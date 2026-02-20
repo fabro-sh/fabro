@@ -1,0 +1,93 @@
+[
+  {
+    "id": "claude-opus-4-6",
+    "provider": "anthropic",
+    "display_name": "Claude Opus 4.6",
+    "context_window": 200000,
+    "max_output": null,
+    "supports_tools": true,
+    "supports_vision": true,
+    "supports_reasoning": true,
+    "input_cost_per_million": 15.0,
+    "output_cost_per_million": 75.0,
+    "aliases": ["opus", "claude-opus"]
+  },
+  {
+    "id": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "display_name": "Claude Sonnet 4.5",
+    "context_window": 200000,
+    "max_output": null,
+    "supports_tools": true,
+    "supports_vision": true,
+    "supports_reasoning": true,
+    "input_cost_per_million": 3.0,
+    "output_cost_per_million": 15.0,
+    "aliases": ["sonnet", "claude-sonnet"]
+  },
+  {
+    "id": "gpt-5.2",
+    "provider": "openai",
+    "display_name": "GPT-5.2",
+    "context_window": 1047576,
+    "max_output": null,
+    "supports_tools": true,
+    "supports_vision": true,
+    "supports_reasoning": true,
+    "input_cost_per_million": null,
+    "output_cost_per_million": null,
+    "aliases": ["gpt5"]
+  },
+  {
+    "id": "gpt-5.2-mini",
+    "provider": "openai",
+    "display_name": "GPT-5.2 Mini",
+    "context_window": 1047576,
+    "max_output": null,
+    "supports_tools": true,
+    "supports_vision": true,
+    "supports_reasoning": true,
+    "input_cost_per_million": null,
+    "output_cost_per_million": null,
+    "aliases": []
+  },
+  {
+    "id": "gpt-5.2-codex",
+    "provider": "openai",
+    "display_name": "GPT-5.2 Codex",
+    "context_window": 1047576,
+    "max_output": null,
+    "supports_tools": true,
+    "supports_vision": true,
+    "supports_reasoning": true,
+    "input_cost_per_million": null,
+    "output_cost_per_million": null,
+    "aliases": ["codex"]
+  },
+  {
+    "id": "gemini-3-pro-preview",
+    "provider": "gemini",
+    "display_name": "Gemini 3 Pro (Preview)",
+    "context_window": 1048576,
+    "max_output": null,
+    "supports_tools": true,
+    "supports_vision": true,
+    "supports_reasoning": true,
+    "input_cost_per_million": null,
+    "output_cost_per_million": null,
+    "aliases": ["gemini-pro"]
+  },
+  {
+    "id": "gemini-3-flash-preview",
+    "provider": "gemini",
+    "display_name": "Gemini 3 Flash (Preview)",
+    "context_window": 1048576,
+    "max_output": null,
+    "supports_tools": true,
+    "supports_vision": true,
+    "supports_reasoning": true,
+    "input_cost_per_million": null,
+    "output_cost_per_million": null,
+    "aliases": ["gemini-flash"]
+  }
+]

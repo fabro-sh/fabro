@@ -85,8 +85,7 @@ pub struct ToolResult {
 
 // --- 3.3 ContentPart ---
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContentPart {
     Text(String),
     Image(ImageData),
@@ -96,6 +95,97 @@ pub enum ContentPart {
     ToolResult(ToolResult),
     Thinking(ThinkingData),
     RedactedThinking(ThinkingData),
+    Other {
+        kind: String,
+        data: serde_json::Value,
+    },
+}
+
+impl Serialize for ContentPart {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(2))?;
+        match self {
+            Self::Text(v) => {
+                map.serialize_entry("kind", "text")?;
+                map.serialize_entry("data", v)?;
+            }
+            Self::Image(v) => {
+                map.serialize_entry("kind", "image")?;
+                map.serialize_entry("data", v)?;
+            }
+            Self::Audio(v) => {
+                map.serialize_entry("kind", "audio")?;
+                map.serialize_entry("data", v)?;
+            }
+            Self::Document(v) => {
+                map.serialize_entry("kind", "document")?;
+                map.serialize_entry("data", v)?;
+            }
+            Self::ToolCall(v) => {
+                map.serialize_entry("kind", "tool_call")?;
+                map.serialize_entry("data", v)?;
+            }
+            Self::ToolResult(v) => {
+                map.serialize_entry("kind", "tool_result")?;
+                map.serialize_entry("data", v)?;
+            }
+            Self::Thinking(v) => {
+                map.serialize_entry("kind", "thinking")?;
+                map.serialize_entry("data", v)?;
+            }
+            Self::RedactedThinking(v) => {
+                map.serialize_entry("kind", "redacted_thinking")?;
+                map.serialize_entry("data", v)?;
+            }
+            Self::Other { kind, data } => {
+                map.serialize_entry("kind", kind)?;
+                map.serialize_entry("data", data)?;
+            }
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for ContentPart {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let kind = value
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::missing_field("kind"))?;
+        let data = value.get("data").cloned().unwrap_or(serde_json::Value::Null);
+        match kind {
+            "text" => serde_json::from_value(data)
+                .map(Self::Text)
+                .map_err(serde::de::Error::custom),
+            "image" => serde_json::from_value(data)
+                .map(Self::Image)
+                .map_err(serde::de::Error::custom),
+            "audio" => serde_json::from_value(data)
+                .map(Self::Audio)
+                .map_err(serde::de::Error::custom),
+            "document" => serde_json::from_value(data)
+                .map(Self::Document)
+                .map_err(serde::de::Error::custom),
+            "tool_call" => serde_json::from_value(data)
+                .map(Self::ToolCall)
+                .map_err(serde::de::Error::custom),
+            "tool_result" => serde_json::from_value(data)
+                .map(Self::ToolResult)
+                .map_err(serde::de::Error::custom),
+            "thinking" => serde_json::from_value(data)
+                .map(Self::Thinking)
+                .map_err(serde::de::Error::custom),
+            "redacted_thinking" => serde_json::from_value(data)
+                .map(Self::RedactedThinking)
+                .map_err(serde::de::Error::custom),
+            other => Ok(Self::Other {
+                kind: other.to_string(),
+                data,
+            }),
+        }
+    }
 }
 
 impl ContentPart {
@@ -441,7 +531,7 @@ pub enum StreamEvent {
         response: Box<Response>,
     },
     Error {
-        error: String,
+        error: SdkError,
         raw: Option<serde_json::Value>,
     },
     ProviderEvent {
@@ -483,11 +573,8 @@ impl StreamEvent {
         }
     }
 
-    pub fn error(message: impl Into<String>) -> Self {
-        Self::Error {
-            error: message.into(),
-            raw: None,
-        }
+    pub fn error(error: SdkError) -> Self {
+        Self::Error { error, raw: None }
     }
 }
 
@@ -955,10 +1042,12 @@ mod tests {
 
     #[test]
     fn stream_event_error() {
-        let event = StreamEvent::error("something went wrong");
+        let event = StreamEvent::error(SdkError::Stream {
+            message: "something went wrong".into(),
+        });
         match &event {
             StreamEvent::Error { error, .. } => {
-                assert_eq!(error, "something went wrong");
+                assert_eq!(error.to_string(), "Stream error: something went wrong");
             }
             other => panic!("Expected Error, got {other:?}"),
         }

@@ -140,6 +140,24 @@ struct ApiUsage {
     cache_creation_input_tokens: Option<i64>,
 }
 
+/// Estimate reasoning tokens from thinking content blocks.
+/// Anthropic does not provide a separate reasoning token count,
+/// so we estimate by dividing the character count of thinking text by 4.
+fn estimate_reasoning_tokens(content_parts: &[ContentPart]) -> Option<i64> {
+    let total_chars: usize = content_parts
+        .iter()
+        .filter_map(|part| match part {
+            ContentPart::Thinking(td) => Some(td.text.len()),
+            _ => None,
+        })
+        .sum();
+    if total_chars > 0 {
+        Some((total_chars / 4).max(1) as i64)
+    } else {
+        None
+    }
+}
+
 fn map_finish_reason(stop_reason: Option<&str>) -> FinishReason {
     match stop_reason {
         Some("end_turn" | "stop_sequence") | None => FinishReason::Stop,
@@ -257,6 +275,7 @@ fn content_part_to_api(part: &ContentPart) -> Option<serde_json::Value> {
         ContentPart::Audio(_) => {
             Some(serde_json::json!({"type": "text", "text": "[Audio content not supported by this provider]"}))
         }
+        ContentPart::Other { .. } => None,
     }
 }
 
@@ -834,6 +853,7 @@ impl StreamAccumulator {
     }
 
     fn handle_message_stop(&mut self) -> Vec<StreamEvent> {
+        self.usage.reasoning_tokens = estimate_reasoning_tokens(&self.content_parts);
         let response = self.take_response();
         vec![StreamEvent::Finish {
             finish_reason: response.finish_reason.clone(),
@@ -1091,6 +1111,7 @@ impl ProviderAdapter for Adapter {
             map_finish_reason(api_resp.stop_reason.as_deref())
         };
         let total = api_resp.usage.input_tokens + api_resp.usage.output_tokens;
+        let reasoning_tokens = estimate_reasoning_tokens(&content_parts);
 
         Ok(Response {
             id: api_resp.id,
@@ -1107,6 +1128,7 @@ impl ProviderAdapter for Adapter {
                 input_tokens: api_resp.usage.input_tokens,
                 output_tokens: api_resp.usage.output_tokens,
                 total_tokens: total,
+                reasoning_tokens,
                 cache_read_tokens: api_resp.usage.cache_read_input_tokens,
                 cache_write_tokens: api_resp.usage.cache_creation_input_tokens,
                 ..Usage::default()

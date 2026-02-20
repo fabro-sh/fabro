@@ -1,105 +1,11 @@
 use crate::types::ModelInfo;
 use std::sync::LazyLock;
 
-/// Built-in model catalog (Section 2.9).
+/// Built-in model catalog loaded from catalog.json (Section 2.9).
 /// The catalog is advisory, not restrictive -- unknown model strings pass through.
 static BUILT_IN_MODELS: LazyLock<Vec<ModelInfo>> = LazyLock::new(|| {
-    vec![
-        // === Anthropic ===
-        ModelInfo {
-            id: "claude-opus-4-6".into(),
-            provider: "anthropic".into(),
-            display_name: "Claude Opus 4.6".into(),
-            context_window: 200_000,
-            max_output: None,
-            supports_tools: true,
-            supports_vision: true,
-            supports_reasoning: true,
-            input_cost_per_million: Some(15.0),
-            output_cost_per_million: Some(75.0),
-            aliases: vec!["opus".into(), "claude-opus".into()],
-        },
-        ModelInfo {
-            id: "claude-sonnet-4-5".into(),
-            provider: "anthropic".into(),
-            display_name: "Claude Sonnet 4.5".into(),
-            context_window: 200_000,
-            max_output: None,
-            supports_tools: true,
-            supports_vision: true,
-            supports_reasoning: true,
-            input_cost_per_million: Some(3.0),
-            output_cost_per_million: Some(15.0),
-            aliases: vec!["sonnet".into(), "claude-sonnet".into()],
-        },
-        // === OpenAI ===
-        ModelInfo {
-            id: "gpt-5.2".into(),
-            provider: "openai".into(),
-            display_name: "GPT-5.2".into(),
-            context_window: 1_047_576,
-            max_output: None,
-            supports_tools: true,
-            supports_vision: true,
-            supports_reasoning: true,
-            input_cost_per_million: None,
-            output_cost_per_million: None,
-            aliases: vec!["gpt5".into()],
-        },
-        ModelInfo {
-            id: "gpt-5.2-mini".into(),
-            provider: "openai".into(),
-            display_name: "GPT-5.2 Mini".into(),
-            context_window: 1_047_576,
-            max_output: None,
-            supports_tools: true,
-            supports_vision: true,
-            supports_reasoning: true,
-            input_cost_per_million: None,
-            output_cost_per_million: None,
-            aliases: vec![],
-        },
-        ModelInfo {
-            id: "gpt-5.2-codex".into(),
-            provider: "openai".into(),
-            display_name: "GPT-5.2 Codex".into(),
-            context_window: 1_047_576,
-            max_output: None,
-            supports_tools: true,
-            supports_vision: true,
-            supports_reasoning: true,
-            input_cost_per_million: None,
-            output_cost_per_million: None,
-            aliases: vec!["codex".into()],
-        },
-        // === Gemini ===
-        ModelInfo {
-            id: "gemini-3-pro-preview".into(),
-            provider: "gemini".into(),
-            display_name: "Gemini 3 Pro (Preview)".into(),
-            context_window: 1_048_576,
-            max_output: None,
-            supports_tools: true,
-            supports_vision: true,
-            supports_reasoning: true,
-            input_cost_per_million: None,
-            output_cost_per_million: None,
-            aliases: vec!["gemini-pro".into()],
-        },
-        ModelInfo {
-            id: "gemini-3-flash-preview".into(),
-            provider: "gemini".into(),
-            display_name: "Gemini 3 Flash (Preview)".into(),
-            context_window: 1_048_576,
-            max_output: None,
-            supports_tools: true,
-            supports_vision: true,
-            supports_reasoning: true,
-            input_cost_per_million: None,
-            output_cost_per_million: None,
-            aliases: vec!["gemini-flash".into()],
-        },
-    ]
+    serde_json::from_str(include_str!("catalog.json"))
+        .expect("embedded catalog.json must be valid")
 });
 
 /// Get model info by model ID (Section 2.9).

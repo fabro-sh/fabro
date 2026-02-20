@@ -24,11 +24,13 @@ pub fn set_default_client(client: Client) {
 }
 
 /// Get the default client, lazily initialized from env.
-fn get_default_client() -> Arc<Client> {
-    DEFAULT_CLIENT
-        .get()
-        .cloned()
-        .unwrap_or_else(|| Arc::new(Client::from_env()))
+async fn get_default_client() -> Result<Arc<Client>, SdkError> {
+    if let Some(client) = DEFAULT_CLIENT.get() {
+        return Ok(client.clone());
+    }
+    let client = Arc::new(Client::from_env().await?);
+    let _ = DEFAULT_CLIENT.set(client.clone());
+    Ok(client)
 }
 
 fn build_initial_messages(params: &GenerateParams) -> Result<Vec<Message>, SdkError> {
@@ -99,7 +101,10 @@ fn build_generate_result(steps: Vec<StepResult>, total_usage: Usage) -> Generate
 /// Panics if a tool's `execute` handler is `None` when matched during tool execution.
 #[allow(clippy::too_many_lines)]
 pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError> {
-    let client = params.client.clone().unwrap_or_else(get_default_client);
+    let client = match params.client.clone() {
+        Some(c) => c,
+        None => get_default_client().await?,
+    };
     let retry_policy = RetryPolicy {
         max_retries: params.max_retries,
         base_delay: 0.001,
@@ -167,7 +172,7 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
                 if tools.iter().any(|t| t.is_active()) {
                     let tool_refs: Vec<&Tool> =
                         tools.iter().map(std::convert::AsRef::as_ref).collect();
-                    tool_results = execute_all_tools(&tool_refs, &tool_calls).await;
+                    tool_results = execute_all_tools(&tool_refs, &tool_calls, &messages, abort_signal.as_ref()).await;
                 }
             }
 
@@ -570,7 +575,10 @@ pub async fn stream(params: GenerateParams) -> Result<StreamResult, SdkError> {
 /// or any provider error encountered during streaming setup.
 #[allow(clippy::too_many_lines)]
 async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStream, SdkError> {
-    let client = params.client.clone().unwrap_or_else(get_default_client);
+    let client = match params.client.clone() {
+        Some(c) => c,
+        None => get_default_client().await?,
+    };
     let mut messages = build_initial_messages(&params)?;
     let tool_definitions: Option<Vec<ToolDefinition>> = params
         .tools
@@ -695,7 +703,7 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
 
                 let tool_refs: Vec<&Tool> =
                     tool_list.iter().map(std::convert::AsRef::as_ref).collect();
-                let tool_results = execute_all_tools(&tool_refs, &tool_calls).await;
+                let tool_results = execute_all_tools(&tool_refs, &tool_calls, &messages, abort_signal.as_ref()).await;
 
                 if tool_results.is_empty() {
                     return;
@@ -804,7 +812,10 @@ async fn stream_generate_raw(
 /// Returns `SdkError::Configuration` if both `prompt` and `messages` are set,
 /// or any provider error encountered during streaming setup.
 pub async fn stream_generate(params: GenerateParams) -> Result<StreamEventStream, SdkError> {
-    let client = params.client.clone().unwrap_or_else(get_default_client);
+    let client = match params.client.clone() {
+        Some(c) => c,
+        None => get_default_client().await?,
+    };
     let messages = build_initial_messages(&params)?;
     let tool_definitions: Option<Vec<ToolDefinition>> = params
         .tools
@@ -1188,7 +1199,7 @@ mod tests {
                     "get_weather",
                     "Get weather",
                     serde_json::json!({"type": "object", "properties": {"city": {"type": "string"}}}),
-                    |args| async move {
+                    |args, _ctx| async move {
                         let city = args["city"].as_str().unwrap_or("unknown");
                         Ok(serde_json::json!(format!("72F in {}", city)))
                     },
@@ -1348,7 +1359,7 @@ mod tests {
                     "get_weather",
                     "Get weather",
                     serde_json::json!({"type": "object", "properties": {"city": {"type": "string"}}}),
-                    |args| async move {
+                    |args, _ctx| async move {
                         let city = args["city"].as_str().unwrap_or("unknown");
                         Ok(serde_json::json!(format!("72F in {}", city)))
                     },
@@ -1714,7 +1725,7 @@ mod tests {
                     "get_weather",
                     "Get weather",
                     serde_json::json!({"type": "object", "properties": {"city": {"type": "string"}}}),
-                    |_args| async { Ok(serde_json::json!("72F")) },
+                    |_args, _ctx| async { Ok(serde_json::json!("72F")) },
                 )])
                 .max_tool_rounds(10)
                 .abort_signal(token)
@@ -1776,7 +1787,7 @@ mod tests {
                     "get_weather",
                     "Get weather",
                     serde_json::json!({"type": "object", "properties": {"city": {"type": "string"}}}),
-                    move |_args| {
+                    move |_args, _ctx| {
                         let counter = tool_executed_clone.clone();
                         async move {
                             counter.fetch_add(1, Ordering::SeqCst);
@@ -1965,7 +1976,7 @@ mod tests {
                     "get_weather",
                     "Get weather",
                     serde_json::json!({"type": "object", "properties": {"city": {"type": "string"}}}),
-                    |_args| async { Ok(serde_json::json!("72F")) },
+                    |_args, _ctx| async { Ok(serde_json::json!("72F")) },
                 )])
                 .max_tool_rounds(5)
                 .client(client),
@@ -2019,7 +2030,7 @@ mod tests {
                     "get_weather",
                     "Get weather",
                     serde_json::json!({"type": "object", "properties": {"city": {"type": "string"}}}),
-                    |_args| async { Ok(serde_json::json!("72F")) },
+                    |_args, _ctx| async { Ok(serde_json::json!("72F")) },
                 )])
                 .max_tool_rounds(0)
                 .client(client),
@@ -2105,7 +2116,7 @@ mod tests {
                     "get_weather",
                     "Get weather",
                     serde_json::json!({"type": "object", "properties": {"city": {"type": "string"}}}),
-                    |_args| async { Ok(serde_json::json!("72F")) },
+                    |_args, _ctx| async { Ok(serde_json::json!("72F")) },
                 )])
                 .max_tool_rounds(5)
                 .client(client),
@@ -2168,7 +2179,7 @@ mod tests {
                     "get_weather",
                     "Get weather",
                     serde_json::json!({"type": "object", "properties": {"city": {"type": "string"}}}),
-                    |_args| async { Ok(serde_json::json!("72F")) },
+                    |_args, _ctx| async { Ok(serde_json::json!("72F")) },
                 )])
                 .max_tool_rounds(5)
                 .stop_when(|_steps| true) // Stop immediately after first round
@@ -2295,7 +2306,7 @@ mod tests {
                     "get_weather",
                     "Get weather",
                     serde_json::json!({"type": "object", "properties": {"city": {"type": "string"}}}),
-                    |_args| async { Ok(serde_json::json!("72F")) },
+                    |_args, _ctx| async { Ok(serde_json::json!("72F")) },
                 )])
                 .max_tool_rounds(1)
                 .max_retries(3)
@@ -2395,7 +2406,7 @@ mod tests {
                     "get_weather",
                     "Get weather",
                     serde_json::json!({"type": "object", "properties": {"city": {"type": "string"}}}),
-                    |_args| async { Ok(serde_json::json!("72F")) },
+                    |_args, _ctx| async { Ok(serde_json::json!("72F")) },
                 )])
                 .max_tool_rounds(1)
                 .timeout(TimeoutConfig {
@@ -2528,7 +2539,7 @@ mod tests {
                     "get_weather",
                     "Get weather",
                     serde_json::json!({"type": "object", "properties": {"city": {"type": "string"}}}),
-                    |_args| async { Ok(serde_json::json!("72F")) },
+                    |_args, _ctx| async { Ok(serde_json::json!("72F")) },
                 )])
                 .max_tool_rounds(5)
                 .timeout(TimeoutConfig {

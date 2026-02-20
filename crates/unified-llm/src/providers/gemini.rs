@@ -1,11 +1,10 @@
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
 use futures::stream;
 
-use crate::error::{error_from_status_code, ProviderErrorDetail, ProviderErrorKind, SdkError};
+use crate::error::{error_from_grpc_status, error_from_status_code, ProviderErrorDetail, ProviderErrorKind, SdkError};
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::providers::common::{
     extract_system_prompt, parse_error_body, parse_rate_limit_headers, parse_retry_after,
-    send_and_read_response,
 };
 use crate::types::{
     ContentPart, FinishReason, Message, Request, Response, ResponseFormat, ResponseFormatType,
@@ -462,10 +461,60 @@ fn parse_usage(metadata: Option<&UsageMetadata>) -> Usage {
     })
 }
 
+/// Send an HTTP request and read the Gemini response body.
+///
+/// Like `send_and_read_response` but uses gRPC status code mapping when available.
+async fn send_gemini_response(
+    request: reqwest::RequestBuilder,
+) -> Result<(String, reqwest::header::HeaderMap), SdkError> {
+    let http_resp = request.send().await.map_err(|e| {
+        if e.is_timeout() {
+            SdkError::RequestTimeout {
+                message: format!("gemini: {e}"),
+            }
+        } else {
+            SdkError::Network {
+                message: e.to_string(),
+            }
+        }
+    })?;
+
+    let status = http_resp.status();
+    let retry_after = parse_retry_after(http_resp.headers());
+    let headers = http_resp.headers().clone();
+    let body = http_resp
+        .text()
+        .await
+        .map_err(|e| SdkError::Network {
+            message: e.to_string(),
+        })?;
+
+    if !status.is_success() {
+        let (msg, code, raw) = parse_error_body(&body, "status");
+        return Err(gemini_error(status.as_u16(), msg, code, raw, retry_after));
+    }
+
+    Ok((body, headers))
+}
+
+/// Map Gemini error response using gRPC status when available, falling back to HTTP status.
+fn gemini_error(
+    status_code: u16,
+    msg: String,
+    grpc_status: Option<String>,
+    raw: Option<serde_json::Value>,
+    retry_after: Option<f64>,
+) -> SdkError {
+    match grpc_status {
+        Some(grpc_code) => error_from_grpc_status(&grpc_code, msg, "gemini".to_string(), Some(grpc_code.clone()), raw, retry_after),
+        None => error_from_status_code(status_code, msg, "gemini".to_string(), None, raw, retry_after),
+    }
+}
+
 /// Send an HTTP request for streaming and return the `reqwest::Response`.
 ///
 /// Checks for HTTP errors before returning. On error, reads the body and
-/// maps it to `SdkError` using the same logic as `send_and_read_body`.
+/// maps it to `SdkError` using gRPC status code mapping when available.
 async fn send_streaming_request(
     request: reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, SdkError> {
@@ -480,14 +529,7 @@ async fn send_streaming_request(
             message: e.to_string(),
         })?;
         let (msg, code, raw) = parse_error_body(&body, "status");
-        return Err(error_from_status_code(
-            status.as_u16(),
-            msg,
-            "gemini".to_string(),
-            code,
-            raw,
-            retry_after,
-        ));
+        return Err(gemini_error(status.as_u16(), msg, code, raw, retry_after));
     }
 
     Ok(http_resp)
@@ -784,10 +826,8 @@ impl ProviderAdapter for Adapter {
         for (key, value) in &self.default_headers {
             req = req.header(key, value);
         }
-        let (body, headers) = send_and_read_response(
+        let (body, headers) = send_gemini_response(
             req.json(&api_body).timeout(self.request_timeout),
-            "gemini",
-            "status",
         )
         .await?;
 
@@ -1061,5 +1101,39 @@ mod tests {
         let part = &contents[0].parts[0];
         assert_eq!(part["inlineData"]["mimeType"], "application/pdf");
         assert!(part["inlineData"]["data"].as_str().is_some());
+    }
+
+    #[test]
+    fn gemini_error_uses_grpc_status_when_available() {
+        use crate::error::ProviderErrorKind;
+
+        let err = gemini_error(400, "model not found".into(), Some("NOT_FOUND".into()), None, None);
+        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::NotFound, .. }));
+
+        let err = gemini_error(400, "bad args".into(), Some("INVALID_ARGUMENT".into()), None, None);
+        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::InvalidRequest, .. }));
+
+        let err = gemini_error(429, "rate limited".into(), Some("RESOURCE_EXHAUSTED".into()), None, None);
+        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::RateLimit, .. }));
+
+        let err = gemini_error(401, "bad key".into(), Some("UNAUTHENTICATED".into()), None, None);
+        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::Authentication, .. }));
+
+        let err = gemini_error(403, "denied".into(), Some("PERMISSION_DENIED".into()), None, None);
+        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::AccessDenied, .. }));
+
+        let err = gemini_error(504, "timeout".into(), Some("DEADLINE_EXCEEDED".into()), None, None);
+        assert!(matches!(err, SdkError::RequestTimeout { .. }));
+    }
+
+    #[test]
+    fn gemini_error_falls_back_to_http_status_without_grpc() {
+        use crate::error::ProviderErrorKind;
+
+        let err = gemini_error(429, "rate limited".into(), None, None, None);
+        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::RateLimit, .. }));
+
+        let err = gemini_error(500, "internal".into(), None, None, None);
+        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::Server, .. }));
     }
 }

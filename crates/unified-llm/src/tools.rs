@@ -1,11 +1,20 @@
-use crate::types::{ToolCall, ToolDefinition, ToolResult};
+use crate::types::{Message, ToolCall, ToolDefinition, ToolResult};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
+
+/// Context passed to tool execute handlers (Section 5.2).
+#[derive(Clone)]
+pub struct ToolContext {
+    pub tool_call_id: String,
+    pub messages: Vec<Message>,
+    pub abort_signal: Option<CancellationToken>,
+}
 
 /// An execute handler for a tool.
 pub type ExecuteHandler = Arc<
-    dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send>>
+    dyn Fn(serde_json::Value, ToolContext) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send>>
         + Send
         + Sync,
 >;
@@ -51,7 +60,7 @@ impl Tool {
         handler: F,
     ) -> Self
     where
-        F: Fn(serde_json::Value) -> Fut + Send + Sync + 'static,
+        F: Fn(serde_json::Value, ToolContext) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<serde_json::Value, String>> + Send + 'static,
     {
         if let Err(e) = validate_tool_name(name) {
@@ -63,7 +72,7 @@ impl Tool {
                 description: description.to_string(),
                 parameters,
             },
-            execute: Some(Arc::new(move |args| Box::pin(handler(args)))),
+            execute: Some(Arc::new(move |args, ctx| Box::pin(handler(args, ctx)))),
         }
     }
 
@@ -115,6 +124,8 @@ pub fn validate_tool_name(name: &str) -> Result<(), String> {
 pub async fn execute_all_tools(
     tools: &[&Tool],
     tool_calls: &[ToolCall],
+    messages: &[Message],
+    abort_signal: Option<&CancellationToken>,
 ) -> Vec<ToolResult> {
     use futures::future::join_all;
 
@@ -125,12 +136,17 @@ pub async fn execute_all_tools(
             let call_id = call.id.clone();
             let call_name = call.name.clone();
             let args = call.arguments.clone();
+            let ctx = ToolContext {
+                tool_call_id: call_id.clone(),
+                messages: messages.to_vec(),
+                abort_signal: abort_signal.cloned(),
+            };
 
             async move {
                 match tool {
                     Some(t) if t.execute.is_some() => {
                         let handler = t.execute.as_ref().unwrap();
-                        match handler(args).await {
+                        match handler(args, ctx).await {
                             Ok(result) => ToolResult {
                                 tool_call_id: call_id,
                                 content: result,
@@ -152,6 +168,162 @@ pub async fn execute_all_tools(
                         content: serde_json::Value::String(format!(
                             "Unknown tool: {call_name}"
                         )),
+                        is_error: true,
+                        image_data: None,
+                        image_media_type: None,
+                    },
+                }
+            }
+        })
+        .collect();
+
+    join_all(futures).await
+}
+
+/// A callback to repair invalid tool call arguments (Section 5.8).
+/// Receives the tool call and the validation error message, returns repaired arguments
+/// or an error if repair is not possible.
+pub type RepairToolCallFn = Arc<
+    dyn Fn(
+            ToolCall,
+            String,
+        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// Validate tool call arguments against the tool's parameter schema.
+/// Performs a lightweight structural check: verifies that when the schema
+/// specifies `"type": "object"`, the arguments are a JSON object, and that
+/// required properties are present.
+fn validate_tool_args(args: &serde_json::Value, schema: &serde_json::Value) -> Result<(), String> {
+    let schema_type = schema.get("type").and_then(serde_json::Value::as_str);
+    if schema_type == Some("object") && !args.is_object() {
+        return Err(format!(
+            "Expected object arguments, got {}",
+            args_type_name(args)
+        ));
+    }
+    if let (Some(obj), Some(required)) = (
+        args.as_object(),
+        schema.get("required").and_then(serde_json::Value::as_array),
+    ) {
+        let missing: Vec<&str> = required
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .filter(|key| !obj.contains_key(*key))
+            .collect();
+        if !missing.is_empty() {
+            return Err(format!("Missing required properties: {}", missing.join(", ")));
+        }
+    }
+    Ok(())
+}
+
+fn args_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
+/// Execute all tool calls with optional schema validation and repair (Section 5.8).
+///
+/// Before calling a tool's execute handler, validates the arguments against the
+/// tool's parameter schema. If validation fails and a `repair` callback is provided,
+/// calls it to attempt repair. If repair succeeds, uses the repaired arguments.
+/// If repair fails or is not configured, returns an error `ToolResult`.
+pub async fn execute_all_tools_with_repair(
+    tools: &[&Tool],
+    tool_calls: &[ToolCall],
+    messages: &[Message],
+    abort_signal: Option<&CancellationToken>,
+    repair: Option<&RepairToolCallFn>,
+) -> Vec<ToolResult> {
+    use futures::future::join_all;
+
+    let futures: Vec<_> = tool_calls
+        .iter()
+        .map(|call| {
+            let tool = tools.iter().find(|t| t.definition.name == call.name).copied();
+            let call_id = call.id.clone();
+            let call_name = call.name.clone();
+            let args = call.arguments.clone();
+            let call_clone = call.clone();
+            let ctx = ToolContext {
+                tool_call_id: call_id.clone(),
+                messages: messages.to_vec(),
+                abort_signal: abort_signal.cloned(),
+            };
+
+            async move {
+                let Some(t) = tool else {
+                    return ToolResult {
+                        tool_call_id: call_id,
+                        content: serde_json::Value::String(format!("Unknown tool: {call_name}")),
+                        is_error: true,
+                        image_data: None,
+                        image_media_type: None,
+                    };
+                };
+
+                let Some(handler) = &t.execute else {
+                    return ToolResult {
+                        tool_call_id: call_id,
+                        content: serde_json::Value::String(format!("Unknown tool: {call_name}")),
+                        is_error: true,
+                        image_data: None,
+                        image_media_type: None,
+                    };
+                };
+
+                let validated_args = match validate_tool_args(&args, &t.definition.parameters) {
+                    Ok(()) => args,
+                    Err(validation_error) => {
+                        if let Some(repair_fn) = repair {
+                            match repair_fn(call_clone, validation_error).await {
+                                Ok(repaired) => repaired,
+                                Err(repair_error) => {
+                                    return ToolResult {
+                                        tool_call_id: call_id,
+                                        content: serde_json::Value::String(format!(
+                                            "Tool call validation failed and repair failed: {repair_error}"
+                                        )),
+                                        is_error: true,
+                                        image_data: None,
+                                        image_media_type: None,
+                                    };
+                                }
+                            }
+                        } else {
+                            return ToolResult {
+                                tool_call_id: call_id,
+                                content: serde_json::Value::String(format!(
+                                    "Tool call validation failed: {validation_error}"
+                                )),
+                                is_error: true,
+                                image_data: None,
+                                image_media_type: None,
+                            };
+                        }
+                    }
+                };
+
+                match handler(validated_args, ctx).await {
+                    Ok(result) => ToolResult {
+                        tool_call_id: call_id,
+                        content: result,
+                        is_error: false,
+                        image_data: None,
+                        image_media_type: None,
+                    },
+                    Err(err_msg) => ToolResult {
+                        tool_call_id: call_id,
+                        content: serde_json::Value::String(err_msg),
                         is_error: true,
                         image_data: None,
                         image_media_type: None,
@@ -224,7 +396,7 @@ mod tests {
             "test",
             "test tool",
             serde_json::json!({"type": "object", "properties": {}}),
-            |_args| async { Ok(serde_json::json!("result")) },
+            |_args, _ctx| async { Ok(serde_json::json!("result")) },
         );
         assert!(tool.is_active());
     }
@@ -235,7 +407,7 @@ mod tests {
             "greet",
             "Greet someone",
             serde_json::json!({"type": "object", "properties": {"name": {"type": "string"}}}),
-            |args| async move {
+            |args, _ctx| async move {
                 let name = args["name"].as_str().unwrap_or("world");
                 Ok(serde_json::json!(format!("Hello, {}!", name)))
             },
@@ -248,7 +420,7 @@ mod tests {
         )];
 
         let tool_refs: Vec<&Tool> = tools.iter().collect();
-        let results = execute_all_tools(&tool_refs, &calls).await;
+        let results = execute_all_tools(&tool_refs, &calls, &[], None).await;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].tool_call_id, "call_1");
         assert!(!results[0].is_error);
@@ -266,7 +438,7 @@ mod tests {
         )];
 
         let tool_refs: Vec<&Tool> = tools.iter().collect();
-        let results = execute_all_tools(&tool_refs, &calls).await;
+        let results = execute_all_tools(&tool_refs, &calls, &[], None).await;
         assert_eq!(results.len(), 1);
         assert!(results[0].is_error);
         assert!(results[0]
@@ -282,7 +454,7 @@ mod tests {
             "fail",
             "Always fails",
             serde_json::json!({"type": "object", "properties": {}}),
-            |_args| async { Err("something went wrong".to_string()) },
+            |_args, _ctx| async { Err("something went wrong".to_string()) },
         )];
 
         let calls = vec![ToolCall::new(
@@ -292,7 +464,7 @@ mod tests {
         )];
 
         let tool_refs: Vec<&Tool> = tools.iter().collect();
-        let results = execute_all_tools(&tool_refs, &calls).await;
+        let results = execute_all_tools(&tool_refs, &calls, &[], None).await;
         assert_eq!(results.len(), 1);
         assert!(results[0].is_error);
         assert_eq!(
@@ -308,13 +480,13 @@ mod tests {
                 "tool_a",
                 "Tool A",
                 serde_json::json!({"type": "object", "properties": {}}),
-                |_args| async { Ok(serde_json::json!("result_a")) },
+                |_args, _ctx| async { Ok(serde_json::json!("result_a")) },
             ),
             Tool::active(
                 "tool_b",
                 "Tool B",
                 serde_json::json!({"type": "object", "properties": {}}),
-                |_args| async { Ok(serde_json::json!("result_b")) },
+                |_args, _ctx| async { Ok(serde_json::json!("result_b")) },
             ),
         ];
 
@@ -324,7 +496,7 @@ mod tests {
         ];
 
         let tool_refs: Vec<&Tool> = tools.iter().collect();
-        let results = execute_all_tools(&tool_refs, &calls).await;
+        let results = execute_all_tools(&tool_refs, &calls, &[], None).await;
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].tool_call_id, "call_1");
         assert_eq!(results[0].content, serde_json::json!("result_a"));
@@ -339,13 +511,13 @@ mod tests {
                 "succeed",
                 "Succeeds",
                 serde_json::json!({"type": "object", "properties": {}}),
-                |_args| async { Ok(serde_json::json!("ok")) },
+                |_args, _ctx| async { Ok(serde_json::json!("ok")) },
             ),
             Tool::active(
                 "fail",
                 "Fails",
                 serde_json::json!({"type": "object", "properties": {}}),
-                |_args| async { Err("boom".to_string()) },
+                |_args, _ctx| async { Err("boom".to_string()) },
             ),
         ];
 
@@ -355,7 +527,7 @@ mod tests {
         ];
 
         let tool_refs: Vec<&Tool> = tools.iter().collect();
-        let results = execute_all_tools(&tool_refs, &calls).await;
+        let results = execute_all_tools(&tool_refs, &calls, &[], None).await;
         assert_eq!(results.len(), 2);
         assert!(!results[0].is_error);
         assert!(results[1].is_error);
@@ -378,7 +550,129 @@ mod tests {
             "my-tool",
             "bad name",
             serde_json::json!({"type": "object"}),
-            |_args| async { Ok(serde_json::json!("result")) },
+            |_args, _ctx| async { Ok(serde_json::json!("result")) },
         );
+    }
+
+    #[test]
+    fn validate_tool_args_valid_object() {
+        let schema = serde_json::json!({"type": "object", "properties": {"name": {"type": "string"}}});
+        let args = serde_json::json!({"name": "Alice"});
+        assert!(validate_tool_args(&args, &schema).is_ok());
+    }
+
+    #[test]
+    fn validate_tool_args_non_object_when_object_expected() {
+        let schema = serde_json::json!({"type": "object", "properties": {}});
+        let args = serde_json::json!("not an object");
+        let result = validate_tool_args(&args, &schema);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Expected object"));
+    }
+
+    #[test]
+    fn validate_tool_args_missing_required_properties() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "age": {"type": "number"}},
+            "required": ["name", "age"]
+        });
+        let args = serde_json::json!({"name": "Alice"});
+        let result = validate_tool_args(&args, &schema);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("age"));
+    }
+
+    #[test]
+    fn validate_tool_args_no_schema_type_passes() {
+        let schema = serde_json::json!({});
+        let args = serde_json::json!("anything");
+        assert!(validate_tool_args(&args, &schema).is_ok());
+    }
+
+    #[tokio::test]
+    async fn execute_with_repair_valid_args_no_repair_needed() {
+        let tools = vec![Tool::active(
+            "greet",
+            "Greet someone",
+            serde_json::json!({"type": "object", "properties": {"name": {"type": "string"}}}),
+            |args, _ctx| async move {
+                let name = args["name"].as_str().unwrap_or("world");
+                Ok(serde_json::json!(format!("Hello, {}!", name)))
+            },
+        )];
+        let calls = vec![ToolCall::new("call_1", "greet", serde_json::json!({"name": "Alice"}))];
+        let tool_refs: Vec<&Tool> = tools.iter().collect();
+
+        let results = execute_all_tools_with_repair(&tool_refs, &calls, &[], None, None).await;
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].is_error);
+        assert_eq!(results[0].content, serde_json::json!("Hello, Alice!"));
+    }
+
+    #[tokio::test]
+    async fn execute_with_repair_invalid_args_no_repair_fn() {
+        let tools = vec![Tool::active(
+            "greet",
+            "Greet someone",
+            serde_json::json!({"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
+            |args, _ctx| async move {
+                let name = args["name"].as_str().unwrap_or("world");
+                Ok(serde_json::json!(format!("Hello, {}!", name)))
+            },
+        )];
+        let calls = vec![ToolCall::new("call_1", "greet", serde_json::json!({}))];
+        let tool_refs: Vec<&Tool> = tools.iter().collect();
+
+        let results = execute_all_tools_with_repair(&tool_refs, &calls, &[], None, None).await;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_error);
+        assert!(results[0].content.as_str().unwrap().contains("validation failed"));
+    }
+
+    #[tokio::test]
+    async fn execute_with_repair_invalid_args_repair_succeeds() {
+        let tools = vec![Tool::active(
+            "greet",
+            "Greet someone",
+            serde_json::json!({"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
+            |args, _ctx| async move {
+                let name = args["name"].as_str().unwrap_or("world");
+                Ok(serde_json::json!(format!("Hello, {}!", name)))
+            },
+        )];
+        let calls = vec![ToolCall::new("call_1", "greet", serde_json::json!({}))];
+        let tool_refs: Vec<&Tool> = tools.iter().collect();
+
+        let repair: RepairToolCallFn = Arc::new(|_call, _error| {
+            Box::pin(async { Ok(serde_json::json!({"name": "Repaired"})) })
+        });
+        let results = execute_all_tools_with_repair(&tool_refs, &calls, &[], None, Some(&repair)).await;
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].is_error);
+        assert_eq!(results[0].content, serde_json::json!("Hello, Repaired!"));
+    }
+
+    #[tokio::test]
+    async fn execute_with_repair_invalid_args_repair_fails() {
+        let tools = vec![Tool::active(
+            "greet",
+            "Greet someone",
+            serde_json::json!({"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
+            |args, _ctx| async move {
+                let name = args["name"].as_str().unwrap_or("world");
+                Ok(serde_json::json!(format!("Hello, {}!", name)))
+            },
+        )];
+        let calls = vec![ToolCall::new("call_1", "greet", serde_json::json!({}))];
+        let tool_refs: Vec<&Tool> = tools.iter().collect();
+
+        let repair: RepairToolCallFn = Arc::new(|_call, _error| {
+            Box::pin(async { Err("cannot repair".to_string()) })
+        });
+        let results = execute_all_tools_with_repair(&tool_refs, &calls, &[], None, Some(&repair)).await;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_error);
+        assert!(results[0].content.as_str().unwrap().contains("repair failed"));
     }
 }

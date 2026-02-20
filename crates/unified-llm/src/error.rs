@@ -1,4 +1,5 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProviderErrorKind {
     Authentication,
     AccessDenied,
@@ -27,7 +28,7 @@ impl std::fmt::Display for ProviderErrorKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProviderErrorDetail {
     pub message: String,
     pub provider: String,
@@ -50,7 +51,8 @@ impl ProviderErrorDetail {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, thiserror::Error)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum SdkError {
     #[error("{kind} {}: {}", .detail.provider, .detail.message)]
     Provider {

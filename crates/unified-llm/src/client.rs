@@ -31,8 +31,11 @@ impl Client {
     /// Create a Client from environment variables (Section 2.2).
     /// Registers providers whose API keys are present in the environment.
     /// The first registered provider becomes the default.
-    #[must_use]
-    pub fn from_env() -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns `SdkError` if any provider adapter fails to initialize.
+    pub async fn from_env() -> Result<Self, SdkError> {
         let mut client = Self {
             providers: HashMap::new(),
             default_provider: None,
@@ -46,7 +49,7 @@ impl Client {
             if let Ok(base_url) = std::env::var("ANTHROPIC_BASE_URL") {
                 adapter = adapter.with_base_url(base_url);
             }
-            client.register_provider(Arc::new(adapter));
+            client.register_provider(Arc::new(adapter)).await?;
         }
         if let Ok(key) = std::env::var("OPENAI_API_KEY") {
             let mut adapter = providers::OpenAiAdapter::new(key);
@@ -59,7 +62,7 @@ impl Client {
             if let Ok(project_id) = std::env::var("OPENAI_PROJECT_ID") {
                 adapter = adapter.with_project_id(project_id);
             }
-            client.register_provider(Arc::new(adapter));
+            client.register_provider(Arc::new(adapter)).await?;
         }
         if let Ok(key) = std::env::var("GEMINI_API_KEY").or_else(|_| std::env::var("GOOGLE_API_KEY"))
         {
@@ -67,19 +70,28 @@ impl Client {
             if let Ok(base_url) = std::env::var("GEMINI_BASE_URL") {
                 adapter = adapter.with_base_url(base_url);
             }
-            client.register_provider(Arc::new(adapter));
+            client.register_provider(Arc::new(adapter)).await?;
         }
 
-        client
+        Ok(client)
     }
 
-    /// Register a provider adapter.
-    pub fn register_provider(&mut self, adapter: Arc<dyn ProviderAdapter>) {
+    /// Register a provider adapter. Calls `initialize()` on the adapter (Section 2.4).
+    ///
+    /// # Errors
+    ///
+    /// Returns `SdkError` if the adapter's `initialize()` method fails.
+    pub async fn register_provider(
+        &mut self,
+        adapter: Arc<dyn ProviderAdapter>,
+    ) -> Result<(), SdkError> {
+        adapter.initialize().await?;
         let name = adapter.name().to_string();
         if self.default_provider.is_none() {
             self.default_provider = Some(name.clone());
         }
         self.providers.insert(name, adapter);
+        Ok(())
     }
 
     /// Add middleware.
@@ -292,7 +304,7 @@ mod tests {
     #[tokio::test]
     async fn complete_routes_to_default_provider() {
         let mut client = Client::new(HashMap::new(), None, vec![]);
-        client.register_provider(Arc::new(MockProvider::new("test", "Hello!")));
+        client.register_provider(Arc::new(MockProvider::new("test", "Hello!"))).await.unwrap();
 
         let response = client.complete(&test_request()).await.unwrap();
         assert_eq!(response.text(), "Hello!");
@@ -302,8 +314,8 @@ mod tests {
     #[tokio::test]
     async fn complete_routes_to_named_provider() {
         let mut client = Client::new(HashMap::new(), None, vec![]);
-        client.register_provider(Arc::new(MockProvider::new("provider_a", "from A")));
-        client.register_provider(Arc::new(MockProvider::new("provider_b", "from B")));
+        client.register_provider(Arc::new(MockProvider::new("provider_a", "from A"))).await.unwrap();
+        client.register_provider(Arc::new(MockProvider::new("provider_b", "from B"))).await.unwrap();
 
         let mut req = test_request();
         req.provider = Some("provider_b".into());
@@ -325,7 +337,7 @@ mod tests {
     #[tokio::test]
     async fn complete_errors_on_unknown_provider() {
         let mut client = Client::new(HashMap::new(), None, vec![]);
-        client.register_provider(Arc::new(MockProvider::new("test", "Hello")));
+        client.register_provider(Arc::new(MockProvider::new("test", "Hello"))).await.unwrap();
 
         let mut req = test_request();
         req.provider = Some("nonexistent".into());
@@ -342,10 +354,10 @@ mod tests {
         let mut client = Client::new(HashMap::new(), None, vec![]);
         assert_eq!(client.default_provider(), None);
 
-        client.register_provider(Arc::new(MockProvider::new("first", "1")));
+        client.register_provider(Arc::new(MockProvider::new("first", "1"))).await.unwrap();
         assert_eq!(client.default_provider(), Some("first"));
 
-        client.register_provider(Arc::new(MockProvider::new("second", "2")));
+        client.register_provider(Arc::new(MockProvider::new("second", "2"))).await.unwrap();
         assert_eq!(client.default_provider(), Some("first"));
     }
 
@@ -354,7 +366,7 @@ mod tests {
         use futures::StreamExt;
 
         let mut client = Client::new(HashMap::new(), None, vec![]);
-        client.register_provider(Arc::new(MockProvider::new("test", "streamed")));
+        client.register_provider(Arc::new(MockProvider::new("test", "streamed"))).await.unwrap();
 
         let mut stream = client.stream(&test_request()).await.unwrap();
         let first = stream.next().await.unwrap().unwrap();
@@ -367,8 +379,8 @@ mod tests {
     #[tokio::test]
     async fn provider_names_returns_registered() {
         let mut client = Client::new(HashMap::new(), None, vec![]);
-        client.register_provider(Arc::new(MockProvider::new("alpha", "")));
-        client.register_provider(Arc::new(MockProvider::new("beta", "")));
+        client.register_provider(Arc::new(MockProvider::new("alpha", ""))).await.unwrap();
+        client.register_provider(Arc::new(MockProvider::new("beta", ""))).await.unwrap();
         let mut names = client.provider_names();
         names.sort_unstable();
         assert_eq!(names, vec!["alpha", "beta"]);
@@ -402,7 +414,7 @@ mod tests {
     #[tokio::test]
     async fn middleware_wraps_complete() {
         let mut client = Client::new(HashMap::new(), None, vec![]);
-        client.register_provider(Arc::new(MockProvider::new("test", "hello")));
+        client.register_provider(Arc::new(MockProvider::new("test", "hello"))).await.unwrap();
         client.add_middleware(Arc::new(UppercaseMiddleware));
 
         let response = client.complete(&test_request()).await.unwrap();
