@@ -24,6 +24,7 @@ pub struct Adapter {
     default_headers: std::collections::HashMap<String, String>,
     client: reqwest::Client,
     request_timeout: std::time::Duration,
+    stream_read_timeout: std::time::Duration,
 }
 
 impl Adapter {
@@ -41,6 +42,7 @@ impl Adapter {
             default_headers: std::collections::HashMap::new(),
             client,
             request_timeout: std::time::Duration::from_secs_f64(timeout.request),
+            stream_read_timeout: std::time::Duration::from_secs_f64(timeout.stream_read),
         }
     }
 
@@ -53,6 +55,17 @@ impl Adapter {
     #[must_use]
     pub fn with_default_headers(mut self, headers: std::collections::HashMap<String, String>) -> Self {
         self.default_headers = headers;
+        self
+    }
+
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: crate::types::AdapterTimeout) -> Self {
+        self.client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs_f64(timeout.connect))
+            .build()
+            .unwrap_or_default();
+        self.request_timeout = std::time::Duration::from_secs_f64(timeout.request);
+        self.stream_read_timeout = std::time::Duration::from_secs_f64(timeout.stream_read);
         self
     }
 
@@ -395,6 +408,9 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
+        if let Some(tc) = &request.tool_choice {
+            crate::provider::validate_tool_choice(self, tc)?;
+        }
         let api_body = build_api_request(request, None, &self.provider_name);
         let url = format!("{}/chat/completions", self.base_url);
 
@@ -467,6 +483,9 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
+        if let Some(tc) = &request.tool_choice {
+            crate::provider::validate_tool_choice(self, tc)?;
+        }
         let api_body = build_api_request(request, Some(true), &self.provider_name);
         let url = format!("{}/chat/completions", self.base_url);
 
@@ -502,9 +521,10 @@ impl ProviderAdapter for Adapter {
         let provider_name = self.provider_name.clone();
         let model = request.model.clone();
         let rate_limit = parse_rate_limit_headers(http_resp.headers());
+        let stream_read_timeout = self.stream_read_timeout;
 
         let stream = futures::stream::unfold(
-            StreamState::new(http_resp, provider_name, model, rate_limit),
+            StreamState::new(http_resp, provider_name, model, rate_limit, stream_read_timeout),
             |mut state| async move {
                 loop {
                     let line = match state.next_line().await {
@@ -599,6 +619,7 @@ struct StreamState {
     text_started: bool,
     done: bool,
     rate_limit: Option<crate::types::RateLimitInfo>,
+    stream_read_timeout: std::time::Duration,
 }
 
 impl StreamState {
@@ -607,6 +628,7 @@ impl StreamState {
         provider_name: String,
         model: String,
         rate_limit: Option<crate::types::RateLimitInfo>,
+        stream_read_timeout: std::time::Duration,
     ) -> Self {
         Self {
             response,
@@ -622,6 +644,7 @@ impl StreamState {
             text_started: false,
             done: false,
             rate_limit,
+            stream_read_timeout,
         }
     }
 
@@ -638,12 +661,12 @@ impl StreamState {
                 return Ok(Some(line));
             }
 
-            match self.response.chunk().await {
-                Ok(Some(bytes)) => {
+            match tokio::time::timeout(self.stream_read_timeout, self.response.chunk()).await {
+                Ok(Ok(Some(bytes))) => {
                     let text = String::from_utf8_lossy(&bytes);
                     self.buffer.push_str(&text);
                 }
-                Ok(None) => {
+                Ok(Ok(None)) => {
                     self.done = true;
                     if self.buffer.is_empty() {
                         return Ok(None);
@@ -651,9 +674,14 @@ impl StreamState {
                     let remaining = std::mem::take(&mut self.buffer);
                     return Ok(Some(remaining));
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     return Err(SdkError::Stream {
                         message: e.to_string(),
+                    });
+                }
+                Err(_) => {
+                    return Err(SdkError::Stream {
+                        message: "stream read timed out waiting for next event".to_string(),
                     });
                 }
             }
@@ -888,7 +916,7 @@ mod tests {
                 .body("")
                 .unwrap(),
         );
-        let mut state = StreamState::new(http_resp, "test".into(), "model".into(), None);
+        let mut state = StreamState::new(http_resp, "test".into(), "model".into(), None, std::time::Duration::from_secs(30));
 
         // First text chunk should emit TextStart + TextDelta.
         let chunk1: StreamChunk = serde_json::from_str(
@@ -918,7 +946,7 @@ mod tests {
                 .body("")
                 .unwrap(),
         );
-        let mut state = StreamState::new(http_resp, "test".into(), "model".into(), None);
+        let mut state = StreamState::new(http_resp, "test".into(), "model".into(), None, std::time::Duration::from_secs(30));
 
         // First tool call chunk (has id and name) -> ToolCallStart.
         let chunk1: StreamChunk = serde_json::from_str(
@@ -947,7 +975,7 @@ mod tests {
                 .body("")
                 .unwrap(),
         );
-        let mut state = StreamState::new(http_resp, "test-provider".into(), "test-model".into(), None);
+        let mut state = StreamState::new(http_resp, "test-provider".into(), "test-model".into(), None, std::time::Duration::from_secs(30));
         state.response_id = "resp-1".into();
         state.response_model = "gpt-4".into();
         state.accumulated_text = "Hello world".into();
@@ -989,7 +1017,7 @@ mod tests {
                 .body("")
                 .unwrap(),
         );
-        let mut state = StreamState::new(http_resp, "test".into(), "model".into(), None);
+        let mut state = StreamState::new(http_resp, "test".into(), "model".into(), None, std::time::Duration::from_secs(30));
         state.response_id = "resp-1".into();
         state.tool_calls.push(AccumulatedToolCall {
             id: "call_1".into(),
@@ -1032,7 +1060,7 @@ mod tests {
                 .body("")
                 .unwrap(),
         );
-        let mut state = StreamState::new(http_resp, "test".into(), "fallback-model".into(), None);
+        let mut state = StreamState::new(http_resp, "test".into(), "fallback-model".into(), None, std::time::Duration::from_secs(30));
         // response_model is empty, so finish_events should use the request model.
         let events = state.finish_events();
         match &events[0] {

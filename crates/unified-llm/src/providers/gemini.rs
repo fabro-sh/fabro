@@ -8,7 +8,7 @@ use crate::providers::common::{
 };
 use crate::types::{
     ContentPart, FinishReason, Message, Request, Response, ResponseFormat, ResponseFormatType,
-    Role, StreamEvent, ToolCall, ToolChoice, ToolDefinition, Usage,
+    Role, StreamEvent, ThinkingData, ToolCall, ToolChoice, ToolDefinition, Usage,
 };
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
@@ -20,6 +20,7 @@ pub struct Adapter {
     default_headers: std::collections::HashMap<String, String>,
     client: reqwest::Client,
     request_timeout: std::time::Duration,
+    stream_read_timeout: std::time::Duration,
 }
 
 impl Adapter {
@@ -36,6 +37,7 @@ impl Adapter {
             default_headers: std::collections::HashMap::new(),
             client,
             request_timeout: std::time::Duration::from_secs_f64(timeout.request),
+            stream_read_timeout: std::time::Duration::from_secs_f64(timeout.stream_read),
         }
     }
 
@@ -48,6 +50,17 @@ impl Adapter {
     #[must_use]
     pub fn with_default_headers(mut self, headers: std::collections::HashMap<String, String>) -> Self {
         self.default_headers = headers;
+        self
+    }
+
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: crate::types::AdapterTimeout) -> Self {
+        self.client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs_f64(timeout.connect))
+            .build()
+            .unwrap_or_default();
+        self.request_timeout = std::time::Duration::from_secs_f64(timeout.request);
+        self.stream_read_timeout = std::time::Duration::from_secs_f64(timeout.stream_read);
         self
     }
 }
@@ -157,6 +170,17 @@ fn map_finish_reason(reason: Option<&str>, has_function_calls: bool) -> FinishRe
 
 fn parse_part(part: &serde_json::Value) -> Option<ContentPart> {
     if let Some(text) = part.get("text").and_then(serde_json::Value::as_str) {
+        let is_thought = part
+            .get("thought")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if is_thought {
+            return Some(ContentPart::Thinking(ThinkingData {
+                text: text.to_string(),
+                signature: None,
+                redacted: false,
+            }));
+        }
         return Some(ContentPart::text(text));
     }
     if let Some(fc) = part.get("functionCall") {
@@ -537,9 +561,9 @@ async fn send_streaming_request(
 
 /// Process a stream of SSE chunks from the Gemini `streamGenerateContent` endpoint
 /// and yield `StreamEvent` values.
-fn process_sse_stream(http_resp: reqwest::Response, model: String, rate_limit: Option<crate::types::RateLimitInfo>) -> StreamEventStream {
+fn process_sse_stream(http_resp: reqwest::Response, model: String, rate_limit: Option<crate::types::RateLimitInfo>, stream_read_timeout: std::time::Duration) -> StreamEventStream {
     Box::pin(stream::unfold(
-        SseStreamState::new(http_resp, model, rate_limit),
+        SseStreamState::new(http_resp, model, rate_limit, stream_read_timeout),
         |mut state| async move {
             // If we have buffered events, yield them first.
             if let Some(event) = state.pending_events.pop_front() {
@@ -628,6 +652,10 @@ struct SseStreamState {
     stream_started: bool,
     /// Whether we have emitted a `TextStart` event.
     text_started: bool,
+    /// Whether we are currently inside a reasoning (thought) segment.
+    reasoning_started: bool,
+    /// Accumulated thinking text across all chunks.
+    accumulated_thinking: String,
     /// Accumulated text across all chunks.
     accumulated_text: String,
     /// Accumulated tool calls across all chunks.
@@ -642,10 +670,11 @@ struct SseStreamState {
     finished: bool,
     /// Rate limit info parsed from HTTP response headers.
     rate_limit: Option<crate::types::RateLimitInfo>,
+    stream_read_timeout: std::time::Duration,
 }
 
 impl SseStreamState {
-    fn new(http_resp: reqwest::Response, model: String, rate_limit: Option<crate::types::RateLimitInfo>) -> Self {
+    fn new(http_resp: reqwest::Response, model: String, rate_limit: Option<crate::types::RateLimitInfo>, stream_read_timeout: std::time::Duration) -> Self {
         Self {
             http_resp,
             model,
@@ -653,6 +682,8 @@ impl SseStreamState {
             pending_events: std::collections::VecDeque::new(),
             stream_started: false,
             text_started: false,
+            reasoning_started: false,
+            accumulated_thinking: String::new(),
             accumulated_text: String::new(),
             accumulated_tool_calls: Vec::new(),
             text_id: uuid::Uuid::new_v4().to_string(),
@@ -660,6 +691,7 @@ impl SseStreamState {
             finish_reason_str: None,
             finished: false,
             rate_limit,
+            stream_read_timeout,
         }
     }
 
@@ -678,12 +710,12 @@ impl SseStreamState {
             }
 
             // Read more bytes from the HTTP response.
-            match self.http_resp.chunk().await {
-                Ok(Some(bytes)) => {
+            match tokio::time::timeout(self.stream_read_timeout, self.http_resp.chunk()).await {
+                Ok(Ok(Some(bytes))) => {
                     let text = String::from_utf8_lossy(&bytes);
                     self.line_buffer.push_str(&text);
                 }
-                Ok(None) => {
+                Ok(Ok(None)) => {
                     // Stream ended. Return any remaining buffered content.
                     if self.line_buffer.is_empty() {
                         return Ok(None);
@@ -695,9 +727,14 @@ impl SseStreamState {
                     }
                     return Ok(Some(line));
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     return Err(SdkError::Stream {
                         message: format!("error reading Gemini stream: {e}"),
+                    });
+                }
+                Err(_) => {
+                    return Err(SdkError::Stream {
+                        message: "stream read timed out waiting for next event".to_string(),
                     });
                 }
             }
@@ -723,16 +760,40 @@ impl SseStreamState {
         };
 
         for part in parts {
+            let is_thought = part
+                .get("thought")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+
             if let Some(text) = part.get("text").and_then(serde_json::Value::as_str) {
-                if !self.text_started {
-                    self.text_started = true;
-                    self.pending_events.push_back(StreamEvent::TextStart {
-                        text_id: Some(self.text_id.clone()),
-                    });
+                if is_thought {
+                    if !self.reasoning_started {
+                        self.reasoning_started = true;
+                        self.pending_events
+                            .push_back(StreamEvent::ReasoningStart);
+                    }
+                    self.accumulated_thinking.push_str(text);
+                    self.pending_events
+                        .push_back(StreamEvent::ReasoningDelta {
+                            delta: text.to_string(),
+                        });
+                } else {
+                    // Transition from reasoning to text: close reasoning segment.
+                    if self.reasoning_started {
+                        self.reasoning_started = false;
+                        self.pending_events
+                            .push_back(StreamEvent::ReasoningEnd);
+                    }
+                    if !self.text_started {
+                        self.text_started = true;
+                        self.pending_events.push_back(StreamEvent::TextStart {
+                            text_id: Some(self.text_id.clone()),
+                        });
+                    }
+                    self.accumulated_text.push_str(text);
+                    self.pending_events
+                        .push_back(StreamEvent::text_delta(text, Some(self.text_id.clone())));
                 }
-                self.accumulated_text.push_str(text);
-                self.pending_events
-                    .push_back(StreamEvent::text_delta(text, Some(self.text_id.clone())));
             } else if let Some(fc) = part.get("functionCall") {
                 let name = fc
                     .get("name")
@@ -765,10 +826,17 @@ impl SseStreamState {
             .and_then(|c| c.finish_reason.as_ref())
             .is_some();
 
-        if has_finish_reason && self.text_started {
-            self.pending_events.push_back(StreamEvent::TextEnd {
-                text_id: Some(self.text_id.clone()),
-            });
+        if has_finish_reason {
+            if self.reasoning_started {
+                self.reasoning_started = false;
+                self.pending_events
+                    .push_back(StreamEvent::ReasoningEnd);
+            }
+            if self.text_started {
+                self.pending_events.push_back(StreamEvent::TextEnd {
+                    text_id: Some(self.text_id.clone()),
+                });
+            }
         }
     }
 
@@ -779,6 +847,13 @@ impl SseStreamState {
             map_finish_reason(self.finish_reason_str.as_deref(), has_tool_calls);
 
         let mut content_parts: Vec<ContentPart> = Vec::new();
+        if !self.accumulated_thinking.is_empty() {
+            content_parts.push(ContentPart::Thinking(ThinkingData {
+                text: self.accumulated_thinking.clone(),
+                signature: None,
+                redacted: false,
+            }));
+        }
         if !self.accumulated_text.is_empty() {
             content_parts.push(ContentPart::text(&self.accumulated_text));
         }
@@ -815,6 +890,9 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
+        if let Some(tc) = &request.tool_choice {
+            crate::provider::validate_tool_choice(self, tc)?;
+        }
         let api_body = build_api_request(request);
 
         let url = format!(
@@ -880,6 +958,9 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
+        if let Some(tc) = &request.tool_choice {
+            crate::provider::validate_tool_choice(self, tc)?;
+        }
         let api_body = build_api_request(request);
 
         let url = format!(
@@ -894,7 +975,7 @@ impl ProviderAdapter for Adapter {
         let http_resp = send_streaming_request(req.json(&api_body)).await?;
 
         let rate_limit = parse_rate_limit_headers(http_resp.headers());
-        Ok(process_sse_stream(http_resp, request.model.clone(), rate_limit))
+        Ok(process_sse_stream(http_resp, request.model.clone(), rate_limit, self.stream_read_timeout))
     }
 }
 
@@ -1135,5 +1216,39 @@ mod tests {
 
         let err = gemini_error(500, "internal".into(), None, None, None);
         assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::Server, .. }));
+    }
+
+    #[test]
+    fn parse_part_handles_thought_text() {
+        let part = serde_json::json!({"text": "Let me think about this...", "thought": true});
+        let result = parse_part(&part).expect("should parse thought part");
+        match result {
+            ContentPart::Thinking(td) => {
+                assert_eq!(td.text, "Let me think about this...");
+                assert!(td.signature.is_none());
+                assert!(!td.redacted);
+            }
+            other => panic!("expected Thinking, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_part_text_without_thought_flag() {
+        let part = serde_json::json!({"text": "Hello world"});
+        let result = parse_part(&part).expect("should parse text part");
+        match result {
+            ContentPart::Text(text) => assert_eq!(text, "Hello world"),
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_part_thought_false_is_regular_text() {
+        let part = serde_json::json!({"text": "Regular text", "thought": false});
+        let result = parse_part(&part).expect("should parse text part");
+        match result {
+            ContentPart::Text(text) => assert_eq!(text, "Regular text"),
+            other => panic!("expected Text, got {other:?}"),
+        }
     }
 }

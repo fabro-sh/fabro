@@ -18,6 +18,7 @@ pub struct Adapter {
     default_headers: std::collections::HashMap<String, String>,
     client: reqwest::Client,
     request_timeout: std::time::Duration,
+    stream_read_timeout: std::time::Duration,
 }
 
 impl Adapter {
@@ -34,6 +35,7 @@ impl Adapter {
             default_headers: std::collections::HashMap::new(),
             client,
             request_timeout: std::time::Duration::from_secs_f64(timeout.request),
+            stream_read_timeout: std::time::Duration::from_secs_f64(timeout.stream_read),
         }
     }
 
@@ -46,6 +48,17 @@ impl Adapter {
     #[must_use]
     pub fn with_default_headers(mut self, headers: std::collections::HashMap<String, String>) -> Self {
         self.default_headers = headers;
+        self
+    }
+
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: crate::types::AdapterTimeout) -> Self {
+        self.client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs_f64(timeout.connect))
+            .build()
+            .unwrap_or_default();
+        self.request_timeout = std::time::Duration::from_secs_f64(timeout.request);
+        self.stream_read_timeout = std::time::Duration::from_secs_f64(timeout.stream_read);
         self
     }
 
@@ -900,6 +913,7 @@ struct SseReaderState {
     done: bool,
     /// When true, `tool_use` events for the synthetic tool are converted to text events.
     json_schema_mode: bool,
+    stream_read_timeout: std::time::Duration,
 }
 
 impl SseReaderState {
@@ -909,6 +923,7 @@ impl SseReaderState {
             + 'static,
         rate_limit: Option<crate::types::RateLimitInfo>,
         json_schema_mode: bool,
+        stream_read_timeout: std::time::Duration,
     ) -> Self {
         use futures::StreamExt;
         Self {
@@ -918,6 +933,7 @@ impl SseReaderState {
             pending_events: std::collections::VecDeque::new(),
             done: false,
             json_schema_mode,
+            stream_read_timeout,
         }
     }
 
@@ -939,23 +955,28 @@ impl SseReaderState {
             }
 
             // Read more bytes from the stream.
-            match self.byte_stream.next().await {
-                Some(Ok(chunk)) => {
+            match tokio::time::timeout(self.stream_read_timeout, self.byte_stream.next()).await {
+                Ok(Some(Ok(chunk))) => {
                     let text = String::from_utf8_lossy(&chunk);
                     self.buffer.push_str(&text);
                 }
-                Some(Err(e)) => {
+                Ok(Some(Err(e))) => {
                     return SseResult::Error(SdkError::Stream {
                         message: e.to_string(),
                     });
                 }
-                None => {
+                Ok(None) => {
                     self.done = true;
                     // Try one more time to parse any remaining data.
                     if let Some(result) = self.try_parse_event() {
                         return result;
                     }
                     return SseResult::Done;
+                }
+                Err(_) => {
+                    return SseResult::Error(SdkError::Stream {
+                        message: "stream read timed out waiting for next event".to_string(),
+                    });
                 }
             }
         }
@@ -1081,6 +1102,9 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
+        if let Some(tc) = &request.tool_choice {
+            crate::provider::validate_tool_choice(self, tc)?;
+        }
         let (_api_request, req_builder) = build_api_request(self, request, false);
 
         let (body, headers) =
@@ -1141,6 +1165,9 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
+        if let Some(tc) = &request.tool_choice {
+            crate::provider::validate_tool_choice(self, tc)?;
+        }
         let (_api_request, req_builder) = build_api_request(self, request, true);
 
         let http_resp = req_builder.send().await.map_err(|e| SdkError::Network {
@@ -1167,9 +1194,10 @@ impl ProviderAdapter for Adapter {
         let rate_limit = parse_rate_limit_headers(http_resp.headers());
         let byte_stream = http_resp.bytes_stream();
         let json_schema_mode = uses_json_schema_format(request);
+        let stream_read_timeout = self.stream_read_timeout;
 
         let stream = futures::stream::unfold(
-            SseReaderState::new(byte_stream, rate_limit, json_schema_mode),
+            SseReaderState::new(byte_stream, rate_limit, json_schema_mode, stream_read_timeout),
             |mut state| async move {
                 loop {
                     // Drain any buffered events first.

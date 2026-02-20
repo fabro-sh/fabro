@@ -786,6 +786,7 @@ ENUM StreamEventType:
     TOOL_CALL_START     -- A tool call has begun. Includes tool name and call ID.
     TOOL_CALL_DELTA     -- Incremental tool call arguments (partial JSON).
     TOOL_CALL_END       -- Tool call is fully formed and ready for execution.
+    STEP_FINISH         -- A tool execution step completed. Includes tool calls and results from this step.
     FINISH              -- Generation complete. Includes finish_reason, usage, response.
     ERROR               -- An error occurred during streaming.
     PROVIDER_EVENT      -- Raw provider event not mapped to the unified model.

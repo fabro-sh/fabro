@@ -23,6 +23,7 @@ pub struct Adapter {
     default_headers: std::collections::HashMap<String, String>,
     client: reqwest::Client,
     request_timeout: std::time::Duration,
+    stream_read_timeout: std::time::Duration,
 }
 
 impl Adapter {
@@ -41,6 +42,7 @@ impl Adapter {
             default_headers: std::collections::HashMap::new(),
             client,
             request_timeout: std::time::Duration::from_secs_f64(timeout.request),
+            stream_read_timeout: std::time::Duration::from_secs_f64(timeout.stream_read),
         }
     }
 
@@ -65,6 +67,17 @@ impl Adapter {
     #[must_use]
     pub fn with_default_headers(mut self, headers: std::collections::HashMap<String, String>) -> Self {
         self.default_headers = headers;
+        self
+    }
+
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: crate::types::AdapterTimeout) -> Self {
+        self.client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs_f64(timeout.connect))
+            .build()
+            .unwrap_or_default();
+        self.request_timeout = std::time::Duration::from_secs_f64(timeout.request);
+        self.stream_read_timeout = std::time::Duration::from_secs_f64(timeout.stream_read);
         self
     }
 
@@ -108,6 +121,8 @@ struct ApiRequest {
     reasoning: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stop: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     metadata: Option<std::collections::HashMap<String, String>>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -352,6 +367,7 @@ fn build_api_request(request: &Request, stream: bool) -> ApiRequest {
         tool_choice,
         reasoning,
         text,
+        stop: request.stop_sequences.clone(),
         metadata: request.metadata.clone(),
         stream,
     }
@@ -449,6 +465,7 @@ struct SseStreamState {
     emitted_text_start: bool,
     raw_response: Option<serde_json::Value>,
     rate_limit: Option<crate::types::RateLimitInfo>,
+    stream_read_timeout: std::time::Duration,
 }
 
 /// Extract complete SSE messages from the buffer.
@@ -513,17 +530,17 @@ async fn process_next_sse_events(
             return Ok(dispatch_sse_messages(state, messages));
         }
 
-        match state.byte_stream.next().await {
-            Some(Ok(bytes)) => {
+        match tokio::time::timeout(state.stream_read_timeout, state.byte_stream.next()).await {
+            Ok(Some(Ok(bytes))) => {
                 let text = String::from_utf8_lossy(&bytes);
                 state.buffer.push_str(&text);
             }
-            Some(Err(e)) => {
+            Ok(Some(Err(e))) => {
                 return Err(SdkError::Stream {
                     message: e.to_string(),
                 });
             }
-            None => {
+            Ok(None) => {
                 // Stream ended. Process any remaining data in the buffer.
                 if !state.buffer.is_empty() {
                     state.buffer.push_str("\n\n");
@@ -531,6 +548,11 @@ async fn process_next_sse_events(
                     return Ok(dispatch_sse_messages(state, messages));
                 }
                 return Ok(vec![]);
+            }
+            Err(_) => {
+                return Err(SdkError::Stream {
+                    message: "stream read timed out waiting for next event".to_string(),
+                });
             }
         }
     }
@@ -823,6 +845,9 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
+        if let Some(tc) = &request.tool_choice {
+            crate::provider::validate_tool_choice(self, tc)?;
+        }
         let request_body = build_request_body(request, false);
         let url = format!("{}/responses", self.base_url);
 
@@ -880,6 +905,9 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
+        if let Some(tc) = &request.tool_choice {
+            crate::provider::validate_tool_choice(self, tc)?;
+        }
         let request_body = build_request_body(request, true);
         let url = format!("{}/responses", self.base_url);
 
@@ -913,6 +941,7 @@ impl ProviderAdapter for Adapter {
         let rate_limit = parse_rate_limit_headers(http_resp.headers());
         let byte_stream = http_resp.bytes_stream();
 
+        let stream_read_timeout = self.stream_read_timeout;
         let state = SseStreamState {
             byte_stream: Box::pin(byte_stream),
             buffer: String::new(),
@@ -927,6 +956,7 @@ impl ProviderAdapter for Adapter {
             emitted_text_start: false,
             raw_response: None,
             rate_limit,
+            stream_read_timeout,
         };
 
         let stream = futures::stream::unfold(state, |mut state| async move {
@@ -1149,5 +1179,25 @@ mod tests {
         let content = input[0]["content"].as_array().expect("content should be array");
         assert_eq!(content[0]["type"], "input_text");
         assert_eq!(content[0]["text"], "[Document content not supported by this provider]");
+    }
+
+    #[test]
+    fn build_request_body_includes_stop_sequences() {
+        let mut request = minimal_request();
+        request.stop_sequences = Some(vec!["END".to_string(), "STOP".to_string()]);
+
+        let body = build_request_body(&request, false);
+        let stop = body.get("stop").expect("stop should be present");
+        let arr = stop.as_array().expect("stop should be an array");
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0], "END");
+        assert_eq!(arr[1], "STOP");
+    }
+
+    #[test]
+    fn build_request_body_omits_stop_when_none() {
+        let request = minimal_request();
+        let body = build_request_body(&request, false);
+        assert!(body.get("stop").is_none());
     }
 }

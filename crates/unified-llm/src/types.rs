@@ -356,6 +356,7 @@ impl std::ops::Add for Usage {
 #[serde(rename_all = "snake_case")]
 pub enum ResponseFormatType {
     Text,
+    #[serde(rename = "json")]
     JsonObject,
     JsonSchema,
 }
@@ -431,6 +432,17 @@ impl ToolChoice {
     pub fn named(name: impl Into<String>) -> Self {
         Self::Named {
             tool_name: name.into(),
+        }
+    }
+
+    /// Return the mode string used by `ProviderAdapter::supports_tool_choice`.
+    #[must_use]
+    pub fn mode_str(&self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::None => "none",
+            Self::Required => "required",
+            Self::Named { .. } => "named",
         }
     }
 }

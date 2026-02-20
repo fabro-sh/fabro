@@ -80,6 +80,9 @@ pub enum SdkError {
 
     #[error("Configuration error: {message}")]
     Configuration { message: String },
+
+    #[error("Unsupported tool choice: {message}")]
+    UnsupportedToolChoice { message: String },
 }
 
 impl SdkError {
@@ -99,7 +102,8 @@ impl SdkError {
             Self::InvalidToolCall { .. }
             | Self::NoObjectGenerated { .. }
             | Self::Abort { .. }
-            | Self::Configuration { .. } => false,
+            | Self::Configuration { .. }
+            | Self::UnsupportedToolChoice { .. } => false,
             _ => true,
         }
     }
@@ -148,35 +152,8 @@ pub fn error_from_status_code(
         raw,
     };
 
-    // First check message-based classification for ambiguous cases
-    let lower_msg = detail.message.to_lowercase();
-    if lower_msg.contains("not found") || lower_msg.contains("does not exist") {
-        return SdkError::Provider {
-            kind: ProviderErrorKind::NotFound,
-            detail: Box::new(detail),
-        };
-    }
-    if lower_msg.contains("unauthorized") || lower_msg.contains("invalid key") {
-        return SdkError::Provider {
-            kind: ProviderErrorKind::Authentication,
-            detail: Box::new(detail),
-        };
-    }
-    if lower_msg.contains("context length") || lower_msg.contains("too many tokens") {
-        return SdkError::Provider {
-            kind: ProviderErrorKind::ContextLength,
-            detail: Box::new(detail),
-        };
-    }
-    if lower_msg.contains("content filter") || lower_msg.contains("safety") {
-        return SdkError::Provider {
-            kind: ProviderErrorKind::ContentFilter,
-            detail: Box::new(detail),
-        };
-    }
-
+    // Check specific status codes first -- these always map to their designated error types
     let kind = match status_code {
-        400 | 422 => ProviderErrorKind::InvalidRequest,
         401 => ProviderErrorKind::Authentication,
         403 => ProviderErrorKind::AccessDenied,
         404 => ProviderErrorKind::NotFound,
@@ -187,7 +164,24 @@ pub fn error_from_status_code(
         }
         413 => ProviderErrorKind::ContextLength,
         429 => ProviderErrorKind::RateLimit,
-        _ => ProviderErrorKind::Server,
+        500..=504 => ProviderErrorKind::Server,
+        // For ambiguous status codes (400, 422, etc.), use message-based classification
+        _ => {
+            let lower_msg = detail.message.to_lowercase();
+            if lower_msg.contains("not found") || lower_msg.contains("does not exist") {
+                ProviderErrorKind::NotFound
+            } else if lower_msg.contains("unauthorized") || lower_msg.contains("invalid key") {
+                ProviderErrorKind::Authentication
+            } else if lower_msg.contains("context length")
+                || lower_msg.contains("too many tokens")
+            {
+                ProviderErrorKind::ContextLength
+            } else if lower_msg.contains("content filter") || lower_msg.contains("safety") {
+                ProviderErrorKind::ContentFilter
+            } else {
+                ProviderErrorKind::InvalidRequest
+            }
+        }
     };
 
     SdkError::Provider {
