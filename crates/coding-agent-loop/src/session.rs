@@ -45,7 +45,7 @@ impl Session {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             config,
-            history: History::new(),
+            history: History::default(),
             event_emitter: EventEmitter::new(),
             state: SessionState::Idle,
             llm_client,

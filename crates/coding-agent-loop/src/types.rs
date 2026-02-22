@@ -19,10 +19,13 @@ pub enum Turn {
         results: Vec<ToolResult>,
         timestamp: SystemTime,
     },
+    /// Injected content sent as a system-role message to the LLM (maps to `Role::System`).
     System {
         content: String,
         timestamp: SystemTime,
     },
+    /// Injected steering content sent as a user-role message to the LLM (maps to `Role::User`).
+    /// Used to guide the assistant's behavior mid-conversation without appearing as actual user input.
     Steering {
         content: String,
         timestamp: SystemTime,

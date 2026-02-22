@@ -12,13 +12,13 @@ fn tool_call_signature(name: &str, arguments: &serde_json::Value) -> u64 {
 }
 
 fn extract_signatures_from_assistant(turn: &Turn) -> Vec<u64> {
-    match turn {
-        Turn::Assistant { tool_calls, .. } => tool_calls
-            .iter()
-            .map(|tc| tool_call_signature(&tc.name, &tc.arguments))
-            .collect(),
-        _ => vec![],
-    }
+    let Turn::Assistant { tool_calls, .. } = turn else {
+        return vec![];
+    };
+    tool_calls
+        .iter()
+        .map(|tc| tool_call_signature(&tc.name, &tc.arguments))
+        .collect()
 }
 
 pub fn detect_loop(history: &History, window_size: usize) -> bool {
@@ -109,20 +109,20 @@ mod tests {
 
     #[test]
     fn too_few_turns_returns_false() {
-        let history = History::new();
+        let history = History::default();
         assert!(!detect_loop(&history, 10));
     }
 
     #[test]
     fn single_turn_returns_false() {
-        let mut history = History::new();
+        let mut history = History::default();
         history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
         assert!(!detect_loop(&history, 10));
     }
 
     #[test]
     fn pattern_1_repeating_detected() {
-        let mut history = History::new();
+        let mut history = History::default();
         // Same tool call repeated 3 times
         history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
         history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn pattern_2_repeating_detected() {
-        let mut history = History::new();
+        let mut history = History::default();
         // A-B-A-B pattern
         history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
         history.push(assistant_with_tool("read_file", serde_json::json!({"path": "foo.rs"})));
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn pattern_3_repeating_detected() {
-        let mut history = History::new();
+        let mut history = History::default();
         // A-B-C-A-B-C pattern
         history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
         history.push(assistant_with_tool("read_file", serde_json::json!({"path": "a.rs"})));
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn non_repeating_returns_false() {
-        let mut history = History::new();
+        let mut history = History::default();
         history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
         history.push(assistant_with_tool("read_file", serde_json::json!({"path": "a.rs"})));
         history.push(assistant_with_tool("grep", serde_json::json!({"pattern": "fn"})));
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn same_name_different_args_are_different() {
-        let mut history = History::new();
+        let mut history = History::default();
         history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
         history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "pwd"})));
         history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "cat"})));
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn user_turns_are_ignored() {
-        let mut history = History::new();
+        let mut history = History::default();
         history.push(Turn::User {
             content: "hello".into(),
             timestamp: SystemTime::now(),
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn window_size_limits_lookback() {
-        let mut history = History::new();
+        let mut history = History::default();
         // Add non-repeating turns first
         history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "unique1"})));
         history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "unique2"})));

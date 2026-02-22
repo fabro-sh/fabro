@@ -7,10 +7,6 @@ pub struct History {
 }
 
 impl History {
-    pub fn new() -> Self {
-        Self { turns: Vec::new() }
-    }
-
     pub fn push(&mut self, turn: Turn) {
         self.turns.push(turn);
     }
@@ -87,14 +83,14 @@ mod tests {
 
     #[test]
     fn empty_history_produces_empty_messages() {
-        let history = History::new();
+        let history = History::default();
         assert!(history.convert_to_messages().is_empty());
         assert_eq!(history.turns().len(), 0);
     }
 
     #[test]
     fn user_turn_maps_to_user_message() {
-        let mut history = History::new();
+        let mut history = History::default();
         history.push(Turn::User {
             content: "Hello".into(),
             timestamp: SystemTime::now(),
@@ -107,7 +103,7 @@ mod tests {
 
     #[test]
     fn assistant_turn_maps_to_assistant_message() {
-        let mut history = History::new();
+        let mut history = History::default();
         history.push(Turn::Assistant {
             content: "Hi there".into(),
             tool_calls: vec![],
@@ -124,7 +120,7 @@ mod tests {
 
     #[test]
     fn assistant_turn_with_tool_calls() {
-        let mut history = History::new();
+        let mut history = History::default();
         let tc = ToolCall::new("call_1", "read_file", serde_json::json!({"path": "foo.rs"}));
         history.push(Turn::Assistant {
             content: "Let me read that".into(),
@@ -146,7 +142,7 @@ mod tests {
 
     #[test]
     fn assistant_turn_with_reasoning() {
-        let mut history = History::new();
+        let mut history = History::default();
         history.push(Turn::Assistant {
             content: "The answer is 42".into(),
             tool_calls: vec![],
@@ -166,7 +162,7 @@ mod tests {
 
     #[test]
     fn tool_results_turn_maps_to_tool_message() {
-        let mut history = History::new();
+        let mut history = History::default();
         let result = ToolResult {
             tool_call_id: "call_1".into(),
             content: serde_json::json!("file contents here"),
@@ -186,7 +182,7 @@ mod tests {
 
     #[test]
     fn system_turn_maps_to_system_message() {
-        let mut history = History::new();
+        let mut history = History::default();
         history.push(Turn::System {
             content: "You are a coding assistant".into(),
             timestamp: SystemTime::now(),
@@ -199,7 +195,7 @@ mod tests {
 
     #[test]
     fn steering_turn_maps_to_user_message() {
-        let mut history = History::new();
+        let mut history = History::default();
         history.push(Turn::Steering {
             content: "Focus on the main task".into(),
             timestamp: SystemTime::now(),
@@ -212,7 +208,7 @@ mod tests {
 
     #[test]
     fn turns_len_matches_push_count() {
-        let mut history = History::new();
+        let mut history = History::default();
         assert_eq!(history.turns().len(), 0);
         history.push(Turn::User {
             content: "First".into(),
@@ -232,7 +228,7 @@ mod tests {
 
     #[test]
     fn round_trip_preserves_content() {
-        let mut history = History::new();
+        let mut history = History::default();
         history.push(Turn::User {
             content: "Hello".into(),
             timestamp: SystemTime::now(),
