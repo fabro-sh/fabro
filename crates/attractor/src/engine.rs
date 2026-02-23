@@ -604,10 +604,11 @@ impl PipelineEngine {
             match outcome.status {
                 StageStatus::Success
                 | StageStatus::PartialSuccess
+                | StageStatus::Fail
                 | StageStatus::Skipped => {
                     return Ok((outcome, attempt));
                 }
-                StageStatus::Fail | StageStatus::Retry => {
+                StageStatus::Retry => {
                     if attempt < policy.max_attempts {
                         let delay = policy.backoff.delay_for_attempt(attempt);
                         self.emitter.emit(&PipelineEvent::StageRetrying {
