@@ -1,10 +1,7 @@
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash coreutils findutils grep git curl ca-certificates \
-    build-essential && \
-    # Install ripgrep
-    curl -LO https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep_14.1.1-1_amd64.deb && \
-    dpkg -i ripgrep_14.1.1-1_amd64.deb && rm ripgrep_14.1.1-1_amd64.deb && \
+    build-essential ripgrep && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 WORKDIR /workspace
 CMD ["sleep", "infinity"]
