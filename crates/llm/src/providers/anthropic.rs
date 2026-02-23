@@ -800,6 +800,19 @@ impl StreamAccumulator {
                     delta: thinking.to_string(),
                 }]
             }
+            "signature_delta" => {
+                let signature = delta
+                    .and_then(|d| d.get("signature"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(String::from);
+                if let Some(ContentBlockKind::Thinking {
+                    signature: ref mut sig,
+                }) = self.current_block
+                {
+                    *sig = signature;
+                }
+                vec![]
+            }
             _ => vec![],
         }
     }
