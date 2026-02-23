@@ -124,11 +124,13 @@ Otherwise set preferred_next_label to \"Fix\"."
         goal_gate=true,
         prompt="The triage report identified IMPLEMENTABLE DoD failures. Pick the top 5 most impactful items (or all if fewer than 5) and implement the fixes in Rust.
 
+Begin by making sure the build is green with `cargo test`
+
 For each fix:
 1. Read the relevant source file(s)
 2. Make the minimal change needed to satisfy the DoD checkbox
-3. Write the modified file(s)
-4. Verify the fix compiles (mentally trace includes and types)
+3. Write the modified file(s) -- update tests as needed
+4. Verify the fix and the tests pass (`cargo test`)
 
 Constraints:
 - Do NOT modify any files under docs/specs/ (those are the specs)
