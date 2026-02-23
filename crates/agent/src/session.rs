@@ -427,6 +427,7 @@ impl Session {
                 EventData::ToolCall {
                     tool_name: tc.name.clone(),
                     tool_call_id: tc.id.clone(),
+                    arguments: tc.arguments.clone(),
                 },
             );
 
@@ -483,6 +484,7 @@ impl Session {
                         EventData::ToolCall {
                             tool_name: tc.name.clone(),
                             tool_call_id: tc.id.clone(),
+                            arguments: tc.arguments.clone(),
                         },
                     );
 

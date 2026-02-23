@@ -67,6 +67,7 @@ pub enum EventData {
     ToolCall {
         tool_name: String,
         tool_call_id: String,
+        arguments: serde_json::Value,
     },
     ToolCallEnd {
         tool_name: String,

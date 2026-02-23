@@ -9,6 +9,38 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
+/// Pre-resolved ANSI escape codes for styled terminal output.
+/// All fields are empty strings when color is disabled (non-TTY stderr).
+struct Styles {
+    bold: &'static str,
+    dim: &'static str,
+    cyan: &'static str,
+    red: &'static str,
+    reset: &'static str,
+}
+
+impl Styles {
+    fn new(use_color: bool) -> Self {
+        if use_color {
+            Self {
+                bold: "\x1b[1m",
+                dim: "\x1b[2m",
+                cyan: "\x1b[36m",
+                red: "\x1b[31m",
+                reset: "\x1b[0m",
+            }
+        } else {
+            Self {
+                bold: "",
+                dim: "",
+                cyan: "",
+                red: "",
+                reset: "",
+            }
+        }
+    }
+}
+
 /// Minimal CLI for the agent agentic loop.
 #[derive(Parser)]
 #[command(name = "agent")]
@@ -75,7 +107,11 @@ fn is_auto_approved(level: PermissionLevel, category: &str) -> bool {
     )
 }
 
-fn build_tool_approval(permissions: PermissionLevel, is_interactive: bool) -> ToolApprovalFn {
+fn build_tool_approval(
+    permissions: PermissionLevel,
+    is_interactive: bool,
+    styles: &'static Styles,
+) -> ToolApprovalFn {
     let level = Arc::new(Mutex::new(permissions));
 
     Arc::new(move |tool_name: &str, _args: &serde_json::Value| {
@@ -93,7 +129,10 @@ fn build_tool_approval(permissions: PermissionLevel, is_interactive: bool) -> To
 
         // Interactive prompt on stderr
         let category = tool_category(tool_name);
-        eprint!("Allow {tool_name} ({category})? [y]es / [n]o / [a]lways: ");
+        eprint!(
+            "Allow {}{tool_name}{} ({category})? [y]es / [n]o / [a]lways: ",
+            styles.bold, styles.reset,
+        );
         std::io::stderr().flush().ok();
 
         let mut input = String::new();
@@ -137,6 +176,26 @@ fn validate_api_key(provider: &str) -> bool {
     }
 }
 
+fn format_tool_args(args: &serde_json::Value) -> String {
+    let Some(obj) = args.as_object() else {
+        return args.to_string();
+    };
+    obj.iter()
+        .map(|(k, v)| match v {
+            serde_json::Value::String(s) => {
+                let display = if s.len() > 80 {
+                    format!("{}...", &s[..77])
+                } else {
+                    s.clone()
+                };
+                format!("{k}={display:?}")
+            }
+            other => format!("{k}={other}"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn print_output(session: &Session) {
     for turn in session.history().turns() {
         if let Turn::Assistant { content, .. } = turn {
@@ -147,7 +206,7 @@ fn print_output(session: &Session) {
     }
 }
 
-fn print_summary(session: &Session) {
+fn print_summary(session: &Session, styles: &Styles) {
     let (mut turn_count, mut tool_call_count, mut total_tokens) = (0usize, 0usize, 0i64);
     for turn in session.history().turns() {
         if let Turn::Assistant {
@@ -164,11 +223,16 @@ fn print_summary(session: &Session) {
     } else {
         format!("{total_tokens} tokens")
     };
-    eprintln!("Done ({turn_count} turns, {tool_call_count} tool calls, {token_str})");
+    eprintln!(
+        "{}Done ({turn_count} turns, {tool_call_count} tool calls, {token_str}){}",
+        styles.dim, styles.reset,
+    );
 }
 
 /// Middleware that logs LLM request/response summaries to stderr.
-struct DebugMiddleware;
+struct DebugMiddleware {
+    styles: &'static Styles,
+}
 
 #[async_trait::async_trait]
 impl llm::middleware::Middleware for DebugMiddleware {
@@ -177,20 +241,63 @@ impl llm::middleware::Middleware for DebugMiddleware {
         request: llm::types::Request,
         next: llm::middleware::NextFn,
     ) -> Result<llm::types::Response, llm::error::SdkError> {
+        let s = self.styles;
         eprintln!(
-            "[debug] request: model={} messages={} tools={}",
+            "{}[debug] request: model={} messages={} tools={}{}",
+            s.dim,
             request.model,
             request.messages.len(),
             request.tools.as_ref().map_or(0, Vec::len),
+            s.reset,
         );
         let response = next(request).await?;
         eprintln!(
-            "[debug] response: model={} finish={:?} usage=({}/{}/{})",
+            "{}[debug] response: model={} finish={:?} usage=({}/{}/{}){}",
+            s.dim,
             response.model,
             response.finish_reason,
             response.usage.input_tokens,
             response.usage.output_tokens,
             response.usage.total_tokens,
+            s.reset,
+        );
+        Ok(response)
+    }
+
+    async fn handle_stream(
+        &self,
+        request: llm::types::Request,
+        next: llm::middleware::NextStreamFn,
+    ) -> Result<llm::provider::StreamEventStream, llm::error::SdkError> {
+        next(request).await
+    }
+}
+
+/// Middleware that logs full LLM request/response JSON to stderr.
+struct VerboseMiddleware {
+    styles: &'static Styles,
+}
+
+#[async_trait::async_trait]
+impl llm::middleware::Middleware for VerboseMiddleware {
+    async fn handle_complete(
+        &self,
+        request: llm::types::Request,
+        next: llm::middleware::NextFn,
+    ) -> Result<llm::types::Response, llm::error::SdkError> {
+        let s = self.styles;
+        eprintln!(
+            "{}[verbose] request:{}\n{}",
+            s.dim,
+            s.reset,
+            serde_json::to_string_pretty(&request).unwrap_or_else(|e| format!("<serialize error: {e}>"))
+        );
+        let response = next(request).await?;
+        eprintln!(
+            "{}[verbose] response:{}\n{}",
+            s.dim,
+            s.reset,
+            serde_json::to_string_pretty(&response).unwrap_or_else(|e| format!("<serialize error: {e}>"))
         );
         Ok(response)
     }
@@ -208,6 +315,10 @@ pub async fn run() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
     let cli = Cli::parse();
 
+    // Resolve color support once, leak to get 'static lifetime for use across threads
+    let styles: &'static Styles =
+        Box::leak(Box::new(Styles::new(std::io::stderr().is_terminal())));
+
     // Validate provider API key
     if !validate_api_key(&cli.provider) {
         anyhow::bail!("API key not set for provider '{}'", cli.provider);
@@ -218,8 +329,10 @@ pub async fn run() -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create LLM client: {e}"))?;
 
-    if cli.debug {
-        client.add_middleware(Arc::new(DebugMiddleware));
+    if cli.verbose {
+        client.add_middleware(Arc::new(VerboseMiddleware { styles }));
+    } else if cli.debug {
+        client.add_middleware(Arc::new(DebugMiddleware { styles }));
     }
 
     // Resolve model and build profile
@@ -235,7 +348,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     // Build tool approval callback
     let is_interactive = std::io::stdin().is_terminal() && !cli.auto_approve;
-    let tool_approval = build_tool_approval(cli.permissions, is_interactive);
+    let tool_approval = build_tool_approval(cli.permissions, is_interactive, styles);
 
     let config = SessionConfig {
         tool_approval: Some(tool_approval),
@@ -252,15 +365,43 @@ pub async fn run() -> anyhow::Result<()> {
     });
 
     // Subscribe to events for real-time tool status on stderr
+    let verbose = cli.verbose;
     let mut rx = session.subscribe();
     tokio::spawn(async move {
+        let s = styles;
         while let Ok(event) = rx.recv().await {
             match (&event.kind, &event.data) {
-                (EventKind::ToolCallStart, EventData::ToolCall { tool_name, .. }) => {
-                    eprintln!("[tool] {tool_name}");
+                (EventKind::ToolCallStart, EventData::ToolCall { tool_name, arguments, .. }) => {
+                    eprintln!(
+                        "  {dim}\u{25cf}{reset} {bold}{cyan}{tool_name}{reset}{dim}({args}){reset}",
+                        dim = s.dim,
+                        reset = s.reset,
+                        bold = s.bold,
+                        cyan = s.cyan,
+                        args = format_tool_args(arguments),
+                    );
+                }
+                (
+                    EventKind::ToolCallEnd,
+                    EventData::ToolCallEnd {
+                        tool_name, output, is_error, ..
+                    },
+                ) if verbose => {
+                    let label = if *is_error { "tool error" } else { "tool result" };
+                    eprintln!(
+                        "  {}[{label}] {tool_name}:{}\n{}",
+                        s.dim,
+                        s.reset,
+                        serde_json::to_string_pretty(output)
+                            .unwrap_or_else(|_| output.to_string()),
+                    );
                 }
                 (EventKind::Error, EventData::Error { error }) => {
-                    eprintln!("[error] {error}");
+                    eprintln!(
+                        "  {red}\u{2717} {error}{reset}",
+                        red = s.red,
+                        reset = s.reset,
+                    );
                 }
                 _ => {}
             }
@@ -275,7 +416,7 @@ pub async fn run() -> anyhow::Result<()> {
     print_output(&session);
 
     // Print completion summary to stderr
-    print_summary(&session);
+    print_summary(&session, styles);
 
     // Propagate errors for exit code
     result?;
@@ -286,6 +427,14 @@ pub async fn run() -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    static NO_COLOR: Styles = Styles {
+        bold: "",
+        dim: "",
+        cyan: "",
+        red: "",
+        reset: "",
+    };
 
     // tool_category tests
 
@@ -366,13 +515,13 @@ mod tests {
 
     #[test]
     fn build_tool_approval_read_only_allows_read() {
-        let approval_fn = build_tool_approval(PermissionLevel::ReadOnly, false);
+        let approval_fn = build_tool_approval(PermissionLevel::ReadOnly, false, &NO_COLOR);
         assert!(approval_fn("read_file", &json!({})).is_ok());
     }
 
     #[test]
     fn build_tool_approval_read_only_denies_write() {
-        let approval_fn = build_tool_approval(PermissionLevel::ReadOnly, false);
+        let approval_fn = build_tool_approval(PermissionLevel::ReadOnly, false, &NO_COLOR);
         let result = approval_fn("write_file", &json!({}));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("denied"));
@@ -380,7 +529,7 @@ mod tests {
 
     #[test]
     fn build_tool_approval_read_write_denies_shell() {
-        let approval_fn = build_tool_approval(PermissionLevel::ReadWrite, false);
+        let approval_fn = build_tool_approval(PermissionLevel::ReadWrite, false, &NO_COLOR);
         let result = approval_fn("shell", &json!({}));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("denied"));
@@ -388,7 +537,7 @@ mod tests {
 
     #[test]
     fn build_tool_approval_full_allows_shell() {
-        let approval_fn = build_tool_approval(PermissionLevel::Full, false);
+        let approval_fn = build_tool_approval(PermissionLevel::Full, false, &NO_COLOR);
         assert!(approval_fn("shell", &json!({})).is_ok());
     }
 
