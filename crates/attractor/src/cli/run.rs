@@ -58,6 +58,14 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     });
     tokio::fs::create_dir_all(&logs_dir).await?;
 
+    if args.verbose >= 1 {
+        eprintln!(
+            "{dim}Logs: {}{reset}",
+            logs_dir.display(),
+            dim = styles.dim, reset = styles.reset,
+        );
+    }
+
     // 3. Build event emitter
     let mut emitter = EventEmitter::new();
     if args.verbose >= 2 {
