@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::bail;
 use chrono::Local;
@@ -17,7 +18,7 @@ use crate::pipeline::PipelineBuilder;
 use crate::validation::Severity;
 
 use super::backend::AgentBackend;
-use super::{format_event_detail, format_event_summary, print_diagnostics, read_dot_file, RunArgs};
+use super::{format_duration_human, format_event_detail, format_event_summary, print_diagnostics, read_dot_file, RunArgs};
 
 /// Execute a full pipeline run.
 ///
@@ -75,6 +76,25 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     } else if args.verbose >= 1 {
         emitter.on_event(move |event| {
             eprintln!("{}", format_event_summary(event, styles));
+        });
+    } else {
+        emitter.on_event(move |event| {
+            match event {
+                crate::event::PipelineEvent::StageCompleted { name, duration_ms, status, .. } => {
+                    eprintln!(
+                        "{dim}Stage \"{name}\" completed ({status}) in {duration}{reset}",
+                        duration = format_duration_human(*duration_ms),
+                        dim = styles.dim, reset = styles.reset,
+                    );
+                }
+                crate::event::PipelineEvent::StageFailed { name, .. } => {
+                    eprintln!(
+                        "{dim}Stage \"{name}\" failed{reset}",
+                        dim = styles.dim, reset = styles.reset,
+                    );
+                }
+                _ => {}
+            }
         });
     }
 
@@ -153,6 +173,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         cancel_token: None,
     };
 
+    let run_start = Instant::now();
     let outcome = if let Some(ref checkpoint_path) = args.resume {
         let checkpoint = Checkpoint::load(checkpoint_path)?;
         engine
@@ -161,6 +182,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     } else {
         engine.run(&graph, &config).await?
     };
+    let run_duration_ms = run_start.elapsed().as_millis() as u64;
 
     // 8. Print result
     eprintln!(
@@ -174,6 +196,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         _ => styles.red,
     };
     eprintln!("Status: {status_color}{status_str}{reset}", reset = styles.reset);
+    eprintln!("Duration: {}", format_duration_human(run_duration_ms));
 
     if let Some(notes) = &outcome.notes {
         eprintln!("Notes: {notes}");

@@ -141,6 +141,26 @@ pub fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles) {
     }
 }
 
+/// Format milliseconds into a human-readable duration string.
+///
+/// - < 1000ms: `123ms`
+/// - < 60s: `12.3s`
+/// - >= 60s: `1m 23s`
+#[must_use]
+pub fn format_duration_human(ms: u64) -> String {
+    if ms < 1000 {
+        format!("{ms}ms")
+    } else if ms < 60_000 {
+        let secs = ms as f64 / 1000.0;
+        format!("{secs:.1}s")
+    } else {
+        let total_secs = ms / 1000;
+        let minutes = total_secs / 60;
+        let secs = total_secs % 60;
+        format!("{minutes}m {secs}s")
+    }
+}
+
 /// One-line summary of a pipeline event for `-v` output (dimmed).
 #[must_use]
 pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
