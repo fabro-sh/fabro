@@ -1,4 +1,4 @@
-use agent::{
+use crate::{
     AnthropicProfile, EventData, EventKind, GeminiProfile, LocalExecutionEnvironment, OpenAiProfile,
     ProviderProfile, Session, SessionConfig, ToolApprovalFn, Turn,
 };
@@ -6,7 +6,6 @@ use clap::{Parser, ValueEnum};
 use llm::client::Client;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
-use std::process::ExitCode;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
@@ -36,6 +35,10 @@ struct Cli {
     /// Print LLM request/response debug info to stderr
     #[arg(long)]
     debug: bool,
+
+    /// Print full LLM request/response JSON to stderr
+    #[arg(long)]
+    verbose: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -201,7 +204,7 @@ impl llm::middleware::Middleware for DebugMiddleware {
     }
 }
 
-async fn run() -> anyhow::Result<()> {
+pub async fn run() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
     let cli = Cli::parse();
 
@@ -277,17 +280,6 @@ async fn run() -> anyhow::Result<()> {
     // Propagate errors for exit code
     result?;
     Ok(())
-}
-
-#[tokio::main]
-async fn main() -> ExitCode {
-    match run().await {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("[error] {e}");
-            ExitCode::FAILURE
-        }
-    }
 }
 
 #[cfg(test)]

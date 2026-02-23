@@ -12,7 +12,14 @@ categories = ["api-bindings"]
 [lib]
 doctest = false
 
+[[bin]]
+name = "agent"
+path = "src/main.rs"
+
 [dependencies]
+clap.workspace = true
+anyhow.workspace = true
+dotenvy.workspace = true
 llm = { path = "../llm" }
 thiserror.workspace = true
 serde.workspace = true
