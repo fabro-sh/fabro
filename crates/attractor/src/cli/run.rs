@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::bail;
 use chrono::Local;
+use terminal::Styles;
 
 use crate::checkpoint::Checkpoint;
 use crate::engine::{PipelineEngine, RunConfig};
@@ -24,24 +25,25 @@ use super::{format_event_detail, format_event_summary, print_diagnostics, read_d
 ///
 /// Returns an error if the pipeline cannot be read, parsed, validated, or executed.
 #[allow(clippy::too_many_lines)]
-pub async fn run_command(args: RunArgs) -> anyhow::Result<()> {
+pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Result<()> {
     // 1. Parse and validate pipeline
     let source = read_dot_file(&args.pipeline)?;
     let (graph, diagnostics) = PipelineBuilder::new().prepare(&source)?;
 
-    println!(
-        "Parsed pipeline: {} ({} nodes, {} edges)",
+    eprintln!(
+        "{bold}Parsed pipeline:{reset} {} ({dim}{} nodes, {} edges{reset})",
         graph.name,
         graph.nodes.len(),
         graph.edges.len(),
+        bold = styles.bold, dim = styles.dim, reset = styles.reset,
     );
 
     let goal = graph.goal();
     if !goal.is_empty() {
-        println!("Goal: {goal}");
+        eprintln!("{bold}Goal:{reset} {goal}", bold = styles.bold, reset = styles.reset);
     }
 
-    print_diagnostics(&diagnostics);
+    print_diagnostics(&diagnostics, styles);
 
     if diagnostics.iter().any(|d| d.severity == Severity::Error) {
         bail!("Validation failed");
@@ -59,12 +61,12 @@ pub async fn run_command(args: RunArgs) -> anyhow::Result<()> {
     // 3. Build event emitter
     let mut emitter = EventEmitter::new();
     if args.verbose >= 2 {
-        emitter.on_event(|event| {
-            eprint!("{}", format_event_detail(event));
+        emitter.on_event(move |event| {
+            eprint!("{}", format_event_detail(event, styles));
         });
     } else if args.verbose >= 1 {
-        emitter.on_event(|event| {
-            eprintln!("{}", format_event_summary(event));
+        emitter.on_event(move |event| {
+            eprintln!("{}", format_event_summary(event, styles));
         });
     }
 
@@ -72,7 +74,7 @@ pub async fn run_command(args: RunArgs) -> anyhow::Result<()> {
     let interviewer: Arc<dyn Interviewer> = if args.auto_approve {
         Arc::new(AutoApproveInterviewer)
     } else {
-        Arc::new(ConsoleInterviewer)
+        Arc::new(ConsoleInterviewer::new(styles))
     };
 
     // 5. Resolve backend, model, and provider
@@ -81,12 +83,18 @@ pub async fn run_command(args: RunArgs) -> anyhow::Result<()> {
     } else {
         match llm::client::Client::from_env().await {
             Ok(c) if c.provider_names().is_empty() => {
-                eprintln!("Warning: No LLM providers configured. Running in dry-run mode.");
+                eprintln!(
+                    "{yellow}Warning:{reset} No LLM providers configured. Running in dry-run mode.",
+                    yellow = styles.yellow, reset = styles.reset,
+                );
                 true
             }
             Ok(_) => false,
             Err(e) => {
-                eprintln!("Warning: Failed to initialize LLM client: {e}. Running in dry-run mode.");
+                eprintln!(
+                    "{yellow}Warning:{reset} Failed to initialize LLM client: {e}. Running in dry-run mode.",
+                    yellow = styles.yellow, reset = styles.reset,
+                );
                 true
             }
         }
@@ -144,15 +152,32 @@ pub async fn run_command(args: RunArgs) -> anyhow::Result<()> {
     };
 
     // 8. Print result
-    println!("\n=== Pipeline Result ===");
-    println!("Status: {}", outcome.status.to_string().to_uppercase());
+    eprintln!(
+        "\n{bold}=== Pipeline Result ==={reset}",
+        bold = styles.bold, reset = styles.reset,
+    );
+
+    let status_str = outcome.status.to_string().to_uppercase();
+    let status_color = match outcome.status {
+        StageStatus::Success | StageStatus::PartialSuccess => styles.green,
+        _ => styles.red,
+    };
+    eprintln!("Status: {status_color}{status_str}{reset}", reset = styles.reset);
+
     if let Some(notes) = &outcome.notes {
-        println!("Notes: {notes}");
+        eprintln!("Notes: {notes}");
     }
     if let Some(failure) = &outcome.failure_reason {
-        println!("Failure: {failure}");
+        eprintln!(
+            "{red}Failure: {failure}{reset}",
+            red = styles.red, reset = styles.reset,
+        );
     }
-    println!("Logs: {}", logs_dir.display());
+    eprintln!(
+        "{dim}Logs: {}{reset}",
+        logs_dir.display(),
+        dim = styles.dim, reset = styles.reset,
+    );
 
     // 9. Exit code
     match outcome.status {

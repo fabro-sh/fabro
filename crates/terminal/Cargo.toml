@@ -1,0 +1,12 @@
+[package]
+name = "terminal"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Shared ANSI terminal styling for CLI binaries"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

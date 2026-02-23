@@ -8,38 +8,7 @@ use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-
-/// Pre-resolved ANSI escape codes for styled terminal output.
-/// All fields are empty strings when color is disabled (non-TTY stderr).
-struct Styles {
-    bold: &'static str,
-    dim: &'static str,
-    cyan: &'static str,
-    red: &'static str,
-    reset: &'static str,
-}
-
-impl Styles {
-    fn new(use_color: bool) -> Self {
-        if use_color {
-            Self {
-                bold: "\x1b[1m",
-                dim: "\x1b[2m",
-                cyan: "\x1b[36m",
-                red: "\x1b[31m",
-                reset: "\x1b[0m",
-            }
-        } else {
-            Self {
-                bold: "",
-                dim: "",
-                cyan: "",
-                red: "",
-                reset: "",
-            }
-        }
-    }
-}
+use terminal::Styles;
 
 /// Minimal CLI for the agent agentic loop.
 #[derive(Parser)]
@@ -316,8 +285,7 @@ pub async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Resolve color support once, leak to get 'static lifetime for use across threads
-    let styles: &'static Styles =
-        Box::leak(Box::new(Styles::new(std::io::stderr().is_terminal())));
+    let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
 
     // Validate provider API key
     if !validate_api_key(&cli.provider) {
@@ -428,13 +396,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    static NO_COLOR: Styles = Styles {
-        bold: "",
-        dim: "",
-        cyan: "",
-        red: "",
-        reset: "",
-    };
+    static NO_COLOR: Styles = Styles::new(false);
 
     // tool_category tests
 

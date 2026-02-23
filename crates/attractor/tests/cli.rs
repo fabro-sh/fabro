@@ -14,7 +14,7 @@ fn validate_simple() {
         .args(["validate", "../../test/simple.dot"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Validation: OK"));
+        .stderr(predicate::str::contains("Validation: OK"));
 }
 
 #[test]
@@ -23,7 +23,7 @@ fn validate_branching() {
         .args(["validate", "../../test/branching.dot"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Validation: OK"));
+        .stderr(predicate::str::contains("Validation: OK"));
 }
 
 #[test]
@@ -32,7 +32,7 @@ fn validate_conditions() {
         .args(["validate", "../../test/conditions.dot"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Validation: OK"));
+        .stderr(predicate::str::contains("Validation: OK"));
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn validate_parallel() {
         .args(["validate", "../../test/parallel.dot"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Validation: OK"));
+        .stderr(predicate::str::contains("Validation: OK"));
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn validate_styled() {
         .args(["validate", "../../test/styled.dot"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Validation: OK"));
+        .stderr(predicate::str::contains("Validation: OK"));
 }
 
 #[test]

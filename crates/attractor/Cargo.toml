@@ -25,6 +25,7 @@ clap.workspace = true
 anyhow.workspace = true
 dotenvy.workspace = true
 agent = { path = "../agent" }
+terminal = { path = "../terminal" }
 llm = { path = "../llm" }
 thiserror.workspace = true
 serde.workspace = true

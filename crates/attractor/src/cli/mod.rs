@@ -6,6 +6,7 @@ use std::path::Path;
 
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
+use terminal::Styles;
 
 use crate::event::PipelineEvent;
 use crate::validation::{Diagnostic, Severity};
@@ -75,27 +76,38 @@ pub fn read_dot_file(path: &Path) -> anyhow::Result<String> {
         .map_err(|e| anyhow::anyhow!("Failed to read {}: {e}", path.display()))
 }
 
-/// Print diagnostics to stderr, grouped by severity.
-pub fn print_diagnostics(diagnostics: &[Diagnostic]) {
+/// Print diagnostics to stderr, colored by severity.
+pub fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles) {
     for d in diagnostics {
-        let prefix = match d.severity {
-            Severity::Error => "error",
-            Severity::Warning => "warning",
-            Severity::Info => "info",
-        };
         let location = match (&d.node_id, &d.edge) {
             (Some(node), _) => format!(" [node: {node}]"),
             (_, Some((from, to))) => format!(" [edge: {from} -> {to}]"),
             _ => String::new(),
         };
-        eprintln!("{prefix}{location}: {} ({})", d.message, d.rule);
+        match d.severity {
+            Severity::Error => eprintln!(
+                "{red}error{reset}{location}: {} ({dim}{}{reset})",
+                d.message, d.rule,
+                red = styles.red, dim = styles.dim, reset = styles.reset,
+            ),
+            Severity::Warning => eprintln!(
+                "{yellow}warning{reset}{location}: {} ({dim}{}{reset})",
+                d.message, d.rule,
+                yellow = styles.yellow, dim = styles.dim, reset = styles.reset,
+            ),
+            Severity::Info => eprintln!(
+                "{dim}info{location}: {} ({}){reset}",
+                d.message, d.rule,
+                dim = styles.dim, reset = styles.reset,
+            ),
+        }
     }
 }
 
-/// One-line summary of a pipeline event for `-v` output.
+/// One-line summary of a pipeline event for `-v` output (dimmed).
 #[must_use]
-pub fn format_event_summary(event: &PipelineEvent) -> String {
-    match event {
+pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
+    let body = match event {
         PipelineEvent::PipelineStarted { name, id } => {
             format!("[PIPELINE_STARTED] name={name} id={id}")
         }
@@ -179,30 +191,35 @@ pub fn format_event_summary(event: &PipelineEvent) -> String {
         PipelineEvent::CheckpointSaved { node_id } => {
             format!("[CHECKPOINT_SAVED] node={node_id}")
         }
-    }
+    };
+    format!("{dim}{body}{reset}", dim = styles.dim, reset = styles.reset)
 }
 
 /// Multi-line detail view of a pipeline event for `-vv` output.
+/// Box-drawing is dimmed; values are normal.
 #[must_use]
-pub fn format_event_detail(event: &PipelineEvent) -> String {
+pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
+    let d = styles.dim;
+    let r = styles.reset;
+
     match event {
         PipelineEvent::PipelineStarted { name, id } => {
             format!(
-                "── PIPELINE_STARTED ─────────────────────────\n  name: {name}\n  id:   {id}\n"
+                "{d}── PIPELINE_STARTED ─────────────────────────{r}\n  {d}name:{r} {name}\n  {d}id:{r}   {id}\n"
             )
         }
         PipelineEvent::PipelineCompleted {
             duration_ms,
             artifact_count,
         } => {
-            format!("── PIPELINE_COMPLETED ───────────────────────\n  duration_ms:    {duration_ms}\n  artifact_count: {artifact_count}\n")
+            format!("{d}── PIPELINE_COMPLETED ───────────────────────{r}\n  {d}duration_ms:{r}    {duration_ms}\n  {d}artifact_count:{r} {artifact_count}\n")
         }
         PipelineEvent::PipelineFailed { error, duration_ms } => {
-            format!("── PIPELINE_FAILED ──────────────────────────\n  error:       {error}\n  duration_ms: {duration_ms}\n")
+            format!("{d}── PIPELINE_FAILED ──────────────────────────{r}\n  {d}error:{r}       {error}\n  {d}duration_ms:{r} {duration_ms}\n")
         }
         PipelineEvent::StageStarted { name, index } => {
             format!(
-                "── STAGE_STARTED ────────────────────────────\n  name:  {name}\n  index: {index}\n"
+                "{d}── STAGE_STARTED ────────────────────────────{r}\n  {d}name:{r}  {name}\n  {d}index:{r} {index}\n"
             )
         }
         PipelineEvent::StageCompleted {
@@ -210,7 +227,7 @@ pub fn format_event_detail(event: &PipelineEvent) -> String {
             index,
             duration_ms,
         } => {
-            format!("── STAGE_COMPLETED ──────────────────────────\n  name:        {name}\n  index:       {index}\n  duration_ms: {duration_ms}\n")
+            format!("{d}── STAGE_COMPLETED ──────────────────────────{r}\n  {d}name:{r}        {name}\n  {d}index:{r}       {index}\n  {d}duration_ms:{r} {duration_ms}\n")
         }
         PipelineEvent::StageFailed {
             name,
@@ -218,7 +235,7 @@ pub fn format_event_detail(event: &PipelineEvent) -> String {
             error,
             will_retry,
         } => {
-            format!("── STAGE_FAILED ─────────────────────────────\n  name:       {name}\n  index:      {index}\n  error:      {error}\n  will_retry: {will_retry}\n")
+            format!("{d}── STAGE_FAILED ─────────────────────────────{r}\n  {d}name:{r}       {name}\n  {d}index:{r}      {index}\n  {d}error:{r}      {error}\n  {d}will_retry:{r} {will_retry}\n")
         }
         PipelineEvent::StageRetrying {
             name,
@@ -226,13 +243,13 @@ pub fn format_event_detail(event: &PipelineEvent) -> String {
             attempt,
             delay_ms,
         } => {
-            format!("── STAGE_RETRYING ───────────────────────────\n  name:     {name}\n  index:    {index}\n  attempt:  {attempt}\n  delay_ms: {delay_ms}\n")
+            format!("{d}── STAGE_RETRYING ───────────────────────────{r}\n  {d}name:{r}     {name}\n  {d}index:{r}    {index}\n  {d}attempt:{r}  {attempt}\n  {d}delay_ms:{r} {delay_ms}\n")
         }
         PipelineEvent::ParallelStarted { branch_count } => {
-            format!("── PARALLEL_STARTED ─────────────────────────\n  branch_count: {branch_count}\n")
+            format!("{d}── PARALLEL_STARTED ─────────────────────────{r}\n  {d}branch_count:{r} {branch_count}\n")
         }
         PipelineEvent::ParallelBranchStarted { branch, index } => {
-            format!("── PARALLEL_BRANCH_STARTED ──────────────────\n  branch: {branch}\n  index:  {index}\n")
+            format!("{d}── PARALLEL_BRANCH_STARTED ──────────────────{r}\n  {d}branch:{r} {branch}\n  {d}index:{r}  {index}\n")
         }
         PipelineEvent::ParallelBranchCompleted {
             branch,
@@ -240,35 +257,35 @@ pub fn format_event_detail(event: &PipelineEvent) -> String {
             duration_ms,
             success,
         } => {
-            format!("── PARALLEL_BRANCH_COMPLETED ────────────────\n  branch:      {branch}\n  index:       {index}\n  duration_ms: {duration_ms}\n  success:     {success}\n")
+            format!("{d}── PARALLEL_BRANCH_COMPLETED ────────────────{r}\n  {d}branch:{r}      {branch}\n  {d}index:{r}       {index}\n  {d}duration_ms:{r} {duration_ms}\n  {d}success:{r}     {success}\n")
         }
         PipelineEvent::ParallelCompleted {
             duration_ms,
             success_count,
             failure_count,
         } => {
-            format!("── PARALLEL_COMPLETED ───────────────────────\n  duration_ms:   {duration_ms}\n  success_count: {success_count}\n  failure_count: {failure_count}\n")
+            format!("{d}── PARALLEL_COMPLETED ───────────────────────{r}\n  {d}duration_ms:{r}   {duration_ms}\n  {d}success_count:{r} {success_count}\n  {d}failure_count:{r} {failure_count}\n")
         }
         PipelineEvent::InterviewStarted { question, stage } => {
-            format!("── INTERVIEW_STARTED ────────────────────────\n  stage:    {stage}\n  question: {question}\n")
+            format!("{d}── INTERVIEW_STARTED ────────────────────────{r}\n  {d}stage:{r}    {stage}\n  {d}question:{r} {question}\n")
         }
         PipelineEvent::InterviewCompleted {
             question,
             answer,
             duration_ms,
         } => {
-            format!("── INTERVIEW_COMPLETED ──────────────────────\n  question:    {question}\n  answer:      {answer}\n  duration_ms: {duration_ms}\n")
+            format!("{d}── INTERVIEW_COMPLETED ──────────────────────{r}\n  {d}question:{r}    {question}\n  {d}answer:{r}      {answer}\n  {d}duration_ms:{r} {duration_ms}\n")
         }
         PipelineEvent::InterviewTimeout {
             question,
             stage,
             duration_ms,
         } => {
-            format!("── INTERVIEW_TIMEOUT ────────────────────────\n  question:    {question}\n  stage:       {stage}\n  duration_ms: {duration_ms}\n")
+            format!("{d}── INTERVIEW_TIMEOUT ────────────────────────{r}\n  {d}question:{r}    {question}\n  {d}stage:{r}       {stage}\n  {d}duration_ms:{r} {duration_ms}\n")
         }
         PipelineEvent::CheckpointSaved { node_id } => {
             format!(
-                "── CHECKPOINT_SAVED ─────────────────────────\n  node_id: {node_id}\n"
+                "{d}── CHECKPOINT_SAVED ─────────────────────────{r}\n  {d}node_id:{r} {node_id}\n"
             )
         }
     }

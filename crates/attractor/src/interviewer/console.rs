@@ -1,10 +1,20 @@
 use async_trait::async_trait;
+use terminal::Styles;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use super::{Answer, AnswerValue, Interviewer, Question, QuestionType};
 
 /// Reads from stdin to collect answers. Displays formatted prompts per spec 6.4.
-pub struct ConsoleInterviewer;
+pub struct ConsoleInterviewer {
+    styles: &'static Styles,
+}
+
+impl ConsoleInterviewer {
+    #[must_use]
+    pub const fn new(styles: &'static Styles) -> Self {
+        Self { styles }
+    }
+}
 
 fn find_matching_option(
     response: &str,
@@ -48,12 +58,21 @@ async fn read_line(prompt: &str) -> std::io::Result<String> {
 #[async_trait]
 impl Interviewer for ConsoleInterviewer {
     async fn ask(&self, question: Question) -> Answer {
-        eprintln!("[?] {}", question.text);
+        let s = self.styles;
+        eprintln!(
+            "{bold}{cyan}?{reset} {}",
+            question.text,
+            bold = s.bold, cyan = s.cyan, reset = s.reset,
+        );
 
         match question.question_type {
             QuestionType::MultipleChoice => {
                 for (i, opt) in question.options.iter().enumerate() {
-                    eprintln!("  [{}] {} - {}", i + 1, opt.key, opt.label);
+                    eprintln!(
+                        "  {dim}[{reset}{bold}{}{reset}{dim}]{reset} {} - {}",
+                        i + 1, opt.key, opt.label,
+                        dim = s.dim, bold = s.bold, reset = s.reset,
+                    );
                 }
                 if question.allow_freeform {
                     eprintln!("  Or type a free-text response");
@@ -86,7 +105,11 @@ impl Interviewer for ConsoleInterviewer {
     }
 
     async fn inform(&self, message: &str, stage: &str) {
-        eprintln!("[{stage}] {message}");
+        let s = self.styles;
+        eprintln!(
+            "{dim}[{stage}]{reset} {message}",
+            dim = s.dim, reset = s.reset,
+        );
     }
 }
 
