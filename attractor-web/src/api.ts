@@ -54,7 +54,7 @@ export type PipelineEvent =
   | { PipelineCompleted: { duration_ms: number; artifact_count: number } }
   | { PipelineFailed: { error: string; duration_ms: number } }
   | { StageStarted: { name: string; index: number } }
-  | { StageCompleted: { name: string; index: number; duration_ms: number; status: string; preferred_label?: string; suggested_next_ids: string[] } }
+  | { StageCompleted: { name: string; index: number; duration_ms: number; status: string; preferred_label?: string; suggested_next_ids: string[]; usage?: { model: string; input_tokens: number; output_tokens: number } } }
   | { StageFailed: { name: string; index: number; error: string; will_retry: boolean } }
   | { StageRetrying: { name: string; index: number; attempt: number; delay_ms: number } }
   | { ParallelStarted: { branch_count: number } }

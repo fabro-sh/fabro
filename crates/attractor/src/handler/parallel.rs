@@ -297,6 +297,7 @@ impl Handler for ParallelHandler {
             } else {
                 None
             },
+            usage: None,
         };
 
         if is_fail {

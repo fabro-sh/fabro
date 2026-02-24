@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::bail;
@@ -18,7 +18,16 @@ use crate::pipeline::PipelineBuilder;
 use crate::validation::Severity;
 
 use super::backend::AgentBackend;
-use super::{format_duration_human, format_event_detail, format_event_summary, print_diagnostics, read_dot_file, RunArgs};
+use super::{compute_stage_cost, format_cost, format_duration_human, format_event_detail, format_event_summary, format_tokens_human, print_diagnostics, read_dot_file, RunArgs};
+
+/// Accumulates token usage and cost across all pipeline stages.
+#[derive(Default)]
+struct CostAccumulator {
+    total_input_tokens: i64,
+    total_output_tokens: i64,
+    total_cost: f64,
+    has_pricing: bool,
+}
 
 /// Execute a full pipeline run.
 ///
@@ -69,6 +78,24 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
 
     // 3. Build event emitter
     let mut emitter = EventEmitter::new();
+
+    // Cost accumulator — shared across all verbosity levels
+    let accumulator = Arc::new(Mutex::new(CostAccumulator::default()));
+    let acc_clone = Arc::clone(&accumulator);
+    emitter.on_event(move |event| {
+        if let crate::event::PipelineEvent::StageCompleted { usage, .. } = event {
+            if let Some(u) = usage {
+                let mut acc = acc_clone.lock().unwrap();
+                acc.total_input_tokens += u.input_tokens;
+                acc.total_output_tokens += u.output_tokens;
+                if let Some(cost) = compute_stage_cost(u) {
+                    acc.total_cost += cost;
+                    acc.has_pricing = true;
+                }
+            }
+        }
+    });
+
     if args.verbose >= 2 {
         emitter.on_event(move |event| {
             eprint!("{}", format_event_detail(event, styles));
@@ -80,12 +107,22 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     } else {
         emitter.on_event(move |event| {
             match event {
-                crate::event::PipelineEvent::StageCompleted { name, duration_ms, status, .. } => {
-                    eprintln!(
-                        "{dim}Stage \"{name}\" completed ({status}) in {duration}{reset}",
+                crate::event::PipelineEvent::StageCompleted { name, duration_ms, status, usage, .. } => {
+                    let mut line = format!(
+                        "{dim}Stage \"{name}\" completed ({status}) in {duration}",
                         duration = format_duration_human(*duration_ms),
-                        dim = styles.dim, reset = styles.reset,
+                        dim = styles.dim,
                     );
+                    if let Some(u) = usage {
+                        let total = u.input_tokens + u.output_tokens;
+                        let tokens_str = format_tokens_human(total);
+                        if let Some(cost) = compute_stage_cost(u) {
+                            line.push_str(&format!(" \u{2014} {tokens_str} tokens ({})", format_cost(cost)));
+                        } else {
+                            line.push_str(&format!(" \u{2014} {tokens_str} tokens"));
+                        }
+                    }
+                    eprintln!("{line}{reset}", reset = styles.reset);
                 }
                 crate::event::PipelineEvent::StageFailed { name, .. } => {
                     eprintln!(
@@ -197,6 +234,17 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     };
     eprintln!("Status: {status_color}{status_str}{reset}", reset = styles.reset);
     eprintln!("Duration: {}", format_duration_human(run_duration_ms));
+
+    let acc = accumulator.lock().unwrap();
+    let total_tokens = acc.total_input_tokens + acc.total_output_tokens;
+    if total_tokens > 0 {
+        if acc.has_pricing {
+            eprintln!("Cost: {} ({} tokens)", format_cost(acc.total_cost), format_tokens_human(total_tokens));
+        } else {
+            eprintln!("Tokens: {}", format_tokens_human(total_tokens));
+        }
+    }
+    drop(acc);
 
     if let Some(notes) = &outcome.notes {
         eprintln!("Notes: {notes}");

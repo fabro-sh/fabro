@@ -154,6 +154,7 @@ mod tests {
             context_updates: std::collections::HashMap::new(),
             notes: None,
             failure_reason: None,
+            usage: None,
         }
     }
 

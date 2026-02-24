@@ -1057,11 +1057,14 @@ impl CodergenBackend for MockCodergenBackend {
         _context: &Context,
         _thread_id: Option<&str>,
     ) -> Result<CodergenResult, AttractorError> {
-        Ok(CodergenResult::Text(format!(
-            "Response for {}: processed prompt '{}'",
-            node.id,
-            &prompt[..prompt.len().min(50)]
-        )))
+        Ok(CodergenResult::Text {
+            text: format!(
+                "Response for {}: processed prompt '{}'",
+                node.id,
+                &prompt[..prompt.len().min(50)]
+            ),
+            usage: None,
+        })
     }
 }
 
@@ -5098,7 +5101,7 @@ mod real_llm {
                 .complete(&request)
                 .await
                 .map_err(|e| AttractorError::Handler(e.to_string()))?;
-            Ok(CodergenResult::Text(response.text()))
+            Ok(CodergenResult::Text { text: response.text(), usage: None })
         }
     }
 

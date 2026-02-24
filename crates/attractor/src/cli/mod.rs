@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use terminal::Styles;
 
 use crate::event::PipelineEvent;
+use crate::outcome::StageUsage;
 use crate::validation::{Diagnostic, Severity};
 
 #[derive(Parser)]
@@ -187,6 +188,7 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             status,
             preferred_label,
             suggested_next_ids,
+            usage,
         } => {
             let mut s = format!("[STAGE_COMPLETED] name={name} index={index} duration={duration_ms}ms status={status}");
             if let Some(label) = preferred_label {
@@ -194,6 +196,15 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             }
             if !suggested_next_ids.is_empty() {
                 s.push_str(&format!(" suggested_next_ids={}", suggested_next_ids.join(",")));
+            }
+            if let Some(u) = usage {
+                let total = u.input_tokens + u.output_tokens;
+                let tokens_str = format_tokens_human(total);
+                if let Some(cost) = compute_stage_cost(u) {
+                    s.push_str(&format!(" tokens={tokens_str} cost={}", format_cost(cost)));
+                } else {
+                    s.push_str(&format!(" tokens={tokens_str}"));
+                }
             }
             s
         }
@@ -296,6 +307,7 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
             status,
             preferred_label,
             suggested_next_ids,
+            usage,
         } => {
             let mut s = format!("{d}── STAGE_COMPLETED ──────────────────────────{r}\n  {d}name:{r}        {name}\n  {d}index:{r}       {index}\n  {d}duration_ms:{r} {duration_ms}\n  {d}status:{r}      {status}\n");
             if let Some(label) = preferred_label {
@@ -303,6 +315,18 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
             }
             if !suggested_next_ids.is_empty() {
                 s.push_str(&format!("  {d}suggested_next_ids:{r} {}\n", suggested_next_ids.join(", ")));
+            }
+            if let Some(u) = usage {
+                let total = u.input_tokens + u.output_tokens;
+                s.push_str(&format!("  {d}model:{r}       {}\n", u.model));
+                s.push_str(&format!("  {d}tokens:{r}      {} ({} in / {} out)\n",
+                    format_tokens_human(total),
+                    format_tokens_human(u.input_tokens),
+                    format_tokens_human(u.output_tokens),
+                ));
+                if let Some(cost) = compute_stage_cost(u) {
+                    s.push_str(&format!("  {d}cost:{r}        {}\n", format_cost(cost)));
+                }
             }
             s
         }
@@ -365,5 +389,31 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
                 "{d}── CHECKPOINT_SAVED ─────────────────────────{r}\n  {d}node_id:{r} {node_id}\n"
             )
         }
+    }
+}
+
+/// Compute the dollar cost for a stage's token usage, if pricing is available.
+#[must_use]
+pub fn compute_stage_cost(usage: &StageUsage) -> Option<f64> {
+    let info = llm::catalog::get_model_info(&usage.model)?;
+    let input_rate = info.input_cost_per_million?;
+    let output_rate = info.output_cost_per_million?;
+    Some(usage.input_tokens as f64 * input_rate / 1_000_000.0
+        + usage.output_tokens as f64 * output_rate / 1_000_000.0)
+}
+
+/// Format a dollar cost for display (e.g. `"$1.23"`).
+#[must_use]
+pub fn format_cost(cost: f64) -> String {
+    format!("${cost:.2}")
+}
+
+/// Format a token count for human display (e.g. `"15.2k"` or `"850"`).
+#[must_use]
+pub fn format_tokens_human(tokens: i64) -> String {
+    if tokens >= 1000 {
+        format!("{:.1}k", tokens as f64 / 1000.0)
+    } else {
+        tokens.to_string()
     }
 }

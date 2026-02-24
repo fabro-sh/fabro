@@ -190,7 +190,7 @@ async fn llm_evaluate(
                 score: 0.0,
             })
         }
-        Ok(CodergenResult::Text(text)) => {
+        Ok(CodergenResult::Text { text, .. }) => {
             // Write response to logs
             tokio::fs::write(stage_dir.join("response.md"), &text).await?;
 
@@ -369,7 +369,7 @@ mod tests {
                 _thread_id: Option<&str>,
             ) -> Result<CodergenResult, AttractorError> {
                 // Return text that contains the ID "branch_b"
-                Ok(CodergenResult::Text("The best candidate is branch_b".to_string()))
+                Ok(CodergenResult::Text { text: "The best candidate is branch_b".to_string(), usage: None })
             }
         }
 

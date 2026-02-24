@@ -15,6 +15,7 @@ use crate::context::Context;
 use crate::error::AttractorError;
 use crate::graph::Node;
 use crate::handler::codergen::{CodergenBackend, CodergenResult};
+use crate::outcome::StageUsage;
 
 /// LLM backend that delegates to an `agent` Session per invocation.
 pub struct AgentBackend {
@@ -152,19 +153,30 @@ impl CodergenBackend for AgentBackend {
             AttractorError::Handler(format!("Agent session failed: {e}"))
         })?;
 
+        // Aggregate token usage from all assistant turns.
+        let (mut turn_count, mut tool_call_count, mut input_tokens, mut output_tokens) =
+            (0usize, 0usize, 0i64, 0i64);
+        for turn in session.history().turns() {
+            if let Turn::Assistant {
+                tool_calls, usage, ..
+            } = turn
+            {
+                turn_count += 1;
+                tool_call_count += tool_calls.len();
+                input_tokens += usage.input_tokens;
+                output_tokens += usage.output_tokens;
+            }
+        }
+
+        let stage_usage = StageUsage {
+            model: self.model.clone(),
+            input_tokens,
+            output_tokens,
+        };
+
         // Print session summary to stderr.
         if self.verbose >= 1 {
-            let (mut turn_count, mut tool_call_count, mut total_tokens) = (0usize, 0usize, 0i64);
-            for turn in session.history().turns() {
-                if let Turn::Assistant {
-                    tool_calls, usage, ..
-                } = turn
-                {
-                    turn_count += 1;
-                    tool_call_count += tool_calls.len();
-                    total_tokens += usage.total_tokens;
-                }
-            }
+            let total_tokens = input_tokens + output_tokens;
             let token_str = if total_tokens >= 1000 {
                 format!("{}k tokens", total_tokens / 1000)
             } else {
@@ -194,7 +206,7 @@ impl CodergenBackend for AgentBackend {
             })
             .unwrap_or_default();
 
-        Ok(CodergenResult::Text(response))
+        Ok(CodergenResult::Text { text: response, usage: Some(stage_usage) })
     }
 }
 

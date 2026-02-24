@@ -43,6 +43,14 @@ impl FromStr for StageStatus {
     }
 }
 
+/// Token usage from a single pipeline stage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageUsage {
+    pub model: String,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+}
+
 /// The result of executing a node handler.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Outcome {
@@ -57,6 +65,8 @@ pub struct Outcome {
     pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<StageUsage>,
 }
 
 impl Outcome {
@@ -69,6 +79,7 @@ impl Outcome {
             context_updates: HashMap::new(),
             notes: None,
             failure_reason: None,
+            usage: None,
         }
     }
 
@@ -80,6 +91,7 @@ impl Outcome {
             context_updates: HashMap::new(),
             notes: None,
             failure_reason: Some(reason.into()),
+            usage: None,
         }
     }
 
@@ -91,10 +103,11 @@ impl Outcome {
             context_updates: HashMap::new(),
             notes: None,
             failure_reason: Some(reason.into()),
+            usage: None,
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn skipped() -> Self {
         Self {
             status: StageStatus::Skipped,
@@ -103,6 +116,7 @@ impl Outcome {
             context_updates: HashMap::new(),
             notes: None,
             failure_reason: None,
+            usage: None,
         }
     }
 }

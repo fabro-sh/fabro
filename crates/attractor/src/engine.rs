@@ -863,6 +863,7 @@ impl PipelineEngine {
                     status: outcome.status.to_string(),
                     preferred_label: outcome.preferred_label.clone(),
                     suggested_next_ids: outcome.suggested_next_ids.clone(),
+                    usage: outcome.usage.clone(),
                 });
                 self.inform(
                     &format!("Stage completed: {}", node.label()),

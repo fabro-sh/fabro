@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::outcome::StageUsage;
+
 /// Events emitted during pipeline execution for observability.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PipelineEvent {
@@ -26,6 +28,7 @@ pub enum PipelineEvent {
         status: String,
         preferred_label: Option<String>,
         suggested_next_ids: Vec<String>,
+        usage: Option<StageUsage>,
     },
     StageFailed {
         name: String,
