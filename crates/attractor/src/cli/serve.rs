@@ -6,7 +6,7 @@ use tokio::net::TcpListener;
 use crate::cli::backend::AgentBackend;
 use crate::handler::default_registry;
 use crate::interviewer::Interviewer;
-use crate::server::{build_router, create_app_state};
+use crate::server::{build_router, create_app_state_with_options};
 
 use super::ServeArgs;
 
@@ -72,7 +72,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         })
     };
 
-    let state = create_app_state(factory);
+    let state = create_app_state_with_options(factory, dry_run_mode);
     let router = build_router(state);
 
     let addr = format!("{}:{}", args.host, args.port);

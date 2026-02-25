@@ -178,7 +178,7 @@ async fn end_to_end_linear_pipeline() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -293,7 +293,7 @@ async fn end_to_end_branching_pipeline() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -398,7 +398,7 @@ async fn end_to_end_human_gate_pipeline() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -497,7 +497,7 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let result = engine.run(&graph, &config).await;
@@ -605,7 +605,7 @@ async fn goal_gate_routes_to_retry_target_when_present() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine
@@ -913,7 +913,7 @@ async fn retry_on_failure_then_succeed() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine
@@ -975,7 +975,7 @@ async fn pipeline_with_many_nodes() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine
@@ -1263,7 +1263,7 @@ async fn smoke_test_with_mock_codergen_backend() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine
@@ -1354,7 +1354,7 @@ async fn end_to_end_parallel_fan_out_fan_in() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine
@@ -1457,7 +1457,7 @@ async fn resume_from_checkpoint_completes_pipeline() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine
@@ -1545,7 +1545,7 @@ async fn resume_from_checkpoint_preserves_goal_gate_outcomes() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     // This should succeed because goal gate for gated_work is satisfied
@@ -1575,7 +1575,7 @@ async fn graph_goal_in_context() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -1601,7 +1601,7 @@ async fn event_streaming_lifecycle() {
     let engine = PipelineEngine::new(make_linear_registry(), emitter);
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -1667,7 +1667,7 @@ async fn context_flow_between_stages() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -1706,7 +1706,7 @@ async fn tool_handler_e2e() {
     let engine = PipelineEngine::new(make_full_registry(interviewer), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1763,7 +1763,7 @@ async fn auto_approve_interviewer_e2e() {
     let engine = PipelineEngine::new(make_full_registry(interviewer), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1786,7 +1786,7 @@ async fn codergen_without_backend_simulated() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -1883,7 +1883,7 @@ async fn branching_loop_back_on_failure() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1963,7 +1963,7 @@ async fn human_gate_loops_back() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2011,7 +2011,7 @@ async fn scenario_ship_a_feature() {
     let engine = PipelineEngine::new(make_full_registry(interviewer), emitter);
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2087,7 +2087,7 @@ async fn scenario_parallel_expert_review() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2157,7 +2157,7 @@ async fn scenario_node_retries_on_retry_status() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2211,7 +2211,7 @@ async fn scenario_loop_restart_resets_context() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2269,7 +2269,7 @@ async fn scenario_bug_triage_router() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2315,7 +2315,7 @@ async fn scenario_crash_recovery() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine
         .run_from_checkpoint(&graph, &config, &checkpoint)
@@ -2393,7 +2393,7 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
 
@@ -2439,7 +2439,7 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
 
@@ -2565,7 +2565,7 @@ async fn conditional_branching_success_fail_paths() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2609,7 +2609,7 @@ async fn edge_selection_condition_match_wins_over_weight() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -2648,7 +2648,7 @@ async fn edge_selection_weight_breaks_ties() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -2679,7 +2679,7 @@ async fn edge_selection_lexical_tiebreak() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -2727,7 +2727,7 @@ async fn context_updates_visible_across_nodes() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -2757,7 +2757,7 @@ async fn stylesheet_applies_model_override() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2803,7 +2803,7 @@ async fn custom_handler_registration_and_execution() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -2860,7 +2860,7 @@ async fn integration_smoke_plan_implement_review_done() {
     let engine = PipelineEngine::new(make_full_registry(interviewer), emitter);
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -3345,7 +3345,7 @@ async fn sub_pipeline_e2e_through_engine() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine
@@ -3487,7 +3487,7 @@ async fn manager_loop_with_child_observer_e2e() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine
@@ -3606,7 +3606,7 @@ async fn graph_merge_e2e_through_engine() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine
@@ -3746,7 +3746,7 @@ async fn fidelity_default_is_compact() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -3785,7 +3785,7 @@ async fn fidelity_graph_default_applied() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -3823,7 +3823,7 @@ async fn fidelity_node_overrides_graph_default() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -3867,7 +3867,7 @@ async fn fidelity_edge_overrides_node_and_graph() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -3901,7 +3901,7 @@ async fn fidelity_full_produces_empty_preamble() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -3942,7 +3942,7 @@ async fn fidelity_truncate_preamble_minimal() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -3999,7 +3999,7 @@ async fn fidelity_summary_low_mode() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4051,7 +4051,7 @@ async fn fidelity_summary_medium_mode() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4103,7 +4103,7 @@ async fn fidelity_summary_high_mode() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4148,7 +4148,7 @@ async fn fidelity_full_sets_thread_id_in_context() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4204,7 +4204,7 @@ async fn fidelity_full_nodes_share_thread_id() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4267,7 +4267,7 @@ async fn fidelity_resume_degrades_full_to_summary_high() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine
         .run_from_checkpoint(&graph, &config, &checkpoint)
@@ -4346,7 +4346,7 @@ async fn fidelity_resume_degrade_only_affects_first_hop() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine
         .run_from_checkpoint(&graph, &config, &checkpoint)
@@ -4412,7 +4412,7 @@ async fn fidelity_resume_no_degrade_when_not_full() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine
         .run_from_checkpoint(&graph, &config, &checkpoint)
@@ -4444,7 +4444,7 @@ async fn fidelity_stored_in_checkpoint_context() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4515,7 +4515,7 @@ async fn fidelity_precedence_multi_node_pipeline() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4568,7 +4568,7 @@ async fn fidelity_compact_preamble_includes_completed_stages_and_context() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4614,7 +4614,7 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
     registry_low.register("exit", Box::new(ExitHandler));
     registry_low.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures_low.clone() }));
     let engine_low = PipelineEngine::new(registry_low, EventEmitter::new());
-    let config_low = RunConfig { logs_root: dir_low.path().to_path_buf(), cancel_token: None };
+    let config_low = RunConfig { logs_root: dir_low.path().to_path_buf(), cancel_token: None, dry_run: false };
     engine_low.run(&graph_low, &config_low).await.expect("run low");
 
     {
@@ -4648,7 +4648,7 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
     registry_med.register("exit", Box::new(ExitHandler));
     registry_med.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures_med.clone() }));
     let engine_med = PipelineEngine::new(registry_med, EventEmitter::new());
-    let config_med = RunConfig { logs_root: dir_med.path().to_path_buf(), cancel_token: None };
+    let config_med = RunConfig { logs_root: dir_med.path().to_path_buf(), cancel_token: None, dry_run: false };
     engine_med.run(&graph_med, &config_med).await.expect("run med");
 
     let preambles_med = captures_med.preambles.lock().unwrap();
@@ -4693,7 +4693,7 @@ async fn fidelity_thread_id_fallback_to_previous_node_in_pipeline() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4732,7 +4732,7 @@ async fn fidelity_thread_id_from_node_class_in_pipeline() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4774,7 +4774,7 @@ async fn fidelity_edge_thread_id_override_in_pipeline() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4817,7 +4817,7 @@ async fn fidelity_full_without_explicit_thread_id_uses_previous_node() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4867,7 +4867,7 @@ async fn fidelity_from_parsed_dot_pipeline() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4905,7 +4905,7 @@ async fn fidelity_checkpoint_roundtrip_preserves_fidelity() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4960,7 +4960,7 @@ async fn fidelity_node_thread_id_overrides_edge_thread_id_in_pipeline() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -5029,7 +5029,7 @@ async fn fidelity_resume_preserves_context_values_across_checkpoint() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
     engine
         .run_from_checkpoint(&graph, &config, &checkpoint)
@@ -5211,7 +5211,7 @@ mod real_llm {
         let engine = PipelineEngine::new(registry, EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
-            cancel_token: None,
+            cancel_token: None, dry_run: false,
         };
 
         let outcome = tokio::time::timeout(
@@ -5315,7 +5315,7 @@ mod real_llm {
         let engine = PipelineEngine::new(registry, EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
-            cancel_token: None,
+            cancel_token: None, dry_run: false,
         };
 
         let outcome = tokio::time::timeout(
@@ -5449,7 +5449,7 @@ mod real_llm {
         let engine = PipelineEngine::new(registry, EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
-            cancel_token: None,
+            cancel_token: None, dry_run: false,
         };
 
         let outcome = tokio::time::timeout(
@@ -5543,7 +5543,7 @@ async fn human_gate_freeform_only_routes_text() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -5658,7 +5658,7 @@ async fn human_gate_freeform_with_fixed_choice_match() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -5758,7 +5758,7 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -5871,7 +5871,7 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -5960,7 +5960,7 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -6198,7 +6198,7 @@ async fn tool_hooks_pre_success_allows_pipeline_to_proceed() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -6233,7 +6233,7 @@ async fn tool_hooks_pre_failure_skips_tool_call() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     engine.run(&graph, &config).await.expect("run should complete");
@@ -6271,7 +6271,7 @@ async fn tool_hooks_post_success_does_not_affect_outcome() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -6301,7 +6301,7 @@ async fn tool_hooks_post_failure_does_not_block_pipeline() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -6333,7 +6333,7 @@ async fn tool_hooks_graph_level_applies_to_all_nodes() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -6368,7 +6368,7 @@ async fn tool_hooks_node_level_overrides_graph_level() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let _outcome = engine.run(&graph, &config).await.expect("run should complete");
@@ -6413,7 +6413,7 @@ async fn tool_hooks_pre_receives_node_id_env_var() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     engine.run(&graph, &config).await.expect("run should succeed");
@@ -6506,7 +6506,7 @@ async fn attractor_e2e_with_real_llm() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: logs_dir.path().to_path_buf(),
-        cancel_token: None,
+        cancel_token: None, dry_run: false,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");

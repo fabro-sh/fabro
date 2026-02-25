@@ -444,6 +444,7 @@ fn is_terminal(node: &Node) -> bool {
 pub struct RunConfig {
     pub logs_root: PathBuf,
     pub cancel_token: Option<Arc<AtomicBool>>,
+    pub dry_run: bool,
 }
 
 /// The pipeline execution engine.
@@ -630,7 +631,8 @@ impl PipelineEngine {
     /// Returns an error if no start node is found, a node is missing, or a goal gate fails
     /// without a retry target.
     pub async fn run(&self, graph: &Graph, config: &RunConfig) -> Result<Outcome> {
-        self.run_internal(graph, config, None, None).await
+        self.run_internal(graph, config, None, None, HashMap::new())
+            .await
     }
 
     /// Resume from a checkpoint. Restores context, completed nodes, and continues
@@ -645,7 +647,8 @@ impl PipelineEngine {
         config: &RunConfig,
         checkpoint: &Checkpoint,
     ) -> Result<Outcome> {
-        self.run_internal(graph, config, Some(checkpoint), None).await
+        self.run_internal(graph, config, Some(checkpoint), None, HashMap::new())
+            .await
     }
 
     /// Internal run implementation supporting optional checkpoint resume and `start_at` override.
@@ -655,6 +658,7 @@ impl PipelineEngine {
         config: &RunConfig,
         resume_checkpoint: Option<&Checkpoint>,
         start_at: Option<&str>,
+        mut node_visits: HashMap<String, usize>,
     ) -> Result<Outcome> {
         let run_start = Instant::now();
         let run_id = uuid::Uuid::new_v4().to_string();
@@ -667,6 +671,17 @@ impl PipelineEngine {
 
         // Write manifest.json (spec 5.6)
         write_manifest(&config.logs_root, graph);
+
+        // Compute effective max-node-visits limit:
+        // graph attr > 0 → use it; else dry_run → 10; else 0 (disabled)
+        let graph_limit = graph.max_node_visits();
+        let max_node_visits: usize = if graph_limit > 0 {
+            usize::try_from(graph_limit).unwrap_or(usize::MAX)
+        } else if config.dry_run {
+            10
+        } else {
+            0
+        };
 
         // Gap #4: Initialize from checkpoint, start_at, or fresh
         let context;
@@ -741,6 +756,18 @@ impl PipelineEngine {
             let node = graph.nodes.get(&current_node_id).ok_or_else(|| {
                 AttractorError::Engine(format!("node not found: {current_node_id}"))
             })?;
+
+            // Check per-node visit limit
+            if max_node_visits > 0 {
+                let count = node_visits.entry(current_node_id.clone()).or_insert(0);
+                *count += 1;
+                if *count > max_node_visits {
+                    return Err(AttractorError::Engine(format!(
+                        "node \"{}\" exceeded max visit limit of {max_node_visits}",
+                        current_node_id
+                    )));
+                }
+            }
 
             // Step 1: Check for terminal node
             if is_terminal(node) {
@@ -965,6 +992,7 @@ impl PipelineEngine {
                             config,
                             None,
                             Some(&edge.to),
+                            node_visits,
                         )).await;
                     }
                     current_node_id.clone_from(&edge.to);
@@ -1641,6 +1669,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
+            dry_run: false,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -1654,6 +1683,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
+            dry_run: false,
         };
         engine.run(&g, &config).await.unwrap();
         let checkpoint_path = dir.path().join("checkpoint.json");
@@ -1676,6 +1706,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
+            dry_run: false,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -1693,6 +1724,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
+            dry_run: false,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -1706,6 +1738,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
+            dry_run: false,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -1732,6 +1765,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
+            dry_run: false,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -1784,6 +1818,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
+            dry_run: false,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -1854,6 +1889,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
+            dry_run: false,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -1876,6 +1912,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
+            dry_run: false,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -1895,6 +1932,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
+            dry_run: false,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2039,7 +2077,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
         let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
-        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None };
+        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None, dry_run: false };
         engine.run(&g, &config).await.unwrap();
 
         let manifest_path = dir.path().join("manifest.json");
@@ -2061,7 +2099,7 @@ mod tests {
         g.edges.push(Edge::new("start", "exit"));
 
         let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
-        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None };
+        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None, dry_run: false };
         engine.run(&g, &config).await.unwrap();
 
         let manifest_path = dir.path().join("manifest.json");
@@ -2097,7 +2135,7 @@ mod tests {
         let mut registry = make_registry();
         registry.register("always_fail", Box::new(AlwaysFailHandler));
         let engine = PipelineEngine::new(registry, EventEmitter::new());
-        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None };
+        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None, dry_run: false };
         let outcome = engine.run(&g, &config).await.unwrap();
 
         assert_eq!(outcome.status, StageStatus::Success);
@@ -2133,7 +2171,7 @@ mod tests {
         let mut registry = make_registry();
         registry.register("always_fail", Box::new(AlwaysFailHandler));
         let engine = PipelineEngine::new(registry, EventEmitter::new());
-        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None };
+        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None, dry_run: false };
         let result = engine.run(&g, &config).await;
 
         assert!(result.is_ok());
@@ -2172,7 +2210,7 @@ mod tests {
         let mut registry = make_registry();
         registry.register("slow", Box::new(SlowHandler { sleep_ms: 500 }));
         let engine = PipelineEngine::new(registry, EventEmitter::new());
-        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None };
+        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None, dry_run: false };
         let result = engine.run(&g, &config).await;
         assert!(result.is_ok());
 
@@ -2206,7 +2244,7 @@ mod tests {
         let mut registry = make_registry();
         registry.register("slow", Box::new(SlowHandler { sleep_ms: 10 }));
         let engine = PipelineEngine::new(registry, EventEmitter::new());
-        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None };
+        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None, dry_run: false };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
     }
@@ -2237,7 +2275,7 @@ mod tests {
         let mut registry = make_registry();
         registry.register("slow", Box::new(SlowHandler { sleep_ms: 500 }));
         let engine = PipelineEngine::new(registry, EventEmitter::new());
-        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None };
+        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None, dry_run: false };
         let outcome = engine.run(&g, &config).await.unwrap();
 
         assert_eq!(outcome.status, StageStatus::Success);
@@ -2289,6 +2327,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
+            dry_run: false,
         };
         engine.run(&g, &config).await.unwrap();
         // Give spawned inform tasks time to complete
@@ -2314,6 +2353,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
+            dry_run: false,
         };
         engine.run(&g, &config).await.unwrap();
         // Give spawned inform tasks time to complete
@@ -2338,6 +2378,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
+            dry_run: false,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -2354,6 +2395,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: Some(cancel_token),
+            dry_run: false,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -2369,6 +2411,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: Some(cancel_token),
+            dry_run: false,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -2396,6 +2439,7 @@ mod tests {
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: Some(cancel_token),
+            dry_run: false,
         };
 
         // Set cancel after a short delay (while the slow handler is running)
@@ -2409,5 +2453,114 @@ mod tests {
         // after the slow handler completes
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), AttractorError::Cancelled));
+    }
+
+    // --- max_node_visits tests ---
+
+    /// Build a graph with a cycle: start -> work -> work (unconditional self-loop)
+    fn cyclic_graph() -> Graph {
+        let mut g = Graph::new("cyclic");
+        g.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("loop".to_string()),
+        );
+        // Disable default retries to keep test fast
+        g.attrs.insert(
+            "default_max_retry".to_string(),
+            AttrValue::Integer(0),
+        );
+
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        g.nodes.insert("start".to_string(), start);
+
+        let work = Node::new("work");
+        g.nodes.insert("work".to_string(), work);
+
+        let mut exit = Node::new("exit");
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
+        g.nodes.insert("exit".to_string(), exit);
+
+        // start -> work -> work (self-loop), work -> exit (conditional, never matches)
+        g.edges.push(Edge::new("start", "work"));
+        let mut cond_edge = Edge::new("work", "exit");
+        cond_edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("outcome=never_matches".to_string()),
+        );
+        g.edges.push(cond_edge);
+        g.edges.push(Edge::new("work", "work"));
+        g
+    }
+
+    #[tokio::test]
+    async fn max_node_visits_errors_on_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut g = cyclic_graph();
+        g.attrs.insert(
+            "max_node_visits".to_string(),
+            AttrValue::Integer(3),
+        );
+        let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+        };
+        let result = engine.run(&g, &config).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("exceeded max visit limit"),
+            "expected visit limit error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn dry_run_applies_default_visit_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = cyclic_graph();
+        let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: true,
+        };
+        let result = engine.run(&g, &config).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("exceeded max visit limit"),
+            "expected visit limit error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn graph_attr_overrides_dry_run_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut g = cyclic_graph();
+        g.attrs.insert(
+            "max_node_visits".to_string(),
+            AttrValue::Integer(2),
+        );
+        let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: true,
+        };
+        let result = engine.run(&g, &config).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("exceeded max visit limit of 2"),
+            "expected limit of 2, got: {err}"
+        );
     }
 }

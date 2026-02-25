@@ -65,6 +65,7 @@ struct ManagedPipeline {
 pub struct AppState {
     pipelines: Mutex<HashMap<String, ManagedPipeline>>,
     registry_factory: Box<dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync>,
+    dry_run: bool,
 }
 
 /// Request body for POST /pipelines.
@@ -126,9 +127,18 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 pub fn create_app_state(
     registry_factory: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
+    create_app_state_with_options(registry_factory, false)
+}
+
+/// Create an `AppState` with the given registry factory and dry-run flag.
+pub fn create_app_state_with_options(
+    registry_factory: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
+    dry_run: bool,
+) -> Arc<AppState> {
     Arc::new(AppState {
         pipelines: Mutex::new(HashMap::new()),
         registry_factory: Box::new(registry_factory),
+        dry_run,
     })
 }
 
@@ -204,7 +214,7 @@ async fn start_pipeline(
     tokio::spawn(async move {
         let logs_root = std::env::temp_dir().join(format!("attractor-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&logs_root).expect("failed to create logs directory");
-        let config = RunConfig { logs_root, cancel_token: Some(cancel_token) };
+        let config = RunConfig { logs_root, cancel_token: Some(cancel_token), dry_run: state_clone.dry_run };
 
         let result = tokio::select! {
             result = engine.run(&graph, &config) => result,

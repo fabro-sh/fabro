@@ -253,6 +253,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     let config = RunConfig {
         logs_root: logs_dir.clone(),
         cancel_token: None,
+        dry_run: dry_run_mode,
     };
 
     let run_start = Instant::now();

@@ -383,6 +383,15 @@ impl Graph {
             .get("default_thread")
             .and_then(AttrValue::as_str)
     }
+
+    /// Graph-level `max_node_visits` (default 0 = disabled).
+    pub fn max_node_visits(&self) -> u64 {
+        self.attrs
+            .get("max_node_visits")
+            .and_then(AttrValue::as_i64)
+            .and_then(|n| u64::try_from(n).ok())
+            .unwrap_or(0)
+    }
 }
 
 #[cfg(test)]
@@ -629,5 +638,19 @@ mod tests {
     fn graph_no_start_node() {
         let g = Graph::new("empty");
         assert!(g.find_start_node().is_none());
+    }
+
+    #[test]
+    fn graph_max_node_visits_default() {
+        let g = Graph::new("empty");
+        assert_eq!(g.max_node_visits(), 0);
+    }
+
+    #[test]
+    fn graph_max_node_visits_set() {
+        let mut g = Graph::new("test");
+        g.attrs
+            .insert("max_node_visits".to_string(), AttrValue::Integer(10));
+        assert_eq!(g.max_node_visits(), 10);
     }
 }
