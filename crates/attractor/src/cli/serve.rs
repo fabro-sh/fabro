@@ -47,6 +47,12 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         _ => "claude-opus-4-6".to_string(),
     });
 
+    // Resolve model alias through catalog
+    let (model, provider) = match llm::catalog::get_model_info(&model) {
+        Some(info) => (info.id, provider.or(Some(info.provider))),
+        None => (model, provider),
+    };
+
     // Build registry factory
     let factory = move |interviewer: Arc<dyn Interviewer>| {
         let model = model.clone();

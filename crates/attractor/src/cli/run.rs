@@ -227,6 +227,12 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             _ => "claude-opus-4-6".to_string(),
         });
 
+    // Resolve model alias through catalog
+    let (model, provider) = match llm::catalog::get_model_info(&model) {
+        Some(info) => (info.id, provider.or(Some(info.provider))),
+        None => (model, provider),
+    };
+
     // 6. Build engine
     let registry = default_registry(interviewer.clone(), || {
         if dry_run_mode {
