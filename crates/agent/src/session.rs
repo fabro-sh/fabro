@@ -460,8 +460,18 @@ impl Session {
         let summary_request = Request {
             model: self.provider_profile.model().to_string(),
             messages: vec![
-                Message::system("You are a conversation summarizer. Produce a concise summary of the conversation below. Preserve key decisions, findings, file paths, and action items. Be thorough but brief.".to_string()),
-                Message::user(rendered),
+                Message::system("You are summarizing a coding assistant conversation to provide continuity. A new context \
+window will continue this work with only your summary and the most recent messages. Write \
+a summary covering:\n\n\
+1. Task & Goal: What the user asked for and any constraints or preferences stated.\n\
+2. Completed Work: What was accomplished, with file paths and key decisions.\n\
+3. Current State: What is in progress or partially done right now.\n\
+4. Failed Approaches: What was tried and didn't work, and why.\n\
+5. Open Issues: Bugs, edge cases, or TODOs that remain.\n\
+6. Next Steps: What should happen next to make progress.\n\n\
+Be specific — include file paths, function names, and error messages. Omit pleasantries \
+and conversational filler.".to_string()),
+                Message::user(format!("Here is the conversation to summarize:\n\n{rendered}")),
             ],
             provider: Some(self.provider_profile.id().to_string()),
             tools: None,
