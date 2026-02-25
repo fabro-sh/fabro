@@ -1,5 +1,6 @@
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
@@ -91,6 +92,14 @@ impl CodergenBackend for AgentBackend {
 
         let mut session = Session::new(client, profile, exec_env, config);
 
+        // File change tracking: shared between spawned task and main fn.
+        let pending_tool_calls: Arc<Mutex<HashMap<String, String>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let files_touched: Arc<Mutex<HashSet<String>>> =
+            Arc::new(Mutex::new(HashSet::new()));
+        let pending_clone = Arc::clone(&pending_tool_calls);
+        let files_clone = Arc::clone(&files_touched);
+
         // Subscribe to session events: forward to pipeline emitter and optionally print to stderr.
         let verbose = self.verbose;
         let node_id = node.id.clone();
@@ -105,16 +114,14 @@ impl CodergenBackend for AgentBackend {
                     AgentEvent::AssistantMessage {
                         text,
                         model,
-                        input_tokens,
-                        output_tokens,
+                        usage,
                         tool_call_count,
                     } => {
                         pipeline_emitter.emit(&PipelineEvent::AssistantMessage {
                             stage: node_id.clone(),
                             text: text.clone(),
                             model: model.clone(),
-                            input_tokens: *input_tokens,
-                            output_tokens: *output_tokens,
+                            usage: usage.clone(),
                             tool_call_count: *tool_call_count,
                         });
                     }
@@ -123,6 +130,15 @@ impl CodergenBackend for AgentBackend {
                         tool_call_id,
                         arguments,
                     } => {
+                        // Track file paths from write_file/edit_file tool calls
+                        if tool_name == "write_file" || tool_name == "edit_file" {
+                            if let Some(path) = arguments.get("file_path").and_then(|v| v.as_str()) {
+                                pending_clone.lock().unwrap().insert(
+                                    tool_call_id.clone(),
+                                    path.to_string(),
+                                );
+                            }
+                        }
                         pipeline_emitter.emit(&PipelineEvent::ToolCallStarted {
                             stage: node_id.clone(),
                             tool_name: tool_name.clone(),
@@ -136,6 +152,14 @@ impl CodergenBackend for AgentBackend {
                         output,
                         is_error,
                     } => {
+                        // On successful completion, move file from pending to touched
+                        if !*is_error {
+                            if let Some(path) = pending_clone.lock().unwrap().remove(tool_call_id) {
+                                files_clone.lock().unwrap().insert(path);
+                            }
+                        } else {
+                            pending_clone.lock().unwrap().remove(tool_call_id);
+                        }
                         pipeline_emitter.emit(&PipelineEvent::ToolCallCompleted {
                             stage: node_id.clone(),
                             tool_name: tool_name.clone(),
@@ -258,6 +282,18 @@ impl CodergenBackend for AgentBackend {
         // Aggregate token usage from all assistant turns.
         let (mut turn_count, mut tool_call_count, mut input_tokens, mut output_tokens) =
             (0usize, 0usize, 0i64, 0i64);
+        let (mut cache_read_tokens, mut cache_write_tokens, mut reasoning_tokens): (
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+        ) = (None, None, None);
+
+        fn add_optional(acc: &mut Option<i64>, val: Option<i64>) {
+            if let Some(v) = val {
+                *acc = Some(acc.unwrap_or(0) + v);
+            }
+        }
+
         for turn in session.history().turns() {
             if let Turn::Assistant {
                 tool_calls, usage, ..
@@ -267,6 +303,9 @@ impl CodergenBackend for AgentBackend {
                 tool_call_count += tool_calls.len();
                 input_tokens += usage.input_tokens;
                 output_tokens += usage.output_tokens;
+                add_optional(&mut cache_read_tokens, usage.cache_read_tokens);
+                add_optional(&mut cache_write_tokens, usage.cache_write_tokens);
+                add_optional(&mut reasoning_tokens, usage.reasoning_tokens);
             }
         }
 
@@ -274,6 +313,9 @@ impl CodergenBackend for AgentBackend {
             model: self.model.clone(),
             input_tokens,
             output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            reasoning_tokens,
         };
 
         // Print session summary to stderr.
@@ -308,7 +350,15 @@ impl CodergenBackend for AgentBackend {
             })
             .unwrap_or_default();
 
-        Ok(CodergenResult::Text { text: response, usage: Some(stage_usage) })
+        // Collect files_touched from the shared set.
+        let files_touched: Vec<String> = {
+            let set = files_touched.lock().unwrap();
+            let mut v: Vec<String> = set.iter().cloned().collect();
+            v.sort();
+            v
+        };
+
+        Ok(CodergenResult::Text { text: response, usage: Some(stage_usage), files_touched })
     }
 }
 

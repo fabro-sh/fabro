@@ -195,6 +195,7 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             usage,
             failure_reason,
             notes,
+            files_touched,
         } => {
             let mut s = format!("[STAGE_COMPLETED] name={name} index={index} duration={duration_ms}ms status={status}");
             if let Some(label) = preferred_label {
@@ -217,6 +218,9 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             }
             if let Some(n) = notes {
                 s.push_str(&format!(" notes=\"{n}\""));
+            }
+            if !files_touched.is_empty() {
+                s.push_str(&format!(" files_touched={}", files_touched.len()));
             }
             s
         }
@@ -293,14 +297,20 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
         PipelineEvent::AssistantMessage {
             stage,
             model,
-            input_tokens,
-            output_tokens,
+            usage,
             tool_call_count,
             ..
         } => {
-            let total = input_tokens + output_tokens;
+            let total = usage.input_tokens + usage.output_tokens;
             let tokens_str = format_tokens_human(total);
-            format!("[ASSISTANT_MESSAGE] stage={stage} model={model} tokens={tokens_str} tool_calls={tool_call_count}")
+            let mut s = format!("[ASSISTANT_MESSAGE] stage={stage} model={model} tokens={tokens_str} tool_calls={tool_call_count}");
+            if let Some(cache_read) = usage.cache_read_tokens {
+                s.push_str(&format!(" cache_read={}", format_tokens_human(cache_read)));
+            }
+            if let Some(reasoning) = usage.reasoning_tokens {
+                s.push_str(&format!(" reasoning={}", format_tokens_human(reasoning)));
+            }
+            s
         }
         PipelineEvent::ToolCallStarted {
             stage,
@@ -393,6 +403,7 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
             usage,
             failure_reason,
             notes,
+            files_touched,
         } => {
             let mut s = format!("{d}── STAGE_COMPLETED ──────────────────────────{r}\n  {d}name:{r}        {name}\n  {d}index:{r}       {index}\n  {d}duration_ms:{r} {duration_ms}\n  {d}status:{r}      {status}\n");
             if let Some(label) = preferred_label {
@@ -409,9 +420,21 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
                     format_tokens_human(u.input_tokens),
                     format_tokens_human(u.output_tokens),
                 ));
+                if let Some(cache_read) = u.cache_read_tokens {
+                    s.push_str(&format!("  {d}cache_read:{r}  {}\n", format_tokens_human(cache_read)));
+                }
+                if let Some(cache_write) = u.cache_write_tokens {
+                    s.push_str(&format!("  {d}cache_write:{r} {}\n", format_tokens_human(cache_write)));
+                }
+                if let Some(reasoning) = u.reasoning_tokens {
+                    s.push_str(&format!("  {d}reasoning:{r}   {}\n", format_tokens_human(reasoning)));
+                }
                 if let Some(cost) = compute_stage_cost(u) {
                     s.push_str(&format!("  {d}cost:{r}        {}\n", format_cost(cost)));
                 }
+            }
+            if !files_touched.is_empty() {
+                s.push_str(&format!("  {d}files_touched:{r} {} files\n", files_touched.len()));
             }
             if let Some(reason) = failure_reason {
                 s.push_str(&format!("  {d}failure_reason:{r} {reason}\n"));
@@ -492,17 +515,27 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
             stage,
             text,
             model,
-            input_tokens,
-            output_tokens,
+            usage,
             tool_call_count,
         } => {
-            let total = input_tokens + output_tokens;
+            let total = usage.input_tokens + usage.output_tokens;
             let truncated = if text.len() > 200 { &text[..200] } else { text.as_str() };
-            format!("{d}── ASSISTANT_MESSAGE ────────────────────────{r}\n  {d}stage:{r}       {stage}\n  {d}model:{r}       {model}\n  {d}tokens:{r}      {} ({} in / {} out)\n  {d}tool_calls:{r}  {tool_call_count}\n  {d}text:{r}        {truncated}\n",
+            let mut s = format!("{d}── ASSISTANT_MESSAGE ────────────────────────{r}\n  {d}stage:{r}       {stage}\n  {d}model:{r}       {model}\n  {d}tokens:{r}      {} ({} in / {} out)\n  {d}tool_calls:{r}  {tool_call_count}\n",
                 format_tokens_human(total),
-                format_tokens_human(*input_tokens),
-                format_tokens_human(*output_tokens),
-            )
+                format_tokens_human(usage.input_tokens),
+                format_tokens_human(usage.output_tokens),
+            );
+            if let Some(cache_read) = usage.cache_read_tokens {
+                s.push_str(&format!("  {d}cache_read:{r}  {}\n", format_tokens_human(cache_read)));
+            }
+            if let Some(cache_write) = usage.cache_write_tokens {
+                s.push_str(&format!("  {d}cache_write:{r} {}\n", format_tokens_human(cache_write)));
+            }
+            if let Some(reasoning) = usage.reasoning_tokens {
+                s.push_str(&format!("  {d}reasoning:{r}   {}\n", format_tokens_human(reasoning)));
+            }
+            s.push_str(&format!("  {d}text:{r}        {truncated}\n"));
+            s
         }
         PipelineEvent::ToolCallStarted {
             stage,

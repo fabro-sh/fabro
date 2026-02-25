@@ -314,6 +314,7 @@ impl Handler for ParallelHandler {
                 None
             },
             usage: None,
+            files_touched: Vec::new(),
         };
 
         if is_fail {

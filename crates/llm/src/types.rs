@@ -325,9 +325,13 @@ pub struct Usage {
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub total_tokens: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_read_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_write_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<serde_json::Value>,
 }
 
@@ -892,6 +896,51 @@ mod tests {
             let deserialized: FinishReason = serde_json::from_str(&json).unwrap();
             assert_eq!(&deserialized, reason);
         }
+    }
+
+    #[test]
+    fn usage_serialization_skips_none_optional_fields() {
+        let usage = Usage {
+            input_tokens: 100,
+            output_tokens: 50,
+            total_tokens: 150,
+            reasoning_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            raw: None,
+        };
+        let json = serde_json::to_string(&usage).unwrap();
+        assert!(!json.contains("reasoning_tokens"));
+        assert!(!json.contains("cache_read_tokens"));
+        assert!(!json.contains("cache_write_tokens"));
+        assert!(!json.contains("raw"));
+    }
+
+    #[test]
+    fn usage_serialization_includes_present_optional_fields() {
+        let usage = Usage {
+            input_tokens: 100,
+            output_tokens: 50,
+            total_tokens: 150,
+            reasoning_tokens: Some(20),
+            cache_read_tokens: Some(80),
+            cache_write_tokens: Some(10),
+            raw: None,
+        };
+        let json = serde_json::to_string(&usage).unwrap();
+        assert!(json.contains("\"reasoning_tokens\":20"));
+        assert!(json.contains("\"cache_read_tokens\":80"));
+        assert!(json.contains("\"cache_write_tokens\":10"));
+        assert!(!json.contains("\"raw\""));
+    }
+
+    #[test]
+    fn usage_deserialization_without_optional_fields() {
+        let json = r#"{"input_tokens":100,"output_tokens":50,"total_tokens":150}"#;
+        let usage: Usage = serde_json::from_str(json).unwrap();
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.reasoning_tokens, None);
+        assert_eq!(usage.cache_read_tokens, None);
     }
 
     #[test]

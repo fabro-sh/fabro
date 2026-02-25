@@ -24,6 +24,9 @@ use super::{compute_stage_cost, format_cost, format_duration_human, format_event
 struct CostAccumulator {
     total_input_tokens: i64,
     total_output_tokens: i64,
+    total_cache_read_tokens: i64,
+    total_cache_write_tokens: i64,
+    total_reasoning_tokens: i64,
     total_cost: f64,
     has_pricing: bool,
 }
@@ -89,6 +92,9 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             let mut acc = acc_clone.lock().unwrap();
             acc.total_input_tokens += u.input_tokens;
             acc.total_output_tokens += u.output_tokens;
+            acc.total_cache_read_tokens += u.cache_read_tokens.unwrap_or(0);
+            acc.total_cache_write_tokens += u.cache_write_tokens.unwrap_or(0);
+            acc.total_reasoning_tokens += u.reasoning_tokens.unwrap_or(0);
             if let Some(cost) = compute_stage_cost(u) {
                 acc.total_cost += cost;
                 acc.has_pricing = true;
@@ -275,6 +281,21 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             eprintln!("Cost: {} ({} tokens)", format_cost(acc.total_cost), format_tokens_human(total_tokens));
         } else {
             eprintln!("Tokens: {}", format_tokens_human(total_tokens));
+        }
+        if acc.total_cache_read_tokens > 0 {
+            eprintln!(
+                "{dim}Cache: {} read, {} write{reset}",
+                format_tokens_human(acc.total_cache_read_tokens),
+                format_tokens_human(acc.total_cache_write_tokens),
+                dim = styles.dim, reset = styles.reset,
+            );
+        }
+        if acc.total_reasoning_tokens > 0 {
+            eprintln!(
+                "{dim}Reasoning: {} tokens{reset}",
+                format_tokens_human(acc.total_reasoning_tokens),
+                dim = styles.dim, reset = styles.reset,
+            );
         }
     }
     drop(acc);

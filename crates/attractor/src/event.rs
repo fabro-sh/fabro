@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::outcome::StageUsage;
+use llm::types::Usage;
 
 /// Events emitted during pipeline execution for observability.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +33,7 @@ pub enum PipelineEvent {
         usage: Option<StageUsage>,
         failure_reason: Option<String>,
         notes: Option<String>,
+        files_touched: Vec<String>,
     },
     StageFailed {
         name: String,
@@ -92,8 +94,7 @@ pub enum PipelineEvent {
         stage: String,
         text: String,
         model: String,
-        input_tokens: i64,
-        output_tokens: i64,
+        usage: Usage,
         tool_call_count: usize,
     },
     ToolCallStarted {
@@ -263,13 +264,51 @@ mod tests {
             stage: "code".to_string(),
             text: "Here is the implementation".to_string(),
             model: "claude-opus-4-6".to_string(),
-            input_tokens: 1000,
-            output_tokens: 500,
+            usage: Usage {
+                input_tokens: 1000,
+                output_tokens: 500,
+                total_tokens: 1500,
+                cache_read_tokens: Some(800),
+                cache_write_tokens: Some(50),
+                reasoning_tokens: Some(100),
+                raw: None,
+            },
             tool_call_count: 3,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("AssistantMessage"));
         assert!(json.contains("claude-opus-4-6"));
+        assert!(json.contains("\"cache_read_tokens\":800"));
+        assert!(json.contains("\"reasoning_tokens\":100"));
+
+        // Round-trip
+        let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            PipelineEvent::AssistantMessage { usage, .. } => {
+                assert_eq!(usage.cache_read_tokens, Some(800));
+                assert_eq!(usage.reasoning_tokens, Some(100));
+            }
+            _ => panic!("expected AssistantMessage"),
+        }
+    }
+
+    #[test]
+    fn assistant_message_without_cache_tokens_omits_them() {
+        let event = PipelineEvent::AssistantMessage {
+            stage: "code".to_string(),
+            text: "response".to_string(),
+            model: "test-model".to_string(),
+            usage: Usage {
+                input_tokens: 100,
+                output_tokens: 50,
+                total_tokens: 150,
+                ..Default::default()
+            },
+            tool_call_count: 0,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(!json.contains("cache_read_tokens"));
+        assert!(!json.contains("reasoning_tokens"));
     }
 
     #[test]
@@ -284,10 +323,12 @@ mod tests {
             usage: None,
             failure_reason: Some("lint errors remain".to_string()),
             notes: Some("fixed 3 of 5 issues".to_string()),
+            files_touched: vec!["src/main.rs".to_string()],
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"failure_reason\":\"lint errors remain\""));
         assert!(json.contains("\"notes\":\"fixed 3 of 5 issues\""));
+        assert!(json.contains("src/main.rs"));
 
         let event_none = PipelineEvent::StageCompleted {
             name: "plan".to_string(),
@@ -299,6 +340,7 @@ mod tests {
             usage: None,
             failure_reason: None,
             notes: None,
+            files_touched: vec![],
         };
         let json_none = serde_json::to_string(&event_none).unwrap();
         assert!(json_none.contains("\"failure_reason\":null"));

@@ -49,6 +49,12 @@ pub struct StageUsage {
     pub model: String,
     pub input_tokens: i64,
     pub output_tokens: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<i64>,
 }
 
 /// The result of executing a node handler.
@@ -67,10 +73,12 @@ pub struct Outcome {
     pub failure_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<StageUsage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files_touched: Vec<String>,
 }
 
 impl Outcome {
-    #[must_use] 
+    #[must_use]
     pub fn success() -> Self {
         Self {
             status: StageStatus::Success,
@@ -80,6 +88,7 @@ impl Outcome {
             notes: None,
             failure_reason: None,
             usage: None,
+            files_touched: Vec::new(),
         }
     }
 
@@ -92,6 +101,7 @@ impl Outcome {
             notes: None,
             failure_reason: Some(reason.into()),
             usage: None,
+            files_touched: Vec::new(),
         }
     }
 
@@ -104,6 +114,7 @@ impl Outcome {
             notes: None,
             failure_reason: Some(reason.into()),
             usage: None,
+            files_touched: Vec::new(),
         }
     }
 
@@ -117,6 +128,7 @@ impl Outcome {
             notes: None,
             failure_reason: None,
             usage: None,
+            files_touched: Vec::new(),
         }
     }
 }
@@ -181,6 +193,59 @@ mod tests {
         let o = Outcome::skipped();
         assert_eq!(o.status, StageStatus::Skipped);
         assert!(o.failure_reason.is_none());
+    }
+
+    #[test]
+    fn stage_usage_serialization_with_cache_and_reasoning() {
+        let usage = StageUsage {
+            model: "claude-opus-4-6".to_string(),
+            input_tokens: 1000,
+            output_tokens: 500,
+            cache_read_tokens: Some(800),
+            cache_write_tokens: Some(50),
+            reasoning_tokens: Some(100),
+        };
+        let json = serde_json::to_string(&usage).unwrap();
+        assert!(json.contains("\"cache_read_tokens\":800"));
+        assert!(json.contains("\"reasoning_tokens\":100"));
+
+        let deserialized: StageUsage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.cache_read_tokens, Some(800));
+        assert_eq!(deserialized.reasoning_tokens, Some(100));
+    }
+
+    #[test]
+    fn stage_usage_serialization_omits_none_optional_fields() {
+        let usage = StageUsage {
+            model: "test-model".to_string(),
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            reasoning_tokens: None,
+        };
+        let json = serde_json::to_string(&usage).unwrap();
+        assert!(!json.contains("cache_read_tokens"));
+        assert!(!json.contains("reasoning_tokens"));
+    }
+
+    #[test]
+    fn outcome_files_touched_serialization() {
+        let mut o = Outcome::success();
+        o.files_touched = vec!["src/main.rs".to_string(), "README.md".to_string()];
+        let json = serde_json::to_string(&o).unwrap();
+        assert!(json.contains("files_touched"));
+        assert!(json.contains("src/main.rs"));
+
+        let deserialized: Outcome = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.files_touched.len(), 2);
+    }
+
+    #[test]
+    fn outcome_empty_files_touched_omitted() {
+        let o = Outcome::success();
+        let json = serde_json::to_string(&o).unwrap();
+        assert!(!json.contains("files_touched"));
     }
 
     #[test]

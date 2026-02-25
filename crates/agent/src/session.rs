@@ -404,8 +404,7 @@ impl Session {
                 AgentEvent::AssistantMessage {
                     text: text.clone(),
                     model: response.model.clone(),
-                    input_tokens: response.usage.input_tokens,
-                    output_tokens: response.usage.output_tokens,
+                    usage: response.usage.clone(),
                     tool_call_count: tool_calls.len(),
                 },
             );
@@ -1577,7 +1576,7 @@ mod tests {
 
     #[test]
     fn render_turns_truncates_long_tool_output() {
-        use llm::types::{ToolResult, Usage};
+        use llm::types::ToolResult;
 
         let long_output = "x".repeat(1000);
         let turns = vec![Turn::ToolResults {

@@ -40,6 +40,24 @@ export interface Checkpoint {
   next_node_id?: string;
 }
 
+export interface StageUsage {
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  reasoning_tokens?: number;
+}
+
+export interface Usage {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  reasoning_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+}
+
 export interface Outcome {
   status: string;
   preferred_label?: string;
@@ -47,24 +65,36 @@ export interface Outcome {
   context_updates: Record<string, unknown>;
   notes?: string;
   failure_reason?: string;
+  usage?: StageUsage;
+  files_touched?: string[];
 }
 
 export type PipelineEvent =
   | { PipelineStarted: { name: string; id: string } }
   | { PipelineCompleted: { duration_ms: number; artifact_count: number } }
   | { PipelineFailed: { error: string; duration_ms: number } }
-  | { StageStarted: { name: string; index: number } }
-  | { StageCompleted: { name: string; index: number; duration_ms: number; status: string; preferred_label?: string; suggested_next_ids: string[]; usage?: { model: string; input_tokens: number; output_tokens: number } } }
-  | { StageFailed: { name: string; index: number; error: string; will_retry: boolean } }
+  | { StageStarted: { name: string; index: number; handler_type?: string } }
+  | { StageCompleted: { name: string; index: number; duration_ms: number; status: string; preferred_label?: string; suggested_next_ids: string[]; usage?: StageUsage; failure_reason?: string; notes?: string; files_touched: string[] } }
+  | { StageFailed: { name: string; index: number; error: string; will_retry: boolean; failure_reason?: string } }
   | { StageRetrying: { name: string; index: number; attempt: number; delay_ms: number } }
-  | { ParallelStarted: { branch_count: number } }
+  | { ParallelStarted: { branch_count: number; join_policy: string; error_policy: string } }
   | { ParallelBranchStarted: { branch: string; index: number } }
-  | { ParallelBranchCompleted: { branch: string; index: number; duration_ms: number; success: boolean } }
+  | { ParallelBranchCompleted: { branch: string; index: number; duration_ms: number; status: string } }
   | { ParallelCompleted: { duration_ms: number; success_count: number; failure_count: number } }
-  | { InterviewStarted: { question: string; stage: string } }
+  | { InterviewStarted: { question: string; stage: string; question_type: string } }
   | { InterviewCompleted: { question: string; answer: string; duration_ms: number } }
   | { InterviewTimeout: { question: string; stage: string; duration_ms: number } }
-  | { CheckpointSaved: { node_id: string } };
+  | { CheckpointSaved: { node_id: string } }
+  | { Prompt: { stage: string; text: string } }
+  | { AssistantMessage: { stage: string; text: string; model: string; usage: Usage; tool_call_count: number } }
+  | { ToolCallStarted: { stage: string; tool_name: string; tool_call_id: string; arguments: unknown } }
+  | { ToolCallCompleted: { stage: string; tool_name: string; tool_call_id: string; output: unknown; is_error: boolean } }
+  | { SessionError: { stage: string; error: string } }
+  | { ContextWindowWarning: { stage: string; estimated_tokens: number; context_window_size: number; usage_percent: number } }
+  | { LoopDetected: { stage: string } }
+  | { TurnLimitReached: { stage: string } }
+  | { CompactionStarted: { stage: string; estimated_tokens: number; context_window_size: number } }
+  | { CompactionCompleted: { stage: string; original_turn_count: number; preserved_turn_count: number; summary_token_estimate: number } };
 
 export type ContextSnapshot = Record<string, unknown>;
 

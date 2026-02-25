@@ -1065,6 +1065,7 @@ impl CodergenBackend for MockCodergenBackend {
                 &prompt[..prompt.len().min(50)]
             ),
             usage: None,
+            files_touched: Vec::new(),
         })
     }
 }
@@ -5102,7 +5103,7 @@ mod real_llm {
                 .complete(&request)
                 .await
                 .map_err(|e| AttractorError::Handler(e.to_string()))?;
-            Ok(CodergenResult::Text { text: response.text(), usage: None })
+            Ok(CodergenResult::Text { text: response.text(), usage: None, files_touched: Vec::new() })
         }
     }
 

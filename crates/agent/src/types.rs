@@ -52,8 +52,7 @@ pub enum AgentEvent {
     AssistantMessage {
         text: String,
         model: String,
-        input_tokens: i64,
-        output_tokens: i64,
+        usage: Usage,
         tool_call_count: usize,
     },
     TextDelta {
@@ -146,13 +145,29 @@ mod tests {
 
     #[test]
     fn agent_event_assistant_message() {
+        let usage = Usage {
+            input_tokens: 100,
+            output_tokens: 50,
+            total_tokens: 150,
+            cache_read_tokens: Some(80),
+            cache_write_tokens: Some(10),
+            reasoning_tokens: Some(20),
+            raw: None,
+        };
         let event = AgentEvent::AssistantMessage {
             text: "Hello".into(),
             model: "test-model".into(),
-            input_tokens: 100,
-            output_tokens: 50,
+            usage: usage.clone(),
             tool_call_count: 2,
         };
-        assert!(matches!(event, AgentEvent::AssistantMessage { tool_call_count: 2, .. }));
+        match &event {
+            AgentEvent::AssistantMessage { usage, tool_call_count, .. } => {
+                assert_eq!(*tool_call_count, 2);
+                assert_eq!(usage.input_tokens, 100);
+                assert_eq!(usage.cache_read_tokens, Some(80));
+                assert_eq!(usage.reasoning_tokens, Some(20));
+            }
+            _ => panic!("expected AssistantMessage"),
+        }
     }
 }

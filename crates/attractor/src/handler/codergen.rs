@@ -16,6 +16,7 @@ pub enum CodergenResult {
     Text {
         text: String,
         usage: Option<StageUsage>,
+        files_touched: Vec<String>,
     },
     Full(Outcome),
 }
@@ -205,7 +206,7 @@ impl Handler for CodergenHandler {
         let thread_id = context
             .get("internal.thread_id")
             .and_then(|v| v.as_str().map(String::from));
-        let (response_text, stage_usage) = if let Some(backend) = &self.backend {
+        let (response_text, stage_usage, backend_files_touched) = if let Some(backend) = &self.backend {
             match backend.run(node, &prompt, context, thread_id.as_deref(), &services.emitter).await {
                 Ok(CodergenResult::Full(outcome)) => {
                     let status_json = serde_json::to_string_pretty(&outcome)
@@ -213,7 +214,7 @@ impl Handler for CodergenHandler {
                     tokio::fs::write(stage_dir.join("status.json"), &status_json).await?;
                     return Ok(outcome);
                 }
-                Ok(CodergenResult::Text { text, usage }) => (text, usage),
+                Ok(CodergenResult::Text { text, usage, files_touched }) => (text, usage, files_touched),
                 Err(e) if e.is_retryable() => {
                     return Err(e);
                 }
@@ -222,7 +223,7 @@ impl Handler for CodergenHandler {
                 }
             }
         } else {
-            (format!("[Simulated] Response for stage: {}", node.id), None)
+            (format!("[Simulated] Response for stage: {}", node.id), None, Vec::new())
         };
 
         // 5. Execute post-hook (spec 9.7)
@@ -257,6 +258,7 @@ impl Handler for CodergenHandler {
         // 7b. Parse routing directives from response text
         extract_status_fields(&response_text, &mut outcome);
         outcome.usage = stage_usage;
+        outcome.files_touched = backend_files_touched;
 
         let status_json = serde_json::to_string_pretty(&outcome)
             .unwrap_or_else(|_| "{}".to_string());
@@ -528,7 +530,7 @@ mod tests {
             ) -> Result<CodergenResult, AttractorError> {
                 *self.captured_thread_id.lock().unwrap() =
                     Some(thread_id.map(String::from));
-                Ok(CodergenResult::Text { text: "ok".to_string(), usage: None })
+                Ok(CodergenResult::Text { text: "ok".to_string(), usage: None, files_touched: Vec::new() })
             }
         }
 
@@ -574,7 +576,7 @@ mod tests {
             ) -> Result<CodergenResult, AttractorError> {
                 *self.captured_thread_id.lock().unwrap() =
                     Some(thread_id.map(String::from));
-                Ok(CodergenResult::Text { text: "ok".to_string(), usage: None })
+                Ok(CodergenResult::Text { text: "ok".to_string(), usage: None, files_touched: Vec::new() })
             }
         }
 

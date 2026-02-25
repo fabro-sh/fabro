@@ -373,7 +373,7 @@ mod tests {
                 _emitter: &Arc<EventEmitter>,
             ) -> Result<CodergenResult, AttractorError> {
                 // Return text that contains the ID "branch_b"
-                Ok(CodergenResult::Text { text: "The best candidate is branch_b".to_string(), usage: None })
+                Ok(CodergenResult::Text { text: "The best candidate is branch_b".to_string(), usage: None, files_touched: Vec::new() })
             }
         }
 

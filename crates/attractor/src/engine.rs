@@ -865,6 +865,7 @@ impl PipelineEngine {
                     usage: outcome.usage.clone(),
                     failure_reason: outcome.failure_reason.clone(),
                     notes: outcome.notes.clone(),
+                    files_touched: outcome.files_touched.clone(),
                 });
                 self.inform(
                     &format!("Stage completed: {}", node.label()),

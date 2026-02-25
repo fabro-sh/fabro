@@ -155,6 +155,7 @@ mod tests {
             notes: None,
             failure_reason: None,
             usage: None,
+            files_touched: Vec::new(),
         }
     }
 
