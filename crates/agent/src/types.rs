@@ -83,6 +83,9 @@ pub enum AgentEvent {
     },
     LoopDetected,
     TurnLimitReached,
+    SkillExpanded {
+        skill_name: String,
+    },
     SteeringInjected,
     CompactionStarted {
         estimated_tokens: usize,
@@ -131,6 +134,14 @@ mod tests {
             summary_token_estimate: 500,
         };
         assert!(matches!(completed, AgentEvent::CompactionCompleted { original_turn_count: 20, .. }));
+    }
+
+    #[test]
+    fn skill_expanded_constructible() {
+        let event = AgentEvent::SkillExpanded {
+            skill_name: "commit".into(),
+        };
+        assert!(matches!(event, AgentEvent::SkillExpanded { skill_name } if skill_name == "commit"));
     }
 
     #[test]

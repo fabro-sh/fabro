@@ -236,12 +236,24 @@ impl Session {
         self.state = SessionState::Processing;
 
         // Expand skill references in input
-        let expanded_input = if self.skills.is_empty() {
-            input.to_string()
+        let expanded = if self.skills.is_empty() {
+            crate::skills::ExpandedInput {
+                text: input.to_string(),
+                skill_name: None,
+            }
         } else {
             expand_skill(&self.skills, input)
                 .map_err(AgentError::InvalidState)?
         };
+        if let Some(ref name) = expanded.skill_name {
+            self.event_emitter.emit(
+                self.id.clone(),
+                AgentEvent::SkillExpanded {
+                    skill_name: name.clone(),
+                },
+            );
+        }
+        let expanded_input = expanded.text;
 
         // Append user turn and emit event
         self.history.push(Turn::User {

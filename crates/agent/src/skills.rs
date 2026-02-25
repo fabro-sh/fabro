@@ -104,11 +104,20 @@ fn find_skill_references(input: &str) -> Vec<SkillMatch> {
     results
 }
 
-pub fn expand_skill(skills: &[Skill], input: &str) -> Result<String, String> {
+#[derive(Debug)]
+pub struct ExpandedInput {
+    pub text: String,
+    pub skill_name: Option<String>,
+}
+
+pub fn expand_skill(skills: &[Skill], input: &str) -> Result<ExpandedInput, String> {
     let refs = find_skill_references(input);
 
     if refs.is_empty() {
-        return Ok(input.to_string());
+        return Ok(ExpandedInput {
+            text: input.to_string(),
+            skill_name: None,
+        });
     }
 
     if refs.len() > 1 {
@@ -127,11 +136,16 @@ pub fn expand_skill(skills: &[Skill], input: &str) -> Result<String, String> {
     let after = &input[skill_ref.end..];
     let user_input = format!("{before}{after}").trim().to_string();
 
-    if skill.template.contains("{{user_input}}") {
-        Ok(skill.template.replace("{{user_input}}", &user_input))
+    let text = if skill.template.contains("{{user_input}}") {
+        skill.template.replace("{{user_input}}", &user_input)
     } else {
-        Ok(skill.template.clone())
-    }
+        skill.template.clone()
+    };
+
+    Ok(ExpandedInput {
+        text,
+        skill_name: Some(skill_ref.name.clone()),
+    })
 }
 
 pub fn format_skills_prompt_section(skills: &[Skill]) -> String {
@@ -303,14 +317,16 @@ name: trimmed
     fn expand_no_skill_reference() {
         let skills = test_skills();
         let result = expand_skill(&skills, "just some plain text").unwrap();
-        assert_eq!(result, "just some plain text");
+        assert_eq!(result.text, "just some plain text");
+        assert_eq!(result.skill_name, None);
     }
 
     #[test]
     fn expand_skill_at_start() {
         let skills = test_skills();
         let result = expand_skill(&skills, "/commit do the thing").unwrap();
-        assert_eq!(result, "Review changes and commit.\n\ndo the thing");
+        assert_eq!(result.text, "Review changes and commit.\n\ndo the thing");
+        assert_eq!(result.skill_name.as_deref(), Some("commit"));
     }
 
     #[test]
@@ -318,16 +334,18 @@ name: trimmed
         let skills = test_skills();
         let result = expand_skill(&skills, "please /commit the auth changes").unwrap();
         assert_eq!(
-            result,
+            result.text,
             "Review changes and commit.\n\nplease  the auth changes"
         );
+        assert_eq!(result.skill_name.as_deref(), Some("commit"));
     }
 
     #[test]
     fn expand_skill_alone() {
         let skills = test_skills();
         let result = expand_skill(&skills, "/commit").unwrap();
-        assert_eq!(result, "Review changes and commit.\n\n");
+        assert_eq!(result.text, "Review changes and commit.\n\n");
+        assert_eq!(result.skill_name.as_deref(), Some("commit"));
     }
 
     #[test]
@@ -342,7 +360,8 @@ name: trimmed
     fn expand_does_not_match_paths() {
         let skills = test_skills();
         let result = expand_skill(&skills, "/usr/bin/bash").unwrap();
-        assert_eq!(result, "/usr/bin/bash");
+        assert_eq!(result.text, "/usr/bin/bash");
+        assert_eq!(result.skill_name, None);
     }
 
     #[test]
@@ -357,7 +376,8 @@ name: trimmed
     fn expand_template_without_placeholder() {
         let skills = test_skills();
         let result = expand_skill(&skills, "/test please run").unwrap();
-        assert_eq!(result, "Run the test suite.");
+        assert_eq!(result.text, "Run the test suite.");
+        assert_eq!(result.skill_name.as_deref(), Some("test"));
     }
 
     // --- format_skills_prompt_section tests ---
