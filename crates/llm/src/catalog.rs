@@ -75,13 +75,13 @@ mod tests {
     #[test]
     fn list_models_all() {
         let models = list_models(None);
-        assert_eq!(models.len(), 7);
+        assert_eq!(models.len(), 8);
     }
 
     #[test]
     fn list_models_by_provider() {
         let anthropic = list_models(Some("anthropic"));
-        assert_eq!(anthropic.len(), 2);
+        assert_eq!(anthropic.len(), 3);
         assert!(anthropic.iter().all(|m| m.provider == "anthropic"));
 
         let openai = list_models(Some("openai"));
