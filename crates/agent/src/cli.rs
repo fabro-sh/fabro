@@ -1,6 +1,7 @@
 use crate::{
     AgentEvent, AnthropicProfile, GeminiProfile, LocalExecutionEnvironment, OpenAiProfile,
     ProviderProfile, Session, SessionConfig, ToolApprovalFn, Turn,
+    subagent::{SessionFactory, SubAgentManager},
 };
 use clap::{Parser, ValueEnum};
 use llm::client::Client;
@@ -65,6 +66,8 @@ fn tool_category(name: &str) -> &'static str {
     match name {
         "read_file" | "read_many_files" | "grep" | "glob" | "list_dir" => "read",
         "write_file" | "edit_file" | "apply_patch" => "write",
+        // subagent tools inherit parent permissions, always allowed
+        "spawn_agent" | "send_input" | "wait" | "close_agent" => "subagent",
         // shell and unknown tools require highest permission
         _ => "shell",
     }
@@ -74,6 +77,7 @@ fn is_auto_approved(level: PermissionLevel, category: &str) -> bool {
     matches!(
         (level, category),
         (_, "read")
+            | (_, "subagent")
             | (PermissionLevel::ReadWrite | PermissionLevel::Full, "write")
             | (PermissionLevel::Full, "shell")
     )
@@ -128,12 +132,12 @@ fn build_tool_approval(
     })
 }
 
-fn build_profile(provider: &str, model: &str) -> Arc<dyn ProviderProfile> {
+fn build_profile(provider: &str, model: &str) -> Box<dyn ProviderProfile> {
     match provider {
-        "openai" => Arc::new(OpenAiProfile::new(model)),
-        "gemini" => Arc::new(GeminiProfile::new(model)),
+        "openai" => Box::new(OpenAiProfile::new(model)),
+        "gemini" => Box::new(GeminiProfile::new(model)),
         // anthropic and unknown providers
-        _ => Arc::new(AnthropicProfile::new(model)),
+        _ => Box::new(AnthropicProfile::new(model)),
     }
 }
 
@@ -321,12 +325,12 @@ pub async fn run() -> anyhow::Result<()> {
         "{}Using model: {model}{}",
         styles.dim, styles.reset,
     );
-    let profile = build_profile(&cli.provider, model);
+    let mut profile = build_profile(&cli.provider, model);
 
     // Build execution environment
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let cwd_str = cwd.to_string_lossy().to_string();
-    let env = Arc::new(LocalExecutionEnvironment::new(cwd));
+    let env: Arc<dyn crate::ExecutionEnvironment> = Arc::new(LocalExecutionEnvironment::new(cwd));
 
     // Build tool approval callback
     let is_interactive = std::io::stdin().is_terminal() && !cli.auto_approve;
@@ -337,6 +341,34 @@ pub async fn run() -> anyhow::Result<()> {
         skill_dirs: cli.skills_dir.map(|d| vec![d]),
         ..SessionConfig::default()
     };
+
+    // Register subagent tools
+    let manager = Arc::new(tokio::sync::Mutex::new(
+        SubAgentManager::new(config.max_subagent_depth),
+    ));
+    let factory_client = client.clone();
+    let factory_provider = cli.provider.clone();
+    let factory_model = model.to_string();
+    let factory_env = Arc::clone(&env);
+    let factory_approval = config.tool_approval.clone();
+    let factory: SessionFactory = Arc::new(move || {
+        let child_profile: Arc<dyn ProviderProfile> = match factory_provider.as_str() {
+            "openai" => Arc::new(OpenAiProfile::new(&factory_model)),
+            "gemini" => Arc::new(GeminiProfile::new(&factory_model)),
+            _ => Arc::new(AnthropicProfile::new(&factory_model)),
+        };
+        Session::new(
+            factory_client.clone(),
+            child_profile,
+            Arc::clone(&factory_env),
+            SessionConfig {
+                tool_approval: factory_approval.clone(),
+                ..SessionConfig::default()
+            },
+        )
+    });
+    profile.register_subagent_tools(manager, factory, 0);
+    let profile: Arc<dyn ProviderProfile> = Arc::from(profile);
 
     let mut session = Session::new(client, profile, env, config);
 
@@ -434,6 +466,14 @@ mod tests {
     }
 
     #[test]
+    fn tool_category_subagent_tools() {
+        assert_eq!(tool_category("spawn_agent"), "subagent");
+        assert_eq!(tool_category("send_input"), "subagent");
+        assert_eq!(tool_category("wait"), "subagent");
+        assert_eq!(tool_category("close_agent"), "subagent");
+    }
+
+    #[test]
     fn tool_category_unknown_defaults_to_shell() {
         assert_eq!(tool_category("some_random_tool"), "shell");
     }
@@ -443,6 +483,7 @@ mod tests {
     #[test]
     fn is_auto_approved_read_only() {
         assert!(is_auto_approved(PermissionLevel::ReadOnly, "read"));
+        assert!(is_auto_approved(PermissionLevel::ReadOnly, "subagent"));
         assert!(!is_auto_approved(PermissionLevel::ReadOnly, "write"));
         assert!(!is_auto_approved(PermissionLevel::ReadOnly, "shell"));
     }
@@ -450,6 +491,7 @@ mod tests {
     #[test]
     fn is_auto_approved_read_write() {
         assert!(is_auto_approved(PermissionLevel::ReadWrite, "read"));
+        assert!(is_auto_approved(PermissionLevel::ReadWrite, "subagent"));
         assert!(is_auto_approved(PermissionLevel::ReadWrite, "write"));
         assert!(!is_auto_approved(PermissionLevel::ReadWrite, "shell"));
     }
@@ -457,6 +499,7 @@ mod tests {
     #[test]
     fn is_auto_approved_full() {
         assert!(is_auto_approved(PermissionLevel::Full, "read"));
+        assert!(is_auto_approved(PermissionLevel::Full, "subagent"));
         assert!(is_auto_approved(PermissionLevel::Full, "write"));
         assert!(is_auto_approved(PermissionLevel::Full, "shell"));
     }
@@ -533,5 +576,23 @@ mod tests {
     fn build_profile_gemini() {
         let profile = build_profile("gemini", "model");
         assert_eq!(profile.id(), "gemini");
+    }
+
+    // subagent tool registration tests
+
+    #[test]
+    fn build_profile_can_register_subagent_tools() {
+        let mut profile = build_profile("anthropic", "model");
+        let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(1)));
+        let factory: SessionFactory = Arc::new(|| {
+            panic!("factory should not be called in this test");
+        });
+        profile.register_subagent_tools(manager, factory, 0);
+
+        let names = profile.tool_registry().names();
+        assert!(names.contains(&"spawn_agent".to_string()));
+        assert!(names.contains(&"send_input".to_string()));
+        assert!(names.contains(&"wait".to_string()));
+        assert!(names.contains(&"close_agent".to_string()));
     }
 }

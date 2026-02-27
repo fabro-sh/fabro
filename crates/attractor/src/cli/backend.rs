@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use agent::{
     AgentEvent, AnthropicProfile, ExecutionEnvironment, GeminiProfile, OpenAiProfile,
     ProviderProfile, Session, SessionConfig, Turn,
+    subagent::{SessionFactory, SubAgentManager},
 };
 use llm::client::Client;
 use terminal::Styles;
@@ -54,22 +55,51 @@ impl AgentBackend {
             .await
             .map_err(|e| AttractorError::Handler(format!("Failed to create LLM client: {e}")))?;
 
-        let profile = self.build_profile();
+        let mut profile = self.build_profile();
 
         let config = SessionConfig {
             reasoning_effort: Some(node.reasoning_effort().to_string()),
             ..SessionConfig::default()
         };
 
+        let manager = Arc::new(tokio::sync::Mutex::new(
+            SubAgentManager::new(config.max_subagent_depth),
+        ));
+
+        // Build factory that creates child sessions WITHOUT subagent tools
+        let factory_client = client.clone();
+        let factory_provider = self.provider.clone();
+        let factory_model = self.model.clone();
+        let factory_env = Arc::clone(execution_env);
+        let factory: SessionFactory = Arc::new(move || {
+            let child_profile = {
+                let provider = factory_provider.as_deref().unwrap_or("anthropic");
+                match provider {
+                    "openai" => Arc::new(OpenAiProfile::new(&factory_model)) as Arc<dyn ProviderProfile>,
+                    "gemini" => Arc::new(GeminiProfile::new(&factory_model)) as Arc<dyn ProviderProfile>,
+                    _ => Arc::new(AnthropicProfile::new(&factory_model)) as Arc<dyn ProviderProfile>,
+                }
+            };
+            Session::new(
+                factory_client.clone(),
+                child_profile,
+                Arc::clone(&factory_env),
+                SessionConfig::default(),
+            )
+        });
+
+        profile.register_subagent_tools(manager, factory, 0);
+        let profile: Arc<dyn ProviderProfile> = Arc::from(profile);
+
         Ok(Session::new(client, profile, Arc::clone(execution_env), config))
     }
 
-    fn build_profile(&self) -> Arc<dyn ProviderProfile> {
+    fn build_profile(&self) -> Box<dyn ProviderProfile> {
         let provider = self.provider.as_deref().unwrap_or("anthropic");
         match provider {
-            "openai" => Arc::new(OpenAiProfile::new(&self.model)),
-            "gemini" => Arc::new(GeminiProfile::new(&self.model)),
-            _ => Arc::new(AnthropicProfile::new(&self.model)),
+            "openai" => Box::new(OpenAiProfile::new(&self.model)),
+            "gemini" => Box::new(GeminiProfile::new(&self.model)),
+            _ => Box::new(AnthropicProfile::new(&self.model)),
         }
     }
 }
@@ -416,6 +446,7 @@ fn format_tool_args(args: &serde_json::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent::subagent::SessionFactory;
 
     #[test]
     fn agent_backend_stores_config() {
@@ -441,5 +472,28 @@ mod tests {
             styles,
         );
         assert!(backend.sessions.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn build_profile_can_register_subagent_tools() {
+        let styles = Box::leak(Box::new(Styles::new(false)));
+        let backend = AgentBackend::new(
+            "claude-opus-4-6".to_string(),
+            None,
+            0,
+            styles,
+        );
+        let mut profile = backend.build_profile();
+        let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(1)));
+        let factory: SessionFactory = Arc::new(|| {
+            panic!("factory should not be called in this test");
+        });
+        profile.register_subagent_tools(manager, factory, 0);
+
+        let names = profile.tool_registry().names();
+        assert!(names.contains(&"spawn_agent".to_string()));
+        assert!(names.contains(&"send_input".to_string()));
+        assert!(names.contains(&"wait".to_string()));
+        assert!(names.contains(&"close_agent".to_string()));
     }
 }

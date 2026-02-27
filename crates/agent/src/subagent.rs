@@ -18,21 +18,9 @@ pub struct SubAgentResult {
 }
 
 pub struct SubAgent {
-    #[allow(dead_code)]
-    id: String,
-    #[allow(dead_code)]
-    depth: usize,
     task: Option<tokio::task::JoinHandle<Result<SubAgentResult, AgentError>>>,
     followup_queue: Arc<Mutex<VecDeque<String>>>,
     cancel_token: CancellationToken,
-}
-
-#[cfg(test)]
-impl SubAgent {
-    #[must_use] 
-    pub fn depth(&self) -> usize {
-        self.depth
-    }
 }
 
 pub struct SubAgentManager {
@@ -83,8 +71,6 @@ impl SubAgentManager {
         self.agents.insert(
             agent_id.clone(),
             SubAgent {
-                id: agent_id.clone(),
-                depth,
                 task: Some(task),
                 followup_queue,
                 cancel_token,
@@ -339,7 +325,6 @@ mod tests {
         let agent_id = result.unwrap();
         assert!(!agent_id.is_empty());
         assert!(manager.get(&agent_id).is_some());
-        assert_eq!(manager.get(&agent_id).unwrap().depth(), 0);
     }
 
     #[tokio::test]
