@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context};
 use serde::Deserialize;
 
+use crate::daytona_env::DaytonaConfig;
+
 const SUPPORTED_VERSION: u32 = 1;
 
 #[derive(Debug, Deserialize)]
@@ -33,6 +35,7 @@ pub struct SetupConfig {
 #[derive(Debug, Deserialize)]
 pub struct ExecutionConfig {
     pub environment: Option<String>,
+    pub daytona: Option<DaytonaConfig>,
 }
 
 /// Load and validate a task config from a TOML file.
@@ -220,6 +223,71 @@ environment = "daytona"
         let config = parse_task_config(toml).unwrap();
         let execution = config.execution.unwrap();
         assert_eq!(execution.environment.as_deref(), Some("daytona"));
+        assert!(execution.daytona.is_none());
+    }
+
+    #[test]
+    fn parse_toml_with_daytona_config() {
+        let toml = r#"
+version = 1
+task = "Run tests"
+graph = "pipeline.dot"
+
+[execution]
+environment = "daytona"
+
+[execution.daytona.sandbox]
+name = "my-sandbox"
+auto_stop_interval = 60
+
+[execution.daytona.sandbox.labels]
+project = "attractor"
+
+[execution.daytona.snapshot]
+name = "my-snapshot"
+cpu = 4
+memory = 8
+disk = 10
+dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update"
+"#;
+        let config = parse_task_config(toml).unwrap();
+        let execution = config.execution.unwrap();
+        assert_eq!(execution.environment.as_deref(), Some("daytona"));
+
+        let daytona = execution.daytona.unwrap();
+        assert_eq!(daytona.sandbox.name.as_deref(), Some("my-sandbox"));
+        assert_eq!(daytona.sandbox.auto_stop_interval, Some(60));
+        let labels = daytona.sandbox.labels.unwrap();
+        assert_eq!(labels["project"], "attractor");
+
+        let snapshot = daytona.snapshot.unwrap();
+        assert_eq!(snapshot.name, "my-snapshot");
+        assert_eq!(snapshot.cpu, Some(4));
+        assert_eq!(snapshot.memory, Some(8));
+        assert_eq!(snapshot.disk, Some(10));
+        assert_eq!(
+            snapshot.dockerfile.as_deref(),
+            Some("FROM rust:1.85-slim-bookworm\nRUN apt-get update")
+        );
+    }
+
+    #[test]
+    fn parse_toml_with_daytona_no_snapshot() {
+        let toml = r#"
+version = 1
+task = "Run tests"
+graph = "pipeline.dot"
+
+[execution]
+environment = "daytona"
+
+[execution.daytona.sandbox]
+name = "bare-sandbox"
+"#;
+        let config = parse_task_config(toml).unwrap();
+        let daytona = config.execution.unwrap().daytona.unwrap();
+        assert_eq!(daytona.sandbox.name.as_deref(), Some("bare-sandbox"));
+        assert!(daytona.snapshot.is_none());
     }
 
     #[test]

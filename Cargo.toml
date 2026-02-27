@@ -35,3 +35,4 @@ regex = "1"
 aho-corasick = "1"
 toml = "0.8"
 daytona-sdk = { git = "https://github.com/brynary/daytona-sdk-rust", package = "daytona-sdk" }
+daytona-api-client = { git = "https://github.com/brynary/daytona-sdk-rust", package = "daytona-api-client" }

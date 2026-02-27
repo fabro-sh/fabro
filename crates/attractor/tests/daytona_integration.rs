@@ -32,6 +32,22 @@ async fn daytona_exec_command() {
 
 #[tokio::test]
 #[ignore]
+async fn daytona_exec_command_with_pipe() {
+    let env = create_env().await;
+    env.initialize().await.unwrap();
+
+    let result = env
+        .exec_command("echo hello world | wc -w", 30_000, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result.exit_code, 0);
+    assert!(result.stdout.trim().contains('2'));
+
+    env.cleanup().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore]
 async fn daytona_file_round_trip() {
     let env = create_env().await;
     env.initialize().await.unwrap();
@@ -79,5 +95,44 @@ async fn daytona_full_lifecycle() {
     assert!(!entries.is_empty());
 
     // Cleanup (deletes sandbox)
+    env.cleanup().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn daytona_snapshot_sandbox() {
+    use attractor::daytona_env::{DaytonaSnapshotConfig, DaytonaSandboxConfig};
+
+    dotenvy::dotenv().ok();
+    let client = daytona_sdk::Client::new()
+        .await
+        .expect("Failed to create Daytona client — is DAYTONA_API_KEY set?");
+
+    let config = DaytonaConfig {
+        sandbox: DaytonaSandboxConfig {
+            name: Some("attractor-snapshot-test".to_string()),
+            auto_stop_interval: Some(60),
+            ..Default::default()
+        },
+        snapshot: Some(DaytonaSnapshotConfig {
+            name: "attractor-test-snapshot".to_string(),
+            cpu: Some(2),
+            memory: Some(4),
+            disk: Some(10),
+            dockerfile: Some("FROM ubuntu:22.04\nRUN apt-get update && apt-get install -y ripgrep".to_string()),
+        }),
+    };
+
+    let env = DaytonaExecutionEnvironment::new(client, config);
+    env.initialize().await.unwrap();
+
+    // Verify rg is available (installed by snapshot)
+    let result = env
+        .exec_command("rg --version", 10_000, None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(result.exit_code, 0);
+    assert!(result.stdout.contains("ripgrep"));
+
     env.cleanup().await.unwrap();
 }
