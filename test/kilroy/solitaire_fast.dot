@@ -1,0 +1,352 @@
+digraph solitaire {
+    graph [
+        goal="Build a terminal-based solitaire (Klondike) game",
+        rankdir=LR,
+        default_max_retry=3,
+        retry_target="impl_setup",
+        fallback_retry_target="impl_game_logic",
+        model_stylesheet="
+            * { llm_model: gpt-5.3-codex-spark; llm_provider: openai; }
+        "
+    ]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Spec expansion - bootstraps .ai/spec.md into existence
+    expand_spec [
+        shape=box,
+        auto_status=true,
+        prompt="Given the requirements: Build a terminal-based solitaire game (Klondike variant). The game should display cards using ASCII art, support standard solitaire rules (7 tableau piles, 4 foundation piles, stock and waste), allow keyboard-based moves, detect win/loss conditions, and provide a pleasant terminal UI with clear instructions.
+
+Expand into a detailed spec covering:
+- Language choice (Python recommended for terminal UI libraries)
+- Game rules and data structures (Card, Deck, Pile types)
+- Terminal rendering approach (curses or rich library)
+- Input handling and move validation
+- Win/loss detection
+- User interface layout
+- Test strategy
+
+Write the spec to .ai/spec.md.
+
+Write status.json: outcome=success"
+    ]
+
+    // Project setup
+    impl_setup [
+        shape=box,
+        prompt="Goal: $goal
+
+Read .ai/spec.md. Set up the project structure based on the chosen language:
+- If Python: Create pyproject.toml or requirements.txt, src/ directory, main.py stub
+- If Go: Create go.mod, cmd/solitaire/main.go, pkg/ structure
+- If Rust: Create Cargo.toml, src/main.rs
+
+Create the basic directory structure and configuration files needed.
+
+Run the appropriate build command:
+- Python: python3 -m py_compile src/*.py (or pytest --collect-only if tests exist)
+- Go: go build ./...
+- Rust: cargo build
+
+Write status.json: outcome=success if project structure is created and builds, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_setup [
+        shape=box,
+        class="verify",
+        prompt="Verify project setup was completed correctly.
+
+Run:
+1. Check that project configuration file exists (pyproject.toml/requirements.txt, go.mod, or Cargo.toml)
+2. Check that source directories exist
+3. Run build command appropriate to language (ONLY one):
+   - Python: python3 -m py_compile src/*.py
+   - Go: go build ./...
+   - Rust: cargo build
+4. Verify no syntax errors
+
+Write results to .ai/verify_setup.md.
+Write status.json: outcome=success if ALL checks pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    check_setup [shape=diamond, label="Setup OK?"]
+
+    // Core data structures
+    impl_data_structures [
+        shape=box,
+        prompt="Goal: $goal
+
+Read .ai/spec.md for the data structure design.
+
+Implement the core game data structures:
+- Card (suit, rank, face up/down)
+- Deck (collection of cards with shuffle)
+- Pile types (Tableau, Foundation, Stock, Waste)
+- GameState (tracks all piles, move history)
+
+Include basic validation methods and unit tests for each structure.
+
+Run appropriate test command:
+- Python: python3 -m pytest tests/
+- Go: go test ./...
+- Rust: cargo test
+
+Write status.json: outcome=success if all tests pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_data_structures [
+        shape=box,
+        class="verify",
+        prompt="Verify data structures implementation.
+
+Run:
+1. Build command for the language (ONLY one):
+   - Python: python3 -m py_compile src/*.py
+   - Go: go build ./...
+   - Rust: cargo build
+2. Run all unit tests for the chosen language (ONLY one):
+   - Python: python3 -m pytest tests/
+   - Go: go test ./...
+   - Rust: cargo test
+3. Check that Card, Deck, and Pile types are defined
+4. Verify basic operations work (create deck, shuffle, deal)
+
+Write results to .ai/verify_data_structures.md.
+Write status.json: outcome=success if all pass, outcome=fail with failure_reason."
+    ]
+
+    check_data_structures [shape=diamond, label="Data structures OK?"]
+
+    // Game logic
+    impl_game_logic [
+        shape=box,
+        class="hard",
+        max_retries=2,
+        prompt="Goal: $goal
+
+Read .ai/spec.md for Klondike solitaire rules.
+Read the data structure files for available types and methods.
+
+Implement the core game logic:
+- Initial deal (7 tableau piles, stock)
+- Move validation (tableau to tableau, tableau to foundation, waste to tableau, etc.)
+- Auto-complete detection
+- Win condition checking
+- Undo functionality
+
+Create comprehensive tests covering:
+- Legal and illegal moves
+- Win detection
+- Edge cases (empty piles, king placement)
+
+Run tests for the chosen language ONLY (do not run other language commands):
+- Python: python3 -m pytest tests/ -v
+- Go: go test ./... -v
+- Rust: cargo test -- --nocapture
+
+Write status.json: outcome=success if all tests pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_game_logic [
+        shape=box,
+        class="verify",
+        prompt="Verify game logic implementation.
+
+Run:
+1. Build command (ONLY one):
+   - Python: python3 -m py_compile src/*.py
+   - Go: go build ./...
+   - Rust: cargo build
+2. Run all tests with verbose output for the chosen language (ONLY one):
+   - Python: python3 -m pytest tests/ -v
+   - Go: go test ./... -v
+   - Rust: cargo test -- --nocapture
+3. Verify move validation works correctly
+4. Check win condition detection
+5. Test undo functionality
+
+Write results to .ai/verify_game_logic.md.
+Write status.json: outcome=success if all pass, outcome=fail with failure_reason."
+    ]
+
+    check_game_logic [shape=diamond, label="Game logic OK?"]
+
+    // Terminal UI
+    impl_terminal_ui [
+        shape=box,
+        class="hard",
+        max_retries=2,
+        prompt="Goal: $goal
+
+Read .ai/spec.md for UI requirements.
+Read the game logic files to understand the GameState interface.
+
+Implement the terminal UI:
+- Card rendering (ASCII art for suits and ranks)
+- Game board layout (tableau, foundation, stock, waste)
+- Keyboard input handling (arrow keys, enter, undo)
+- Move selection interface
+- Status messages and help text
+- Graceful exit handling
+
+Use appropriate library:
+- Python: curses or rich
+- Go: termui or bubbletea
+- Rust: crossterm or tui-rs
+
+Create integration tests that verify UI components render without crashing.
+
+Run for the chosen language ONLY (do not run other language commands):
+- Python: python3 -m pytest tests/ && python3 -m mypy src/ (if using type hints)
+- Go: go build ./... && go test ./...
+- Rust: cargo build && cargo test
+
+Write status.json: outcome=success if builds and tests pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_terminal_ui [
+        shape=box,
+        class="verify",
+        prompt="Verify terminal UI implementation.
+
+Run:
+1. Build the executable (ONLY one):
+   - Python: python3 -m py_compile src/*.py
+   - Go: go build ./...
+   - Rust: cargo build
+2. Run all tests for the chosen language (ONLY one):
+   - Python: python3 -m pytest tests/
+   - Go: go test ./...
+   - Rust: cargo test
+3. Verify UI components exist (renderer, input handler)
+4. Check that game can be instantiated
+5. Test that rendering doesn't crash with empty game state
+
+Write results to .ai/verify_terminal_ui.md.
+Write status.json: outcome=success if all pass, outcome=fail with failure_reason."
+    ]
+
+    check_terminal_ui [shape=diamond, label="Terminal UI OK?"]
+
+    // Integration and polish
+    impl_integration [
+        shape=box,
+        prompt="Goal: $goal
+
+Read .ai/spec.md for complete requirements.
+
+Integrate all components into a working game:
+- Wire up main.go/main.py/main.rs to start game loop
+- Connect UI input to game logic
+- Add game over screen with win/loss message
+- Include help menu (accessible with 'h' key)
+- Add README with build and run instructions
+
+Test the complete game:
+- Build the executable
+- Play through at least one successful game (can auto-win or test with a fixed seed)
+- Verify all keyboard controls work
+- Check that undo works across multiple moves
+
+Run:
+IMPORTANT: Run for the chosen language ONLY (do not run other language commands):
+- Python: python3 src/main.py (manual test) && python3 -m pytest tests/
+- Go: go build ./cmd/solitaire && go test ./...
+- Rust: cargo build --release && cargo test
+
+Write status.json: outcome=success if game runs and all tests pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_integration [
+        shape=box,
+        class="verify",
+        prompt="Verify integration is complete.
+
+Run:
+1. Build the final executable (ONLY one):
+   - Python: python3 -m py_compile src/*.py
+   - Go: go build ./...
+   - Rust: cargo build
+2. Run all tests for the chosen language (ONLY one):
+   - Python: python3 -m pytest tests/
+   - Go: go test ./...
+   - Rust: cargo test
+3. Check README exists with instructions
+4. Verify the game binary can be executed
+5. Test that game starts without errors
+
+Write results to .ai/verify_integration.md.
+Write status.json: outcome=success if all pass, outcome=fail with failure_reason."
+    ]
+
+    check_integration [shape=diamond, label="Integration OK?"]
+
+    // Final review
+    review [
+        shape=box,
+        class="review",
+        goal_gate=true,
+        prompt="Goal: $goal
+
+Read .ai/spec.md in full.
+
+Review the complete implementation against the spec:
+- All game rules correctly implemented (Klondike solitaire)
+- Terminal UI works and is intuitive
+- Keyboard controls responsive
+- Win/loss detection accurate
+- Tests comprehensive and passing
+- README clear and accurate
+- Code quality good (organized, readable)
+
+Test the game:
+- Build and run the executable
+- Play through a few moves
+- Verify UI renders correctly
+- Check that illegal moves are rejected
+- Test undo functionality
+- Run full test suite
+
+Write detailed review to .ai/final_review.md including:
+- What works well
+- Any issues found
+- Compliance with spec
+
+Write status.json: outcome=success if the game is complete and playable per spec, outcome=fail with what's missing or broken."
+    ]
+
+    check_review [shape=diamond, label="Review OK?"]
+
+    // Flow
+    start -> expand_spec -> impl_setup -> verify_setup -> check_setup
+    check_setup -> impl_data_structures [condition="outcome=success"]
+    check_setup -> impl_setup           [condition="outcome=fail", label="retry"]
+    check_setup -> impl_setup           [label="fallback"]
+
+    impl_data_structures -> verify_data_structures -> check_data_structures
+    check_data_structures -> impl_game_logic     [condition="outcome=success"]
+    check_data_structures -> impl_data_structures [condition="outcome=fail", label="retry"]
+    check_data_structures -> impl_data_structures [label="fallback"]
+
+    impl_game_logic -> verify_game_logic -> check_game_logic
+    check_game_logic -> impl_terminal_ui    [condition="outcome=success"]
+    check_game_logic -> impl_game_logic     [condition="outcome=fail", label="retry"]
+    check_game_logic -> impl_game_logic     [label="fallback"]
+
+    impl_terminal_ui -> verify_terminal_ui -> check_terminal_ui
+    check_terminal_ui -> impl_integration   [condition="outcome=success"]
+    check_terminal_ui -> impl_terminal_ui   [condition="outcome=fail", label="retry"]
+    check_terminal_ui -> impl_terminal_ui   [label="fallback"]
+
+    impl_integration -> verify_integration -> check_integration
+    check_integration -> review             [condition="outcome=success"]
+    check_integration -> impl_integration   [condition="outcome=fail", label="retry"]
+    check_integration -> impl_integration   [label="fallback"]
+
+    review -> check_review
+    check_review -> exit            [condition="outcome=success"]
+    check_review -> impl_terminal_ui [condition="outcome=fail", label="fix"]
+    check_review -> impl_terminal_ui [label="fallback"]
+}

@@ -1,0 +1,6 @@
+digraph G {
+  start [shape=Mdiamond]
+  exit  [shape=Msquare]
+  work  [shape=box, llm_model=gpt-5.2, prompt="Do the work."]
+  start -> work -> exit
+}

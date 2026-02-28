@@ -1,0 +1,158 @@
+digraph Workflow {
+  graph [
+    label="Consensus Task Workflow",
+    goal="$task",
+    rankdir="LR",
+    context_fidelity_default="truncate",
+    context_thread_default="consensus-task",
+    default_max_retry="3",
+    retry_target="CheckDoD",
+    fallback_retry_target="Start"
+  ];
+
+  Start [
+    node_type="start", label="Start", shape="Mdiamond", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="4", timeout="300"
+  ];
+
+  CheckDoD [
+    node_type="stack.steer", label="Check DoD", shape="box", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="2", timeout="120",
+    llm_prompt="Check if definition of done provided.\n\nTASK: $task\nDOD: $definition_of_done\n\nWrite status.json with outcome=needs_dod if DOD is empty or just a placeholder, else outcome=has_dod if a real DOD was provided."
+  ];
+
+  DefineDoD_Gemini [
+    node_type="stack.observe", label="Define DoD (Gemini)", shape="box", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="6", timeout="300",
+    llm_prompt="Propose definition of done.\n\nTASK: $task\n\nWrite to .ai/dod_gemini.md"
+  ];
+
+  DefineDoD_GPT [
+    node_type="stack.observe", label="Define DoD (GPT)", shape="box", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="6", timeout="300", reasoning_effort="high",
+    llm_prompt="Propose definition of done.\n\nTASK: $task\n\nWrite to .ai/dod_gpt.md"
+  ];
+
+  DefineDoD_Opus [
+    node_type="stack.observe", label="Define DoD (Opus)", shape="box", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="6", timeout="300",
+    llm_prompt="Propose definition of done.\n\nTASK: $task\n\nWrite to .ai/dod_opus.md"
+  ];
+
+  ConsolidateDoD [
+    node_type="stack.observe", label="Consolidate DoD", shape="box", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="8", timeout="420",
+    llm_prompt="Synthesize three DoD proposals.\n\nTASK: $task\n\nRead .ai/dod_*.md, write consensus to .ai/definition_of_done.md"
+  ];
+
+  PlanGemini [
+    node_type="stack.observe", label="Plan (Gemini)", shape="box", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="8", timeout="420",
+    llm_prompt="Create implementation plan.\n\nTASK: $task\nDOD: .ai/definition_of_done.md or $definition_of_done\n\nWrite to .ai/plan_gemini.md"
+  ];
+
+  PlanGPT [
+    node_type="stack.observe", label="Plan (GPT)", shape="box", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="8", timeout="420", reasoning_effort="high",
+    llm_prompt="Create implementation plan.\n\nTASK: $task\nDOD: .ai/definition_of_done.md or $definition_of_done\n\nWrite to .ai/plan_gpt.md"
+  ];
+
+  PlanOpus [
+    node_type="stack.observe", label="Plan (Opus)", shape="box", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="8", timeout="420",
+    llm_prompt="Create implementation plan.\n\nTASK: $task\nDOD: .ai/definition_of_done.md or $definition_of_done\n\nWrite to .ai/plan_opus.md"
+  ];
+
+  DebateConsolidate [
+    node_type="stack.observe", label="Debate & Consolidate", shape="box", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="10", timeout="600",
+    llm_prompt="Synthesize three plans.\n\nTASK: $task\n\nRead .ai/plan_*.md, write final to .ai/plan_final.md"
+  ];
+
+  Implement [
+    node_type="stack.observe", label="Implement (Opus)", shape="box", style="rounded,filled",
+    is_codergen="true", allow_partial="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="25", timeout="1200",
+    llm_prompt="Execute plan.\n\nTASK: $task\n\nFollow .ai/plan_final.md. Log to .ai/implementation_log.md"
+  ];
+
+  ReviewGemini [
+    node_type="stack.observe", label="Review (Gemini)", shape="box", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="6", timeout="300",
+    llm_prompt="Review implementation.\n\nTASK: $task\n\nWrite to .ai/review_gemini.md with PASS/FAIL"
+  ];
+
+  ReviewGPT [
+    node_type="stack.observe", label="Review (GPT)", shape="box", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="6", timeout="300", reasoning_effort="high",
+    llm_prompt="Review implementation.\n\nTASK: $task\n\nWrite to .ai/review_gpt.md with PASS/FAIL"
+  ];
+
+  ReviewOpus [
+    node_type="stack.observe", label="Review (Opus)", shape="box", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="6", timeout="300",
+    llm_prompt="Review implementation.\n\nTASK: $task\n\nWrite to .ai/review_opus.md with PASS/FAIL"
+  ];
+
+  ReviewConsensus [
+    node_type="stack.steer", label="Review Consensus", shape="box", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="6", timeout="300",
+    llm_prompt="Reach consensus.\n\nRead .ai/review_*.md\nWrite to .ai/review_consensus.md\n\noutcome=yes if PASS, outcome=retry if FAIL. Set preferred_next_label to \"\" (empty) or to \"yes\"/\"retry\"; do not use \"No\"."
+  ];
+
+  Postmortem [
+    node_type="stack.observe", label="Postmortem", shape="box", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="8", timeout="420",
+    llm_prompt="Failure postmortem.\n\nTASK: $task\n\nWrite to .ai/postmortem_NN.md"
+  ];
+
+  Exit [
+    node_type="exit", label="Exit", shape="Msquare", style="rounded,filled",
+    is_codergen="true", llm_provider="openai", llm_model="gpt-5.2-codex",
+    max_agent_turns="4", timeout="120"
+  ];
+
+  Start -> CheckDoD;
+  CheckDoD -> DefineDoD_Gemini [condition="outcome=needs_dod"];
+  CheckDoD -> DefineDoD_GPT [condition="outcome=needs_dod"];
+  CheckDoD -> DefineDoD_Opus [condition="outcome=needs_dod"];
+  CheckDoD -> PlanGemini [condition="outcome=has_dod"];
+  CheckDoD -> PlanGPT [condition="outcome=has_dod"];
+  CheckDoD -> PlanOpus [condition="outcome=has_dod"];
+  DefineDoD_Gemini -> ConsolidateDoD;
+  DefineDoD_GPT -> ConsolidateDoD;
+  DefineDoD_Opus -> ConsolidateDoD;
+  ConsolidateDoD -> PlanGemini;
+  ConsolidateDoD -> PlanGPT;
+  ConsolidateDoD -> PlanOpus;
+  PlanGemini -> DebateConsolidate;
+  PlanGPT -> DebateConsolidate;
+  PlanOpus -> DebateConsolidate;
+  DebateConsolidate -> Implement;
+  Implement -> ReviewGemini;
+  Implement -> ReviewGPT;
+  Implement -> ReviewOpus;
+  ReviewGemini -> ReviewConsensus;
+  ReviewGPT -> ReviewConsensus;
+  ReviewOpus -> ReviewConsensus;
+  ReviewConsensus -> Exit [condition="outcome=yes"];
+  ReviewConsensus -> Postmortem;
+  Postmortem -> PlanGemini [loop_restart="true"];
+  Postmortem -> PlanGPT [loop_restart="true"];
+  Postmortem -> PlanOpus [loop_restart="true"];
+}

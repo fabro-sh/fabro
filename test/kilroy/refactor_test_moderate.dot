@@ -1,0 +1,400 @@
+digraph linkcheck {
+    graph [
+        goal="Build a Go CLI tool that checks URLs for broken links with configurable depth and multiple output formats",
+        rankdir=LR,
+        default_max_retry=3,
+        retry_target="impl_setup",
+        fallback_retry_target="impl_crawler",
+        model_stylesheet="
+            * { llm_model: gemini-3-flash-preview; llm_provider: google; reasoning_effort: medium; }
+            .hard { llm_model: gemini-3-flash-preview; llm_provider: google; reasoning_effort: high; }
+            .verify { llm_model: gemini-3-flash-preview; llm_provider: google; reasoning_effort: medium; }
+            .review { llm_model: gemini-3-flash-preview; llm_provider: google; reasoning_effort: high; }
+        "
+    ]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Spec expansion (vague input — bootstraps .ai/spec.md into existence)
+    expand_spec [
+        shape=box,
+        auto_status=true,
+        prompt="Given the requirements: Build a Go CLI tool called 'linkcheck' that takes a URL as input, crawls the page, finds all links, checks each link for HTTP status, and outputs a report of broken links (4xx/5xx). It should respect robots.txt, have a configurable crawl depth (default 1), and output in both human-readable and JSON formats.
+
+Expand into a detailed spec covering:
+- CLI interface (flags, arguments, exit codes)
+- Package structure (cmd/, pkg/ organization)
+- Core data types (Link, CrawlResult, Report, etc.)
+- robots.txt parsing and respect
+- HTTP client configuration (timeouts, user agent, redirects)
+- Link extraction from HTML
+- Status code categorization (broken vs. OK)
+- Depth control mechanism
+- Output formatters (text and JSON)
+- Error handling
+- Test plan (unit tests for each package, integration test)
+
+Write the spec to .ai/spec.md.
+
+Write status.json: outcome=success"
+    ]
+
+    // Project setup
+    impl_setup [
+        shape=box,
+        prompt="Goal: $goal
+
+Read .ai/spec.md. Create the Go project structure:
+- Initialize go.mod for linkcheck
+- Create cmd/linkcheck/main.go with CLI stub
+- Create pkg/ directories: pkg/crawler/, pkg/checker/, pkg/robots/, pkg/formatter/
+- Add basic README.md with build/usage instructions
+
+Acceptance:
+- `go mod init` must succeed
+- `go build ./...` must pass
+- Directory structure matches spec
+
+Write status.json: outcome=success if all pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_setup [
+        shape=box,
+        class="verify",
+        prompt="Verify project setup was completed correctly.
+
+Run:
+1. `go build ./...`
+2. `go vet ./...`
+3. Check that go.mod exists
+4. Check that cmd/linkcheck/main.go exists
+5. Check that pkg/ subdirectories exist
+
+Write results to .ai/verify_setup.md.
+Write status.json: outcome=success if ALL pass, outcome=fail with details."
+    ]
+
+    check_setup [shape=diamond, label="Setup OK?"]
+
+    // Crawler implementation
+    impl_crawler [
+        shape=box,
+        class="hard",
+        max_retries=2,
+        prompt="Goal: $goal
+
+Spec: .ai/spec.md, crawler section.
+Read: cmd/linkcheck/main.go for understanding the entry point.
+
+Implement the web crawler in pkg/crawler/:
+- Crawler struct with configurable depth, user agent
+- FetchPage function (HTTP GET with proper headers)
+- ExtractLinks function (parse HTML, find all <a href> tags)
+- Depth tracking and queue management
+- URL normalization and deduplication
+- Tests for all functions
+
+Create/modify:
+- pkg/crawler/crawler.go
+- pkg/crawler/parser.go
+- pkg/crawler/crawler_test.go
+
+Acceptance:
+- `go build ./...` must pass
+- `go test ./pkg/crawler/...` must pass with all tests
+
+Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_crawler [
+        shape=box,
+        class="verify",
+        prompt="Verify crawler implementation was completed correctly.
+
+Run:
+1. `go build ./...`
+2. `go vet ./...`
+3. `go test ./pkg/crawler/... -v`
+4. Check that pkg/crawler/crawler.go exists
+5. Check that tests cover FetchPage and ExtractLinks
+
+Write results to .ai/verify_crawler.md.
+Write status.json: outcome=success if ALL pass, outcome=fail with details."
+    ]
+
+    check_crawler [shape=diamond, label="Crawler OK?"]
+
+    // Robots.txt implementation
+    impl_robots [
+        shape=box,
+        prompt="Goal: $goal
+
+Spec: .ai/spec.md, robots.txt section.
+Read: pkg/crawler/crawler.go for types you need.
+
+Implement robots.txt parser and checker in pkg/robots/:
+- RobotsParser struct
+- FetchRobotsTxt function
+- IsAllowed function (check if URL path is allowed for user agent)
+- Parse user-agent, disallow, allow directives
+- Tests
+
+Create/modify:
+- pkg/robots/robots.go
+- pkg/robots/robots_test.go
+
+Acceptance:
+- `go build ./...` must pass
+- `go test ./pkg/robots/...` must pass
+
+Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_robots [
+        shape=box,
+        class="verify",
+        prompt="Verify robots.txt implementation was completed correctly.
+
+Run:
+1. `go build ./...`
+2. `go vet ./...`
+3. `go test ./pkg/robots/... -v`
+4. Check that pkg/robots/robots.go exists
+
+Write results to .ai/verify_robots.md.
+Write status.json: outcome=success if ALL pass, outcome=fail with details."
+    ]
+
+    check_robots [shape=diamond, label="Robots OK?"]
+
+    // Link checker implementation
+    impl_checker [
+        shape=box,
+        class="hard",
+        max_retries=2,
+        prompt="Goal: $goal
+
+Spec: .ai/spec.md, link checker section.
+Read: pkg/crawler/crawler.go, pkg/robots/robots.go for types.
+
+Implement HTTP status checker in pkg/checker/:
+- CheckLink function (HEAD or GET request, return status code)
+- Categorize status codes (2xx=OK, 3xx=redirect, 4xx/5xx=broken)
+- Timeout and retry handling
+- Report struct with URL, status, error message
+- Tests with mock HTTP server
+
+Create/modify:
+- pkg/checker/checker.go
+- pkg/checker/status.go
+- pkg/checker/checker_test.go
+
+Acceptance:
+- `go build ./...` must pass
+- `go test ./pkg/checker/...` must pass
+
+Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_checker [
+        shape=box,
+        class="verify",
+        prompt="Verify link checker implementation was completed correctly.
+
+Run:
+1. `go build ./...`
+2. `go vet ./...`
+3. `go test ./pkg/checker/... -v`
+4. Check that pkg/checker/checker.go exists
+
+Write results to .ai/verify_checker.md.
+Write status.json: outcome=success if ALL pass, outcome=fail with details."
+    ]
+
+    check_checker [shape=diamond, label="Checker OK?"]
+
+    // Output formatter implementation
+    impl_formatter [
+        shape=box,
+        prompt="Goal: $goal
+
+Spec: .ai/spec.md, output section.
+Read: pkg/checker/checker.go for Report type.
+
+Implement output formatters in pkg/formatter/:
+- TextFormatter (human-readable table or list)
+- JSONFormatter (structured JSON output)
+- Format function that takes Report slice and format type
+- Tests for both formatters
+
+Create/modify:
+- pkg/formatter/text.go
+- pkg/formatter/json.go
+- pkg/formatter/formatter.go
+- pkg/formatter/formatter_test.go
+
+Acceptance:
+- `go build ./...` must pass
+- `go test ./pkg/formatter/...` must pass
+
+Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_formatter [
+        shape=box,
+        class="verify",
+        prompt="Verify formatter implementation was completed correctly.
+
+Run:
+1. `go build ./...`
+2. `go vet ./...`
+3. `go test ./pkg/formatter/... -v`
+4. Check that both text.go and json.go exist
+
+Write results to .ai/verify_formatter.md.
+Write status.json: outcome=success if ALL pass, outcome=fail with details."
+    ]
+
+    check_formatter [shape=diamond, label="Formatter OK?"]
+
+    // CLI integration
+    impl_cli [
+        shape=box,
+        prompt="Goal: $goal
+
+Spec: .ai/spec.md, CLI section.
+Read: pkg/crawler/, pkg/robots/, pkg/checker/, pkg/formatter/ for all functions.
+
+Wire up the CLI in cmd/linkcheck/main.go:
+- Parse flags: --depth (default 1), --format (text/json), --user-agent
+- Parse URL argument
+- Orchestrate: check robots.txt, crawl, check links, format output
+- Exit codes: 0 if no broken links, 1 if broken links found, 2 on error
+- Help text
+
+Acceptance:
+- `go build ./cmd/linkcheck` must pass
+- `./linkcheck --help` shows usage
+- `./linkcheck https://example.com` runs without error
+
+Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_cli [
+        shape=box,
+        class="verify",
+        prompt="Verify CLI integration was completed correctly.
+
+Run:
+1. `go build ./cmd/linkcheck`
+2. `./linkcheck --help` (must show help)
+3. `go vet ./...`
+4. Check that main.go wires all packages together
+
+Write results to .ai/verify_cli.md.
+Write status.json: outcome=success if ALL pass, outcome=fail with details."
+    ]
+
+    check_cli [shape=diamond, label="CLI OK?"]
+
+    // Integration test
+    impl_integration [
+        shape=box,
+        goal_gate=true,
+        prompt="Goal: $goal
+
+Spec: .ai/spec.md, test plan section.
+
+Create integration test:
+- Test script or test/integration_test.go
+- Test with real HTTP calls (or mock server)
+- Test depth=1 vs depth=2
+- Test text vs JSON output
+- Test robots.txt respect
+
+Acceptance:
+- `go build ./...` must pass
+- `go test ./...` must pass (all tests)
+- Integration test validates end-to-end functionality
+
+Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_integration [
+        shape=box,
+        class="verify",
+        prompt="Verify integration test was completed correctly.
+
+Run:
+1. `go build ./...`
+2. `go test ./... -v`
+3. Check that integration test covers depth, format, robots.txt
+
+Write results to .ai/verify_integration.md.
+Write status.json: outcome=success if ALL pass, outcome=fail with details."
+    ]
+
+    check_integration [shape=diamond, label="Integration OK?"]
+
+    // Final review
+    review [
+        shape=box,
+        class="review",
+        goal_gate=true,
+        prompt="Goal: $goal
+
+Read .ai/spec.md. Review the full linkcheck implementation against the spec.
+
+Check:
+- All features implemented (crawling, link checking, robots.txt, depth, formats)
+- All tests pass
+- CLI works as specified
+- Error handling is correct
+- Code quality (no warnings, good structure)
+- Documentation complete
+
+Run:
+1. `go build ./cmd/linkcheck`
+2. `go test ./...`
+3. Manual test: `./linkcheck https://example.com --depth 1 --format json`
+
+Write review to .ai/final_review.md.
+Write status.json: outcome=success if complete and correct, outcome=fail with what's missing or broken."
+    ]
+
+    check_review [shape=diamond, label="Review OK?"]
+
+    // Flow
+    start -> expand_spec -> impl_setup -> verify_setup -> check_setup
+    check_setup -> impl_crawler       [condition="outcome=success"]
+    check_setup -> impl_setup         [condition="outcome=fail", label="retry"]
+
+    impl_crawler -> verify_crawler -> check_crawler
+    check_crawler -> impl_robots      [condition="outcome=success"]
+    check_crawler -> impl_crawler     [condition="outcome=fail", label="retry"]
+
+    impl_robots -> verify_robots -> check_robots
+    check_robots -> impl_checker      [condition="outcome=success"]
+    check_robots -> impl_robots       [condition="outcome=fail", label="retry"]
+
+    impl_checker -> verify_checker -> check_checker
+    check_checker -> impl_formatter   [condition="outcome=success"]
+    check_checker -> impl_checker     [condition="outcome=fail", label="retry"]
+
+    impl_formatter -> verify_formatter -> check_formatter
+    check_formatter -> impl_cli       [condition="outcome=success"]
+    check_formatter -> impl_formatter [condition="outcome=fail", label="retry"]
+
+    impl_cli -> verify_cli -> check_cli
+    check_cli -> impl_integration     [condition="outcome=success"]
+    check_cli -> impl_cli             [condition="outcome=fail", label="retry"]
+
+    impl_integration -> verify_integration -> check_integration
+    check_integration -> review       [condition="outcome=success"]
+    check_integration -> impl_integration [condition="outcome=fail", label="retry"]
+
+    review -> check_review
+    check_review -> exit              [condition="outcome=success"]
+    check_review -> impl_integration  [condition="outcome=fail", label="fix"]
+}

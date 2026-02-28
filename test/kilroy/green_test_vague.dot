@@ -1,0 +1,473 @@
+digraph solitaire {
+    graph [
+        goal="Build a terminal-based Klondike Solitaire game in Go with TUI",
+        rankdir=LR,
+        default_max_retry=3,
+        retry_target="impl_setup",
+        model_stylesheet="
+            * { llm_model: gpt-5.2-codex; llm_provider: openai; reasoning_effort: medium; }
+            .hard { llm_model: gpt-5.2-codex; llm_provider: openai; reasoning_effort: high; }
+            .verify { llm_model: gpt-5.2-codex; llm_provider: openai; reasoning_effort: medium; }
+            .review { llm_model: gpt-5.2-codex; llm_provider: openai; reasoning_effort: high; }
+        "
+    ]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Project setup
+    impl_setup [
+        shape=box,
+        timeout=600,
+        prompt="Read .ai/spec.md. Create Go project structure for solitaire game.
+
+Create:
+- go.mod with module name 'solitaire'
+- cmd/solitaire/main.go (stub with hello world)
+- pkg/game/ directory
+- pkg/ui/ directory
+- pkg/storage/ directory
+- README.md with brief description
+
+Run: go build ./...
+
+Write status.json: outcome=success if project builds, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_setup [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify project setup was completed correctly.
+
+Run:
+1. go build ./...
+2. go vet ./...
+3. Check that all required directories exist
+
+Write results to .ai/verify_setup.md.
+Write status.json: outcome=success if ALL pass, outcome=fail with details."
+    ]
+
+    check_setup [shape=diamond, label="Setup OK?"]
+
+    // Core types (cards and deck)
+    impl_core_types [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read .ai/spec.md sections on Game Logic and Package Structure.
+
+Implement card and deck types in pkg/game/:
+
+Create pkg/game/card.go with:
+- Card type (Rank, Suit)
+- Suit constants (Spades, Hearts, Diamonds, Clubs) with Unicode symbols
+- Rank constants (Ace through King)
+- String() method for card display
+- NewDeck() function that creates standard 52-card deck
+- Shuffle() method using crypto/rand for secure shuffling
+
+Create pkg/game/card_test.go with tests for:
+- Card string representation
+- Deck creation (52 unique cards)
+- Shuffle produces different order
+
+Acceptance:
+- go build ./...
+- go test ./pkg/game/
+
+Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_core_types [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify core card types implementation.
+
+Run:
+1. go build ./...
+2. go vet ./...
+3. go test ./pkg/game/ -v
+4. Check test coverage: go test -cover ./pkg/game/
+
+Write results to .ai/verify_core_types.md.
+Write status.json: outcome=success if ALL pass and coverage >70%, outcome=fail with details."
+    ]
+
+    check_core_types [shape=diamond, label="Types OK?"]
+
+    // Game logic
+    impl_game_logic [
+        shape=box,
+        class="hard",
+        timeout=1200,
+        max_retries=2,
+        prompt="Read .ai/spec.md sections on Game Logic and Core Features.
+Read pkg/game/card.go for Card and Deck types.
+
+Implement Klondike Solitaire game logic:
+
+Create pkg/game/game.go with:
+- Game struct with:
+  - Tableau (7 piles, [][]Card)
+  - Foundation (4 piles, [][]Card)
+  - Stock pile ([]Card)
+  - Waste pile ([]Card)
+  - Move history for undo
+- NewGame() initializes properly (7 tableau piles with 1-7 cards, stock gets rest)
+- IsWon() checks if all cards in foundations
+- GetValidMoves() returns legal moves from current state
+
+Create pkg/game/move.go with:
+- Move type (source, destination, card count)
+- MoveType constants (TableauToTableau, TableauToFoundation, WasteToTableau, etc.)
+- ValidateMove() checks Klondike rules:
+  - Tableau: descending rank, alternating colors
+  - Foundation: ascending rank, same suit, starts with Ace
+  - Kings only to empty tableau
+- ExecuteMove() applies move and updates game state
+- UndoMove() reverts last move
+
+Create pkg/game/game_test.go with tests for:
+- Game initialization (correct card distribution)
+- Move validation (legal and illegal moves)
+- Move execution and undo
+- Win detection
+
+Acceptance:
+- go build ./...
+- go test ./pkg/game/ -v (all tests pass)
+
+Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_game_logic [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify game logic implementation.
+
+Run:
+1. go build ./...
+2. go vet ./...
+3. go test ./pkg/game/ -v
+4. go test -cover ./pkg/game/ (check for >80% coverage)
+
+Write results to .ai/verify_game_logic.md.
+Write status.json: outcome=success if ALL pass with good coverage, outcome=fail with details."
+    ]
+
+    check_game_logic [shape=diamond, label="Logic OK?"]
+
+    // UI Rendering
+    impl_ui_render [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read .ai/spec.md sections on User Interface and Input/Output.
+Read pkg/game/game.go and pkg/game/card.go for game state types.
+
+Implement TUI rendering using bubbletea framework:
+
+First, add dependencies:
+- go get github.com/charmbracelet/bubbletea
+- go get github.com/charmbracelet/lipgloss
+
+Create pkg/ui/render.go with:
+- RenderGame() function that takes Game state and returns formatted string
+- Display layout: foundations (top), tableau (middle), stock/waste (bottom)
+- Card display: face-up shows rank+suit, face-down shows \"##\"
+- Highlight selected pile/card
+- Status line showing move count and messages
+
+Create pkg/ui/tui.go with:
+- model struct embedding Game and UI state (selected pile, cursor position)
+- Init() bubbletea init function
+- Update() stub (minimal, just quit on 'q')
+- View() calls RenderGame()
+
+Create basic test in pkg/ui/render_test.go for RenderGame output format.
+
+Acceptance:
+- go build ./...
+- go test ./pkg/ui/
+
+Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_ui_render [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify UI rendering implementation.
+
+Run:
+1. go build ./...
+2. go vet ./...
+3. go test ./pkg/ui/ -v
+4. Check that bubbletea dependency is properly added to go.mod
+
+Write results to .ai/verify_ui_render.md.
+Write status.json: outcome=success if ALL pass, outcome=fail with details."
+    ]
+
+    check_ui_render [shape=diamond, label="Render OK?"]
+
+    // UI Input
+    impl_ui_input [
+        shape=box,
+        class="hard",
+        timeout=1200,
+        max_retries=2,
+        prompt="Read .ai/spec.md section on User Interface keyboard navigation.
+Read pkg/game/game.go, pkg/game/move.go for game operations.
+Read pkg/ui/tui.go for existing model struct.
+
+Implement keyboard input handling:
+
+Update pkg/ui/tui.go:
+- Extend model with:
+  - selectedPile (which pile is selected)
+  - selectedCardIndex (which card in pile)
+  - message (for feedback)
+- Update() handles:
+  - Arrow keys / hjkl for navigation
+  - Space/Enter to select source, then destination (execute move)
+  - 'd' to draw from stock
+  - 'u' to undo
+  - 'n' for new game
+  - 'q' to quit
+- Call game.ValidateMove() before executing
+- Show feedback messages for invalid moves
+- Detect and display win condition
+
+Create pkg/ui/input.go with helper functions for input processing.
+
+Update cmd/solitaire/main.go to:
+- Create new game
+- Initialize bubbletea program with TUI model
+- Run program
+
+Acceptance:
+- go build ./cmd/solitaire
+- Binary runs and displays game (manual check)
+- All keyboard controls work (manual check)
+
+Write status.json: outcome=success if builds and runs, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_ui_input [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify UI input handling.
+
+Run:
+1. go build ./...
+2. go vet ./...
+3. go test ./...
+4. go build ./cmd/solitaire
+5. Check that binary exists at ./cmd/solitaire/solitaire
+
+Write results to .ai/verify_ui_input.md.
+Write status.json: outcome=success if ALL pass and binary exists, outcome=fail with details."
+    ]
+
+    check_ui_input [shape=diamond, label="Input OK?"]
+
+    // Persistence
+    impl_persistence [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read .ai/spec.md section on Game State Management and Input/Output.
+Read pkg/game/game.go for Game struct.
+
+Implement save/load functionality:
+
+Create pkg/storage/save.go with:
+- SaveGame(game *Game, filename string) error
+  - Serialize game state to JSON
+  - Write to file
+- LoadGame(filename string) (*Game, error)
+  - Read from file
+  - Deserialize JSON to Game struct
+  - Validate loaded state
+- Make sure Game struct fields are exported for JSON marshaling
+
+Update cmd/solitaire/main.go to:
+- Add --load flag
+- Add 's' key to save game
+- Auto-save on quit (to .solitaire-save.json)
+- Load on startup if save exists
+
+Create pkg/storage/save_test.go with:
+- Test save/load cycle
+- Test invalid file handling
+
+Acceptance:
+- go build ./...
+- go test ./pkg/storage/
+- Manual test: save game, quit, restart with --load
+
+Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_persistence [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify persistence implementation.
+
+Run:
+1. go build ./...
+2. go vet ./...
+3. go test ./pkg/storage/ -v
+4. go test ./... (all tests)
+
+Write results to .ai/verify_persistence.md.
+Write status.json: outcome=success if ALL pass, outcome=fail with details."
+    ]
+
+    check_persistence [shape=diamond, label="Persist OK?"]
+
+    // Integration and polish
+    impl_integration [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read .ai/spec.md for full acceptance criteria.
+Read all existing code to understand current state.
+
+Polish and integrate the complete solitaire game:
+
+Tasks:
+1. Add command-line flags:
+   - --draw (1 or 3 cards, default 3)
+   - --seed (for reproducible games)
+   - --load (load saved game)
+2. Add statistics display on quit (moves, time)
+3. Improve error messages and user feedback
+4. Add help screen ('h' or '?' key)
+5. Ensure all tests pass
+6. Update README.md with build instructions and how to play
+
+Create integration test that:
+- Initializes game
+- Executes a sequence of moves
+- Verifies game state
+- Tests save/load cycle
+
+Acceptance:
+- go build ./...
+- go test ./...
+- go vet ./...
+- ./cmd/solitaire/solitaire runs successfully
+- All keyboard commands work
+- Game is winnable
+
+Write status.json: outcome=success if all criteria pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_integration [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify integration and completeness.
+
+Run:
+1. go build ./...
+2. go vet ./...
+3. go test ./... -v
+4. go test -cover ./...
+5. go build ./cmd/solitaire
+6. Test all command-line flags work
+7. Verify README exists and has instructions
+
+Write results to .ai/verify_integration.md.
+Write status.json: outcome=success if ALL pass, outcome=fail with details."
+    ]
+
+    check_integration [shape=diamond, label="Integration OK?"]
+
+    // Final review
+    review [
+        shape=box,
+        class="review",
+        timeout=600,
+        goal_gate=true,
+        prompt="Read .ai/spec.md in full.
+Review the complete solitaire implementation against all requirements.
+
+Verify:
+1. Core Gameplay:
+   - Game initializes correctly (proper card distribution)
+   - All legal moves accepted
+   - All illegal moves rejected
+   - Win condition works
+2. User Experience:
+   - Full keyboard control
+   - Clear display
+   - Undo works
+   - Save/load works
+3. Code Quality:
+   - go build ./... succeeds
+   - go test ./... succeeds
+   - go vet ./... clean
+   - Test coverage >80% for pkg/game/
+4. Binary Works:
+   - Runs with ./cmd/solitaire/solitaire
+   - All features functional
+   - Can complete a game
+
+Run full test suite and manual gameplay check.
+
+Write comprehensive review to .ai/final_review.md.
+Write status.json: outcome=success if COMPLETE per spec, outcome=fail with specific missing items."
+    ]
+
+    check_review [shape=diamond, label="Review OK?"]
+
+    // Wire up the graph
+    start -> impl_setup
+    impl_setup -> verify_setup
+    verify_setup -> check_setup
+    check_setup -> impl_core_types      [condition="outcome=success"]
+    check_setup -> impl_setup           [condition="outcome=fail", label="retry"]
+
+    impl_core_types -> verify_core_types
+    verify_core_types -> check_core_types
+    check_core_types -> impl_game_logic [condition="outcome=success"]
+    check_core_types -> impl_core_types [condition="outcome=fail", label="retry"]
+
+    impl_game_logic -> verify_game_logic
+    verify_game_logic -> check_game_logic
+    check_game_logic -> impl_ui_render [condition="outcome=success"]
+    check_game_logic -> impl_game_logic [condition="outcome=fail", label="retry"]
+
+    impl_ui_render -> verify_ui_render
+    verify_ui_render -> check_ui_render
+    check_ui_render -> impl_ui_input   [condition="outcome=success"]
+    check_ui_render -> impl_ui_render  [condition="outcome=fail", label="retry"]
+
+    impl_ui_input -> verify_ui_input
+    verify_ui_input -> check_ui_input
+    check_ui_input -> impl_persistence [condition="outcome=success"]
+    check_ui_input -> impl_ui_input    [condition="outcome=fail", label="retry"]
+
+    impl_persistence -> verify_persistence
+    verify_persistence -> check_persistence
+    check_persistence -> impl_integration [condition="outcome=success"]
+    check_persistence -> impl_persistence [condition="outcome=fail", label="retry"]
+
+    impl_integration -> verify_integration
+    verify_integration -> check_integration
+    check_integration -> review         [condition="outcome=success"]
+    check_integration -> impl_integration [condition="outcome=fail", label="retry"]
+
+    review -> check_review
+    check_review -> exit                [condition="outcome=success"]
+    check_review -> impl_integration    [condition="outcome=fail", label="fix"]
+}

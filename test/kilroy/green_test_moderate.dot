@@ -1,0 +1,592 @@
+digraph linkcheck {
+    graph [
+        goal="Build a Go CLI tool that crawls URLs, checks links for HTTP status, and reports broken links with robots.txt support",
+        rankdir=LR,
+        default_max_retry=3,
+        retry_target="impl_setup",
+        model_stylesheet="
+            * { llm_model: gpt-5.2-codex; llm_provider: openai; reasoning_effort: medium; }
+            .hard { llm_model: gpt-5.2-codex; llm_provider: openai; reasoning_effort: high; }
+            .verify { llm_model: gpt-5.2-codex; llm_provider: openai; reasoning_effort: medium; }
+            .review { llm_model: gpt-5.2-codex; llm_provider: openai; reasoning_effort: high; }
+        "
+    ]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Phase 1: Requirements expansion
+    expand_spec [
+        shape=box,
+        timeout=600,
+        prompt="Given the requirements: Build a Go CLI tool called 'linkcheck' that takes a URL as input, crawls the page, finds all links, checks each link for HTTP status, and outputs a report of broken links (4xx/5xx). It should respect robots.txt, have a configurable crawl depth (default 1), and output in both human-readable and JSON formats.
+
+Expand this into a detailed spec covering:
+- CLI interface (flags, arguments, usage)
+- Package structure (cmd/, pkg/)
+- Core types and interfaces (URL, Link, Report, etc.)
+- Robots.txt parsing and compliance
+- HTTP client configuration (timeouts, retries)
+- Crawl algorithm (depth limits, visited tracking)
+- Link extraction from HTML
+- Status code categorization (2xx=ok, 4xx/5xx=broken)
+- Output formats (human-readable table, JSON)
+- Error handling strategy
+- Test plan for each component
+
+Write the expanded spec to .ai/spec.md.
+
+Write status.json: outcome=success"
+    ]
+
+    // Phase 2: Project setup
+    impl_setup [
+        shape=box,
+        timeout=600,
+        max_retries=2,
+        prompt="Read .ai/spec.md.
+
+Create the Go project structure:
+- go.mod (module name: linkcheck)
+- cmd/linkcheck/main.go (stub with basic CLI parsing)
+- pkg/crawler/ directory
+- pkg/robotstxt/ directory
+- pkg/checker/ directory
+- pkg/report/ directory
+
+Run: go build ./...
+
+Write status.json: outcome=success if the project builds, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_setup [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify project setup.
+
+Run:
+1. go build ./...
+2. go vet ./...
+
+Check that:
+- go.mod exists with correct module name
+- cmd/linkcheck/main.go exists
+- pkg/ directories are created
+
+Write results to .ai/verify_setup.md.
+Write status.json: outcome=success if all checks pass, outcome=fail with details otherwise."
+    ]
+
+    check_setup [shape=diamond, label="Setup OK?"]
+
+    // Phase 3: Core types and interfaces
+    impl_types [
+        shape=box,
+        timeout=900,
+        max_retries=2,
+        prompt="Read .ai/spec.md.
+
+Implement core types and interfaces per the spec.
+
+Create pkg/crawler/types.go with:
+- URL type
+- Link type (URL, source, depth, status code)
+- CrawlConfig struct (max depth, user agent, timeout)
+- Crawler interface
+
+Create pkg/report/types.go with:
+- Report struct (total links, broken links, results slice)
+- LinkResult struct (URL, status, error)
+- Formatter interface
+
+Include comprehensive documentation for all exported types.
+
+Run: go build ./...
+
+Write status.json: outcome=success if builds, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_types [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify core types implementation.
+
+Run:
+1. go build ./...
+2. go vet ./...
+
+Check that:
+- pkg/crawler/types.go defines all required types
+- pkg/report/types.go defines report types
+- All types have godoc comments
+- No compilation errors
+
+Write results to .ai/verify_types.md.
+Write status.json: outcome=success if all pass, outcome=fail with details otherwise."
+    ]
+
+    check_types [shape=diamond, label="Types OK?"]
+
+    // Phase 4: Robots.txt parser
+    impl_robotstxt [
+        shape=box,
+        class="hard",
+        timeout=1200,
+        max_retries=2,
+        prompt="Read .ai/spec.md section on robots.txt compliance.
+
+Implement robots.txt parser in pkg/robotstxt/:
+- parser.go: Parse robots.txt files per RFC 9309
+- matcher.go: Check if a URL is allowed for a given user-agent
+- cache.go: Cache parsed robots.txt files to avoid repeated fetches
+
+Handle:
+- User-agent matching (specific agent, wildcards, default *)
+- Allow/Disallow rules with path matching
+- Crawl-delay directive
+- Missing robots.txt (allow all)
+- Malformed robots.txt (be permissive)
+
+Create pkg/robotstxt/parser_test.go with tests for:
+- Various robots.txt formats
+- User-agent matching
+- Path matching edge cases
+
+Read: pkg/crawler/types.go for interfaces.
+
+Run: go test ./pkg/robotstxt/...
+
+Write status.json: outcome=success if all tests pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_robotstxt [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify robots.txt parser implementation.
+
+Run:
+1. go build ./...
+2. go vet ./pkg/robotstxt/...
+3. go test ./pkg/robotstxt/... -v
+
+Check test coverage:
+4. go test ./pkg/robotstxt/... -cover
+
+Write results to .ai/verify_robotstxt.md.
+Write status.json: outcome=success if all pass and coverage > 70%, outcome=fail with details otherwise."
+    ]
+
+    check_robotstxt [shape=diamond, label="Robots.txt OK?"]
+
+    // Phase 5: HTTP checker
+    impl_checker [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read .ai/spec.md section on HTTP checking.
+
+Implement HTTP link checker in pkg/checker/:
+- checker.go: Check URL status codes
+- Configure HTTP client with reasonable timeouts
+- Follow redirects (up to a limit)
+- Categorize status codes (2xx/3xx=ok, 4xx/5xx=broken)
+- Handle network errors gracefully
+- Support HEAD requests (fallback to GET if HEAD fails)
+
+Create pkg/checker/checker_test.go with:
+- Tests for various HTTP status codes
+- Mock HTTP server for testing
+- Timeout handling tests
+- Redirect handling tests
+
+Read: pkg/crawler/types.go for types.
+
+Run: go test ./pkg/checker/...
+
+Write status.json: outcome=success if all tests pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_checker [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify HTTP checker implementation.
+
+Run:
+1. go build ./...
+2. go vet ./pkg/checker/...
+3. go test ./pkg/checker/... -v
+
+Check:
+- Tests cover success, failure, and error cases
+- No race conditions: go test ./pkg/checker/... -race
+
+Write results to .ai/verify_checker.md.
+Write status.json: outcome=success if all pass, outcome=fail with details otherwise."
+    ]
+
+    check_checker [shape=diamond, label="Checker OK?"]
+
+    // Phase 6: HTML link extractor
+    impl_extractor [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read .ai/spec.md section on link extraction.
+
+Implement HTML link extractor in pkg/crawler/:
+- extractor.go: Parse HTML and extract all links
+- Find links in <a href>, <link href>, <img src>, <script src>
+- Convert relative URLs to absolute using base URL
+- Filter out non-http(s) schemes (mailto:, javascript:, etc.)
+- Handle malformed HTML gracefully
+- Use golang.org/x/net/html for parsing
+
+Create pkg/crawler/extractor_test.go with:
+- Tests for relative URL resolution
+- Tests for various HTML structures
+- Tests for malformed HTML
+- Tests for filtering non-http links
+
+Read: pkg/crawler/types.go for types.
+
+Run: go test ./pkg/crawler/...
+
+Write status.json: outcome=success if all tests pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_extractor [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify HTML extractor implementation.
+
+Run:
+1. go build ./...
+2. go vet ./pkg/crawler/...
+3. go test ./pkg/crawler/... -v
+
+Check:
+- All test cases pass
+- Relative URL conversion is correct
+- Non-http schemes are filtered
+
+Write results to .ai/verify_extractor.md.
+Write status.json: outcome=success if all pass, outcome=fail with details otherwise."
+    ]
+
+    check_extractor [shape=diamond, label="Extractor OK?"]
+
+    // Phase 7: Crawler algorithm
+    impl_crawler [
+        shape=box,
+        class="hard",
+        timeout=1500,
+        max_retries=2,
+        prompt="Read .ai/spec.md section on crawling algorithm.
+
+Implement the main crawler in pkg/crawler/:
+- crawler.go: Orchestrate crawling with depth limits
+- Track visited URLs to avoid cycles
+- Respect robots.txt using pkg/robotstxt
+- Extract links using extractor.go
+- Check each link using pkg/checker
+- Implement breadth-first crawl up to configured depth
+- Handle concurrent checking with rate limiting
+- Collect results into a report
+
+Key algorithm:
+1. Start with seed URL at depth 0
+2. Fetch and parse page
+3. Extract all links
+4. For each link:
+   - Check if allowed by robots.txt
+   - Check if already visited
+   - Check HTTP status
+   - If depth < max_depth and status ok, add to queue
+5. Continue until queue empty or max depth reached
+
+Create pkg/crawler/crawler_test.go with:
+- Tests for depth limiting
+- Tests for visited tracking
+- Tests for robots.txt integration
+- Mock HTTP responses for testing
+
+Read: pkg/crawler/types.go, pkg/crawler/extractor.go, pkg/robotstxt/, pkg/checker/ for dependencies.
+
+Run: go test ./pkg/crawler/...
+
+Write status.json: outcome=success if all tests pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_crawler [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify crawler implementation.
+
+Run:
+1. go build ./...
+2. go vet ./pkg/crawler/...
+3. go test ./pkg/crawler/... -v
+4. go test ./pkg/crawler/... -race
+
+Check:
+- Depth limiting works correctly
+- No infinite loops
+- Robots.txt is respected
+- No race conditions
+
+Write results to .ai/verify_crawler.md.
+Write status.json: outcome=success if all pass, outcome=fail with details otherwise."
+    ]
+
+    check_crawler [shape=diamond, label="Crawler OK?"]
+
+    // Phase 8: Output formatters
+    impl_report [
+        shape=box,
+        timeout=900,
+        max_retries=2,
+        prompt="Read .ai/spec.md section on output formats.
+
+Implement output formatters in pkg/report/:
+- formatter.go: Format interface
+- text.go: Human-readable table format showing broken links
+- json.go: JSON format with all details
+
+Human-readable format should show:
+- Summary: X total links, Y broken
+- Table of broken links: URL, Status Code, Source Page
+- Color coding (red for errors) if terminal supports it
+
+JSON format should output:
+- Structured data with all checked links
+- Status codes, timestamps, error messages
+- Easy to parse for automation
+
+Create pkg/report/formatter_test.go with:
+- Tests for both formats
+- Tests for empty results
+- Tests for large result sets
+
+Read: pkg/report/types.go for types.
+
+Run: go test ./pkg/report/...
+
+Write status.json: outcome=success if all tests pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_report [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify report formatting implementation.
+
+Run:
+1. go build ./...
+2. go vet ./pkg/report/...
+3. go test ./pkg/report/... -v
+
+Check:
+- Both text and JSON formats work
+- Output is properly formatted
+- All test cases pass
+
+Write results to .ai/verify_report.md.
+Write status.json: outcome=success if all pass, outcome=fail with details otherwise."
+    ]
+
+    check_report [shape=diamond, label="Report OK?"]
+
+    // Phase 9: CLI integration
+    impl_cli [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read .ai/spec.md section on CLI interface.
+
+Implement the CLI in cmd/linkcheck/main.go:
+- Use flag package for argument parsing
+- Required argument: URL to check
+- Optional flags:
+  --depth int (default 1): maximum crawl depth
+  --format string (default text): output format (text or json)
+  --user-agent string (default linkcheck/1.0): HTTP user agent
+  --timeout int (default 10): HTTP timeout in seconds
+  --verbose: enable verbose logging
+- Wire together: crawler, checker, robots.txt, formatter
+- Print results to stdout
+- Exit code 0 if no broken links, 1 if broken links found, 2 on error
+
+Usage example:
+  linkcheck https://example.com
+  linkcheck --depth 2 --format json https://example.com
+
+Read: all pkg/ directories for integration.
+
+Run: go build ./cmd/linkcheck
+
+Write status.json: outcome=success if builds, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_cli [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify CLI integration.
+
+Run:
+1. go build ./cmd/linkcheck
+2. ./cmd/linkcheck --help (check help text)
+3. Test with a real URL: ./cmd/linkcheck https://example.com
+4. Test JSON output: ./cmd/linkcheck --format json https://example.com
+5. Test depth flag: ./cmd/linkcheck --depth 0 https://example.com
+
+Check:
+- Binary builds successfully
+- Help text is clear
+- Flags work correctly
+- Output is properly formatted
+- Exit codes are correct
+
+Write results to .ai/verify_cli.md.
+Write status.json: outcome=success if all manual tests pass, outcome=fail with details otherwise."
+    ]
+
+    check_cli [shape=diamond, label="CLI OK?"]
+
+    // Phase 10: Integration tests
+    impl_integration [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read .ai/spec.md section on testing.
+
+Create integration tests in test/:
+- integration_test.go: End-to-end tests
+- Set up local HTTP test server with known structure
+- Create test pages with working and broken links
+- Create test robots.txt
+- Run linkcheck against test server
+- Verify correct broken links are detected
+- Test depth limiting
+- Test robots.txt compliance
+- Test both output formats
+
+Run: go test ./test/...
+
+Write status.json: outcome=success if integration tests pass, outcome=fail with failure_reason otherwise."
+    ]
+
+    verify_integration [
+        shape=box,
+        class="verify",
+        timeout=300,
+        goal_gate=true,
+        prompt="Verify integration tests.
+
+Run:
+1. go test ./test/... -v
+2. go test ./... (all tests)
+3. go build ./...
+
+Check:
+- All integration tests pass
+- All unit tests still pass
+- Project builds cleanly
+
+Write results to .ai/verify_integration.md.
+Write status.json: outcome=success if all pass, outcome=fail with details otherwise."
+    ]
+
+    check_integration [shape=diamond, label="Integration OK?"]
+
+    // Phase 11: Final review
+    review [
+        shape=box,
+        class="review",
+        timeout=600,
+        goal_gate=true,
+        prompt="Read .ai/spec.md.
+
+Perform final review of the complete linkcheck implementation:
+
+1. Verify all requirements are met:
+   - CLI takes URL as input
+   - Crawls pages and finds all links
+   - Checks each link for HTTP status
+   - Reports broken links (4xx/5xx)
+   - Respects robots.txt
+   - Configurable crawl depth (default 1)
+   - Outputs both human-readable and JSON formats
+
+2. Code quality:
+   - All packages have tests
+   - Code is well-documented
+   - Error handling is comprehensive
+   - No obvious bugs or race conditions
+
+3. Functionality:
+   - Run: go build ./cmd/linkcheck
+   - Test with real URLs
+   - Verify robots.txt compliance
+   - Verify depth limiting works
+   - Verify both output formats work
+
+4. Run complete test suite:
+   - go test ./...
+   - go vet ./...
+   - go build ./...
+
+Write detailed review to .ai/final_review.md.
+Write status.json: outcome=success if complete and working, outcome=fail with specific issues that need fixing."
+    ]
+
+    check_review [shape=diamond, label="Review OK?"]
+
+    // Graph flow
+    start -> expand_spec -> impl_setup -> verify_setup -> check_setup
+
+    check_setup -> impl_types           [condition="outcome=success"]
+    check_setup -> impl_setup           [condition="outcome=fail", label="retry"]
+
+    impl_types -> verify_types -> check_types
+    check_types -> impl_robotstxt       [condition="outcome=success"]
+    check_types -> impl_types           [condition="outcome=fail", label="retry"]
+
+    impl_robotstxt -> verify_robotstxt -> check_robotstxt
+    check_robotstxt -> impl_checker     [condition="outcome=success"]
+    check_robotstxt -> impl_robotstxt   [condition="outcome=fail", label="retry"]
+
+    impl_checker -> verify_checker -> check_checker
+    check_checker -> impl_extractor     [condition="outcome=success"]
+    check_checker -> impl_checker       [condition="outcome=fail", label="retry"]
+
+    impl_extractor -> verify_extractor -> check_extractor
+    check_extractor -> impl_crawler     [condition="outcome=success"]
+    check_extractor -> impl_extractor   [condition="outcome=fail", label="retry"]
+
+    impl_crawler -> verify_crawler -> check_crawler
+    check_crawler -> impl_report        [condition="outcome=success"]
+    check_crawler -> impl_crawler       [condition="outcome=fail", label="retry"]
+
+    impl_report -> verify_report -> check_report
+    check_report -> impl_cli            [condition="outcome=success"]
+    check_report -> impl_report         [condition="outcome=fail", label="retry"]
+
+    impl_cli -> verify_cli -> check_cli
+    check_cli -> impl_integration       [condition="outcome=success"]
+    check_cli -> impl_cli               [condition="outcome=fail", label="retry"]
+
+    impl_integration -> verify_integration -> check_integration
+    check_integration -> review         [condition="outcome=success"]
+    check_integration -> impl_integration [condition="outcome=fail", label="retry"]
+
+    review -> check_review
+    check_review -> exit                [condition="outcome=success"]
+    check_review -> impl_cli            [condition="outcome=fail", label="fix"]
+}

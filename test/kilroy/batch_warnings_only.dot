@@ -1,0 +1,6 @@
+digraph G {
+  start [shape=Mdiamond]
+  exit  [shape=Msquare]
+  work  [shape=box, llm_provider=openai, llm_model=gpt-5.2]
+  start -> work -> exit
+}

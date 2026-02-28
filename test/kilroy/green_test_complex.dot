@@ -1,0 +1,1075 @@
+digraph dttf {
+    graph [
+        goal="Build DTTF: a bitmap-to-TrueType font converter with custom quadratic Bezier tracer",
+        rankdir=LR,
+        default_max_retry=3,
+        retry_target="impl_setup",
+        model_stylesheet="
+            * { llm_model: gpt-5.2-codex; llm_provider: openai; reasoning_effort: medium; }
+            .hard { llm_model: gpt-5.2-codex; llm_provider: openai; reasoning_effort: high; }
+            .verify { llm_model: gpt-5.2-codex; llm_provider: openai; reasoning_effort: medium; }
+            .review { llm_model: gpt-5.2-codex; llm_provider: openai; reasoning_effort: high; }
+        "
+    ]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Project setup
+    impl_setup [
+        shape=box,
+        timeout=600,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md. Create Go project structure for DTTF.
+
+Create:
+- go.mod with module github.com/kilroy/dttf
+- cmd/dttf/main.go (stub that prints version)
+- pkg/dttf/ directory structure
+- .ai/implementation_plan.md documenting the build order
+
+Run: go build ./...
+
+Write status.json: outcome=success if project builds, outcome=fail with error otherwise."
+    ]
+
+    verify_setup [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify project setup.
+
+Run:
+1. go build ./...
+2. go vet ./...
+3. Check that go.mod exists with correct module path
+
+Write results to .ai/verify_setup.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_setup [shape=diamond, label="Setup OK?"]
+
+    // Core types and interfaces
+    impl_types [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md section 7 (Data Structures).
+
+Implement core types in pkg/dttf/types.go:
+- GlyphBitmap (codepoint, pixels, width, height)
+- Point (X, Y int16, OnCurve bool)
+- Contour (Points []Point)
+- TracedGlyph (codepoint, contours, metrics)
+- FontMetadata (family, style, units_per_em, ascender, descender)
+- Options, TraceOptions, RasterizeOptions structs
+
+Add comprehensive godoc comments. Include validation methods where appropriate.
+
+Run: go build ./... && go test ./pkg/dttf/...
+
+Write status.json: outcome=success if builds and tests pass, outcome=fail otherwise."
+    ]
+
+    verify_types [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify core types implementation.
+
+Run:
+1. go build ./...
+2. go vet ./...
+3. go test ./pkg/dttf/... -v
+4. Check that all types from section 7 are present
+
+Write results to .ai/verify_types.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_types [shape=diamond, label="Types OK?"]
+
+    // PNG loader and filename parser
+    impl_loader [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md sections 1.1-1.5 (Input format).
+
+Implement in pkg/dttf/loader.go:
+- LoadGlyphs(inputDir string) ([]GlyphBitmap, *FontMetadata, error)
+- ParseFilename(name string) (codepoint rune, ok bool)
+- LoadFontMetadata(dir string) (*FontMetadata, error)
+
+Handle:
+- PNG loading with image/png
+- Filename parsing (U+XXXX pattern, case-insensitive)
+- Optional font.json sidecar with defaults
+- Error handling per section 9
+
+Create tests in pkg/dttf/loader_test.go with sample PNGs.
+
+Run: go test ./pkg/dttf/... -run TestLoad
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_loader [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify PNG loader implementation.
+
+Run:
+1. go build ./...
+2. go test ./pkg/dttf/... -run TestLoad -v
+3. Check error handling for missing files
+4. Verify font.json defaults are applied
+
+Write results to .ai/verify_loader.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_loader [shape=diamond, label="Loader OK?"]
+
+    // Image processing (grayscale + threshold)
+    impl_imageproc [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md section 1.4 (Image Requirements).
+
+Implement in pkg/dttf/imageproc.go:
+- ToGrayscale(img image.Image) [][]uint8
+- Threshold(grayscale [][]uint8, threshold uint8) [][]bool
+- Helper functions for pixel format conversion
+
+Handle RGB/RGBA/Gray input formats. Output: row-major 2D arrays.
+
+Create tests with synthetic images and known thresholds.
+
+Run: go test ./pkg/dttf/... -run TestImage
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_imageproc [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify image processing implementation.
+
+Run:
+1. go test ./pkg/dttf/... -run TestImage -v
+2. Check grayscale conversion preserves intensity
+3. Check threshold produces binary output
+
+Write results to .ai/verify_imageproc.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_imageproc [shape=diamond, label="ImageProc OK?"]
+
+    // Tracer Phase 1: Path decomposition
+    impl_tracer_phase1 [
+        shape=box,
+        class="hard",
+        timeout=1800,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md section 3.2 Phase 1 (Path Decomposition).
+
+Implement in pkg/dttf/tracer/contour.go:
+- DecomposePaths(binary [][]bool) []RawPath
+- RawPath struct (points as pixel coordinates)
+- Contour-following algorithm on 1-bit raster
+- Separate outer contours from inner contours/counters
+
+This is complex boundary-tracing logic. Reference standard contour-following algorithms.
+
+Create tests with simple shapes (square, circle, letter O with counter).
+
+Run: go test ./pkg/dttf/tracer/... -run TestDecompose
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_tracer_phase1 [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify tracer phase 1 (path decomposition).
+
+Run:
+1. go test ./pkg/dttf/tracer/... -run TestDecompose -v
+2. Check that outer/inner contours are distinguished
+3. Verify closed paths return to origin
+
+Write results to .ai/verify_tracer_phase1.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_tracer_phase1 [shape=diamond, label="Phase1 OK?"]
+
+    // Tracer Phase 2: Optimal polygon
+    impl_tracer_phase2 [
+        shape=box,
+        class="hard",
+        timeout=1800,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md section 3.2 Phase 2 (Optimal Polygon).
+
+Implement in pkg/dttf/tracer/polygon.go:
+- OptimalPolygon(path RawPath) []PixelPoint
+- Convert pixel staircase to minimal straight-line segments
+- Preserve shape fidelity
+
+Use polygon approximation algorithm (Douglas-Peucker or similar).
+
+Create tests comparing input/output vertex counts.
+
+Run: go test ./pkg/dttf/tracer/... -run TestPolygon
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_tracer_phase2 [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify tracer phase 2 (optimal polygon).
+
+Run:
+1. go test ./pkg/dttf/tracer/... -run TestPolygon -v
+2. Check polygon has fewer points than raw path
+3. Verify shape is preserved
+
+Write results to .ai/verify_tracer_phase2.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_tracer_phase2 [shape=diamond, label="Phase2 OK?"]
+
+    // Tracer Phase 3: Quadratic Bezier fitting
+    impl_tracer_phase3 [
+        shape=box,
+        class="hard",
+        timeout=2400,
+        max_retries=3,
+        prompt="Read specs/dttf-v1.md section 3.2 Phase 3 (Quadratic Bezier Fitting).
+
+Implement in pkg/dttf/tracer/bezier.go:
+- FitQuadraticBezier(polygon []Point, tolerance float64) []Point
+- Quadratic curve fitting (NOT cubic)
+- Output: Points with OnCurve flags
+- Minimize point count while staying within tolerance
+
+This is the core tracer algorithm. Complex curve fitting math.
+
+Create tests with known curves.
+
+Run: go test ./pkg/dttf/tracer/... -run TestBezier
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_tracer_phase3 [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify tracer phase 3 (quadratic Bezier fitting).
+
+Run:
+1. go test ./pkg/dttf/tracer/... -run TestBezier -v
+2. Check output has OnCurve flags set correctly
+3. Verify curves are quadratic (TrueType format)
+
+Write results to .ai/verify_tracer_phase3.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_tracer_phase3 [shape=diamond, label="Phase3 OK?"]
+
+    // Tracer Phase 4: Font-specific optimization
+    impl_tracer_phase4 [
+        shape=box,
+        class="hard",
+        timeout=1800,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md section 3.2 Phase 4 (Font-Aware Optimization).
+
+Implement in pkg/dttf/tracer/optimize.go:
+- OptimizeForFont(contours []Contour, opts TraceOptions) []Contour
+- Insert points at extrema (required by OpenType)
+- Ensure correct winding direction (clockwise outer, CCW inner)
+- Remove self-intersections
+- Eliminate short segments (< 2 units)
+- Enforce max 1000 control points per glyph
+
+Create tests validating each constraint.
+
+Run: go test ./pkg/dttf/tracer/... -run TestOptimize
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_tracer_phase4 [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify tracer phase 4 (font optimization).
+
+Run:
+1. go test ./pkg/dttf/tracer/... -run TestOptimize -v
+2. Check winding direction is correct
+3. Verify no self-intersections
+4. Check point count cap
+
+Write results to .ai/verify_tracer_phase4.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_tracer_phase4 [shape=diamond, label="Phase4 OK?"]
+
+    // Coordinate mapping
+    impl_coordinates [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md section 3.3 (Coordinate Mapping).
+
+Implement in pkg/dttf/tracer/coordinates.go:
+- PixelToFontUnits(pixelX, pixelY, imageWidth, imageHeight, advanceWidth, ascender, descender int) (int16, int16)
+- FontUnitsToPixel (inverse for testing)
+
+Handle the coordinate system transformation. All output coordinates are integers.
+
+Create tests with known transformations.
+
+Run: go test ./pkg/dttf/tracer/... -run TestCoordinates
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_coordinates [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify coordinate mapping.
+
+Run:
+1. go test ./pkg/dttf/tracer/... -run TestCoordinates -v
+2. Check round-trip accuracy
+3. Verify integer output
+
+Write results to .ai/verify_coordinates.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_coordinates [shape=diamond, label="Coords OK?"]
+
+    // Main tracer integration
+    impl_tracer_main [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md section 4.2 (API Surface).
+
+Implement in pkg/dttf/tracer.go:
+- TraceGlyph(bitmap GlyphBitmap, opts TraceOptions) ([]Contour, error)
+- Integrate all 4 tracer phases plus coordinate mapping
+- Handle parallelization across glyphs (coordinate for later)
+
+Read types from pkg/dttf/types.go.
+Read phase implementations from pkg/dttf/tracer/*.go.
+
+Create integration tests.
+
+Run: go test ./pkg/dttf/... -run TestTrace
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_tracer_main [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify main tracer integration.
+
+Run:
+1. go test ./pkg/dttf/... -run TestTrace -v
+2. Check end-to-end: bitmap in, contours out
+3. Verify all phases are called
+
+Write results to .ai/verify_tracer_main.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_tracer_main [shape=diamond, label="Tracer OK?"]
+
+    // Metrics computation
+    impl_metrics [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md section 2.6 (Glyph Metrics).
+
+Implement in pkg/dttf/metrics.go:
+- ComputeMetrics(contours []Contour, opts Options) (advanceWidth uint16, lsb int16, bbox BoundingBox)
+- BoundingBox calculation from contour points
+- Advance width = bbox width + sidebearings
+- Sidebearing strategy per spec
+
+Create tests with known glyph shapes.
+
+Run: go test ./pkg/dttf/... -run TestMetrics
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_metrics [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify metrics computation.
+
+Run:
+1. go test ./pkg/dttf/... -run TestMetrics -v
+2. Check bounding box accuracy
+3. Verify sidebearing calculations
+
+Write results to .ai/verify_metrics.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_metrics [shape=diamond, label="Metrics OK?"]
+
+    // TrueType table builders
+    impl_tables [
+        shape=box,
+        class="hard",
+        timeout=2400,
+        max_retries=3,
+        prompt="Read specs/dttf-v1.md sections 2.2, 8.1-8.5 (TrueType Tables).
+
+Implement in pkg/dttf/ttf/:
+- BuildHeadTable(meta *FontMetadata) []byte
+- BuildMaxpTable(glyphs []TracedGlyph) []byte
+- BuildHheaTable(meta *FontMetadata, glyphs []TracedGlyph) []byte
+- BuildHmtxTable(glyphs []TracedGlyph) []byte
+- BuildOS2Table(meta *FontMetadata, glyphs []TracedGlyph) []byte
+- BuildNameTable(meta *FontMetadata) []byte
+- BuildPostTable() []byte (format 3.0)
+- BuildCmapTable(glyphs []TracedGlyph) []byte (format 4)
+- BuildGlyfTable(glyphs []TracedGlyph) []byte
+- BuildLocaTable(glyphOffsets []uint32) []byte
+- BuildGaspTable() []byte
+
+Each table builder is a separate function. Follow TrueType spec exactly.
+
+Create tests validating table structure.
+
+Run: go test ./pkg/dttf/ttf/... -v
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_tables [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify TrueType table builders.
+
+Run:
+1. go test ./pkg/dttf/ttf/... -v
+2. Check all 11 tables build without errors
+3. Verify checksums are computed correctly
+
+Write results to .ai/verify_tables.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_tables [shape=diamond, label="Tables OK?"]
+
+    // Font assembler
+    impl_assembler [
+        shape=box,
+        class="hard",
+        timeout=1800,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md sections 4.2, 8.1-8.3 (Font Assembly).
+
+Implement in pkg/dttf/assembler.go:
+- AssembleFont(glyphs []TracedGlyph, meta *FontMetadata) (*Font, error)
+- Font struct (table directory + table data)
+- Build all tables using pkg/dttf/ttf/* builders
+- Compute table checksums
+- Alphabetical table ordering
+- Offset table construction
+
+Run: go test ./pkg/dttf/... -run TestAssemble
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_assembler [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify font assembler.
+
+Run:
+1. go test ./pkg/dttf/... -run TestAssemble -v
+2. Check table directory is correct
+3. Verify offset calculations
+
+Write results to .ai/verify_assembler.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_assembler [shape=diamond, label="Assembler OK?"]
+
+    // Font writer
+    impl_writer [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md sections 4.2, 8.3 (File Writing).
+
+Implement in pkg/dttf/writer.go:
+- WriteFont(font *Font, outputPath string) error
+- Write offset table, table directory, table data
+- 4-byte padding
+- Compute head.checksumAdjustment: 0xB1B0AFBA - file_checksum
+
+Create tests writing to temp files.
+
+Run: go test ./pkg/dttf/... -run TestWrite
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_writer [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify font writer.
+
+Run:
+1. go test ./pkg/dttf/... -run TestWrite -v
+2. Check output file is valid binary
+3. Verify checksum calculation
+
+Write results to .ai/verify_writer.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_writer [shape=diamond, label="Writer OK?"]
+
+    // Pipeline integration
+    impl_pipeline [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md sections 4.2, 4.3 (Main Pipeline).
+
+Implement in pkg/dttf/dttf.go:
+- Build(inputDir string, outputPath string, opts Options) error
+- Integrate: LoadGlyphs -> TraceGlyph (parallel) -> ComputeMetrics -> AssembleFont -> WriteFont
+- Use goroutines for parallel glyph tracing
+
+Create end-to-end test with sample input directory.
+
+Run: go test ./pkg/dttf/... -run TestBuild
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_pipeline [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify main pipeline integration.
+
+Run:
+1. go test ./pkg/dttf/... -run TestBuild -v
+2. Check full pipeline: PNG dir -> .ttf file
+3. Verify parallelization works
+
+Write results to .ai/verify_pipeline.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_pipeline [shape=diamond, label="Pipeline OK?"]
+
+    // Validator
+    impl_validator [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md section 5.1 (Font Validity).
+
+Implement in pkg/dttf/validator.go:
+- Validate(fontPath string) (ValidityReport, error)
+- ValidityReport struct (checks + pass/fail)
+- Check: loadable by golang.org/x/image/font/sfnt
+- Check: contours closed
+- Check: correct winding direction
+- Check: no self-intersections
+- Check: points at extrema
+
+Create tests with valid and invalid fonts.
+
+Run: go test ./pkg/dttf/... -run TestValidate
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_validator [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify font validator.
+
+Run:
+1. go test ./pkg/dttf/... -run TestValidate -v
+2. Check that valid fonts pass all checks
+3. Check that invalid fonts fail appropriately
+
+Write results to .ai/verify_validator.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_validator [shape=diamond, label="Validator OK?"]
+
+    // Rasterizer
+    impl_rasterizer [
+        shape=box,
+        class="hard",
+        timeout=1800,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md section 11 (Rasterizer).
+
+Implement in pkg/dttf/rasterizer.go:
+- Rasterize(fontPath string, outputDir string, opts RasterizeOptions) error
+- Use golang.org/x/image/font/opentype for rendering
+- Charset selection (ASCII, all, chars, ranges)
+- Generate PNGs named per DTTF format
+- Write font.json with extracted metrics
+- Handle space glyph (U+0020) as white image
+
+Create tests with a simple font.
+
+Run: go test ./pkg/dttf/... -run TestRasterize
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_rasterizer [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify rasterizer implementation.
+
+Run:
+1. go test ./pkg/dttf/... -run TestRasterize -v
+2. Check PNG output format is correct
+3. Verify font.json is written
+
+Write results to .ai/verify_rasterizer.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_rasterizer [shape=diamond, label="Rasterizer OK?"]
+
+    // SSIM computation
+    impl_ssim [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md sections 5.2, 5.3 (SSIM Quality Metric).
+
+Implement in pkg/dttf/quality/ssim.go:
+- SSIM(img1, img2 image.Image) float64
+- Structural Similarity Index implementation
+- Window-based comparison
+- Return value 0.0-1.0
+
+Create tests with identical/different images.
+
+Run: go test ./pkg/dttf/quality/... -run TestSSIM
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_ssim [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify SSIM implementation.
+
+Run:
+1. go test ./pkg/dttf/quality/... -run TestSSIM -v
+2. Check identical images return 1.0
+3. Check different images return < 1.0
+
+Write results to .ai/verify_ssim.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_ssim [shape=diamond, label="SSIM OK?"]
+
+    // Test harness
+    impl_test_harness [
+        shape=box,
+        class="hard",
+        timeout=2400,
+        max_retries=3,
+        prompt="Read specs/dttf-v1.md section 6 (Test Harness).
+
+Implement in pkg/dttf/test/harness.go:
+- RoundTripTest(referenceFontPath string, opts TestOptions) (*TestReport, error)
+- TestReport struct (per-glyph scores, aggregate, failures)
+- Pipeline: render reference -> trace -> render output -> compute SSIM
+- Multi-scale testing (12, 16, 24, 48, 96 px)
+- Download reference fonts if needed
+
+Create tests with a known font.
+
+Run: go test ./pkg/dttf/test/... -run TestHarness
+
+Write status.json: outcome=success if tests pass, outcome=fail otherwise."
+    ]
+
+    verify_test_harness [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify test harness implementation.
+
+Run:
+1. go test ./pkg/dttf/test/... -run TestHarness -v
+2. Check round-trip completes
+3. Verify SSIM scores are computed
+
+Write results to .ai/verify_test_harness.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_test_harness [shape=diamond, label="Harness OK?"]
+
+    // CLI build command
+    impl_cli_build [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md section 12 (CLI Reference).
+
+Implement in cmd/dttf/build.go:
+- BuildCommand using a CLI framework (cobra or stdlib flag)
+- Flags: -o/--output, --family, --style, --units-per-em, --threshold, etc.
+- Call pkg/dttf.Build() with parsed options
+
+Update cmd/dttf/main.go to register command.
+
+Run: go build ./cmd/dttf && ./cmd/dttf build --help
+
+Write status.json: outcome=success if help displays, outcome=fail otherwise."
+    ]
+
+    verify_cli_build [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify CLI build command.
+
+Run:
+1. go build ./cmd/dttf
+2. ./cmd/dttf build --help
+3. Check all flags are present
+
+Write results to .ai/verify_cli_build.md.
+Write status.json: outcome=success if help works, outcome=fail with details."
+    ]
+
+    check_cli_build [shape=diamond, label="CLI Build OK?"]
+
+    // CLI rasterize command
+    impl_cli_rasterize [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md section 12 (CLI Reference).
+
+Implement in cmd/dttf/rasterize.go:
+- RasterizeCommand
+- Flags: -o/--output-dir, --ascii, --all, --chars, --range, --height
+- Call pkg/dttf.Rasterize() with parsed options
+
+Update cmd/dttf/main.go to register command.
+
+Run: go build ./cmd/dttf && ./cmd/dttf rasterize --help
+
+Write status.json: outcome=success if help displays, outcome=fail otherwise."
+    ]
+
+    verify_cli_rasterize [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify CLI rasterize command.
+
+Run:
+1. go build ./cmd/dttf
+2. ./cmd/dttf rasterize --help
+3. Check all flags are present
+
+Write results to .ai/verify_cli_rasterize.md.
+Write status.json: outcome=success if help works, outcome=fail with details."
+    ]
+
+    check_cli_rasterize [shape=diamond, label="CLI Rasterize OK?"]
+
+    // CLI validate command
+    impl_cli_validate [
+        shape=box,
+        timeout=900,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md section 12 (CLI Reference).
+
+Implement in cmd/dttf/validate.go:
+- ValidateCommand
+- Call pkg/dttf.Validate()
+- Exit 0 if valid, 1 if invalid
+
+Update cmd/dttf/main.go to register command.
+
+Run: go build ./cmd/dttf && ./cmd/dttf validate --help
+
+Write status.json: outcome=success if help displays, outcome=fail otherwise."
+    ]
+
+    verify_cli_validate [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify CLI validate command.
+
+Run:
+1. go build ./cmd/dttf
+2. ./cmd/dttf validate --help
+
+Write results to .ai/verify_cli_validate.md.
+Write status.json: outcome=success if help works, outcome=fail with details."
+    ]
+
+    check_cli_validate [shape=diamond, label="CLI Validate OK?"]
+
+    // CLI test command
+    impl_cli_test [
+        shape=box,
+        timeout=1200,
+        max_retries=2,
+        prompt="Read specs/dttf-v1.md section 12 (CLI Reference).
+
+Implement in cmd/dttf/test.go:
+- TestCommand
+- Flags: --reference, --reference-dir, --sizes, --threshold, --output-dir
+- Call pkg/dttf/test.RoundTripTest()
+- Handle single font or directory of fonts
+
+Update cmd/dttf/main.go to register command.
+
+Run: go build ./cmd/dttf && ./cmd/dttf test --help
+
+Write status.json: outcome=success if help displays, outcome=fail otherwise."
+    ]
+
+    verify_cli_test [
+        shape=box,
+        class="verify",
+        timeout=300,
+        prompt="Verify CLI test command.
+
+Run:
+1. go build ./cmd/dttf
+2. ./cmd/dttf test --help
+3. Check all flags are present
+
+Write results to .ai/verify_cli_test.md.
+Write status.json: outcome=success if help works, outcome=fail with details."
+    ]
+
+    check_cli_test [shape=diamond, label="CLI Test OK?"]
+
+    // Integration test
+    impl_integration [
+        shape=box,
+        class="hard",
+        timeout=2400,
+        max_retries=3,
+        goal_gate=true,
+        prompt="Read specs/dttf-v1.md sections 6.1-6.4 (Test Harness).
+
+Create integration test in test/integration_test.go:
+1. Download or use embedded simple reference font (e.g., Roboto subset)
+2. Run: dttf rasterize reference.ttf -o testdata/input/
+3. Run: dttf build testdata/input/ -o testdata/output.ttf
+4. Run: dttf validate testdata/output.ttf
+5. Run: dttf test --reference reference.ttf
+6. Check SSIM > 0.90
+
+This is an end-to-end test of the full pipeline.
+
+Run: go test ./test/... -v -timeout 5m
+
+Write status.json: outcome=success if all steps pass and SSIM > 0.90, outcome=fail with details."
+    ]
+
+    verify_integration [
+        shape=box,
+        class="verify",
+        timeout=600,
+        prompt="Verify integration test.
+
+Run:
+1. go test ./test/... -v -timeout 5m
+2. Check all pipeline stages completed
+3. Verify output font is valid
+4. Check SSIM threshold met
+
+Write results to .ai/verify_integration.md.
+Write status.json: outcome=success if all pass, outcome=fail with details."
+    ]
+
+    check_integration [shape=diamond, label="Integration OK?"]
+
+    // Final review
+    review [
+        shape=box,
+        class="review",
+        timeout=900,
+        goal_gate=true,
+        prompt="Read specs/dttf-v1.md in full.
+
+Review the complete DTTF implementation:
+1. Check all required components from spec are implemented
+2. Verify the 4-phase tracer produces quadratic Beziers
+3. Check all 11 TrueType tables are built correctly
+4. Verify CLI has all 4 commands (build, rasterize, validate, test)
+5. Check error handling per section 9
+6. Verify quality metrics (SSIM) are computed
+7. Run full test suite
+
+Run:
+1. go build ./...
+2. go test ./... -v
+3. go vet ./...
+
+Write a review report to .ai/review.md.
+Write status.json: outcome=success if complete and correct, outcome=fail with missing/broken items."
+    ]
+
+    check_review [shape=diamond, label="Review OK?"]
+
+    // Flow
+    start -> impl_setup -> verify_setup -> check_setup
+    check_setup -> impl_types         [condition="outcome=success"]
+    check_setup -> impl_setup          [condition="outcome=fail", label="retry"]
+
+    impl_types -> verify_types -> check_types
+    check_types -> impl_loader         [condition="outcome=success"]
+    check_types -> impl_types          [condition="outcome=fail", label="retry"]
+
+    impl_loader -> verify_loader -> check_loader
+    check_loader -> impl_imageproc     [condition="outcome=success"]
+    check_loader -> impl_loader        [condition="outcome=fail", label="retry"]
+
+    impl_imageproc -> verify_imageproc -> check_imageproc
+    check_imageproc -> impl_tracer_phase1    [condition="outcome=success"]
+    check_imageproc -> impl_imageproc        [condition="outcome=fail", label="retry"]
+
+    impl_tracer_phase1 -> verify_tracer_phase1 -> check_tracer_phase1
+    check_tracer_phase1 -> impl_tracer_phase2      [condition="outcome=success"]
+    check_tracer_phase1 -> impl_tracer_phase1      [condition="outcome=fail", label="retry"]
+
+    impl_tracer_phase2 -> verify_tracer_phase2 -> check_tracer_phase2
+    check_tracer_phase2 -> impl_tracer_phase3      [condition="outcome=success"]
+    check_tracer_phase2 -> impl_tracer_phase2      [condition="outcome=fail", label="retry"]
+
+    impl_tracer_phase3 -> verify_tracer_phase3 -> check_tracer_phase3
+    check_tracer_phase3 -> impl_tracer_phase4      [condition="outcome=success"]
+    check_tracer_phase3 -> impl_tracer_phase3      [condition="outcome=fail", label="retry"]
+
+    impl_tracer_phase4 -> verify_tracer_phase4 -> check_tracer_phase4
+    check_tracer_phase4 -> impl_coordinates        [condition="outcome=success"]
+    check_tracer_phase4 -> impl_tracer_phase4      [condition="outcome=fail", label="retry"]
+
+    impl_coordinates -> verify_coordinates -> check_coordinates
+    check_coordinates -> impl_tracer_main          [condition="outcome=success"]
+    check_coordinates -> impl_coordinates          [condition="outcome=fail", label="retry"]
+
+    impl_tracer_main -> verify_tracer_main -> check_tracer_main
+    check_tracer_main -> impl_metrics              [condition="outcome=success"]
+    check_tracer_main -> impl_tracer_main          [condition="outcome=fail", label="retry"]
+
+    impl_metrics -> verify_metrics -> check_metrics
+    check_metrics -> impl_tables                   [condition="outcome=success"]
+    check_metrics -> impl_metrics                  [condition="outcome=fail", label="retry"]
+
+    impl_tables -> verify_tables -> check_tables
+    check_tables -> impl_assembler                 [condition="outcome=success"]
+    check_tables -> impl_tables                    [condition="outcome=fail", label="retry"]
+
+    impl_assembler -> verify_assembler -> check_assembler
+    check_assembler -> impl_writer                 [condition="outcome=success"]
+    check_assembler -> impl_assembler              [condition="outcome=fail", label="retry"]
+
+    impl_writer -> verify_writer -> check_writer
+    check_writer -> impl_pipeline                  [condition="outcome=success"]
+    check_writer -> impl_writer                    [condition="outcome=fail", label="retry"]
+
+    impl_pipeline -> verify_pipeline -> check_pipeline
+    check_pipeline -> impl_validator               [condition="outcome=success"]
+    check_pipeline -> impl_pipeline                [condition="outcome=fail", label="retry"]
+
+    impl_validator -> verify_validator -> check_validator
+    check_validator -> impl_rasterizer             [condition="outcome=success"]
+    check_validator -> impl_validator              [condition="outcome=fail", label="retry"]
+
+    impl_rasterizer -> verify_rasterizer -> check_rasterizer
+    check_rasterizer -> impl_ssim                  [condition="outcome=success"]
+    check_rasterizer -> impl_rasterizer            [condition="outcome=fail", label="retry"]
+
+    impl_ssim -> verify_ssim -> check_ssim
+    check_ssim -> impl_test_harness                [condition="outcome=success"]
+    check_ssim -> impl_ssim                        [condition="outcome=fail", label="retry"]
+
+    impl_test_harness -> verify_test_harness -> check_test_harness
+    check_test_harness -> impl_cli_build           [condition="outcome=success"]
+    check_test_harness -> impl_test_harness        [condition="outcome=fail", label="retry"]
+
+    impl_cli_build -> verify_cli_build -> check_cli_build
+    check_cli_build -> impl_cli_rasterize          [condition="outcome=success"]
+    check_cli_build -> impl_cli_build              [condition="outcome=fail", label="retry"]
+
+    impl_cli_rasterize -> verify_cli_rasterize -> check_cli_rasterize
+    check_cli_rasterize -> impl_cli_validate       [condition="outcome=success"]
+    check_cli_rasterize -> impl_cli_rasterize      [condition="outcome=fail", label="retry"]
+
+    impl_cli_validate -> verify_cli_validate -> check_cli_validate
+    check_cli_validate -> impl_cli_test            [condition="outcome=success"]
+    check_cli_validate -> impl_cli_validate        [condition="outcome=fail", label="retry"]
+
+    impl_cli_test -> verify_cli_test -> check_cli_test
+    check_cli_test -> impl_integration             [condition="outcome=success"]
+    check_cli_test -> impl_cli_test                [condition="outcome=fail", label="retry"]
+
+    impl_integration -> verify_integration -> check_integration
+    check_integration -> review                    [condition="outcome=success"]
+    check_integration -> impl_integration          [condition="outcome=fail", label="retry"]
+
+    review -> check_review
+    check_review -> exit                           [condition="outcome=success"]
+    check_review -> impl_setup                     [condition="outcome=fail", label="fix from start"]
+}
