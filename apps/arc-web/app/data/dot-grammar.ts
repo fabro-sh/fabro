@@ -1,4 +1,4 @@
-import type { LanguageRegistration } from "shiki";
+import type { LanguageRegistration } from "@pierre/diffs";
 
 export const dotLanguage: LanguageRegistration = {
   name: "dot",

@@ -35,21 +35,6 @@
     radial-gradient(ellipse 80% 50% at 85% 90%, rgba(90, 200, 168, 0.07) 0%, transparent 45%);
   background-attachment: fixed;
 }
-/* ── Shiki syntax highlighting ── */
-
-.shiki-container pre.shiki {
-  background: transparent !important;
-  margin: 0;
-  padding: 1rem 1.25rem;
-  font-family: var(--font-mono);
-  font-size: 0.8125rem;
-  line-height: 1.7;
-}
-
-.shiki-container pre.shiki code {
-  font-family: inherit;
-}
-
 /* ── @pierre/diffs brand overrides ── */
 
 :root {
