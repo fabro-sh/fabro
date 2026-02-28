@@ -1,9 +1,12 @@
 use crate::config::SessionConfig;
 use crate::execution_env::GrepOptions;
 use crate::tool_registry::RegisteredTool;
+use std::borrow::Cow;
 use std::fmt::Write;
 use std::sync::Arc;
 use llm::types::ToolDefinition;
+
+const MAX_WEB_FETCH_BYTES: usize = 100 * 1024;
 
 pub(crate) fn required_str<'a>(args: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
     args.get(key)
@@ -431,14 +434,50 @@ pub(crate) fn make_web_fetch_tool() -> RegisteredTool {
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "URL to fetch"}
+                    "url": {"type": "string", "description": "URL to fetch (must be http:// or https://)"},
+                    "timeout_ms": {"type": "integer", "description": "Timeout in milliseconds (default 30000, max 60000)"}
                 },
                 "required": ["url"]
             }),
         },
-        executor: Arc::new(|_args, _env, _cancel| {
+        executor: Arc::new(|args, env, cancel| {
             Box::pin(async move {
-                Ok("Web fetch is not configured. This is a placeholder tool.".to_string())
+                let url = required_str(&args, "url")?;
+                let timeout_ms = args
+                    .get("timeout_ms")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(30_000)
+                    .min(60_000);
+
+                if !url.starts_with("http://") && !url.starts_with("https://") {
+                    return Err("URL must start with http:// or https://".to_string());
+                }
+
+                let timeout_secs = timeout_ms.div_ceil(1000);
+                let escaped_url = shell_escape::escape(Cow::Borrowed(url));
+                let command = format!(
+                    "curl -sL --max-time {timeout_secs} -H 'User-Agent: attractor-agent/0.1' {escaped_url}"
+                );
+
+                let result = env
+                    .exec_command(&command, timeout_ms, None, None, Some(cancel))
+                    .await?;
+
+                if result.exit_code != 0 {
+                    return Err(format!(
+                        "curl failed (exit code {}): {}",
+                        result.exit_code,
+                        result.stderr.trim()
+                    ));
+                }
+
+                let mut output = result.stdout;
+                if output.len() > MAX_WEB_FETCH_BYTES {
+                    output.truncate(MAX_WEB_FETCH_BYTES);
+                    output.push_str("\n\n[Output truncated at 100KB]");
+                }
+
+                Ok(output)
             })
         }),
     }
@@ -740,6 +779,128 @@ mod tests {
     fn format_brave_results_no_results() {
         let body = serde_json::json!({"web": {}});
         assert_eq!(format_brave_results(&body), "No results found.");
+    }
+
+    #[tokio::test]
+    async fn web_fetch_builds_curl_command() {
+        let tool = make_web_fetch_tool();
+        let env = Arc::new(MockExecutionEnvironment {
+            exec_result: ExecResult {
+                stdout: "<html>hello</html>".into(),
+                stderr: String::new(),
+                exit_code: 0,
+                timed_out: false,
+                duration_ms: 100,
+            },
+            ..Default::default()
+        });
+        let env_clone: Arc<dyn ExecutionEnvironment> = env.clone();
+        let result = (tool.executor)(
+            serde_json::json!({"url": "https://example.com"}),
+            env_clone,
+            CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(result.unwrap(), "<html>hello</html>");
+        let cmd = env.captured_command.lock().unwrap().clone().unwrap();
+        assert!(cmd.starts_with("curl -sL --max-time 30 "), "command should start with curl flags, got: {cmd}");
+        assert!(cmd.contains("https://example.com"), "command should contain the URL");
+        assert!(cmd.contains("User-Agent: attractor-agent/0.1"), "command should set user agent");
+    }
+
+    #[tokio::test]
+    async fn web_fetch_rejects_non_http_url() {
+        let tool = make_web_fetch_tool();
+        let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment::default());
+        let result = (tool.executor)(
+            serde_json::json!({"url": "ftp://example.com/file"}),
+            env,
+            CancellationToken::new(),
+        )
+        .await;
+        let err = result.unwrap_err();
+        assert!(err.contains("http://") || err.contains("https://"), "error should mention valid schemes, got: {err}");
+    }
+
+    #[tokio::test]
+    async fn web_fetch_timeout_flows_through() {
+        let tool = make_web_fetch_tool();
+        let env = Arc::new(MockExecutionEnvironment::default());
+        let env_clone: Arc<dyn ExecutionEnvironment> = env.clone();
+        let _result = (tool.executor)(
+            serde_json::json!({"url": "https://example.com", "timeout_ms": 15000}),
+            env_clone,
+            CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(*env.captured_timeout.lock().unwrap(), Some(15000));
+        let cmd = env.captured_command.lock().unwrap().clone().unwrap();
+        assert!(cmd.contains("--max-time 15"), "curl timeout should be 15 seconds, got: {cmd}");
+    }
+
+    #[tokio::test]
+    async fn web_fetch_timeout_capped_at_60s() {
+        let tool = make_web_fetch_tool();
+        let env = Arc::new(MockExecutionEnvironment::default());
+        let env_clone: Arc<dyn ExecutionEnvironment> = env.clone();
+        let _result = (tool.executor)(
+            serde_json::json!({"url": "https://example.com", "timeout_ms": 120000}),
+            env_clone,
+            CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(*env.captured_timeout.lock().unwrap(), Some(60000));
+        let cmd = env.captured_command.lock().unwrap().clone().unwrap();
+        assert!(cmd.contains("--max-time 60"), "curl timeout should be capped at 60 seconds, got: {cmd}");
+    }
+
+    #[tokio::test]
+    async fn web_fetch_truncates_large_output() {
+        let large_content = "x".repeat(150 * 1024);
+        let tool = make_web_fetch_tool();
+        let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment {
+            exec_result: ExecResult {
+                stdout: large_content,
+                stderr: String::new(),
+                exit_code: 0,
+                timed_out: false,
+                duration_ms: 100,
+            },
+            ..Default::default()
+        });
+        let result = (tool.executor)(
+            serde_json::json!({"url": "https://example.com"}),
+            env,
+            CancellationToken::new(),
+        )
+        .await;
+        let output = result.unwrap();
+        assert!(output.len() < 110 * 1024, "output should be truncated");
+        assert!(output.ends_with("[Output truncated at 100KB]"));
+    }
+
+    #[tokio::test]
+    async fn web_fetch_returns_error_on_nonzero_exit() {
+        let tool = make_web_fetch_tool();
+        let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment {
+            exec_result: ExecResult {
+                stdout: String::new(),
+                stderr: "curl: (6) Could not resolve host".into(),
+                exit_code: 6,
+                timed_out: false,
+                duration_ms: 100,
+            },
+            ..Default::default()
+        });
+        let result = (tool.executor)(
+            serde_json::json!({"url": "https://nonexistent.example.com"}),
+            env,
+            CancellationToken::new(),
+        )
+        .await;
+        let err = result.unwrap_err();
+        assert!(err.contains("exit code 6"), "error should contain exit code, got: {err}");
+        assert!(err.contains("Could not resolve host"), "error should contain stderr, got: {err}");
     }
 
     #[tokio::test]

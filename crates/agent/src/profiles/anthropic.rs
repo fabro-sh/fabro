@@ -7,7 +7,7 @@ use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{
     make_edit_file_tool, make_glob_tool, make_grep_tool, make_read_file_tool,
-    make_shell_tool_with_config, make_web_search_tool, make_write_file_tool,
+    make_shell_tool_with_config, make_web_fetch_tool, make_web_search_tool, make_write_file_tool,
 };
 
 use super::EnvContext;
@@ -32,6 +32,7 @@ impl AnthropicProfile {
         registry.register(make_grep_tool());
         registry.register(make_glob_tool());
         registry.register(make_web_search_tool());
+        registry.register(make_web_fetch_tool());
 
         Self {
             base: BaseProfile {
@@ -134,6 +135,9 @@ finding files rather than using shell find or ls commands.
 
 ## web_search
 Search the web using Brave Search. Returns titles, URLs, and descriptions.
+
+## web_fetch
+Fetch content from a URL. URLs must start with http:// or https://.
 
 # Coding Best Practices
 
@@ -244,6 +248,10 @@ mod tests {
             prompt.contains("web_search"),
             "prompt should contain web_search guidance"
         );
+        assert!(
+            prompt.contains("web_fetch"),
+            "prompt should contain web_fetch guidance"
+        );
     }
 
     #[test]
@@ -291,7 +299,7 @@ mod tests {
     fn anthropic_tools_registered() {
         let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
         let names = profile.tool_registry().names();
-        assert_eq!(names.len(), 7);
+        assert_eq!(names.len(), 8);
         assert!(names.contains(&"read_file".to_string()));
         assert!(names.contains(&"write_file".to_string()));
         assert!(names.contains(&"edit_file".to_string()));
@@ -299,6 +307,7 @@ mod tests {
         assert!(names.contains(&"grep".to_string()));
         assert!(names.contains(&"glob".to_string()));
         assert!(names.contains(&"web_search".to_string()));
+        assert!(names.contains(&"web_fetch".to_string()));
     }
 
     #[test]
@@ -348,7 +357,7 @@ mod tests {
         use std::sync::Arc;
 
         let mut profile = AnthropicProfile::new("claude-sonnet-4-20250514");
-        assert_eq!(profile.tool_registry().names().len(), 7);
+        assert_eq!(profile.tool_registry().names().len(), 8);
 
         let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(3)));
         let factory: SessionFactory = Arc::new(|| {
@@ -358,7 +367,7 @@ mod tests {
         profile.register_subagent_tools(manager, factory, 0);
 
         let names = profile.tool_registry().names();
-        assert_eq!(names.len(), 11, "should have 7 base + 4 subagent tools");
+        assert_eq!(names.len(), 12, "should have 8 base + 4 subagent tools");
         assert!(names.contains(&"spawn_agent".to_string()));
         assert!(names.contains(&"send_input".to_string()));
         assert!(names.contains(&"wait".to_string()));

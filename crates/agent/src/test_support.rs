@@ -31,6 +31,8 @@ pub struct MockExecutionEnvironment {
     pub written_files: Mutex<Vec<(String, String)>>,
     /// Captures the `timeout_ms` argument from `exec_command` calls.
     pub captured_timeout: Mutex<Option<u64>>,
+    /// Captures the `command` argument from `exec_command` calls.
+    pub captured_command: Mutex<Option<String>>,
     pub event_callback: Option<crate::execution_env::ExecEnvEventCallback>,
 }
 
@@ -72,6 +74,7 @@ impl Default for MockExecutionEnvironment {
             apply_read_offset_limit: false,
             written_files: Mutex::new(Vec::new()),
             captured_timeout: Mutex::new(None),
+            captured_command: Mutex::new(None),
             event_callback: None,
         }
     }
@@ -128,7 +131,7 @@ impl ExecutionEnvironment for MockExecutionEnvironment {
 
     async fn exec_command(
         &self,
-        _command: &str,
+        command: &str,
         timeout_ms: u64,
         _working_dir: Option<&str>,
         _env_vars: Option<&std::collections::HashMap<String, String>>,
@@ -138,6 +141,10 @@ impl ExecutionEnvironment for MockExecutionEnvironment {
             .captured_timeout
             .lock()
             .expect("captured_timeout lock poisoned") = Some(timeout_ms);
+        *self
+            .captured_command
+            .lock()
+            .expect("captured_command lock poisoned") = Some(command.to_string());
         Ok(self.exec_result.clone())
     }
 

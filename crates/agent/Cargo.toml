@@ -40,6 +40,7 @@ reqwest.workspace = true
 tokio-util.workspace = true
 dirs = "6"
 glob = "0.3"
+shell-escape = "0.1"
 bollard = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
 
