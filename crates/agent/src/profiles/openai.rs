@@ -1,13 +1,11 @@
+use crate::config::SessionConfig;
 use crate::execution_env::ExecutionEnvironment;
 use crate::profiles::assemble_system_prompt;
 use crate::profiles::BaseProfile;
 use crate::provider_profile::{ProfileCapabilities, ProviderProfile};
 use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
-use crate::tools::{
-    make_glob_tool, make_grep_tool, make_read_file_tool, make_shell_tool, make_web_fetch_tool,
-    make_web_search_tool, make_write_file_tool, WebFetchSummarizer,
-};
+use crate::tools::{register_core_tools, WebFetchSummarizer};
 use crate::v4a_patch::make_apply_patch_tool;
 
 use super::EnvContext;
@@ -25,16 +23,11 @@ impl OpenAiProfile {
 
     #[must_use]
     pub fn with_summarizer(model: impl Into<String>, summarizer: Option<WebFetchSummarizer>) -> Self {
+        let config = SessionConfig::default();
         let mut registry = ToolRegistry::new();
 
-        registry.register(make_read_file_tool());
-        registry.register(make_write_file_tool());
-        registry.register(make_shell_tool());
-        registry.register(make_grep_tool());
-        registry.register(make_glob_tool());
+        register_core_tools(&mut registry, &config, summarizer);
         registry.register(make_apply_patch_tool());
-        registry.register(make_web_search_tool());
-        registry.register(make_web_fetch_tool(summarizer));
 
         Self {
             base: BaseProfile {

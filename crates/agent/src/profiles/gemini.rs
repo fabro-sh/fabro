@@ -1,3 +1,4 @@
+use crate::config::SessionConfig;
 use crate::execution_env::ExecutionEnvironment;
 use crate::profiles::assemble_system_prompt;
 use crate::profiles::BaseProfile;
@@ -5,9 +6,8 @@ use crate::provider_profile::{ProfileCapabilities, ProviderProfile};
 use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{
-    make_edit_file_tool, make_glob_tool, make_grep_tool, make_list_dir_tool,
-    make_read_file_tool, make_read_many_files_tool, make_shell_tool, make_web_fetch_tool,
-    make_web_search_tool, make_write_file_tool, WebFetchSummarizer,
+    make_edit_file_tool, make_list_dir_tool, make_read_many_files_tool, register_core_tools,
+    WebFetchSummarizer,
 };
 
 use super::EnvContext;
@@ -24,18 +24,13 @@ impl GeminiProfile {
 
     #[must_use]
     pub fn with_summarizer(model: impl Into<String>, summarizer: Option<WebFetchSummarizer>) -> Self {
+        let config = SessionConfig::default();
         let mut registry = ToolRegistry::new();
 
-        registry.register(make_read_file_tool());
-        registry.register(make_read_many_files_tool());
-        registry.register(make_write_file_tool());
+        register_core_tools(&mut registry, &config, summarizer);
         registry.register(make_edit_file_tool());
-        registry.register(make_shell_tool());
-        registry.register(make_grep_tool());
-        registry.register(make_glob_tool());
+        registry.register(make_read_many_files_tool());
         registry.register(make_list_dir_tool());
-        registry.register(make_web_search_tool());
-        registry.register(make_web_fetch_tool(summarizer));
 
         Self {
             base: BaseProfile {

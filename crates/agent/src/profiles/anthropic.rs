@@ -5,11 +5,7 @@ use crate::profiles::BaseProfile;
 use crate::provider_profile::{ProfileCapabilities, ProviderProfile};
 use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
-use crate::tools::{
-    make_edit_file_tool, make_glob_tool, make_grep_tool, make_read_file_tool,
-    make_shell_tool_with_config, make_web_fetch_tool, make_web_search_tool, make_write_file_tool,
-    WebFetchSummarizer,
-};
+use crate::tools::{make_edit_file_tool, register_core_tools, WebFetchSummarizer};
 
 use super::EnvContext;
 
@@ -31,14 +27,8 @@ impl AnthropicProfile {
         };
         let mut registry = ToolRegistry::new();
 
-        registry.register(make_read_file_tool());
-        registry.register(make_write_file_tool());
+        register_core_tools(&mut registry, &config, summarizer);
         registry.register(make_edit_file_tool());
-        registry.register(make_shell_tool_with_config(&config));
-        registry.register(make_grep_tool());
-        registry.register(make_glob_tool());
-        registry.register(make_web_search_tool());
-        registry.register(make_web_fetch_tool(summarizer));
 
         Self {
             base: BaseProfile {

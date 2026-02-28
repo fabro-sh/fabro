@@ -35,6 +35,26 @@ fn html_to_markdown(text: &str) -> String {
     converter.convert(text).unwrap_or_else(|_| text.to_string())
 }
 
+/// Registers the core tools shared by all provider profiles: `read_file`, `write_file`,
+/// `shell`, `grep`, `glob`, `web_search`, and `web_fetch`.
+///
+/// The shell tool uses `config` to set its default and max timeouts. Pass a custom
+/// `SessionConfig` (e.g. with a longer `default_command_timeout_ms`) for providers
+/// that need non-default shell behavior.
+pub fn register_core_tools(
+    registry: &mut crate::tool_registry::ToolRegistry,
+    config: &SessionConfig,
+    summarizer: Option<WebFetchSummarizer>,
+) {
+    registry.register(make_read_file_tool());
+    registry.register(make_write_file_tool());
+    registry.register(make_shell_tool_with_config(config));
+    registry.register(make_grep_tool());
+    registry.register(make_glob_tool());
+    registry.register(make_web_search_tool());
+    registry.register(make_web_fetch_tool(summarizer));
+}
+
 pub(crate) fn required_str<'a>(args: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
     args.get(key)
         .and_then(|v| v.as_str())
@@ -57,7 +77,7 @@ pub fn make_read_file_tool() -> RegisteredTool {
                 "required": ["file_path"]
             }),
         },
-        executor: Arc::new(|args, env, _cancel| {
+        executor: Arc::new(|args, ctx| {
             Box::pin(async move {
                 let file_path = required_str(&args, "file_path")?;
                 let offset = args.get("offset").and_then(serde_json::Value::as_u64);
@@ -66,7 +86,7 @@ pub fn make_read_file_tool() -> RegisteredTool {
                 let offset_usize = offset.map(|v| v as usize);
                 let limit_usize = limit.map(|v| v as usize);
 
-                let content = env.read_file(file_path, offset_usize, limit_usize).await?;
+                let content = ctx.env.read_file(file_path, offset_usize, limit_usize).await?;
                 Ok(content)
             })
         }),

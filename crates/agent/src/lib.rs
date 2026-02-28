@@ -44,7 +44,7 @@ pub use subagent::{SubAgent, SubAgentEventCallback, SubAgentManager, SubAgentRes
 pub use tool_registry::ToolRegistry;
 pub use tools::{
     make_edit_file_tool, make_glob_tool, make_grep_tool, make_read_file_tool, make_shell_tool,
-    make_shell_tool_with_config, make_write_file_tool, WebFetchSummarizer,
+    make_shell_tool_with_config, make_write_file_tool, register_core_tools, WebFetchSummarizer,
 };
 pub use truncation::{truncate_lines, truncate_output, truncate_tool_output, TruncationMode};
 pub use types::{AgentEvent, SessionEvent, SessionState, Turn};
