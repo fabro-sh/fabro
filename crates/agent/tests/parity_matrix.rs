@@ -6,31 +6,33 @@ use agent::{
     Session, SessionConfig, SubAgentManager, WebFetchSummarizer,
 };
 use llm::client::Client;
+use llm::provider::{ModelId, Provider};
 
-fn build_summarizer(provider: &str, client: &Client) -> WebFetchSummarizer {
-    let (summarizer_model, provider_name) = match provider {
-        "openai" => ("gpt-4o-mini", Some("openai".to_string())),
-        "gemini" => ("gemini-2.0-flash", Some("gemini".to_string())),
-        _ => ("claude-haiku-4-5-20251001", None),
-    };
+fn summarizer_model_id(provider: Provider) -> ModelId {
+    match provider {
+        Provider::OpenAi => ModelId::new(Provider::OpenAi, "gpt-4o-mini"),
+        Provider::Gemini => ModelId::new(Provider::Gemini, "gemini-2.0-flash"),
+        Provider::Anthropic => ModelId::new(Provider::Anthropic, "claude-haiku-4-5-20251001"),
+    }
+}
+
+fn build_summarizer(provider: Provider, client: &Client) -> WebFetchSummarizer {
     WebFetchSummarizer {
         client: client.clone(),
-        model: summarizer_model.into(),
-        provider: provider_name,
+        model_id: summarizer_model_id(provider),
     }
 }
 
-fn build_profile(provider: &str, model: &str, client: &Client) -> Box<dyn ProviderProfile> {
+fn build_profile(provider: Provider, model: &str, client: &Client) -> Box<dyn ProviderProfile> {
     let summarizer = Some(build_summarizer(provider, client));
     match provider {
-        "anthropic" => Box::new(AnthropicProfile::with_summarizer(model, summarizer)),
-        "openai" => Box::new(OpenAiProfile::with_summarizer(model, summarizer)),
-        "gemini" => Box::new(GeminiProfile::with_summarizer(model, summarizer)),
-        _ => panic!("unknown provider: {provider}"),
+        Provider::Anthropic => Box::new(AnthropicProfile::with_summarizer(model, summarizer)),
+        Provider::OpenAi => Box::new(OpenAiProfile::with_summarizer(model, summarizer)),
+        Provider::Gemini => Box::new(GeminiProfile::with_summarizer(model, summarizer)),
     }
 }
 
-async fn make_session(provider: &str, model: &str, cwd: &Path) -> Session {
+async fn make_session(provider: Provider, model: &str, cwd: &Path) -> Session {
     dotenvy::dotenv().ok();
     let client = Client::from_env().await.expect("Client::from_env failed");
     let mut profile = build_profile(provider, model, &client);
@@ -39,31 +41,25 @@ async fn make_session(provider: &str, model: &str, cwd: &Path) -> Session {
     // Register subagent tools so spawn_agent / wait / send_input / close_agent are available
     let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(3)));
     let factory_client = client.clone();
-    let factory_provider: &str = provider;
     let factory_model: String = model.to_string();
     let factory_cwd = cwd.to_path_buf();
-    let factory: agent::subagent::SessionFactory = {
-        let provider = factory_provider.to_string();
-        let model = factory_model;
-        Arc::new(move || {
-            let sub_profile: Arc<dyn ProviderProfile> = {
-                let summarizer = Some(build_summarizer(&provider, &factory_client));
-                match provider.as_str() {
-                    "anthropic" => Arc::new(AnthropicProfile::with_summarizer(&model, summarizer)),
-                    "openai" => Arc::new(OpenAiProfile::with_summarizer(&model, summarizer)),
-                    "gemini" => Arc::new(GeminiProfile::with_summarizer(&model, summarizer)),
-                    _ => panic!("unknown provider: {provider}"),
-                }
-            };
-            let sub_env = Arc::new(LocalExecutionEnvironment::new(factory_cwd.clone()));
-            Session::new(
-                factory_client.clone(),
-                sub_profile,
-                sub_env,
-                SessionConfig::default(),
-            )
-        })
-    };
+    let factory: agent::subagent::SessionFactory = Arc::new(move || {
+        let sub_profile: Arc<dyn ProviderProfile> = {
+            let summarizer = Some(build_summarizer(provider, &factory_client));
+            match provider {
+                Provider::Anthropic => Arc::new(AnthropicProfile::with_summarizer(&factory_model, summarizer)),
+                Provider::OpenAi => Arc::new(OpenAiProfile::with_summarizer(&factory_model, summarizer)),
+                Provider::Gemini => Arc::new(GeminiProfile::with_summarizer(&factory_model, summarizer)),
+            }
+        };
+        let sub_env = Arc::new(LocalExecutionEnvironment::new(factory_cwd.clone()));
+        Session::new(
+            factory_client.clone(),
+            sub_profile,
+            sub_env,
+            SessionConfig::default(),
+        )
+    });
     profile.register_subagent_tools(manager, factory, 0);
 
     let profile: Arc<dyn ProviderProfile> = Arc::from(profile);
@@ -75,7 +71,7 @@ async fn make_session(provider: &str, model: &str, cwd: &Path) -> Session {
 }
 
 async fn make_session_with_config(
-    provider: &str,
+    provider: Provider,
     model: &str,
     cwd: &Path,
     config: SessionConfig,
@@ -94,7 +90,7 @@ macro_rules! provider_tests {
             #[ignore = "requires LLM API keys"]
             async fn [<anthropic_ $scenario>]() {
                 let tmp = tempfile::tempdir().expect("failed to create tempdir");
-                let mut session = make_session("anthropic", "claude-haiku-4-5-20251001", tmp.path()).await;
+                let mut session = make_session(Provider::Anthropic, "claude-haiku-4-5-20251001", tmp.path()).await;
                 session.initialize().await;
                 [<scenario_ $scenario>](&mut session, tmp.path()).await;
             }
@@ -103,7 +99,7 @@ macro_rules! provider_tests {
             #[ignore = "requires LLM API keys"]
             async fn [<openai_ $scenario>]() {
                 let tmp = tempfile::tempdir().expect("failed to create tempdir");
-                let mut session = make_session("openai", "gpt-4o-mini", tmp.path()).await;
+                let mut session = make_session(Provider::OpenAi, "gpt-4o-mini", tmp.path()).await;
                 session.initialize().await;
                 [<scenario_ $scenario>](&mut session, tmp.path()).await;
             }
@@ -112,7 +108,7 @@ macro_rules! provider_tests {
             #[ignore = "requires LLM API keys"]
             async fn [<gemini_ $scenario>]() {
                 let tmp = tempfile::tempdir().expect("failed to create tempdir");
-                let mut session = make_session("gemini", "gemini-2.5-flash", tmp.path()).await;
+                let mut session = make_session(Provider::Gemini, "gemini-2.5-flash", tmp.path()).await;
                 session.initialize().await;
                 [<scenario_ $scenario>](&mut session, tmp.path()).await;
             }
@@ -149,7 +145,7 @@ macro_rules! anthropic_gemini_tests {
             #[ignore = "requires LLM API keys"]
             async fn [<anthropic_ $scenario>]() {
                 let tmp = tempfile::tempdir().expect("failed to create tempdir");
-                let mut session = make_session("anthropic", "claude-haiku-4-5-20251001", tmp.path()).await;
+                let mut session = make_session(Provider::Anthropic, "claude-haiku-4-5-20251001", tmp.path()).await;
                 session.initialize().await;
                 [<scenario_ $scenario>](&mut session, tmp.path()).await;
             }
@@ -158,7 +154,7 @@ macro_rules! anthropic_gemini_tests {
             #[ignore = "requires LLM API keys"]
             async fn [<gemini_ $scenario>]() {
                 let tmp = tempfile::tempdir().expect("failed to create tempdir");
-                let mut session = make_session("gemini", "gemini-2.5-flash", tmp.path()).await;
+                let mut session = make_session(Provider::Gemini, "gemini-2.5-flash", tmp.path()).await;
                 session.initialize().await;
                 [<scenario_ $scenario>](&mut session, tmp.path()).await;
             }
@@ -340,9 +336,9 @@ macro_rules! reasoning_effort_tests {
     };
 }
 
-reasoning_effort_tests!("anthropic", "claude-haiku-4-5-20251001", anthropic_reasoning_effort);
+reasoning_effort_tests!(Provider::Anthropic, "claude-haiku-4-5-20251001", anthropic_reasoning_effort);
 // gpt-4o-mini does not support the reasoning.effort parameter, so no OpenAI test.
-reasoning_effort_tests!("gemini", "gemini-2.5-flash", gemini_reasoning_effort);
+reasoning_effort_tests!(Provider::Gemini, "gemini-2.5-flash", gemini_reasoning_effort);
 
 // ---------------------------------------------------------------------------
 // Scenario 12: subagent_spawn
@@ -383,9 +379,9 @@ macro_rules! loop_detection_tests {
     };
 }
 
-loop_detection_tests!("anthropic", "claude-haiku-4-5-20251001", anthropic_loop_detection);
-loop_detection_tests!("openai", "gpt-4o-mini", openai_loop_detection);
-loop_detection_tests!("gemini", "gemini-2.5-flash", gemini_loop_detection);
+loop_detection_tests!(Provider::Anthropic, "claude-haiku-4-5-20251001", anthropic_loop_detection);
+loop_detection_tests!(Provider::OpenAi, "gpt-4o-mini", openai_loop_detection);
+loop_detection_tests!(Provider::Gemini, "gemini-2.5-flash", gemini_loop_detection);
 
 // ---------------------------------------------------------------------------
 // Scenario 14: error_recovery

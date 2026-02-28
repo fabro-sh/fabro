@@ -1,4 +1,5 @@
 use crate::execution_env::ExecutionEnvironment;
+use llm::provider::Provider;
 
 const BUDGET_BYTES: usize = 32768;
 
@@ -6,15 +7,14 @@ pub async fn discover_project_docs(
     env: &dyn ExecutionEnvironment,
     git_root: &str,
     working_dir: &str,
-    provider_id: &str,
+    provider: Provider,
 ) -> Vec<String> {
     let directories = build_directory_walk(git_root, working_dir);
 
-    let candidate_filenames: Vec<&str> = match provider_id {
-        "anthropic" => vec!["AGENTS.md", "CLAUDE.md"],
-        "openai" => vec!["AGENTS.md", ".codex/instructions.md"],
-        "gemini" => vec!["AGENTS.md", "GEMINI.md"],
-        _ => vec!["AGENTS.md"],
+    let candidate_filenames: Vec<&str> = match provider {
+        Provider::Anthropic => vec!["AGENTS.md", "CLAUDE.md"],
+        Provider::OpenAi => vec!["AGENTS.md", ".codex/instructions.md"],
+        Provider::Gemini => vec!["AGENTS.md", "GEMINI.md"],
     };
 
     let mut results = Vec::new();
@@ -99,7 +99,7 @@ mod tests {
             files,
             ..Default::default()
         });
-        let docs = discover_project_docs(env.as_ref(), "/repo", "/repo", "anthropic").await;
+        let docs = discover_project_docs(env.as_ref(), "/repo", "/repo", Provider::Anthropic).await;
         assert_eq!(docs.len(), 1);
         assert_eq!(docs[0], "Agent instructions");
     }
@@ -120,7 +120,7 @@ mod tests {
             ..Default::default()
         });
         let anthropic_docs =
-            discover_project_docs(env.as_ref(), "/repo", "/repo", "anthropic").await;
+            discover_project_docs(env.as_ref(), "/repo", "/repo", Provider::Anthropic).await;
         assert_eq!(anthropic_docs.len(), 2);
         assert_eq!(anthropic_docs[0], "agents");
         assert_eq!(anthropic_docs[1], "claude");
@@ -129,7 +129,7 @@ mod tests {
             files: files.clone(),
             ..Default::default()
         });
-        let openai_docs = discover_project_docs(env.as_ref(), "/repo", "/repo", "openai").await;
+        let openai_docs = discover_project_docs(env.as_ref(), "/repo", "/repo", Provider::OpenAi).await;
         assert_eq!(openai_docs.len(), 2);
         assert_eq!(openai_docs[0], "agents");
         assert_eq!(openai_docs[1], "copilot");
@@ -138,7 +138,7 @@ mod tests {
             files,
             ..Default::default()
         });
-        let gemini_docs = discover_project_docs(env.as_ref(), "/repo", "/repo", "gemini").await;
+        let gemini_docs = discover_project_docs(env.as_ref(), "/repo", "/repo", Provider::Gemini).await;
         assert_eq!(gemini_docs.len(), 2);
         assert_eq!(gemini_docs[0], "agents");
         assert_eq!(gemini_docs[1], "gemini");
@@ -157,7 +157,7 @@ mod tests {
             files,
             ..Default::default()
         });
-        let docs = discover_project_docs(env.as_ref(), "/repo", "/repo", "anthropic").await;
+        let docs = discover_project_docs(env.as_ref(), "/repo", "/repo", Provider::Anthropic).await;
         assert_eq!(docs.len(), 2);
         assert_eq!(docs[0], large_content);
         // Second doc should be truncated to fit remaining budget
@@ -177,7 +177,7 @@ mod tests {
             ..Default::default()
         });
         let docs =
-            discover_project_docs(env.as_ref(), "/repo", "/repo/src/app", "anthropic").await;
+            discover_project_docs(env.as_ref(), "/repo", "/repo/src/app", Provider::Anthropic).await;
         assert_eq!(docs.len(), 3);
         assert_eq!(docs[0], "root agents");
         assert_eq!(docs[1], "src agents");

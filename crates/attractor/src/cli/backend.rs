@@ -9,6 +9,7 @@ use agent::{
     subagent::{SessionFactory, SubAgentManager},
 };
 use llm::client::Client;
+use llm::provider::Provider;
 use util::terminal::Styles;
 
 use crate::context::Context;
@@ -23,7 +24,7 @@ use crate::outcome::StageUsage;
 /// and reused so the LLM sees the full conversation history.
 pub struct AgentBackend {
     model: String,
-    provider: Option<String>,
+    provider: Provider,
     verbose: u8,
     styles: &'static Styles,
     sessions: Mutex<HashMap<String, Session>>,
@@ -33,7 +34,7 @@ impl AgentBackend {
     #[must_use]
     pub fn new(
         model: String,
-        provider: Option<String>,
+        provider: Provider,
         verbose: u8,
         styles: &'static Styles,
     ) -> Self {
@@ -69,17 +70,14 @@ impl AgentBackend {
 
         // Build factory that creates child sessions WITHOUT subagent tools
         let factory_client = client.clone();
-        let factory_provider = self.provider.clone();
+        let factory_provider = self.provider;
         let factory_model = self.model.clone();
         let factory_env = Arc::clone(execution_env);
         let factory: SessionFactory = Arc::new(move || {
-            let child_profile = {
-                let provider = factory_provider.as_deref().unwrap_or("anthropic");
-                match provider {
-                    "openai" => Arc::new(OpenAiProfile::new(&factory_model)) as Arc<dyn ProviderProfile>,
-                    "gemini" => Arc::new(GeminiProfile::new(&factory_model)) as Arc<dyn ProviderProfile>,
-                    _ => Arc::new(AnthropicProfile::new(&factory_model)) as Arc<dyn ProviderProfile>,
-                }
+            let child_profile: Arc<dyn ProviderProfile> = match factory_provider {
+                Provider::OpenAi => Arc::new(OpenAiProfile::new(&factory_model)),
+                Provider::Gemini => Arc::new(GeminiProfile::new(&factory_model)),
+                Provider::Anthropic => Arc::new(AnthropicProfile::new(&factory_model)),
             };
             Session::new(
                 factory_client.clone(),
@@ -101,11 +99,10 @@ impl AgentBackend {
     }
 
     fn build_profile(&self) -> Box<dyn ProviderProfile> {
-        let provider = self.provider.as_deref().unwrap_or("anthropic");
-        match provider {
-            "openai" => Box::new(OpenAiProfile::new(&self.model)),
-            "gemini" => Box::new(GeminiProfile::new(&self.model)),
-            _ => Box::new(AnthropicProfile::new(&self.model)),
+        match self.provider {
+            Provider::OpenAi => Box::new(OpenAiProfile::new(&self.model)),
+            Provider::Gemini => Box::new(GeminiProfile::new(&self.model)),
+            Provider::Anthropic => Box::new(AnthropicProfile::new(&self.model)),
         }
     }
 }
@@ -125,8 +122,8 @@ impl CodergenBackend for AgentBackend {
         let model = node.llm_model().unwrap_or(&self.model);
         let provider = node
             .llm_provider()
-            .or(self.provider.as_deref())
-            .map(String::from);
+            .map(String::from)
+            .or_else(|| Some(self.provider.as_str().to_string()));
 
         let request = llm::types::Request {
             model: model.to_string(),
@@ -413,7 +410,7 @@ impl CodergenBackend for AgentBackend {
 
         let provider_used = serde_json::json!({
             "mode": "agent_loop",
-            "provider": self.provider.as_deref().unwrap_or("anthropic"),
+            "provider": self.provider.as_str(),
             "model": &self.model,
         });
         if let Ok(json) = serde_json::to_string_pretty(&provider_used) {
@@ -459,12 +456,12 @@ mod tests {
         let styles = Box::leak(Box::new(Styles::new(false)));
         let backend = AgentBackend::new(
             "claude-opus-4-6".to_string(),
-            Some("openai".to_string()),
+            Provider::OpenAi,
             2,
             styles,
         );
         assert_eq!(backend.model, "claude-opus-4-6");
-        assert_eq!(backend.provider.as_deref(), Some("openai"));
+        assert_eq!(backend.provider, Provider::OpenAi);
         assert_eq!(backend.verbose, 2);
     }
 
@@ -473,7 +470,7 @@ mod tests {
         let styles = Box::leak(Box::new(Styles::new(false)));
         let backend = AgentBackend::new(
             "claude-opus-4-6".to_string(),
-            None,
+            Provider::Anthropic,
             0,
             styles,
         );
@@ -485,7 +482,7 @@ mod tests {
         let styles = Box::leak(Box::new(Styles::new(false)));
         let backend = AgentBackend::new(
             "claude-opus-4-6".to_string(),
-            None,
+            Provider::Anthropic,
             0,
             styles,
         );

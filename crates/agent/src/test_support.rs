@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use llm::client::Client;
 use llm::error::SdkError;
-use llm::provider::{ProviderAdapter, StreamEventStream};
+use llm::provider::{Provider, ProviderAdapter, StreamEventStream};
 use llm::types::{ContentPart, FinishReason, Message, Request, Response, StreamEvent, Usage};
 use tokio_util::sync::CancellationToken;
 
@@ -344,8 +344,8 @@ impl TestProfile {
 }
 
 impl ProviderProfile for TestProfile {
-    fn id(&self) -> &'static str {
-        "mock"
+    fn provider(&self) -> Provider {
+        Provider::Anthropic
     }
 
     fn model(&self) -> &'static str {
@@ -488,7 +488,9 @@ pub fn text_response(text: &str) -> Response {
 
 pub async fn make_client(provider: Arc<dyn ProviderAdapter>) -> Client {
     let mut providers = HashMap::new();
-    providers.insert(provider.name().to_string(), provider);
+    providers.insert(provider.name().to_string(), provider.clone());
+    // Also register under "anthropic" so TestProfile (Provider::Anthropic) routes correctly
+    providers.insert("anthropic".to_string(), provider);
     Client::new(providers, Some("mock".into()), vec![])
 }
 

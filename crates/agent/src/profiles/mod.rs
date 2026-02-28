@@ -9,13 +9,14 @@ pub use openai::OpenAiProfile;
 use crate::execution_env::ExecutionEnvironment;
 use crate::skills::{format_skills_prompt_section, Skill};
 use crate::tool_registry::ToolRegistry;
+use llm::provider::Provider;
 
 /// Common fields shared by all provider profiles.
 ///
-/// Each concrete profile embeds this struct and delegates `id()`, `model()`,
+/// Each concrete profile embeds this struct and delegates `provider()`, `model()`,
 /// `tool_registry()`, and `tool_registry_mut()` to it.
 pub struct BaseProfile {
-    pub id: &'static str,
+    pub provider: Provider,
     pub model: String,
     pub registry: ToolRegistry,
 }

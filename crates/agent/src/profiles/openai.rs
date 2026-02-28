@@ -7,6 +7,7 @@ use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{register_core_tools, WebFetchSummarizer};
 use crate::v4a_patch::make_apply_patch_tool;
+use llm::provider::Provider;
 
 use super::EnvContext;
 
@@ -31,7 +32,7 @@ impl OpenAiProfile {
 
         Self {
             base: BaseProfile {
-                id: "openai",
+                provider: Provider::OpenAi,
                 model: model.into(),
                 registry,
             },
@@ -45,8 +46,8 @@ impl OpenAiProfile {
 }
 
 impl ProviderProfile for OpenAiProfile {
-    fn id(&self) -> &str {
-        self.base.id
+    fn provider(&self) -> Provider {
+        self.base.provider
     }
 
     fn model(&self) -> &str {
@@ -194,7 +195,7 @@ mod tests {
     #[test]
     fn openai_profile_identity() {
         let profile = OpenAiProfile::new("o3-mini");
-        assert_eq!(profile.id(), "openai");
+        assert_eq!(profile.provider(), Provider::OpenAi);
         assert_eq!(profile.model(), "o3-mini");
     }
 

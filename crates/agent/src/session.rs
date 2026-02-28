@@ -82,7 +82,7 @@ impl Session {
             self.execution_env.as_ref(),
             &doc_root,
             self.execution_env.working_directory(),
-            self.provider_profile.id(),
+            self.provider_profile.provider(),
         )
         .await;
 
@@ -371,7 +371,7 @@ impl Session {
             // Call LLM (streaming) with retry for transient errors
             let retry_emitter = self.event_emitter.clone();
             let retry_session_id = self.id.clone();
-            let retry_provider = self.provider_profile.id().to_string();
+            let retry_provider = self.provider_profile.provider().as_str().to_string();
             let retry_model = self.provider_profile.model().to_string();
             let retry_policy = llm::types::RetryPolicy {
                 max_retries: 3,
@@ -612,7 +612,7 @@ impl Session {
         Request {
             model: self.provider_profile.model().to_string(),
             messages,
-            provider: Some(self.provider_profile.id().to_string()),
+            provider: Some(self.provider_profile.provider().as_str().to_string()),
             tools: if has_tools { Some(tools) } else { None },
             tool_choice: if has_tools {
                 Some(ToolChoice::Auto)

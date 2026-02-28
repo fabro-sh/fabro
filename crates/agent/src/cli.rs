@@ -5,6 +5,7 @@ use crate::{
 };
 use clap::{Parser, ValueEnum};
 use llm::client::Client;
+use llm::provider::{ModelId, Provider};
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -63,12 +64,11 @@ enum PermissionLevel {
     Full,
 }
 
-fn default_model(provider: &str) -> &'static str {
+fn default_model(provider: Provider) -> &'static str {
     match provider {
-        "openai" => "gpt-5.2-codex",
-        "gemini" => "gemini-3.1-pro-preview",
-        // anthropic and unknown providers
-        _ => "claude-opus-4-6",
+        Provider::OpenAi => "gpt-5.2-codex",
+        Provider::Gemini => "gemini-3.1-pro-preview",
+        Provider::Anthropic => "claude-opus-4-6",
     }
 }
 
@@ -142,44 +142,38 @@ fn build_tool_approval(
     })
 }
 
-fn build_summarizer(provider: &str, llm_client: Option<Client>) -> Option<crate::tools::WebFetchSummarizer> {
-    let client = llm_client?;
-    let model = match provider {
-        "openai" => "gpt-4o-mini",
-        "gemini" => "gemini-2.0-flash",
-        // anthropic and unknown providers
-        _ => "claude-haiku-4-5-20251001",
-    };
-    let provider_name = match provider {
-        "openai" => Some("openai".to_string()),
-        "gemini" => Some("gemini".to_string()),
-        _ => None,
-    };
-    Some(crate::tools::WebFetchSummarizer {
-        client,
-        model: model.into(),
-        provider: provider_name,
-    })
-}
-
-fn build_profile(provider: &str, model: &str, llm_client: Option<Client>) -> Box<dyn ProviderProfile> {
-    let summarizer = build_summarizer(provider, llm_client);
+fn summarizer_model_id(provider: Provider) -> ModelId {
     match provider {
-        "openai" => Box::new(OpenAiProfile::with_summarizer(model, summarizer)),
-        "gemini" => Box::new(GeminiProfile::with_summarizer(model, summarizer)),
-        // anthropic and unknown providers
-        _ => Box::new(AnthropicProfile::with_summarizer(model, summarizer)),
+        Provider::OpenAi => ModelId::new(Provider::OpenAi, "gpt-4o-mini"),
+        Provider::Gemini => ModelId::new(Provider::Gemini, "gemini-2.0-flash"),
+        Provider::Anthropic => ModelId::new(Provider::Anthropic, "claude-haiku-4-5-20251001"),
     }
 }
 
-fn validate_api_key(provider: &str) -> bool {
+fn build_summarizer(provider: Provider, llm_client: Option<Client>) -> Option<crate::tools::WebFetchSummarizer> {
+    let client = llm_client?;
+    Some(crate::tools::WebFetchSummarizer {
+        client,
+        model_id: summarizer_model_id(provider),
+    })
+}
+
+fn build_profile(provider: Provider, model: &str, llm_client: Option<Client>) -> Box<dyn ProviderProfile> {
+    let summarizer = build_summarizer(provider, llm_client);
     match provider {
-        "anthropic" => std::env::var("ANTHROPIC_API_KEY").is_ok(),
-        "openai" => std::env::var("OPENAI_API_KEY").is_ok(),
-        "gemini" => {
+        Provider::OpenAi => Box::new(OpenAiProfile::with_summarizer(model, summarizer)),
+        Provider::Gemini => Box::new(GeminiProfile::with_summarizer(model, summarizer)),
+        Provider::Anthropic => Box::new(AnthropicProfile::with_summarizer(model, summarizer)),
+    }
+}
+
+fn validate_api_key(provider: Provider) -> bool {
+    match provider {
+        Provider::Anthropic => std::env::var("ANTHROPIC_API_KEY").is_ok(),
+        Provider::OpenAi => std::env::var("OPENAI_API_KEY").is_ok(),
+        Provider::Gemini => {
             std::env::var("GEMINI_API_KEY").is_ok() || std::env::var("GOOGLE_API_KEY").is_ok()
         }
-        _ => false,
     }
 }
 
@@ -331,9 +325,12 @@ pub async fn run() -> anyhow::Result<()> {
     // Resolve color support once, leak to get 'static lifetime for use across threads
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
 
+    // Parse provider string to enum early for compile-time safety
+    let provider: Provider = cli.provider.parse().map_err(|e: String| anyhow::anyhow!("{e}"))?;
+
     // Validate provider API key
-    if !validate_api_key(&cli.provider) {
-        anyhow::bail!("API key not set for provider '{}'", cli.provider);
+    if !validate_api_key(provider) {
+        anyhow::bail!("API key not set for provider '{provider}'");
     }
 
     // Build LLM client
@@ -351,12 +348,12 @@ pub async fn run() -> anyhow::Result<()> {
     let model = cli
         .model
         .as_deref()
-        .unwrap_or_else(|| default_model(&cli.provider));
+        .unwrap_or_else(|| default_model(provider));
     eprintln!(
         "{}Using model: {model}{}",
         styles.dim, styles.reset,
     );
-    let mut profile = build_profile(&cli.provider, model, Some(client.clone()));
+    let mut profile = build_profile(provider, model, Some(client.clone()));
 
     // Build execution environment
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -379,16 +376,15 @@ pub async fn run() -> anyhow::Result<()> {
     ));
     let manager_for_callback = manager.clone();
     let factory_client = client.clone();
-    let factory_provider = cli.provider.clone();
     let factory_model = model.to_string();
     let factory_env = Arc::clone(&env);
     let factory_approval = config.tool_approval.clone();
     let factory: SessionFactory = Arc::new(move || {
-        let child_summarizer = build_summarizer(&factory_provider, Some(factory_client.clone()));
-        let child_profile: Arc<dyn ProviderProfile> = match factory_provider.as_str() {
-            "openai" => Arc::new(OpenAiProfile::with_summarizer(&factory_model, child_summarizer)),
-            "gemini" => Arc::new(GeminiProfile::with_summarizer(&factory_model, child_summarizer)),
-            _ => Arc::new(AnthropicProfile::with_summarizer(&factory_model, child_summarizer)),
+        let child_summarizer = build_summarizer(provider, Some(factory_client.clone()));
+        let child_profile: Arc<dyn ProviderProfile> = match provider {
+            Provider::OpenAi => Arc::new(OpenAiProfile::with_summarizer(&factory_model, child_summarizer)),
+            Provider::Gemini => Arc::new(GeminiProfile::with_summarizer(&factory_model, child_summarizer)),
+            Provider::Anthropic => Arc::new(AnthropicProfile::with_summarizer(&factory_model, child_summarizer)),
         };
         Session::new(
             factory_client.clone(),
@@ -526,6 +522,7 @@ pub async fn run() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use llm::provider::Provider;
     use serde_json::json;
 
     static NO_COLOR: Styles = Styles::new(false);
@@ -596,24 +593,17 @@ mod tests {
 
     #[test]
     fn default_model_anthropic() {
-        assert_eq!(default_model("anthropic"), "claude-opus-4-6");
+        assert_eq!(default_model(Provider::Anthropic), "claude-opus-4-6");
     }
 
     #[test]
     fn default_model_openai() {
-        assert_eq!(default_model("openai"), "gpt-5.2-codex");
+        assert_eq!(default_model(Provider::OpenAi), "gpt-5.2-codex");
     }
 
     #[test]
     fn default_model_gemini() {
-        assert_eq!(default_model("gemini"), "gemini-3.1-pro-preview");
-    }
-
-    // validate_api_key tests
-
-    #[test]
-    fn validate_api_key_unknown_provider() {
-        assert!(!validate_api_key("unknown"));
+        assert_eq!(default_model(Provider::Gemini), "gemini-3.1-pro-preview");
     }
 
     // build_tool_approval non-interactive tests
@@ -650,27 +640,27 @@ mod tests {
 
     #[test]
     fn build_profile_anthropic() {
-        let profile = build_profile("anthropic", "model", None);
-        assert_eq!(profile.id(), "anthropic");
+        let profile = build_profile(Provider::Anthropic, "model", None);
+        assert_eq!(profile.provider(), Provider::Anthropic);
     }
 
     #[test]
     fn build_profile_openai() {
-        let profile = build_profile("openai", "model", None);
-        assert_eq!(profile.id(), "openai");
+        let profile = build_profile(Provider::OpenAi, "model", None);
+        assert_eq!(profile.provider(), Provider::OpenAi);
     }
 
     #[test]
     fn build_profile_gemini() {
-        let profile = build_profile("gemini", "model", None);
-        assert_eq!(profile.id(), "gemini");
+        let profile = build_profile(Provider::Gemini, "model", None);
+        assert_eq!(profile.provider(), Provider::Gemini);
     }
 
     // subagent tool registration tests
 
     #[test]
     fn build_profile_can_register_subagent_tools() {
-        let mut profile = build_profile("anthropic", "model", None);
+        let mut profile = build_profile(Provider::Anthropic, "model", None);
         let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(1)));
         let factory: SessionFactory = Arc::new(|| {
             panic!("factory should not be called in this test");

@@ -2,6 +2,7 @@ use crate::config::SessionConfig;
 use crate::execution_env::GrepOptions;
 use crate::tool_registry::RegisteredTool;
 use llm::client::Client;
+use llm::provider::ModelId;
 use llm::types::{Message, Request, ToolDefinition};
 use std::borrow::Cow;
 use std::fmt::Write;
@@ -13,8 +14,7 @@ const MAX_WEB_FETCH_BYTES: usize = 100 * 1024;
 #[derive(Clone)]
 pub struct WebFetchSummarizer {
     pub client: Client,
-    pub model: String,
-    pub provider: Option<String>,
+    pub model_id: ModelId,
 }
 
 /// Returns true if the input looks like it contains HTML markup.
@@ -534,9 +534,9 @@ pub(crate) fn make_web_fetch_tool(summarizer: Option<WebFetchSummarizer>) -> Reg
                             "Content from {url}:\n---\n{content}\n---\n\n{user_prompt}\n\nRespond concisely based only on the content above."
                         );
                         let request = Request {
-                            model: s.model.clone(),
+                            model: s.model_id.model.clone(),
                             messages: vec![Message::user(summarization_prompt)],
-                            provider: s.provider.clone(),
+                            provider: Some(s.model_id.provider.as_str().to_string()),
                             tools: None,
                             tool_choice: None,
                             response_format: None,
@@ -549,7 +549,7 @@ pub(crate) fn make_web_fetch_tool(summarizer: Option<WebFetchSummarizer>) -> Reg
                             provider_options: None,
                         };
                         let response = s.client.complete(&request).await.map_err(|e| {
-                            format!("web_fetch summarization (model={}) failed: {e}", s.model)
+                            format!("web_fetch summarization (model={}) failed: {e}", s.model_id.model)
                         })?;
                         Ok(response.text())
                     }
@@ -984,8 +984,7 @@ mod tests {
         let client = make_client(provider).await;
         let summarizer = WebFetchSummarizer {
             client,
-            model: "mock-model".into(),
-            provider: None,
+            model_id: ModelId::new(llm::provider::Provider::Anthropic, "mock-model"),
         };
 
         let tool = make_web_fetch_tool(Some(summarizer));
@@ -1035,10 +1034,9 @@ mod tests {
     async fn web_fetch_summarizer_routes_to_specified_provider() {
         use crate::test_support::{MockErrorProvider, MockLlmProvider, text_response};
         use llm::error::{ProviderErrorDetail, ProviderErrorKind, SdkError};
-        use llm::provider::ProviderAdapter;
 
         // "other_provider" is the default — it rejects all requests.
-        let default_provider: Arc<dyn ProviderAdapter> = Arc::new(
+        let default_provider: Arc<dyn llm::provider::ProviderAdapter> = Arc::new(
             MockErrorProvider {
                 error: SdkError::Provider {
                     kind: ProviderErrorKind::NotFound,
@@ -1048,20 +1046,20 @@ mod tests {
                 },
             },
         );
-        // "target_provider" has the model we actually want.
-        let target_provider: Arc<dyn ProviderAdapter> = Arc::new(
+        // "anthropic" provider has the model we actually want.
+        let target_provider: Arc<dyn llm::provider::ProviderAdapter> = Arc::new(
             MockLlmProvider::new(vec![text_response("summarized content")]),
         );
 
         let mut providers = HashMap::new();
         providers.insert("other_provider".to_string(), default_provider);
-        providers.insert(target_provider.name().to_string(), target_provider);
+        // Register under "anthropic" so ModelId { provider: Anthropic, .. } routes here
+        providers.insert("anthropic".to_string(), target_provider);
         let client = Client::new(providers, Some("other_provider".into()), vec![]);
 
         let summarizer = WebFetchSummarizer {
             client,
-            model: "target-model".into(),
-            provider: Some("mock".into()),
+            model_id: ModelId::new(llm::provider::Provider::Anthropic, "target-model"),
         };
 
         let tool = make_web_fetch_tool(Some(summarizer));

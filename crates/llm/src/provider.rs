@@ -1,7 +1,87 @@
 use crate::error::SdkError;
 use crate::types::{Request, Response, StreamEvent, ToolChoice};
 use futures::Stream;
+use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::pin::Pin;
+use std::str::FromStr;
+
+// ---------------------------------------------------------------------------
+// Provider enum — compile-time safe provider identity
+// ---------------------------------------------------------------------------
+
+/// Known LLM provider variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Provider {
+    Anthropic,
+    OpenAi,
+    Gemini,
+}
+
+impl Provider {
+    /// Stable lowercase string representation used in `Request.provider`,
+    /// adapter names, and other serialization boundaries.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Anthropic => "anthropic",
+            Self::OpenAi => "openai",
+            Self::Gemini => "gemini",
+        }
+    }
+}
+
+impl fmt::Display for Provider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for Provider {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "anthropic" => Ok(Self::Anthropic),
+            "openai" | "open_ai" => Ok(Self::OpenAi),
+            "gemini" => Ok(Self::Gemini),
+            other => Err(format!("unknown provider: {other}")),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ModelId — bundles a provider with a model name
+// ---------------------------------------------------------------------------
+
+/// A model identifier that pairs a [`Provider`] with the provider-specific
+/// model name (e.g. `"claude-opus-4-6"` or `"gpt-4o-mini"`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ModelId {
+    pub provider: Provider,
+    pub model: String,
+}
+
+impl ModelId {
+    #[must_use]
+    pub fn new(provider: Provider, model: impl Into<String>) -> Self {
+        Self {
+            provider,
+            model: model.into(),
+        }
+    }
+}
+
+impl fmt::Display for ModelId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.provider, self.model)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProviderAdapter trait
+// ---------------------------------------------------------------------------
 
 /// Async stream of `StreamEvents` returned by streaming providers.
 pub type StreamEventStream =

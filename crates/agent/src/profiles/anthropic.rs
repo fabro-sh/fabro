@@ -6,6 +6,7 @@ use crate::provider_profile::{ProfileCapabilities, ProviderProfile};
 use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{make_edit_file_tool, register_core_tools, WebFetchSummarizer};
+use llm::provider::Provider;
 
 use super::EnvContext;
 
@@ -32,7 +33,7 @@ impl AnthropicProfile {
 
         Self {
             base: BaseProfile {
-                id: "anthropic",
+                provider: Provider::Anthropic,
                 model: model.into(),
                 registry,
             },
@@ -41,8 +42,8 @@ impl AnthropicProfile {
 }
 
 impl ProviderProfile for AnthropicProfile {
-    fn id(&self) -> &str {
-        self.base.id
+    fn provider(&self) -> Provider {
+        self.base.provider
     }
 
     fn model(&self) -> &str {
@@ -191,7 +192,7 @@ mod tests {
     #[test]
     fn anthropic_profile_identity() {
         let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
-        assert_eq!(profile.id(), "anthropic");
+        assert_eq!(profile.provider(), Provider::Anthropic);
         assert_eq!(profile.model(), "claude-sonnet-4-20250514");
     }
 

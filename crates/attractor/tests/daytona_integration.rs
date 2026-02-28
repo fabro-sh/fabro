@@ -20,6 +20,7 @@ use attractor::handler::exit::ExitHandler;
 use attractor::handler::start::StartHandler;
 use attractor::handler::{Handler, HandlerRegistry};
 use attractor::outcome::{Outcome, StageStatus};
+use llm::provider::Provider;
 
 async fn create_env() -> DaytonaExecutionEnvironment {
     dotenvy::dotenv().ok();
@@ -319,7 +320,7 @@ use attractor::handler::codergen::{CodergenBackend, CodergenResult};
 ///
 /// Installs the CLI tool in the sandbox, then runs the CliBackend against it.
 async fn run_daytona_cli_test(
-    provider: &str,
+    provider: Provider,
     model: &str,
     install_command: &str,
 ) {
@@ -338,7 +339,7 @@ async fn run_daytona_cli_test(
         install_result.exit_code, install_result.stdout
     );
 
-    let backend = CliBackend::new(model.to_string(), provider.to_string());
+    let backend = CliBackend::new(model.to_string(), provider);
     let node = Node::new("daytona_cli_test");
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::new());
@@ -392,7 +393,7 @@ async fn run_daytona_cli_test(
 #[ignore] // requires DAYTONA_API_KEY + Claude CLI auth
 async fn daytona_cli_claude() {
     run_daytona_cli_test(
-        "anthropic",
+        Provider::Anthropic,
         "haiku",
         "curl -fsSL https://claude.ai/install.sh | sh",
     )
@@ -403,7 +404,7 @@ async fn daytona_cli_claude() {
 #[ignore] // requires DAYTONA_API_KEY + OpenAI/Codex auth
 async fn daytona_cli_codex() {
     run_daytona_cli_test(
-        "openai",
+        Provider::OpenAi,
         "o4-mini",
         "npm install -g @openai/codex",
     )
@@ -414,7 +415,7 @@ async fn daytona_cli_codex() {
 #[ignore] // requires DAYTONA_API_KEY + Gemini auth
 async fn daytona_cli_gemini() {
     run_daytona_cli_test(
-        "gemini",
+        Provider::Gemini,
         "gemini-2.5-flash",
         "npm install -g @google/gemini-cli",
     )

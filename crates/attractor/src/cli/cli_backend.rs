@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use agent::ExecutionEnvironment;
 use async_trait::async_trait;
+use llm::provider::Provider;
 
 use crate::context::Context;
 use crate::error::AttractorError;
@@ -25,24 +26,23 @@ pub fn is_cli_only_model(model: &str) -> bool {
 /// The `prompt_file` is the path to a file containing the prompt text, which
 /// will be shell-redirected into the command's stdin.
 #[must_use]
-pub fn cli_command_for_provider(provider: &str, model: &str, prompt_file: &str) -> String {
+pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &str) -> String {
     let model_flag = if model.is_empty() {
         String::new()
     } else {
         match provider {
-            "openai" => format!(" -m {model}"),
-            "gemini" => format!(" -m {model}"),
-            _ => format!(" --model {model}"),
+            Provider::OpenAi | Provider::Gemini => format!(" -m {model}"),
+            Provider::Anthropic => format!(" --model {model}"),
         }
     };
     match provider {
         // --full-auto: sandboxed auto-execution, escalates on request
-        "openai" => format!("codex exec --json --full-auto{model_flag} < {prompt_file}"),
+        Provider::OpenAi => format!("codex exec --json --full-auto{model_flag} < {prompt_file}"),
         // --yolo: auto-approve all tool calls
-        "gemini" => format!("gemini -o json --yolo{model_flag} < {prompt_file}"),
+        Provider::Gemini => format!("gemini -o json --yolo{model_flag} < {prompt_file}"),
         // --dangerously-skip-permissions: bypass all permission checks (required for non-interactive use).
         // CLAUDECODE= unset to allow running inside a Claude Code session.
-        _ => format!("CLAUDECODE= claude -p --output-format stream-json --dangerously-skip-permissions{model_flag} < {prompt_file}"),
+        Provider::Anthropic => format!("CLAUDECODE= claude -p --output-format stream-json --dangerously-skip-permissions{model_flag} < {prompt_file}"),
     }
 }
 
@@ -170,23 +170,23 @@ fn parse_gemini_json(output: &str) -> Option<CliResponse> {
 }
 
 /// Parse CLI output, choosing the right parser based on provider.
-pub fn parse_cli_response(provider: &str, output: &str) -> Option<CliResponse> {
+pub fn parse_cli_response(provider: Provider, output: &str) -> Option<CliResponse> {
     match provider {
-        "openai" => parse_codex_ndjson(output),
-        "gemini" => parse_gemini_json(output),
-        _ => parse_claude_ndjson(output),
+        Provider::OpenAi => parse_codex_ndjson(output),
+        Provider::Gemini => parse_gemini_json(output),
+        Provider::Anthropic => parse_claude_ndjson(output),
     }
 }
 
 /// CLI backend that invokes external CLI tools (claude, codex, gemini) via `exec_command()`.
 pub struct CliBackend {
     model: String,
-    provider: String,
+    provider: Provider,
 }
 
 impl CliBackend {
     #[must_use]
-    pub fn new(model: String, provider: String) -> Self {
+    pub fn new(model: String, provider: Provider) -> Self {
         Self { model, provider }
     }
 
@@ -267,13 +267,16 @@ impl CodergenBackend for CliBackend {
 
         // 3. Build and execute CLI command
         let model = node.llm_model().unwrap_or(&self.model);
-        let provider = node.llm_provider().unwrap_or(&self.provider);
+        let provider = node
+            .llm_provider()
+            .and_then(|s| s.parse::<Provider>().ok())
+            .unwrap_or(self.provider);
         let command = cli_command_for_provider(provider, model, prompt_path);
 
         let _ = tokio::fs::create_dir_all(stage_dir).await;
         let provider_used = serde_json::json!({
             "mode": "cli",
-            "provider": provider,
+            "provider": provider.as_str(),
             "model": model,
             "command": &command,
         });
@@ -410,7 +413,7 @@ mod tests {
 
     #[test]
     fn cli_command_for_codex() {
-        let cmd = cli_command_for_provider("openai", "gpt-5.3-codex", "/tmp/prompt.txt");
+        let cmd = cli_command_for_provider(Provider::OpenAi, "gpt-5.3-codex", "/tmp/prompt.txt");
         assert!(cmd.starts_with("codex exec --json --full-auto"));
         assert!(cmd.contains("-m gpt-5.3-codex"));
         assert!(cmd.ends_with("< /tmp/prompt.txt"));
@@ -418,7 +421,7 @@ mod tests {
 
     #[test]
     fn cli_command_for_claude() {
-        let cmd = cli_command_for_provider("anthropic", "claude-opus-4-6", "/tmp/prompt.txt");
+        let cmd = cli_command_for_provider(Provider::Anthropic, "claude-opus-4-6", "/tmp/prompt.txt");
         assert!(cmd.contains("claude -p"));
         assert!(cmd.contains("--dangerously-skip-permissions"));
         assert!(cmd.contains("--output-format stream-json"));
@@ -427,27 +430,20 @@ mod tests {
 
     #[test]
     fn cli_command_for_gemini() {
-        let cmd = cli_command_for_provider("gemini", "gemini-3.1-pro", "/tmp/prompt.txt");
+        let cmd = cli_command_for_provider(Provider::Gemini, "gemini-3.1-pro", "/tmp/prompt.txt");
         assert!(cmd.starts_with("gemini -o json --yolo"));
         assert!(cmd.contains("-m gemini-3.1-pro"));
     }
 
     #[test]
-    fn cli_command_defaults_to_claude() {
-        let cmd = cli_command_for_provider("unknown_provider", "some-model", "/tmp/prompt.txt");
-        assert!(cmd.contains("claude "));
-        assert!(cmd.contains("--dangerously-skip-permissions"));
-    }
-
-    #[test]
     fn cli_command_omits_model_when_empty() {
-        let cmd = cli_command_for_provider("openai", "", "/tmp/prompt.txt");
+        let cmd = cli_command_for_provider(Provider::OpenAi, "", "/tmp/prompt.txt");
         assert!(cmd.starts_with("codex exec --json --full-auto"));
         assert!(!cmd.contains("-m "));
-        let cmd = cli_command_for_provider("anthropic", "", "/tmp/prompt.txt");
+        let cmd = cli_command_for_provider(Provider::Anthropic, "", "/tmp/prompt.txt");
         assert!(cmd.contains("--dangerously-skip-permissions"));
         assert!(!cmd.contains("--model "));
-        let cmd = cli_command_for_provider("gemini", "", "/tmp/prompt.txt");
+        let cmd = cli_command_for_provider(Provider::Gemini, "", "/tmp/prompt.txt");
         assert!(cmd.contains("--yolo"));
         assert!(!cmd.contains("-m "));
     }
@@ -468,7 +464,7 @@ mod tests {
         let output = r#"{"type":"system","message":"Claude CLI v1.0"}
 {"type":"assistant","message":{"content":"thinking..."}}
 {"type":"result","result":"Here is the implementation.","usage":{"input_tokens":100,"output_tokens":50}}"#;
-        let response = parse_cli_response("anthropic", output).unwrap();
+        let response = parse_cli_response(Provider::Anthropic, output).unwrap();
         assert_eq!(response.text, "Here is the implementation.");
         assert_eq!(response.input_tokens, 100);
         assert_eq!(response.output_tokens, 50);
@@ -478,7 +474,7 @@ mod tests {
     fn parse_claude_ndjson_uses_last_result() {
         let output = r#"{"type":"result","result":"first","usage":{"input_tokens":10,"output_tokens":5}}
 {"type":"result","result":"second","usage":{"input_tokens":20,"output_tokens":10}}"#;
-        let response = parse_cli_response("anthropic", output).unwrap();
+        let response = parse_cli_response(Provider::Anthropic, output).unwrap();
         assert_eq!(response.text, "second");
         assert_eq!(response.input_tokens, 20);
     }
@@ -487,13 +483,13 @@ mod tests {
     fn parse_claude_ndjson_returns_none_for_no_result() {
         let output = r#"{"type":"system","message":"hello"}
 {"type":"assistant","message":{"content":"no result line"}}"#;
-        assert!(parse_cli_response("anthropic", output).is_none());
+        assert!(parse_cli_response(Provider::Anthropic, output).is_none());
     }
 
     #[test]
     fn parse_gemini_json_extracts_text_and_usage() {
         let output = r#"{"session_id":"abc","response":"Gemini says hello","stats":{"models":{"gemini-2.5-flash":{"tokens":{"input":200,"candidates":80,"total":280}}}}}"#;
-        let response = parse_cli_response("gemini", output).unwrap();
+        let response = parse_cli_response(Provider::Gemini, output).unwrap();
         assert_eq!(response.text, "Gemini says hello");
         assert_eq!(response.input_tokens, 200);
         assert_eq!(response.output_tokens, 80);
@@ -502,7 +498,7 @@ mod tests {
     #[test]
     fn parse_gemini_json_handles_missing_stats() {
         let output = r#"{"response":"hello"}"#;
-        let response = parse_cli_response("gemini", output).unwrap();
+        let response = parse_cli_response(Provider::Gemini, output).unwrap();
         assert_eq!(response.text, "hello");
         assert_eq!(response.input_tokens, 0);
         assert_eq!(response.output_tokens, 0);
@@ -510,7 +506,7 @@ mod tests {
 
     #[test]
     fn parse_gemini_json_returns_none_for_invalid_json() {
-        assert!(parse_cli_response("gemini", "not json").is_none());
+        assert!(parse_cli_response(Provider::Gemini, "not json").is_none());
     }
 
     // -- Cycle 4: parse_cli_response — Codex NDJSON --
@@ -522,7 +518,7 @@ mod tests {
 {"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"thinking..."}}
 {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Fixed the bug."}}
 {"type":"turn.completed","usage":{"input_tokens":300,"output_tokens":150}}"#;
-        let response = parse_cli_response("openai", output).unwrap();
+        let response = parse_cli_response(Provider::OpenAi, output).unwrap();
         assert_eq!(response.text, "Fixed the bug.");
         assert_eq!(response.input_tokens, 300);
         assert_eq!(response.output_tokens, 150);
@@ -531,14 +527,14 @@ mod tests {
     #[test]
     fn parse_codex_ndjson_handles_no_message() {
         let output = r#"{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}"#;
-        let response = parse_cli_response("openai", output).unwrap();
+        let response = parse_cli_response(Provider::OpenAi, output).unwrap();
         assert_eq!(response.text, "");
         assert_eq!(response.input_tokens, 10);
     }
 
     #[test]
     fn parse_codex_ndjson_returns_none_for_no_events() {
-        assert!(parse_cli_response("openai", "not json at all").is_none());
+        assert!(parse_cli_response(Provider::OpenAi, "not json at all").is_none());
     }
 
     // -- Cycle 5: Node::backend() accessor (tested here since the accessor is simple) --
@@ -567,7 +563,7 @@ mod tests {
         node.attrs
             .insert("backend".to_string(), AttrValue::String("cli".to_string()));
 
-        let cli_backend = CliBackend::new("model".into(), "anthropic".into());
+        let cli_backend = CliBackend::new("model".into(), Provider::Anthropic);
         let router = BackendRouter::new(
             Box::new(StubBackend),
             cli_backend,
@@ -579,7 +575,7 @@ mod tests {
     fn router_uses_api_by_default() {
         let node = Node::new("test");
 
-        let cli_backend = CliBackend::new("model".into(), "anthropic".into());
+        let cli_backend = CliBackend::new("model".into(), Provider::Anthropic);
         let router = BackendRouter::new(
             Box::new(StubBackend),
             cli_backend,
@@ -595,7 +591,7 @@ mod tests {
             AttrValue::String("claude-opus-4-6".to_string()),
         );
 
-        let cli_backend = CliBackend::new("model".into(), "anthropic".into());
+        let cli_backend = CliBackend::new("model".into(), Provider::Anthropic);
         let router = BackendRouter::new(
             Box::new(StubBackend),
             cli_backend,

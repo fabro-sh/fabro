@@ -18,6 +18,8 @@ use crate::outcome::StageStatus;
 use crate::pipeline::PipelineBuilder;
 use crate::validation::Severity;
 
+use llm::provider::Provider;
+
 use super::backend::AgentBackend;
 use super::cli_backend::{BackendRouter, CliBackend};
 use super::task_config;
@@ -399,6 +401,14 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         None => (model, provider),
     };
 
+    // Parse provider string to enum (defaults to Anthropic)
+    let provider_enum: Provider = provider
+        .as_deref()
+        .map(|s| s.parse::<Provider>())
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .unwrap_or(Provider::Anthropic);
+
     // 7. Build engine
     let registry = default_registry(interviewer.clone(), || {
         if dry_run_mode {
@@ -406,13 +416,13 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         } else {
             let api = AgentBackend::new(
                 model.clone(),
-                provider.clone(),
+                provider_enum,
                 args.verbose,
                 styles,
             );
             let cli = CliBackend::new(
                 model.clone(),
-                provider.clone().unwrap_or_else(|| "anthropic".to_string()),
+                provider_enum,
             );
             Some(Box::new(BackendRouter::new(Box::new(api), cli)))
         }

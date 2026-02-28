@@ -7,6 +7,7 @@ use crate::subagent::{
 };
 use crate::tool_registry::ToolRegistry;
 use std::sync::Arc;
+use llm::provider::Provider;
 use llm::types::ToolDefinition;
 
 /// Static capabilities of a provider profile.
@@ -18,7 +19,7 @@ pub struct ProfileCapabilities {
 }
 
 pub trait ProviderProfile: Send + Sync {
-    fn id(&self) -> &str;
+    fn provider(&self) -> Provider;
     fn model(&self) -> &str;
     fn tool_registry(&self) -> &ToolRegistry;
     fn tool_registry_mut(&mut self) -> &mut ToolRegistry;
@@ -81,11 +82,12 @@ pub trait ProviderProfile: Send + Sync {
 mod tests {
     use super::*;
     use crate::test_support::{MockExecutionEnvironment, TestProfile};
+    use llm::provider::Provider;
 
     #[test]
-    fn profile_id_and_model() {
+    fn profile_provider_and_model() {
         let profile = TestProfile::new();
-        assert_eq!(profile.id(), "mock");
+        assert_eq!(profile.provider(), Provider::Anthropic);
         assert_eq!(profile.model(), "mock-model");
     }
 

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use llm::provider::Provider;
 use util::terminal::Styles;
 use tokio::net::TcpListener;
 
@@ -40,30 +41,37 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     };
 
     // Resolve model/provider defaults
-    let provider = args.provider;
-    let model = args.model.unwrap_or_else(|| match provider.as_deref() {
+    let provider_str = args.provider;
+    let model = args.model.unwrap_or_else(|| match provider_str.as_deref() {
         Some("openai") => "gpt-5.2".to_string(),
         Some("gemini") => "gemini-3.1-pro-preview".to_string(),
         _ => "claude-opus-4-6".to_string(),
     });
 
     // Resolve model alias through catalog
-    let (model, provider) = match llm::catalog::get_model_info(&model) {
-        Some(info) => (info.id, provider.or(Some(info.provider))),
-        None => (model, provider),
+    let (model, provider_str) = match llm::catalog::get_model_info(&model) {
+        Some(info) => (info.id, provider_str.or(Some(info.provider))),
+        None => (model, provider_str),
     };
+
+    // Parse provider string to enum (defaults to Anthropic)
+    let provider_enum: Provider = provider_str
+        .as_deref()
+        .map(|s| s.parse::<Provider>())
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .unwrap_or(Provider::Anthropic);
 
     // Build registry factory
     let factory = move |interviewer: Arc<dyn Interviewer>| {
         let model = model.clone();
-        let provider = provider.clone();
         default_registry(interviewer, move || {
             if dry_run_mode {
                 None
             } else {
                 Some(Box::new(AgentBackend::new(
                     model.clone(),
-                    provider.clone(),
+                    provider_enum,
                     0,
                     styles,
                 )))

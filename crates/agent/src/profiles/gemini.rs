@@ -9,6 +9,7 @@ use crate::tools::{
     make_edit_file_tool, make_list_dir_tool, make_read_many_files_tool, register_core_tools,
     WebFetchSummarizer,
 };
+use llm::provider::Provider;
 
 use super::EnvContext;
 
@@ -34,7 +35,7 @@ impl GeminiProfile {
 
         Self {
             base: BaseProfile {
-                id: "gemini",
+                provider: Provider::Gemini,
                 model: model.into(),
                 registry,
             },
@@ -43,8 +44,8 @@ impl GeminiProfile {
 }
 
 impl ProviderProfile for GeminiProfile {
-    fn id(&self) -> &str {
-        self.base.id
+    fn provider(&self) -> Provider {
+        self.base.provider
     }
 
     fn model(&self) -> &str {
@@ -221,7 +222,7 @@ mod tests {
     #[test]
     fn gemini_profile_identity() {
         let profile = GeminiProfile::new("gemini-2.0-flash");
-        assert_eq!(profile.id(), "gemini");
+        assert_eq!(profile.provider(), Provider::Gemini);
         assert_eq!(profile.model(), "gemini-2.0-flash");
     }
 
