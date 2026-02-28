@@ -43,6 +43,14 @@ impl OpenAiProfile {
     pub fn set_reasoning_effort(&mut self, effort: Option<String>) {
         self.reasoning_effort = effort;
     }
+
+    /// Override the provider identity (e.g. for Z.AI or Minimax, which use the
+    /// OpenAI Chat Completions protocol but route to different adapters).
+    #[must_use]
+    pub fn with_provider(mut self, provider: Provider) -> Self {
+        self.base.provider = provider;
+        self
+    }
 }
 
 impl ProviderProfile for OpenAiProfile {

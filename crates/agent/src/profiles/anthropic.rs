@@ -39,6 +39,14 @@ impl AnthropicProfile {
             },
         }
     }
+
+    /// Override the provider identity (e.g. for Kimi, which uses the Anthropic
+    /// Messages protocol but routes to a different adapter).
+    #[must_use]
+    pub fn with_provider(mut self, provider: Provider) -> Self {
+        self.base.provider = provider;
+        self
+    }
 }
 
 impl ProviderProfile for AnthropicProfile {

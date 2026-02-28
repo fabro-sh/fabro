@@ -73,6 +73,26 @@ impl Client {
             }
             client.register_provider(Arc::new(adapter)).await?;
         }
+        if let Ok(key) = std::env::var("KIMI_API_KEY") {
+            let adapter =
+                providers::OpenAiCompatibleAdapter::new(key, "https://api.moonshot.ai/v1")
+                    .with_name("kimi");
+            client.register_provider(Arc::new(adapter)).await?;
+        }
+        if let Ok(key) = std::env::var("ZAI_API_KEY") {
+            let adapter = providers::OpenAiCompatibleAdapter::new(
+                key,
+                "https://api.z.ai/api/coding/paas/v4",
+            )
+            .with_name("zai");
+            client.register_provider(Arc::new(adapter)).await?;
+        }
+        if let Ok(key) = std::env::var("MINIMAX_API_KEY") {
+            let adapter =
+                providers::OpenAiCompatibleAdapter::new(key, "https://api.minimax.io/v1")
+                    .with_name("minimax");
+            client.register_provider(Arc::new(adapter)).await?;
+        }
 
         Ok(client)
     }

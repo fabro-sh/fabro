@@ -62,7 +62,7 @@ mod tests {
     #[test]
     fn list_models_all() {
         let models = list_models(None);
-        assert_eq!(models.len(), 9);
+        assert_eq!(models.len(), 12);
     }
 
     #[test]
@@ -79,6 +79,31 @@ mod tests {
 
         let unknown = list_models(Some("unknown"));
         assert!(unknown.is_empty());
+    }
+
+    #[test]
+    fn kimi_k2_5_in_catalog() {
+        let m = get_model_info("kimi-k2.5").unwrap();
+        assert_eq!(m.provider, "kimi");
+        assert_eq!(m.max_output, Some(16000));
+        assert_eq!(m.context_window, 262144);
+    }
+
+    #[test]
+    fn kimi_alias() {
+        assert_eq!(get_model_info("kimi").unwrap().id, "kimi-k2.5");
+    }
+
+    #[test]
+    fn glm_4_7_in_catalog() {
+        let m = get_model_info("glm-4.7").unwrap();
+        assert_eq!(m.provider, "zai");
+    }
+
+    #[test]
+    fn minimax_m2_5_in_catalog() {
+        let m = get_model_info("minimax-m2.5").unwrap();
+        assert_eq!(m.provider, "minimax");
     }
 
     #[test]

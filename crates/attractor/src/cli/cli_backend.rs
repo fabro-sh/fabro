@@ -31,13 +31,17 @@ pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &s
         String::new()
     } else {
         match provider {
-            Provider::OpenAi | Provider::Gemini => format!(" -m {model}"),
+            Provider::OpenAi | Provider::Gemini | Provider::Kimi | Provider::Zai | Provider::Minimax => {
+                format!(" -m {model}")
+            }
             Provider::Anthropic => format!(" --model {model}"),
         }
     };
     match provider {
         // --full-auto: sandboxed auto-execution, escalates on request
-        Provider::OpenAi => format!("codex exec --json --full-auto{model_flag} < {prompt_file}"),
+        Provider::OpenAi | Provider::Kimi | Provider::Zai | Provider::Minimax => {
+            format!("codex exec --json --full-auto{model_flag} < {prompt_file}")
+        }
         // --yolo: auto-approve all tool calls
         Provider::Gemini => format!("gemini -o json --yolo{model_flag} < {prompt_file}"),
         // --dangerously-skip-permissions: bypass all permission checks (required for non-interactive use).
@@ -172,7 +176,9 @@ fn parse_gemini_json(output: &str) -> Option<CliResponse> {
 /// Parse CLI output, choosing the right parser based on provider.
 pub fn parse_cli_response(provider: Provider, output: &str) -> Option<CliResponse> {
     match provider {
-        Provider::OpenAi => parse_codex_ndjson(output),
+        Provider::OpenAi | Provider::Kimi | Provider::Zai | Provider::Minimax => {
+            parse_codex_ndjson(output)
+        }
         Provider::Gemini => parse_gemini_json(output),
         Provider::Anthropic => parse_claude_ndjson(output),
     }

@@ -14,6 +14,7 @@ use crate::types::{
 /// Provider adapter for the Anthropic Messages API.
 pub struct Adapter {
     pub(crate) http: super::http_api::HttpApi,
+    provider_name: String,
 }
 
 impl Adapter {
@@ -21,7 +22,14 @@ impl Adapter {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
             http: super::http_api::HttpApi::new(api_key, DEFAULT_BASE_URL),
+            provider_name: "anthropic".to_string(),
         }
+    }
+
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.provider_name = name.into();
+        self
     }
 
     #[must_use]
@@ -32,16 +40,36 @@ impl Adapter {
 
     #[must_use]
     pub fn with_default_headers(self, headers: std::collections::HashMap<String, String>) -> Self {
-        Self { http: self.http.with_default_headers(headers) }
+        Self { http: self.http.with_default_headers(headers), ..self }
     }
 
     #[must_use]
     pub fn with_timeout(self, timeout: crate::types::AdapterTimeout) -> Self {
-        Self { http: self.http.with_timeout(timeout) }
+        Self { http: self.http.with_timeout(timeout), ..self }
     }
 
     fn messages_url(&self) -> String {
         format!("{}/messages", self.http.base_url)
+    }
+
+    /// Collect a streaming response into a single [`Response`].
+    ///
+    /// Used by non-Anthropic providers (e.g. Kimi) that require `stream=true`.
+    async fn complete_via_stream(&self, request: &Request) -> Result<Response, SdkError> {
+        use futures::StreamExt;
+
+        let mut stream = self.stream(request).await?;
+        let mut response: Option<Response> = None;
+
+        while let Some(event) = stream.next().await {
+            if let StreamEvent::Finish { response: r, .. } = event? {
+                response = Some(*r);
+            }
+        }
+
+        response.ok_or_else(|| SdkError::Stream {
+            message: "complete_via_stream: stream ended without a Finish event".to_string(),
+        })
     }
 }
 
@@ -1056,12 +1084,17 @@ fn build_api_request(
     for (key, value) in &adapter.http.default_headers {
         req_builder = req_builder.header(key, value);
     }
-    req_builder = req_builder
-        .header("x-api-key", &adapter.http.api_key)
-        .header("anthropic-version", "2023-06-01");
 
-    if let Some(beta_str) = build_beta_header(request.provider_options.as_ref(), auto_cache) {
-        req_builder = req_builder.header("anthropic-beta", beta_str);
+    if adapter.provider_name == "anthropic" {
+        req_builder = req_builder
+            .header("x-api-key", &adapter.http.api_key)
+            .header("anthropic-version", "2023-06-01");
+
+        if let Some(beta_str) = build_beta_header(request.provider_options.as_ref(), auto_cache) {
+            req_builder = req_builder.header("anthropic-beta", beta_str);
+        }
+    } else {
+        req_builder = req_builder.bearer_auth(&adapter.http.api_key);
     }
 
     let req_builder = req_builder.json(&merge_provider_options(&api_request, request.provider_options.as_ref()));
@@ -1071,13 +1104,20 @@ fn build_api_request(
 #[async_trait::async_trait]
 impl ProviderAdapter for Adapter {
     fn name(&self) -> &str {
-        "anthropic"
+        &self.provider_name
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
         if let Some(tc) = &request.tool_choice {
             crate::provider::validate_tool_choice(self, tc)?;
         }
+
+        // Non-Anthropic providers (e.g. Kimi) require stream=true even for
+        // blocking calls.  Collect the stream into a single Response.
+        if self.provider_name != "anthropic" {
+            return self.complete_via_stream(request).await;
+        }
+
         let (_api_request, req_builder) = build_api_request(self, request, false);
 
         let mut req = req_builder;
@@ -1085,11 +1125,11 @@ impl ProviderAdapter for Adapter {
             req = req.timeout(t);
         }
         let (body, headers) =
-            send_and_read_response(req, "anthropic", "type").await?;
+            send_and_read_response(req, &self.provider_name, "type").await?;
 
         let api_resp: ApiResponse =
             serde_json::from_str(&body).map_err(|e| SdkError::Network {
-                message: format!("failed to parse Anthropic response: {e}"),
+                message: format!("failed to parse {} response: {e}", self.provider_name),
             })?;
 
         let content_parts: Vec<ContentPart> = api_resp
@@ -1118,7 +1158,7 @@ impl ProviderAdapter for Adapter {
         Ok(Response {
             id: api_resp.id,
             model: api_resp.model,
-            provider: "anthropic".to_string(),
+            provider: self.provider_name.clone(),
             message: Message {
                 role: Role::Assistant,
                 content: content_parts,
@@ -1161,7 +1201,7 @@ impl ProviderAdapter for Adapter {
             return Err(crate::error::error_from_status_code(
                 status.as_u16(),
                 msg,
-                "anthropic".to_string(),
+                self.provider_name.clone(),
                 code,
                 raw,
                 retry_after,
@@ -1223,6 +1263,18 @@ impl ProviderAdapter for Adapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adapter_with_name() {
+        let adapter = Adapter::new("key").with_name("kimi");
+        assert_eq!(adapter.name(), "kimi");
+    }
+
+    #[test]
+    fn adapter_default_name() {
+        let adapter = Adapter::new("key");
+        assert_eq!(adapter.name(), "anthropic");
+    }
 
     #[test]
     fn auto_cache_enabled_by_default() {

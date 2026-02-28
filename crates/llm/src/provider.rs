@@ -17,6 +17,9 @@ pub enum Provider {
     Anthropic,
     OpenAi,
     Gemini,
+    Kimi,
+    Zai,
+    Minimax,
 }
 
 impl Provider {
@@ -28,6 +31,9 @@ impl Provider {
             Self::Anthropic => "anthropic",
             Self::OpenAi => "openai",
             Self::Gemini => "gemini",
+            Self::Kimi => "kimi",
+            Self::Zai => "zai",
+            Self::Minimax => "minimax",
         }
     }
 }
@@ -46,6 +52,9 @@ impl FromStr for Provider {
             "anthropic" => Ok(Self::Anthropic),
             "openai" | "open_ai" => Ok(Self::OpenAi),
             "gemini" => Ok(Self::Gemini),
+            "kimi" => Ok(Self::Kimi),
+            "zai" => Ok(Self::Zai),
+            "minimax" => Ok(Self::Minimax),
             other => Err(format!("unknown provider: {other}")),
         }
     }
@@ -138,4 +147,39 @@ pub fn validate_tool_choice(
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_kimi() {
+        assert_eq!("kimi".parse::<Provider>().unwrap(), Provider::Kimi);
+    }
+
+    #[test]
+    fn parse_zai() {
+        assert_eq!("zai".parse::<Provider>().unwrap(), Provider::Zai);
+    }
+
+    #[test]
+    fn parse_minimax() {
+        assert_eq!("minimax".parse::<Provider>().unwrap(), Provider::Minimax);
+    }
+
+    #[test]
+    fn kimi_as_str() {
+        assert_eq!(Provider::Kimi.as_str(), "kimi");
+    }
+
+    #[test]
+    fn zai_as_str() {
+        assert_eq!(Provider::Zai.as_str(), "zai");
+    }
+
+    #[test]
+    fn minimax_as_str() {
+        assert_eq!(Provider::Minimax.as_str(), "minimax");
+    }
 }

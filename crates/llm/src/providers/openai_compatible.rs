@@ -7,7 +7,7 @@ use crate::providers::common::{
 };
 use crate::types::{
     ContentPart, FinishReason, Message, Request, Response, ResponseFormat, ResponseFormatType,
-    Role, StreamEvent, ToolCall, ToolChoice, ToolDefinition, Usage,
+    Role, StreamEvent, ThinkingData, ToolCall, ToolChoice, ToolDefinition, Usage,
 };
 
 /// `OpenAI`-compatible Chat Completions adapter (Section 7.10).
@@ -87,6 +87,9 @@ struct ChatMessage {
     role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<String>,
+    /// Reasoning/thinking content echoed back for providers that require it (Kimi).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -126,6 +129,7 @@ struct ApiChoice {
 #[derive(serde::Deserialize)]
 struct ApiChoiceMessage {
     content: Option<String>,
+    reasoning_content: Option<String>,
     tool_calls: Option<Vec<ApiToolCall>>,
 }
 
@@ -167,6 +171,8 @@ struct StreamChoice {
 #[derive(serde::Deserialize)]
 struct StreamDelta {
     content: Option<String>,
+    /// Reasoning/thinking content (used by Kimi and other reasoning models).
+    reasoning_content: Option<String>,
     tool_calls: Option<Vec<StreamToolCall>>,
 }
 
@@ -264,9 +270,30 @@ fn translate_messages(messages: &[Message]) -> Vec<ChatMessage> {
                 Some(tool_calls)
             };
 
+            // Extract reasoning/thinking content for assistant messages.
+            let reasoning_content = if msg.role == Role::Assistant {
+                let reasoning: String = msg
+                    .content
+                    .iter()
+                    .filter_map(|part| match part {
+                        ContentPart::Thinking(t) if !t.redacted => Some(t.text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("");
+                if reasoning.is_empty() {
+                    None
+                } else {
+                    Some(reasoning)
+                }
+            } else {
+                None
+            };
+
             ChatMessage {
                 role: role.to_string(),
                 content,
+                reasoning_content,
                 tool_call_id: msg.tool_call_id.clone(),
                 tool_calls,
             }
@@ -410,6 +437,15 @@ impl ProviderAdapter for Adapter {
         })?;
 
         let mut content_parts = Vec::new();
+        if let Some(reasoning) = &choice.message.reasoning_content {
+            if !reasoning.is_empty() {
+                content_parts.push(ContentPart::Thinking(ThinkingData {
+                    text: reasoning.clone(),
+                    signature: None,
+                    redacted: false,
+                }));
+            }
+        }
         if let Some(text) = &choice.message.content {
             if !text.is_empty() {
                 content_parts.push(ContentPart::text(text));
@@ -502,7 +538,19 @@ impl ProviderAdapter for Adapter {
                 loop {
                     let line = match state.next_line().await {
                         Ok(Some(line)) => line,
-                        Ok(None) => return None,
+                        Ok(None) => {
+                            // Stream ended without [DONE]. Some providers
+                            // (e.g. Minimax) omit the sentinel. Emit
+                            // accumulated finish events if we have content
+                            // and haven't already emitted them.
+                            if !state.finished
+                                && (state.text_started || !state.tool_calls.is_empty())
+                            {
+                                let events = state.finish_events();
+                                return Some((Ok(events), state));
+                            }
+                            return None;
+                        }
                         Err(e) => return Some((Err(e), state)),
                     };
 
@@ -585,11 +633,14 @@ struct StreamState {
     response_id: String,
     response_model: String,
     accumulated_text: String,
+    accumulated_reasoning: String,
     tool_calls: Vec<AccumulatedToolCall>,
     usage: Usage,
     finish_reason: FinishReason,
     text_started: bool,
     done: bool,
+    /// True after `finish_events()` has been called (guards against duplicates).
+    finished: bool,
     rate_limit: Option<crate::types::RateLimitInfo>,
 }
 
@@ -608,11 +659,13 @@ impl StreamState {
             response_id: String::new(),
             response_model: String::new(),
             accumulated_text: String::new(),
+            accumulated_reasoning: String::new(),
             tool_calls: Vec::new(),
             usage: Usage::default(),
             finish_reason: FinishReason::Stop,
             text_started: false,
             done: false,
+            finished: false,
             rate_limit,
         }
     }
@@ -666,6 +719,13 @@ impl StreamState {
         }
 
         let delta = choice.delta.as_ref()?;
+
+        // Accumulate reasoning/thinking content (Kimi, etc.).
+        if let Some(reasoning) = &delta.reasoning_content {
+            if !reasoning.is_empty() {
+                self.accumulated_reasoning.push_str(reasoning);
+            }
+        }
 
         // Handle text content delta.
         if let Some(content) = &delta.content {
@@ -737,6 +797,7 @@ impl StreamState {
 
     /// Generate the final events when `[DONE]` is received.
     fn finish_events(&mut self) -> Vec<StreamEvent> {
+        self.finished = true;
         let mut events = Vec::new();
 
         // End text segment if it was started.
@@ -746,6 +807,15 @@ impl StreamState {
 
         // End all tool calls with complete data.
         let mut content_parts = Vec::new();
+
+        // Include reasoning/thinking content if present (Kimi, etc.).
+        if !self.accumulated_reasoning.is_empty() {
+            content_parts.push(ContentPart::Thinking(ThinkingData {
+                text: std::mem::take(&mut self.accumulated_reasoning),
+                signature: None,
+                redacted: false,
+            }));
+        }
 
         if !self.accumulated_text.is_empty() {
             content_parts.push(ContentPart::text(&self.accumulated_text));
@@ -805,6 +875,15 @@ impl StreamState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stream_chunk_minimax_format() {
+        let json = r#"{"id":"abc","choices":[{"index":0,"delta":{"content":"hello","role":"assistant","name":"MiniMax AI","audio_content":""}}],"created":1772268546,"model":"MiniMax-M2.5","object":"chat.completion.chunk","usage":null,"input_sensitive":false,"output_sensitive":false}"#;
+        let chunk: StreamChunk = serde_json::from_str(json).unwrap();
+        let choices = chunk.choices.unwrap();
+        let delta = choices[0].delta.as_ref().unwrap();
+        assert_eq!(delta.content.as_deref(), Some("hello"));
+    }
 
     #[test]
     fn stream_chunk_text_delta_parsing() {

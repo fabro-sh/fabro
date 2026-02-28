@@ -10,9 +10,13 @@ use llm::provider::{ModelId, Provider};
 
 fn summarizer_model_id(provider: Provider) -> ModelId {
     match provider {
-        Provider::OpenAi => ModelId::new(Provider::OpenAi, "gpt-4o-mini"),
+        Provider::OpenAi | Provider::Kimi | Provider::Zai | Provider::Minimax => {
+            ModelId::new(Provider::OpenAi, "gpt-4o-mini")
+        }
         Provider::Gemini => ModelId::new(Provider::Gemini, "gemini-2.0-flash"),
-        Provider::Anthropic => ModelId::new(Provider::Anthropic, "claude-haiku-4-5-20251001"),
+        Provider::Anthropic => {
+            ModelId::new(Provider::Anthropic, "claude-haiku-4-5-20251001")
+        }
     }
 }
 
@@ -28,6 +32,9 @@ fn build_profile(provider: Provider, model: &str, client: &Client) -> Box<dyn Pr
     match provider {
         Provider::Anthropic => Box::new(AnthropicProfile::with_summarizer(model, summarizer)),
         Provider::OpenAi => Box::new(OpenAiProfile::with_summarizer(model, summarizer)),
+        Provider::Kimi | Provider::Zai | Provider::Minimax => Box::new(
+            OpenAiProfile::with_summarizer(model, summarizer).with_provider(provider),
+        ),
         Provider::Gemini => Box::new(GeminiProfile::with_summarizer(model, summarizer)),
     }
 }
@@ -47,9 +54,19 @@ async fn make_session(provider: Provider, model: &str, cwd: &Path) -> Session {
         let sub_profile: Arc<dyn ProviderProfile> = {
             let summarizer = Some(build_summarizer(provider, &factory_client));
             match provider {
-                Provider::Anthropic => Arc::new(AnthropicProfile::with_summarizer(&factory_model, summarizer)),
-                Provider::OpenAi => Arc::new(OpenAiProfile::with_summarizer(&factory_model, summarizer)),
-                Provider::Gemini => Arc::new(GeminiProfile::with_summarizer(&factory_model, summarizer)),
+                Provider::Anthropic => {
+                    Arc::new(AnthropicProfile::with_summarizer(&factory_model, summarizer))
+                }
+                Provider::OpenAi => {
+                    Arc::new(OpenAiProfile::with_summarizer(&factory_model, summarizer))
+                }
+                Provider::Kimi | Provider::Zai | Provider::Minimax => Arc::new(
+                    OpenAiProfile::with_summarizer(&factory_model, summarizer)
+                        .with_provider(provider),
+                ),
+                Provider::Gemini => {
+                    Arc::new(GeminiProfile::with_summarizer(&factory_model, summarizer))
+                }
             }
         };
         let sub_env = Arc::new(LocalExecutionEnvironment::new(factory_cwd.clone()));

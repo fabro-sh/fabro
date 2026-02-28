@@ -18,7 +18,7 @@ struct Cli {
     /// Task prompt
     prompt: String,
 
-    /// LLM provider (anthropic, openai, gemini)
+    /// LLM provider (anthropic, openai, gemini, kimi, zai, minimax)
     #[arg(long, default_value = "anthropic")]
     provider: String,
 
@@ -69,6 +69,9 @@ fn default_model(provider: Provider) -> &'static str {
         Provider::OpenAi => "gpt-5.2-codex",
         Provider::Gemini => "gemini-3.1-pro-preview",
         Provider::Anthropic => "claude-opus-4-6",
+        Provider::Kimi => "kimi-k2.5",
+        Provider::Zai => "glm-4.7",
+        Provider::Minimax => "minimax-m2.5",
     }
 }
 
@@ -147,6 +150,9 @@ fn summarizer_model_id(provider: Provider) -> ModelId {
         Provider::OpenAi => ModelId::new(Provider::OpenAi, "gpt-4o-mini"),
         Provider::Gemini => ModelId::new(Provider::Gemini, "gemini-2.0-flash"),
         Provider::Anthropic => ModelId::new(Provider::Anthropic, "claude-haiku-4-5-20251001"),
+        Provider::Kimi => ModelId::new(Provider::Kimi, "kimi-k2.5"),
+        Provider::Zai => ModelId::new(Provider::Zai, "glm-4.7"),
+        Provider::Minimax => ModelId::new(Provider::Minimax, "minimax-m2.5"),
     }
 }
 
@@ -162,6 +168,9 @@ fn build_profile(provider: Provider, model: &str, llm_client: Option<Client>) ->
     let summarizer = build_summarizer(provider, llm_client);
     match provider {
         Provider::OpenAi => Box::new(OpenAiProfile::with_summarizer(model, summarizer)),
+        Provider::Kimi | Provider::Zai | Provider::Minimax => Box::new(
+            OpenAiProfile::with_summarizer(model, summarizer).with_provider(provider),
+        ),
         Provider::Gemini => Box::new(GeminiProfile::with_summarizer(model, summarizer)),
         Provider::Anthropic => Box::new(AnthropicProfile::with_summarizer(model, summarizer)),
     }
@@ -174,6 +183,9 @@ fn validate_api_key(provider: Provider) -> bool {
         Provider::Gemini => {
             std::env::var("GEMINI_API_KEY").is_ok() || std::env::var("GOOGLE_API_KEY").is_ok()
         }
+        Provider::Kimi => std::env::var("KIMI_API_KEY").is_ok(),
+        Provider::Zai => std::env::var("ZAI_API_KEY").is_ok(),
+        Provider::Minimax => std::env::var("MINIMAX_API_KEY").is_ok(),
     }
 }
 
@@ -382,9 +394,17 @@ pub async fn run() -> anyhow::Result<()> {
     let factory: SessionFactory = Arc::new(move || {
         let child_summarizer = build_summarizer(provider, Some(factory_client.clone()));
         let child_profile: Arc<dyn ProviderProfile> = match provider {
-            Provider::OpenAi => Arc::new(OpenAiProfile::with_summarizer(&factory_model, child_summarizer)),
+            Provider::OpenAi => {
+                Arc::new(OpenAiProfile::with_summarizer(&factory_model, child_summarizer))
+            }
+            Provider::Kimi | Provider::Zai | Provider::Minimax => Arc::new(
+                OpenAiProfile::with_summarizer(&factory_model, child_summarizer)
+                    .with_provider(provider),
+            ),
             Provider::Gemini => Arc::new(GeminiProfile::with_summarizer(&factory_model, child_summarizer)),
-            Provider::Anthropic => Arc::new(AnthropicProfile::with_summarizer(&factory_model, child_summarizer)),
+            Provider::Anthropic => {
+                Arc::new(AnthropicProfile::with_summarizer(&factory_model, child_summarizer))
+            }
         };
         Session::new(
             factory_client.clone(),
@@ -604,6 +624,21 @@ mod tests {
     #[test]
     fn default_model_gemini() {
         assert_eq!(default_model(Provider::Gemini), "gemini-3.1-pro-preview");
+    }
+
+    #[test]
+    fn default_model_kimi() {
+        assert_eq!(default_model(Provider::Kimi), "kimi-k2.5");
+    }
+
+    #[test]
+    fn default_model_zai() {
+        assert_eq!(default_model(Provider::Zai), "glm-4.7");
+    }
+
+    #[test]
+    fn default_model_minimax() {
+        assert_eq!(default_model(Provider::Minimax), "minimax-m2.5");
     }
 
     // build_tool_approval non-interactive tests

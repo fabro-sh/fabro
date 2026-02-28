@@ -76,6 +76,9 @@ impl AgentBackend {
         let factory: SessionFactory = Arc::new(move || {
             let child_profile: Arc<dyn ProviderProfile> = match factory_provider {
                 Provider::OpenAi => Arc::new(OpenAiProfile::new(&factory_model)),
+                Provider::Kimi | Provider::Zai | Provider::Minimax => Arc::new(
+                    OpenAiProfile::new(&factory_model).with_provider(factory_provider),
+                ),
                 Provider::Gemini => Arc::new(GeminiProfile::new(&factory_model)),
                 Provider::Anthropic => Arc::new(AnthropicProfile::new(&factory_model)),
             };
@@ -101,6 +104,9 @@ impl AgentBackend {
     fn build_profile(&self) -> Box<dyn ProviderProfile> {
         match self.provider {
             Provider::OpenAi => Box::new(OpenAiProfile::new(&self.model)),
+            Provider::Kimi | Provider::Zai | Provider::Minimax => {
+                Box::new(OpenAiProfile::new(&self.model).with_provider(self.provider))
+            }
             Provider::Gemini => Box::new(GeminiProfile::new(&self.model)),
             Provider::Anthropic => Box::new(AnthropicProfile::new(&self.model)),
         }
@@ -125,6 +131,8 @@ impl CodergenBackend for AgentBackend {
             .map(String::from)
             .or_else(|| Some(self.provider.as_str().to_string()));
 
+        let max_tokens = llm::catalog::get_model_info(model).and_then(|m| m.max_output);
+
         let request = llm::types::Request {
             model: model.to_string(),
             messages: vec![llm::types::Message::user(prompt)],
@@ -135,7 +143,7 @@ impl CodergenBackend for AgentBackend {
             response_format: None,
             temperature: None,
             top_p: None,
-            max_tokens: None,
+            max_tokens,
             stop_sequences: None,
             metadata: None,
             provider_options: None,
