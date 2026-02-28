@@ -26,34 +26,27 @@ fn parse_kilroy_simple_example() {
     assert!(graph.find_exit_node().is_some());
 }
 
-// The batch_*.dot files use unquoted values with hyphens/dots (e.g., `llm_model=gpt-5.2`)
-// which is valid in kilroy's more lenient Go parser but not in arc's strict DOT parser.
-// These tests document the parser gap: arc requires quoting such values.
 #[test]
-fn parse_kilroy_batch_clean_requires_quoted_model_values() {
-    let err = parse_kilroy_dot("batch_clean.dot").unwrap_err();
-    assert!(
-        err.contains("grammar error"),
-        "expected grammar error for unquoted `gpt-5.2`, got: {err}"
-    );
+fn parse_kilroy_batch_clean() {
+    let graph = parse_kilroy_dot("batch_clean.dot").unwrap();
+    assert_eq!(graph.name, "G");
+    assert_eq!(graph.nodes.len(), 3);
+    assert!(graph.find_start_node().is_some());
+    assert!(graph.find_exit_node().is_some());
 }
 
 #[test]
-fn parse_kilroy_batch_has_errors_requires_quoted_model_values() {
-    let err = parse_kilroy_dot("batch_has_errors.dot").unwrap_err();
-    assert!(
-        err.contains("grammar error"),
-        "expected grammar error for unquoted `gpt-5.2`, got: {err}"
-    );
+fn parse_kilroy_batch_has_errors() {
+    // This file is intentionally missing llm_provider on the work node.
+    // It should still parse successfully — validation is separate from parsing.
+    let graph = parse_kilroy_dot("batch_has_errors.dot").unwrap();
+    assert_eq!(graph.nodes.len(), 3);
 }
 
 #[test]
-fn parse_kilroy_batch_warnings_only_requires_quoted_model_values() {
-    let err = parse_kilroy_dot("batch_warnings_only.dot").unwrap_err();
-    assert!(
-        err.contains("grammar error"),
-        "expected grammar error for unquoted `gpt-5.2`, got: {err}"
-    );
+fn parse_kilroy_batch_warnings_only() {
+    let graph = parse_kilroy_dot("batch_warnings_only.dot").unwrap();
+    assert_eq!(graph.nodes.len(), 3);
 }
 
 #[test]

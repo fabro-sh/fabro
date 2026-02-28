@@ -238,7 +238,27 @@ pub mod combinators {
         Ok((rest, AstValue::Str(format!("{num}{unit}"))))
     }
 
-    /// Parse an AST value: duration, float, integer, boolean, quoted string, or bare identifier.
+    /// Parse a bare string value containing hyphens and dots (e.g., `gpt-5.2-codex`).
+    ///
+    /// Must start with an alpha/underscore character, then may continue with
+    /// alphanumeric, underscore, hyphen, or dot characters. Must contain at
+    /// least one hyphen or dot (otherwise `identifier` handles it).
+    pub fn bare_string(input: &str) -> IResult<&str, String> {
+        let (rest, raw) = recognize(pair(
+            take_while1(|c: char| c.is_ascii_alphabetic() || c == '_'),
+            take_while(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.'),
+        ))(input)?;
+        if !raw.contains('-') && !raw.contains('.') {
+            return Err(nom::Err::Error(nom::error::Error::new(
+                input,
+                nom::error::ErrorKind::Verify,
+            )));
+        }
+        Ok((rest, raw.to_string()))
+    }
+
+    /// Parse an AST value: duration, float, integer, boolean, quoted string, bare identifier,
+    /// or bare string (e.g., `gpt-5.2-codex`).
     pub fn value(input: &str) -> IResult<&str, AstValue> {
         let input = input.trim_start();
         alt((
@@ -247,6 +267,7 @@ pub mod combinators {
             map(float_value, AstValue::Float),
             map(integer_value, AstValue::Int),
             map(boolean, AstValue::Bool),
+            map(bare_string, AstValue::Str),
             map(identifier, |s: &str| AstValue::Ident(s.to_string())),
         ))(input)
     }
@@ -402,5 +423,40 @@ mod tests {
         assert_eq!(value("42"), Ok(("", AstValue::Int(42))));
         assert_eq!(value("true"), Ok(("", AstValue::Bool(true))));
         assert_eq!(value("LR"), Ok(("", AstValue::Ident("LR".into()))));
+    }
+
+    #[test]
+    fn parse_bare_string_with_hyphens_and_dots() {
+        assert_eq!(
+            bare_string("gpt-5.2 rest"),
+            Ok((" rest", "gpt-5.2".into()))
+        );
+        assert_eq!(
+            bare_string("gpt-5.2-codex"),
+            Ok(("", "gpt-5.2-codex".into()))
+        );
+        assert_eq!(
+            bare_string("gpt-5.3-codex-spark"),
+            Ok(("", "gpt-5.3-codex-spark".into()))
+        );
+        assert_eq!(
+            bare_string("gemini-3-flash-preview"),
+            Ok(("", "gemini-3-flash-preview".into()))
+        );
+        // Plain identifier without hyphens/dots should fail (identifier handles it)
+        assert!(bare_string("LR").is_err());
+        assert!(bare_string("openai").is_err());
+    }
+
+    #[test]
+    fn parse_value_bare_string() {
+        assert_eq!(
+            value("gpt-5.2"),
+            Ok(("", AstValue::Str("gpt-5.2".into())))
+        );
+        assert_eq!(
+            value("gpt-5.2-codex"),
+            Ok(("", AstValue::Str("gpt-5.2-codex".into())))
+        );
     }
 }
