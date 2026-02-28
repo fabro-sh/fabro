@@ -1211,6 +1211,21 @@ impl PipelineEngine {
             final_git_commit_sha: last_git_sha.clone(),
         });
 
+        // Write final.patch: comprehensive diff from base_sha to HEAD
+        if let (Some(ref mode), Some(ref base)) = (&config.git_checkpoint, &config.base_sha) {
+            let patch = match mode {
+                GitCheckpointMode::Host(work_dir) => {
+                    git_diff_host(work_dir.clone(), base.clone()).await
+                }
+                GitCheckpointMode::Remote => {
+                    git_diff_remote(&*self.services.execution_env, base).await
+                }
+            };
+            if let Some(patch) = patch {
+                let _ = std::fs::write(config.logs_root.join("final.patch"), patch);
+            }
+        }
+
         // Return last outcome, or success if no outcomes recorded
         let last_outcome = node_outcomes
             .get(completed_nodes.last().unwrap_or(&String::new()))

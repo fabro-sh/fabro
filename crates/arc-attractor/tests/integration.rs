@@ -8395,6 +8395,12 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         "checkpoint should have git_commit_sha"
     );
 
+    // 9. Assert final.patch exists and contains the changes
+    let final_patch = logs_dir.path().join("final.patch");
+    assert!(final_patch.exists(), "final.patch should exist in logs_root");
+    let patch_content = std::fs::read_to_string(&final_patch).unwrap();
+    assert!(patch_content.contains("hello.txt"), "final.patch should contain hello.txt changes");
+
     // Cleanup worktree
     let _ = std::process::Command::new("git")
         .args(["worktree", "remove", "--force"])

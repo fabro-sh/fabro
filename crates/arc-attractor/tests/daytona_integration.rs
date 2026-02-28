@@ -474,6 +474,12 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         "checkpoint should have git_commit_sha"
     );
 
+    // Assert final.patch exists and contains changes from the run
+    let final_patch = dir.path().join("final.patch");
+    assert!(final_patch.exists(), "final.patch should exist in logs_root");
+    let patch_content = std::fs::read_to_string(&final_patch).unwrap();
+    assert!(!patch_content.is_empty(), "final.patch should not be empty");
+
     env.cleanup().await.unwrap();
 }
 
