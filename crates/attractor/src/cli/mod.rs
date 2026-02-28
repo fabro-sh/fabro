@@ -401,6 +401,27 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
                 let delay_ms = (*delay_secs * 1000.0) as u64;
                 format!("[LLM_RETRY] stage={stage} provider={provider} model={model} attempt={attempt} delay={delay_ms}ms error=\"{error}\"")
             }
+            AgentEvent::SubAgentSpawned { agent_id, depth, task } => {
+                let short_id = &agent_id[..8.min(agent_id.len())];
+                let task_preview = if task.len() > 60 { &task[..60] } else { task };
+                format!("[SUBAGENT_SPAWNED] stage={stage} agent_id={short_id} depth={depth} task=\"{task_preview}\"")
+            }
+            AgentEvent::SubAgentCompleted { agent_id, depth, success, turns_used } => {
+                let short_id = &agent_id[..8.min(agent_id.len())];
+                format!("[SUBAGENT_COMPLETED] stage={stage} agent_id={short_id} depth={depth} success={success} turns={turns_used}")
+            }
+            AgentEvent::SubAgentFailed { agent_id, depth, error } => {
+                let short_id = &agent_id[..8.min(agent_id.len())];
+                format!("[SUBAGENT_FAILED] stage={stage} agent_id={short_id} depth={depth} error=\"{error}\"")
+            }
+            AgentEvent::SubAgentClosed { agent_id, depth } => {
+                let short_id = &agent_id[..8.min(agent_id.len())];
+                format!("[SUBAGENT_CLOSED] stage={stage} agent_id={short_id} depth={depth}")
+            }
+            AgentEvent::SubAgentEvent { agent_id, depth, event } => {
+                let short_id = &agent_id[..8.min(agent_id.len())];
+                format!("[SUBAGENT_EVENT] stage={stage} agent_id={short_id} depth={depth} event={event:?}")
+            }
             other => format!("[AGENT] stage={stage} event={other:?}"),
         }
         PipelineEvent::ParallelEarlyTermination {
@@ -691,6 +712,22 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
                 let delay_ms = (*delay_secs * 1000.0) as u64;
                 format!("{d}── LLM_RETRY ────────────────────────────────{r}\n  {d}stage:{r}    {stage}\n  {d}provider:{r} {provider}\n  {d}model:{r}    {model}\n  {d}attempt:{r}  {attempt}\n  {d}delay_ms:{r} {delay_ms}\n  {d}error:{r}    {error}\n")
             }
+            AgentEvent::SubAgentSpawned { agent_id, depth, task } => {
+                let task_preview = if task.len() > 200 { &task[..200] } else { task.as_str() };
+                format!("{d}── SUBAGENT_SPAWNED ─────────────────────────{r}\n  {d}stage:{r}    {stage}\n  {d}agent_id:{r} {agent_id}\n  {d}depth:{r}    {depth}\n  {d}task:{r}     {task_preview}\n")
+            }
+            AgentEvent::SubAgentCompleted { agent_id, depth, success, turns_used } => {
+                format!("{d}── SUBAGENT_COMPLETED ───────────────────────{r}\n  {d}stage:{r}      {stage}\n  {d}agent_id:{r}   {agent_id}\n  {d}depth:{r}      {depth}\n  {d}success:{r}    {success}\n  {d}turns_used:{r} {turns_used}\n")
+            }
+            AgentEvent::SubAgentFailed { agent_id, depth, error } => {
+                format!("{d}── SUBAGENT_FAILED ──────────────────────────{r}\n  {d}stage:{r}    {stage}\n  {d}agent_id:{r} {agent_id}\n  {d}depth:{r}    {depth}\n  {d}error:{r}    {error}\n")
+            }
+            AgentEvent::SubAgentClosed { agent_id, depth } => {
+                format!("{d}── SUBAGENT_CLOSED ──────────────────────────{r}\n  {d}stage:{r}    {stage}\n  {d}agent_id:{r} {agent_id}\n  {d}depth:{r}    {depth}\n")
+            }
+            AgentEvent::SubAgentEvent { agent_id, depth, event } => {
+                format!("{d}── SUBAGENT_EVENT ───────────────────────────{r}\n  {d}stage:{r}    {stage}\n  {d}agent_id:{r} {agent_id}\n  {d}depth:{r}    {depth}\n  {d}event:{r}    {event:?}\n")
+            }
             other => format!("{d}── AGENT ────────────────────────────────────{r}\n  {d}stage:{r} {stage}\n  {d}event:{r} {other:?}\n"),
         }
         PipelineEvent::ParallelEarlyTermination {
@@ -862,6 +899,84 @@ mod tests {
         assert!(s.contains("EXEC_ENV_READY"));
         assert!(s.contains("local"));
         assert!(s.contains("42"));
+    }
+
+    #[test]
+    fn format_summary_subagent_spawned() {
+        let event = PipelineEvent::Agent {
+            stage: "code".into(),
+            event: AgentEvent::SubAgentSpawned {
+                agent_id: "abcdef12-3456-7890-abcd-ef1234567890".into(),
+                depth: 1,
+                task: "list files".into(),
+            },
+        };
+        let s = format_event_summary(&event, test_styles());
+        assert!(s.contains("[SUBAGENT_SPAWNED]"));
+        assert!(s.contains("abcdef12"));
+        assert!(s.contains("depth=1"));
+    }
+
+    #[test]
+    fn format_summary_subagent_completed() {
+        let event = PipelineEvent::Agent {
+            stage: "code".into(),
+            event: AgentEvent::SubAgentCompleted {
+                agent_id: "abcdef12-xxxx".into(),
+                depth: 1,
+                success: true,
+                turns_used: 5,
+            },
+        };
+        let s = format_event_summary(&event, test_styles());
+        assert!(s.contains("[SUBAGENT_COMPLETED]"));
+        assert!(s.contains("success=true"));
+        assert!(s.contains("turns=5"));
+    }
+
+    #[test]
+    fn format_detail_subagent_failed() {
+        let event = PipelineEvent::Agent {
+            stage: "code".into(),
+            event: AgentEvent::SubAgentFailed {
+                agent_id: "abcdef12-xxxx".into(),
+                depth: 2,
+                error: "timeout".into(),
+            },
+        };
+        let s = format_event_detail(&event, test_styles());
+        assert!(s.contains("SUBAGENT_FAILED"));
+        assert!(s.contains("timeout"));
+        assert!(s.contains("depth"));
+    }
+
+    #[test]
+    fn format_detail_subagent_closed() {
+        let event = PipelineEvent::Agent {
+            stage: "code".into(),
+            event: AgentEvent::SubAgentClosed {
+                agent_id: "abcdef12-xxxx".into(),
+                depth: 1,
+            },
+        };
+        let s = format_event_detail(&event, test_styles());
+        assert!(s.contains("SUBAGENT_CLOSED"));
+        assert!(s.contains("abcdef12-xxxx"));
+    }
+
+    #[test]
+    fn format_summary_subagent_event() {
+        let event = PipelineEvent::Agent {
+            stage: "code".into(),
+            event: AgentEvent::SubAgentEvent {
+                agent_id: "abcdef12-xxxx".into(),
+                depth: 1,
+                event: Box::new(AgentEvent::SessionStarted),
+            },
+        };
+        let s = format_event_summary(&event, test_styles());
+        assert!(s.contains("[SUBAGENT_EVENT]"));
+        assert!(s.contains("abcdef12"));
     }
 
     #[test]

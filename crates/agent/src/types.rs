@@ -109,6 +109,31 @@ pub enum AgentEvent {
         delay_secs: f64,
         error: String,
     },
+    SubAgentSpawned {
+        agent_id: String,
+        depth: usize,
+        task: String,
+    },
+    SubAgentCompleted {
+        agent_id: String,
+        depth: usize,
+        success: bool,
+        turns_used: usize,
+    },
+    SubAgentFailed {
+        agent_id: String,
+        depth: usize,
+        error: String,
+    },
+    SubAgentClosed {
+        agent_id: String,
+        depth: usize,
+    },
+    SubAgentEvent {
+        agent_id: String,
+        depth: usize,
+        event: Box<AgentEvent>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +180,80 @@ mod tests {
             skill_name: "commit".into(),
         };
         assert!(matches!(event, AgentEvent::SkillExpanded { skill_name } if skill_name == "commit"));
+    }
+
+    #[test]
+    fn subagent_spawned_constructible() {
+        let event = AgentEvent::SubAgentSpawned {
+            agent_id: "sa-1".into(),
+            depth: 1,
+            task: "list files".into(),
+        };
+        assert!(matches!(event, AgentEvent::SubAgentSpawned { depth: 1, .. }));
+    }
+
+    #[test]
+    fn subagent_completed_constructible() {
+        let event = AgentEvent::SubAgentCompleted {
+            agent_id: "sa-1".into(),
+            depth: 1,
+            success: true,
+            turns_used: 5,
+        };
+        assert!(matches!(event, AgentEvent::SubAgentCompleted { success: true, turns_used: 5, .. }));
+    }
+
+    #[test]
+    fn subagent_failed_constructible() {
+        let event = AgentEvent::SubAgentFailed {
+            agent_id: "sa-1".into(),
+            depth: 0,
+            error: "timeout".into(),
+        };
+        assert!(matches!(event, AgentEvent::SubAgentFailed { depth: 0, .. }));
+    }
+
+    #[test]
+    fn subagent_closed_constructible() {
+        let event = AgentEvent::SubAgentClosed {
+            agent_id: "sa-1".into(),
+            depth: 2,
+        };
+        assert!(matches!(event, AgentEvent::SubAgentClosed { depth: 2, .. }));
+    }
+
+    #[test]
+    fn subagent_event_wraps_child_event() {
+        let child = AgentEvent::ToolCallStarted {
+            tool_name: "read_file".into(),
+            tool_call_id: "tc-1".into(),
+            arguments: serde_json::json!({}),
+        };
+        let event = AgentEvent::SubAgentEvent {
+            agent_id: "sa-1".into(),
+            depth: 1,
+            event: Box::new(child),
+        };
+        assert!(matches!(event, AgentEvent::SubAgentEvent { depth: 1, .. }));
+    }
+
+    #[test]
+    fn subagent_events_serde_round_trip() {
+        let events = vec![
+            AgentEvent::SubAgentSpawned { agent_id: "sa-1".into(), depth: 0, task: "test".into() },
+            AgentEvent::SubAgentCompleted { agent_id: "sa-1".into(), depth: 0, success: true, turns_used: 3 },
+            AgentEvent::SubAgentFailed { agent_id: "sa-1".into(), depth: 0, error: "oops".into() },
+            AgentEvent::SubAgentClosed { agent_id: "sa-1".into(), depth: 0 },
+            AgentEvent::SubAgentEvent {
+                agent_id: "sa-1".into(),
+                depth: 1,
+                event: Box::new(AgentEvent::SessionStarted),
+            },
+        ];
+        let json = serde_json::to_string(&events).unwrap();
+        let deserialized: Vec<AgentEvent> = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.len(), 5);
+        assert!(matches!(&deserialized[4], AgentEvent::SubAgentEvent { event, .. } if matches!(event.as_ref(), AgentEvent::SessionStarted)));
     }
 
     #[test]

@@ -346,6 +346,7 @@ pub async fn run() -> anyhow::Result<()> {
     let manager = Arc::new(tokio::sync::Mutex::new(
         SubAgentManager::new(config.max_subagent_depth),
     ));
+    let manager_for_callback = manager.clone();
     let factory_client = client.clone();
     let factory_provider = cli.provider.clone();
     let factory_model = model.to_string();
@@ -371,6 +372,9 @@ pub async fn run() -> anyhow::Result<()> {
     let profile: Arc<dyn ProviderProfile> = Arc::from(profile);
 
     let mut session = Session::new(client, profile, env, config);
+
+    // Wire subagent event callback to parent session's emitter
+    manager_for_callback.lock().await.set_event_callback(session.event_callback());
 
     // SIGINT handler
     let cancel_token = session.cancel_token();
@@ -413,6 +417,42 @@ pub async fn run() -> anyhow::Result<()> {
                         "  {red}\u{2717} {error}{reset}",
                         red = s.red,
                         reset = s.reset,
+                    );
+                }
+                AgentEvent::SubAgentSpawned { agent_id, depth, task, .. } => {
+                    let short_id = &agent_id[..8.min(agent_id.len())];
+                    let task_preview = if task.len() > 60 { &task[..60] } else { task };
+                    eprintln!(
+                        "  {dim}\u{25b6} subagent {short_id} spawned (depth={depth}) task={task_preview:?}{reset}",
+                        dim = s.dim, reset = s.reset,
+                    );
+                }
+                AgentEvent::SubAgentCompleted { agent_id, depth, success, turns_used } => {
+                    let short_id = &agent_id[..8.min(agent_id.len())];
+                    eprintln!(
+                        "  {dim}\u{25a0} subagent {short_id} completed (depth={depth}, success={success}, turns={turns_used}){reset}",
+                        dim = s.dim, reset = s.reset,
+                    );
+                }
+                AgentEvent::SubAgentFailed { agent_id, depth, error } => {
+                    let short_id = &agent_id[..8.min(agent_id.len())];
+                    eprintln!(
+                        "  {red}\u{2717} subagent {short_id} failed (depth={depth}): {error}{reset}",
+                        red = s.red, reset = s.reset,
+                    );
+                }
+                AgentEvent::SubAgentClosed { agent_id, depth } => {
+                    let short_id = &agent_id[..8.min(agent_id.len())];
+                    eprintln!(
+                        "  {dim}\u{25a0} subagent {short_id} closed (depth={depth}){reset}",
+                        dim = s.dim, reset = s.reset,
+                    );
+                }
+                AgentEvent::SubAgentEvent { agent_id, event: child_event, .. } if verbose => {
+                    let short_id = &agent_id[..8.min(agent_id.len())];
+                    eprintln!(
+                        "  {dim}[subagent {short_id}] {child_event:?}{reset}",
+                        dim = s.dim, reset = s.reset,
                     );
                 }
                 _ => {}

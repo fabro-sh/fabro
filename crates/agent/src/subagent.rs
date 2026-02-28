@@ -2,13 +2,14 @@ use crate::error::AgentError;
 use crate::session::Session;
 use crate::tool_registry::RegisteredTool;
 use crate::tools::required_str;
-use crate::types::Turn;
+use crate::types::{AgentEvent, Turn};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use llm::types::ToolDefinition;
 use tokio_util::sync::CancellationToken;
 
 pub type SessionFactory = Arc<dyn Fn() -> Session + Send + Sync>;
+pub type SubAgentEventCallback = Arc<dyn Fn(AgentEvent) + Send + Sync>;
 
 #[derive(Debug, Clone)]
 pub struct SubAgentResult {
@@ -21,19 +22,32 @@ pub struct SubAgent {
     task: Option<tokio::task::JoinHandle<Result<SubAgentResult, AgentError>>>,
     followup_queue: Arc<Mutex<VecDeque<String>>>,
     cancel_token: CancellationToken,
+    depth: usize,
 }
 
 pub struct SubAgentManager {
     agents: HashMap<String, SubAgent>,
     max_depth: usize,
+    event_callback: Option<SubAgentEventCallback>,
 }
 
 impl SubAgentManager {
-    #[must_use] 
+    #[must_use]
     pub fn new(max_depth: usize) -> Self {
         Self {
             agents: HashMap::new(),
             max_depth,
+            event_callback: None,
+        }
+    }
+
+    pub fn set_event_callback(&mut self, cb: SubAgentEventCallback) {
+        self.event_callback = Some(cb);
+    }
+
+    fn emit_event(&self, event: AgentEvent) {
+        if let Some(ref cb) = self.event_callback {
+            cb(event);
         }
     }
 
@@ -54,8 +68,38 @@ impl SubAgentManager {
         let followup_queue = session.followup_queue_handle();
         let cancel_token = session.cancel_token();
 
+        // Subscribe to child session events and forward them via callback
+        if let Some(ref cb) = self.event_callback {
+            let mut rx = session.subscribe();
+            let cb = cb.clone();
+            let fwd_agent_id = agent_id.clone();
+            let child_depth = depth + 1;
+            tokio::spawn(async move {
+                while let Ok(event) = rx.recv().await {
+                    // Skip streaming / noise events
+                    if matches!(
+                        &event.event,
+                        AgentEvent::TextDelta { .. }
+                            | AgentEvent::ToolCallOutputDelta { .. }
+                            | AgentEvent::AssistantTextStart
+                            | AgentEvent::SessionStarted
+                            | AgentEvent::SessionEnded
+                            | AgentEvent::SkillExpanded { .. }
+                    ) {
+                        continue;
+                    }
+                    cb(AgentEvent::SubAgentEvent {
+                        agent_id: fwd_agent_id.clone(),
+                        depth: child_depth,
+                        event: Box::new(event.event),
+                    });
+                }
+            });
+        }
+
+        let task_prompt_for_spawn = task_prompt.clone();
         let task = tokio::spawn(async move {
-            session.process_input(&task_prompt).await?;
+            session.process_input(&task_prompt_for_spawn).await?;
             let turns = session.history().turns();
             let last_text = turns.iter().rev().find_map(|t| match t {
                 Turn::Assistant { content, .. } => Some(content.clone()),
@@ -74,8 +118,15 @@ impl SubAgentManager {
                 task: Some(task),
                 followup_queue,
                 cancel_token,
+                depth: depth + 1,
             },
         );
+
+        self.emit_event(AgentEvent::SubAgentSpawned {
+            agent_id: agent_id.clone(),
+            depth: depth + 1,
+            task: task_prompt,
+        });
 
         Ok(agent_id)
     }
@@ -105,12 +156,36 @@ impl SubAgentManager {
                 AgentError::InvalidState(format!("No agent found with id: {agent_id}"))
             })?;
 
+        let depth = agent.depth;
+
         match agent.task.take() {
             Some(join_handle) => match join_handle.await {
-                Ok(result) => result,
-                Err(e) => Err(AgentError::InvalidState(format!(
-                    "Agent task panicked: {e}"
-                ))),
+                Ok(Ok(result)) => {
+                    self.emit_event(AgentEvent::SubAgentCompleted {
+                        agent_id: agent_id.to_string(),
+                        depth,
+                        success: result.success,
+                        turns_used: result.turns_used,
+                    });
+                    Ok(result)
+                }
+                Ok(Err(e)) => {
+                    self.emit_event(AgentEvent::SubAgentFailed {
+                        agent_id: agent_id.to_string(),
+                        depth,
+                        error: e.to_string(),
+                    });
+                    Err(e)
+                }
+                Err(e) => {
+                    let error = format!("Agent task panicked: {e}");
+                    self.emit_event(AgentEvent::SubAgentFailed {
+                        agent_id: agent_id.to_string(),
+                        depth,
+                        error: error.clone(),
+                    });
+                    Err(AgentError::InvalidState(error))
+                }
             },
             None => Err(AgentError::InvalidState(format!(
                 "Agent {agent_id} has no running task"
@@ -131,6 +206,11 @@ impl SubAgentManager {
         if let Some(join_handle) = agent.task {
             join_handle.abort();
         }
+
+        self.emit_event(AgentEvent::SubAgentClosed {
+            agent_id: agent_id.to_string(),
+            depth: agent.depth,
+        });
 
         Ok(())
     }
@@ -420,5 +500,84 @@ mod tests {
             .as_array()
             .unwrap();
         assert!(close_required.contains(&serde_json::json!("agent_id")));
+    }
+
+    fn captured_events() -> (SubAgentEventCallback, Arc<Mutex<Vec<AgentEvent>>>) {
+        let events: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = events.clone();
+        let cb: SubAgentEventCallback = Arc::new(move |event| {
+            events_clone.lock().unwrap().push(event);
+        });
+        (cb, events)
+    }
+
+    #[tokio::test]
+    async fn callback_captures_spawn_event() {
+        let (cb, events) = captured_events();
+        let mut manager = SubAgentManager::new(3);
+        manager.set_event_callback(cb);
+
+        let session = make_session(vec![text_response("Hello")]).await;
+        let _agent_id = manager.spawn(session, "test task".into(), 0).unwrap();
+
+        let captured = events.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert!(matches!(&captured[0], AgentEvent::SubAgentSpawned { depth: 1, task, .. } if task == "test task"));
+    }
+
+    #[tokio::test]
+    async fn callback_captures_wait_completed_event() {
+        let (cb, events) = captured_events();
+        let mut manager = SubAgentManager::new(3);
+        manager.set_event_callback(cb);
+
+        let session = make_session(vec![text_response("done")]).await;
+        let agent_id = manager.spawn(session, "task".into(), 0).unwrap();
+        let _result = manager.wait(&agent_id).await.unwrap();
+
+        let captured = events.lock().unwrap();
+        assert!(captured.iter().any(|e| matches!(e, AgentEvent::SubAgentCompleted { success: true, depth: 1, .. })));
+    }
+
+    #[tokio::test]
+    async fn callback_captures_close_event() {
+        let (cb, events) = captured_events();
+        let mut manager = SubAgentManager::new(3);
+        manager.set_event_callback(cb);
+
+        let session = make_session(vec![text_response("Hello")]).await;
+        let agent_id = manager.spawn(session, "task".into(), 1).unwrap();
+        manager.close(&agent_id).unwrap();
+
+        let captured = events.lock().unwrap();
+        assert!(captured.iter().any(|e| matches!(e, AgentEvent::SubAgentClosed { depth: 2, .. })));
+    }
+
+    #[tokio::test]
+    async fn callback_forwards_child_events() {
+        let (cb, events) = captured_events();
+        let mut manager = SubAgentManager::new(3);
+        manager.set_event_callback(cb);
+
+        let session = make_session(vec![text_response("Hello")]).await;
+        let agent_id = manager.spawn(session, "task".into(), 0).unwrap();
+
+        // Wait for agent to complete - child events arrive asynchronously
+        let _result = manager.wait(&agent_id).await.unwrap();
+
+        // Give the forwarding task a moment to process remaining events
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let captured = events.lock().unwrap();
+        let forwarded_count = captured.iter().filter(|e| matches!(e, AgentEvent::SubAgentEvent { .. })).count();
+        // Child session emits at least UserInput and AssistantMessage (filtered from SessionStarted/SessionEnded/etc)
+        assert!(forwarded_count > 0, "expected at least one forwarded child event, got {forwarded_count}");
+    }
+
+    #[test]
+    fn no_callback_does_not_panic() {
+        // Manager without callback should not panic on emit
+        let manager = SubAgentManager::new(3);
+        manager.emit_event(AgentEvent::SubAgentClosed { agent_id: "x".into(), depth: 0 });
     }
 }

@@ -65,6 +65,7 @@ impl AgentBackend {
         let manager = Arc::new(tokio::sync::Mutex::new(
             SubAgentManager::new(config.max_subagent_depth),
         ));
+        let manager_for_callback = manager.clone();
 
         // Build factory that creates child sessions WITHOUT subagent tools
         let factory_client = client.clone();
@@ -91,7 +92,12 @@ impl AgentBackend {
         profile.register_subagent_tools(manager, factory, 0);
         let profile: Arc<dyn ProviderProfile> = Arc::from(profile);
 
-        Ok(Session::new(client, profile, Arc::clone(execution_env), config))
+        let session = Session::new(client, profile, Arc::clone(execution_env), config);
+
+        // Wire subagent event callback to parent session's emitter
+        manager_for_callback.lock().await.set_event_callback(session.event_callback());
+
+        Ok(session)
     }
 
     fn build_profile(&self) -> Box<dyn ProviderProfile> {

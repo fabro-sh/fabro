@@ -191,9 +191,19 @@ impl Session {
         self.followup_queue.clone()
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn cancel_token(&self) -> CancellationToken {
         self.cancel_token.clone()
+    }
+
+    /// Build a callback that forwards `AgentEvent`s through this session's emitter.
+    #[must_use]
+    pub fn event_callback(&self) -> crate::subagent::SubAgentEventCallback {
+        let emitter = self.event_emitter.clone();
+        let session_id = self.id.clone();
+        Arc::new(move |event| {
+            emitter.emit(session_id.clone(), event);
+        })
     }
 
     pub fn close(&mut self) {

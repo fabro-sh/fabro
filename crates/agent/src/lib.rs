@@ -36,7 +36,7 @@ pub use skills::Skill;
 pub use profiles::{AnthropicProfile, EnvContext, GeminiProfile, OpenAiProfile};
 pub use provider_profile::{ProfileCapabilities, ProviderProfile};
 pub use session::Session;
-pub use subagent::{SubAgent, SubAgentManager, SubAgentResult};
+pub use subagent::{SubAgent, SubAgentEventCallback, SubAgentManager, SubAgentResult};
 pub use tool_registry::ToolRegistry;
 pub use tools::{
     make_edit_file_tool, make_glob_tool, make_grep_tool, make_read_file_tool, make_shell_tool,
