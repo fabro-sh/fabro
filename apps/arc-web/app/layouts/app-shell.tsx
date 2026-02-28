@@ -7,7 +7,14 @@ import {
   MenuItem,
   MenuItems,
 } from "@headlessui/react";
-import { Bars3Icon, XMarkIcon } from "@heroicons/react/24/outline";
+import {
+  Bars3Icon,
+  ChartBarIcon,
+  Cog6ToothIcon,
+  PlayCircleIcon,
+  RocketLaunchIcon,
+  XMarkIcon,
+} from "@heroicons/react/24/outline";
 import { Link, Outlet, useLocation, useMatches } from "react-router";
 
 const user = {
@@ -18,10 +25,10 @@ const user = {
 };
 
 const navigation = [
-  { name: "Start", href: "/start" },
-  { name: "Workflow Runs", href: "/runs" },
-  { name: "Insights", href: "/insights" },
-  { name: "Settings", href: "/settings" },
+  { name: "Start", href: "/start", icon: RocketLaunchIcon },
+  { name: "Workflow Runs", href: "/runs", icon: PlayCircleIcon },
+  { name: "Insights", href: "/insights", icon: ChartBarIcon },
+  { name: "Settings", href: "/settings", icon: Cog6ToothIcon },
 ];
 
 const userNavigation = [{ name: "Sign out", href: "#" }];
@@ -61,9 +68,10 @@ export default function AppShell() {
                           current
                             ? "bg-navy-950/50 text-white"
                             : "text-ice-300 hover:bg-white/5 hover:text-white",
-                          "rounded-md px-3 py-2 text-sm font-medium",
+                          "inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium",
                         )}
                       >
+                        <item.icon className="size-4" aria-hidden="true" />
                         {item.name}
                       </Link>
                     );
@@ -133,9 +141,10 @@ export default function AppShell() {
                     current
                       ? "bg-navy-950 text-white"
                       : "text-ice-300 hover:bg-white/5 hover:text-white",
-                    "block rounded-md px-3 py-2 text-base font-medium",
+                    "flex items-center gap-2 rounded-md px-3 py-2 text-base font-medium",
                   )}
                 >
+                  <item.icon className="size-5" aria-hidden="true" />
                   {item.name}
                 </DisclosureButton>
               );
