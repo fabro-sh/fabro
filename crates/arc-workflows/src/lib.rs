@@ -15,6 +15,8 @@ pub mod outcome;
 pub mod parser;
 pub mod pipeline;
 pub mod preamble;
+pub mod retro;
+pub mod retro_agent;
 pub mod stylesheet;
 pub mod transform;
 pub mod validation;

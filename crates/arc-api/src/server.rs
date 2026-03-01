@@ -62,6 +62,7 @@ struct ManagedPipeline {
     checkpoint: Option<Checkpoint>,
     cancel_tx: Option<tokio::sync::oneshot::Sender<()>>,
     cancel_token: Arc<AtomicBool>,
+    logs_root: Option<std::path::PathBuf>,
 }
 
 /// Shared application state for the server.
@@ -120,6 +121,7 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
         .route("/pipelines/{id}/context", get(get_context))
         .route("/pipelines/{id}/cancel", post(cancel_pipeline))
         .route("/pipelines/{id}/graph", get(get_graph))
+        .route("/pipelines/{id}/retro", get(get_retro))
         .layer(axum::Extension(auth_mode))
         .with_state(state)
 }
@@ -219,6 +221,7 @@ async fn start_pipeline(
                 checkpoint: None,
                 cancel_tx: Some(cancel_tx),
                 cancel_token: Arc::clone(&cancel_token),
+                logs_root: None,
             },
         );
     }
@@ -255,6 +258,27 @@ async fn start_pipeline(
         // Save final checkpoint
         let checkpoint = Checkpoint::load(&config.logs_root.join("checkpoint.json")).ok();
 
+        // Auto-derive retro
+        if let Some(ref cp) = checkpoint {
+            let (failed, failure_reason) = match &result {
+                Ok(_) => (false, None),
+                Err(e) => (true, Some(e.to_string())),
+            };
+            let stage_durations =
+                arc_workflows::retro::extract_stage_durations(&config.logs_root);
+            let retro = arc_workflows::retro::derive_retro(
+                &run_id_clone,
+                "pipeline",
+                "",
+                cp,
+                failed,
+                failure_reason.as_deref(),
+                0,
+                &stage_durations,
+            );
+            let _ = retro.save(&config.logs_root);
+        }
+
         let mut pipelines = state_clone
             .pipelines
             .lock()
@@ -273,6 +297,7 @@ async fn start_pipeline(
                 }
             }
             pipeline.checkpoint = checkpoint;
+            pipeline.logs_root = Some(config.logs_root.clone());
             pipeline.event_tx = None;
         }
     });
@@ -458,6 +483,29 @@ async fn cancel_pipeline(
             (StatusCode::OK, Json(serde_json::json!({"cancelled": true}))).into_response()
         }
         None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn get_retro(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let logs_root = {
+        let pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
+        match pipelines.get(&id) {
+            Some(pipeline) => pipeline.logs_root.clone(),
+            None => return StatusCode::NOT_FOUND.into_response(),
+        }
+    };
+
+    let Some(logs_root) = logs_root else {
+        return (StatusCode::OK, Json(serde_json::json!(null))).into_response();
+    };
+
+    match arc_workflows::retro::Retro::load(&logs_root) {
+        Ok(retro) => (StatusCode::OK, Json(retro)).into_response(),
+        Err(_) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
     }
 }
 

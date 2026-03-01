@@ -598,6 +598,64 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         }
     }
 
+    // Auto-derive retro (always, cheap) and optionally run retro agent
+    {
+        let (failed, failure_reason) = match &engine_result {
+            Ok(o) => (
+                o.status == StageStatus::Fail,
+                o.failure_reason.clone(),
+            ),
+            Err(e) => (true, Some(e.to_string())),
+        };
+        if let Ok(cp) = Checkpoint::load(&logs_dir.join("checkpoint.json")) {
+            let stage_durations = crate::retro::extract_stage_durations(&logs_dir);
+            let mut retro = crate::retro::derive_retro(
+                &config.run_id,
+                &graph.name,
+                graph.goal(),
+                &cp,
+                failed,
+                failure_reason.as_deref(),
+                run_duration_ms,
+                &stage_durations,
+            );
+            let _ = retro.save(&logs_dir);
+
+            // Run retro agent session (execution_env still alive via _cleanup_guard)
+            if !dry_run_mode {
+                if let Ok(client) = arc_llm::client::Client::from_env().await {
+                    match crate::retro_agent::run_retro_agent(
+                        &execution_env,
+                        &logs_dir,
+                        &client,
+                        provider_enum,
+                        &model,
+                    )
+                    .await
+                    {
+                        Ok(narrative) => {
+                            retro.apply_narrative(narrative);
+                            let _ = retro.save(&logs_dir);
+                            eprintln!(
+                                "{dim}Retro saved to {}/retro.json{reset}",
+                                logs_dir.display(),
+                                dim = styles.dim,
+                                reset = styles.reset,
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "{dim}Retro agent skipped: {e}{reset}",
+                                dim = styles.dim,
+                                reset = styles.reset,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let outcome = engine_result?;
 
     // 8. Print result

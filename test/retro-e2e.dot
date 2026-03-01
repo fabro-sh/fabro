@@ -1,0 +1,12 @@
+digraph RetroE2E {
+    graph [goal="Verify retro generation works end-to-end"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    check [label="Check", shape=parallelogram, script="echo 'Hello from Daytona sandbox' && ls -la"]
+    summarize [label="Summarize", prompt="Briefly summarize what the check stage did. Keep it under 2 sentences."]
+
+    start -> check -> summarize -> exit
+}

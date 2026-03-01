@@ -24,6 +24,7 @@ export default [
       route("graph", "routes/run-graph.tsx"),
       route("files", "routes/run-files-changed.tsx"),
       route("usage", "routes/run-usage.tsx"),
+      route("retro", "routes/run-retro.tsx"),
     ]),
     route("verifications", "routes/verifications.tsx"),
     route("retros", "routes/retros.tsx"),
