@@ -105,10 +105,38 @@ function annotateRunningNodes(svg: SVGSVGElement) {
     if (!nodeId) continue;
 
     if (runningDotIds.has(nodeId)) {
-      // Style the running node with a pulsing glow
+      // Animate with native SVG <animate> elements (cross-browser reliable)
+      const ns = "http://www.w3.org/2000/svg";
       const shapes = group.querySelectorAll("ellipse, polygon, path");
       for (const shape of shapes) {
-        shape.setAttribute("class", "running-node");
+        shape.setAttribute("fill", "#0d3a3a");
+        shape.setAttribute("stroke", "#14b8a6");
+        shape.setAttribute("stroke-width", "2");
+
+        const animFill = document.createElementNS(ns, "animate");
+        animFill.setAttribute("attributeName", "fill");
+        animFill.setAttribute("values", "#0d3a3a;#134e4a;#0d3a3a");
+        animFill.setAttribute("dur", "1.5s");
+        animFill.setAttribute("repeatCount", "indefinite");
+        shape.appendChild(animFill);
+
+        const animStroke = document.createElementNS(ns, "animate");
+        animStroke.setAttribute("attributeName", "stroke");
+        animStroke.setAttribute("values", "#14b8a6;#5eead4;#14b8a6");
+        animStroke.setAttribute("dur", "1.5s");
+        animStroke.setAttribute("repeatCount", "indefinite");
+        shape.appendChild(animStroke);
+
+        const animWidth = document.createElementNS(ns, "animate");
+        animWidth.setAttribute("attributeName", "stroke-width");
+        animWidth.setAttribute("values", "2;3.5;2");
+        animWidth.setAttribute("dur", "1.5s");
+        animWidth.setAttribute("repeatCount", "indefinite");
+        shape.appendChild(animWidth);
+      }
+      const texts = group.querySelectorAll("text");
+      for (const text of texts) {
+        text.setAttribute("fill", "#5eead4");
       }
     } else if (completedDotIds.has(nodeId)) {
       // Tint completed nodes green
@@ -143,18 +171,6 @@ function annotateRunningNodes(svg: SVGSVGElement) {
     }
   }
 
-  // Inject CSS animation
-  const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-  style.textContent = `
-    @keyframes pulse-glow {
-      0%, 100% { stroke: #14b8a6; fill: #0d3a3a; stroke-width: 2.4; }
-      50% { stroke: #5eead4; fill: #0f4f4f; stroke-width: 3; }
-    }
-    .running-node {
-      animation: pulse-glow 2s ease-in-out infinite;
-    }
-  `;
-  svg.insertBefore(style, svg.firstChild);
 }
 
 const ZOOM_STEPS = [25, 50, 75, 100, 150, 200];
