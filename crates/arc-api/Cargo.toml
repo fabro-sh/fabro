@@ -13,7 +13,10 @@ arc-workflows = { path = "../arc-workflows" }
 arc-agent = { path = "../arc-agent" }
 arc-llm = { path = "../arc-llm" }
 arc-util = { path = "../arc-util" }
+arc-db = { path = "../arc-db" }
 axum = "0.8"
+dirs.workspace = true
+sqlx.workspace = true
 tower = "0.5"
 tokio-stream = { workspace = true, features = ["sync"] }
 jsonwebtoken.workspace = true

@@ -47,9 +47,15 @@ mod server_lifecycle {
         revise -> gate
     }"#;
 
+    async fn test_db() -> sqlx::SqlitePool {
+        let pool = arc_db::connect_memory().await.unwrap();
+        arc_db::initialize_db(&pool).await.unwrap();
+        pool
+    }
+
     #[tokio::test]
     async fn full_http_lifecycle_approve_and_complete() {
-        let state = create_app_state(gate_registry);
+        let state = create_app_state(test_db().await, gate_registry);
         let app = build_router(Arc::clone(&state), arc_api::jwt_auth::AuthMode::Disabled);
 
         // 1. Start pipeline
@@ -148,7 +154,7 @@ mod server_lifecycle {
 
     #[tokio::test]
     async fn full_http_lifecycle_cancel() {
-        let state = create_app_state(gate_registry);
+        let state = create_app_state(test_db().await, gate_registry);
         let app = build_router(Arc::clone(&state), arc_api::jwt_auth::AuthMode::Disabled);
 
         // Start a pipeline that will block at the human gate
@@ -225,9 +231,15 @@ mod sse_events {
         start -> work -> exit
     }"#;
 
+    async fn test_db() -> sqlx::SqlitePool {
+        let pool = arc_db::connect_memory().await.unwrap();
+        arc_db::initialize_db(&pool).await.unwrap();
+        pool
+    }
+
     #[tokio::test]
     async fn sse_stream_contains_expected_event_types() {
-        let state = create_app_state(simple_registry);
+        let state = create_app_state(test_db().await, simple_registry);
         let app = build_router(Arc::clone(&state), arc_api::jwt_auth::AuthMode::Disabled);
 
         // Start pipeline
@@ -356,10 +368,16 @@ mod serve_dry_run {
         start -> exit
     }"#;
 
+    async fn test_db() -> sqlx::SqlitePool {
+        let pool = arc_db::connect_memory().await.unwrap();
+        arc_db::initialize_db(&pool).await.unwrap();
+        pool
+    }
+
     /// Build the router exactly as `serve_command` does in dry-run mode.
-    fn dry_run_app() -> axum::Router {
+    async fn dry_run_app() -> axum::Router {
         let factory = |interviewer: Arc<dyn Interviewer>| default_registry(interviewer, || None);
-        let state = create_app_state(factory);
+        let state = create_app_state(test_db().await, factory);
         build_router(state, arc_api::jwt_auth::AuthMode::Disabled)
     }
 
@@ -370,7 +388,7 @@ mod serve_dry_run {
 
     #[tokio::test]
     async fn dry_run_serve_starts_and_runs_pipeline() {
-        let app = dry_run_app();
+        let app = dry_run_app().await;
 
         // POST /pipelines to start a pipeline
         let req = Request::builder()
@@ -408,7 +426,7 @@ mod serve_dry_run {
 
     #[tokio::test]
     async fn dry_run_serve_rejects_invalid_dot() {
-        let app = dry_run_app();
+        let app = dry_run_app().await;
 
         let req = Request::builder()
             .method("POST")

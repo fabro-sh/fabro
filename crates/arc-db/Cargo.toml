@@ -1,0 +1,18 @@
+[package]
+name = "arc-db"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "SQLite persistence layer for Arc"
+
+[lib]
+doctest = false
+
+[dependencies]
+sqlx = { workspace = true, features = ["sqlite"] }
+chrono.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }

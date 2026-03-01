@@ -70,6 +70,7 @@ pub struct AppState {
     pipelines: Mutex<HashMap<String, ManagedPipeline>>,
     registry_factory: Box<dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync>,
     dry_run: bool,
+    pub db: sqlx::SqlitePool,
 }
 
 /// Request body for POST /pipelines.
@@ -126,18 +127,20 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
         .with_state(state)
 }
 
-/// Create an `AppState` with the given registry factory.
+/// Create an `AppState` with the given registry factory and database pool.
 ///
 /// The factory receives the pipeline's `WebInterviewer` so it can wire it
 /// into handlers that need human-in-the-loop interaction (e.g., `WaitHumanHandler`).
 pub fn create_app_state(
+    db: sqlx::SqlitePool,
     registry_factory: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
-    create_app_state_with_options(registry_factory, false)
+    create_app_state_with_options(db, registry_factory, false)
 }
 
-/// Create an `AppState` with the given registry factory and dry-run flag.
+/// Create an `AppState` with the given database pool, registry factory, and dry-run flag.
 pub fn create_app_state_with_options(
+    db: sqlx::SqlitePool,
     registry_factory: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
     dry_run: bool,
 ) -> Arc<AppState> {
@@ -145,6 +148,7 @@ pub fn create_app_state_with_options(
         pipelines: Mutex::new(HashMap::new()),
         registry_factory: Box::new(registry_factory),
         dry_run,
+        db,
     })
 }
 
@@ -594,8 +598,14 @@ mod tests {
         registry
     }
 
-    fn test_app() -> Router {
-        let state = create_app_state(test_registry);
+    async fn test_db() -> sqlx::SqlitePool {
+        let pool = arc_db::connect_memory().await.unwrap();
+        arc_db::initialize_db(&pool).await.unwrap();
+        pool
+    }
+
+    fn test_app_with(db: sqlx::SqlitePool) -> Router {
+        let state = create_app_state(db, test_registry);
         build_router(state, AuthMode::Disabled)
     }
 
@@ -606,7 +616,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_pipelines_starts_pipeline_and_returns_id() {
-        let app = test_app();
+        let app = test_app_with(test_db().await);
 
         let req = Request::builder()
             .method("POST")
@@ -627,7 +637,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_pipelines_invalid_dot_returns_bad_request() {
-        let app = test_app();
+        let app = test_app_with(test_db().await);
 
         let req = Request::builder()
             .method("POST")
@@ -644,7 +654,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_pipeline_status_returns_status() {
-        let state = create_app_state(test_registry);
+        let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
@@ -686,7 +696,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_pipeline_status_not_found() {
-        let app = test_app();
+        let app = test_app_with(test_db().await);
 
         let req = Request::builder()
             .method("GET")
@@ -700,7 +710,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_questions_returns_empty_list() {
-        let state = create_app_state(test_registry);
+        let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
@@ -733,7 +743,7 @@ mod tests {
 
     #[tokio::test]
     async fn submit_answer_not_found_pipeline() {
-        let app = test_app();
+        let app = test_app_with(test_db().await);
 
         let req = Request::builder()
             .method("POST")
@@ -750,7 +760,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_events_not_found() {
-        let app = test_app();
+        let app = test_app_with(test_db().await);
 
         let req = Request::builder()
             .method("GET")
@@ -764,7 +774,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_checkpoint_returns_null_initially() {
-        let state = create_app_state(test_registry);
+        let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
@@ -794,7 +804,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_context_returns_map() {
-        let state = create_app_state(test_registry);
+        let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
@@ -827,7 +837,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_pipeline_succeeds() {
-        let state = create_app_state(test_registry);
+        let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
@@ -862,7 +872,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_nonexistent_pipeline_returns_not_found() {
-        let app = test_app();
+        let app = test_app_with(test_db().await);
 
         let req = Request::builder()
             .method("POST")
@@ -876,7 +886,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_events_returns_sse_stream() {
-        let state = create_app_state(test_registry);
+        let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
@@ -918,7 +928,7 @@ mod tests {
 
     #[tokio::test]
     async fn pipeline_completes_and_status_is_completed() {
-        let state = create_app_state(test_registry);
+        let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
@@ -957,7 +967,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_graph_returns_svg() {
-        let state = create_app_state(test_registry);
+        let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
@@ -1011,7 +1021,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_graph_not_found() {
-        let app = test_app();
+        let app = test_app_with(test_db().await);
 
         let req = Request::builder()
             .method("GET")
@@ -1025,7 +1035,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_pipelines_returns_started_pipeline() {
-        let state = create_app_state(test_registry);
+        let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // List should be empty initially
