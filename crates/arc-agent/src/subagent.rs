@@ -3,9 +3,9 @@ use crate::session::Session;
 use crate::tool_registry::RegisteredTool;
 use crate::tools::required_str;
 use crate::types::{AgentEvent, Turn};
+use arc_llm::types::ToolDefinition;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-use arc_llm::types::ToolDefinition;
 use tokio_util::sync::CancellationToken;
 
 pub type SessionFactory = Arc<dyn Fn() -> Session + Send + Sync>;
@@ -132,12 +132,9 @@ impl SubAgentManager {
     }
 
     pub fn send_input(&self, agent_id: &str, message: &str) -> Result<(), AgentError> {
-        let agent = self
-            .agents
-            .get(agent_id)
-            .ok_or_else(|| {
-                AgentError::InvalidState(format!("No agent found with id: {agent_id}"))
-            })?;
+        let agent = self.agents.get(agent_id).ok_or_else(|| {
+            AgentError::InvalidState(format!("No agent found with id: {agent_id}"))
+        })?;
 
         agent
             .followup_queue
@@ -149,12 +146,9 @@ impl SubAgentManager {
     }
 
     pub async fn wait(&mut self, agent_id: &str) -> Result<SubAgentResult, AgentError> {
-        let mut agent = self
-            .agents
-            .remove(agent_id)
-            .ok_or_else(|| {
-                AgentError::InvalidState(format!("No agent found with id: {agent_id}"))
-            })?;
+        let mut agent = self.agents.remove(agent_id).ok_or_else(|| {
+            AgentError::InvalidState(format!("No agent found with id: {agent_id}"))
+        })?;
 
         let depth = agent.depth;
 
@@ -194,12 +188,9 @@ impl SubAgentManager {
     }
 
     pub fn close(&mut self, agent_id: &str) -> Result<(), AgentError> {
-        let agent = self
-            .agents
-            .remove(agent_id)
-            .ok_or_else(|| {
-                AgentError::InvalidState(format!("No agent found with id: {agent_id}"))
-            })?;
+        let agent = self.agents.remove(agent_id).ok_or_else(|| {
+            AgentError::InvalidState(format!("No agent found with id: {agent_id}"))
+        })?;
 
         agent.cancel_token.cancel();
 
@@ -216,7 +207,7 @@ impl SubAgentManager {
     }
 
     #[cfg(test)]
-    #[must_use] 
+    #[must_use]
     pub fn get(&self, agent_id: &str) -> Option<&SubAgent> {
         self.agents.get(agent_id)
     }
@@ -278,9 +269,7 @@ pub fn make_spawn_agent_tool(
     }
 }
 
-pub fn make_send_input_tool(
-    manager: Arc<tokio::sync::Mutex<SubAgentManager>>,
-) -> RegisteredTool {
+pub fn make_send_input_tool(manager: Arc<tokio::sync::Mutex<SubAgentManager>>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name: "send_input".into(),
@@ -315,9 +304,7 @@ pub fn make_send_input_tool(
     }
 }
 
-pub fn make_wait_tool(
-    manager: Arc<tokio::sync::Mutex<SubAgentManager>>,
-) -> RegisteredTool {
+pub fn make_wait_tool(manager: Arc<tokio::sync::Mutex<SubAgentManager>>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name: "wait".into(),
@@ -339,8 +326,7 @@ pub fn make_wait_tool(
                 let agent_id = required_str(&args, "agent_id")?;
 
                 let mut mgr = manager.lock().await;
-                let result = mgr.wait(agent_id).await
-                    .map_err(|e| e.to_string())?;
+                let result = mgr.wait(agent_id).await.map_err(|e| e.to_string())?;
                 Ok(format!(
                     "Agent completed (success: {}, turns: {})\n\n{}",
                     result.success, result.turns_used, result.output
@@ -350,9 +336,7 @@ pub fn make_wait_tool(
     }
 }
 
-pub fn make_close_agent_tool(
-    manager: Arc<tokio::sync::Mutex<SubAgentManager>>,
-) -> RegisteredTool {
+pub fn make_close_agent_tool(manager: Arc<tokio::sync::Mutex<SubAgentManager>>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name: "close_agent".into(),
@@ -374,8 +358,7 @@ pub fn make_close_agent_tool(
                 let agent_id = required_str(&args, "agent_id")?;
 
                 let mut mgr = manager.lock().await;
-                mgr.close(agent_id)
-                    .map_err(|e| e.to_string())?;
+                mgr.close(agent_id).map_err(|e| e.to_string())?;
                 Ok(format!("Agent {agent_id} closed"))
             })
         }),
@@ -413,7 +396,10 @@ mod tests {
         let session = make_session(vec![text_response("Hello")]).await;
         let result = manager.spawn(session, "Do something".into(), 2);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Maximum subagent depth"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Maximum subagent depth"));
     }
 
     #[tokio::test]
@@ -447,8 +433,7 @@ mod tests {
     #[tokio::test]
     async fn wait_returns_result() {
         let mut manager = SubAgentManager::new(3);
-        let session =
-            make_session(vec![text_response("Task completed successfully")]).await;
+        let session = make_session(vec![text_response("Task completed successfully")]).await;
         let agent_id = manager.spawn(session, "Do something".into(), 0).unwrap();
 
         let result = manager.wait(&agent_id).await;
@@ -522,7 +507,9 @@ mod tests {
 
         let captured = events.lock().unwrap();
         assert_eq!(captured.len(), 1);
-        assert!(matches!(&captured[0], AgentEvent::SubAgentSpawned { depth: 1, task, .. } if task == "test task"));
+        assert!(
+            matches!(&captured[0], AgentEvent::SubAgentSpawned { depth: 1, task, .. } if task == "test task")
+        );
     }
 
     #[tokio::test]
@@ -536,7 +523,14 @@ mod tests {
         let _result = manager.wait(&agent_id).await.unwrap();
 
         let captured = events.lock().unwrap();
-        assert!(captured.iter().any(|e| matches!(e, AgentEvent::SubAgentCompleted { success: true, depth: 1, .. })));
+        assert!(captured.iter().any(|e| matches!(
+            e,
+            AgentEvent::SubAgentCompleted {
+                success: true,
+                depth: 1,
+                ..
+            }
+        )));
     }
 
     #[tokio::test]
@@ -550,7 +544,9 @@ mod tests {
         manager.close(&agent_id).unwrap();
 
         let captured = events.lock().unwrap();
-        assert!(captured.iter().any(|e| matches!(e, AgentEvent::SubAgentClosed { depth: 2, .. })));
+        assert!(captured
+            .iter()
+            .any(|e| matches!(e, AgentEvent::SubAgentClosed { depth: 2, .. })));
     }
 
     #[tokio::test]
@@ -569,15 +565,24 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let captured = events.lock().unwrap();
-        let forwarded_count = captured.iter().filter(|e| matches!(e, AgentEvent::SubAgentEvent { .. })).count();
+        let forwarded_count = captured
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::SubAgentEvent { .. }))
+            .count();
         // Child session emits at least UserInput and AssistantMessage (filtered from SessionStarted/SessionEnded/etc)
-        assert!(forwarded_count > 0, "expected at least one forwarded child event, got {forwarded_count}");
+        assert!(
+            forwarded_count > 0,
+            "expected at least one forwarded child event, got {forwarded_count}"
+        );
     }
 
     #[test]
     fn no_callback_does_not_panic() {
         // Manager without callback should not panic on emit
         let manager = SubAgentManager::new(3);
-        manager.emit_event(AgentEvent::SubAgentClosed { agent_id: "x".into(), depth: 0 });
+        manager.emit_event(AgentEvent::SubAgentClosed {
+            agent_id: "x".into(),
+            depth: 0,
+        });
     }
 }

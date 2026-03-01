@@ -158,7 +158,11 @@ impl Serialize for ContentPart {
                 map.serialize_entry("data", v)?;
             }
             Self::Thinking(v) => {
-                let kind = if v.redacted { "redacted_thinking" } else { "thinking" };
+                let kind = if v.redacted {
+                    "redacted_thinking"
+                } else {
+                    "thinking"
+                };
                 map.serialize_entry("kind", kind)?;
                 map.serialize_entry("data", v)?;
             }
@@ -178,7 +182,10 @@ impl<'de> Deserialize<'de> for ContentPart {
             .get("kind")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| serde::de::Error::missing_field("kind"))?;
-        let data = value.get("data").cloned().unwrap_or(serde_json::Value::Null);
+        let data = value
+            .get("data")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         match kind {
             "text" => serde_json::from_value(data)
                 .map(Self::Text)
@@ -202,7 +209,10 @@ impl<'de> Deserialize<'de> for ContentPart {
                 .map(Self::Thinking)
                 .map_err(serde::de::Error::custom),
             "redacted_thinking" => serde_json::from_value::<ThinkingData>(data)
-                .map(|mut td| { td.redacted = true; Self::Thinking(td) })
+                .map(|mut td| {
+                    td.redacted = true;
+                    Self::Thinking(td)
+                })
                 .map_err(serde::de::Error::custom),
             other => Ok(Self::Other {
                 kind: other.to_string(),
@@ -216,7 +226,6 @@ impl ContentPart {
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text(text.into())
     }
-
 }
 
 // --- 3.1 Message ---
@@ -610,7 +619,7 @@ impl StreamEvent {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn error(error: SdkError) -> Self {
         Self::Error { error, raw: None }
     }
@@ -798,7 +807,11 @@ mod tests {
 
     #[test]
     fn message_tool_result_constructor() {
-        let msg = Message::tool_result("call_123", serde_json::Value::String("72F and sunny".into()), false);
+        let msg = Message::tool_result(
+            "call_123",
+            serde_json::Value::String("72F and sunny".into()),
+            false,
+        );
         assert_eq!(msg.role, Role::Tool);
         assert_eq!(msg.tool_call_id, Some("call_123".to_string()));
         match &msg.content[0] {
@@ -1216,7 +1229,11 @@ mod tests {
             warnings: vec![],
             rate_limit: None,
         };
-        let tool_calls = vec![ToolCall::new("call_1", "get_weather", serde_json::json!({"city": "SF"}))];
+        let tool_calls = vec![ToolCall::new(
+            "call_1",
+            "get_weather",
+            serde_json::json!({"city": "SF"}),
+        )];
         let tool_results = vec![ToolResult::success("call_1", serde_json::json!("72F"))];
 
         let event = StreamEvent::step_finish(

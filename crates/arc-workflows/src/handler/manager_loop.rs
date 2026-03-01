@@ -228,10 +228,8 @@ mod tests {
     async fn manager_loop_max_cycles_exceeded() {
         let handler = ManagerLoopHandler::new(None);
         let mut node = Node::new("manager");
-        node.attrs.insert(
-            "manager.max_cycles".to_string(),
-            AttrValue::Integer(2),
-        );
+        node.attrs
+            .insert("manager.max_cycles".to_string(), AttrValue::Integer(2));
         node.attrs.insert(
             "manager.poll_interval".to_string(),
             AttrValue::Duration(Duration::from_millis(1)),
@@ -256,24 +254,16 @@ mod tests {
     async fn manager_loop_child_completed_success() {
         let handler = ManagerLoopHandler::new(None);
         let mut node = Node::new("manager");
-        node.attrs.insert(
-            "manager.max_cycles".to_string(),
-            AttrValue::Integer(10),
-        );
+        node.attrs
+            .insert("manager.max_cycles".to_string(), AttrValue::Integer(10));
         node.attrs.insert(
             "manager.poll_interval".to_string(),
             AttrValue::Duration(Duration::from_millis(1)),
         );
         // Pre-set child status to "completed" and outcome to "success"
         let context = Context::new();
-        context.set(
-            "context.stack.child.status",
-            serde_json::json!("completed"),
-        );
-        context.set(
-            "context.stack.child.outcome",
-            serde_json::json!("success"),
-        );
+        context.set("context.stack.child.status", serde_json::json!("completed"));
+        context.set("context.stack.child.outcome", serde_json::json!("success"));
         let graph = Graph::new("test");
         let logs_root = Path::new("/tmp/test");
 
@@ -282,26 +272,25 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
-        assert!(outcome.notes.as_deref().unwrap().contains("Child completed"));
+        assert!(outcome
+            .notes
+            .as_deref()
+            .unwrap()
+            .contains("Child completed"));
     }
 
     #[tokio::test]
     async fn manager_loop_child_failed() {
         let handler = ManagerLoopHandler::new(None);
         let mut node = Node::new("manager");
-        node.attrs.insert(
-            "manager.max_cycles".to_string(),
-            AttrValue::Integer(10),
-        );
+        node.attrs
+            .insert("manager.max_cycles".to_string(), AttrValue::Integer(10));
         node.attrs.insert(
             "manager.poll_interval".to_string(),
             AttrValue::Duration(Duration::from_millis(1)),
         );
         let context = Context::new();
-        context.set(
-            "context.stack.child.status",
-            serde_json::json!("failed"),
-        );
+        context.set("context.stack.child.status", serde_json::json!("failed"));
         let graph = Graph::new("test");
         let logs_root = Path::new("/tmp/test");
 
@@ -321,10 +310,8 @@ mod tests {
     async fn manager_loop_stop_condition_satisfied() {
         let handler = ManagerLoopHandler::new(None);
         let mut node = Node::new("manager");
-        node.attrs.insert(
-            "manager.max_cycles".to_string(),
-            AttrValue::Integer(10),
-        );
+        node.attrs
+            .insert("manager.max_cycles".to_string(), AttrValue::Integer(10));
         node.attrs.insert(
             "manager.poll_interval".to_string(),
             AttrValue::Duration(Duration::from_millis(1)),

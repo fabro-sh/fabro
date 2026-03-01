@@ -24,9 +24,11 @@ pub struct BranchStore<'a> {
 impl<'a> BranchStore<'a> {
     pub fn new(objects: &'a Store, branch: impl Into<String>, author: &Signature<'_>) -> Self {
         // Clone to 'static by using Signature::now (author name/email are copied into owned strings)
-        let author_static =
-            Signature::now(author.name().unwrap_or("unknown"), author.email().unwrap_or(""))
-                .expect("creating signature should not fail");
+        let author_static = Signature::now(
+            author.name().unwrap_or("unknown"),
+            author.email().unwrap_or(""),
+        )
+        .expect("creating signature should not fail");
         Self {
             objects,
             branch: branch.into(),
@@ -53,12 +55,11 @@ impl<'a> BranchStore<'a> {
         message: &str,
         f: impl FnOnce(&mut TreeEntries) -> Result<()>,
     ) -> Result<Oid> {
-        let parent_oid = self
-            .objects
-            .resolve_ref(&self.branch)?
-            .ok_or_else(|| crate::Error::BranchNotFound {
+        let parent_oid = self.objects.resolve_ref(&self.branch)?.ok_or_else(|| {
+            crate::Error::BranchNotFound {
                 branch: self.branch.clone(),
-            })?;
+            }
+        })?;
         let parent_commit = self.objects.repo().find_commit(parent_oid)?;
         let tree_oid = parent_commit.tree_id();
         let mut entries = self.objects.read_tree(tree_oid)?;
@@ -168,12 +169,11 @@ impl<'a> BranchStore<'a> {
 
     /// Full tree from branch tip.
     pub fn tip_tree(&self) -> Result<TreeEntries> {
-        let commit_oid = self
-            .objects
-            .resolve_ref(&self.branch)?
-            .ok_or_else(|| crate::Error::BranchNotFound {
+        let commit_oid = self.objects.resolve_ref(&self.branch)?.ok_or_else(|| {
+            crate::Error::BranchNotFound {
                 branch: self.branch.clone(),
-            })?;
+            }
+        })?;
         let commit = self.objects.repo().find_commit(commit_oid)?;
         self.objects.read_tree(commit.tree_id())
     }
@@ -280,8 +280,7 @@ mod tests {
         let bs = BranchStore::new(&store, "test/data", &sig);
         bs.ensure_branch().unwrap();
 
-        bs.write_entry("hello.txt", b"world", "add hello")
-            .unwrap();
+        bs.write_entry("hello.txt", b"world", "add hello").unwrap();
         let content = bs.read_entry("hello.txt").unwrap().unwrap();
         assert_eq!(content, b"world");
     }
@@ -295,11 +294,8 @@ mod tests {
         let bs = BranchStore::new(&store, "test/data", &sig);
         bs.ensure_branch().unwrap();
 
-        bs.write_entries(
-            &[("a.txt", b"alpha"), ("b.txt", b"beta")],
-            "add both",
-        )
-        .unwrap();
+        bs.write_entries(&[("a.txt", b"alpha"), ("b.txt", b"beta")], "add both")
+            .unwrap();
 
         assert_eq!(bs.read_entry("a.txt").unwrap().unwrap(), b"alpha");
         assert_eq!(bs.read_entry("b.txt").unwrap().unwrap(), b"beta");
@@ -395,8 +391,7 @@ mod tests {
         let bs = BranchStore::new(&store, "test/data", &sig);
         bs.ensure_branch().unwrap();
 
-        bs.write_entry("file.txt", b"content", "add file")
-            .unwrap();
+        bs.write_entry("file.txt", b"content", "add file").unwrap();
         let tree = bs.tip_tree().unwrap();
         assert_eq!(tree.len(), 1);
         assert!(tree.get("file.txt").is_some());
@@ -453,15 +448,10 @@ mod tests {
         let bs = BranchStore::new(&store, "test/data", &sig);
         bs.ensure_branch().unwrap();
 
-        bs.write_entries(
-            &[("a.txt", b"alpha"), ("b.txt", b"beta")],
-            "add files",
-        )
-        .unwrap();
-
-        let results = bs
-            .read_entries(&["a.txt", "b.txt", "missing.txt"])
+        bs.write_entries(&[("a.txt", b"alpha"), ("b.txt", b"beta")], "add files")
             .unwrap();
+
+        let results = bs.read_entries(&["a.txt", "b.txt", "missing.txt"]).unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[0], ("a.txt", b"alpha".to_vec()));
         assert_eq!(results[1], ("b.txt", b"beta".to_vec()));

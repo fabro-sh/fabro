@@ -31,10 +31,7 @@ impl Transform for PreambleTransform {
     fn apply(&self, graph: &mut Graph) {
         let default_fidelity = graph.default_fidelity().unwrap_or("full").to_string();
         for node in graph.nodes.values_mut() {
-            let fidelity = node
-                .fidelity()
-                .unwrap_or(&default_fidelity)
-                .to_string();
+            let fidelity = node.fidelity().unwrap_or(&default_fidelity).to_string();
             if fidelity == "full" {
                 continue;
             }
@@ -55,7 +52,7 @@ pub struct GraphMergeTransform {
 }
 
 impl GraphMergeTransform {
-    #[must_use] 
+    #[must_use]
     pub const fn new(secondary_graphs: Vec<Graph>) -> Self {
         Self { secondary_graphs }
     }
@@ -109,9 +106,10 @@ mod tests {
     #[test]
     fn variable_expansion_replaces_goal() {
         let mut graph = Graph::new("test");
-        graph
-            .attrs
-            .insert("goal".to_string(), AttrValue::String("Fix bugs".to_string()));
+        graph.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("Fix bugs".to_string()),
+        );
 
         let mut node = Node::new("plan");
         node.attrs.insert(
@@ -134,9 +132,10 @@ mod tests {
     #[test]
     fn variable_expansion_no_goal_variable() {
         let mut graph = Graph::new("test");
-        graph
-            .attrs
-            .insert("goal".to_string(), AttrValue::String("Fix bugs".to_string()));
+        graph.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("Fix bugs".to_string()),
+        );
 
         let mut node = Node::new("plan");
         node.attrs.insert(
@@ -180,9 +179,10 @@ mod tests {
     #[test]
     fn variable_expansion_no_prompt() {
         let mut graph = Graph::new("test");
-        graph
-            .attrs
-            .insert("goal".to_string(), AttrValue::String("Fix bugs".to_string()));
+        graph.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("Fix bugs".to_string()),
+        );
         let node = Node::new("plan");
         graph.nodes.insert("plan".to_string(), node);
 
@@ -322,7 +322,9 @@ mod tests {
         primary.nodes.insert("work".to_string(), Node::new("work"));
 
         let mut secondary = Graph::new("sub");
-        secondary.nodes.insert("work".to_string(), Node::new("work"));
+        secondary
+            .nodes
+            .insert("work".to_string(), Node::new("work"));
 
         let transform = GraphMergeTransform::new(vec![secondary]);
         transform.apply(&mut primary);
@@ -426,10 +428,8 @@ mod tests {
             "prompt".to_string(),
             AttrValue::String("Do the work".to_string()),
         );
-        node.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        node.attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         secondary.nodes.insert("worker".to_string(), node);
 
         let transform = GraphMergeTransform::new(vec![secondary]);
@@ -471,7 +471,10 @@ mod tests {
             .expect("should have merged edge");
         assert_eq!(merged_edge.to, "sub.y");
         assert_eq!(
-            merged_edge.attrs.get("condition").and_then(AttrValue::as_str),
+            merged_edge
+                .attrs
+                .get("condition")
+                .and_then(AttrValue::as_str),
             Some("outcome=success")
         );
     }

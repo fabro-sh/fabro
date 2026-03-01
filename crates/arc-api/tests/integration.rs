@@ -6,13 +6,13 @@ mod server_lifecycle {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use arc_api::server::{build_router, create_app_state};
     use arc_workflows::handler::codergen::CodergenHandler;
     use arc_workflows::handler::exit::ExitHandler;
     use arc_workflows::handler::start::StartHandler;
     use arc_workflows::handler::wait_human::WaitHumanHandler;
     use arc_workflows::handler::HandlerRegistry;
     use arc_workflows::interviewer::Interviewer;
-    use arc_api::server::{build_router, create_app_state};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
@@ -198,12 +198,12 @@ mod sse_events {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use arc_api::server::{build_router, create_app_state};
     use arc_workflows::handler::codergen::CodergenHandler;
     use arc_workflows::handler::exit::ExitHandler;
     use arc_workflows::handler::start::StartHandler;
     use arc_workflows::handler::HandlerRegistry;
     use arc_workflows::interviewer::Interviewer;
-    use arc_api::server::{build_router, create_app_state};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
@@ -267,7 +267,9 @@ mod sse_events {
         // Collect SSE frames with a timeout
         let mut body = response.into_body();
         let mut sse_data = String::new();
-        while let Ok(Some(Ok(frame))) = tokio::time::timeout(Duration::from_millis(500), body.frame()).await {
+        while let Ok(Some(Ok(frame))) =
+            tokio::time::timeout(Duration::from_millis(500), body.frame()).await
+        {
             if let Some(data) = frame.data_ref() {
                 sse_data.push_str(&String::from_utf8_lossy(data));
             }
@@ -340,9 +342,9 @@ mod serve_dry_run {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use arc_api::server::{build_router, create_app_state};
     use arc_workflows::handler::default_registry;
     use arc_workflows::interviewer::Interviewer;
-    use arc_api::server::{build_router, create_app_state};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
@@ -356,9 +358,7 @@ mod serve_dry_run {
 
     /// Build the router exactly as `serve_command` does in dry-run mode.
     fn dry_run_app() -> axum::Router {
-        let factory = |interviewer: Arc<dyn Interviewer>| {
-            default_registry(interviewer, || None)
-        };
+        let factory = |interviewer: Arc<dyn Interviewer>| default_registry(interviewer, || None);
         let state = create_app_state(factory);
         build_router(state, arc_api::jwt_auth::AuthMode::Disabled)
     }

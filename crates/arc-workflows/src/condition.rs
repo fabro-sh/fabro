@@ -89,11 +89,7 @@ fn resolve_key(key: &str, outcome: &Outcome, context: &Context) -> String {
         return outcome.status.to_string();
     }
     if key == "preferred_label" {
-        return outcome
-            .preferred_label
-            .as_deref()
-            .unwrap_or("")
-            .to_string();
+        return outcome.preferred_label.as_deref().unwrap_or("").to_string();
     }
     if let Some(path) = key.strip_prefix("context.") {
         if let Some(val) = context.get(key) {
@@ -180,11 +176,7 @@ mod tests {
         let outcome = make_outcome(StageStatus::Success);
         let context = Context::new();
         assert!(evaluate_condition("outcome!=fail", &outcome, &context));
-        assert!(!evaluate_condition(
-            "outcome!=success",
-            &outcome,
-            &context
-        ));
+        assert!(!evaluate_condition("outcome!=success", &outcome, &context));
     }
 
     #[test]

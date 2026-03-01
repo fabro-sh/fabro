@@ -40,7 +40,13 @@ pub fn parse_qualified_name(qualified: &str) -> Option<(String, String)> {
 
 fn sanitize_name(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -138,8 +144,7 @@ impl McpConnectionManager {
             );
         }
 
-        self.clients
-            .insert(config.name.clone(), Arc::new(client));
+        self.clients.insert(config.name.clone(), Arc::new(client));
 
         Ok(tool_count)
     }
@@ -165,9 +170,7 @@ impl McpConnectionManager {
         let client = self
             .clients
             .get(&info.server_name)
-            .ok_or_else(|| {
-                anyhow::anyhow!("no client for MCP server: {}", info.server_name)
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("no client for MCP server: {}", info.server_name))?;
 
         client
             .call_tool(&info.original_tool_name, arguments, timeout)
@@ -271,10 +274,7 @@ mod tests {
 
     #[test]
     fn call_result_to_string_text_error() {
-        let result = make_call_result(
-            vec![make_text_content("something failed")],
-            Some(true),
-        );
+        let result = make_call_result(vec![make_text_content("something failed")], Some(true));
         assert_eq!(
             call_result_to_string(&result),
             Err("something failed".to_string())

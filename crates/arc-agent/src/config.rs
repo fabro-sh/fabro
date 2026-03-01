@@ -5,8 +5,7 @@ use arc_mcp::config::McpServerConfig;
 
 /// Callback invoked before each tool execution. Return `Ok(())` to allow,
 /// `Err(message)` to deny with the given message.
-pub type ToolApprovalFn =
-    Arc<dyn Fn(&str, &serde_json::Value) -> Result<(), String> + Send + Sync>;
+pub type ToolApprovalFn = Arc<dyn Fn(&str, &serde_json::Value) -> Result<(), String> + Send + Sync>;
 
 #[derive(Clone)]
 pub struct SessionConfig {
@@ -39,10 +38,7 @@ impl std::fmt::Debug for SessionConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SessionConfig")
             .field("max_turns", &self.max_turns)
-            .field(
-                "max_tool_rounds_per_input",
-                &self.max_tool_rounds_per_input,
-            )
+            .field("max_tool_rounds_per_input", &self.max_tool_rounds_per_input)
             .field(
                 "default_command_timeout_ms",
                 &self.default_command_timeout_ms,
@@ -62,7 +58,10 @@ impl std::fmt::Debug for SessionConfig {
                 &self.tool_approval.as_ref().map(|_| "<fn>"),
             )
             .field("enable_context_compaction", &self.enable_context_compaction)
-            .field("compaction_threshold_percent", &self.compaction_threshold_percent)
+            .field(
+                "compaction_threshold_percent",
+                &self.compaction_threshold_percent,
+            )
             .field("compaction_preserve_turns", &self.compaction_preserve_turns)
             .field("skill_dirs", &self.skill_dirs)
             .field("mcp_servers", &self.mcp_servers.len())

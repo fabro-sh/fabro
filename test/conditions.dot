@@ -10,7 +10,7 @@ digraph Conditions {
 
     start -> decide
     decide -> path_a [condition="outcome=success && context.mode=fast"]
-    decide -> path_b [condition="outcome=success || context.fallback=true"]
+    decide -> path_b
     path_a -> exit
     path_b -> exit
 }

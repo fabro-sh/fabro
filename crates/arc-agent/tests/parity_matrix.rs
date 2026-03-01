@@ -10,13 +10,13 @@ use arc_llm::provider::{ModelId, Provider};
 
 fn summarizer_model_id(provider: Provider) -> ModelId {
     match provider {
-        Provider::OpenAi | Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {
-            ModelId::new(Provider::OpenAi, "gpt-4o-mini")
-        }
+        Provider::OpenAi
+        | Provider::Kimi
+        | Provider::Zai
+        | Provider::Minimax
+        | Provider::Inception => ModelId::new(Provider::OpenAi, "gpt-4o-mini"),
         Provider::Gemini => ModelId::new(Provider::Gemini, "gemini-2.0-flash"),
-        Provider::Anthropic => {
-            ModelId::new(Provider::Anthropic, "claude-haiku-4-5-20251001")
-        }
+        Provider::Anthropic => ModelId::new(Provider::Anthropic, "claude-haiku-4-5-20251001"),
     }
 }
 
@@ -32,9 +32,9 @@ fn build_profile(provider: Provider, model: &str, client: &Client) -> Box<dyn Pr
     match provider {
         Provider::Anthropic => Box::new(AnthropicProfile::with_summarizer(model, summarizer)),
         Provider::OpenAi => Box::new(OpenAiProfile::with_summarizer(model, summarizer)),
-        Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => Box::new(
-            OpenAiProfile::with_summarizer(model, summarizer).with_provider(provider),
-        ),
+        Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {
+            Box::new(OpenAiProfile::with_summarizer(model, summarizer).with_provider(provider))
+        }
         Provider::Gemini => Box::new(GeminiProfile::with_summarizer(model, summarizer)),
     }
 }
@@ -54,16 +54,19 @@ async fn make_session(provider: Provider, model: &str, cwd: &Path) -> Session {
         let sub_profile: Arc<dyn ProviderProfile> = {
             let summarizer = Some(build_summarizer(provider, &factory_client));
             match provider {
-                Provider::Anthropic => {
-                    Arc::new(AnthropicProfile::with_summarizer(&factory_model, summarizer))
-                }
+                Provider::Anthropic => Arc::new(AnthropicProfile::with_summarizer(
+                    &factory_model,
+                    summarizer,
+                )),
                 Provider::OpenAi => {
                     Arc::new(OpenAiProfile::with_summarizer(&factory_model, summarizer))
                 }
-                Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => Arc::new(
-                    OpenAiProfile::with_summarizer(&factory_model, summarizer)
-                        .with_provider(provider),
-                ),
+                Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {
+                    Arc::new(
+                        OpenAiProfile::with_summarizer(&factory_model, summarizer)
+                            .with_provider(provider),
+                    )
+                }
                 Provider::Gemini => {
                     Arc::new(GeminiProfile::with_summarizer(&factory_model, summarizer))
                 }
@@ -223,14 +226,8 @@ async fn scenario_multi_file_edit(session: &mut Session, dir: &Path) {
         .expect("process_input failed");
     let a = std::fs::read_to_string(dir.join("a.txt")).expect("failed to read a.txt");
     let b = std::fs::read_to_string(dir.join("b.txt")).expect("failed to read b.txt");
-    assert!(
-        a.contains("AAA"),
-        "Expected 'AAA' in a.txt, got: {a}"
-    );
-    assert!(
-        b.contains("BBB"),
-        "Expected 'BBB' in b.txt, got: {b}"
-    );
+    assert!(a.contains("AAA"), "Expected 'AAA' in a.txt, got: {a}");
+    assert!(b.contains("BBB"), "Expected 'BBB' in b.txt, got: {b}");
 }
 
 // ---------------------------------------------------------------------------
@@ -294,9 +291,7 @@ async fn scenario_multi_step_read_analyze_edit(session: &mut Session, dir: &Path
 // Scenario 8: tool_output_truncation
 // ---------------------------------------------------------------------------
 async fn scenario_tool_output_truncation(session: &mut Session, dir: &Path) {
-    let lines: String = (1..=10_000)
-        .map(|n| format!("line {n}\n"))
-        .collect();
+    let lines: String = (1..=10_000).map(|n| format!("line {n}\n")).collect();
     std::fs::write(dir.join("big.txt"), lines).expect("failed to write big.txt");
     session
         .process_input("Read the file big.txt and tell me how many lines it has")
@@ -342,8 +337,7 @@ macro_rules! reasoning_effort_tests {
                 reasoning_effort: Some("low".to_string()),
                 ..SessionConfig::default()
             };
-            let mut session =
-                make_session_with_config($provider, $model, tmp.path(), config).await;
+            let mut session = make_session_with_config($provider, $model, tmp.path(), config).await;
             session.initialize().await;
             session
                 .process_input("Say hello")
@@ -353,9 +347,17 @@ macro_rules! reasoning_effort_tests {
     };
 }
 
-reasoning_effort_tests!(Provider::Anthropic, "claude-haiku-4-5-20251001", anthropic_reasoning_effort);
+reasoning_effort_tests!(
+    Provider::Anthropic,
+    "claude-haiku-4-5-20251001",
+    anthropic_reasoning_effort
+);
 // gpt-4o-mini does not support the reasoning.effort parameter, so no OpenAI test.
-reasoning_effort_tests!(Provider::Gemini, "gemini-2.5-flash", gemini_reasoning_effort);
+reasoning_effort_tests!(
+    Provider::Gemini,
+    "gemini-2.5-flash",
+    gemini_reasoning_effort
+);
 
 // ---------------------------------------------------------------------------
 // Scenario 12: subagent_spawn
@@ -385,8 +387,7 @@ macro_rules! loop_detection_tests {
                 loop_detection_window: 3,
                 ..SessionConfig::default()
             };
-            let mut session =
-                make_session_with_config($provider, $model, tmp.path(), config).await;
+            let mut session = make_session_with_config($provider, $model, tmp.path(), config).await;
             session.initialize().await;
             session
                 .process_input("Repeatedly read the file /dev/null")
@@ -396,7 +397,11 @@ macro_rules! loop_detection_tests {
     };
 }
 
-loop_detection_tests!(Provider::Anthropic, "claude-haiku-4-5-20251001", anthropic_loop_detection);
+loop_detection_tests!(
+    Provider::Anthropic,
+    "claude-haiku-4-5-20251001",
+    anthropic_loop_detection
+);
 loop_detection_tests!(Provider::OpenAi, "gpt-4o-mini", openai_loop_detection);
 loop_detection_tests!(Provider::Gemini, "gemini-2.5-flash", gemini_loop_detection);
 
@@ -411,9 +416,11 @@ async fn scenario_error_recovery(session: &mut Session, dir: &Path) {
         .await
         .expect("process_input failed");
     let path = dir.join("nonexistent_file.txt");
-    assert!(path.exists(), "nonexistent_file.txt should have been created");
-    let content =
-        std::fs::read_to_string(&path).expect("failed to read nonexistent_file.txt");
+    assert!(
+        path.exists(),
+        "nonexistent_file.txt should have been created"
+    );
+    let content = std::fs::read_to_string(&path).expect("failed to read nonexistent_file.txt");
     assert!(
         content.contains("recovered"),
         "Expected 'recovered' in file, got: {content}"
@@ -480,17 +487,13 @@ async fn scenario_web_search(session: &mut Session, dir: &Path) {
 // Scenario 17: provider_specific_editing
 // ---------------------------------------------------------------------------
 async fn scenario_provider_specific_editing(session: &mut Session, dir: &Path) {
-    std::fs::write(
-        dir.join("target.rs"),
-        "fn greet() { println!(\"hello\"); }",
-    )
-    .expect("failed to write target.rs");
+    std::fs::write(dir.join("target.rs"), "fn greet() { println!(\"hello\"); }")
+        .expect("failed to write target.rs");
     session
         .process_input("Edit target.rs to change 'hello' to 'goodbye'")
         .await
         .expect("process_input failed");
-    let content =
-        std::fs::read_to_string(dir.join("target.rs")).expect("failed to read target.rs");
+    let content = std::fs::read_to_string(dir.join("target.rs")).expect("failed to read target.rs");
     assert!(
         content.contains("goodbye"),
         "Expected 'goodbye' in target.rs, got: {content}"

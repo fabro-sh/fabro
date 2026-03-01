@@ -20,7 +20,9 @@ pub fn validate_command(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<
         graph.name,
         graph.nodes.len(),
         graph.edges.len(),
-        bold = styles.bold, dim = styles.dim, reset = styles.reset,
+        bold = styles.bold,
+        dim = styles.dim,
+        reset = styles.reset,
     );
 
     print_diagnostics(&diagnostics, styles);
@@ -31,7 +33,8 @@ pub fn validate_command(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<
 
     eprintln!(
         "Validation: {green}OK{reset}",
-        green = styles.green, reset = styles.reset,
+        green = styles.green,
+        reset = styles.reset,
     );
     Ok(())
 }

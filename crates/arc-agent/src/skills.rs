@@ -220,10 +220,7 @@ pub fn default_skill_dirs(home_dir: Option<&str>, git_root: Option<&str>) -> Vec
     dirs
 }
 
-pub async fn discover_skills(
-    env: &dyn ExecutionEnvironment,
-    dirs: &[String],
-) -> Vec<Skill> {
+pub async fn discover_skills(env: &dyn ExecutionEnvironment, dirs: &[String]) -> Vec<Skill> {
     let mut skills_by_name: std::collections::HashMap<String, Skill> =
         std::collections::HashMap::new();
 
@@ -469,7 +466,10 @@ name: trimmed
         files.insert("/skills/bad/SKILL.md".into(), "no frontmatter here".into());
         let env = MockExecutionEnvironment {
             files,
-            glob_results: vec!["/skills/good/SKILL.md".into(), "/skills/bad/SKILL.md".into()],
+            glob_results: vec![
+                "/skills/good/SKILL.md".into(),
+                "/skills/bad/SKILL.md".into(),
+            ],
             ..Default::default()
         };
 
@@ -502,13 +502,15 @@ name: trimmed
         // and glob returns both — the later dir overrides the earlier.
         let env = MockExecutionEnvironment {
             files,
-            glob_results: vec!["/global/commit/SKILL.md".into(), "/project/commit/SKILL.md".into()],
+            glob_results: vec![
+                "/global/commit/SKILL.md".into(),
+                "/project/commit/SKILL.md".into(),
+            ],
             ..Default::default()
         };
 
         // discover_skills iterates dirs in order; later dirs override earlier names
-        let skills =
-            discover_skills(&env, &["/global".into(), "/project".into()]).await;
+        let skills = discover_skills(&env, &["/global".into(), "/project".into()]).await;
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].description, "Project commit");
     }
@@ -544,7 +546,10 @@ name: trimmed
         let env: Arc<dyn crate::execution_env::ExecutionEnvironment> =
             Arc::new(MockExecutionEnvironment::default());
         let args = serde_json::json!({"skill_name": "commit"});
-        let ctx = crate::tool_registry::ToolContext { env, cancel: tokio_util::sync::CancellationToken::new() };
+        let ctx = crate::tool_registry::ToolContext {
+            env,
+            cancel: tokio_util::sync::CancellationToken::new(),
+        };
         let result = (tool.executor)(args, ctx).await;
         assert_eq!(
             result.unwrap(),
@@ -560,7 +565,10 @@ name: trimmed
         let env: Arc<dyn crate::execution_env::ExecutionEnvironment> =
             Arc::new(MockExecutionEnvironment::default());
         let args = serde_json::json!({"skill_name": "nonexistent"});
-        let ctx = crate::tool_registry::ToolContext { env, cancel: tokio_util::sync::CancellationToken::new() };
+        let ctx = crate::tool_registry::ToolContext {
+            env,
+            cancel: tokio_util::sync::CancellationToken::new(),
+        };
         let result = (tool.executor)(args, ctx).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown skill"));
@@ -574,7 +582,10 @@ name: trimmed
         let env: Arc<dyn crate::execution_env::ExecutionEnvironment> =
             Arc::new(MockExecutionEnvironment::default());
         let args = serde_json::json!({});
-        let ctx = crate::tool_registry::ToolContext { env, cancel: tokio_util::sync::CancellationToken::new() };
+        let ctx = crate::tool_registry::ToolContext {
+            env,
+            cancel: tokio_util::sync::CancellationToken::new(),
+        };
         let result = (tool.executor)(args, ctx).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Missing required parameter"));

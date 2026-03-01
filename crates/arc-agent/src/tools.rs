@@ -20,8 +20,12 @@ pub struct WebFetchSummarizer {
 /// Returns true if the input looks like it contains HTML markup.
 fn looks_like_html(text: &str) -> bool {
     let trimmed = text.trim_start();
-    trimmed.starts_with("<!") || trimmed.starts_with("<html") || trimmed.starts_with("<HTML")
-        || trimmed.contains("</div>") || trimmed.contains("</p>") || trimmed.contains("</body>")
+    trimmed.starts_with("<!")
+        || trimmed.starts_with("<html")
+        || trimmed.starts_with("<HTML")
+        || trimmed.contains("</div>")
+        || trimmed.contains("</p>")
+        || trimmed.contains("</body>")
 }
 
 /// Converts HTML to Markdown, stripping script/style tags.
@@ -87,7 +91,10 @@ pub fn make_read_file_tool() -> RegisteredTool {
                 let offset_usize = offset.map(|v| v as usize);
                 let limit_usize = limit.map(|v| v as usize);
 
-                let content = ctx.env.read_file(file_path, offset_usize, limit_usize).await?;
+                let content = ctx
+                    .env
+                    .read_file(file_path, offset_usize, limit_usize)
+                    .await?;
                 Ok(content)
             })
         }),
@@ -153,10 +160,7 @@ pub fn make_edit_file_tool() -> RegisteredTool {
                 // Strip line numbers: each line looks like "  1 | content" or " 10 | content"
                 let raw_lines: Vec<&str> = numbered_content
                     .lines()
-                    .map(|line| {
-                        line.find(" | ")
-                            .map_or(line, |idx| &line[idx + 3..])
-                    })
+                    .map(|line| line.find(" | ").map_or(line, |idx| &line[idx + 3..]))
                     .collect();
                 let raw_content = raw_lines.join("\n");
 
@@ -215,7 +219,8 @@ pub fn make_shell_tool_with_config(config: &SessionConfig) -> RegisteredTool {
                     .unwrap_or(default_timeout)
                     .min(max_timeout);
 
-                let result = ctx.env
+                let result = ctx
+                    .env
                     .exec_command(command, timeout_ms, None, None, Some(ctx.cancel))
                     .await?;
 
@@ -300,9 +305,7 @@ pub fn make_glob_tool() -> RegisteredTool {
         executor: Arc::new(|args, ctx| {
             Box::pin(async move {
                 let pattern = required_str(&args, "pattern")?;
-                let path = args
-                    .get("path")
-                    .and_then(serde_json::Value::as_str);
+                let path = args.get("path").and_then(serde_json::Value::as_str);
 
                 let results = ctx.env.glob(pattern, path).await?;
                 Ok(results.join("\n"))
@@ -407,10 +410,26 @@ fn format_brave_results(body: &serde_json::Value) -> String {
 
     let mut output = String::new();
     for (i, result) in results.iter().enumerate() {
-        let title = result.get("title").and_then(serde_json::Value::as_str).unwrap_or("(no title)");
-        let url = result.get("url").and_then(serde_json::Value::as_str).unwrap_or("(no url)");
-        let description = result.get("description").and_then(serde_json::Value::as_str).unwrap_or("");
-        let _ = write!(output, "{}. {}\n   {}\n   {}\n\n", i + 1, title, url, description);
+        let title = result
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("(no title)");
+        let url = result
+            .get("url")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("(no url)");
+        let description = result
+            .get("description")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let _ = write!(
+            output,
+            "{}. {}\n   {}\n   {}\n\n",
+            i + 1,
+            title,
+            url,
+            description
+        );
     }
     output
 }
@@ -439,8 +458,9 @@ fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool 
             let client = client.clone();
             let api_key = api_key.clone();
             Box::pin(async move {
-                let api_key = api_key
-                    .ok_or_else(|| "BRAVE_SEARCH_API_KEY environment variable is not set".to_string())?;
+                let api_key = api_key.ok_or_else(|| {
+                    "BRAVE_SEARCH_API_KEY environment variable is not set".to_string()
+                })?;
 
                 let query = required_str(&args, "query")?;
                 let count = args
@@ -459,7 +479,10 @@ fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool 
                     .map_err(|e| format!("HTTP request failed: {e}"))?;
 
                 if !resp.status().is_success() {
-                    return Err(format!("Brave Search API returned status {}", resp.status()));
+                    return Err(format!(
+                        "Brave Search API returned status {}",
+                        resp.status()
+                    ));
                 }
 
                 let body: serde_json::Value = resp
@@ -583,7 +606,14 @@ mod tests {
             apply_read_offset_limit: true,
             ..Default::default()
         });
-        let result = (tool.executor)(serde_json::json!({"file_path": "/test.txt"}), ToolContext { env, cancel: CancellationToken::new() }).await;
+        let result = (tool.executor)(
+            serde_json::json!({"file_path": "/test.txt"}),
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
+        )
+        .await;
         assert_eq!(result.unwrap(), "  1 | hello\n  2 | world");
     }
 
@@ -602,7 +632,10 @@ mod tests {
         });
         let result = (tool.executor)(
             serde_json::json!({"file_path": "/test.txt", "offset": 2, "limit": 2}),
-            ToolContext { env, cancel: CancellationToken::new() },
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         assert_eq!(result.unwrap(), "  2 | line2\n  3 | line3");
@@ -615,7 +648,10 @@ mod tests {
         let env_clone: Arc<dyn ExecutionEnvironment> = env.clone();
         let result = (tool.executor)(
             serde_json::json!({"file_path": "/out.txt", "content": "hello"}),
-            ToolContext { env: env_clone, cancel: CancellationToken::new() },
+            ToolContext {
+                env: env_clone,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         assert_eq!(result.unwrap(), "Successfully wrote to /out.txt");
@@ -641,7 +677,10 @@ mod tests {
                 "old_string": "hello",
                 "new_string": "goodbye"
             }),
-            ToolContext { env: env_clone, cancel: CancellationToken::new() },
+            ToolContext {
+                env: env_clone,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         assert_eq!(result.unwrap(), "Successfully edited /f.txt");
@@ -665,7 +704,10 @@ mod tests {
                 "old_string": "missing",
                 "new_string": "replacement"
             }),
-            ToolContext { env, cancel: CancellationToken::new() },
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         assert_eq!(result.unwrap_err(), "old_string not found in file");
@@ -686,7 +728,10 @@ mod tests {
                 "old_string": "aa",
                 "new_string": "cc"
             }),
-            ToolContext { env, cancel: CancellationToken::new() },
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         let err = result.unwrap_err();
@@ -711,7 +756,10 @@ mod tests {
                 "new_string": "cc",
                 "replace_all": true
             }),
-            ToolContext { env: env_clone, cancel: CancellationToken::new() },
+            ToolContext {
+                env: env_clone,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         assert_eq!(result.unwrap(), "Successfully edited /f.txt");
@@ -733,7 +781,14 @@ mod tests {
             },
             ..Default::default()
         });
-        let result = (tool.executor)(serde_json::json!({"command": "echo hello"}), ToolContext { env, cancel: CancellationToken::new() }).await;
+        let result = (tool.executor)(
+            serde_json::json!({"command": "echo hello"}),
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
+        )
+        .await;
         let output = result.unwrap();
         assert!(output.contains("Exit code: 0"));
         assert!(output.contains("hello"));
@@ -746,7 +801,10 @@ mod tests {
         let env_clone: Arc<dyn ExecutionEnvironment> = env.clone();
         let _result = (tool.executor)(
             serde_json::json!({"command": "sleep 1", "timeout_ms": 5000}),
-            ToolContext { env: env_clone, cancel: CancellationToken::new() },
+            ToolContext {
+                env: env_clone,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         assert_eq!(*env.captured_timeout.lock().unwrap(), Some(5000));
@@ -765,7 +823,14 @@ mod tests {
             },
             ..Default::default()
         });
-        let result = (tool.executor)(serde_json::json!({"command": "false"}), ToolContext { env, cancel: CancellationToken::new() }).await;
+        let result = (tool.executor)(
+            serde_json::json!({"command": "false"}),
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
+        )
+        .await;
         let output = result.unwrap();
         assert!(output.contains("Exit code: 1"));
         assert!(output.contains("error"));
@@ -784,7 +849,14 @@ mod tests {
             },
             ..Default::default()
         });
-        let result = (tool.executor)(serde_json::json!({"command": "sleep 100"}), ToolContext { env, cancel: CancellationToken::new() }).await;
+        let result = (tool.executor)(
+            serde_json::json!({"command": "sleep 100"}),
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
+        )
+        .await;
         let output = result.unwrap();
         assert!(output.starts_with("Command timed out.\n"));
     }
@@ -793,10 +865,20 @@ mod tests {
     async fn grep_basic() {
         let tool = make_grep_tool();
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment {
-            grep_results: vec!["src/main.rs:10:fn main()".into(), "src/lib.rs:5:pub fn".into()],
+            grep_results: vec![
+                "src/main.rs:10:fn main()".into(),
+                "src/lib.rs:5:pub fn".into(),
+            ],
             ..Default::default()
         });
-        let result = (tool.executor)(serde_json::json!({"pattern": "fn"}), ToolContext { env, cancel: CancellationToken::new() }).await;
+        let result = (tool.executor)(
+            serde_json::json!({"pattern": "fn"}),
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
+        )
+        .await;
         let output = result.unwrap();
         assert!(output.contains("src/main.rs:10:fn main()"));
         assert!(output.contains("src/lib.rs:5:pub fn"));
@@ -809,7 +891,14 @@ mod tests {
             glob_results: vec!["src/main.rs".into(), "src/lib.rs".into()],
             ..Default::default()
         });
-        let result = (tool.executor)(serde_json::json!({"pattern": "src/**/*.rs"}), ToolContext { env, cancel: CancellationToken::new() }).await;
+        let result = (tool.executor)(
+            serde_json::json!({"pattern": "src/**/*.rs"}),
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
+        )
+        .await;
         let output = result.unwrap();
         assert!(output.contains("src/main.rs"));
         assert!(output.contains("src/lib.rs"));
@@ -819,18 +908,38 @@ mod tests {
     async fn web_search_missing_api_key_returns_error() {
         let tool = make_web_search_tool_with_api_key(None);
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment::default());
-        let result = (tool.executor)(serde_json::json!({"query": "test"}), ToolContext { env, cancel: CancellationToken::new() }).await;
+        let result = (tool.executor)(
+            serde_json::json!({"query": "test"}),
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
+        )
+        .await;
         let err = result.unwrap_err();
-        assert!(err.contains("BRAVE_SEARCH_API_KEY"), "error should mention BRAVE_SEARCH_API_KEY, got: {err}");
+        assert!(
+            err.contains("BRAVE_SEARCH_API_KEY"),
+            "error should mention BRAVE_SEARCH_API_KEY, got: {err}"
+        );
     }
 
     #[tokio::test]
     async fn web_search_missing_query_returns_error() {
         let tool = make_web_search_tool_with_api_key(Some("fake-key".into()));
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment::default());
-        let result = (tool.executor)(serde_json::json!({}), ToolContext { env, cancel: CancellationToken::new() }).await;
+        let result = (tool.executor)(
+            serde_json::json!({}),
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
+        )
+        .await;
         let err = result.unwrap_err();
-        assert!(err.contains("query"), "error should mention missing query, got: {err}");
+        assert!(
+            err.contains("query"),
+            "error should mention missing query, got: {err}"
+        );
     }
 
     #[test]
@@ -872,16 +981,34 @@ mod tests {
         let env_clone: Arc<dyn ExecutionEnvironment> = env.clone();
         let result = (tool.executor)(
             serde_json::json!({"url": "https://example.com"}),
-            ToolContext { env: env_clone, cancel: CancellationToken::new() },
+            ToolContext {
+                env: env_clone,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         let output = result.unwrap();
-        assert!(output.contains("# hello"), "HTML should be converted to markdown, got: {output}");
-        assert!(!output.contains("<html>"), "raw HTML tags should be removed, got: {output}");
+        assert!(
+            output.contains("# hello"),
+            "HTML should be converted to markdown, got: {output}"
+        );
+        assert!(
+            !output.contains("<html>"),
+            "raw HTML tags should be removed, got: {output}"
+        );
         let cmd = env.captured_command.lock().unwrap().clone().unwrap();
-        assert!(cmd.starts_with("curl -sL --max-time 30 "), "command should start with curl flags, got: {cmd}");
-        assert!(cmd.contains("https://example.com"), "command should contain the URL");
-        assert!(cmd.contains("User-Agent: arc-agent/0.1"), "command should set user agent");
+        assert!(
+            cmd.starts_with("curl -sL --max-time 30 "),
+            "command should start with curl flags, got: {cmd}"
+        );
+        assert!(
+            cmd.contains("https://example.com"),
+            "command should contain the URL"
+        );
+        assert!(
+            cmd.contains("User-Agent: arc-agent/0.1"),
+            "command should set user agent"
+        );
     }
 
     #[tokio::test]
@@ -890,11 +1017,17 @@ mod tests {
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment::default());
         let result = (tool.executor)(
             serde_json::json!({"url": "ftp://example.com/file"}),
-            ToolContext { env, cancel: CancellationToken::new() },
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         let err = result.unwrap_err();
-        assert!(err.contains("http://") || err.contains("https://"), "error should mention valid schemes, got: {err}");
+        assert!(
+            err.contains("http://") || err.contains("https://"),
+            "error should mention valid schemes, got: {err}"
+        );
     }
 
     #[tokio::test]
@@ -904,12 +1037,18 @@ mod tests {
         let env_clone: Arc<dyn ExecutionEnvironment> = env.clone();
         let _result = (tool.executor)(
             serde_json::json!({"url": "https://example.com", "timeout_ms": 15000}),
-            ToolContext { env: env_clone, cancel: CancellationToken::new() },
+            ToolContext {
+                env: env_clone,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         assert_eq!(*env.captured_timeout.lock().unwrap(), Some(15000));
         let cmd = env.captured_command.lock().unwrap().clone().unwrap();
-        assert!(cmd.contains("--max-time 15"), "curl timeout should be 15 seconds, got: {cmd}");
+        assert!(
+            cmd.contains("--max-time 15"),
+            "curl timeout should be 15 seconds, got: {cmd}"
+        );
     }
 
     #[tokio::test]
@@ -919,12 +1058,18 @@ mod tests {
         let env_clone: Arc<dyn ExecutionEnvironment> = env.clone();
         let _result = (tool.executor)(
             serde_json::json!({"url": "https://example.com", "timeout_ms": 120000}),
-            ToolContext { env: env_clone, cancel: CancellationToken::new() },
+            ToolContext {
+                env: env_clone,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         assert_eq!(*env.captured_timeout.lock().unwrap(), Some(60000));
         let cmd = env.captured_command.lock().unwrap().clone().unwrap();
-        assert!(cmd.contains("--max-time 60"), "curl timeout should be capped at 60 seconds, got: {cmd}");
+        assert!(
+            cmd.contains("--max-time 60"),
+            "curl timeout should be capped at 60 seconds, got: {cmd}"
+        );
     }
 
     #[tokio::test]
@@ -943,7 +1088,10 @@ mod tests {
         });
         let result = (tool.executor)(
             serde_json::json!({"url": "https://example.com"}),
-            ToolContext { env, cancel: CancellationToken::new() },
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         let output = result.unwrap();
@@ -966,21 +1114,30 @@ mod tests {
         });
         let result = (tool.executor)(
             serde_json::json!({"url": "https://nonexistent.example.com"}),
-            ToolContext { env, cancel: CancellationToken::new() },
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         let err = result.unwrap_err();
-        assert!(err.contains("exit code 6"), "error should contain exit code, got: {err}");
-        assert!(err.contains("Could not resolve host"), "error should contain stderr, got: {err}");
+        assert!(
+            err.contains("exit code 6"),
+            "error should contain exit code, got: {err}"
+        );
+        assert!(
+            err.contains("Could not resolve host"),
+            "error should contain stderr, got: {err}"
+        );
     }
 
     #[tokio::test]
     async fn web_fetch_prompt_with_summarizer_returns_llm_answer() {
-        use crate::test_support::{make_client, MockLlmProvider, text_response};
+        use crate::test_support::{make_client, text_response, MockLlmProvider};
 
-        let provider = Arc::new(MockLlmProvider::new(vec![
-            text_response("Rust is a systems programming language focused on safety and performance."),
-        ]));
+        let provider = Arc::new(MockLlmProvider::new(vec![text_response(
+            "Rust is a systems programming language focused on safety and performance.",
+        )]));
         let client = make_client(provider).await;
         let summarizer = WebFetchSummarizer {
             client,
@@ -1000,11 +1157,17 @@ mod tests {
         });
         let result = (tool.executor)(
             serde_json::json!({"url": "https://example.com", "prompt": "What is Rust?"}),
-            ToolContext { env, cancel: CancellationToken::new() },
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         let output = result.unwrap();
-        assert_eq!(output, "Rust is a systems programming language focused on safety and performance.");
+        assert_eq!(
+            output,
+            "Rust is a systems programming language focused on safety and performance."
+        );
     }
 
     #[tokio::test]
@@ -1012,7 +1175,8 @@ mod tests {
         let tool = make_web_fetch_tool(None);
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment {
             exec_result: ExecResult {
-                stdout: "<html><body><p>Rust is a systems programming language.</p></body></html>".into(),
+                stdout: "<html><body><p>Rust is a systems programming language.</p></body></html>"
+                    .into(),
                 stderr: String::new(),
                 exit_code: 0,
                 timed_out: false,
@@ -1022,30 +1186,39 @@ mod tests {
         });
         let result = (tool.executor)(
             serde_json::json!({"url": "https://example.com", "prompt": "What is Rust?"}),
-            ToolContext { env, cancel: CancellationToken::new() },
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         let output = result.unwrap();
-        assert!(output.contains("summarization unavailable"), "should note unavailability, got: {output}");
-        assert!(output.contains("Rust is a systems programming language"), "should contain page content, got: {output}");
+        assert!(
+            output.contains("summarization unavailable"),
+            "should note unavailability, got: {output}"
+        );
+        assert!(
+            output.contains("Rust is a systems programming language"),
+            "should contain page content, got: {output}"
+        );
     }
 
     #[tokio::test]
     async fn web_fetch_summarizer_routes_to_specified_provider() {
-        use crate::test_support::{MockErrorProvider, MockLlmProvider, text_response};
+        use crate::test_support::{text_response, MockErrorProvider, MockLlmProvider};
         use arc_llm::error::{ProviderErrorDetail, ProviderErrorKind, SdkError};
 
         // "other_provider" is the default — it rejects all requests.
-        let default_provider: Arc<dyn arc_llm::provider::ProviderAdapter> = Arc::new(
-            MockErrorProvider {
+        let default_provider: Arc<dyn arc_llm::provider::ProviderAdapter> =
+            Arc::new(MockErrorProvider {
                 error: SdkError::Provider {
                     kind: ProviderErrorKind::NotFound,
                     detail: Box::new(ProviderErrorDetail::new(
-                        "model not found", "other_provider",
+                        "model not found",
+                        "other_provider",
                     )),
                 },
-            },
-        );
+            });
         // "anthropic" provider has the model we actually want.
         let target_provider: Arc<dyn arc_llm::provider::ProviderAdapter> = Arc::new(
             MockLlmProvider::new(vec![text_response("summarized content")]),
@@ -1075,10 +1248,14 @@ mod tests {
         });
         let result = (tool.executor)(
             serde_json::json!({"url": "https://example.com", "prompt": "Summarize this"}),
-            ToolContext { env, cancel: CancellationToken::new() },
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
-        let output = result.expect("summarization should succeed when provider is correctly routed");
+        let output =
+            result.expect("summarization should succeed when provider is correctly routed");
         assert_eq!(output, "summarized content");
     }
 
@@ -1092,8 +1269,14 @@ mod tests {
     fn html_to_markdown_strips_script_and_style() {
         let html = "<html><head><style>body{color:red}</style></head><body><script>alert(1)</script><p>Content</p></body></html>";
         let result = html_to_markdown(html);
-        assert!(!result.contains("alert"), "script content should be stripped");
-        assert!(!result.contains("color:red"), "style content should be stripped");
+        assert!(
+            !result.contains("alert"),
+            "script content should be stripped"
+        );
+        assert!(
+            !result.contains("color:red"),
+            "style content should be stripped"
+        );
         assert!(result.contains("Content"), "paragraph text should remain");
     }
 
@@ -1115,7 +1298,10 @@ mod tests {
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment::default());
         let result = (tool.executor)(
             serde_json::json!({"query": "rust programming language"}),
-            ToolContext { env, cancel: CancellationToken::new() },
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         let output = result.expect("web search should succeed with valid API key");

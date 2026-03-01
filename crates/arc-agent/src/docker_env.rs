@@ -1,6 +1,8 @@
-use crate::execution_env::{format_lines_numbered, DirEntry, ExecEnvEventCallback, ExecResult, ExecutionEnvEvent, ExecutionEnvironment, GrepOptions};
+use crate::execution_env::{
+    format_lines_numbered, DirEntry, ExecEnvEventCallback, ExecResult, ExecutionEnvEvent,
+    ExecutionEnvironment, GrepOptions,
+};
 use async_trait::async_trait;
-use tokio_util::sync::CancellationToken;
 use bollard::container::{
     Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
     StopContainerOptions, UploadToContainerOptions,
@@ -11,6 +13,7 @@ use bollard::Docker;
 use futures::StreamExt;
 use std::collections::HashMap;
 use std::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 /// Configuration for a Docker-based execution environment.
 pub struct DockerConfig {
@@ -70,8 +73,8 @@ impl DockerExecutionEnvironment {
     /// Validates Docker daemon connectivity but does NOT create a container.
     /// Call `initialize()` to create and start the container.
     pub fn new(config: DockerConfig) -> Result<Self, String> {
-        let docker =
-            Docker::connect_with_local_defaults().map_err(|e| format!("Failed to connect to Docker daemon: {e}"))?;
+        let docker = Docker::connect_with_local_defaults()
+            .map_err(|e| format!("Failed to connect to Docker daemon: {e}"))?;
         Ok(Self {
             docker,
             config,
@@ -179,13 +182,13 @@ impl DockerExecutionEnvironment {
     ) -> Result<ExecResult, String> {
         let start = Instant::now();
 
-        let effective_dir = working_dir.map_or_else(|| self.config.container_mount_point.clone(), ToString::to_string);
+        let effective_dir = working_dir.map_or_else(
+            || self.config.container_mount_point.clone(),
+            ToString::to_string,
+        );
 
-        let env: Option<Vec<String>> = env_vars.map(|vars| {
-            vars.iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect()
-        });
+        let env: Option<Vec<String>> =
+            env_vars.map(|vars| vars.iter().map(|(k, v)| format!("{k}={v}")).collect());
 
         let cmd = vec![
             "/bin/bash".to_string(),
@@ -267,18 +270,29 @@ impl DockerExecutionEnvironment {
 #[async_trait]
 impl ExecutionEnvironment for DockerExecutionEnvironment {
     async fn initialize(&self) -> Result<(), String> {
-        self.emit(ExecutionEnvEvent::Initializing { env_type: "docker".into() });
+        self.emit(ExecutionEnvEvent::Initializing {
+            env_type: "docker".into(),
+        });
         let init_start = Instant::now();
 
-        self.emit(ExecutionEnvEvent::ImagePulling { image: self.config.image.clone() });
+        self.emit(ExecutionEnvEvent::ImagePulling {
+            image: self.config.image.clone(),
+        });
         let pull_start = Instant::now();
         if let Err(e) = self.ensure_image().await {
             let duration_ms = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-            self.emit(ExecutionEnvEvent::InitializeFailed { env_type: "docker".into(), error: e.clone(), duration_ms });
+            self.emit(ExecutionEnvEvent::InitializeFailed {
+                env_type: "docker".into(),
+                error: e.clone(),
+                duration_ms,
+            });
             return Err(e);
         }
         let pull_duration = u64::try_from(pull_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        self.emit(ExecutionEnvEvent::ImagePulled { image: self.config.image.clone(), duration_ms: pull_duration });
+        self.emit(ExecutionEnvEvent::ImagePulled {
+            image: self.config.image.clone(),
+            duration_ms: pull_duration,
+        });
 
         let mut binds = vec![format!(
             "{}:{}",
@@ -328,11 +342,7 @@ impl ExecutionEnvironment for DockerExecutionEnvironment {
 
         // Verify container is running
         let (stdout, _, exit_code) = self
-            .docker_exec(
-                vec!["echo".to_string(), "ready".to_string()],
-                None,
-                None,
-            )
+            .docker_exec(vec!["echo".to_string(), "ready".to_string()], None, None)
             .await?;
 
         if exit_code != 0 || !stdout.contains("ready") {
@@ -341,11 +351,7 @@ impl ExecutionEnvironment for DockerExecutionEnvironment {
 
         // Cache platform info
         let (uname_output, _, _) = self
-            .docker_exec(
-                vec!["uname".to_string(), "-r".to_string()],
-                None,
-                None,
-            )
+            .docker_exec(vec!["uname".to_string(), "-r".to_string()], None, None)
             .await?;
 
         let _ = self.cached_platform.set("linux".to_string());
@@ -354,27 +360,38 @@ impl ExecutionEnvironment for DockerExecutionEnvironment {
             .set(format!("linux {}", uname_output.trim()));
 
         let init_duration = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        self.emit(ExecutionEnvEvent::Ready { env_type: "docker".into(), duration_ms: init_duration });
+        self.emit(ExecutionEnvEvent::Ready {
+            env_type: "docker".into(),
+            duration_ms: init_duration,
+        });
 
         Ok(())
     }
 
     async fn cleanup(&self) -> Result<(), String> {
-        self.emit(ExecutionEnvEvent::CleanupStarted { env_type: "docker".into() });
+        self.emit(ExecutionEnvEvent::CleanupStarted {
+            env_type: "docker".into(),
+        });
         let start = Instant::now();
 
         let container_id = match self.container_id.get() {
             Some(id) => id.clone(),
             None => {
                 let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                self.emit(ExecutionEnvEvent::CleanupCompleted { env_type: "docker".into(), duration_ms });
+                self.emit(ExecutionEnvEvent::CleanupCompleted {
+                    env_type: "docker".into(),
+                    duration_ms,
+                });
                 return Ok(());
             }
         };
 
         // Stop with 5-second grace period; ignore "not running" errors
         let stop_opts = StopContainerOptions { t: 5 };
-        let _ = self.docker.stop_container(&container_id, Some(stop_opts)).await;
+        let _ = self
+            .docker
+            .stop_container(&container_id, Some(stop_opts))
+            .await;
 
         // Force-remove; ignore "no such container" errors
         let remove_opts = RemoveContainerOptions {
@@ -387,7 +404,10 @@ impl ExecutionEnvironment for DockerExecutionEnvironment {
             .await;
 
         let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        self.emit(ExecutionEnvEvent::CleanupCompleted { env_type: "docker".into(), duration_ms });
+        self.emit(ExecutionEnvEvent::CleanupCompleted {
+            env_type: "docker".into(),
+            duration_ms,
+        });
 
         Ok(())
     }
@@ -413,17 +433,11 @@ impl ExecutionEnvironment for DockerExecutionEnvironment {
     ) -> Result<String, String> {
         let container_path = self.resolve_container_path(path);
         let (stdout, stderr, exit_code) = self
-            .docker_exec(
-                vec!["cat".to_string(), container_path.clone()],
-                None,
-                None,
-            )
+            .docker_exec(vec!["cat".to_string(), container_path.clone()], None, None)
             .await?;
 
         if exit_code != 0 {
-            return Err(format!(
-                "Failed to read {container_path}: {stderr}"
-            ));
+            return Err(format!("Failed to read {container_path}: {stderr}"));
         }
 
         Ok(format_lines_numbered(&stdout, offset, limit))
@@ -448,7 +462,9 @@ impl ExecutionEnvironment for DockerExecutionEnvironment {
                 )
                 .await?;
             if exit_code != 0 {
-                return Err(format!("Failed to create parent dirs for {container_path}: {stderr}"));
+                return Err(format!(
+                    "Failed to create parent dirs for {container_path}: {stderr}"
+                ));
             }
         }
 
@@ -463,7 +479,9 @@ impl ExecutionEnvironment for DockerExecutionEnvironment {
 
         let content_bytes = content.as_bytes();
         let mut header = tar::Header::new_gnu();
-        header.set_path(&file_name).map_err(|e| format!("Failed to set tar path: {e}"))?;
+        header
+            .set_path(&file_name)
+            .map_err(|e| format!("Failed to set tar path: {e}"))?;
         header.set_size(content_bytes.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
@@ -477,7 +495,8 @@ impl ExecutionEnvironment for DockerExecutionEnvironment {
             .map_err(|e| format!("Failed to finalize tar archive: {e}"))?;
 
         let parent_dir = std::path::Path::new(&container_path)
-            .parent().map_or_else(|| "/".to_string(), |p| p.to_string_lossy().to_string());
+            .parent()
+            .map_or_else(|| "/".to_string(), |p| p.to_string_lossy().to_string());
 
         let upload_opts = UploadToContainerOptions {
             path: parent_dir,
@@ -584,14 +603,15 @@ impl ExecutionEnvironment for DockerExecutionEnvironment {
         let container_path = self.resolve_container_path(path);
 
         // Detect ripgrep availability (cached)
-        let use_rg = *self.rg_available.get_or_init(|| async {
-            let result = self.docker_exec(
-                vec!["which".to_string(), "rg".to_string()],
-                None,
-                None,
-            ).await;
-            matches!(result, Ok((_, _, 0)))
-        }).await;
+        let use_rg = *self
+            .rg_available
+            .get_or_init(|| async {
+                let result = self
+                    .docker_exec(vec!["which".to_string(), "rg".to_string()], None, None)
+                    .await;
+                matches!(result, Ok((_, _, 0)))
+            })
+            .await;
 
         let command = if use_rg {
             let mut args = vec!["rg".to_string(), "-n".to_string()];
@@ -643,7 +663,10 @@ impl ExecutionEnvironment for DockerExecutionEnvironment {
     }
 
     async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String> {
-        let base_dir = path.map_or_else(|| self.config.container_mount_point.clone(), |p| self.resolve_container_path(p));
+        let base_dir = path.map_or_else(
+            || self.config.container_mount_point.clone(),
+            |p| self.resolve_container_path(p),
+        );
 
         let full_pattern = if pattern.starts_with('/') {
             pattern.to_string()
@@ -708,7 +731,8 @@ mod tests {
     #[ignore]
     async fn full_lifecycle() {
         let _docker = require_docker();
-        let host_dir = std::env::temp_dir().join(format!("docker_env_test_{}", uuid::Uuid::new_v4()));
+        let host_dir =
+            std::env::temp_dir().join(format!("docker_env_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&host_dir).unwrap();
 
         let config = test_config(host_dir.to_str().unwrap());
@@ -723,13 +747,18 @@ mod tests {
         assert!(env.os_version().starts_with("linux "));
 
         // exec_command
-        let result = env.exec_command("echo hello", 5000, None, None, None).await.unwrap();
+        let result = env
+            .exec_command("echo hello", 5000, None, None, None)
+            .await
+            .unwrap();
         assert_eq!(result.stdout.trim(), "hello");
         assert_eq!(result.exit_code, 0);
         assert!(!result.timed_out);
 
         // write_file + read_file
-        env.write_file("test.txt", "line1\nline2\nline3").await.unwrap();
+        env.write_file("test.txt", "line1\nline2\nline3")
+            .await
+            .unwrap();
         let content = env.read_file("test.txt", None, None).await.unwrap();
         assert!(content.contains("1 | line1"));
         assert!(content.contains("2 | line2"));
@@ -744,7 +773,10 @@ mod tests {
         assert!(entries.iter().any(|e| e.name == "test.txt"));
 
         // grep
-        let grep_results = env.grep("line2", "test.txt", &GrepOptions::default()).await.unwrap();
+        let grep_results = env
+            .grep("line2", "test.txt", &GrepOptions::default())
+            .await
+            .unwrap();
         assert_eq!(grep_results.len(), 1);
         assert!(grep_results[0].contains("line2"));
 
@@ -765,14 +797,18 @@ mod tests {
     #[ignore]
     async fn timeout_handling() {
         let _docker = require_docker();
-        let host_dir = std::env::temp_dir().join(format!("docker_timeout_test_{}", uuid::Uuid::new_v4()));
+        let host_dir =
+            std::env::temp_dir().join(format!("docker_timeout_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&host_dir).unwrap();
 
         let config = test_config(host_dir.to_str().unwrap());
         let env = DockerExecutionEnvironment::new(config).unwrap();
         env.initialize().await.unwrap();
 
-        let result = env.exec_command("sleep 60", 1000, None, None, None).await.unwrap();
+        let result = env
+            .exec_command("sleep 60", 1000, None, None, None)
+            .await
+            .unwrap();
         assert!(result.timed_out);
         assert_eq!(result.exit_code, -1);
 
@@ -784,7 +820,8 @@ mod tests {
     #[ignore]
     async fn special_characters_in_write() {
         let _docker = require_docker();
-        let host_dir = std::env::temp_dir().join(format!("docker_special_test_{}", uuid::Uuid::new_v4()));
+        let host_dir =
+            std::env::temp_dir().join(format!("docker_special_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&host_dir).unwrap();
 
         let config = test_config(host_dir.to_str().unwrap());
@@ -795,7 +832,10 @@ mod tests {
         env.write_file("special.txt", content).await.unwrap();
 
         // Read raw content back via cat to verify exact match
-        let result = env.exec_command("cat /workspace/special.txt", 5000, None, None, None).await.unwrap();
+        let result = env
+            .exec_command("cat /workspace/special.txt", 5000, None, None, None)
+            .await
+            .unwrap();
         assert_eq!(result.stdout, content);
 
         env.cleanup().await.unwrap();
@@ -806,7 +846,8 @@ mod tests {
     #[ignore]
     async fn path_resolution() {
         let _docker = require_docker();
-        let host_dir = std::env::temp_dir().join(format!("docker_path_test_{}", uuid::Uuid::new_v4()));
+        let host_dir =
+            std::env::temp_dir().join(format!("docker_path_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&host_dir).unwrap();
 
         let config = test_config(host_dir.to_str().unwrap());
@@ -819,7 +860,9 @@ mod tests {
         assert!(env.file_exists("/workspace/relative.txt").await.unwrap());
 
         // Absolute path used as-is
-        env.write_file("/tmp/absolute.txt", "absolute").await.unwrap();
+        env.write_file("/tmp/absolute.txt", "absolute")
+            .await
+            .unwrap();
         assert!(env.file_exists("/tmp/absolute.txt").await.unwrap());
 
         env.cleanup().await.unwrap();
@@ -830,7 +873,8 @@ mod tests {
     #[ignore]
     async fn cleanup_idempotent() {
         let _docker = require_docker();
-        let host_dir = std::env::temp_dir().join(format!("docker_cleanup_test_{}", uuid::Uuid::new_v4()));
+        let host_dir =
+            std::env::temp_dir().join(format!("docker_cleanup_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&host_dir).unwrap();
 
         let config = test_config(host_dir.to_str().unwrap());

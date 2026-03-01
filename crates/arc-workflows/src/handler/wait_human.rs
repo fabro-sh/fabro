@@ -117,10 +117,7 @@ impl Handler for WaitHumanHandler {
                 freeform_target = Some(edge.to.clone());
                 continue;
             }
-            let label = edge
-                .label()
-                .filter(|l| !l.is_empty())
-                .unwrap_or(&edge.to);
+            let label = edge.label().filter(|l| !l.is_empty()).unwrap_or(&edge.to);
             let key = parse_accelerator_key(label);
             choices.push(Choice {
                 key,
@@ -142,10 +139,7 @@ impl Handler for WaitHumanHandler {
             })
             .collect();
 
-        let mut question = Question::new(
-            node.label(),
-            QuestionType::MultipleChoice,
-        );
+        let mut question = Question::new(node.label(), QuestionType::MultipleChoice);
         question.options = options;
         question.allow_freeform = freeform_target.is_some();
         question.stage.clone_from(&node.id);
@@ -211,14 +205,12 @@ impl Handler for WaitHumanHandler {
                 "human.gate.selected".to_string(),
                 serde_json::json!("freeform"),
             );
-            outcome.context_updates.insert(
-                "human.gate.label".to_string(),
-                serde_json::json!(text),
-            );
-            outcome.context_updates.insert(
-                "human.gate.text".to_string(),
-                serde_json::json!(text),
-            );
+            outcome
+                .context_updates
+                .insert("human.gate.label".to_string(), serde_json::json!(text));
+            outcome
+                .context_updates
+                .insert("human.gate.text".to_string(), serde_json::json!(text));
             return Ok(outcome);
         }
 
@@ -235,22 +227,18 @@ fn make_choice_outcome(key: &str, label: &str, to: &str) -> Outcome {
     let mut outcome = Outcome::success();
     outcome.preferred_label = Some(label.to_string());
     outcome.suggested_next_ids = vec![to.to_string()];
-    outcome.context_updates.insert(
-        "human.gate.selected".to_string(),
-        serde_json::json!(key),
-    );
-    outcome.context_updates.insert(
-        "human.gate.label".to_string(),
-        serde_json::json!(label),
-    );
+    outcome
+        .context_updates
+        .insert("human.gate.selected".to_string(), serde_json::json!(key));
+    outcome
+        .context_updates
+        .insert("human.gate.label".to_string(), serde_json::json!(label));
     outcome
 }
 
 fn find_choice_match<'a>(answer: &Answer, choices: &'a [Choice]) -> Option<&'a Choice> {
     match &answer.value {
-        AnswerValue::Selected(key) => {
-            choices.iter().find(|c| c.key == *key)
-        }
+        AnswerValue::Selected(key) => choices.iter().find(|c| c.key == *key),
         AnswerValue::Text(text) => {
             // Try matching by key or label
             choices
@@ -306,8 +294,12 @@ mod tests {
             AttrValue::String("Review Changes".to_string()),
         );
         graph.nodes.insert("gate".to_string(), gate);
-        graph.nodes.insert("approve".to_string(), Node::new("approve"));
-        graph.nodes.insert("reject".to_string(), Node::new("reject"));
+        graph
+            .nodes
+            .insert("approve".to_string(), Node::new("approve"));
+        graph
+            .nodes
+            .insert("reject".to_string(), Node::new("reject"));
 
         let mut e1 = Edge::new("gate", "approve");
         e1.attrs.insert(
@@ -399,12 +391,12 @@ mod tests {
 
         let mut graph = Graph::new("test");
         let mut gate = Node::new("gate");
-        gate.attrs.insert(
-            "label".to_string(),
-            AttrValue::String("Choose".to_string()),
-        );
+        gate.attrs
+            .insert("label".to_string(), AttrValue::String("Choose".to_string()));
         graph.nodes.insert("gate".to_string(), gate);
-        graph.nodes.insert("freeform_target".to_string(), Node::new("freeform_target"));
+        graph
+            .nodes
+            .insert("freeform_target".to_string(), Node::new("freeform_target"));
 
         let mut edge = Edge::new("gate", "freeform_target");
         edge.attrs

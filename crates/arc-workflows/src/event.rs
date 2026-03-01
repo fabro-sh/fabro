@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use arc_agent::{AgentEvent, ExecutionEnvEvent};
 use crate::outcome::StageUsage;
+use arc_agent::{AgentEvent, ExecutionEnvEvent};
 
 /// Events emitted during pipeline execution for observability.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -333,7 +333,10 @@ mod tests {
         // Round-trip
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
         match deserialized {
-            PipelineEvent::Agent { event: AgentEvent::AssistantMessage { usage, .. }, .. } => {
+            PipelineEvent::Agent {
+                event: AgentEvent::AssistantMessage { usage, .. },
+                ..
+            } => {
                 assert_eq!(usage.cache_read_tokens, Some(800));
                 assert_eq!(usage.reasoning_tokens, Some(100));
             }
@@ -422,7 +425,9 @@ mod tests {
         assert!(json.contains("\"failure_class\":\"transient\""));
 
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, PipelineEvent::StageFailed { failure_class: Some(fc), .. } if fc == "transient"));
+        assert!(
+            matches!(deserialized, PipelineEvent::StageFailed { failure_class: Some(fc), .. } if fc == "transient")
+        );
 
         let event_none = PipelineEvent::StageFailed {
             name: "plan".to_string(),
@@ -450,7 +455,9 @@ mod tests {
         assert!(!json.contains("\"success\":"));
 
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, PipelineEvent::ParallelBranchCompleted { status, .. } if status == "success"));
+        assert!(
+            matches!(deserialized, PipelineEvent::ParallelBranchCompleted { status, .. } if status == "success")
+        );
     }
 
     #[test]
@@ -465,7 +472,9 @@ mod tests {
         assert!(json.contains("\"error_policy\":\"continue\""));
 
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, PipelineEvent::ParallelStarted { join_policy, error_policy, .. } if join_policy == "wait_all" && error_policy == "continue"));
+        assert!(
+            matches!(deserialized, PipelineEvent::ParallelStarted { join_policy, error_policy, .. } if join_policy == "wait_all" && error_policy == "continue")
+        );
     }
 
     #[test]
@@ -479,7 +488,9 @@ mod tests {
         assert!(json.contains("\"question_type\":\"multiple_choice\""));
 
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, PipelineEvent::InterviewStarted { question_type, .. } if question_type == "multiple_choice"));
+        assert!(
+            matches!(deserialized, PipelineEvent::InterviewStarted { question_type, .. } if question_type == "multiple_choice")
+        );
     }
 
     #[test]
@@ -527,7 +538,9 @@ mod tests {
         assert!(json.contains("\"condition\":\"outcome == 'success'\""));
 
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, PipelineEvent::EdgeSelected { from_node, to_node, .. } if from_node == "plan" && to_node == "code"));
+        assert!(
+            matches!(deserialized, PipelineEvent::EdgeSelected { from_node, to_node, .. } if from_node == "plan" && to_node == "code")
+        );
 
         // None label/condition
         let event_none = PipelineEvent::EdgeSelected {
@@ -553,7 +566,9 @@ mod tests {
         assert!(json.contains("\"to_node\":\"code\""));
 
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, PipelineEvent::LoopRestart { from_node, to_node } if from_node == "review" && to_node == "code"));
+        assert!(
+            matches!(deserialized, PipelineEvent::LoopRestart { from_node, to_node } if from_node == "review" && to_node == "code")
+        );
     }
 
     #[test]
@@ -572,7 +587,13 @@ mod tests {
         assert!(json.contains("\"delay_ms\":400"));
 
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, PipelineEvent::StageRetrying { max_attempts: 5, .. }));
+        assert!(matches!(
+            deserialized,
+            PipelineEvent::StageRetrying {
+                max_attempts: 5,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -609,7 +630,13 @@ mod tests {
         assert!(json.contains("\"pending_count\":3"));
 
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, PipelineEvent::ParallelEarlyTermination { completed_count: 2, .. }));
+        assert!(matches!(
+            deserialized,
+            PipelineEvent::ParallelEarlyTermination {
+                completed_count: 2,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -624,7 +651,9 @@ mod tests {
         assert!(json.contains("\"start_node\":\"start\""));
 
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, PipelineEvent::SubgraphStarted { node_id, .. } if node_id == "sub_1"));
+        assert!(
+            matches!(deserialized, PipelineEvent::SubgraphStarted { node_id, .. } if node_id == "sub_1")
+        );
     }
 
     #[test]
@@ -641,7 +670,13 @@ mod tests {
         assert!(json.contains("\"duration_ms\":3200"));
 
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, PipelineEvent::SubgraphCompleted { steps_executed: 5, .. }));
+        assert!(matches!(
+            deserialized,
+            PipelineEvent::SubgraphCompleted {
+                steps_executed: 5,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -649,7 +684,9 @@ mod tests {
         use arc_agent::ExecutionEnvEvent;
 
         let event = PipelineEvent::ExecutionEnv {
-            event: ExecutionEnvEvent::Initializing { env_type: "docker".into() },
+            event: ExecutionEnvEvent::Initializing {
+                env_type: "docker".into(),
+            },
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("ExecutionEnv"));
@@ -664,10 +701,23 @@ mod tests {
     fn setup_events_serialization() {
         let events = vec![
             PipelineEvent::SetupStarted { command_count: 3 },
-            PipelineEvent::SetupCommandStarted { command: "npm install".into(), index: 0 },
-            PipelineEvent::SetupCommandCompleted { command: "npm install".into(), index: 0, exit_code: 0, duration_ms: 5000 },
+            PipelineEvent::SetupCommandStarted {
+                command: "npm install".into(),
+                index: 0,
+            },
+            PipelineEvent::SetupCommandCompleted {
+                command: "npm install".into(),
+                index: 0,
+                exit_code: 0,
+                duration_ms: 5000,
+            },
             PipelineEvent::SetupCompleted { duration_ms: 8000 },
-            PipelineEvent::SetupFailed { command: "npm test".into(), index: 1, exit_code: 1, stderr: "test failed".into() },
+            PipelineEvent::SetupFailed {
+                command: "npm test".into(),
+                index: 1,
+                exit_code: 1,
+                stderr: "test failed".into(),
+            },
         ];
 
         for event in &events {

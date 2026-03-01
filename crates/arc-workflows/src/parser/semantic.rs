@@ -89,9 +89,17 @@ impl SemanticState {
         }
     }
 
-    fn process_node(&mut self, node_stmt: &crate::parser::ast::NodeStmt, subgraph_class: Option<&str>) {
+    fn process_node(
+        &mut self,
+        node_stmt: &crate::parser::ast::NodeStmt,
+        subgraph_class: Option<&str>,
+    ) {
         self.ensure_node(&node_stmt.id);
-        let node = self.graph.nodes.get_mut(&node_stmt.id).expect("just ensured");
+        let node = self
+            .graph
+            .nodes
+            .get_mut(&node_stmt.id)
+            .expect("just ensured");
         if let Some(attrs) = &node_stmt.attrs {
             for (k, v) in attrs {
                 node.attrs.insert(k.clone(), convert_value(v));
@@ -107,7 +115,11 @@ impl SemanticState {
             .and_then(AttrValue::as_str)
             .map(String::from);
         if let Some(class_str) = class_str {
-            let node = self.graph.nodes.get_mut(&node_stmt.id).expect("just ensured");
+            let node = self
+                .graph
+                .nodes
+                .get_mut(&node_stmt.id)
+                .expect("just ensured");
             for cls in class_str.split(',') {
                 let cls = cls.trim().to_string();
                 if !cls.is_empty() && !node.classes.contains(&cls) {
@@ -117,7 +129,11 @@ impl SemanticState {
         }
     }
 
-    fn process_edge(&mut self, edge_stmt: &crate::parser::ast::EdgeStmt, subgraph_class: Option<&str>) {
+    fn process_edge(
+        &mut self,
+        edge_stmt: &crate::parser::ast::EdgeStmt,
+        subgraph_class: Option<&str>,
+    ) {
         for id in &edge_stmt.nodes {
             self.ensure_node(id);
             if let Some(cls) = subgraph_class {
@@ -433,9 +449,10 @@ mod tests {
             statements: vec![Statement::Subgraph(crate::parser::ast::SubgraphStmt {
                 name: Some("cluster_review".into()),
                 statements: vec![
-                    Statement::GraphAttr(vec![
-                        ("label".into(), AstValue::Str("Code Review".into())),
-                    ]),
+                    Statement::GraphAttr(vec![(
+                        "label".into(),
+                        AstValue::Str("Code Review".into()),
+                    )]),
                     Statement::Node(crate::parser::ast::NodeStmt {
                         id: "reviewer".into(),
                         attrs: None,
@@ -488,7 +505,10 @@ mod tests {
             name: "ClassTest".into(),
             statements: vec![Statement::Node(crate::parser::ast::NodeStmt {
                 id: "review".into(),
-                attrs: Some(vec![("class".into(), AstValue::Str("code,critical".into()))]),
+                attrs: Some(vec![(
+                    "class".into(),
+                    AstValue::Str("code,critical".into()),
+                )]),
             })],
         };
 

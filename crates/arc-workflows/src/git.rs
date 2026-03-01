@@ -126,22 +126,34 @@ pub fn checkpoint_commit(
     let subject = format!("arc({run_id}): {node_id} ({status})");
     let completed_str = completed_count.to_string();
     let mut trailers = vec![
-        Trailer { key: "Arc-Run", value: run_id },
-        Trailer { key: "Arc-Completed", value: &completed_str },
+        Trailer {
+            key: "Arc-Run",
+            value: run_id,
+        },
+        Trailer {
+            key: "Arc-Completed",
+            value: &completed_str,
+        },
     ];
     if let Some(sha) = shadow_sha {
-        trailers.push(Trailer { key: "Arc-Checkpoint", value: sha });
+        trailers.push(Trailer {
+            key: "Arc-Checkpoint",
+            value: sha,
+        });
     }
     let message = trailerlink::format_message(&subject, "", &trailers);
 
     // Commit with arc identity (works even if user.name/email not configured)
     let output = Command::new("git")
         .args([
-            "-c", "user.name=arc",
-            "-c", "user.email=arc@local",
+            "-c",
+            "user.name=arc",
+            "-c",
+            "user.email=arc@local",
             "commit",
             "--allow-empty",
-            "-m", &message,
+            "-m",
+            &message,
         ])
         .current_dir(work_dir)
         .output()
@@ -182,7 +194,9 @@ pub struct MetadataStore {
 
 impl MetadataStore {
     pub fn new(repo_path: impl Into<std::path::PathBuf>) -> Self {
-        Self { repo_path: repo_path.into() }
+        Self {
+            repo_path: repo_path.into(),
+        }
     }
 
     /// Returns the branch ref name for a run: `refs/arc/{run_id}`.
@@ -204,11 +218,13 @@ impl MetadataStore {
         let (store, sig) = self.open_store()?;
         let branch = Self::branch_name(run_id);
         let bs = BranchStore::new(&store, &branch, &sig);
-        bs.ensure_branch().map_err(|e| git_error(format!("ensure_branch failed: {e}")))?;
+        bs.ensure_branch()
+            .map_err(|e| git_error(format!("ensure_branch failed: {e}")))?;
         bs.write_entries(
             &[("manifest.json", manifest_json), ("graph.dot", graph_dot)],
             "init run",
-        ).map_err(|e| git_error(format!("write_entries failed: {e}")))?;
+        )
+        .map_err(|e| git_error(format!("write_entries failed: {e}")))?;
         Ok(())
     }
 
@@ -225,7 +241,8 @@ impl MetadataStore {
         let bs = BranchStore::new(&store, &branch, &sig);
         let mut entries: Vec<(&str, &[u8])> = vec![("checkpoint.json", checkpoint_json)];
         entries.extend_from_slice(artifacts);
-        let oid = bs.write_entries(&entries, "checkpoint")
+        let oid = bs
+            .write_entries(&entries, "checkpoint")
             .map_err(|e| git_error(format!("write_entries failed: {e}")))?;
         Ok(oid.to_string())
     }
@@ -296,7 +313,16 @@ mod tests {
             .output()
             .unwrap();
         Command::new("git")
-            .args(["-c", "user.name=test", "-c", "user.email=test@test", "commit", "--allow-empty", "-m", "init"])
+            .args([
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@test",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "init",
+            ])
             .current_dir(dir)
             .output()
             .unwrap();
@@ -377,7 +403,8 @@ mod tests {
 
         // Simulate a shadow commit SHA
         let shadow_sha = "abcdef1234567890abcdef1234567890abcdef12";
-        let sha = checkpoint_commit(&wt_path, "run1", "nodeA", "success", 3, Some(shadow_sha)).unwrap();
+        let sha =
+            checkpoint_commit(&wt_path, "run1", "nodeA", "success", 3, Some(shadow_sha)).unwrap();
         assert_eq!(sha.len(), 40);
         assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
 
@@ -399,7 +426,10 @@ mod tests {
         let full_msg = String::from_utf8_lossy(&output.stdout).trim().to_string();
         assert_eq!(trailerlink::parse(&full_msg, "Arc-Run"), Some("run1"));
         assert_eq!(trailerlink::parse(&full_msg, "Arc-Completed"), Some("3"));
-        assert_eq!(trailerlink::parse(&full_msg, "Arc-Checkpoint"), Some(shadow_sha));
+        assert_eq!(
+            trailerlink::parse(&full_msg, "Arc-Checkpoint"),
+            Some(shadow_sha)
+        );
 
         remove_worktree(dir.path(), &wt_path).unwrap();
     }
@@ -439,7 +469,16 @@ mod tests {
             .output()
             .unwrap();
         Command::new("git")
-            .args(["-c", "user.name=test", "-c", "user.email=test@test", "commit", "--allow-empty", "-m", "init"])
+            .args([
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@test",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "init",
+            ])
             .current_dir(dir.path())
             .output()
             .unwrap();
@@ -468,7 +507,15 @@ mod tests {
             .output()
             .unwrap();
         Command::new("git")
-            .args(["-c", "user.name=test", "-c", "user.email=test@test", "commit", "-m", "add file"])
+            .args([
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@test",
+                "commit",
+                "-m",
+                "add file",
+            ])
             .current_dir(dir.path())
             .output()
             .unwrap();
@@ -499,11 +546,15 @@ mod tests {
         let dot = b"digraph { start -> end }";
         store.init_run("RUN1", manifest, dot).unwrap();
 
-        let read_manifest = MetadataStore::read_manifest(dir.path(), "RUN1").unwrap().unwrap();
+        let read_manifest = MetadataStore::read_manifest(dir.path(), "RUN1")
+            .unwrap()
+            .unwrap();
         assert_eq!(read_manifest["run_id"], "RUN1");
         assert_eq!(read_manifest["pipeline"], "test");
 
-        let read_dot = MetadataStore::read_graph_dot(dir.path(), "RUN1").unwrap().unwrap();
+        let read_dot = MetadataStore::read_graph_dot(dir.path(), "RUN1")
+            .unwrap()
+            .unwrap();
         assert_eq!(read_dot, "digraph { start -> end }");
     }
 
@@ -528,11 +579,16 @@ mod tests {
         let cp_json = serde_json::to_vec_pretty(&cp).unwrap();
         store.write_checkpoint("RUN2", &cp_json, &[]).unwrap();
 
-        let loaded = MetadataStore::read_checkpoint(dir.path(), "RUN2").unwrap().unwrap();
+        let loaded = MetadataStore::read_checkpoint(dir.path(), "RUN2")
+            .unwrap()
+            .unwrap();
         assert_eq!(loaded.current_node, "node_a");
         assert_eq!(loaded.completed_nodes, vec!["start"]);
         assert_eq!(loaded.next_node_id.as_deref(), Some("node_b"));
-        assert_eq!(loaded.context_values.get("goal"), Some(&serde_json::json!("test")));
+        assert_eq!(
+            loaded.context_values.get("goal"),
+            Some(&serde_json::json!("test"))
+        );
     }
 
     #[test]
@@ -566,7 +622,9 @@ mod tests {
         let cp2_json = serde_json::to_vec_pretty(&cp2).unwrap();
         store.write_checkpoint("RUN3", &cp2_json, &[]).unwrap();
 
-        let loaded = MetadataStore::read_checkpoint(dir.path(), "RUN3").unwrap().unwrap();
+        let loaded = MetadataStore::read_checkpoint(dir.path(), "RUN3")
+            .unwrap()
+            .unwrap();
         assert_eq!(loaded.current_node, "node_b");
         assert_eq!(loaded.completed_nodes.len(), 2);
     }
@@ -590,13 +648,17 @@ mod tests {
 
         let artifact_data = br#"{"large_output":"some data"}"#;
         let cp_json = b"{}"; // minimal checkpoint for the test
-        store.write_checkpoint(
-            "RUN4",
-            cp_json,
-            &[("artifacts/response.plan.json", artifact_data.as_slice())],
-        ).unwrap();
+        store
+            .write_checkpoint(
+                "RUN4",
+                cp_json,
+                &[("artifacts/response.plan.json", artifact_data.as_slice())],
+            )
+            .unwrap();
 
-        let read_back = MetadataStore::read_artifact(dir.path(), "RUN4", "response.plan").unwrap().unwrap();
+        let read_back = MetadataStore::read_artifact(dir.path(), "RUN4", "response.plan")
+            .unwrap()
+            .unwrap();
         assert_eq!(read_back, artifact_data);
     }
 }

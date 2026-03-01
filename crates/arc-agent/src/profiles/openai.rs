@@ -23,7 +23,10 @@ impl OpenAiProfile {
     }
 
     #[must_use]
-    pub fn with_summarizer(model: impl Into<String>, summarizer: Option<WebFetchSummarizer>) -> Self {
+    pub fn with_summarizer(
+        model: impl Into<String>,
+        summarizer: Option<WebFetchSummarizer>,
+    ) -> Self {
         let config = SessionConfig::default();
         let mut registry = ToolRegistry::new();
 
@@ -165,7 +168,14 @@ information instead of returning the full page. URLs must start with http:// or 
 Write clean, maintainable code. Handle errors appropriately. Follow existing code conventions \
 in the project.";
 
-        assemble_system_prompt(core_prompt, env, env_context, project_docs, user_instructions, skills)
+        assemble_system_prompt(
+            core_prompt,
+            env,
+            env_context,
+            project_docs,
+            user_instructions,
+            skills,
+        )
     }
 
     fn capabilities(&self) -> ProfileCapabilities {
@@ -196,7 +206,6 @@ in the project.";
         "April 2025"
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -268,7 +277,13 @@ mod tests {
     fn openai_system_prompt_includes_user_instructions() {
         let profile = OpenAiProfile::new("o3-mini");
         let env = MockExecutionEnvironment::linux();
-        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], Some("Always write tests first"), &[]);
+        let prompt = profile.build_system_prompt(
+            &env,
+            &EnvContext::default(),
+            &[],
+            Some("Always write tests first"),
+            &[],
+        );
         assert!(prompt.contains("Always write tests first"));
         assert!(prompt.contains("# User Instructions"));
     }
@@ -307,17 +322,15 @@ mod tests {
 
     #[test]
     fn openai_subagent_tools_registered() {
-        use crate::subagent::SubAgentManager;
         use crate::subagent::SessionFactory;
+        use crate::subagent::SubAgentManager;
         use std::sync::Arc;
 
         let mut profile = OpenAiProfile::new("o3-mini");
         assert_eq!(profile.tool_registry().names().len(), 8);
 
         let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(3)));
-        let factory: SessionFactory = Arc::new(|| {
-            panic!("should not be called in test")
-        });
+        let factory: SessionFactory = Arc::new(|| panic!("should not be called in test"));
         profile.register_subagent_tools(manager, factory, 0);
         assert_eq!(profile.tool_registry().names().len(), 12);
     }
@@ -336,5 +349,4 @@ mod tests {
         assert!(names.contains(&"web_search".to_string()));
         assert!(names.contains(&"web_fetch".to_string()));
     }
-
 }

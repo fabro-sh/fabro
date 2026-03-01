@@ -43,7 +43,17 @@ impl Handler for FanInHandler {
         let prompt = node.prompt().filter(|p| !p.is_empty());
 
         let best = if let (Some(prompt_text), Some(backend)) = (prompt, &self.backend) {
-            llm_evaluate(backend.as_ref(), prompt_text, &results, context, logs_root, &node.id, &services.emitter, &services.execution_env).await?
+            llm_evaluate(
+                backend.as_ref(),
+                prompt_text,
+                &results,
+                context,
+                logs_root,
+                &node.id,
+                &services.emitter,
+                &services.execution_env,
+            )
+            .await?
         } else {
             heuristic_select(&results)
         };
@@ -52,12 +62,8 @@ impl Handler for FanInHandler {
         let all_failed = if best.status == "fail" {
             let empty_vec = vec![];
             let arr = results.as_array().unwrap_or(&empty_vec);
-            arr.iter().all(|v| {
-                v.get("status")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("fail")
-                    == "fail"
-            })
+            arr.iter()
+                .all(|v| v.get("status").and_then(|v| v.as_str()).unwrap_or("fail") == "fail")
         } else {
             false
         };
@@ -134,7 +140,10 @@ fn heuristic_select(results: &serde_json::Value) -> Candidate {
             return rank_cmp;
         }
         // Higher score is better, so reverse the comparison
-        let score_cmp = b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal);
+        let score_cmp = b
+            .score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal);
         if score_cmp != std::cmp::Ordering::Equal {
             return score_cmp;
         }
@@ -160,8 +169,8 @@ async fn llm_evaluate(
     emitter: &Arc<EventEmitter>,
     execution_env: &Arc<dyn ExecutionEnvironment>,
 ) -> Result<Candidate, ArcError> {
-    let results_text = serde_json::to_string_pretty(results)
-        .unwrap_or_else(|_| results.to_string());
+    let results_text =
+        serde_json::to_string_pretty(results).unwrap_or_else(|_| results.to_string());
 
     let full_prompt = format!(
         "{prompt}\n\nParallel branch results:\n{results_text}\n\n\
@@ -178,7 +187,18 @@ async fn llm_evaluate(
     let eval_node = Node::new("fan_in_eval");
 
     // Fan-in evaluation runs outside a thread context, so pass None
-    match backend.run(&eval_node, &full_prompt, context, None, emitter, &stage_dir, execution_env).await {
+    match backend
+        .run(
+            &eval_node,
+            &full_prompt,
+            context,
+            None,
+            emitter,
+            &stage_dir,
+            execution_env,
+        )
+        .await
+    {
         Ok(CodergenResult::Full(outcome)) => {
             // If the backend returned a full Outcome, extract best_id from context_updates
             let best_id = outcome
@@ -188,8 +208,8 @@ async fn llm_evaluate(
                 .map(String::from)
                 .or_else(|| outcome.notes.clone())
                 .unwrap_or_else(|| "unknown".to_string());
-            let response_text = serde_json::to_string_pretty(&outcome)
-                .unwrap_or_else(|_| "{}".to_string());
+            let response_text =
+                serde_json::to_string_pretty(&outcome).unwrap_or_else(|_| "{}".to_string());
             tokio::fs::write(stage_dir.join("response.md"), &response_text).await?;
             Ok(Candidate {
                 id: best_id,
@@ -382,7 +402,11 @@ mod tests {
                 _execution_env: &Arc<dyn ExecutionEnvironment>,
             ) -> Result<CodergenResult, ArcError> {
                 // Return text that contains the ID "branch_b"
-                Ok(CodergenResult::Text { text: "The best candidate is branch_b".to_string(), usage: None, files_touched: Vec::new() })
+                Ok(CodergenResult::Text {
+                    text: "The best candidate is branch_b".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
+                })
             }
         }
 

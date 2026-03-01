@@ -11,7 +11,7 @@ impl History {
         self.turns.push(turn);
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn turns(&self) -> &[Turn] {
         &self.turns
     }
@@ -88,8 +88,8 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::SystemTime;
     use arc_llm::types::{ToolCall, ToolResult, Usage};
+    use std::time::SystemTime;
 
     #[test]
     fn compact_replaces_old_turns_with_summary() {
@@ -284,7 +284,9 @@ mod tests {
         let messages = history.convert_to_messages();
         assert_eq!(messages.len(), 1);
         // Provider parts come first, then tool calls
-        assert!(matches!(&messages[0].content[0], ContentPart::Other { kind, .. } if kind == "openai_reasoning"));
+        assert!(
+            matches!(&messages[0].content[0], ContentPart::Other { kind, .. } if kind == "openai_reasoning")
+        );
         assert!(matches!(&messages[0].content[1], ContentPart::ToolCall(_)));
     }
 
@@ -377,7 +379,10 @@ mod tests {
             timestamp: SystemTime::now(),
         });
         history.push(Turn::ToolResults {
-            results: vec![ToolResult::success("c1", serde_json::json!("file1.rs\nfile2.rs"))],
+            results: vec![ToolResult::success(
+                "c1",
+                serde_json::json!("file1.rs\nfile2.rs"),
+            )],
             timestamp: SystemTime::now(),
         });
 

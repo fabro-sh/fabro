@@ -138,26 +138,29 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
             let request = build_request(&params, &messages, tool_definitions.as_deref());
 
             let client_ref = client.clone();
-            let response =
-                if let Some(per_step) = params.timeout.as_ref().and_then(|t| t.per_step) {
-                    let duration = std::time::Duration::from_secs_f64(per_step);
-                    tokio::time::timeout(duration, retry(&retry_policy, || {
-                        let c = client_ref.clone();
-                        let r = request.clone();
-                        async move { c.complete(&r).await }
-                    }))
-                    .await
-                    .map_err(|_| SdkError::RequestTimeout {
-                        message: format!("Per-step timeout of {per_step}s exceeded"),
-                    })?
-                } else {
+            let response = if let Some(per_step) = params.timeout.as_ref().and_then(|t| t.per_step)
+            {
+                let duration = std::time::Duration::from_secs_f64(per_step);
+                tokio::time::timeout(
+                    duration,
                     retry(&retry_policy, || {
                         let c = client_ref.clone();
                         let r = request.clone();
                         async move { c.complete(&r).await }
-                    })
-                    .await
-                }?;
+                    }),
+                )
+                .await
+                .map_err(|_| SdkError::RequestTimeout {
+                    message: format!("Per-step timeout of {per_step}s exceeded"),
+                })?
+            } else {
+                retry(&retry_policy, || {
+                    let c = client_ref.clone();
+                    let r = request.clone();
+                    async move { c.complete(&r).await }
+                })
+                .await
+            }?;
 
             let tool_calls = response.tool_calls();
             let mut tool_results = Vec::new();
@@ -171,7 +174,14 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
                 if tools.iter().any(|t| t.is_active()) {
                     let tool_refs: Vec<&Tool> =
                         tools.iter().map(std::convert::AsRef::as_ref).collect();
-                    tool_results = execute_all_tools_with_repair(&tool_refs, &tool_calls, &messages, abort_signal.as_ref(), params.repair_tool_call.as_ref()).await;
+                    tool_results = execute_all_tools_with_repair(
+                        &tool_refs,
+                        &tool_calls,
+                        &messages,
+                        abort_signal.as_ref(),
+                        params.repair_tool_call.as_ref(),
+                    )
+                    .await;
                 }
             }
 
@@ -409,10 +419,7 @@ impl GenerateParams {
     /// The callback receives the accumulated steps so far and returns `true`
     /// to stop the tool loop early.
     #[must_use]
-    pub fn stop_when(
-        mut self,
-        f: impl Fn(&[StepResult]) -> bool + Send + Sync + 'static,
-    ) -> Self {
+    pub fn stop_when(mut self, f: impl Fn(&[StepResult]) -> bool + Send + Sync + 'static) -> Self {
         self.stop_when = Some(Arc::new(f));
         self
     }
@@ -603,8 +610,7 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
 
     if !has_active_tools {
         // No tool loop needed, just stream directly
-        return stream_generate_raw(&client, &params, &messages, tool_definitions.as_deref())
-            .await;
+        return stream_generate_raw(&client, &params, &messages, tool_definitions.as_deref()).await;
     }
 
     // Tool loop: collect events from each round, execute tools, continue
@@ -649,9 +655,11 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
                         let duration = std::time::Duration::from_secs_f64(per_step);
                         tokio::time::timeout(duration, stream_connect)
                             .await
-                            .unwrap_or_else(|_| Err(SdkError::RequestTimeout {
-                                message: format!("Per-step timeout of {per_step}s exceeded"),
-                            }))
+                            .unwrap_or_else(|_| {
+                                Err(SdkError::RequestTimeout {
+                                    message: format!("Per-step timeout of {per_step}s exceeded"),
+                                })
+                            })
                     } else {
                         stream_connect.await
                     };
@@ -711,7 +719,14 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
 
                 let tool_refs: Vec<&Tool> =
                     tool_list.iter().map(std::convert::AsRef::as_ref).collect();
-                let tool_results = execute_all_tools_with_repair(&tool_refs, &tool_calls, &messages, abort_signal.as_ref(), repair_tool_call.as_ref()).await;
+                let tool_results = execute_all_tools_with_repair(
+                    &tool_refs,
+                    &tool_calls,
+                    &messages,
+                    abort_signal.as_ref(),
+                    repair_tool_call.as_ref(),
+                )
+                .await;
 
                 if tool_results.is_empty() {
                     return;
@@ -826,26 +841,22 @@ async fn stream_generate_raw(
         let duration = std::time::Duration::from_secs_f64(total);
         let deadline = tokio::time::Instant::now() + duration;
         let total_copy = total;
-        let timed_stream = futures::stream::unfold(
-            (stream, false),
-            move |(mut stream, done)| async move {
+        let timed_stream =
+            futures::stream::unfold((stream, false), move |(mut stream, done)| async move {
                 if done {
                     return None;
                 }
                 match tokio::time::timeout_at(deadline, stream.next()).await {
                     Ok(Some(item)) => Some((item, (stream, false))),
                     Ok(None) => None, // stream completed naturally
-                    Err(_) => {
-                        Some((
-                            Err(SdkError::RequestTimeout {
-                                message: format!("Total timeout of {total_copy}s exceeded"),
-                            }),
-                            (stream, true),
-                        ))
-                    }
+                    Err(_) => Some((
+                        Err(SdkError::RequestTimeout {
+                            message: format!("Total timeout of {total_copy}s exceeded"),
+                        }),
+                        (stream, true),
+                    )),
                 }
-            },
-        );
+            });
         Ok(Box::pin(timed_stream))
     } else {
         Ok(stream)
@@ -994,7 +1005,9 @@ pub async fn stream_object(
                         accumulated_text.push_str(delta);
 
                         // Try incremental JSON parse
-                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(accumulated_text) {
+                        if let Ok(parsed) =
+                            serde_json::from_str::<serde_json::Value>(accumulated_text)
+                        {
                             if last_parsed.as_ref() != Some(&parsed) {
                                 *last_parsed = Some(parsed.clone());
                                 events.push(Ok(ObjectStreamEvent::Partial { object: parsed }));
@@ -1087,10 +1100,7 @@ mod tests {
             })
         }
 
-        async fn stream(
-            &self,
-            _request: &Request,
-        ) -> Result<StreamEventStream, SdkError> {
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
             let text = self.response_text.clone();
             let events = vec![
                 Ok(StreamEvent::text_delta(&text, Some("t1".into()))),
@@ -1127,11 +1137,7 @@ mod tests {
     fn mock_client(text: &str) -> Arc<Client> {
         let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
         providers.insert("mock".to_string(), Arc::new(MockProvider::new(text)));
-        Arc::new(Client::new(
-            providers,
-            Some("mock".to_string()),
-            vec![],
-        ))
+        Arc::new(Client::new(providers, Some("mock".to_string()), vec![]))
     }
 
     #[tokio::test]
@@ -1261,10 +1267,7 @@ mod tests {
             }
         }
 
-        async fn stream(
-            &self,
-            _request: &Request,
-        ) -> Result<StreamEventStream, SdkError> {
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
             Ok(Box::pin(stream::empty()))
         }
     }
@@ -1278,11 +1281,7 @@ mod tests {
 
         let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
         providers.insert("mock".to_string(), provider);
-        let client = Arc::new(Client::new(
-            providers,
-            Some("mock".to_string()),
-            vec![],
-        ));
+        let client = Arc::new(Client::new(providers, Some("mock".to_string()), vec![]));
 
         let result = generate(
             GenerateParams::new("mock-model")
@@ -1438,11 +1437,7 @@ mod tests {
 
         let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
         providers.insert("mock".to_string(), provider);
-        let client = Arc::new(Client::new(
-            providers,
-            Some("mock".to_string()),
-            vec![],
-        ));
+        let client = Arc::new(Client::new(providers, Some("mock".to_string()), vec![]));
 
         let result = generate(
             GenerateParams::new("mock-model")
@@ -1495,10 +1490,7 @@ mod tests {
         assert_eq!(params.temperature, Some(0.7));
         assert_eq!(params.top_p, Some(0.9));
         assert_eq!(params.max_tokens, Some(100));
-        assert_eq!(
-            params.stop_sequences,
-            Some(vec!["STOP".to_string()])
-        );
+        assert_eq!(params.stop_sequences, Some(vec!["STOP".to_string()]));
         assert_eq!(params.reasoning_effort.as_deref(), Some("high"));
         assert_eq!(params.provider.as_deref(), Some("anthropic"));
         assert!(params.provider_options.is_some());
@@ -1510,11 +1502,10 @@ mod tests {
 
     #[test]
     fn generate_params_timeout_builder() {
-        let params = GenerateParams::new("test-model")
-            .timeout(TimeoutConfig {
-                total: Some(30.0),
-                per_step: Some(10.0),
-            });
+        let params = GenerateParams::new("test-model").timeout(TimeoutConfig {
+            total: Some(30.0),
+            per_step: Some(10.0),
+        });
         assert!(params.timeout.is_some());
         let t = params.timeout.unwrap();
         assert_eq!(t.total, Some(30.0));
@@ -1557,10 +1548,7 @@ mod tests {
             })
         }
 
-        async fn stream(
-            &self,
-            _request: &Request,
-        ) -> Result<StreamEventStream, SdkError> {
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
             let mut events: Vec<Result<StreamEvent, SdkError>> = self
                 .deltas
                 .iter()
@@ -1603,11 +1591,7 @@ mod tests {
             "mock".to_string(),
             Arc::new(StreamingJsonMockProvider::new(deltas)),
         );
-        Arc::new(Client::new(
-            providers,
-            Some("mock".to_string()),
-            vec![],
-        ))
+        Arc::new(Client::new(providers, Some("mock".to_string()), vec![]))
     }
 
     #[tokio::test]
@@ -1650,11 +1634,8 @@ mod tests {
 
     #[tokio::test]
     async fn stream_object_yields_partial_events_incrementally() {
-        let client = streaming_json_mock_client(vec![
-            r#"{"name""#,
-            r#": "Bob""#,
-            r#", "age": 25}"#,
-        ]);
+        let client =
+            streaming_json_mock_client(vec![r#"{"name""#, r#": "Bob""#, r#", "age": 25}"#]);
 
         let schema = serde_json::json!({
             "type": "object",
@@ -1790,10 +1771,7 @@ mod tests {
                 })
             }
 
-            async fn stream(
-                &self,
-                _request: &Request,
-            ) -> Result<StreamEventStream, SdkError> {
+            async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
                 Ok(Box::pin(stream::empty()))
             }
         }
@@ -1804,11 +1782,7 @@ mod tests {
         });
         let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
         providers.insert("mock".to_string(), provider);
-        let client = Arc::new(Client::new(
-            providers,
-            Some("mock".to_string()),
-            vec![],
-        ));
+        let client = Arc::new(Client::new(providers, Some("mock".to_string()), vec![]));
 
         let result = generate(
             GenerateParams::new("mock-model")
@@ -1863,11 +1837,7 @@ mod tests {
 
         let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
         providers.insert("mock".to_string(), provider);
-        let client = Arc::new(Client::new(
-            providers,
-            Some("mock".to_string()),
-            vec![],
-        ));
+        let client = Arc::new(Client::new(providers, Some("mock".to_string()), vec![]));
 
         let tool_executed = Arc::new(AtomicU32::new(0));
         let tool_executed_clone = tool_executed.clone();
@@ -1904,8 +1874,7 @@ mod tests {
     #[test]
     fn generate_params_abort_signal_builder() {
         let token = CancellationToken::new();
-        let params = GenerateParams::new("test-model")
-            .abort_signal(token);
+        let params = GenerateParams::new("test-model").abort_signal(token);
         assert!(params.abort_signal.is_some());
     }
 
@@ -1975,15 +1944,13 @@ mod tests {
             })
         }
 
-        async fn stream(
-            &self,
-            _request: &Request,
-        ) -> Result<StreamEventStream, SdkError> {
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
             let count = self.call_count.fetch_add(1, Ordering::SeqCst);
 
             if count == 0 {
                 // First stream: return tool call
-                let tool_call = ToolCall::new("call_1", "get_weather", serde_json::json!({"city": "SF"}));
+                let tool_call =
+                    ToolCall::new("call_1", "get_weather", serde_json::json!({"city": "SF"}));
                 let response = Response {
                     id: "resp_1".into(),
                     model: "mock-model".into(),
@@ -2055,11 +2022,7 @@ mod tests {
 
         let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
         providers.insert("mock".to_string(), provider);
-        let client = Arc::new(Client::new(
-            providers,
-            Some("mock".to_string()),
-            vec![],
-        ));
+        let client = Arc::new(Client::new(providers, Some("mock".to_string()), vec![]));
 
         let mut result = stream(
             GenerateParams::new("mock-model")
@@ -2097,7 +2060,10 @@ mod tests {
 
         // The final response should be the text response
         assert!(result.response().is_some());
-        assert_eq!(result.response().unwrap().text(), "The weather in SF is 72F");
+        assert_eq!(
+            result.response().unwrap().text(),
+            "The weather in SF is 72F"
+        );
     }
 
     #[tokio::test]
@@ -2109,11 +2075,7 @@ mod tests {
 
         let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
         providers.insert("mock".to_string(), provider);
-        let client = Arc::new(Client::new(
-            providers,
-            Some("mock".to_string()),
-            vec![],
-        ));
+        let client = Arc::new(Client::new(providers, Some("mock".to_string()), vec![]));
 
         let mut result = stream(
             GenerateParams::new("mock-model")
@@ -2164,7 +2126,10 @@ mod tests {
             serde_json::json!({"city": "SF"}),
         )];
 
-        let tool_results = vec![crate::types::ToolResult::success("call_1", serde_json::json!("72F"))];
+        let tool_results = vec![crate::types::ToolResult::success(
+            "call_1",
+            serde_json::json!("72F"),
+        )];
 
         // Processing StepFinish should not panic and should not set the final response
         acc.process(&StreamEvent::step_finish(
@@ -2189,11 +2154,7 @@ mod tests {
 
         let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
         providers.insert("mock".to_string(), provider);
-        let client = Arc::new(Client::new(
-            providers,
-            Some("mock".to_string()),
-            vec![],
-        ));
+        let client = Arc::new(Client::new(providers, Some("mock".to_string()), vec![]));
 
         let mut result = stream(
             GenerateParams::new("mock-model")
@@ -2220,7 +2181,10 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, Ok(StreamEvent::StepFinish { .. })))
             .count();
-        assert_eq!(step_finish_count, 1, "Expected exactly one StepFinish event");
+        assert_eq!(
+            step_finish_count, 1,
+            "Expected exactly one StepFinish event"
+        );
 
         // Verify StepFinish contents
         let step_finish = events
@@ -2252,11 +2216,7 @@ mod tests {
 
         let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
         providers.insert("mock".to_string(), provider);
-        let client = Arc::new(Client::new(
-            providers,
-            Some("mock".to_string()),
-            vec![],
-        ));
+        let client = Arc::new(Client::new(providers, Some("mock".to_string()), vec![]));
 
         let mut result = stream(
             GenerateParams::new("mock-model")
@@ -2287,14 +2247,20 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, Ok(StreamEvent::StepFinish { .. })))
             .count();
-        assert_eq!(step_finish_count, 1, "Expected StepFinish event from stopped round");
+        assert_eq!(
+            step_finish_count, 1,
+            "Expected StepFinish event from stopped round"
+        );
 
         // Should NOT have any text deltas (second round never started)
         let text_delta_count = events
             .iter()
             .filter(|e| matches!(e, Ok(StreamEvent::TextDelta { .. })))
             .count();
-        assert_eq!(text_delta_count, 0, "Expected no text deltas since loop was stopped");
+        assert_eq!(
+            text_delta_count, 0,
+            "Expected no text deltas since loop was stopped"
+        );
     }
 
     /// Mock provider that fails on stream N times then succeeds
@@ -2323,10 +2289,7 @@ mod tests {
             })
         }
 
-        async fn stream(
-            &self,
-            _request: &Request,
-        ) -> Result<StreamEventStream, SdkError> {
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
             let count = self.call_count.fetch_add(1, Ordering::SeqCst);
 
             if count < self.failures {
@@ -2378,11 +2341,7 @@ mod tests {
 
         let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
         providers.insert("mock".to_string(), provider);
-        let client = Arc::new(Client::new(
-            providers,
-            Some("mock".to_string()),
-            vec![],
-        ));
+        let client = Arc::new(Client::new(providers, Some("mock".to_string()), vec![]));
 
         // Need active tools so the tool loop path (with retry) is used
         let mut result = stream(
@@ -2445,10 +2404,7 @@ mod tests {
             })
         }
 
-        async fn stream(
-            &self,
-            _request: &Request,
-        ) -> Result<StreamEventStream, SdkError> {
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
             tokio::time::sleep(self.delay).await;
             let text = "Slow response";
             let response = Response {
@@ -2464,7 +2420,11 @@ mod tests {
             };
             let events = vec![
                 Ok(StreamEvent::text_delta(text, Some("t1".into()))),
-                Ok(StreamEvent::finish(FinishReason::Stop, Usage::default(), response)),
+                Ok(StreamEvent::finish(
+                    FinishReason::Stop,
+                    Usage::default(),
+                    response,
+                )),
             ];
             Ok(Box::pin(stream::iter(events)))
         }
@@ -2478,11 +2438,7 @@ mod tests {
 
         let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
         providers.insert("mock".to_string(), provider);
-        let client = Arc::new(Client::new(
-            providers,
-            Some("mock".to_string()),
-            vec![],
-        ));
+        let client = Arc::new(Client::new(providers, Some("mock".to_string()), vec![]));
 
         // Need active tools so the tool loop path (with timeout) is used
         let mut result = stream(
@@ -2511,9 +2467,9 @@ mod tests {
         }
 
         // Should have received a timeout error
-        let has_timeout = events.iter().any(|e| {
-            matches!(e, Err(SdkError::RequestTimeout { .. }))
-        });
+        let has_timeout = events
+            .iter()
+            .any(|e| matches!(e, Err(SdkError::RequestTimeout { .. })));
         assert!(has_timeout, "Expected a RequestTimeout error");
     }
 
@@ -2548,15 +2504,13 @@ mod tests {
                 })
             }
 
-            async fn stream(
-                &self,
-                _request: &Request,
-            ) -> Result<StreamEventStream, SdkError> {
+            async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
                 let count = self.call_count.fetch_add(1, Ordering::SeqCst);
 
                 if count == 0 {
                     // First stream: return tool call quickly
-                    let tool_call = ToolCall::new("call_1", "get_weather", serde_json::json!({"city": "SF"}));
+                    let tool_call =
+                        ToolCall::new("call_1", "get_weather", serde_json::json!({"city": "SF"}));
                     let response = Response {
                         id: "resp_1".into(),
                         model: "mock-model".into(),
@@ -2599,7 +2553,11 @@ mod tests {
                     };
                     let events = vec![
                         Ok(StreamEvent::text_delta(text, Some("t1".into()))),
-                        Ok(StreamEvent::finish(FinishReason::Stop, Usage::default(), response)),
+                        Ok(StreamEvent::finish(
+                            FinishReason::Stop,
+                            Usage::default(),
+                            response,
+                        )),
                     ];
                     Ok(Box::pin(stream::iter(events)))
                 }
@@ -2612,11 +2570,7 @@ mod tests {
 
         let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
         providers.insert("mock".to_string(), provider);
-        let client = Arc::new(Client::new(
-            providers,
-            Some("mock".to_string()),
-            vec![],
-        ));
+        let client = Arc::new(Client::new(providers, Some("mock".to_string()), vec![]));
 
         let mut result = stream(
             GenerateParams::new("mock-model")
@@ -2644,9 +2598,12 @@ mod tests {
         }
 
         // Should have received a total timeout error
-        let has_timeout = events.iter().any(|e| {
-            matches!(e, Err(SdkError::RequestTimeout { .. }))
-        });
-        assert!(has_timeout, "Expected a RequestTimeout error from total timeout");
+        let has_timeout = events
+            .iter()
+            .any(|e| matches!(e, Err(SdkError::RequestTimeout { .. })));
+        assert!(
+            has_timeout,
+            "Expected a RequestTimeout error from total timeout"
+        );
     }
 }

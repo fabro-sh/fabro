@@ -87,27 +87,68 @@ macro_rules! delegate_execution_env {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExecutionEnvEvent {
     // -- Common lifecycle --
-    Initializing { env_type: String },
-    Ready { env_type: String, duration_ms: u64 },
-    InitializeFailed { env_type: String, error: String, duration_ms: u64 },
-    CleanupStarted { env_type: String },
-    CleanupCompleted { env_type: String, duration_ms: u64 },
-    CleanupFailed { env_type: String, error: String },
+    Initializing {
+        env_type: String,
+    },
+    Ready {
+        env_type: String,
+        duration_ms: u64,
+    },
+    InitializeFailed {
+        env_type: String,
+        error: String,
+        duration_ms: u64,
+    },
+    CleanupStarted {
+        env_type: String,
+    },
+    CleanupCompleted {
+        env_type: String,
+        duration_ms: u64,
+    },
+    CleanupFailed {
+        env_type: String,
+        error: String,
+    },
 
     // -- Docker --
-    ImagePulling { image: String },
-    ImagePulled { image: String, duration_ms: u64 },
+    ImagePulling {
+        image: String,
+    },
+    ImagePulled {
+        image: String,
+        duration_ms: u64,
+    },
 
     // -- Daytona snapshots --
-    SnapshotEnsuring { name: String },
-    SnapshotCreating { name: String },
-    SnapshotReady { name: String, duration_ms: u64 },
-    SnapshotFailed { name: String, error: String },
+    SnapshotEnsuring {
+        name: String,
+    },
+    SnapshotCreating {
+        name: String,
+    },
+    SnapshotReady {
+        name: String,
+        duration_ms: u64,
+    },
+    SnapshotFailed {
+        name: String,
+        error: String,
+    },
 
     // -- Daytona git --
-    GitCloneStarted { url: String, branch: Option<String> },
-    GitCloneCompleted { url: String, duration_ms: u64 },
-    GitCloneFailed { url: String, error: String },
+    GitCloneStarted {
+        url: String,
+        branch: Option<String>,
+    },
+    GitCloneCompleted {
+        url: String,
+        duration_ms: u64,
+    },
+    GitCloneFailed {
+        url: String,
+        error: String,
+    },
 }
 
 /// Callback type for execution environment events.
@@ -117,7 +158,7 @@ pub type ExecEnvEventCallback = Arc<dyn Fn(ExecutionEnvEvent) + Send + Sync>;
 ///
 /// Applies optional offset (0-based lines to skip) and limit (max lines to return).
 /// Line numbers are 1-based and right-aligned.
-#[must_use] 
+#[must_use]
 pub fn format_lines_numbered(content: &str, offset: Option<usize>, limit: Option<usize>) -> String {
     let all_lines: Vec<&str> = content.lines().collect();
     let skip = offset.unwrap_or(0);
@@ -157,11 +198,20 @@ pub struct GrepOptions {
 
 #[async_trait]
 pub trait ExecutionEnvironment: Send + Sync {
-    async fn read_file(&self, path: &str, offset: Option<usize>, limit: Option<usize>) -> Result<String, String>;
+    async fn read_file(
+        &self,
+        path: &str,
+        offset: Option<usize>,
+        limit: Option<usize>,
+    ) -> Result<String, String>;
     async fn write_file(&self, path: &str, content: &str) -> Result<(), String>;
     async fn delete_file(&self, path: &str) -> Result<(), String>;
     async fn file_exists(&self, path: &str) -> Result<bool, String>;
-    async fn list_directory(&self, path: &str, depth: Option<usize>) -> Result<Vec<DirEntry>, String>;
+    async fn list_directory(
+        &self,
+        path: &str,
+        depth: Option<usize>,
+    ) -> Result<Vec<DirEntry>, String>;
     async fn exec_command(
         &self,
         command: &str,
@@ -206,7 +256,10 @@ mod tests {
     #[tokio::test]
     async fn mock_env_exec_command() {
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment::default());
-        let result = env.exec_command("echo", 5000, None, None, None).await.unwrap();
+        let result = env
+            .exec_command("echo", 5000, None, None, None)
+            .await
+            .unwrap();
         assert_eq!(result.exit_code, 0);
         assert!(!result.timed_out);
     }
@@ -263,21 +316,62 @@ mod tests {
     #[test]
     fn execution_env_event_serialization_round_trip() {
         let events = vec![
-            ExecutionEnvEvent::Initializing { env_type: "local".into() },
-            ExecutionEnvEvent::Ready { env_type: "local".into(), duration_ms: 50 },
-            ExecutionEnvEvent::InitializeFailed { env_type: "docker".into(), error: "no daemon".into(), duration_ms: 100 },
-            ExecutionEnvEvent::CleanupStarted { env_type: "daytona".into() },
-            ExecutionEnvEvent::CleanupCompleted { env_type: "daytona".into(), duration_ms: 200 },
-            ExecutionEnvEvent::CleanupFailed { env_type: "docker".into(), error: "container gone".into() },
-            ExecutionEnvEvent::ImagePulling { image: "ubuntu:22.04".into() },
-            ExecutionEnvEvent::ImagePulled { image: "ubuntu:22.04".into(), duration_ms: 5000 },
-            ExecutionEnvEvent::SnapshotEnsuring { name: "my-snap".into() },
-            ExecutionEnvEvent::SnapshotCreating { name: "my-snap".into() },
-            ExecutionEnvEvent::SnapshotReady { name: "my-snap".into(), duration_ms: 30000 },
-            ExecutionEnvEvent::SnapshotFailed { name: "my-snap".into(), error: "build failed".into() },
-            ExecutionEnvEvent::GitCloneStarted { url: "https://github.com/org/repo.git".into(), branch: Some("main".into()) },
-            ExecutionEnvEvent::GitCloneCompleted { url: "https://github.com/org/repo.git".into(), duration_ms: 8000 },
-            ExecutionEnvEvent::GitCloneFailed { url: "https://github.com/org/repo.git".into(), error: "auth failed".into() },
+            ExecutionEnvEvent::Initializing {
+                env_type: "local".into(),
+            },
+            ExecutionEnvEvent::Ready {
+                env_type: "local".into(),
+                duration_ms: 50,
+            },
+            ExecutionEnvEvent::InitializeFailed {
+                env_type: "docker".into(),
+                error: "no daemon".into(),
+                duration_ms: 100,
+            },
+            ExecutionEnvEvent::CleanupStarted {
+                env_type: "daytona".into(),
+            },
+            ExecutionEnvEvent::CleanupCompleted {
+                env_type: "daytona".into(),
+                duration_ms: 200,
+            },
+            ExecutionEnvEvent::CleanupFailed {
+                env_type: "docker".into(),
+                error: "container gone".into(),
+            },
+            ExecutionEnvEvent::ImagePulling {
+                image: "ubuntu:22.04".into(),
+            },
+            ExecutionEnvEvent::ImagePulled {
+                image: "ubuntu:22.04".into(),
+                duration_ms: 5000,
+            },
+            ExecutionEnvEvent::SnapshotEnsuring {
+                name: "my-snap".into(),
+            },
+            ExecutionEnvEvent::SnapshotCreating {
+                name: "my-snap".into(),
+            },
+            ExecutionEnvEvent::SnapshotReady {
+                name: "my-snap".into(),
+                duration_ms: 30000,
+            },
+            ExecutionEnvEvent::SnapshotFailed {
+                name: "my-snap".into(),
+                error: "build failed".into(),
+            },
+            ExecutionEnvEvent::GitCloneStarted {
+                url: "https://github.com/org/repo.git".into(),
+                branch: Some("main".into()),
+            },
+            ExecutionEnvEvent::GitCloneCompleted {
+                url: "https://github.com/org/repo.git".into(),
+                duration_ms: 8000,
+            },
+            ExecutionEnvEvent::GitCloneFailed {
+                url: "https://github.com/org/repo.git".into(),
+                error: "auth failed".into(),
+            },
         ];
 
         assert_eq!(events.len(), 15, "should test all 15 variants");
@@ -293,6 +387,8 @@ mod tests {
     #[test]
     fn exec_env_event_callback_type_compiles() {
         let cb: ExecEnvEventCallback = Arc::new(|_event| {});
-        cb(ExecutionEnvEvent::Initializing { env_type: "test".into() });
+        cb(ExecutionEnvEvent::Initializing {
+            env_type: "test".into(),
+        });
     }
 }

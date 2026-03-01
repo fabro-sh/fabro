@@ -2,8 +2,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arc_agent::ExecutionEnvironment;
-use async_trait::async_trait;
 use arc_llm::provider::Provider;
+use async_trait::async_trait;
 
 use crate::context::Context;
 use crate::error::ArcError;
@@ -31,7 +31,12 @@ pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &s
         String::new()
     } else {
         match provider {
-            Provider::OpenAi | Provider::Gemini | Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {
+            Provider::OpenAi
+            | Provider::Gemini
+            | Provider::Kimi
+            | Provider::Zai
+            | Provider::Minimax
+            | Provider::Inception => {
                 format!(" -m {model}")
             }
             Provider::Anthropic => format!(" --model {model}"),
@@ -77,7 +82,11 @@ fn parse_claude_ndjson(output: &str) -> Option<CliResponse> {
     }
 
     let result = last_result?;
-    let text = result.get("result").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let text = result
+        .get("result")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let input_tokens = result
         .pointer("/usage/input_tokens")
         .and_then(|v| v.as_i64())
@@ -118,7 +127,10 @@ fn parse_codex_ndjson(output: &str) -> Option<CliResponse> {
 
         match event_type {
             "item.completed" => {
-                let item_type = value.pointer("/item/type").and_then(|t| t.as_str()).unwrap_or("");
+                let item_type = value
+                    .pointer("/item/type")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("");
                 if item_type == "agent_message" {
                     if let Some(text) = value.pointer("/item/text").and_then(|t| t.as_str()) {
                         last_message_text = text.to_string();
@@ -127,8 +139,14 @@ fn parse_codex_ndjson(output: &str) -> Option<CliResponse> {
                 }
             }
             "turn.completed" => {
-                input_tokens = value.pointer("/usage/input_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
-                output_tokens = value.pointer("/usage/output_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+                input_tokens = value
+                    .pointer("/usage/input_tokens")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                output_tokens = value
+                    .pointer("/usage/output_tokens")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
                 found_anything = true;
             }
             _ => {}
@@ -152,7 +170,11 @@ fn parse_codex_ndjson(output: &str) -> Option<CliResponse> {
 /// `stats.models.<model>.tokens` for usage.
 fn parse_gemini_json(output: &str) -> Option<CliResponse> {
     let value: serde_json::Value = serde_json::from_str(output.trim()).ok()?;
-    let text = value.get("response").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let text = value
+        .get("response")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     // Extract tokens from the first model in stats.models
     let (input_tokens, output_tokens) = value
@@ -160,8 +182,14 @@ fn parse_gemini_json(output: &str) -> Option<CliResponse> {
         .and_then(|m| m.as_object())
         .and_then(|models| models.values().next())
         .map(|model_stats| {
-            let input = model_stats.pointer("/tokens/input").and_then(|v| v.as_i64()).unwrap_or(0);
-            let output = model_stats.pointer("/tokens/candidates").and_then(|v| v.as_i64()).unwrap_or(0);
+            let input = model_stats
+                .pointer("/tokens/input")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let output = model_stats
+                .pointer("/tokens/candidates")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
             (input, output)
         })
         .unwrap_or((0, 0));
@@ -176,9 +204,11 @@ fn parse_gemini_json(output: &str) -> Option<CliResponse> {
 /// Parse CLI output, choosing the right parser based on provider.
 pub fn parse_cli_response(provider: Provider, output: &str) -> Option<CliResponse> {
     match provider {
-        Provider::OpenAi | Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {
-            parse_codex_ndjson(output)
-        }
+        Provider::OpenAi
+        | Provider::Kimi
+        | Provider::Zai
+        | Provider::Minimax
+        | Provider::Inception => parse_codex_ndjson(output),
         Provider::Gemini => parse_gemini_json(output),
         Provider::Anthropic => parse_claude_ndjson(output),
     }
@@ -313,9 +343,8 @@ impl CodergenBackend for CliBackend {
         }
 
         // 4. Parse the CLI output
-        let parsed = parse_cli_response(provider, &result.stdout).ok_or_else(|| {
-            ArcError::Handler("Failed to parse CLI output".to_string())
-        })?;
+        let parsed = parse_cli_response(provider, &result.stdout)
+            .ok_or_else(|| ArcError::Handler("Failed to parse CLI output".to_string()))?;
 
         // 5. Detect changed files
         let files_after = self.detect_changed_files(execution_env).await;
@@ -390,11 +419,27 @@ impl CodergenBackend for BackendRouter {
     ) -> Result<CodergenResult, ArcError> {
         if self.should_use_cli(node) {
             self.cli_backend
-                .run(node, prompt, context, thread_id, emitter, stage_dir, execution_env)
+                .run(
+                    node,
+                    prompt,
+                    context,
+                    thread_id,
+                    emitter,
+                    stage_dir,
+                    execution_env,
+                )
                 .await
         } else {
             self.api_backend
-                .run(node, prompt, context, thread_id, emitter, stage_dir, execution_env)
+                .run(
+                    node,
+                    prompt,
+                    context,
+                    thread_id,
+                    emitter,
+                    stage_dir,
+                    execution_env,
+                )
                 .await
         }
     }
@@ -427,7 +472,8 @@ mod tests {
 
     #[test]
     fn cli_command_for_claude() {
-        let cmd = cli_command_for_provider(Provider::Anthropic, "claude-opus-4-6", "/tmp/prompt.txt");
+        let cmd =
+            cli_command_for_provider(Provider::Anthropic, "claude-opus-4-6", "/tmp/prompt.txt");
         assert!(cmd.contains("claude -p"));
         assert!(cmd.contains("--dangerously-skip-permissions"));
         assert!(cmd.contains("--output-format stream-json"));
@@ -570,10 +616,7 @@ mod tests {
             .insert("backend".to_string(), AttrValue::String("cli".to_string()));
 
         let cli_backend = CliBackend::new("model".into(), Provider::Anthropic);
-        let router = BackendRouter::new(
-            Box::new(StubBackend),
-            cli_backend,
-        );
+        let router = BackendRouter::new(Box::new(StubBackend), cli_backend);
         assert!(router.should_use_cli(&node));
     }
 
@@ -582,10 +625,7 @@ mod tests {
         let node = Node::new("test");
 
         let cli_backend = CliBackend::new("model".into(), Provider::Anthropic);
-        let router = BackendRouter::new(
-            Box::new(StubBackend),
-            cli_backend,
-        );
+        let router = BackendRouter::new(Box::new(StubBackend), cli_backend);
         assert!(!router.should_use_cli(&node));
     }
 
@@ -598,10 +638,7 @@ mod tests {
         );
 
         let cli_backend = CliBackend::new("model".into(), Provider::Anthropic);
-        let router = BackendRouter::new(
-            Box::new(StubBackend),
-            cli_backend,
-        );
+        let router = BackendRouter::new(Box::new(StubBackend), cli_backend);
         assert!(!router.should_use_cli(&node));
     }
 

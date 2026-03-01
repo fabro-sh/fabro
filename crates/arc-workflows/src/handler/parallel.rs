@@ -46,12 +46,18 @@ fn parse_join_policy(raw: &str) -> JoinPolicy {
     if raw == "first_success" {
         return JoinPolicy::FirstSuccess;
     }
-    if let Some(inner) = raw.strip_prefix("k_of_n(").and_then(|s| s.strip_suffix(')')) {
+    if let Some(inner) = raw
+        .strip_prefix("k_of_n(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
         if let Ok(k) = inner.trim().parse::<usize>() {
             return JoinPolicy::KOfN(k);
         }
     }
-    if let Some(inner) = raw.strip_prefix("quorum(").and_then(|s| s.strip_suffix(')')) {
+    if let Some(inner) = raw
+        .strip_prefix("quorum(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
         if let Ok(frac) = inner.trim().parse::<f64>() {
             return JoinPolicy::Quorum(frac);
         }
@@ -146,9 +152,10 @@ impl Handler for ParallelHandler {
             let sem = Arc::clone(&semaphore);
 
             let handle = tokio::spawn(async move {
-                let _permit = sem.acquire().await.map_err(|e| {
-                    ArcError::Handler(format!("semaphore error: {e}"))
-                })?;
+                let _permit = sem
+                    .acquire()
+                    .await
+                    .map_err(|e| ArcError::Handler(format!("semaphore error: {e}")))?;
 
                 emitter.emit(&PipelineEvent::ParallelBranchStarted {
                     branch: target_id.clone(),
@@ -157,7 +164,8 @@ impl Handler for ParallelHandler {
                 let branch_start = Instant::now();
 
                 let Some(target_node) = graph.nodes.get(&target_id) else {
-                    let outcome = Outcome::fail(format!("branch target node not found: {target_id}"));
+                    let outcome =
+                        Outcome::fail(format!("branch target node not found: {target_id}"));
                     emitter.emit(&PipelineEvent::ParallelBranchCompleted {
                         branch: target_id.clone(),
                         index: branch_index,
@@ -177,7 +185,13 @@ impl Handler for ParallelHandler {
                 };
                 let handler = registry.resolve(target_node);
                 let outcome = handler
-                    .execute(target_node, &branch_context, &graph, &logs_root, &branch_services)
+                    .execute(
+                        target_node,
+                        &branch_context,
+                        &graph,
+                        &logs_root,
+                        &branch_services,
+                    )
                     .await?;
 
                 emitter.emit(&PipelineEvent::ParallelBranchCompleted {
@@ -205,11 +219,13 @@ impl Handler for ParallelHandler {
                         && result.outcome.status == StageStatus::Fail
                     {
                         results.push(result);
-                        services.emitter.emit(&PipelineEvent::ParallelEarlyTermination {
-                            reason: "fail_fast_branch_failed".to_string(),
-                            completed_count: results.len(),
-                            pending_count: total_branches - handle_index - 1,
-                        });
+                        services
+                            .emitter
+                            .emit(&PipelineEvent::ParallelEarlyTermination {
+                                reason: "fail_fast_branch_failed".to_string(),
+                                completed_count: results.len(),
+                                pending_count: total_branches - handle_index - 1,
+                            });
                         break;
                     }
                     results.push(result);
@@ -221,11 +237,13 @@ impl Handler for ParallelHandler {
                     };
                     if error_policy == ErrorPolicy::FailFast {
                         results.push(result);
-                        services.emitter.emit(&PipelineEvent::ParallelEarlyTermination {
-                            reason: "fail_fast_handler_error".to_string(),
-                            completed_count: results.len(),
-                            pending_count: total_branches - handle_index - 1,
-                        });
+                        services
+                            .emitter
+                            .emit(&PipelineEvent::ParallelEarlyTermination {
+                                reason: "fail_fast_handler_error".to_string(),
+                                completed_count: results.len(),
+                                pending_count: total_branches - handle_index - 1,
+                            });
                         break;
                     }
                     results.push(result);
@@ -237,11 +255,13 @@ impl Handler for ParallelHandler {
                     };
                     if error_policy == ErrorPolicy::FailFast {
                         results.push(result);
-                        services.emitter.emit(&PipelineEvent::ParallelEarlyTermination {
-                            reason: "fail_fast_join_error".to_string(),
-                            completed_count: results.len(),
-                            pending_count: total_branches - handle_index - 1,
-                        });
+                        services
+                            .emitter
+                            .emit(&PipelineEvent::ParallelEarlyTermination {
+                                reason: "fail_fast_join_error".to_string(),
+                                completed_count: results.len(),
+                                pending_count: total_branches - handle_index - 1,
+                            });
                         break;
                     }
                     results.push(result);
@@ -418,11 +438,21 @@ mod tests {
         assert!(results.is_some());
 
         // Check parallel_results.json was written
-        let results_path = tmp.path().join("nodes").join("par").join("parallel_results.json");
-        assert!(results_path.exists(), "parallel_results.json should be written");
+        let results_path = tmp
+            .path()
+            .join("nodes")
+            .join("par")
+            .join("parallel_results.json");
+        assert!(
+            results_path.exists(),
+            "parallel_results.json should be written"
+        );
         let content = std::fs::read_to_string(&results_path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert!(parsed.is_array(), "parallel_results.json should be a JSON array");
+        assert!(
+            parsed.is_array(),
+            "parallel_results.json should be a JSON array"
+        );
         assert_eq!(parsed.as_array().unwrap().len(), 2);
     }
 
@@ -507,8 +537,14 @@ mod tests {
             parse_join_policy("first_success"),
             JoinPolicy::FirstSuccess
         ));
-        assert!(matches!(parse_join_policy("k_of_n(3)"), JoinPolicy::KOfN(3)));
-        assert!(matches!(parse_join_policy("quorum(0.5)"), JoinPolicy::Quorum(_)));
+        assert!(matches!(
+            parse_join_policy("k_of_n(3)"),
+            JoinPolicy::KOfN(3)
+        ));
+        assert!(matches!(
+            parse_join_policy("quorum(0.5)"),
+            JoinPolicy::Quorum(_)
+        ));
         // Invalid falls back to WaitAll
         assert!(matches!(parse_join_policy("invalid"), JoinPolicy::WaitAll));
     }

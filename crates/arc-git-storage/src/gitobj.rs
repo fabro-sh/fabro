@@ -51,10 +51,7 @@ impl TreeEntries {
     }
 
     pub fn set(&mut self, path: impl Into<String>, oid: Oid, filemode: FileMode) {
-        self.0.insert(
-            path.into(),
-            TreeEntry { oid, filemode },
-        );
+        self.0.insert(path.into(), TreeEntry { oid, filemode });
     }
 
     pub fn remove(&mut self, path: &str) {
@@ -76,7 +73,10 @@ impl TreeEntries {
     }
 
     /// Iterate entries whose paths start with the given prefix.
-    pub fn under_prefix<'a>(&'a self, prefix: &'a str) -> impl Iterator<Item = (&'a str, &'a TreeEntry)> {
+    pub fn under_prefix<'a>(
+        &'a self,
+        prefix: &'a str,
+    ) -> impl Iterator<Item = (&'a str, &'a TreeEntry)> {
         self.0
             .range(prefix.to_string()..)
             .take_while(move |(k, _)| k.starts_with(prefix))
@@ -506,9 +506,7 @@ mod tests {
         let (_dir, store) = temp_repo();
         let tree_oid = store.write_empty_tree().unwrap();
         let sig = Signature::now("Test", "test@example.com").unwrap();
-        let commit_oid = store
-            .write_commit(tree_oid, &[], "initial", &sig)
-            .unwrap();
+        let commit_oid = store.write_commit(tree_oid, &[], "initial", &sig).unwrap();
 
         store.update_ref("test-branch", commit_oid).unwrap();
         let resolved = store.resolve_ref("test-branch").unwrap();
@@ -527,9 +525,7 @@ mod tests {
         let (_dir, store) = temp_repo();
         let tree_oid = store.write_empty_tree().unwrap();
         let sig = Signature::now("Test", "test@example.com").unwrap();
-        let commit_oid = store
-            .write_commit(tree_oid, &[], "initial", &sig)
-            .unwrap();
+        let commit_oid = store.write_commit(tree_oid, &[], "initial", &sig).unwrap();
 
         store.update_ref("to-delete", commit_oid).unwrap();
         store.delete_ref("to-delete").unwrap();

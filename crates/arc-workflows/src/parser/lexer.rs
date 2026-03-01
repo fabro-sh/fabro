@@ -189,10 +189,7 @@ pub mod combinators {
             pair(char('.'), take_while1(|c: char| c.is_ascii_digit())),
         ))(input)?;
         let val: f64 = raw.parse().map_err(|_| {
-            nom::Err::Error(nom::error::Error::new(
-                input,
-                nom::error::ErrorKind::Float,
-            ))
+            nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Float))
         })?;
         Ok((rest, val))
     }
@@ -210,10 +207,7 @@ pub mod combinators {
             )));
         }
         let val: i64 = raw.parse().map_err(|_| {
-            nom::Err::Error(nom::error::Error::new(
-                input,
-                nom::error::ErrorKind::Digit,
-            ))
+            nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
         })?;
         Ok((rest, val))
     }
@@ -328,10 +322,7 @@ mod tests {
             qualified_id("tool_hooks.pre rest"),
             Ok((" rest", "tool_hooks.pre".into()))
         );
-        assert_eq!(
-            qualified_id("a.b.c rest"),
-            Ok((" rest", "a.b.c".into()))
-        );
+        assert_eq!(qualified_id("a.b.c rest"), Ok((" rest", "a.b.c".into())));
         assert!(qualified_id("simple rest").is_err());
     }
 
@@ -414,10 +405,7 @@ mod tests {
 
     #[test]
     fn parse_value_all_types() {
-        assert_eq!(
-            value(r#""hello""#),
-            Ok(("", AstValue::Str("hello".into())))
-        );
+        assert_eq!(value(r#""hello""#), Ok(("", AstValue::Str("hello".into()))));
         assert_eq!(value("250ms"), Ok(("", AstValue::Str("250ms".into()))));
         assert_eq!(value("3.15"), Ok(("", AstValue::Float(3.15))));
         assert_eq!(value("42"), Ok(("", AstValue::Int(42))));
@@ -427,10 +415,7 @@ mod tests {
 
     #[test]
     fn parse_bare_string_with_hyphens_and_dots() {
-        assert_eq!(
-            bare_string("gpt-5.2 rest"),
-            Ok((" rest", "gpt-5.2".into()))
-        );
+        assert_eq!(bare_string("gpt-5.2 rest"), Ok((" rest", "gpt-5.2".into())));
         assert_eq!(
             bare_string("gpt-5.2-codex"),
             Ok(("", "gpt-5.2-codex".into()))
@@ -450,10 +435,7 @@ mod tests {
 
     #[test]
     fn parse_value_bare_string() {
-        assert_eq!(
-            value("gpt-5.2"),
-            Ok(("", AstValue::Str("gpt-5.2".into())))
-        );
+        assert_eq!(value("gpt-5.2"), Ok(("", AstValue::Str("gpt-5.2".into()))));
         assert_eq!(
             value("gpt-5.2-codex"),
             Ok(("", AstValue::Str("gpt-5.2-codex".into())))

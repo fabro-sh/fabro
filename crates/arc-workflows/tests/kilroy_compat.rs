@@ -6,8 +6,8 @@ fn parse_kilroy_dot(filename: &str) -> Result<arc_workflows::graph::types::Graph
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../test/kilroy")
         .join(filename);
-    let content =
-        std::fs::read_to_string(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
     parse(&content).map_err(|e| format!("failed to parse {filename}: {e}"))
 }
 

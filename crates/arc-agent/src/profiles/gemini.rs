@@ -24,7 +24,10 @@ impl GeminiProfile {
     }
 
     #[must_use]
-    pub fn with_summarizer(model: impl Into<String>, summarizer: Option<WebFetchSummarizer>) -> Self {
+    pub fn with_summarizer(
+        model: impl Into<String>,
+        summarizer: Option<WebFetchSummarizer>,
+    ) -> Self {
         let config = SessionConfig::default();
         let mut registry = ToolRegistry::new();
 
@@ -185,7 +188,14 @@ These are foundational mandates that take precedence over defaults in this promp
 Write clean, maintainable code. Handle errors appropriately. Follow existing code conventions \
 in the project.";
 
-        assemble_system_prompt(core_prompt, env, env_context, project_docs, user_instructions, skills)
+        assemble_system_prompt(
+            core_prompt,
+            env,
+            env_context,
+            project_docs,
+            user_instructions,
+            skills,
+        )
     }
 
     fn capabilities(&self) -> ProfileCapabilities {

@@ -13,7 +13,11 @@ pub async fn discover_project_docs(
 
     let candidate_filenames: Vec<&str> = match provider {
         Provider::Anthropic => vec!["AGENTS.md", "CLAUDE.md"],
-        Provider::OpenAi | Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {
+        Provider::OpenAi
+        | Provider::Kimi
+        | Provider::Zai
+        | Provider::Minimax
+        | Provider::Inception => {
             vec!["AGENTS.md", ".codex/instructions.md"]
         }
         Provider::Gemini => vec!["AGENTS.md", "GEMINI.md"],
@@ -111,10 +115,7 @@ mod tests {
         let mut files = HashMap::new();
         files.insert("/repo/AGENTS.md".into(), "agents".into());
         files.insert("/repo/CLAUDE.md".into(), "claude".into());
-        files.insert(
-            "/repo/.codex/instructions.md".into(),
-            "copilot".into(),
-        );
+        files.insert("/repo/.codex/instructions.md".into(), "copilot".into());
         files.insert("/repo/GEMINI.md".into(), "gemini".into());
 
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment {
@@ -131,7 +132,8 @@ mod tests {
             files: files.clone(),
             ..Default::default()
         });
-        let openai_docs = discover_project_docs(env.as_ref(), "/repo", "/repo", Provider::OpenAi).await;
+        let openai_docs =
+            discover_project_docs(env.as_ref(), "/repo", "/repo", Provider::OpenAi).await;
         assert_eq!(openai_docs.len(), 2);
         assert_eq!(openai_docs[0], "agents");
         assert_eq!(openai_docs[1], "copilot");
@@ -140,7 +142,8 @@ mod tests {
             files,
             ..Default::default()
         });
-        let gemini_docs = discover_project_docs(env.as_ref(), "/repo", "/repo", Provider::Gemini).await;
+        let gemini_docs =
+            discover_project_docs(env.as_ref(), "/repo", "/repo", Provider::Gemini).await;
         assert_eq!(gemini_docs.len(), 2);
         assert_eq!(gemini_docs[0], "agents");
         assert_eq!(gemini_docs[1], "gemini");
@@ -179,7 +182,8 @@ mod tests {
             ..Default::default()
         });
         let docs =
-            discover_project_docs(env.as_ref(), "/repo", "/repo/src/app", Provider::Anthropic).await;
+            discover_project_docs(env.as_ref(), "/repo", "/repo/src/app", Provider::Anthropic)
+                .await;
         assert_eq!(docs.len(), 3);
         assert_eq!(docs[0], "root agents");
         assert_eq!(docs[1], "src agents");

@@ -183,7 +183,14 @@ fn prompt_errors_without_prompt_text() {
 #[test]
 fn prompt_reads_from_stdin() {
     let result = arc()
-        .args(["--no-dotenv", "llm", "prompt", "--no-stream", "-m", "test-model"])
+        .args([
+            "--no-dotenv",
+            "llm",
+            "prompt",
+            "--no-stream",
+            "-m",
+            "test-model",
+        ])
         .write_stdin("hello from stdin")
         .assert()
         .failure();
@@ -195,7 +202,15 @@ fn prompt_reads_from_stdin() {
 #[test]
 fn prompt_concatenates_stdin_and_arg() {
     let result = arc()
-        .args(["--no-dotenv", "llm", "prompt", "--no-stream", "-m", "test-model", "summarize this"])
+        .args([
+            "--no-dotenv",
+            "llm",
+            "prompt",
+            "--no-stream",
+            "-m",
+            "test-model",
+            "summarize this",
+        ])
         .write_stdin("some input text")
         .assert()
         .failure();
@@ -216,7 +231,14 @@ fn prompt_rejects_bad_option_format() {
 #[ignore = "requires API key"]
 fn prompt_no_stream_generates_response() {
     arc()
-        .args(["llm", "prompt", "--no-stream", "-m", "claude-sonnet-4-5", "Say just the word 'hello'"])
+        .args([
+            "llm",
+            "prompt",
+            "--no-stream",
+            "-m",
+            "claude-sonnet-4-5",
+            "Say just the word 'hello'",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::is_empty().not());
@@ -226,7 +248,13 @@ fn prompt_no_stream_generates_response() {
 #[ignore = "requires API key"]
 fn prompt_stream_generates_response() {
     arc()
-        .args(["llm", "prompt", "-m", "claude-sonnet-4-5", "Say just the word 'hello'"])
+        .args([
+            "llm",
+            "prompt",
+            "-m",
+            "claude-sonnet-4-5",
+            "Say just the word 'hello'",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::is_empty().not());
@@ -236,7 +264,15 @@ fn prompt_stream_generates_response() {
 #[ignore = "requires API key"]
 fn prompt_usage_shows_tokens() {
     arc()
-        .args(["llm", "prompt", "--no-stream", "-u", "-m", "claude-sonnet-4-5", "Say just the word 'hello'"])
+        .args([
+            "llm",
+            "prompt",
+            "--no-stream",
+            "-u",
+            "-m",
+            "claude-sonnet-4-5",
+            "Say just the word 'hello'",
+        ])
         .assert()
         .success()
         .stderr(predicate::str::contains("Tokens:"));
@@ -245,7 +281,17 @@ fn prompt_usage_shows_tokens() {
 #[test]
 fn prompt_schema_rejects_invalid_json() {
     arc()
-        .args(["--no-dotenv", "llm", "prompt", "--no-stream", "-m", "test-model", "--schema", "not json", "hello"])
+        .args([
+            "--no-dotenv",
+            "llm",
+            "prompt",
+            "--no-stream",
+            "-m",
+            "test-model",
+            "--schema",
+            "not json",
+            "hello",
+        ])
         .assert()
         .failure()
         .stderr(predicate::str::contains("--schema must be valid JSON"));
@@ -264,8 +310,12 @@ fn prompt_schema_no_stream_generates_json() {
         .success();
 
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("stdout should be valid JSON");
-    assert!(parsed.get("greeting").is_some(), "expected 'greeting' key in output");
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout should be valid JSON");
+    assert!(
+        parsed.get("greeting").is_some(),
+        "expected 'greeting' key in output"
+    );
 }
 
 #[test]
@@ -281,8 +331,12 @@ fn prompt_schema_stream_generates_json() {
         .success();
 
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("stdout should be valid JSON");
-    assert!(parsed.get("greeting").is_some(), "expected 'greeting' key in output");
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout should be valid JSON");
+    assert!(
+        parsed.get("greeting").is_some(),
+        "expected 'greeting' key in output"
+    );
 }
 
 // == Agent ====================================================================
@@ -412,7 +466,12 @@ fn serve_help() {
 #[test]
 fn dry_run_simple() {
     arc()
-        .args(["run", "--dry-run", "--auto-approve", "../../test/simple.dot"])
+        .args([
+            "run",
+            "--dry-run",
+            "--auto-approve",
+            "../../test/simple.dot",
+        ])
         .assert()
         .success();
 }
@@ -420,7 +479,12 @@ fn dry_run_simple() {
 #[test]
 fn dry_run_branching() {
     arc()
-        .args(["run", "--dry-run", "--auto-approve", "../../test/branching.dot"])
+        .args([
+            "run",
+            "--dry-run",
+            "--auto-approve",
+            "../../test/branching.dot",
+        ])
         .assert()
         .success();
 }
@@ -428,7 +492,12 @@ fn dry_run_branching() {
 #[test]
 fn dry_run_conditions() {
     arc()
-        .args(["run", "--dry-run", "--auto-approve", "../../test/conditions.dot"])
+        .args([
+            "run",
+            "--dry-run",
+            "--auto-approve",
+            "../../test/conditions.dot",
+        ])
         .assert()
         .success();
 }
@@ -436,7 +505,12 @@ fn dry_run_conditions() {
 #[test]
 fn dry_run_parallel() {
     arc()
-        .args(["run", "--dry-run", "--auto-approve", "../../test/parallel.dot"])
+        .args([
+            "run",
+            "--dry-run",
+            "--auto-approve",
+            "../../test/parallel.dot",
+        ])
         .assert()
         .success();
 }
@@ -444,7 +518,12 @@ fn dry_run_parallel() {
 #[test]
 fn dry_run_styled() {
     arc()
-        .args(["run", "--dry-run", "--auto-approve", "../../test/styled.dot"])
+        .args([
+            "run",
+            "--dry-run",
+            "--auto-approve",
+            "../../test/styled.dot",
+        ])
         .assert()
         .success();
 }
@@ -452,7 +531,12 @@ fn dry_run_styled() {
 #[test]
 fn dry_run_legacy_tool() {
     arc()
-        .args(["run", "--dry-run", "--auto-approve", "../../test/legacy_tool.dot"])
+        .args([
+            "run",
+            "--dry-run",
+            "--auto-approve",
+            "../../test/legacy_tool.dot",
+        ])
         .assert()
         .success();
 }
@@ -481,12 +565,21 @@ fn dry_run_writes_ndjson_and_live_json() {
     assert!(ndjson_path.exists(), "progress.ndjson should exist");
     let ndjson_content = std::fs::read_to_string(&ndjson_path).unwrap();
     let lines: Vec<&str> = ndjson_content.lines().collect();
-    assert!(!lines.is_empty(), "progress.ndjson should have at least one line");
+    assert!(
+        !lines.is_empty(),
+        "progress.ndjson should have at least one line"
+    );
 
     // Every line must be valid JSON with timestamp, run_id, and event keys
     let first_line: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
-    assert!(first_line.get("timestamp").is_some(), "line should have timestamp");
-    assert!(first_line.get("run_id").is_some(), "line should have run_id");
+    assert!(
+        first_line.get("timestamp").is_some(),
+        "line should have timestamp"
+    );
+    assert!(
+        first_line.get("run_id").is_some(),
+        "line should have run_id"
+    );
     assert!(first_line.get("event").is_some(), "line should have event");
 
     // Events should contain PipelineStarted (may not be first due to exec env events)
@@ -494,7 +587,10 @@ fn dry_run_writes_ndjson_and_live_json() {
         let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
         parsed["event"].get("PipelineStarted").is_some()
     });
-    assert!(has_pipeline_started, "events should contain PipelineStarted");
+    assert!(
+        has_pipeline_started,
+        "events should contain PipelineStarted"
+    );
 
     // run_id should be non-empty after PipelineStarted
     let last_line: serde_json::Value = serde_json::from_str(lines[lines.len() - 1]).unwrap();

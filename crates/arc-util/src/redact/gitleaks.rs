@@ -81,7 +81,11 @@ impl GitleaksEngine {
                 }
             }
 
-            let allowlist_regexes = def.allowlist_regexes.iter().map(|_| OnceLock::new()).collect();
+            let allowlist_regexes = def
+                .allowlist_regexes
+                .iter()
+                .map(|_| OnceLock::new())
+                .collect();
 
             rules.push(LazyRule {
                 id: def.id,
@@ -173,8 +177,11 @@ impl GitleaksEngine {
                 }
 
                 // Check global allowlist regexes against the secret
-                let globally_allowlisted = (0..generated::GLOBAL_ALLOWLIST_REGEXES.len())
-                    .any(|i| self.global_allowlist_regex(i).is_some_and(|r| r.is_match(secret)));
+                let globally_allowlisted =
+                    (0..generated::GLOBAL_ALLOWLIST_REGEXES.len()).any(|i| {
+                        self.global_allowlist_regex(i)
+                            .is_some_and(|r| r.is_match(secret))
+                    });
                 if globally_allowlisted {
                     continue;
                 }
@@ -234,7 +241,10 @@ mod tests {
     fn detects_aws_access_key() {
         let regions = find_gitleaks_regions("key=AKIAYRWQG5EJLPZLBYNP");
         assert_eq!(regions.len(), 1, "expected 1 region, got {regions:?}");
-        assert_eq!(&"key=AKIAYRWQG5EJLPZLBYNP"[regions[0].start..regions[0].end], "AKIAYRWQG5EJLPZLBYNP");
+        assert_eq!(
+            &"key=AKIAYRWQG5EJLPZLBYNP"[regions[0].start..regions[0].end],
+            "AKIAYRWQG5EJLPZLBYNP"
+        );
     }
 
     #[test]
@@ -257,14 +267,16 @@ mod tests {
 
     #[test]
     fn detects_private_key_block() {
-        let input = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----";
+        let input =
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----";
         let regions = find_gitleaks_regions(input);
         assert_eq!(regions.len(), 1, "expected 1 region, got {regions:?}");
     }
 
     #[test]
     fn normal_text_not_flagged() {
-        let regions = find_gitleaks_regions("Hello, this is a normal English sentence with no secrets.");
+        let regions =
+            find_gitleaks_regions("Hello, this is a normal English sentence with no secrets.");
         assert!(regions.is_empty(), "expected no regions, got {regions:?}");
     }
 
@@ -272,13 +284,19 @@ mod tests {
     fn global_allowlist_stopwords_respected() {
         // The global allowlist includes a UUID that should not be flagged
         let regions = find_gitleaks_regions("014df517-39d1-4453-b7b3-9930c563627c");
-        assert!(regions.is_empty(), "expected no regions for allowlisted UUID, got {regions:?}");
+        assert!(
+            regions.is_empty(),
+            "expected no regions for allowlisted UUID, got {regions:?}"
+        );
     }
 
     #[test]
     fn aws_example_key_not_flagged() {
         // AKIAIOSFODNN7EXAMPLE ends with EXAMPLE — per-rule allowlist
         let regions = find_gitleaks_regions("key=AKIAIOSFODNN7EXAMPLE");
-        assert!(regions.is_empty(), "expected no regions for example key, got {regions:?}");
+        assert!(
+            regions.is_empty(),
+            "expected no regions for example key, got {regions:?}"
+        );
     }
 }

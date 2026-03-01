@@ -40,12 +40,18 @@ impl Adapter {
 
     #[must_use]
     pub fn with_default_headers(self, headers: std::collections::HashMap<String, String>) -> Self {
-        Self { http: self.http.with_default_headers(headers), ..self }
+        Self {
+            http: self.http.with_default_headers(headers),
+            ..self
+        }
     }
 
     #[must_use]
     pub fn with_timeout(self, timeout: crate::types::AdapterTimeout) -> Self {
-        Self { http: self.http.with_timeout(timeout), ..self }
+        Self {
+            http: self.http.with_timeout(timeout),
+            ..self
+        }
     }
 
     fn messages_url(&self) -> String {
@@ -291,9 +297,9 @@ fn content_part_to_api(part: &ContentPart) -> Option<serde_json::Value> {
                 })
             }
         }
-        ContentPart::Audio(_) => {
-            Some(serde_json::json!({"type": "text", "text": "[Audio content not supported by this provider]"}))
-        }
+        ContentPart::Audio(_) => Some(
+            serde_json::json!({"type": "text", "text": "[Audio content not supported by this provider]"}),
+        ),
         ContentPart::Other { .. } => None,
     }
 }
@@ -314,11 +320,8 @@ fn translate_messages(messages: &[&Message]) -> Vec<ApiMessage> {
             Role::System | Role::Developer => continue,
         };
 
-        let content: Vec<serde_json::Value> = msg
-            .content
-            .iter()
-            .filter_map(content_part_to_api)
-            .collect();
+        let content: Vec<serde_json::Value> =
+            msg.content.iter().filter_map(content_part_to_api).collect();
 
         if content.is_empty() {
             continue;
@@ -403,8 +406,7 @@ fn apply_response_format(
                 Some(tools) => tools.push(synthetic_tool),
                 None => *api_tools = Some(vec![synthetic_tool]),
             }
-            *tool_choice =
-                Some(serde_json::json!({"type": "tool", "name": SYNTHETIC_TOOL_NAME}));
+            *tool_choice = Some(serde_json::json!({"type": "tool", "name": SYNTHETIC_TOOL_NAME}));
         }
         ResponseFormatType::JsonObject => {
             let json_instruction = "\n\nYou must respond with valid JSON only, no other text.";
@@ -510,7 +512,9 @@ const CACHE_BETA_HEADER: &str = "prompt-caching-2024-07-31";
 /// Returns `true` if caching should be applied (the default).
 /// Only returns `false` if `provider_options.anthropic.auto_cache` is explicitly `false`.
 /// Extract the `thinking` configuration from `provider_options.anthropic.thinking`.
-fn extract_thinking_config(provider_options: Option<&serde_json::Value>) -> Option<serde_json::Value> {
+fn extract_thinking_config(
+    provider_options: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
     provider_options
         .and_then(|opts| opts.get("anthropic"))
         .and_then(|anthropic| anthropic.get("thinking"))
@@ -840,8 +844,8 @@ impl StreamAccumulator {
             }
             Some(ContentBlockKind::ToolUse { id, name }) => {
                 let raw_args = std::mem::take(&mut self.current_tool_args);
-                let arguments = serde_json::from_str(&raw_args)
-                    .unwrap_or_else(|_| serde_json::json!({}));
+                let arguments =
+                    serde_json::from_str(&raw_args).unwrap_or_else(|_| serde_json::json!({}));
                 let mut tool_call = ToolCall::new(id, name, arguments);
                 tool_call.raw_arguments = Some(raw_args);
                 self.content_parts
@@ -870,9 +874,7 @@ impl StreamAccumulator {
 
     fn handle_message_delta(&mut self, data: &serde_json::Value) {
         if let Some(delta) = data.get("delta") {
-            let stop_reason = delta
-                .get("stop_reason")
-                .and_then(serde_json::Value::as_str);
+            let stop_reason = delta.get("stop_reason").and_then(serde_json::Value::as_str);
             self.finish_reason = map_finish_reason(stop_reason);
         }
         if let Some(usage) = data.get("usage") {
@@ -1052,7 +1054,12 @@ fn build_api_request(
 
     // Apply response_format (may inject synthetic tool or system prompt suffix)
     let mut tool_choice_json = tool_choice_json;
-    apply_response_format(request, &mut api_tools, &mut tool_choice_json, &mut system_value);
+    apply_response_format(
+        request,
+        &mut api_tools,
+        &mut tool_choice_json,
+        &mut system_value,
+    );
 
     if auto_cache {
         if let Some(ref mut tools) = api_tools {
@@ -1097,7 +1104,10 @@ fn build_api_request(
         req_builder = req_builder.bearer_auth(&adapter.http.api_key);
     }
 
-    let req_builder = req_builder.json(&merge_provider_options(&api_request, request.provider_options.as_ref()));
+    let req_builder = req_builder.json(&merge_provider_options(
+        &api_request,
+        request.provider_options.as_ref(),
+    ));
     (api_request, req_builder)
 }
 
@@ -1124,13 +1134,11 @@ impl ProviderAdapter for Adapter {
         if let Some(t) = self.http.request_timeout {
             req = req.timeout(t);
         }
-        let (body, headers) =
-            send_and_read_response(req, &self.provider_name, "type").await?;
+        let (body, headers) = send_and_read_response(req, &self.provider_name, "type").await?;
 
-        let api_resp: ApiResponse =
-            serde_json::from_str(&body).map_err(|e| SdkError::Network {
-                message: format!("failed to parse {} response: {e}", self.provider_name),
-            })?;
+        let api_resp: ApiResponse = serde_json::from_str(&body).map_err(|e| SdkError::Network {
+            message: format!("failed to parse {} response: {e}", self.provider_name),
+        })?;
 
         let content_parts: Vec<ContentPart> = api_resp
             .content
@@ -1377,10 +1385,7 @@ mod tests {
         apply_cache_control_to_conversation_prefix(&mut messages);
 
         // First user message should have cache_control
-        assert_eq!(
-            messages[0].content[0]["cache_control"]["type"],
-            "ephemeral"
-        );
+        assert_eq!(messages[0].content[0]["cache_control"]["type"], "ephemeral");
         // Last user message should NOT have cache_control
         assert!(messages[2].content[0].get("cache_control").is_none());
         // Assistant message should NOT have cache_control
@@ -1411,10 +1416,7 @@ mod tests {
 
         // Only the LAST content block of the first user message should have cache_control
         assert!(messages[0].content[0].get("cache_control").is_none());
-        assert_eq!(
-            messages[0].content[1]["cache_control"]["type"],
-            "ephemeral"
-        );
+        assert_eq!(messages[0].content[1]["cache_control"]["type"], "ephemeral");
     }
 
     #[test]
@@ -1466,10 +1468,7 @@ mod tests {
 
         // Only the second-to-last user message (index 2) should get cache_control
         assert!(messages[0].content[0].get("cache_control").is_none());
-        assert_eq!(
-            messages[2].content[0]["cache_control"]["type"],
-            "ephemeral"
-        );
+        assert_eq!(messages[2].content[0]["cache_control"]["type"], "ephemeral");
         assert!(messages[4].content[0].get("cache_control").is_none());
     }
 
@@ -1521,10 +1520,7 @@ mod tests {
             }
         });
         let result = build_beta_header(Some(&opts), false);
-        assert_eq!(
-            result,
-            Some("interleaved-thinking-2025-05-14".to_string())
-        );
+        assert_eq!(result, Some("interleaved-thinking-2025-05-14".to_string()));
     }
 
     #[test]
@@ -1585,9 +1581,7 @@ mod tests {
         assert_eq!(arr[0]["cache_control"]["type"], "ephemeral");
     }
 
-    fn make_request_with_format(
-        format: crate::types::ResponseFormat,
-    ) -> Request {
+    fn make_request_with_format(format: crate::types::ResponseFormat) -> Request {
         Request {
             model: "claude-sonnet-4-20250514".to_string(),
             messages: vec![Message::user("Hello")],
@@ -1749,13 +1743,11 @@ mod tests {
 
     #[test]
     fn convert_synthetic_tool_to_text_replaces_synthetic_tool() {
-        let parts = vec![
-            ContentPart::ToolCall(ToolCall::new(
-                "id1",
-                SYNTHETIC_TOOL_NAME,
-                serde_json::json!({"name": "Alice"}),
-            )),
-        ];
+        let parts = vec![ContentPart::ToolCall(ToolCall::new(
+            "id1",
+            SYNTHETIC_TOOL_NAME,
+            serde_json::json!({"name": "Alice"}),
+        ))];
         let result = convert_synthetic_tool_to_text(parts);
         assert_eq!(result.len(), 1);
         match &result[0] {
@@ -1768,13 +1760,11 @@ mod tests {
 
     #[test]
     fn convert_synthetic_tool_to_text_preserves_other_tool_calls() {
-        let parts = vec![
-            ContentPart::ToolCall(ToolCall::new(
-                "id1",
-                "real_tool",
-                serde_json::json!({"key": "value"}),
-            )),
-        ];
+        let parts = vec![ContentPart::ToolCall(ToolCall::new(
+            "id1",
+            "real_tool",
+            serde_json::json!({"key": "value"}),
+        ))];
         let result = convert_synthetic_tool_to_text(parts);
         assert_eq!(result.len(), 1);
         match &result[0] {
@@ -1788,11 +1778,7 @@ mod tests {
     #[test]
     fn convert_stream_event_converts_tool_start_for_synthetic() {
         let event = StreamEvent::ToolCallStart {
-            tool_call: ToolCall::new(
-                "id1",
-                SYNTHETIC_TOOL_NAME,
-                serde_json::json!({}),
-            ),
+            tool_call: ToolCall::new("id1", SYNTHETIC_TOOL_NAME, serde_json::json!({})),
         };
         let result = convert_stream_event_for_json_schema(event);
         assert!(matches!(result, StreamEvent::TextStart { .. }));
@@ -1810,11 +1796,7 @@ mod tests {
     #[test]
     fn convert_stream_event_converts_tool_delta_for_synthetic() {
         let event = StreamEvent::ToolCallDelta {
-            tool_call: ToolCall::new(
-                "id1",
-                SYNTHETIC_TOOL_NAME,
-                serde_json::json!("{\"name\""),
-            ),
+            tool_call: ToolCall::new("id1", SYNTHETIC_TOOL_NAME, serde_json::json!("{\"name\"")),
         };
         let result = convert_stream_event_for_json_schema(event);
         match result {
@@ -1921,7 +1903,10 @@ mod tests {
         // No user headers — only cache header should appear
         let header = build_beta_header(None, true).unwrap_or_default();
         for dep in &deprecated {
-            assert!(!header.contains(dep), "default header must not contain deprecated value {dep}");
+            assert!(
+                !header.contains(dep),
+                "default header must not contain deprecated value {dep}"
+            );
         }
 
         // With a valid user header
@@ -1932,7 +1917,10 @@ mod tests {
         });
         let header = build_beta_header(Some(&opts), true).unwrap_or_default();
         for dep in &deprecated {
-            assert!(!header.contains(dep), "header with user values must not contain deprecated value {dep}");
+            assert!(
+                !header.contains(dep),
+                "header with user values must not contain deprecated value {dep}"
+            );
         }
     }
 
@@ -2014,6 +2002,9 @@ mod tests {
         });
         let result = content_part_to_api(&part).expect("should produce JSON");
         assert_eq!(result["type"], "text");
-        assert_eq!(result["text"], "[Audio content not supported by this provider]");
+        assert_eq!(
+            result["text"],
+            "[Audio content not supported by this provider]"
+        );
     }
 }

@@ -1,9 +1,9 @@
 use crate::execution_env::ExecutionEnvironment;
+use arc_llm::types::ToolDefinition;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use arc_llm::types::ToolDefinition;
 use tokio_util::sync::CancellationToken;
 
 pub struct ToolContext {
@@ -170,12 +170,15 @@ mod tests {
 
         let tool = registry.get("echo").unwrap();
 
+        use super::ToolContext;
         use crate::execution_env::ExecutionEnvironment;
         use crate::test_support::MockExecutionEnvironment;
-        use super::ToolContext;
 
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment::default());
-        let ctx = ToolContext { env, cancel: CancellationToken::new() };
+        let ctx = ToolContext {
+            env,
+            cancel: CancellationToken::new(),
+        };
         let result = (tool.executor)(serde_json::json!({}), ctx).await;
         assert_eq!(result.unwrap(), "ok");
     }

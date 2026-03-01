@@ -10,14 +10,16 @@ impl Interviewer for AutoApproveInterviewer {
     async fn ask(&self, question: Question) -> Answer {
         match question.question_type {
             QuestionType::YesNo | QuestionType::Confirmation => Answer::yes(),
-            QuestionType::MultipleChoice | QuestionType::MultiSelect => question.options.first().map_or_else(
-                || Answer::text("auto-approved"),
-                |first| Answer {
-                    value: AnswerValue::Selected(first.key.clone()),
-                    selected_option: Some(first.clone()),
-                    text: None,
-                },
-            ),
+            QuestionType::MultipleChoice | QuestionType::MultiSelect => {
+                question.options.first().map_or_else(
+                    || Answer::text("auto-approved"),
+                    |first| Answer {
+                        value: AnswerValue::Selected(first.key.clone()),
+                        selected_option: Some(first.clone()),
+                        text: None,
+                    },
+                )
+            }
             QuestionType::Freeform => Answer::text("auto-approved"),
         }
     }

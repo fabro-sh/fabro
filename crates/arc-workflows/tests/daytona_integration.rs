@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arc_agent::ExecutionEnvironment;
+use arc_llm::provider::Provider;
 use arc_workflows::artifact::sync_artifacts_to_env;
 use arc_workflows::checkpoint::Checkpoint;
 use arc_workflows::context::Context;
@@ -20,7 +21,6 @@ use arc_workflows::handler::exit::ExitHandler;
 use arc_workflows::handler::start::StartHandler;
 use arc_workflows::handler::{Handler, HandlerRegistry};
 use arc_workflows::outcome::{Outcome, StageStatus};
-use arc_llm::provider::Provider;
 
 async fn create_env() -> DaytonaExecutionEnvironment {
     dotenvy::dotenv().ok();
@@ -117,7 +117,7 @@ async fn daytona_full_lifecycle() {
 #[tokio::test]
 #[ignore]
 async fn daytona_snapshot_sandbox() {
-    use arc_workflows::daytona_env::{DaytonaSnapshotConfig, DaytonaSandboxConfig};
+    use arc_workflows::daytona_env::{DaytonaSandboxConfig, DaytonaSnapshotConfig};
 
     dotenvy::dotenv().ok();
     let client = daytona_sdk::Client::new()
@@ -134,7 +134,9 @@ async fn daytona_snapshot_sandbox() {
             cpu: Some(2),
             memory: Some(4),
             disk: Some(10),
-            dockerfile: Some("FROM ubuntu:22.04\nRUN apt-get update && apt-get install -y ripgrep".to_string()),
+            dockerfile: Some(
+                "FROM ubuntu:22.04\nRUN apt-get update && apt-get install -y ripgrep".to_string(),
+            ),
         }),
     };
 
@@ -163,25 +165,23 @@ async fn daytona_artifact_sync_uploads_and_rewrites_pointer() {
     let artifact_content = "x".repeat(150 * 1024); // 150KB
     let artifact_json = serde_json::json!(artifact_content);
     let artifact_file = dir.path().join("response.plan.json");
-    std::fs::write(&artifact_file, serde_json::to_string(&artifact_json).unwrap()).unwrap();
+    std::fs::write(
+        &artifact_file,
+        serde_json::to_string(&artifact_json).unwrap(),
+    )
+    .unwrap();
 
     // Build updates with a file:// pointer (as offload_large_values would)
     let pointer = format!("file://{}", artifact_file.display());
     let mut updates = HashMap::new();
-    updates.insert(
-        "response.plan".to_string(),
-        serde_json::json!(pointer),
-    );
+    updates.insert("response.plan".to_string(), serde_json::json!(pointer));
 
     // Sync — the local file doesn't exist in the Daytona sandbox, so it should upload
     sync_artifacts_to_env(&mut updates, &env).await.unwrap();
 
     // Pointer should be rewritten to the Daytona working directory
     let new_pointer = updates["response.plan"].as_str().unwrap();
-    let expected_prefix = format!(
-        "file://{}/.arc/artifacts/",
-        env.working_directory()
-    );
+    let expected_prefix = format!("file://{}/.arc/artifacts/", env.working_directory());
     assert!(
         new_pointer.starts_with(&expected_prefix),
         "pointer should reference Daytona path, got: {new_pointer}"
@@ -246,15 +246,24 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
     );
 
     let mut start = Node::new("start");
-    start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut big_output = Node::new("big_output");
-    big_output.attrs.insert("label".to_string(), AttrValue::String("Big Output".to_string()));
+    big_output.attrs.insert(
+        "label".to_string(),
+        AttrValue::String("Big Output".to_string()),
+    );
     graph.nodes.insert("big_output".to_string(), big_output);
 
     graph.edges.push(Edge::new("start", "big_output"));
@@ -277,21 +286,21 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("pipeline should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Checkpoint should have a pointer rewritten for Daytona
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json"))
-        .expect("checkpoint should load");
+    let checkpoint =
+        Checkpoint::load(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
     let pointer_value = checkpoint
         .context_values
         .get("response.big_output")
         .expect("context should have response.big_output");
     let pointer_str = pointer_value.as_str().expect("pointer should be a string");
-    let expected_prefix = format!(
-        "file://{}/.arc/artifacts/",
-        env.working_directory()
-    );
+    let expected_prefix = format!("file://{}/.arc/artifacts/", env.working_directory());
     assert!(
         pointer_str.starts_with(&expected_prefix),
         "pointer should reference Daytona path, got: {pointer_str}"
@@ -339,27 +348,36 @@ impl Handler for FileWriterHandler {
     ) -> Result<Outcome, ArcError> {
         let content = format!("output from {}", node.id);
         let cmd = format!("echo '{content}' > {}.txt", node.id);
-        let _ = services.execution_env.exec_command(&cmd, 10_000, None, None, None).await;
+        let _ = services
+            .execution_env
+            .exec_command(&cmd, 10_000, None, None, None)
+            .await;
         Ok(Outcome::success())
     }
 }
 
 /// Set up git inside a Daytona sandbox for checkpoint commits.
 /// Returns (run_id, base_sha, branch_name) on success.
-async fn setup_daytona_git(
-    exec_env: &dyn ExecutionEnvironment,
-) -> (String, String, String) {
+async fn setup_daytona_git(exec_env: &dyn ExecutionEnvironment) -> (String, String, String) {
     // Get current HEAD as base SHA
-    let sha_result = exec_env.exec_command("git rev-parse HEAD", 10_000, None, None, None).await
+    let sha_result = exec_env
+        .exec_command("git rev-parse HEAD", 10_000, None, None, None)
+        .await
         .expect("git rev-parse HEAD should succeed");
-    assert_eq!(sha_result.exit_code, 0, "git rev-parse HEAD failed: {}", sha_result.stderr);
+    assert_eq!(
+        sha_result.exit_code, 0,
+        "git rev-parse HEAD failed: {}",
+        sha_result.stderr
+    );
     let base_sha = sha_result.stdout.trim().to_string();
 
     let run_id = ulid::Ulid::new().to_string();
     let branch_name = format!("arc/run/{run_id}");
 
     let checkout_cmd = format!("git checkout -b {branch_name}");
-    let checkout_result = exec_env.exec_command(&checkout_cmd, 10_000, None, None, None).await
+    let checkout_result = exec_env
+        .exec_command(&checkout_cmd, 10_000, None, None, None)
+        .await
         .expect("git checkout should succeed");
     assert_eq!(
         checkout_result.exit_code, 0,
@@ -378,13 +396,25 @@ async fn daytona_git_checkpoint_remote_emits_events() {
     let env: Arc<dyn ExecutionEnvironment> = Arc::new(env);
 
     // Install git if not available (the default ubuntu:22.04 image may not have it)
-    let git_check = env.exec_command("git --version", 10_000, None, None, None).await;
+    let git_check = env
+        .exec_command("git --version", 10_000, None, None, None)
+        .await;
     if git_check.as_ref().map_or(true, |r| r.exit_code != 0) {
-        let install = env.exec_command(
-            "apt-get update -qq && apt-get install -y -qq git >/dev/null 2>&1",
-            120_000, None, None, None,
-        ).await.expect("apt-get install git should not error");
-        assert_eq!(install.exit_code, 0, "git install failed: {}", install.stderr);
+        let install = env
+            .exec_command(
+                "apt-get update -qq && apt-get install -y -qq git >/dev/null 2>&1",
+                120_000,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("apt-get install git should not error");
+        assert_eq!(
+            install.exit_code, 0,
+            "git install failed: {}",
+            install.stderr
+        );
     }
 
     // Set up git in the sandbox
@@ -398,15 +428,22 @@ async fn daytona_git_checkpoint_remote_emits_events() {
     );
 
     let mut start = Node::new("start");
-    start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut work = Node::new("work");
-    work.attrs.insert("label".to_string(), AttrValue::String("Work".to_string()));
+    work.attrs
+        .insert("label".to_string(), AttrValue::String("Work".to_string()));
     graph.nodes.insert("work".to_string(), work);
 
     graph.edges.push(Edge::new("start", "work"));
@@ -439,38 +476,50 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("pipeline should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Assert GitCheckpoint events were emitted
-    let events = events.lock().unwrap();
-    let git_events: Vec<_> = events
-        .iter()
-        .filter_map(|e| {
-            if let arc_workflows::event::PipelineEvent::GitCheckpoint { node_id, git_commit_sha, .. } = e {
-                Some((node_id.clone(), git_commit_sha.clone()))
-            } else {
-                None
-            }
-        })
-        .collect();
-    assert!(
-        git_events.len() >= 2,
-        "expected at least 2 GitCheckpoint events, got {}",
-        git_events.len()
-    );
-    assert!(
-        git_events.iter().all(|(_, sha)| sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit())),
-        "all SHAs should be 40-char hex, got: {git_events:?}"
-    );
+    {
+        let events = events.lock().unwrap();
+        let git_events: Vec<_> = events
+            .iter()
+            .filter_map(|e| {
+                if let arc_workflows::event::PipelineEvent::GitCheckpoint {
+                    node_id,
+                    git_commit_sha,
+                    ..
+                } = e
+                {
+                    Some((node_id.clone(), git_commit_sha.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(
+            git_events.len() >= 2,
+            "expected at least 2 GitCheckpoint events, got {}",
+            git_events.len()
+        );
+        assert!(
+            git_events
+                .iter()
+                .all(|(_, sha)| sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit())),
+            "all SHAs should be 40-char hex, got: {git_events:?}"
+        );
+    }
 
     // Assert diff.patch was written for the work node
     let work_diff = dir.path().join("nodes").join("work").join("diff.patch");
     assert!(work_diff.exists(), "diff.patch should exist for work node");
 
     // Verify checkpoint.json has git_commit_sha
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json"))
-        .expect("checkpoint should load");
+    let checkpoint =
+        Checkpoint::load(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
     assert!(
         checkpoint.git_commit_sha.is_some(),
         "checkpoint should have git_commit_sha"
@@ -478,7 +527,10 @@ async fn daytona_git_checkpoint_remote_emits_events() {
 
     // Assert final.patch exists and contains changes from the run
     let final_patch = dir.path().join("final.patch");
-    assert!(final_patch.exists(), "final.patch should exist in logs_root");
+    assert!(
+        final_patch.exists(),
+        "final.patch should exist in logs_root"
+    );
     let patch_content = std::fs::read_to_string(&final_patch).unwrap();
     assert!(!patch_content.is_empty(), "final.patch should not be empty");
 
@@ -495,11 +547,7 @@ use arc_workflows::handler::codergen::{CodergenBackend, CodergenResult};
 /// Helper: run a real CLI backend test on Daytona.
 ///
 /// Installs the CLI tool in the sandbox, then runs the CliBackend against it.
-async fn run_daytona_cli_test(
-    provider: Provider,
-    model: &str,
-    install_command: &str,
-) {
+async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: &str) {
     let env = create_env().await;
     env.initialize().await.unwrap();
     let env: Arc<dyn ExecutionEnvironment> = Arc::new(env);
@@ -556,10 +604,8 @@ async fn run_daytona_cli_test(
         provider_path.exists(),
         "{provider}/{model}: provider_used.json should exist"
     );
-    let provider_json: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&provider_path).unwrap(),
-    )
-    .unwrap();
+    let provider_json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&provider_path).unwrap()).unwrap();
     assert_eq!(provider_json["mode"], "cli");
 
     env.cleanup().await.unwrap();
@@ -579,12 +625,7 @@ async fn daytona_cli_claude() {
 #[tokio::test]
 #[ignore] // requires DAYTONA_API_KEY + OpenAI/Codex auth
 async fn daytona_cli_codex() {
-    run_daytona_cli_test(
-        Provider::OpenAi,
-        "o4-mini",
-        "npm install -g @openai/codex",
-    )
-    .await;
+    run_daytona_cli_test(Provider::OpenAi, "o4-mini", "npm install -g @openai/codex").await;
 }
 
 #[tokio::test]
@@ -614,13 +655,25 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
     let env: Arc<dyn ExecutionEnvironment> = Arc::new(env);
 
     // Install git if not available
-    let git_check = env.exec_command("git --version", 10_000, None, None, None).await;
+    let git_check = env
+        .exec_command("git --version", 10_000, None, None, None)
+        .await;
     if git_check.as_ref().map_or(true, |r| r.exit_code != 0) {
-        let install = env.exec_command(
-            "apt-get update -qq && apt-get install -y -qq git >/dev/null 2>&1",
-            120_000, None, None, None,
-        ).await.expect("apt-get install git should not error");
-        assert_eq!(install.exit_code, 0, "git install failed: {}", install.stderr);
+        let install = env
+            .exec_command(
+                "apt-get update -qq && apt-get install -y -qq git >/dev/null 2>&1",
+                120_000,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("apt-get install git should not error");
+        assert_eq!(
+            install.exit_code, 0,
+            "git install failed: {}",
+            install.stderr
+        );
     }
 
     // Set up git in the sandbox
@@ -634,8 +687,16 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         .output()
         .unwrap();
     std::process::Command::new("git")
-        .args(["-c", "user.name=test", "-c", "user.email=test@test",
-               "commit", "--allow-empty", "-m", "init"])
+        .args([
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ])
         .current_dir(host_repo.path())
         .output()
         .unwrap();
@@ -648,15 +709,22 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
     );
 
     let mut start = Node::new("start");
-    start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut work = Node::new("work");
-    work.attrs.insert("label".to_string(), AttrValue::String("Work".to_string()));
+    work.attrs
+        .insert("label".to_string(), AttrValue::String("Work".to_string()));
     graph.nodes.insert("work".to_string(), work);
 
     graph.edges.push(Edge::new("start", "work"));
@@ -683,7 +751,10 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         meta_branch: Some(meta_branch),
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("pipeline should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Assert shadow branch on host has checkpoint data
@@ -700,7 +771,9 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
     );
 
     // Assert sandbox commit has Arc-Checkpoint trailer
-    let log_result = env.exec_command("git log --format=%B -1", 10_000, None, None, None).await
+    let log_result = env
+        .exec_command("git log --format=%B -1", 10_000, None, None, None)
+        .await
         .expect("git log should succeed");
     assert_eq!(log_result.exit_code, 0);
     let commit_msg = log_result.stdout.trim().to_string();
@@ -715,7 +788,10 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
 
     // Assert final.patch exists
     let final_patch = dir.path().join("final.patch");
-    assert!(final_patch.exists(), "final.patch should exist in logs_root");
+    assert!(
+        final_patch.exists(),
+        "final.patch should exist in logs_root"
+    );
 
     env.cleanup().await.unwrap();
 }

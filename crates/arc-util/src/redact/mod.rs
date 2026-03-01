@@ -101,13 +101,20 @@ mod tests {
     fn redact_string_github_pat() {
         let input = "token=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123";
         let result = redact_string(input);
-        assert!(result.contains("REDACTED"), "expected REDACTED in: {result}");
+        assert!(
+            result.contains("REDACTED"),
+            "expected REDACTED in: {result}"
+        );
     }
 
     #[test]
     fn redact_string_private_key() {
-        let input = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----";
+        let input =
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----";
         let result = redact_string(input);
-        assert!(result.contains("REDACTED"), "expected REDACTED in: {result}");
+        assert!(
+            result.contains("REDACTED"),
+            "expected REDACTED in: {result}"
+        );
     }
 }

@@ -47,8 +47,8 @@ pub struct ExecutionConfig {
 /// The `graph` path in the returned config is resolved relative to the
 /// TOML file's parent directory.
 pub fn load_task_config(path: &Path) -> anyhow::Result<TaskConfig> {
-    let contents =
-        std::fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
+    let contents = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
     let config = parse_task_config(&contents)?;
 
     Ok(config)
@@ -134,7 +134,12 @@ pub async fn run_setup(setup: &SetupConfig, directory: &Path) -> anyhow::Result<
 
         let output = tokio::time::timeout(timeout, fut)
             .await
-            .with_context(|| format!("Setup command timed out after {}ms: {cmd}", timeout.as_millis()))?
+            .with_context(|| {
+                format!(
+                    "Setup command timed out after {}ms: {cmd}",
+                    timeout.as_millis()
+                )
+            })?
             .with_context(|| format!("Failed to execute setup command: {cmd}"))?;
 
         if !output.status.success() {
@@ -346,7 +351,8 @@ graph = "p.dot"
 "#;
         let err = parse_task_config(toml).unwrap_err();
         assert!(
-            err.to_string().contains("Unsupported task config version 2"),
+            err.to_string()
+                .contains("Unsupported task config version 2"),
             "unexpected error: {err}"
         );
     }

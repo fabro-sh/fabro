@@ -208,9 +208,7 @@ mod tests {
 
     #[test]
     fn redact_jsonl_line_with_secret_in_content() {
-        let input = format!(
-            r#"{{"type":"text","content":"key={HIGH_ENTROPY_SECRET}"}}"#
-        );
+        let input = format!(r#"{{"type":"text","content":"key={HIGH_ENTROPY_SECRET}"}}"#);
         let result = redact_jsonl_line(&input);
         assert!(
             result.contains("REDACTED"),
@@ -224,9 +222,7 @@ mod tests {
 
     #[test]
     fn redact_jsonl_line_preserves_session_id() {
-        let input = format!(
-            r#"{{"session_id":"{HIGH_ENTROPY_SECRET}","content":"normal text"}}"#
-        );
+        let input = format!(r#"{{"session_id":"{HIGH_ENTROPY_SECRET}","content":"normal text"}}"#);
         let result = redact_jsonl_line(&input);
         assert!(
             result.contains(HIGH_ENTROPY_SECRET),
@@ -240,9 +236,7 @@ mod tests {
 
     #[test]
     fn redact_jsonl_line_fallback_on_invalid_json() {
-        let input = format!(
-            r#"{{"type":"text", "invalid {HIGH_ENTROPY_SECRET} json"#
-        );
+        let input = format!(r#"{{"type":"text", "invalid {HIGH_ENTROPY_SECRET} json"#);
         let result = redact_jsonl_line(&input);
         assert!(
             result.contains("REDACTED"),
@@ -266,9 +260,8 @@ mod tests {
 
     #[test]
     fn redact_jsonl_line_secrets_in_content_not_in_paths() {
-        let input = format!(
-            r#"{{"file_path":"/tmp/test.go","content":"api_key={HIGH_ENTROPY_SECRET}"}}"#
-        );
+        let input =
+            format!(r#"{{"file_path":"/tmp/test.go","content":"api_key={HIGH_ENTROPY_SECRET}"}}"#);
         let result = redact_jsonl_line(&input);
         assert!(
             result.contains("/tmp/test.go"),
@@ -286,9 +279,7 @@ mod tests {
 
     #[test]
     fn redact_jsonl_line_image_object_skipped() {
-        let input = format!(
-            r#"{{"type":"image","data":"{HIGH_ENTROPY_SECRET}"}}"#
-        );
+        let input = format!(r#"{{"type":"image","data":"{HIGH_ENTROPY_SECRET}"}}"#);
         let result = redact_jsonl_line(&input);
         assert!(
             !result.contains("REDACTED"),

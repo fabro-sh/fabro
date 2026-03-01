@@ -2,10 +2,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use arc_agent::{DockerConfig, DockerExecutionEnvironment, ExecutionEnvironment, LocalExecutionEnvironment};
 use anyhow::bail;
-use chrono::{Local, Utc};
+use arc_agent::{
+    DockerConfig, DockerExecutionEnvironment, ExecutionEnvironment, LocalExecutionEnvironment,
+};
 use arc_util::terminal::Styles;
+use chrono::{Local, Utc};
 
 use crate::checkpoint::Checkpoint;
 use crate::engine::{GitCheckpointMode, PipelineEngine, RunConfig};
@@ -23,7 +25,11 @@ use arc_llm::provider::Provider;
 use super::backend::AgentBackend;
 use super::cli_backend::{BackendRouter, CliBackend};
 use super::task_config;
-use super::{compute_stage_cost, format_cost, format_duration_human, format_event_detail, format_event_summary, format_tokens_human, print_diagnostics, read_dot_file, ExecutionEnvKind, RunArgs};
+use super::{
+    compute_stage_cost, format_cost, format_duration_human, format_event_detail,
+    format_event_summary, format_tokens_human, print_diagnostics, read_dot_file, ExecutionEnvKind,
+    RunArgs,
+};
 
 /// Accumulates token usage and cost across all pipeline stages.
 #[derive(Default)]
@@ -48,7 +54,9 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         return run_from_branch(args, &branch, styles).await;
     }
 
-    let pipeline_path = args.pipeline.as_ref()
+    let pipeline_path = args
+        .pipeline
+        .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--pipeline is required unless --run-branch is provided"))?;
 
     // 0. Load task config if TOML, resolve DOT path, run setup
@@ -87,12 +95,18 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         graph.name,
         graph.nodes.len(),
         graph.edges.len(),
-        bold = styles.bold, dim = styles.dim, reset = styles.reset,
+        bold = styles.bold,
+        dim = styles.dim,
+        reset = styles.reset,
     );
 
     let goal = graph.goal();
     if !goal.is_empty() {
-        eprintln!("{bold}Goal:{reset} {goal}", bold = styles.bold, reset = styles.reset);
+        eprintln!(
+            "{bold}Goal:{reset} {goal}",
+            bold = styles.bold,
+            reset = styles.reset
+        );
     }
 
     print_diagnostics(&diagnostics, styles);
@@ -128,10 +142,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             .expect("could not determine home directory")
             .join(".arc")
             .join("logs");
-        base.join(format!(
-            "arc-run-{}",
-            Local::now().format("%Y%m%d-%H%M%S")
-        ))
+        base.join(format!("arc-run-{}", Local::now().format("%Y%m%d-%H%M%S")))
     });
     tokio::fs::create_dir_all(&logs_dir).await?;
     tokio::fs::write(logs_dir.join("graph.dot"), &source).await?;
@@ -146,7 +157,8 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         eprintln!(
             "{dim}Logs: {}{reset}",
             logs_dir.display(),
-            dim = styles.dim, reset = styles.reset,
+            dim = styles.dim,
+            reset = styles.reset,
         );
     }
 
@@ -226,33 +238,41 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             eprintln!("{}", format_event_summary(event, styles));
         });
     } else {
-        emitter.on_event(move |event| {
-            match event {
-                crate::event::PipelineEvent::StageCompleted { name, duration_ms, status, usage, .. } => {
-                    let mut line = format!(
-                        "{dim}Stage \"{name}\" completed ({status}) in {duration}",
-                        duration = format_duration_human(*duration_ms),
-                        dim = styles.dim,
-                    );
-                    if let Some(u) = usage {
-                        let total = u.input_tokens + u.output_tokens;
-                        let tokens_str = format_tokens_human(total);
-                        if let Some(cost) = compute_stage_cost(u) {
-                            line.push_str(&format!(" \u{2014} {tokens_str} tokens ({})", format_cost(cost)));
-                        } else {
-                            line.push_str(&format!(" \u{2014} {tokens_str} tokens"));
-                        }
+        emitter.on_event(move |event| match event {
+            crate::event::PipelineEvent::StageCompleted {
+                name,
+                duration_ms,
+                status,
+                usage,
+                ..
+            } => {
+                let mut line = format!(
+                    "{dim}Stage \"{name}\" completed ({status}) in {duration}",
+                    duration = format_duration_human(*duration_ms),
+                    dim = styles.dim,
+                );
+                if let Some(u) = usage {
+                    let total = u.input_tokens + u.output_tokens;
+                    let tokens_str = format_tokens_human(total);
+                    if let Some(cost) = compute_stage_cost(u) {
+                        line.push_str(&format!(
+                            " \u{2014} {tokens_str} tokens ({})",
+                            format_cost(cost)
+                        ));
+                    } else {
+                        line.push_str(&format!(" \u{2014} {tokens_str} tokens"));
                     }
-                    eprintln!("{line}{reset}", reset = styles.reset);
                 }
-                crate::event::PipelineEvent::StageFailed { name, .. } => {
-                    eprintln!(
-                        "{dim}Stage \"{name}\" failed{reset}",
-                        dim = styles.dim, reset = styles.reset,
-                    );
-                }
-                _ => {}
+                eprintln!("{line}{reset}", reset = styles.reset);
             }
+            crate::event::PipelineEvent::StageFailed { name, .. } => {
+                eprintln!(
+                    "{dim}Stage \"{name}\" failed{reset}",
+                    dim = styles.dim,
+                    reset = styles.reset,
+                );
+            }
+            _ => {}
         });
     }
 
@@ -271,23 +291,29 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         .map(|s| s.parse::<ExecutionEnvKind>())
         .transpose()
         .map_err(|e| anyhow::anyhow!("Invalid execution environment in TOML: {e}"))?;
-    let execution_env_kind = args.execution_env.or(toml_execution_env).unwrap_or_default();
+    let execution_env_kind = args
+        .execution_env
+        .or(toml_execution_env)
+        .unwrap_or_default();
 
     // Set up git worktree for local execution (must happen before cwd is captured)
-    let (worktree_run_id, worktree_work_dir, worktree_path, worktree_branch, worktree_base_sha) = if git_clean {
-        match setup_worktree(&original_cwd, &logs_dir) {
-            Ok((rid, wd, wt, branch, base)) => (Some(rid), Some(wd), Some(wt), Some(branch), Some(base)),
-            Err(e) => {
-                eprintln!(
+    let (worktree_run_id, worktree_work_dir, worktree_path, worktree_branch, worktree_base_sha) =
+        if git_clean {
+            match setup_worktree(&original_cwd, &logs_dir) {
+                Ok((rid, wd, wt, branch, base)) => {
+                    (Some(rid), Some(wd), Some(wt), Some(branch), Some(base))
+                }
+                Err(e) => {
+                    eprintln!(
                     "{yellow}Warning:{reset} Git worktree setup failed ({e}), running without worktree.",
                     yellow = styles.yellow, reset = styles.reset,
                 );
-                (None, None, None, None, None)
+                    (None, None, None, None, None)
+                }
             }
-        }
-    } else {
-        (None, None, None, None, None)
-    };
+        } else {
+            (None, None, None, None, None)
+        };
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let daytona_config = task_cfg
@@ -305,7 +331,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
                 ..DockerConfig::default()
             };
             let mut env = DockerExecutionEnvironment::new(config)
-                    .map_err(|e| anyhow::anyhow!("Failed to create Docker environment: {e}"))?;
+                .map_err(|e| anyhow::anyhow!("Failed to create Docker environment: {e}"))?;
             let emitter_cb = Arc::clone(&emitter);
             env.set_event_callback(Arc::new(move |event| {
                 emitter_cb.emit(&crate::event::PipelineEvent::ExecutionEnv { event });
@@ -317,10 +343,8 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to create Daytona client: {e}"))?;
             let config = daytona_config.clone().unwrap_or_default();
-            let mut env = crate::daytona_env::DaytonaExecutionEnvironment::new(
-                daytona_client,
-                config,
-            );
+            let mut env =
+                crate::daytona_env::DaytonaExecutionEnvironment::new(daytona_client, config);
             let emitter_cb = Arc::clone(&emitter);
             env.set_event_callback(Arc::new(move |event| {
                 emitter_cb.emit(&crate::event::PipelineEvent::ExecutionEnv { event });
@@ -338,7 +362,9 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     };
 
     // Initialize execution environment (creates sandbox/container once for the whole pipeline)
-    execution_env.initialize().await
+    execution_env
+        .initialize()
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to initialize execution environment: {e}"))?;
 
     // Ensure cleanup runs even on error/panic
@@ -356,7 +382,9 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     });
 
     // Set up git inside Daytona sandbox (if applicable)
-    let (daytona_run_id, daytona_base_sha, daytona_branch) = if execution_env_kind == ExecutionEnvKind::Daytona {
+    let (daytona_run_id, daytona_base_sha, daytona_branch) = if execution_env_kind
+        == ExecutionEnvKind::Daytona
+    {
         match setup_daytona_git(&*execution_env).await {
             Ok((rid, base, branch)) => (Some(rid), Some(base), Some(branch)),
             Err(e) => {
@@ -373,10 +401,15 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
 
     // Run setup commands inside the execution environment (once, not per-stage)
     if !setup_commands.is_empty() {
-        emitter.emit(&crate::event::PipelineEvent::SetupStarted { command_count: setup_commands.len() });
+        emitter.emit(&crate::event::PipelineEvent::SetupStarted {
+            command_count: setup_commands.len(),
+        });
         let setup_start = Instant::now();
         for (index, cmd) in setup_commands.iter().enumerate() {
-            emitter.emit(&crate::event::PipelineEvent::SetupCommandStarted { command: cmd.clone(), index });
+            emitter.emit(&crate::event::PipelineEvent::SetupCommandStarted {
+                command: cmd.clone(),
+                index,
+            });
             let cmd_start = Instant::now();
             let result = execution_env
                 .exec_command(cmd, 300_000, None, None, None)
@@ -404,7 +437,9 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             });
         }
         let setup_duration = u64::try_from(setup_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        emitter.emit(&crate::event::PipelineEvent::SetupCompleted { duration_ms: setup_duration });
+        emitter.emit(&crate::event::PipelineEvent::SetupCompleted {
+            duration_ms: setup_duration,
+        });
     }
 
     // 6. Resolve backend, model, and provider
@@ -415,7 +450,8 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             Ok(c) if c.provider_names().is_empty() => {
                 eprintln!(
                     "{yellow}Warning:{reset} No LLM providers configured. Running in dry-run mode.",
-                    yellow = styles.yellow, reset = styles.reset,
+                    yellow = styles.yellow,
+                    reset = styles.reset,
                 );
                 true
             }
@@ -440,16 +476,13 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         .and_then(|l| l.provider.clone());
 
     // Precedence: CLI flag > TOML > DOT graph attrs > defaults
-    let provider = args
-        .provider
-        .or(toml_provider)
-        .or_else(|| {
-            graph
-                .attrs
-                .get("default_provider")
-                .and_then(|v| v.as_str())
-                .map(String::from)
-        });
+    let provider = args.provider.or(toml_provider).or_else(|| {
+        graph
+            .attrs
+            .get("default_provider")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+    });
 
     let model = args
         .model
@@ -489,20 +522,17 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         if dry_run_mode {
             None
         } else {
-            let api = AgentBackend::new(
-                model.clone(),
-                provider_enum,
-                args.verbose,
-                styles,
-            );
-            let cli = CliBackend::new(
-                model.clone(),
-                provider_enum,
-            );
+            let api = AgentBackend::new(model.clone(), provider_enum, args.verbose, styles);
+            let cli = CliBackend::new(model.clone(), provider_enum);
             Some(Box::new(BackendRouter::new(Box::new(api), cli)))
         }
     });
-    let engine = PipelineEngine::with_interviewer(registry, Arc::clone(&emitter), interviewer, Arc::clone(&execution_env));
+    let engine = PipelineEngine::with_interviewer(
+        registry,
+        Arc::clone(&emitter),
+        interviewer,
+        Arc::clone(&execution_env),
+    );
 
     // 7. Execute
     let run_id = worktree_run_id
@@ -523,9 +553,9 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             ExecutionEnvKind::Local | ExecutionEnvKind::Docker => {
                 worktree_work_dir.map(GitCheckpointMode::Host)
             }
-            ExecutionEnvKind::Daytona => {
-                daytona_base_sha.as_ref().map(|_| GitCheckpointMode::Remote(original_cwd.clone()))
-            }
+            ExecutionEnvKind::Daytona => daytona_base_sha
+                .as_ref()
+                .map(|_| GitCheckpointMode::Remote(original_cwd.clone())),
         },
         base_sha: worktree_base_sha.or(daytona_base_sha),
         run_branch: worktree_branch.or(daytona_branch),
@@ -573,7 +603,8 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     // 8. Print result
     eprintln!(
         "\n{bold}=== Pipeline Result ==={reset}",
-        bold = styles.bold, reset = styles.reset,
+        bold = styles.bold,
+        reset = styles.reset,
     );
 
     let status_str = outcome.status.to_string().to_uppercase();
@@ -581,14 +612,21 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         StageStatus::Success | StageStatus::PartialSuccess => styles.green,
         _ => styles.red,
     };
-    eprintln!("Status: {status_color}{status_str}{reset}", reset = styles.reset);
+    eprintln!(
+        "Status: {status_color}{status_str}{reset}",
+        reset = styles.reset
+    );
     eprintln!("Duration: {}", format_duration_human(run_duration_ms));
 
     let acc = accumulator.lock().unwrap();
     let total_tokens = acc.total_input_tokens + acc.total_output_tokens;
     if total_tokens > 0 {
         if acc.has_pricing {
-            eprintln!("Cost: {} ({} tokens)", format_cost(acc.total_cost), format_tokens_human(total_tokens));
+            eprintln!(
+                "Cost: {} ({} tokens)",
+                format_cost(acc.total_cost),
+                format_tokens_human(total_tokens)
+            );
         } else {
             eprintln!("Tokens: {}", format_tokens_human(total_tokens));
         }
@@ -597,14 +635,16 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
                 "{dim}Cache: {} read, {} write{reset}",
                 format_tokens_human(acc.total_cache_read_tokens),
                 format_tokens_human(acc.total_cache_write_tokens),
-                dim = styles.dim, reset = styles.reset,
+                dim = styles.dim,
+                reset = styles.reset,
             );
         }
         if acc.total_reasoning_tokens > 0 {
             eprintln!(
                 "{dim}Reasoning: {} tokens{reset}",
                 format_tokens_human(acc.total_reasoning_tokens),
-                dim = styles.dim, reset = styles.reset,
+                dim = styles.dim,
+                reset = styles.reset,
             );
         }
     }
@@ -616,13 +656,15 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     if let Some(failure) = &outcome.failure_reason {
         eprintln!(
             "{red}Failure: {failure}{reset}",
-            red = styles.red, reset = styles.reset,
+            red = styles.red,
+            reset = styles.reset,
         );
     }
     eprintln!(
         "{dim}Logs: {}{reset}",
         logs_dir.display(),
-        dim = styles.dim, reset = styles.reset,
+        dim = styles.dim,
+        reset = styles.reset,
     );
 
     // 9. Exit code
@@ -641,12 +683,10 @@ fn setup_worktree(
     original_cwd: &std::path::Path,
     logs_dir: &std::path::Path,
 ) -> anyhow::Result<(String, PathBuf, PathBuf, String, String)> {
-    let base_sha = crate::git::head_sha(original_cwd)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let base_sha = crate::git::head_sha(original_cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
     let run_id = ulid::Ulid::new().to_string();
     let branch_name = format!("arc/run/{run_id}");
-    crate::git::create_branch(original_cwd, &branch_name)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    crate::git::create_branch(original_cwd, &branch_name).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let worktree_path = logs_dir.join("worktree");
     crate::git::add_worktree(original_cwd, &worktree_path, &branch_name)
@@ -654,7 +694,13 @@ fn setup_worktree(
 
     std::env::set_current_dir(&worktree_path)?;
 
-    Ok((run_id, worktree_path.clone(), worktree_path, branch_name, base_sha))
+    Ok((
+        run_id,
+        worktree_path.clone(),
+        worktree_path,
+        branch_name,
+        base_sha,
+    ))
 }
 
 /// Set up git inside a Daytona sandbox for checkpoint commits.
@@ -663,10 +709,16 @@ async fn setup_daytona_git(
     exec_env: &dyn arc_agent::ExecutionEnvironment,
 ) -> anyhow::Result<(String, String, String)> {
     // Get current HEAD as base SHA
-    let sha_result = exec_env.exec_command("git rev-parse HEAD", 10_000, None, None, None).await
+    let sha_result = exec_env
+        .exec_command("git rev-parse HEAD", 10_000, None, None, None)
+        .await
         .map_err(|e| anyhow::anyhow!("git rev-parse HEAD failed: {e}"))?;
     if sha_result.exit_code != 0 {
-        anyhow::bail!("git rev-parse HEAD failed (exit {}): {}", sha_result.exit_code, sha_result.stderr);
+        anyhow::bail!(
+            "git rev-parse HEAD failed (exit {}): {}",
+            sha_result.exit_code,
+            sha_result.stderr
+        );
     }
     let base_sha = sha_result.stdout.trim().to_string();
 
@@ -675,10 +727,16 @@ async fn setup_daytona_git(
 
     // Create and checkout a run branch
     let checkout_cmd = format!("git checkout -b {branch_name}");
-    let checkout_result = exec_env.exec_command(&checkout_cmd, 10_000, None, None, None).await
+    let checkout_result = exec_env
+        .exec_command(&checkout_cmd, 10_000, None, None, None)
+        .await
         .map_err(|e| anyhow::anyhow!("git checkout failed: {e}"))?;
     if checkout_result.exit_code != 0 {
-        anyhow::bail!("git checkout -b failed (exit {}): {}", checkout_result.exit_code, checkout_result.stderr);
+        anyhow::bail!(
+            "git checkout -b failed (exit {}): {}",
+            checkout_result.exit_code,
+            checkout_result.stderr
+        );
     }
 
     Ok((run_id, base_sha, branch_name))
@@ -689,20 +747,28 @@ async fn setup_daytona_git(
 /// Reads the checkpoint, manifest, and graph DOT from the metadata branch
 /// (`refs/arc/{run_id}`), re-attaches a worktree to the existing run branch,
 /// and resumes execution via `run_from_checkpoint()`.
-async fn run_from_branch(args: RunArgs, run_branch: &str, styles: &'static Styles) -> anyhow::Result<()> {
+async fn run_from_branch(
+    args: RunArgs,
+    run_branch: &str,
+    styles: &'static Styles,
+) -> anyhow::Result<()> {
     // Extract run_id from branch name: "arc/run/{run_id}" -> "{run_id}"
     let run_id = run_branch
         .strip_prefix("arc/run/")
-        .ok_or_else(|| anyhow::anyhow!(
-            "invalid run branch format: expected 'arc/run/<run_id>', got '{run_branch}'"
-        ))?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "invalid run branch format: expected 'arc/run/<run_id>', got '{run_branch}'"
+            )
+        })?
         .to_string();
 
     let original_cwd = std::env::current_dir()?;
 
     // Read checkpoint from metadata branch
     let checkpoint = crate::git::MetadataStore::read_checkpoint(&original_cwd, &run_id)?
-        .ok_or_else(|| anyhow::anyhow!("no checkpoint found on metadata branch for run {run_id}"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("no checkpoint found on metadata branch for run {run_id}")
+        })?;
 
     // Read graph DOT from metadata branch
     let source = crate::git::MetadataStore::read_graph_dot(&original_cwd, &run_id)?
@@ -720,11 +786,16 @@ async fn run_from_branch(args: RunArgs, run_branch: &str, styles: &'static Style
     eprintln!(
         "{bold}Resuming pipeline:{reset} {} from branch {dim}{run_branch}{reset}",
         graph.name,
-        bold = styles.bold, dim = styles.dim, reset = styles.reset,
+        bold = styles.bold,
+        dim = styles.dim,
+        reset = styles.reset,
     );
 
     super::print_diagnostics(&diagnostics, styles);
-    if diagnostics.iter().any(|d| d.severity == crate::validation::Severity::Error) {
+    if diagnostics
+        .iter()
+        .any(|d| d.severity == crate::validation::Severity::Error)
+    {
         anyhow::bail!("Validation failed");
     }
 
@@ -770,12 +841,15 @@ async fn run_from_branch(args: RunArgs, run_branch: &str, styles: &'static Style
     };
 
     // Build engine with a backend
-    let dry_run_mode = args.dry_run || arc_llm::client::Client::from_env().await
-        .map(|c| c.provider_names().is_empty())
-        .unwrap_or(true);
+    let dry_run_mode = args.dry_run
+        || arc_llm::client::Client::from_env()
+            .await
+            .map(|c| c.provider_names().is_empty())
+            .unwrap_or(true);
 
     let model = args.model.unwrap_or_else(|| "claude-opus-4-6".to_string());
-    let provider_enum = args.provider
+    let provider_enum = args
+        .provider
         .as_deref()
         .map(|s| s.parse::<arc_llm::provider::Provider>())
         .transpose()
@@ -811,7 +885,9 @@ async fn run_from_branch(args: RunArgs, run_branch: &str, styles: &'static Style
     };
 
     let run_start = Instant::now();
-    let engine_result = engine.run_from_checkpoint(&graph, &config, &checkpoint).await;
+    let engine_result = engine
+        .run_from_checkpoint(&graph, &config, &checkpoint)
+        .await;
     let run_duration_ms = run_start.elapsed().as_millis() as u64;
 
     // Clean up
@@ -822,19 +898,27 @@ async fn run_from_branch(args: RunArgs, run_branch: &str, styles: &'static Style
 
     eprintln!(
         "\n{bold}=== Pipeline Result ==={reset}",
-        bold = styles.bold, reset = styles.reset,
+        bold = styles.bold,
+        reset = styles.reset,
     );
     let status_str = outcome.status.to_string().to_uppercase();
     let status_color = match outcome.status {
         StageStatus::Success | StageStatus::PartialSuccess => styles.green,
         _ => styles.red,
     };
-    eprintln!("Status: {status_color}{status_str}{reset}", reset = styles.reset);
-    eprintln!("Duration: {}", super::format_duration_human(run_duration_ms));
+    eprintln!(
+        "Status: {status_color}{status_str}{reset}",
+        reset = styles.reset
+    );
+    eprintln!(
+        "Duration: {}",
+        super::format_duration_human(run_duration_ms)
+    );
     eprintln!(
         "{dim}Logs: {}{reset}",
         logs_dir.display(),
-        dim = styles.dim, reset = styles.reset,
+        dim = styles.dim,
+        reset = styles.reset,
     );
 
     match outcome.status {

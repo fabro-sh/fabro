@@ -8,16 +8,18 @@ use crate::loop_detection::detect_loop;
 use crate::profiles::EnvContext;
 use crate::project_docs::discover_project_docs;
 use crate::provider_profile::ProviderProfile;
-use crate::skills::{default_skill_dirs, discover_skills, expand_skill, make_use_skill_tool, Skill};
+use crate::skills::{
+    default_skill_dirs, discover_skills, expand_skill, make_use_skill_tool, Skill,
+};
 use crate::types::{AgentEvent, SessionState, Turn};
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
-use futures::StreamExt;
 use arc_llm::client::Client;
 use arc_llm::error::{ProviderErrorKind, SdkError};
 use arc_llm::generate::StreamAccumulator;
 use arc_llm::types::{Message, Request, StreamEvent, ToolChoice};
+use futures::StreamExt;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 use tokio_util::sync::CancellationToken;
 
 pub struct Session {
@@ -100,7 +102,9 @@ impl Session {
         if !self.skills.is_empty() {
             let skills_arc = Arc::new(self.skills.clone());
             if let Some(profile) = Arc::get_mut(&mut self.provider_profile) {
-                profile.tool_registry_mut().register(make_use_skill_tool(skills_arc));
+                profile
+                    .tool_registry_mut()
+                    .register(make_use_skill_tool(skills_arc));
             }
         }
 
@@ -204,12 +208,12 @@ impl Session {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn state(&self) -> SessionState {
         self.state
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<crate::types::SessionEvent> {
         self.event_emitter.subscribe()
     }
@@ -232,7 +236,7 @@ impl Session {
         self.cancel_token.cancel();
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn followup_queue_handle(&self) -> Arc<Mutex<VecDeque<String>>> {
         self.followup_queue.clone()
     }
@@ -314,8 +318,7 @@ impl Session {
                 skill_name: None,
             }
         } else {
-            expand_skill(&self.skills, input)
-                .map_err(AgentError::InvalidState)?
+            expand_skill(&self.skills, input).map_err(AgentError::InvalidState)?
         };
         if let Some(ref name) = expanded.skill_name {
             self.event_emitter.emit(
@@ -332,8 +335,12 @@ impl Session {
             content: expanded_input.clone(),
             timestamp: SystemTime::now(),
         });
-        self.event_emitter
-            .emit(self.id.clone(), AgentEvent::UserInput { text: expanded_input.clone() });
+        self.event_emitter.emit(
+            self.id.clone(),
+            AgentEvent::UserInput {
+                text: expanded_input.clone(),
+            },
+        );
 
         // Drain steering queue before first LLM call
         self.drain_steering();
@@ -343,15 +350,23 @@ impl Session {
         loop {
             // Check max_tool_rounds_per_input
             if round_count >= self.config.max_tool_rounds_per_input {
-                self.event_emitter
-                    .emit(self.id.clone(), AgentEvent::TurnLimitReached { max_turns: self.config.max_tool_rounds_per_input });
+                self.event_emitter.emit(
+                    self.id.clone(),
+                    AgentEvent::TurnLimitReached {
+                        max_turns: self.config.max_tool_rounds_per_input,
+                    },
+                );
                 break;
             }
 
             // Check max_turns
             if self.config.max_turns > 0 && self.history.turns().len() >= self.config.max_turns {
-                self.event_emitter
-                    .emit(self.id.clone(), AgentEvent::TurnLimitReached { max_turns: self.config.max_turns });
+                self.event_emitter.emit(
+                    self.id.clone(),
+                    AgentEvent::TurnLimitReached {
+                        max_turns: self.config.max_turns,
+                    },
+                );
                 break;
             }
 
@@ -515,7 +530,9 @@ impl Session {
                     self.config.compaction_preserve_turns,
                     &self.event_emitter,
                     &self.id,
-                ).await {
+                )
+                .await
+                {
                     self.event_emitter.emit(
                         self.id.clone(),
                         AgentEvent::Error {
@@ -547,7 +564,8 @@ impl Session {
             .await;
 
             // Track file operations from tool calls
-            self.file_tracker.record_from_tool_calls(&tool_calls, &results);
+            self.file_tracker
+                .record_from_tool_calls(&tool_calls, &results);
 
             // Check cancellation after tool execution
             if self.cancel_token.is_cancelled() {
@@ -622,16 +640,16 @@ impl Session {
             response_format: None,
             temperature: None,
             top_p: None,
-            max_tokens: self.config.max_tokens.or_else(||
+            max_tokens: self.config.max_tokens.or_else(|| {
                 arc_llm::catalog::get_model_info(self.provider_profile.model())
-                    .and_then(|m| m.max_output)),
+                    .and_then(|m| m.max_output)
+            }),
             stop_sequences: None,
             reasoning_effort: self.config.reasoning_effort.clone(),
             metadata: None,
             provider_options: self.provider_profile.provider_options(),
         }
     }
-
 }
 
 const fn is_auth_error(err: &SdkError) -> bool {
@@ -669,9 +687,7 @@ mod tests {
         // UserTurn + AssistantTurn = 2
         assert_eq!(turns.len(), 2);
         assert!(matches!(&turns[0], Turn::User { content, .. } if content == "Hi"));
-        assert!(
-            matches!(&turns[1], Turn::Assistant { content, .. } if content == "Hello there!")
-        );
+        assert!(matches!(&turns[1], Turn::Assistant { content, .. } if content == "Hello there!"));
     }
 
     #[tokio::test]
@@ -694,9 +710,7 @@ mod tests {
         assert!(matches!(&turns[0], Turn::User { .. }));
         assert!(matches!(&turns[1], Turn::Assistant { tool_calls, .. } if tool_calls.len() == 1));
         assert!(matches!(&turns[2], Turn::ToolResults { results, .. } if results.len() == 1));
-        assert!(
-            matches!(&turns[3], Turn::Assistant { content, .. } if content == "Done!")
-        );
+        assert!(matches!(&turns[3], Turn::Assistant { content, .. } if content == "Done!"));
 
         // Verify tool result content
         if let Turn::ToolResults { results, .. } = &turns[2] {
@@ -790,9 +804,13 @@ mod tests {
         // Total = 4
         assert_eq!(turns.len(), 4);
         assert!(matches!(&turns[0], Turn::User { content, .. } if content == "initial message"));
-        assert!(matches!(&turns[1], Turn::Assistant { content, .. } if content == "First response"));
+        assert!(
+            matches!(&turns[1], Turn::Assistant { content, .. } if content == "First response")
+        );
         assert!(matches!(&turns[2], Turn::User { content, .. } if content == "followup message"));
-        assert!(matches!(&turns[3], Turn::Assistant { content, .. } if content == "Followup response"));
+        assert!(
+            matches!(&turns[3], Turn::Assistant { content, .. } if content == "Followup response")
+        );
     }
 
     #[tokio::test]
@@ -810,10 +828,18 @@ mod tests {
             events.push(event);
         }
 
-        assert!(events.iter().any(|e| matches!(e.event, AgentEvent::SessionStarted)));
-        assert!(events.iter().any(|e| matches!(e.event, AgentEvent::UserInput { .. })));
-        assert!(events.iter().any(|e| matches!(e.event, AgentEvent::AssistantMessage { .. })));
-        assert!(events.iter().any(|e| matches!(e.event, AgentEvent::SessionEnded)));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e.event, AgentEvent::SessionStarted)));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e.event, AgentEvent::UserInput { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e.event, AgentEvent::AssistantMessage { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e.event, AgentEvent::SessionEnded)));
     }
 
     #[tokio::test]
@@ -931,9 +957,9 @@ mod tests {
         assert!(found_loop_detection);
 
         // Check for Steering turn with warning in history
-        let has_steering_warning = session.history().turns().iter().any(|t| {
-            matches!(t, Turn::Steering { content, .. } if content.contains("Loop detected"))
-        });
+        let has_steering_warning = session.history().turns().iter().any(
+            |t| matches!(t, Turn::Steering { content, .. } if content.contains("Loop detected")),
+        );
         assert!(has_steering_warning);
     }
 
@@ -1045,10 +1071,7 @@ mod tests {
 
     #[tokio::test]
     async fn sequential_inputs() {
-        let responses = vec![
-            text_response("First"),
-            text_response("Second"),
-        ];
+        let responses = vec![text_response("First"), text_response("Second")];
 
         let mut session = make_session(responses).await;
 
@@ -1092,7 +1115,9 @@ mod tests {
             events.push(event);
         }
         assert!(
-            !events.iter().any(|e| matches!(e.event, AgentEvent::SessionStarted)),
+            !events
+                .iter()
+                .any(|e| matches!(e.event, AgentEvent::SessionStarted)),
             "SessionStarted should not be emitted for a closed session"
         );
     }
@@ -1164,9 +1189,7 @@ mod tests {
         let provider = Arc::new(MockLlmProvider::new(responses));
         let client = make_client(provider).await;
         let registry = ToolRegistry::new();
-        let profile = Arc::new(TestProfile::parallel_with_context_window(
-            registry, 100,
-        ));
+        let profile = Arc::new(TestProfile::parallel_with_context_window(registry, 100));
         let env = Arc::new(MockExecutionEnvironment::default());
         let mut session = Session::new(client, profile, env, SessionConfig::default());
         let mut rx = session.subscribe();
@@ -1201,7 +1224,9 @@ mod tests {
         session.process_input("test").await.unwrap();
 
         let captured = provider_ref.captured_request.lock().unwrap();
-        let request = captured.as_ref().expect("request should have been captured");
+        let request = captured
+            .as_ref()
+            .expect("request should have been captured");
         assert_eq!(request.reasoning_effort, Some("high".to_string()));
     }
 
@@ -1213,9 +1238,7 @@ mod tests {
         let client = make_client(provider).await;
         let registry = ToolRegistry::new();
         // Large context window so short input stays well under 80%
-        let profile = Arc::new(TestProfile::parallel_with_context_window(
-            registry, 200_000,
-        ));
+        let profile = Arc::new(TestProfile::parallel_with_context_window(registry, 200_000));
         let env = Arc::new(MockExecutionEnvironment::default());
         let mut session = Session::new(client, profile, env, SessionConfig::default());
         let mut rx = session.subscribe();
@@ -1314,10 +1337,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_start_emitted_once_for_multiple_inputs() {
-        let responses = vec![
-            text_response("First"),
-            text_response("Second"),
-        ];
+        let responses = vec![text_response("First"), text_response("Second")];
 
         let mut session = make_session(responses).await;
         let mut rx = session.subscribe();
@@ -1359,7 +1379,9 @@ mod tests {
 
         // Verify user instructions are included in the system prompt
         let captured = provider_ref.captured_request.lock().unwrap();
-        let request = captured.as_ref().expect("request should have been captured");
+        let request = captured
+            .as_ref()
+            .expect("request should have been captured");
         let system_msg = &request.messages[0];
         let system_text = system_msg.text();
         assert!(
@@ -1379,9 +1401,7 @@ mod tests {
         ];
 
         let config = SessionConfig {
-            tool_approval: Some(Arc::new(|_name, _args| {
-                Err("denied by policy".to_string())
-            })),
+            tool_approval: Some(Arc::new(|_name, _args| Err("denied by policy".to_string()))),
             ..Default::default()
         };
 
@@ -1445,8 +1465,7 @@ mod tests {
         let mut registry = ToolRegistry::new();
         registry.register(make_echo_tool());
 
-        let captured: Arc<Mutex<Option<(String, serde_json::Value)>>> =
-            Arc::new(Mutex::new(None));
+        let captured: Arc<Mutex<Option<(String, serde_json::Value)>>> = Arc::new(Mutex::new(None));
         let captured_clone = captured.clone();
 
         let responses = vec![
@@ -1466,7 +1485,9 @@ mod tests {
         session.process_input("Use echo").await.unwrap();
 
         let captured_value = captured.lock().unwrap();
-        let (name, args) = captured_value.as_ref().expect("approval fn should have been called");
+        let (name, args) = captured_value
+            .as_ref()
+            .expect("approval fn should have been called");
         assert_eq!(name, "echo");
         assert_eq!(args, &serde_json::json!({"text": "world"}));
     }
@@ -1513,9 +1534,7 @@ mod tests {
         ];
 
         let config = SessionConfig {
-            tool_approval: Some(Arc::new(|_name, _args| {
-                Err("not allowed".to_string())
-            })),
+            tool_approval: Some(Arc::new(|_name, _args| Err("not allowed".to_string()))),
             ..Default::default()
         };
 
@@ -1534,7 +1553,10 @@ mod tests {
         assert_eq!(tool_end_events.len(), 1);
         match &tool_end_events[0].event {
             AgentEvent::ToolCallCompleted { is_error, .. } => {
-                assert!(is_error, "ToolCallCompleted event should have is_error: true");
+                assert!(
+                    is_error,
+                    "ToolCallCompleted event should have is_error: true"
+                );
             }
             _ => panic!("Expected ToolCallCompleted event"),
         }
@@ -1572,7 +1594,10 @@ mod tests {
         let mut session = Session::new(client, profile, env, SessionConfig::default());
 
         let result = session.process_input("Hello").await;
-        assert!(matches!(result, Err(AgentError::Llm(SdkError::Stream { .. }))));
+        assert!(matches!(
+            result,
+            Err(AgentError::Llm(SdkError::Stream { .. }))
+        ));
     }
 
     #[tokio::test]
@@ -1612,7 +1637,10 @@ mod tests {
             }
         }
         assert!(found_started, "CompactionStarted event should be emitted");
-        assert!(found_completed, "CompactionCompleted event should be emitted");
+        assert!(
+            found_completed,
+            "CompactionCompleted event should be emitted"
+        );
 
         // History should have been compacted: summary turn + preserved turns
         let turns = session.history().turns();
@@ -1643,7 +1671,10 @@ mod tests {
 
         let mut found_compaction = false;
         while let Ok(event) = rx.try_recv() {
-            if matches!(event.event, AgentEvent::CompactionStarted { .. } | AgentEvent::CompactionCompleted { .. }) {
+            if matches!(
+                event.event,
+                AgentEvent::CompactionStarted { .. } | AgentEvent::CompactionCompleted { .. }
+            ) {
                 found_compaction = true;
             }
         }
@@ -1662,10 +1693,14 @@ mod tests {
 
         #[async_trait::async_trait]
         impl ProviderAdapter for StreamOnlyProvider {
-            fn name(&self) -> &'static str { "mock" }
+            fn name(&self) -> &'static str {
+                "mock"
+            }
 
             async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
-                Err(SdkError::Stream { message: "summarization failed".into() })
+                Err(SdkError::Stream {
+                    message: "summarization failed".into(),
+                })
             }
 
             async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
@@ -1683,7 +1718,9 @@ mod tests {
                 }
                 for part in &response.message.content {
                     if let arc_llm::types::ContentPart::ToolCall(tc) = part {
-                        events.push(Ok(StreamEvent::ToolCallEnd { tool_call: tc.clone() }));
+                        events.push(Ok(StreamEvent::ToolCallEnd {
+                            tool_call: tc.clone(),
+                        }));
                     }
                 }
                 events.push(Ok(StreamEvent::finish(
@@ -1716,7 +1753,10 @@ mod tests {
 
         // Should not return an error even though compaction fails
         let result = session.process_input(&large_input).await;
-        assert!(result.is_ok(), "Session should continue despite compaction failure");
+        assert!(
+            result.is_ok(),
+            "Session should continue despite compaction failure"
+        );
 
         // Should emit an Error event for the failed compaction
         let mut found_error = false;
@@ -1745,7 +1785,9 @@ mod tests {
 
         #[async_trait::async_trait]
         impl ProviderAdapter for CompactionCapturingProvider {
-            fn name(&self) -> &'static str { "mock" }
+            fn name(&self) -> &'static str {
+                "mock"
+            }
 
             async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
                 *self.captured_complete.lock().unwrap() = Some(request.clone());
@@ -1784,7 +1826,11 @@ mod tests {
         // [2] = text "OK" (second process_input — triggers compaction)
         // [3] = fallback
         let stream_responses = vec![
-            tool_call_response("read_file", "tc1", serde_json::json!({"file_path": "/src/main.rs"})),
+            tool_call_response(
+                "read_file",
+                "tc1",
+                serde_json::json!({"file_path": "/src/main.rs"}),
+            ),
             text_response("OK"),
             text_response("Done after compaction"),
             text_response("fallback"),
@@ -1812,7 +1858,11 @@ mod tests {
         // First call: tool call executes, files get tracked, no compaction yet
         // (compaction may trigger but file tracker is populated by tool execution)
         session.process_input("Read the file").await.unwrap();
-        assert_eq!(session.file_tracker().file_count(), 1, "read_file should be tracked");
+        assert_eq!(
+            session.file_tracker().file_count(),
+            1,
+            "read_file should be tracked"
+        );
 
         // Second call with large input: context is well over threshold, compaction triggers
         let large_input = "x".repeat(400);
@@ -1820,7 +1870,9 @@ mod tests {
 
         // Verify the compaction request has the structured prompt
         let captured = provider.captured_complete.lock().unwrap();
-        let request = captured.as_ref().expect("compaction request should have been captured");
+        let request = captured
+            .as_ref()
+            .expect("compaction request should have been captured");
         let system_text = request.messages[0].text();
         assert!(
             system_text.contains("## Goal"),
@@ -1842,18 +1894,24 @@ mod tests {
         // Verify CompactionCompleted event has tracked_file_count
         let mut found_tracked_count = false;
         while let Ok(event) = rx.try_recv() {
-            if let AgentEvent::CompactionCompleted { tracked_file_count, .. } = &event.event {
+            if let AgentEvent::CompactionCompleted {
+                tracked_file_count, ..
+            } = &event.event
+            {
                 assert_eq!(*tracked_file_count, 1, "Should track 1 file (read_file)");
                 found_tracked_count = true;
             }
         }
-        assert!(found_tracked_count, "CompactionCompleted event should be emitted");
+        assert!(
+            found_tracked_count,
+            "CompactionCompleted event should be emitted"
+        );
     }
 
     #[tokio::test]
     async fn mcp_end_to_end_tool_call() {
-        use std::collections::HashMap;
         use arc_mcp::config::{McpServerConfig, McpTransport};
+        use std::collections::HashMap;
 
         let test_server = format!(
             "{}/../arc-mcp/tests/test_mcp_server.py",
@@ -1901,7 +1959,11 @@ mod tests {
         // Verify McpServerReady event was emitted
         let mut mcp_ready = false;
         while let Ok(event) = rx.try_recv() {
-            if let AgentEvent::McpServerReady { server_name, tool_count } = &event.event {
+            if let AgentEvent::McpServerReady {
+                server_name,
+                tool_count,
+            } = &event.event
+            {
                 assert_eq!(server_name, "test-echo");
                 assert_eq!(*tool_count, 1);
                 mcp_ready = true;
@@ -1914,14 +1976,14 @@ mod tests {
 
         // Verify turn sequence
         let turns = session.history().turns();
-        assert_eq!(turns.len(), 4, "Expected User + Assistant(tool) + ToolResults + Assistant(text)");
+        assert_eq!(
+            turns.len(),
+            4,
+            "Expected User + Assistant(tool) + ToolResults + Assistant(text)"
+        );
         assert!(matches!(&turns[0], Turn::User { .. }));
-        assert!(
-            matches!(&turns[1], Turn::Assistant { tool_calls, .. } if tool_calls.len() == 1)
-        );
-        assert!(
-            matches!(&turns[2], Turn::ToolResults { results, .. } if results.len() == 1)
-        );
+        assert!(matches!(&turns[1], Turn::Assistant { tool_calls, .. } if tool_calls.len() == 1));
+        assert!(matches!(&turns[2], Turn::ToolResults { results, .. } if results.len() == 1));
         assert!(
             matches!(&turns[3], Turn::Assistant { content, .. } if content == "The echo server replied!")
         );
@@ -1945,7 +2007,11 @@ mod tests {
                     assert_eq!(tool_name, "mcp__test_echo__echo");
                     tool_started = true;
                 }
-                AgentEvent::ToolCallCompleted { tool_name, is_error, .. } => {
+                AgentEvent::ToolCallCompleted {
+                    tool_name,
+                    is_error,
+                    ..
+                } => {
                     assert_eq!(tool_name, "mcp__test_echo__echo");
                     assert!(!is_error);
                     tool_completed = true;
@@ -1953,7 +2019,13 @@ mod tests {
                 _ => {}
             }
         }
-        assert!(tool_started, "ToolCallStarted should be emitted for MCP tool");
-        assert!(tool_completed, "ToolCallCompleted should be emitted for MCP tool");
+        assert!(
+            tool_started,
+            "ToolCallStarted should be emitted for MCP tool"
+        );
+        assert!(
+            tool_completed,
+            "ToolCallCompleted should be emitted for MCP tool"
+        );
     }
 }

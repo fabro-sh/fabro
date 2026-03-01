@@ -23,12 +23,26 @@ pub async fn execute_tool_calls(
 ) -> Vec<ToolResult> {
     if parallel && tool_calls.len() > 1 {
         execute_tool_calls_parallel(
-            tool_calls, registry, env, tool_approval, cancel_token, config, emitter, session_id,
+            tool_calls,
+            registry,
+            env,
+            tool_approval,
+            cancel_token,
+            config,
+            emitter,
+            session_id,
         )
         .await
     } else {
         execute_tool_calls_sequential(
-            tool_calls, registry, env, tool_approval, cancel_token, config, emitter, session_id,
+            tool_calls,
+            registry,
+            env,
+            tool_approval,
+            cancel_token,
+            config,
+            emitter,
+            session_id,
         )
         .await
     }

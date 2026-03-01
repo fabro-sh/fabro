@@ -60,7 +60,10 @@ mod tests {
             name: "test-server".into(),
             transport: McpTransport::Stdio {
                 command: "npx".into(),
-                args: vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into()],
+                args: vec![
+                    "-y".into(),
+                    "@modelcontextprotocol/server-filesystem".into(),
+                ],
                 env: HashMap::new(),
             },
             startup_timeout_secs: 10,
@@ -104,7 +107,9 @@ mod tests {
         assert_eq!(deserialized.name, "fs");
         assert_eq!(deserialized.startup_timeout_secs, 15);
         assert_eq!(deserialized.tool_timeout_secs, 90);
-        assert!(matches!(deserialized.transport, McpTransport::Stdio { command, .. } if command == "node"));
+        assert!(
+            matches!(deserialized.transport, McpTransport::Stdio { command, .. } if command == "node")
+        );
     }
 
     #[test]
@@ -121,7 +126,9 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: McpServerConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.name, "remote");
-        assert!(matches!(deserialized.transport, McpTransport::Http { url, .. } if url == "https://mcp.example.com"));
+        assert!(
+            matches!(deserialized.transport, McpTransport::Http { url, .. } if url == "https://mcp.example.com")
+        );
     }
 
     #[test]

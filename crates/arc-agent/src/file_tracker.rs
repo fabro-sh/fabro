@@ -1,5 +1,5 @@
-use std::collections::BTreeMap;
 use arc_llm::types::{ToolCall, ToolResult};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, Default)]
 struct FileOps {
@@ -125,8 +125,15 @@ mod tests {
     #[test]
     fn record_from_tool_calls_read_file() {
         let mut tracker = FileTracker::default();
-        let tool_calls = vec![ToolCall::new("tc1", "read_file", serde_json::json!({"file_path": "/tmp/foo.rs"}))];
-        let results = vec![ToolResult::success("tc1", serde_json::json!("file contents"))];
+        let tool_calls = vec![ToolCall::new(
+            "tc1",
+            "read_file",
+            serde_json::json!({"file_path": "/tmp/foo.rs"}),
+        )];
+        let results = vec![ToolResult::success(
+            "tc1",
+            serde_json::json!("file contents"),
+        )];
         tracker.record_from_tool_calls(&tool_calls, &results);
         assert_eq!(tracker.render(), "- /tmp/foo.rs (read)\n");
     }
@@ -134,7 +141,11 @@ mod tests {
     #[test]
     fn record_from_tool_calls_write_file() {
         let mut tracker = FileTracker::default();
-        let tool_calls = vec![ToolCall::new("tc1", "write_file", serde_json::json!({"file_path": "/tmp/bar.rs", "content": "hello"}))];
+        let tool_calls = vec![ToolCall::new(
+            "tc1",
+            "write_file",
+            serde_json::json!({"file_path": "/tmp/bar.rs", "content": "hello"}),
+        )];
         let results = vec![ToolResult::success("tc1", serde_json::json!("ok"))];
         tracker.record_from_tool_calls(&tool_calls, &results);
         assert_eq!(tracker.render(), "- /tmp/bar.rs (written)\n");
@@ -143,7 +154,11 @@ mod tests {
     #[test]
     fn record_from_tool_calls_edit_file() {
         let mut tracker = FileTracker::default();
-        let tool_calls = vec![ToolCall::new("tc1", "edit_file", serde_json::json!({"file_path": "/tmp/baz.rs"}))];
+        let tool_calls = vec![ToolCall::new(
+            "tc1",
+            "edit_file",
+            serde_json::json!({"file_path": "/tmp/baz.rs"}),
+        )];
         let results = vec![ToolResult::success("tc1", serde_json::json!("ok"))];
         tracker.record_from_tool_calls(&tool_calls, &results);
         assert_eq!(tracker.render(), "- /tmp/baz.rs (edited)\n");
@@ -152,7 +167,11 @@ mod tests {
     #[test]
     fn record_from_tool_calls_skips_errors() {
         let mut tracker = FileTracker::default();
-        let tool_calls = vec![ToolCall::new("tc1", "read_file", serde_json::json!({"file_path": "/tmp/missing.rs"}))];
+        let tool_calls = vec![ToolCall::new(
+            "tc1",
+            "read_file",
+            serde_json::json!({"file_path": "/tmp/missing.rs"}),
+        )];
         let results = vec![ToolResult::error("tc1", "File not found")];
         tracker.record_from_tool_calls(&tool_calls, &results);
         assert!(tracker.is_empty());
@@ -161,10 +180,20 @@ mod tests {
     #[test]
     fn record_from_tool_calls_apply_patch_added() {
         let mut tracker = FileTracker::default();
-        let tool_calls = vec![ToolCall::new("tc1", "apply_patch", serde_json::json!({"patch": "..."}))];
-        let results = vec![ToolResult::success("tc1", serde_json::json!("Added file: src/new.rs\nUpdated file: src/old.rs"))];
+        let tool_calls = vec![ToolCall::new(
+            "tc1",
+            "apply_patch",
+            serde_json::json!({"patch": "..."}),
+        )];
+        let results = vec![ToolResult::success(
+            "tc1",
+            serde_json::json!("Added file: src/new.rs\nUpdated file: src/old.rs"),
+        )];
         tracker.record_from_tool_calls(&tool_calls, &results);
-        assert_eq!(tracker.render(), "- src/new.rs (written)\n- src/old.rs (edited)\n");
+        assert_eq!(
+            tracker.render(),
+            "- src/new.rs (written)\n- src/old.rs (edited)\n"
+        );
     }
 
     #[test]
@@ -182,8 +211,15 @@ mod tests {
     #[test]
     fn record_from_tool_calls_ignores_unknown_tools() {
         let mut tracker = FileTracker::default();
-        let tool_calls = vec![ToolCall::new("tc1", "shell", serde_json::json!({"command": "ls"}))];
-        let results = vec![ToolResult::success("tc1", serde_json::json!("file1\nfile2"))];
+        let tool_calls = vec![ToolCall::new(
+            "tc1",
+            "shell",
+            serde_json::json!({"command": "ls"}),
+        )];
+        let results = vec![ToolResult::success(
+            "tc1",
+            serde_json::json!("file1\nfile2"),
+        )];
         tracker.record_from_tool_calls(&tool_calls, &results);
         assert!(tracker.is_empty());
     }

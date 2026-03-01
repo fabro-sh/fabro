@@ -150,14 +150,20 @@ mod tests {
 
     #[test]
     fn stage_status_from_str() {
-        assert_eq!("success".parse::<StageStatus>().unwrap(), StageStatus::Success);
+        assert_eq!(
+            "success".parse::<StageStatus>().unwrap(),
+            StageStatus::Success
+        );
         assert_eq!("fail".parse::<StageStatus>().unwrap(), StageStatus::Fail);
         assert_eq!(
             "partial_success".parse::<StageStatus>().unwrap(),
             StageStatus::PartialSuccess
         );
         assert_eq!("retry".parse::<StageStatus>().unwrap(), StageStatus::Retry);
-        assert_eq!("skipped".parse::<StageStatus>().unwrap(), StageStatus::Skipped);
+        assert_eq!(
+            "skipped".parse::<StageStatus>().unwrap(),
+            StageStatus::Skipped
+        );
     }
 
     #[test]

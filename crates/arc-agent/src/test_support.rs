@@ -5,14 +5,14 @@ use crate::provider_profile::{ProfileCapabilities, ProviderProfile};
 use crate::session::Session;
 use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
-use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use arc_llm::client::Client;
 use arc_llm::error::SdkError;
 use arc_llm::provider::{Provider, ProviderAdapter, StreamEventStream};
 use arc_llm::types::{ContentPart, FinishReason, Message, Request, Response, StreamEvent, Usage};
+use async_trait::async_trait;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 // --- MockExecutionEnvironment ---
@@ -162,14 +162,24 @@ impl ExecutionEnvironment for MockExecutionEnvironment {
     }
 
     async fn initialize(&self) -> Result<(), String> {
-        self.emit(crate::execution_env::ExecutionEnvEvent::Initializing { env_type: "mock".into() });
-        self.emit(crate::execution_env::ExecutionEnvEvent::Ready { env_type: "mock".into(), duration_ms: 0 });
+        self.emit(crate::execution_env::ExecutionEnvEvent::Initializing {
+            env_type: "mock".into(),
+        });
+        self.emit(crate::execution_env::ExecutionEnvEvent::Ready {
+            env_type: "mock".into(),
+            duration_ms: 0,
+        });
         Ok(())
     }
 
     async fn cleanup(&self) -> Result<(), String> {
-        self.emit(crate::execution_env::ExecutionEnvEvent::CleanupStarted { env_type: "mock".into() });
-        self.emit(crate::execution_env::ExecutionEnvEvent::CleanupCompleted { env_type: "mock".into(), duration_ms: 0 });
+        self.emit(crate::execution_env::ExecutionEnvEvent::CleanupStarted {
+            env_type: "mock".into(),
+        });
+        self.emit(crate::execution_env::ExecutionEnvEvent::CleanupCompleted {
+            env_type: "mock".into(),
+            duration_ms: 0,
+        });
         Ok(())
     }
 
@@ -227,10 +237,7 @@ impl ExecutionEnvironment for MutableMockExecutionEnvironment {
     }
 
     async fn delete_file(&self, path: &str) -> Result<(), String> {
-        self.files
-            .lock()
-            .expect("files lock poisoned")
-            .remove(path);
+        self.files.lock().expect("files lock poisoned").remove(path);
         Ok(())
     }
 
@@ -375,7 +382,9 @@ impl ProviderProfile for TestProfile {
             format!("\n\n{skills_section}")
         };
         match user_instructions {
-            Some(instructions) => format!("You are a test assistant.{skills_part}\n\n# User Instructions\n{instructions}"),
+            Some(instructions) => format!(
+                "You are a test assistant.{skills_part}\n\n# User Instructions\n{instructions}"
+            ),
             None => format!("You are a test assistant.{skills_part}"),
         }
     }
@@ -502,10 +511,7 @@ pub async fn make_session(responses: Vec<Response>) -> Session {
     Session::new(client, profile, env, SessionConfig::default())
 }
 
-pub async fn make_session_with_tools(
-    responses: Vec<Response>,
-    registry: ToolRegistry,
-) -> Session {
+pub async fn make_session_with_tools(responses: Vec<Response>, registry: ToolRegistry) -> Session {
     let provider = Arc::new(MockLlmProvider::new(responses));
     let client = make_client(provider).await;
     let profile = Arc::new(TestProfile::with_tools(registry));
@@ -513,10 +519,7 @@ pub async fn make_session_with_tools(
     Session::new(client, profile, env, SessionConfig::default())
 }
 
-pub async fn make_session_with_config(
-    responses: Vec<Response>,
-    config: SessionConfig,
-) -> Session {
+pub async fn make_session_with_config(responses: Vec<Response>, config: SessionConfig) -> Session {
     let provider = Arc::new(MockLlmProvider::new(responses));
     let client = make_client(provider).await;
     let profile = Arc::new(TestProfile::new());
@@ -688,9 +691,7 @@ impl ProviderAdapter for MockMidStreamErrorProvider {
     }
 }
 
-pub fn multi_tool_call_response(
-    calls: Vec<(&str, &str, serde_json::Value)>,
-) -> Response {
+pub fn multi_tool_call_response(calls: Vec<(&str, &str, serde_json::Value)>) -> Response {
     use arc_llm::types::{ContentPart, Role, ToolCall};
     let mut content = vec![ContentPart::text("Let me use multiple tools.")];
     for (tool_name, tool_call_id, args) in &calls {

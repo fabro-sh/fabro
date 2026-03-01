@@ -6,16 +6,16 @@ pub mod validate;
 
 use std::path::Path;
 
+use arc_util::terminal::Styles;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
-use arc_util::terminal::Styles;
 
-use arc_agent::AgentEvent;
 use crate::event::PipelineEvent;
 use crate::outcome::StageUsage;
 use crate::validation::{Diagnostic, Severity};
+use arc_agent::AgentEvent;
 
 /// Execution environment for agent tool operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
@@ -53,7 +53,11 @@ impl FromStr for ExecutionEnvKind {
 }
 
 #[derive(Parser)]
-#[command(name = "arc-workflows", version, about = "DOT-based pipeline runner for AI workflows")]
+#[command(
+    name = "arc-workflows",
+    version,
+    about = "DOT-based pipeline runner for AI workflows"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -137,18 +141,26 @@ pub fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles) {
         match d.severity {
             Severity::Error => eprintln!(
                 "{red}error{reset}{location}: {} ({dim}{}{reset})",
-                d.message, d.rule,
-                red = styles.red, dim = styles.dim, reset = styles.reset,
+                d.message,
+                d.rule,
+                red = styles.red,
+                dim = styles.dim,
+                reset = styles.reset,
             ),
             Severity::Warning => eprintln!(
                 "{yellow}warning{reset}{location}: {} ({dim}{}{reset})",
-                d.message, d.rule,
-                yellow = styles.yellow, dim = styles.dim, reset = styles.reset,
+                d.message,
+                d.rule,
+                yellow = styles.yellow,
+                dim = styles.dim,
+                reset = styles.reset,
             ),
             Severity::Info => eprintln!(
                 "{dim}info{location}: {} ({}){reset}",
-                d.message, d.rule,
-                dim = styles.dim, reset = styles.reset,
+                d.message,
+                d.rule,
+                dim = styles.dim,
+                reset = styles.reset,
             ),
         }
     }
@@ -187,16 +199,25 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             total_cost,
             ..
         } => {
-            let mut s = format!("[PIPELINE_COMPLETED] duration={duration_ms}ms artifacts={artifact_count}");
+            let mut s =
+                format!("[PIPELINE_COMPLETED] duration={duration_ms}ms artifacts={artifact_count}");
             if let Some(cost) = total_cost {
                 s.push_str(&format!(" total_cost={}", format_cost(*cost)));
             }
             s
         }
-        PipelineEvent::PipelineFailed { error, duration_ms, .. } => {
+        PipelineEvent::PipelineFailed {
+            error, duration_ms, ..
+        } => {
             format!("[PIPELINE_FAILED] error=\"{error}\" duration={duration_ms}ms")
         }
-        PipelineEvent::StageStarted { name, index, handler_type, attempt, max_attempts } => {
+        PipelineEvent::StageStarted {
+            name,
+            index,
+            handler_type,
+            attempt,
+            max_attempts,
+        } => {
             let mut s = format!("[STAGE_STARTED] name={name} index={index}");
             if let Some(ht) = handler_type {
                 s.push_str(&format!(" handler_type={ht}"));
@@ -224,7 +245,10 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
                 s.push_str(&format!(" preferred_label=\"{label}\""));
             }
             if !suggested_next_ids.is_empty() {
-                s.push_str(&format!(" suggested_next_ids={}", suggested_next_ids.join(",")));
+                s.push_str(&format!(
+                    " suggested_next_ids={}",
+                    suggested_next_ids.join(",")
+                ));
             }
             if let Some(u) = usage {
                 let total = u.input_tokens + u.output_tokens;
@@ -280,7 +304,11 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
                 "[STAGE_RETRYING] name={name} index={index} attempt={attempt}/{max_attempts} delay={delay_ms}ms"
             )
         }
-        PipelineEvent::ParallelStarted { branch_count, join_policy, error_policy } => {
+        PipelineEvent::ParallelStarted {
+            branch_count,
+            join_policy,
+            error_policy,
+        } => {
             format!("[PARALLEL_STARTED] branches={branch_count} join_policy={join_policy} error_policy={error_policy}")
         }
         PipelineEvent::ParallelBranchStarted { branch, index } => {
@@ -301,7 +329,11 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
         } => {
             format!("[PARALLEL_COMPLETED] duration={duration_ms}ms succeeded={success_count} failed={failure_count}")
         }
-        PipelineEvent::InterviewStarted { question, stage, question_type } => {
+        PipelineEvent::InterviewStarted {
+            question,
+            stage,
+            question_type,
+        } => {
             format!("[INTERVIEW_STARTED] stage={stage} question=\"{question}\" question_type={question_type}")
         }
         PipelineEvent::InterviewCompleted {
@@ -321,10 +353,20 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
         PipelineEvent::CheckpointSaved { node_id } => {
             format!("[CHECKPOINT_SAVED] node={node_id}")
         }
-        PipelineEvent::GitCheckpoint { node_id, git_commit_sha, status, .. } => {
+        PipelineEvent::GitCheckpoint {
+            node_id,
+            git_commit_sha,
+            status,
+            ..
+        } => {
             format!("[GIT_CHECKPOINT] node={node_id} sha={git_commit_sha} status={status}")
         }
-        PipelineEvent::EdgeSelected { from_node, to_node, label, condition } => {
+        PipelineEvent::EdgeSelected {
+            from_node,
+            to_node,
+            label,
+            condition,
+        } => {
             let mut s = format!("[EDGE_SELECTED] from={from_node} to={to_node}");
             if let Some(l) = label {
                 s.push_str(&format!(" label=\"{l}\""));
@@ -342,7 +384,12 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             format!("[PROMPT] stage={stage} text=\"{truncated}\"")
         }
         PipelineEvent::Agent { stage, event } => match event {
-            AgentEvent::AssistantMessage { model, usage, tool_call_count, .. } => {
+            AgentEvent::AssistantMessage {
+                model,
+                usage,
+                tool_call_count,
+                ..
+            } => {
                 let total = usage.input_tokens + usage.output_tokens;
                 let tokens_str = format_tokens_human(total);
                 let mut s = format!("[ASSISTANT_MESSAGE] stage={stage} model={model} tokens={tokens_str} tool_calls={tool_call_count}");
@@ -357,7 +404,11 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             AgentEvent::ToolCallStarted { tool_name, .. } => {
                 format!("[TOOL_CALL_STARTED] stage={stage} tool={tool_name}")
             }
-            AgentEvent::ToolCallCompleted { tool_name, is_error, .. } => {
+            AgentEvent::ToolCallCompleted {
+                tool_name,
+                is_error,
+                ..
+            } => {
                 format!("[TOOL_CALL_COMPLETED] stage={stage} tool={tool_name} is_error={is_error}")
             }
             AgentEvent::Error { error } => {
@@ -367,27 +418,56 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
                 format!("[CONTEXT_WINDOW_WARNING] stage={stage} usage={usage_percent}%")
             }
             AgentEvent::LoopDetected => format!("[LOOP_DETECTED] stage={stage}"),
-            AgentEvent::TurnLimitReached { max_turns } => format!("[TURN_LIMIT_REACHED] stage={stage} max_turns={max_turns}"),
-            AgentEvent::CompactionStarted { estimated_tokens, context_window_size } => {
+            AgentEvent::TurnLimitReached { max_turns } => {
+                format!("[TURN_LIMIT_REACHED] stage={stage} max_turns={max_turns}")
+            }
+            AgentEvent::CompactionStarted {
+                estimated_tokens,
+                context_window_size,
+            } => {
                 format!("[COMPACTION_STARTED] stage={stage} estimated_tokens={estimated_tokens} context_window={context_window_size}")
             }
-            AgentEvent::CompactionCompleted { original_turn_count, preserved_turn_count, summary_token_estimate, tracked_file_count } => {
+            AgentEvent::CompactionCompleted {
+                original_turn_count,
+                preserved_turn_count,
+                summary_token_estimate,
+                tracked_file_count,
+            } => {
                 format!("[COMPACTION_COMPLETED] stage={stage} original_turns={original_turn_count} preserved_turns={preserved_turn_count} summary_tokens={summary_token_estimate} tracked_files={tracked_file_count}")
             }
-            AgentEvent::LlmRetry { provider, model, attempt, delay_secs, error } => {
+            AgentEvent::LlmRetry {
+                provider,
+                model,
+                attempt,
+                delay_secs,
+                error,
+            } => {
                 let delay_ms = (*delay_secs * 1000.0) as u64;
                 format!("[LLM_RETRY] stage={stage} provider={provider} model={model} attempt={attempt} delay={delay_ms}ms error=\"{error}\"")
             }
-            AgentEvent::SubAgentSpawned { agent_id, depth, task } => {
+            AgentEvent::SubAgentSpawned {
+                agent_id,
+                depth,
+                task,
+            } => {
                 let short_id = &agent_id[..8.min(agent_id.len())];
                 let task_preview = if task.len() > 60 { &task[..60] } else { task };
                 format!("[SUBAGENT_SPAWNED] stage={stage} agent_id={short_id} depth={depth} task=\"{task_preview}\"")
             }
-            AgentEvent::SubAgentCompleted { agent_id, depth, success, turns_used } => {
+            AgentEvent::SubAgentCompleted {
+                agent_id,
+                depth,
+                success,
+                turns_used,
+            } => {
                 let short_id = &agent_id[..8.min(agent_id.len())];
                 format!("[SUBAGENT_COMPLETED] stage={stage} agent_id={short_id} depth={depth} success={success} turns={turns_used}")
             }
-            AgentEvent::SubAgentFailed { agent_id, depth, error } => {
+            AgentEvent::SubAgentFailed {
+                agent_id,
+                depth,
+                error,
+            } => {
                 let short_id = &agent_id[..8.min(agent_id.len())];
                 format!("[SUBAGENT_FAILED] stage={stage} agent_id={short_id} depth={depth} error=\"{error}\"")
             }
@@ -395,12 +475,16 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
                 let short_id = &agent_id[..8.min(agent_id.len())];
                 format!("[SUBAGENT_CLOSED] stage={stage} agent_id={short_id} depth={depth}")
             }
-            AgentEvent::SubAgentEvent { agent_id, depth, event } => {
+            AgentEvent::SubAgentEvent {
+                agent_id,
+                depth,
+                event,
+            } => {
                 let short_id = &agent_id[..8.min(agent_id.len())];
                 format!("[SUBAGENT_EVENT] stage={stage} agent_id={short_id} depth={depth} event={event:?}")
             }
             other => format!("[AGENT] stage={stage} event={other:?}"),
-        }
+        },
         PipelineEvent::ParallelEarlyTermination {
             reason,
             completed_count,
@@ -408,7 +492,10 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
         } => {
             format!("[PARALLEL_EARLY_TERMINATION] reason={reason} completed={completed_count} pending={pending_count}")
         }
-        PipelineEvent::SubgraphStarted { node_id, start_node } => {
+        PipelineEvent::SubgraphStarted {
+            node_id,
+            start_node,
+        } => {
             format!("[SUBGRAPH_STARTED] node={node_id} start_node={start_node}")
         }
         PipelineEvent::SubgraphCompleted {
@@ -442,14 +529,34 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
                 ExecutionEnvEvent::GitCloneFailed { url, error } => format!("[EXEC_ENV_GIT_CLONE_FAILED] url={url} error=\"{error}\""),
             }
         }
-        PipelineEvent::SetupStarted { command_count } => format!("[SETUP_STARTED] command_count={command_count}"),
-        PipelineEvent::SetupCommandStarted { command, index } => format!("[SETUP_COMMAND_STARTED] index={index} command=\"{command}\""),
-        PipelineEvent::SetupCommandCompleted { command, index, exit_code, duration_ms } => {
+        PipelineEvent::SetupStarted { command_count } => {
+            format!("[SETUP_STARTED] command_count={command_count}")
+        }
+        PipelineEvent::SetupCommandStarted { command, index } => {
+            format!("[SETUP_COMMAND_STARTED] index={index} command=\"{command}\"")
+        }
+        PipelineEvent::SetupCommandCompleted {
+            command,
+            index,
+            exit_code,
+            duration_ms,
+        } => {
             format!("[SETUP_COMMAND_COMPLETED] index={index} command=\"{command}\" exit_code={exit_code} duration={duration_ms}ms")
         }
-        PipelineEvent::SetupCompleted { duration_ms } => format!("[SETUP_COMPLETED] duration={duration_ms}ms"),
-        PipelineEvent::SetupFailed { command, index, exit_code, stderr } => {
-            let truncated = if stderr.len() > 80 { &stderr[..80] } else { stderr };
+        PipelineEvent::SetupCompleted { duration_ms } => {
+            format!("[SETUP_COMPLETED] duration={duration_ms}ms")
+        }
+        PipelineEvent::SetupFailed {
+            command,
+            index,
+            exit_code,
+            stderr,
+        } => {
+            let truncated = if stderr.len() > 80 {
+                &stderr[..80]
+            } else {
+                stderr
+            };
             format!("[SETUP_FAILED] index={index} command=\"{command}\" exit_code={exit_code} stderr=\"{truncated}\"")
         }
     };
@@ -806,8 +913,10 @@ pub fn compute_stage_cost(usage: &StageUsage) -> Option<f64> {
     let info = arc_llm::catalog::get_model_info(&usage.model)?;
     let input_rate = info.input_cost_per_million?;
     let output_rate = info.output_cost_per_million?;
-    Some(usage.input_tokens as f64 * input_rate / 1_000_000.0
-        + usage.output_tokens as f64 * output_rate / 1_000_000.0)
+    Some(
+        usage.input_tokens as f64 * input_rate / 1_000_000.0
+            + usage.output_tokens as f64 * output_rate / 1_000_000.0,
+    )
 }
 
 /// Format a dollar cost for display (e.g. `"$1.23"`).
@@ -837,10 +946,22 @@ mod tests {
 
     #[test]
     fn execution_env_kind_from_str() {
-        assert_eq!("local".parse::<ExecutionEnvKind>().unwrap(), ExecutionEnvKind::Local);
-        assert_eq!("docker".parse::<ExecutionEnvKind>().unwrap(), ExecutionEnvKind::Docker);
-        assert_eq!("daytona".parse::<ExecutionEnvKind>().unwrap(), ExecutionEnvKind::Daytona);
-        assert_eq!("LOCAL".parse::<ExecutionEnvKind>().unwrap(), ExecutionEnvKind::Local);
+        assert_eq!(
+            "local".parse::<ExecutionEnvKind>().unwrap(),
+            ExecutionEnvKind::Local
+        );
+        assert_eq!(
+            "docker".parse::<ExecutionEnvKind>().unwrap(),
+            ExecutionEnvKind::Docker
+        );
+        assert_eq!(
+            "daytona".parse::<ExecutionEnvKind>().unwrap(),
+            ExecutionEnvKind::Daytona
+        );
+        assert_eq!(
+            "LOCAL".parse::<ExecutionEnvKind>().unwrap(),
+            ExecutionEnvKind::Local
+        );
         assert!("invalid".parse::<ExecutionEnvKind>().is_err());
     }
 
@@ -858,7 +979,9 @@ mod tests {
     #[test]
     fn format_summary_execution_env_initializing() {
         let event = PipelineEvent::ExecutionEnv {
-            event: arc_agent::ExecutionEnvEvent::Initializing { env_type: "docker".into() },
+            event: arc_agent::ExecutionEnvEvent::Initializing {
+                env_type: "docker".into(),
+            },
         };
         let s = format_event_summary(&event, test_styles());
         assert!(s.contains("[EXEC_ENV_INITIALIZING]"));
@@ -876,7 +999,10 @@ mod tests {
     #[test]
     fn format_detail_execution_env_ready() {
         let event = PipelineEvent::ExecutionEnv {
-            event: arc_agent::ExecutionEnvEvent::Ready { env_type: "local".into(), duration_ms: 42 },
+            event: arc_agent::ExecutionEnvEvent::Ready {
+                env_type: "local".into(),
+                duration_ms: 42,
+            },
         };
         let s = format_event_detail(&event, test_styles());
         assert!(s.contains("EXEC_ENV_READY"));

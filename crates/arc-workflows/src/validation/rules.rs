@@ -43,15 +43,15 @@ impl LintRule for StartNodeRule {
         let start_count = graph
             .nodes
             .iter()
-            .filter(|(id, n)| {
-                n.shape() == "Mdiamond" || *id == "start" || *id == "Start"
-            })
+            .filter(|(id, n)| n.shape() == "Mdiamond" || *id == "start" || *id == "Start")
             .count();
         if start_count == 0 {
             return vec![Diagnostic {
                 rule: self.name().to_string(),
                 severity: Severity::Error,
-                message: "Pipeline must have exactly one start node (shape=Mdiamond or id start/Start)".to_string(),
+                message:
+                    "Pipeline must have exactly one start node (shape=Mdiamond or id start/Start)"
+                        .to_string(),
                 node_id: None,
                 edge: None,
                 fix: Some("Add a node with shape=Mdiamond or id 'start'".to_string()),
@@ -98,7 +98,9 @@ impl LintRule for TerminalNodeRule {
             return vec![Diagnostic {
                 rule: self.name().to_string(),
                 severity: Severity::Error,
-                message: "Pipeline must have exactly one terminal node (shape=Msquare or id exit/end)".to_string(),
+                message:
+                    "Pipeline must have exactly one terminal node (shape=Msquare or id exit/end)"
+                        .to_string(),
                 node_id: None,
                 edge: None,
                 fix: Some("Add a node with shape=Msquare or id 'exit'/'end'".to_string()),
@@ -200,10 +202,7 @@ impl LintRule for EdgeTargetExistsRule {
                 diagnostics.push(Diagnostic {
                     rule: self.name().to_string(),
                     severity: Severity::Error,
-                    message: format!(
-                        "Edge source '{}' references non-existent node",
-                        edge.from
-                    ),
+                    message: format!("Edge source '{}' references non-existent node", edge.from),
                     node_id: None,
                     edge: Some((edge.from.clone(), edge.to.clone())),
                     fix: Some(format!(
@@ -405,10 +404,7 @@ impl LintRule for TypeKnownRule {
                     diagnostics.push(Diagnostic {
                         rule: self.name().to_string(),
                         severity: Severity::Warning,
-                        message: format!(
-                            "Node '{}' has unrecognized type '{node_type}'",
-                            node.id
-                        ),
+                        message: format!("Node '{}' has unrecognized type '{node_type}'", node.id),
                         node_id: Some(node.id.clone()),
                         edge: None,
                         fix: Some(format!("Use one of: {}", KNOWN_HANDLER_TYPES.join(", "))),
@@ -452,10 +448,7 @@ impl LintRule for FidelityValidRule {
                         ),
                         node_id: Some(node.id.clone()),
                         edge: None,
-                        fix: Some(format!(
-                            "Use one of: {}",
-                            VALID_FIDELITY_MODES.join(", ")
-                        )),
+                        fix: Some(format!("Use one of: {}", VALID_FIDELITY_MODES.join(", "))),
                     });
                 }
             }
@@ -472,10 +465,7 @@ impl LintRule for FidelityValidRule {
                         ),
                         node_id: None,
                         edge: Some((edge.from.clone(), edge.to.clone())),
-                        fix: Some(format!(
-                            "Use one of: {}",
-                            VALID_FIDELITY_MODES.join(", ")
-                        )),
+                        fix: Some(format!("Use one of: {}", VALID_FIDELITY_MODES.join(", "))),
                     });
                 }
             }
@@ -488,10 +478,7 @@ impl LintRule for FidelityValidRule {
                     message: format!("Graph has invalid default_fidelity '{fidelity}'"),
                     node_id: None,
                     edge: None,
-                    fix: Some(format!(
-                        "Use one of: {}",
-                        VALID_FIDELITY_MODES.join(", ")
-                    )),
+                    fix: Some(format!("Use one of: {}", VALID_FIDELITY_MODES.join(", "))),
                 });
             }
         }
@@ -712,9 +699,7 @@ impl LintRule for DirectionValidRule {
         vec![Diagnostic {
             rule: self.name().to_string(),
             severity: Severity::Warning,
-            message: format!(
-                "Graph has invalid rankdir '{rankdir}'"
-            ),
+            message: format!("Graph has invalid rankdir '{rankdir}'"),
             node_id: None,
             edge: None,
             fix: Some(format!("Use one of: {}", VALID_DIRECTIONS.join(", "))),
@@ -751,7 +736,8 @@ impl LintRule for ReservedKeywordNodeIdRule {
                 edge: None,
                 fix: Some(format!(
                     "Rename '{}' to '{}_step' or another non-reserved ID",
-                    node.id, node.id.to_lowercase()
+                    node.id,
+                    node.id.to_lowercase()
                 )),
             })
             .collect()
@@ -856,14 +842,17 @@ mod tests {
     fn minimal_graph() -> Graph {
         let mut g = Graph::new("test");
         let mut start = Node::new("start");
-        start
-            .attrs
-            .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("start".to_string(), start);
 
         let mut exit = Node::new("exit");
-        exit.attrs
-            .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
         g.nodes.insert("exit".to_string(), exit);
 
         g.edges.push(Edge::new("start", "exit"));
@@ -885,11 +874,15 @@ mod tests {
     fn start_node_rule_two_starts() {
         let mut g = Graph::new("test");
         let mut s1 = Node::new("s1");
-        s1.attrs
-            .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        s1.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         let mut s2 = Node::new("s2");
-        s2.attrs
-            .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        s2.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("s1".to_string(), s1);
         g.nodes.insert("s2".to_string(), s2);
         let rule = StartNodeRule;
@@ -933,9 +926,10 @@ mod tests {
     fn terminal_node_rule_no_terminal() {
         let mut g = Graph::new("test");
         let mut start = Node::new("start");
-        start
-            .attrs
-            .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("start".to_string(), start);
         let rule = TerminalNodeRule;
         let d = rule.apply(&g);
@@ -1320,38 +1314,28 @@ mod tests {
     fn direction_valid_rule_valid_directions() {
         let rule = DirectionValidRule;
         let mut g = minimal_graph();
-        g.attrs.insert(
-            "rankdir".to_string(),
-            AttrValue::String("LR".to_string()),
-        );
+        g.attrs
+            .insert("rankdir".to_string(), AttrValue::String("LR".to_string()));
         assert!(rule.apply(&g).is_empty());
 
-        g.attrs.insert(
-            "rankdir".to_string(),
-            AttrValue::String("TB".to_string()),
-        );
+        g.attrs
+            .insert("rankdir".to_string(), AttrValue::String("TB".to_string()));
         assert!(rule.apply(&g).is_empty());
 
-        g.attrs.insert(
-            "rankdir".to_string(),
-            AttrValue::String("BT".to_string()),
-        );
+        g.attrs
+            .insert("rankdir".to_string(), AttrValue::String("BT".to_string()));
         assert!(rule.apply(&g).is_empty());
 
-        g.attrs.insert(
-            "rankdir".to_string(),
-            AttrValue::String("RL".to_string()),
-        );
+        g.attrs
+            .insert("rankdir".to_string(), AttrValue::String("RL".to_string()));
         assert!(rule.apply(&g).is_empty());
     }
 
     #[test]
     fn direction_valid_rule_invalid_direction() {
         let mut g = minimal_graph();
-        g.attrs.insert(
-            "rankdir".to_string(),
-            AttrValue::String("XY".to_string()),
-        );
+        g.attrs
+            .insert("rankdir".to_string(), AttrValue::String("XY".to_string()));
         let rule = DirectionValidRule;
         let d = rule.apply(&g);
         assert_eq!(d.len(), 1);
@@ -1408,10 +1392,8 @@ mod tests {
     fn condition_syntax_rule_empty_condition() {
         let mut g = minimal_graph();
         let mut edge = Edge::new("start", "exit");
-        edge.attrs.insert(
-            "condition".to_string(),
-            AttrValue::String(String::new()),
-        );
+        edge.attrs
+            .insert("condition".to_string(), AttrValue::String(String::new()));
         g.edges = vec![edge];
         let rule = ConditionSyntaxRule;
         let d = rule.apply(&g);
@@ -1438,11 +1420,15 @@ mod tests {
     fn terminal_node_rule_two_terminals() {
         let mut g = Graph::new("test");
         let mut e1 = Node::new("e1");
-        e1.attrs
-            .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+        e1.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
         let mut e2 = Node::new("e2");
-        e2.attrs
-            .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+        e2.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
         g.nodes.insert("e1".to_string(), e1);
         g.nodes.insert("e2".to_string(), e2);
         let rule = TerminalNodeRule;
@@ -1803,9 +1789,10 @@ mod tests {
     fn exit_no_outgoing_rule_end_id_with_outgoing() {
         let mut g = Graph::new("test");
         let mut start = Node::new("start");
-        start
-            .attrs
-            .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("start".to_string(), start);
         let end_node = Node::new("end");
         g.nodes.insert("end".to_string(), end_node);
@@ -1928,10 +1915,8 @@ mod tests {
         g.nodes.insert("n4".to_string(), n4);
 
         let mut n5 = Node::new("n5");
-        n5.attrs.insert(
-            "type".to_string(),
-            AttrValue::String("script".to_string()),
-        );
+        n5.attrs
+            .insert("type".to_string(), AttrValue::String("script".to_string()));
         g.nodes.insert("n5".to_string(), n5);
 
         let mut n6 = Node::new("n6");
@@ -2021,9 +2006,10 @@ mod tests {
     fn exit_no_outgoing_rule_exit_capitalized_with_outgoing() {
         let mut g = Graph::new("test");
         let mut start = Node::new("start");
-        start
-            .attrs
-            .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("start".to_string(), start);
         let exit_node = Node::new("Exit");
         g.nodes.insert("Exit".to_string(), exit_node);
@@ -2042,9 +2028,10 @@ mod tests {
     fn exit_no_outgoing_rule_end_capitalized_with_outgoing() {
         let mut g = Graph::new("test");
         let mut start = Node::new("start");
-        start
-            .attrs
-            .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("start".to_string(), start);
         let end_node = Node::new("End");
         g.nodes.insert("End".to_string(), end_node);
@@ -2167,10 +2154,8 @@ mod tests {
     fn prompt_on_llm_nodes_rule_empty_prompt_no_label() {
         let mut g = minimal_graph();
         let mut node = Node::new("work");
-        node.attrs.insert(
-            "prompt".to_string(),
-            AttrValue::String(String::new()),
-        );
+        node.attrs
+            .insert("prompt".to_string(), AttrValue::String(String::new()));
         g.nodes.insert("work".to_string(), node);
         let rule = PromptOnLlmNodesRule;
         let d = rule.apply(&g);
@@ -2184,10 +2169,8 @@ mod tests {
     fn prompt_on_llm_nodes_rule_empty_label_no_prompt() {
         let mut g = minimal_graph();
         let mut node = Node::new("work");
-        node.attrs.insert(
-            "label".to_string(),
-            AttrValue::String(String::new()),
-        );
+        node.attrs
+            .insert("label".to_string(), AttrValue::String(String::new()));
         g.nodes.insert("work".to_string(), node);
         let rule = PromptOnLlmNodesRule;
         let d = rule.apply(&g);
@@ -2307,8 +2290,7 @@ mod tests {
     #[test]
     fn reserved_keyword_node_id_warns_on_keyword() {
         let mut g = minimal_graph();
-        g.nodes
-            .insert("graph".to_string(), Node::new("graph"));
+        g.nodes.insert("graph".to_string(), Node::new("graph"));
         g.edges.push(Edge::new("start", "graph"));
         g.edges.push(Edge::new("graph", "exit"));
         let rule = ReservedKeywordNodeIdRule;
@@ -2342,10 +2324,8 @@ mod tests {
     #[test]
     fn reserved_keyword_node_id_multiple_keywords() {
         let mut g = minimal_graph();
-        g.nodes
-            .insert("strict".to_string(), Node::new("strict"));
-        g.nodes
-            .insert("digraph".to_string(), Node::new("digraph"));
+        g.nodes.insert("strict".to_string(), Node::new("strict"));
+        g.nodes.insert("digraph".to_string(), Node::new("digraph"));
         g.nodes.insert("if".to_string(), Node::new("if"));
         g.edges.push(Edge::new("start", "strict"));
         g.edges.push(Edge::new("strict", "digraph"));

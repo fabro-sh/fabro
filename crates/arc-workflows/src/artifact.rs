@@ -62,7 +62,12 @@ impl ArtifactStore {
     /// # Panics
     ///
     /// Panics if the internal lock is poisoned.
-    pub fn store(&self, id: impl Into<String>, name: impl Into<String>, data: Value) -> Result<ArtifactInfo> {
+    pub fn store(
+        &self,
+        id: impl Into<String>,
+        name: impl Into<String>,
+        data: Value,
+    ) -> Result<ArtifactInfo> {
         let id = id.into();
         let name = name.into();
         let serialized = serde_json::to_string(&data)
@@ -120,9 +125,7 @@ impl ArtifactStore {
                 let path = path.clone();
                 drop(guard);
                 let data = std::fs::read_to_string(&path).map_err(|e| {
-                    ArcError::Engine(format!(
-                        "failed to read file-backed artifact {id}: {e}"
-                    ))
+                    ArcError::Engine(format!("failed to read file-backed artifact {id}: {e}"))
                 })?;
                 serde_json::from_str(&data).map_err(|e| {
                     ArcError::Engine(format!(
@@ -212,9 +215,7 @@ pub fn offload_large_values(
     store: &ArtifactStore,
 ) -> Result<()> {
     for (key, value) in updates.iter_mut() {
-        let serialized_len = serde_json::to_string(&*value)
-            .map(|s| s.len())
-            .unwrap_or(0);
+        let serialized_len = serde_json::to_string(&*value).map(|s| s.len()).unwrap_or(0);
         if serialized_len > FILE_BACKING_THRESHOLD {
             let info = store.store(key, key, value.clone())?;
             if let Some(path) = info.file_path {
@@ -289,10 +290,7 @@ pub async fn sync_artifacts_to_env(
             .and_then(|f| f.to_str())
             .unwrap_or("artifact.json");
 
-        let remote_path = format!(
-            "{}/.arc/artifacts/{filename}",
-            env.working_directory()
-        );
+        let remote_path = format!("{}/.arc/artifacts/{filename}", env.working_directory());
 
         env.write_file(&remote_path, &content).await.map_err(|e| {
             ArcError::Engine(format!("failed to write artifact to remote env: {e}"))
@@ -450,7 +448,11 @@ mod tests {
         assert_eq!(retrieved, serde_json::json!(large_string));
 
         // File should exist on disk
-        assert!(dir.path().join("artifacts").join("response.plan.json").exists());
+        assert!(dir
+            .path()
+            .join("artifacts")
+            .join("response.plan.json")
+            .exists());
     }
 
     #[test]
@@ -511,7 +513,12 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ExecutionEnvironment for TestSyncEnv {
-        async fn read_file(&self, _path: &str, _offset: Option<usize>, _limit: Option<usize>) -> std::result::Result<String, String> {
+        async fn read_file(
+            &self,
+            _path: &str,
+            _offset: Option<usize>,
+            _limit: Option<usize>,
+        ) -> std::result::Result<String, String> {
             Err("not implemented".to_string())
         }
 
@@ -531,7 +538,11 @@ mod tests {
             Ok(self.accessible)
         }
 
-        async fn list_directory(&self, _path: &str, _depth: Option<usize>) -> std::result::Result<Vec<arc_agent::DirEntry>, String> {
+        async fn list_directory(
+            &self,
+            _path: &str,
+            _depth: Option<usize>,
+        ) -> std::result::Result<Vec<arc_agent::DirEntry>, String> {
             Err("not implemented".to_string())
         }
 
@@ -546,11 +557,20 @@ mod tests {
             Err("not implemented".to_string())
         }
 
-        async fn grep(&self, _pattern: &str, _path: &str, _options: &arc_agent::GrepOptions) -> std::result::Result<Vec<String>, String> {
+        async fn grep(
+            &self,
+            _pattern: &str,
+            _path: &str,
+            _options: &arc_agent::GrepOptions,
+        ) -> std::result::Result<Vec<String>, String> {
             Err("not implemented".to_string())
         }
 
-        async fn glob(&self, _pattern: &str, _path: Option<&str>) -> std::result::Result<Vec<String>, String> {
+        async fn glob(
+            &self,
+            _pattern: &str,
+            _path: Option<&str>,
+        ) -> std::result::Result<Vec<String>, String> {
             Err("not implemented".to_string())
         }
 
@@ -590,10 +610,7 @@ mod tests {
 
         let written = env.written.lock().unwrap();
         assert_eq!(written.len(), 1);
-        assert_eq!(
-            written[0].0,
-            "/workspace/.arc/artifacts/response.plan.json"
-        );
+        assert_eq!(written[0].0, "/workspace/.arc/artifacts/response.plan.json");
         assert_eq!(written[0].1, r#""hello from artifact""#);
 
         let new_pointer = updates["response.plan"].as_str().unwrap();

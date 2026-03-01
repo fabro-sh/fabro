@@ -78,10 +78,7 @@ impl Context {
     /// Panics if the internal lock is poisoned.
     #[must_use]
     pub fn snapshot(&self) -> HashMap<String, Value> {
-        self.values
-            .read()
-            .expect("context lock poisoned")
-            .clone()
+        self.values.read().expect("context lock poisoned").clone()
     }
 
     /// Return a snapshot of the logs.

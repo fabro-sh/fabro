@@ -35,7 +35,7 @@ pub enum AttrValue {
 }
 
 impl AttrValue {
-    #[must_use] 
+    #[must_use]
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Self::String(s) => Some(s),
@@ -43,7 +43,7 @@ impl AttrValue {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn as_i64(&self) -> Option<i64> {
         match self {
             Self::Integer(n) => Some(*n),
@@ -51,7 +51,7 @@ impl AttrValue {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn as_f64(&self) -> Option<f64> {
         match self {
             Self::Float(n) => Some(*n),
@@ -59,7 +59,7 @@ impl AttrValue {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn as_bool(&self) -> Option<bool> {
         match self {
             Self::Boolean(b) => Some(*b),
@@ -67,7 +67,7 @@ impl AttrValue {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn as_duration(&self) -> Option<Duration> {
         match self {
             Self::Duration(d) => Some(*d),
@@ -89,7 +89,7 @@ impl AttrValue {
 }
 
 /// Maps Graphviz shapes to handler type strings (Section 2.8).
-#[must_use] 
+#[must_use]
 pub fn shape_to_handler_type(shape: &str) -> Option<&'static str> {
     match shape {
         "Mdiamond" => Some("start"),
@@ -136,57 +136,57 @@ impl Node {
         self.attrs.get(key).and_then(AttrValue::as_i64)
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn label(&self) -> &str {
         self.str_attr("label").unwrap_or(&self.id)
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn shape(&self) -> &str {
         self.str_attr("shape").unwrap_or("box")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn node_type(&self) -> Option<&str> {
         self.str_attr("type")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn prompt(&self) -> Option<&str> {
         self.str_attr("prompt")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn max_retries(&self) -> Option<i64> {
         self.int_attr("max_retries")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn goal_gate(&self) -> bool {
         self.bool_attr("goal_gate").unwrap_or(false)
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn retry_target(&self) -> Option<&str> {
         self.str_attr("retry_target")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn fallback_retry_target(&self) -> Option<&str> {
         self.str_attr("fallback_retry_target")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn fidelity(&self) -> Option<&str> {
         self.str_attr("fidelity")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn thread_id(&self) -> Option<&str> {
         self.str_attr("thread_id")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn class(&self) -> Option<&str> {
         self.str_attr("class")
     }
@@ -195,12 +195,12 @@ impl Node {
         self.attrs.get("timeout").and_then(AttrValue::as_duration)
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn llm_model(&self) -> Option<&str> {
         self.str_attr("llm_model")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn llm_provider(&self) -> Option<&str> {
         self.str_attr("llm_provider")
     }
@@ -215,7 +215,7 @@ impl Node {
         self.str_attr("reasoning_effort").unwrap_or("high")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn auto_status(&self) -> bool {
         self.bool_attr("auto_status").unwrap_or(false)
     }
@@ -244,7 +244,7 @@ impl Node {
     }
 
     /// Resolve the handler type for this node using explicit type or shape mapping.
-    #[must_use] 
+    #[must_use]
     pub fn handler_type(&self) -> Option<&str> {
         if let Some(t) = self.node_type() {
             return Some(t);
@@ -282,37 +282,37 @@ impl Edge {
         self.attrs.get(key).and_then(AttrValue::as_i64)
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn label(&self) -> Option<&str> {
         self.str_attr("label")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn condition(&self) -> Option<&str> {
         self.str_attr("condition")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn weight(&self) -> i64 {
         self.int_attr("weight").unwrap_or(0)
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn fidelity(&self) -> Option<&str> {
         self.str_attr("fidelity")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn thread_id(&self) -> Option<&str> {
         self.str_attr("thread_id")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn loop_restart(&self) -> bool {
         self.bool_attr("loop_restart").unwrap_or(false)
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn freeform(&self) -> bool {
         self.bool_attr("freeform").unwrap_or(false)
     }
@@ -338,19 +338,19 @@ impl Graph {
     }
 
     /// Returns all outgoing edges from the given node.
-    #[must_use] 
+    #[must_use]
     pub fn outgoing_edges(&self, node_id: &str) -> Vec<&Edge> {
         self.edges.iter().filter(|e| e.from == node_id).collect()
     }
 
     /// Returns all incoming edges to the given node.
-    #[must_use] 
+    #[must_use]
     pub fn incoming_edges(&self, node_id: &str) -> Vec<&Edge> {
         self.edges.iter().filter(|e| e.to == node_id).collect()
     }
 
     /// Find the start node: shape=Mdiamond, or id "start"/"Start".
-    #[must_use] 
+    #[must_use]
     pub fn find_start_node(&self) -> Option<&Node> {
         // First: look for shape=Mdiamond
         let by_shape = self.nodes.values().find(|n| n.shape() == "Mdiamond");
@@ -358,13 +358,11 @@ impl Graph {
             return by_shape;
         }
         // Second: look for id "start" or "Start"
-        self.nodes
-            .get("start")
-            .or_else(|| self.nodes.get("Start"))
+        self.nodes.get("start").or_else(|| self.nodes.get("Start"))
     }
 
     /// Find the exit node: shape=Msquare, or id "exit"/"Exit".
-    #[must_use] 
+    #[must_use]
     pub fn find_exit_node(&self) -> Option<&Node> {
         let by_shape = self.nodes.values().find(|n| n.shape() == "Msquare");
         if by_shape.is_some() {
@@ -418,9 +416,7 @@ impl Graph {
 
     /// Graph-level `default_thread`.
     pub fn default_thread(&self) -> Option<&str> {
-        self.attrs
-            .get("default_thread")
-            .and_then(AttrValue::as_str)
+        self.attrs.get("default_thread").and_then(AttrValue::as_str)
     }
 
     /// Graph-level `max_node_visits` (default 0 = disabled).
@@ -482,10 +478,7 @@ mod tests {
             Some("parallel.fan_in")
         );
         assert_eq!(shape_to_handler_type("parallelogram"), Some("script"));
-        assert_eq!(
-            shape_to_handler_type("house"),
-            Some("stack.manager_loop")
-        );
+        assert_eq!(shape_to_handler_type("house"), Some("stack.manager_loop"));
         assert_eq!(shape_to_handler_type("unknown"), None);
     }
 
@@ -516,10 +509,14 @@ mod tests {
     #[test]
     fn node_with_attrs() {
         let mut node = Node::new("plan");
-        node.attrs
-            .insert("label".to_string(), AttrValue::String("Plan step".to_string()));
-        node.attrs
-            .insert("shape".to_string(), AttrValue::String("diamond".to_string()));
+        node.attrs.insert(
+            "label".to_string(),
+            AttrValue::String("Plan step".to_string()),
+        );
+        node.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("diamond".to_string()),
+        );
         node.attrs
             .insert("goal_gate".to_string(), AttrValue::Boolean(true));
         node.attrs
@@ -534,16 +531,20 @@ mod tests {
     #[test]
     fn node_handler_type_explicit() {
         let mut node = Node::new("gate");
-        node.attrs
-            .insert("type".to_string(), AttrValue::String("wait.human".to_string()));
+        node.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("wait.human".to_string()),
+        );
         assert_eq!(node.handler_type(), Some("wait.human"));
     }
 
     #[test]
     fn node_handler_type_from_shape() {
         let mut node = Node::new("entry");
-        node.attrs
-            .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        node.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         assert_eq!(node.handler_type(), Some("start"));
     }
 
@@ -566,8 +567,10 @@ mod tests {
         let mut edge = Edge::new("a", "b");
         edge.attrs
             .insert("label".to_string(), AttrValue::String("next".to_string()));
-        edge.attrs
-            .insert("condition".to_string(), AttrValue::String("outcome=success".to_string()));
+        edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("outcome=success".to_string()),
+        );
         edge.attrs
             .insert("weight".to_string(), AttrValue::Integer(5));
         edge.attrs
@@ -586,14 +589,17 @@ mod tests {
         let mut g = Graph::new("test_pipeline");
 
         let mut start = Node::new("start");
-        start
-            .attrs
-            .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("start".to_string(), start);
 
         let mut exit = Node::new("exit");
-        exit.attrs
-            .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
         g.nodes.insert("exit".to_string(), exit);
 
         let work = Node::new("work");
@@ -695,12 +701,18 @@ mod tests {
 
     #[test]
     fn codergen_mode_parse_agent_loop() {
-        assert_eq!(CodergenMode::parse("agent_loop").unwrap(), CodergenMode::AgentLoop);
+        assert_eq!(
+            CodergenMode::parse("agent_loop").unwrap(),
+            CodergenMode::AgentLoop
+        );
     }
 
     #[test]
     fn codergen_mode_parse_one_shot() {
-        assert_eq!(CodergenMode::parse("one_shot").unwrap(), CodergenMode::OneShot);
+        assert_eq!(
+            CodergenMode::parse("one_shot").unwrap(),
+            CodergenMode::OneShot
+        );
     }
 
     #[test]

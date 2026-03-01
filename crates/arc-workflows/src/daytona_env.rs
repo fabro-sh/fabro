@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
-use arc_agent::execution_env::{format_lines_numbered, DirEntry, ExecEnvEventCallback, ExecResult, ExecutionEnvEvent, ExecutionEnvironment, GrepOptions};
+use arc_agent::execution_env::{
+    format_lines_numbered, DirEntry, ExecEnvEventCallback, ExecResult, ExecutionEnvEvent,
+    ExecutionEnvironment, GrepOptions,
+};
 use async_trait::async_trait;
 use rand::Rng;
 use serde::Deserialize;
@@ -195,7 +198,9 @@ impl DaytonaExecutionEnvironment {
             }
         }
 
-        Err(format!("Timed out waiting for snapshot '{name}' to become active"))
+        Err(format!(
+            "Timed out waiting for snapshot '{name}' to become active"
+        ))
     }
 }
 
@@ -266,22 +271,37 @@ pub fn get_gh_token() -> Result<String, String> {
 #[async_trait]
 impl ExecutionEnvironment for DaytonaExecutionEnvironment {
     async fn initialize(&self) -> Result<(), String> {
-        self.emit(ExecutionEnvEvent::Initializing { env_type: "daytona".into() });
+        self.emit(ExecutionEnvEvent::Initializing {
+            env_type: "daytona".into(),
+        });
         let init_start = Instant::now();
 
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
         let params = if let Some(ref snap_cfg) = self.config.snapshot {
-            self.emit(ExecutionEnvEvent::SnapshotEnsuring { name: snap_cfg.name.clone() });
+            self.emit(ExecutionEnvEvent::SnapshotEnsuring {
+                name: snap_cfg.name.clone(),
+            });
             let snap_start = Instant::now();
             if let Err(e) = self.ensure_snapshot(snap_cfg).await {
-                self.emit(ExecutionEnvEvent::SnapshotFailed { name: snap_cfg.name.clone(), error: e.clone() });
-                let duration_ms = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                self.emit(ExecutionEnvEvent::InitializeFailed { env_type: "daytona".into(), error: e.clone(), duration_ms });
+                self.emit(ExecutionEnvEvent::SnapshotFailed {
+                    name: snap_cfg.name.clone(),
+                    error: e.clone(),
+                });
+                let duration_ms =
+                    u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                self.emit(ExecutionEnvEvent::InitializeFailed {
+                    env_type: "daytona".into(),
+                    error: e.clone(),
+                    duration_ms,
+                });
                 return Err(e);
             }
             let snap_duration = u64::try_from(snap_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-            self.emit(ExecutionEnvEvent::SnapshotReady { name: snap_cfg.name.clone(), duration_ms: snap_duration });
+            self.emit(ExecutionEnvEvent::SnapshotReady {
+                name: snap_cfg.name.clone(),
+                duration_ms: snap_duration,
+            });
 
             daytona_sdk::CreateParams::Snapshot(daytona_sdk::SnapshotParams {
                 base: self.base_params(),
@@ -301,8 +321,13 @@ impl ExecutionEnvironment for DaytonaExecutionEnvironment {
             .await
             .map_err(|e| {
                 let err = format!("Failed to create Daytona sandbox: {e}");
-                let duration_ms = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                self.emit(ExecutionEnvEvent::InitializeFailed { env_type: "daytona".into(), error: err.clone(), duration_ms });
+                let duration_ms =
+                    u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                self.emit(ExecutionEnvEvent::InitializeFailed {
+                    env_type: "daytona".into(),
+                    error: err.clone(),
+                    duration_ms,
+                });
                 err
             })?;
 
@@ -311,7 +336,10 @@ impl ExecutionEnvironment for DaytonaExecutionEnvironment {
             Ok((detected_url, branch)) => {
                 // Daytona clones over HTTPS with token auth, so rewrite SSH URLs.
                 let url = ssh_url_to_https(&detected_url);
-                self.emit(ExecutionEnvEvent::GitCloneStarted { url: url.clone(), branch: branch.clone() });
+                self.emit(ExecutionEnvEvent::GitCloneStarted {
+                    url: url.clone(),
+                    branch: branch.clone(),
+                });
                 let clone_start = Instant::now();
 
                 let token = get_gh_token()
@@ -319,9 +347,17 @@ impl ExecutionEnvironment for DaytonaExecutionEnvironment {
                 let token = match token {
                     Ok(t) => t,
                     Err(e) => {
-                        self.emit(ExecutionEnvEvent::GitCloneFailed { url: url.clone(), error: e.clone() });
-                        let duration_ms = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                        self.emit(ExecutionEnvEvent::InitializeFailed { env_type: "daytona".into(), error: e.clone(), duration_ms });
+                        self.emit(ExecutionEnvEvent::GitCloneFailed {
+                            url: url.clone(),
+                            error: e.clone(),
+                        });
+                        let duration_ms =
+                            u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                        self.emit(ExecutionEnvEvent::InitializeFailed {
+                            env_type: "daytona".into(),
+                            error: e.clone(),
+                            duration_ms,
+                        });
                         return Err(e);
                     }
                 };
@@ -333,9 +369,17 @@ impl ExecutionEnvironment for DaytonaExecutionEnvironment {
                 let git_svc = match git_svc {
                     Ok(g) => g,
                     Err(e) => {
-                        self.emit(ExecutionEnvEvent::GitCloneFailed { url: url.clone(), error: e.clone() });
-                        let duration_ms = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                        self.emit(ExecutionEnvEvent::InitializeFailed { env_type: "daytona".into(), error: e.clone(), duration_ms });
+                        self.emit(ExecutionEnvEvent::GitCloneFailed {
+                            url: url.clone(),
+                            error: e.clone(),
+                        });
+                        let duration_ms =
+                            u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                        self.emit(ExecutionEnvEvent::InitializeFailed {
+                            env_type: "daytona".into(),
+                            error: e.clone(),
+                            duration_ms,
+                        });
                         return Err(e);
                     }
                 };
@@ -354,14 +398,26 @@ impl ExecutionEnvironment for DaytonaExecutionEnvironment {
                     .await
                 {
                     Ok(()) => {
-                        let clone_duration = u64::try_from(clone_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                        self.emit(ExecutionEnvEvent::GitCloneCompleted { url, duration_ms: clone_duration });
+                        let clone_duration =
+                            u64::try_from(clone_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                        self.emit(ExecutionEnvEvent::GitCloneCompleted {
+                            url,
+                            duration_ms: clone_duration,
+                        });
                     }
                     Err(e) => {
                         let err = format!("Failed to clone repo into Daytona sandbox: {e}");
-                        self.emit(ExecutionEnvEvent::GitCloneFailed { url, error: err.clone() });
-                        let duration_ms = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                        self.emit(ExecutionEnvEvent::InitializeFailed { env_type: "daytona".into(), error: err.clone(), duration_ms });
+                        self.emit(ExecutionEnvEvent::GitCloneFailed {
+                            url,
+                            error: err.clone(),
+                        });
+                        let duration_ms =
+                            u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                        self.emit(ExecutionEnvEvent::InitializeFailed {
+                            env_type: "daytona".into(),
+                            error: err.clone(),
+                            duration_ms,
+                        });
                         return Err(err);
                     }
                 }
@@ -385,23 +441,34 @@ impl ExecutionEnvironment for DaytonaExecutionEnvironment {
             .map_err(|_| "Daytona sandbox already initialized".to_string())?;
 
         let init_duration = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        self.emit(ExecutionEnvEvent::Ready { env_type: "daytona".into(), duration_ms: init_duration });
+        self.emit(ExecutionEnvEvent::Ready {
+            env_type: "daytona".into(),
+            duration_ms: init_duration,
+        });
 
         Ok(())
     }
 
     async fn cleanup(&self) -> Result<(), String> {
-        self.emit(ExecutionEnvEvent::CleanupStarted { env_type: "daytona".into() });
+        self.emit(ExecutionEnvEvent::CleanupStarted {
+            env_type: "daytona".into(),
+        });
         let start = Instant::now();
         if let Some(sandbox) = self.sandbox.get() {
             if let Err(e) = sandbox.delete().await {
                 let err = format!("Failed to delete Daytona sandbox: {e}");
-                self.emit(ExecutionEnvEvent::CleanupFailed { env_type: "daytona".into(), error: err.clone() });
+                self.emit(ExecutionEnvEvent::CleanupFailed {
+                    env_type: "daytona".into(),
+                    error: err.clone(),
+                });
                 return Err(err);
             }
         }
         let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        self.emit(ExecutionEnvEvent::CleanupCompleted { env_type: "daytona".into(), duration_ms });
+        self.emit(ExecutionEnvEvent::CleanupCompleted {
+            env_type: "daytona".into(),
+            duration_ms,
+        });
         Ok(())
     }
 
@@ -592,10 +659,15 @@ impl ExecutionEnvironment for DaytonaExecutionEnvironment {
         let resolved = self.resolve_path(path);
 
         // Detect ripgrep availability (cached)
-        let use_rg = *self.rg_available.get_or_init(|| async {
-            let result = self.exec_command("rg --version", 10_000, None, None, None).await;
-            matches!(result, Ok(r) if r.exit_code == 0)
-        }).await;
+        let use_rg = *self
+            .rg_available
+            .get_or_init(|| async {
+                let result = self
+                    .exec_command("rg --version", 10_000, None, None, None)
+                    .await;
+                matches!(result, Ok(r) if r.exit_code == 0)
+            })
+            .await;
 
         let cmd = if use_rg {
             let mut cmd = "rg --line-number --no-heading".to_string();
@@ -608,7 +680,11 @@ impl ExecutionEnvironment for DaytonaExecutionEnvironment {
             if let Some(max) = options.max_results {
                 cmd.push_str(&format!(" --max-count {max}"));
             }
-            cmd.push_str(&format!(" -- '{}' '{}'", pattern.replace('\'', "'\\''"), resolved));
+            cmd.push_str(&format!(
+                " -- '{}' '{}'",
+                pattern.replace('\'', "'\\''"),
+                resolved
+            ));
             cmd
         } else {
             let mut cmd = "grep -rn".to_string();
@@ -621,7 +697,11 @@ impl ExecutionEnvironment for DaytonaExecutionEnvironment {
             if let Some(max) = options.max_results {
                 cmd.push_str(&format!(" -m {max}"));
             }
-            cmd.push_str(&format!(" -- '{}' '{}'", pattern.replace('\'', "'\\''"), resolved));
+            cmd.push_str(&format!(
+                " -- '{}' '{}'",
+                pattern.replace('\'', "'\\''"),
+                resolved
+            ));
             cmd
         };
 
@@ -632,14 +712,13 @@ impl ExecutionEnvironment for DaytonaExecutionEnvironment {
             return Ok(Vec::new());
         }
         if result.exit_code != 0 {
-            return Err(format!("grep failed (exit {}): {}", result.exit_code, result.stderr));
+            return Err(format!(
+                "grep failed (exit {}): {}",
+                result.exit_code, result.stderr
+            ));
         }
 
-        Ok(result
-            .stdout
-            .lines()
-            .map(String::from)
-            .collect())
+        Ok(result.stdout.lines().map(String::from).collect())
     }
 
     async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String> {
@@ -656,7 +735,10 @@ impl ExecutionEnvironment for DaytonaExecutionEnvironment {
         let result = self.exec_command(&cmd, 30_000, None, None, None).await?;
 
         if result.exit_code != 0 {
-            return Err(format!("glob failed (exit {}): {}", result.exit_code, result.stderr));
+            return Err(format!(
+                "glob failed (exit {}): {}",
+                result.exit_code, result.stderr
+            ));
         }
 
         Ok(result
@@ -697,26 +779,47 @@ mod tests {
     fn wrap_bash_uses_base64_encoding() {
         let wrapped = wrap_bash_command("echo hello");
         // Should use base64 pipe to sh
-        assert!(wrapped.starts_with("sh -c \"echo '"), "should start with sh -c wrapper");
-        assert!(wrapped.ends_with("' | base64 -d | sh\""), "should end with base64 -d | sh");
+        assert!(
+            wrapped.starts_with("sh -c \"echo '"),
+            "should start with sh -c wrapper"
+        );
+        assert!(
+            wrapped.ends_with("' | base64 -d | sh\""),
+            "should end with base64 -d | sh"
+        );
         // The base64 of "echo hello" is "ZWNobyBoZWxsbw=="
-        assert!(wrapped.contains("ZWNobyBoZWxsbw=="), "should contain base64 of 'echo hello'");
+        assert!(
+            wrapped.contains("ZWNobyBoZWxsbw=="),
+            "should contain base64 of 'echo hello'"
+        );
     }
 
     #[test]
     fn wrap_bash_handles_single_quotes_safely() {
         // Single quotes in the original command are safely encoded in base64
         let wrapped = wrap_bash_command("echo 'hello world'");
-        assert!(wrapped.starts_with("sh -c \"echo '"), "should use sh -c wrapper");
+        assert!(
+            wrapped.starts_with("sh -c \"echo '"),
+            "should use sh -c wrapper"
+        );
         // No raw single quotes from the original command should appear in the base64
-        assert!(!wrapped.contains("hello world"), "original command should be base64 encoded, not literal");
+        assert!(
+            !wrapped.contains("hello world"),
+            "original command should be base64 encoded, not literal"
+        );
     }
 
     #[test]
     fn wrap_bash_handles_pipes() {
         let wrapped = wrap_bash_command("ls | grep foo");
-        assert!(wrapped.starts_with("sh -c \"echo '"), "should use sh -c wrapper");
-        assert!(wrapped.ends_with("' | base64 -d | sh\""), "should end with base64 -d | sh");
+        assert!(
+            wrapped.starts_with("sh -c \"echo '"),
+            "should use sh -c wrapper"
+        );
+        assert!(
+            wrapped.ends_with("' | base64 -d | sh\""),
+            "should end with base64 -d | sh"
+        );
     }
 
     #[test]

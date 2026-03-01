@@ -6,9 +6,9 @@ use crate::subagent::{
     SubAgentManager,
 };
 use crate::tool_registry::ToolRegistry;
-use std::sync::Arc;
 use arc_llm::provider::Provider;
 use arc_llm::types::ToolDefinition;
+use std::sync::Arc;
 
 /// Static capabilities of a provider profile.
 pub struct ProfileCapabilities {

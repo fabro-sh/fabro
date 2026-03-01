@@ -4,8 +4,7 @@ use std::sync::LazyLock;
 /// Built-in model catalog loaded from catalog.json (Section 2.9).
 /// The catalog is advisory, not restrictive -- unknown model strings pass through.
 static BUILT_IN_MODELS: LazyLock<Vec<ModelInfo>> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("catalog.json"))
-        .expect("embedded catalog.json must be valid")
+    serde_json::from_str(include_str!("catalog.json")).expect("embedded catalog.json must be valid")
 });
 
 /// Get model info by model ID (Section 2.9).
@@ -22,7 +21,13 @@ pub fn get_model_info(model_id: &str) -> Option<ModelInfo> {
 pub fn list_models(provider: Option<&str>) -> Vec<ModelInfo> {
     provider.map_or_else(
         || BUILT_IN_MODELS.clone(),
-        |p| BUILT_IN_MODELS.iter().filter(|m| m.provider == p).cloned().collect(),
+        |p| {
+            BUILT_IN_MODELS
+                .iter()
+                .filter(|m| m.provider == p)
+                .cloned()
+                .collect()
+        },
     )
 }
 
@@ -51,7 +56,8 @@ mod tests {
             assert!(
                 parsed.is_ok(),
                 "catalog model '{}' has provider '{}' which does not parse as Provider",
-                model.id, model.provider
+                model.id,
+                model.provider
             );
         }
     }

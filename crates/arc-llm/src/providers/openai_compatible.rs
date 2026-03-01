@@ -39,12 +39,18 @@ impl Adapter {
 
     #[must_use]
     pub fn with_default_headers(self, headers: std::collections::HashMap<String, String>) -> Self {
-        Self { http: self.http.with_default_headers(headers), ..self }
+        Self {
+            http: self.http.with_default_headers(headers),
+            ..self
+        }
     }
 
     #[must_use]
     pub fn with_timeout(self, timeout: crate::types::AdapterTimeout) -> Self {
-        Self { http: self.http.with_timeout(timeout), ..self }
+        Self {
+            http: self.http.with_timeout(timeout),
+            ..self
+        }
     }
 
     /// Build a `reqwest::RequestBuilder` with default headers and auth.
@@ -221,7 +227,9 @@ fn content_text_with_fallbacks(parts: &[ContentPart]) -> String {
             ContentPart::Document(doc) => {
                 let desc = doc.file_name.as_ref().map_or_else(
                     || "[Document content not supported by this provider]".to_string(),
-                    |name| format!("[Document '{name}': content type not supported by this provider]"),
+                    |name| {
+                        format!("[Document '{name}': content type not supported by this provider]")
+                    },
                 );
                 segments.push(desc);
             }
@@ -353,7 +361,11 @@ fn translate_response_format(format: &ResponseFormat) -> serde_json::Value {
 ///
 /// Returns a `serde_json::Value` so that `provider_options.<provider_name>` fields
 /// can be merged into the request before sending.
-fn build_api_request(request: &Request, stream: Option<bool>, provider_name: &str) -> serde_json::Value {
+fn build_api_request(
+    request: &Request,
+    stream: Option<bool>,
+    provider_name: &str,
+) -> serde_json::Value {
     let chat_messages = translate_messages(&request.messages);
     let tools = request.tools.as_ref().map(|t| translate_tools(t));
     let tool_choice = request.tool_choice.as_ref().map(translate_tool_choice);
@@ -423,10 +435,9 @@ impl ProviderAdapter for Adapter {
         }
         let (body, headers) = send_and_read_response(req, &self.provider_name, "type").await?;
 
-        let api_resp: ApiResponse =
-            serde_json::from_str(&body).map_err(|e| SdkError::Network {
-                message: format!("failed to parse response: {e}"),
-            })?;
+        let api_resp: ApiResponse = serde_json::from_str(&body).map_err(|e| SdkError::Network {
+            message: format!("failed to parse response: {e}"),
+        })?;
 
         let choice = api_resp.choices.first().ok_or_else(|| SdkError::Provider {
             kind: ProviderErrorKind::Server,
@@ -510,12 +521,9 @@ impl ProviderAdapter for Adapter {
         let status = http_resp.status();
         if !status.is_success() {
             let retry_after = parse_retry_after(http_resp.headers());
-            let body = http_resp
-                .text()
-                .await
-                .map_err(|e| SdkError::Network {
-                    message: e.to_string(),
-                })?;
+            let body = http_resp.text().await.map_err(|e| SdkError::Network {
+                message: e.to_string(),
+            })?;
             let (msg, code, raw) = parse_error_body(&body, "type");
             return Err(error_from_status_code(
                 status.as_u16(),
@@ -533,7 +541,13 @@ impl ProviderAdapter for Adapter {
         let stream_read_timeout = self.http.stream_read_timeout;
 
         let stream = futures::stream::unfold(
-            StreamState::new(http_resp, provider_name, model, rate_limit, stream_read_timeout),
+            StreamState::new(
+                http_resp,
+                provider_name,
+                model,
+                rate_limit,
+                stream_read_timeout,
+            ),
             |mut state| async move {
                 loop {
                     let line = match state.next_line().await {
@@ -619,9 +633,8 @@ impl ProviderAdapter for Adapter {
 
 /// State for flattening batched events into individual stream events.
 struct FlattenState {
-    inner: std::pin::Pin<
-        Box<dyn futures::Stream<Item = Result<Vec<StreamEvent>, SdkError>> + Send>,
-    >,
+    inner:
+        std::pin::Pin<Box<dyn futures::Stream<Item = Result<Vec<StreamEvent>, SdkError>> + Send>>,
     pending: Vec<StreamEvent>,
 }
 
@@ -769,11 +782,8 @@ impl StreamState {
                     }
                 }
 
-                let partial_tool_call = ToolCall::new(
-                    &accumulated.id,
-                    &accumulated.name,
-                    serde_json::json!(null),
-                );
+                let partial_tool_call =
+                    ToolCall::new(&accumulated.id, &accumulated.name, serde_json::json!(null));
 
                 if accumulated.started {
                     events.push(StreamEvent::ToolCallDelta {
@@ -824,8 +834,7 @@ impl StreamState {
         for accumulated in &self.tool_calls {
             let arguments = serde_json::from_str(&accumulated.arguments)
                 .unwrap_or_else(|_| serde_json::json!({}));
-            let mut tool_call =
-                ToolCall::new(&accumulated.id, &accumulated.name, arguments);
+            let mut tool_call = ToolCall::new(&accumulated.id, &accumulated.name, arguments);
             tool_call.raw_arguments = Some(accumulated.arguments.clone());
 
             events.push(StreamEvent::ToolCallEnd {
@@ -932,13 +941,15 @@ mod tests {
 
     #[test]
     fn stream_state_process_text_chunks() {
-        let http_resp = reqwest::Response::from(
-            http::Response::builder()
-                .status(200)
-                .body("")
-                .unwrap(),
+        let http_resp =
+            reqwest::Response::from(http::Response::builder().status(200).body("").unwrap());
+        let mut state = StreamState::new(
+            http_resp,
+            "test".into(),
+            "model".into(),
+            None,
+            Some(std::time::Duration::from_secs(30)),
         );
-        let mut state = StreamState::new(http_resp, "test".into(), "model".into(), None, Some(std::time::Duration::from_secs(30)));
 
         // First text chunk should emit TextStart + TextDelta.
         let chunk1: StreamChunk = serde_json::from_str(
@@ -962,13 +973,15 @@ mod tests {
 
     #[test]
     fn stream_state_process_tool_call_chunks() {
-        let http_resp = reqwest::Response::from(
-            http::Response::builder()
-                .status(200)
-                .body("")
-                .unwrap(),
+        let http_resp =
+            reqwest::Response::from(http::Response::builder().status(200).body("").unwrap());
+        let mut state = StreamState::new(
+            http_resp,
+            "test".into(),
+            "model".into(),
+            None,
+            Some(std::time::Duration::from_secs(30)),
         );
-        let mut state = StreamState::new(http_resp, "test".into(), "model".into(), None, Some(std::time::Duration::from_secs(30)));
 
         // First tool call chunk (has id and name) -> ToolCallStart.
         let chunk1: StreamChunk = serde_json::from_str(
@@ -991,13 +1004,15 @@ mod tests {
 
     #[test]
     fn stream_state_finish_events_text_only() {
-        let http_resp = reqwest::Response::from(
-            http::Response::builder()
-                .status(200)
-                .body("")
-                .unwrap(),
+        let http_resp =
+            reqwest::Response::from(http::Response::builder().status(200).body("").unwrap());
+        let mut state = StreamState::new(
+            http_resp,
+            "test-provider".into(),
+            "test-model".into(),
+            None,
+            Some(std::time::Duration::from_secs(30)),
         );
-        let mut state = StreamState::new(http_resp, "test-provider".into(), "test-model".into(), None, Some(std::time::Duration::from_secs(30)));
         state.response_id = "resp-1".into();
         state.response_model = "gpt-4".into();
         state.accumulated_text = "Hello world".into();
@@ -1033,13 +1048,15 @@ mod tests {
 
     #[test]
     fn stream_state_finish_events_with_tool_calls() {
-        let http_resp = reqwest::Response::from(
-            http::Response::builder()
-                .status(200)
-                .body("")
-                .unwrap(),
+        let http_resp =
+            reqwest::Response::from(http::Response::builder().status(200).body("").unwrap());
+        let mut state = StreamState::new(
+            http_resp,
+            "test".into(),
+            "model".into(),
+            None,
+            Some(std::time::Duration::from_secs(30)),
         );
-        let mut state = StreamState::new(http_resp, "test".into(), "model".into(), None, Some(std::time::Duration::from_secs(30)));
         state.response_id = "resp-1".into();
         state.tool_calls.push(AccumulatedToolCall {
             id: "call_1".into(),
@@ -1076,13 +1093,15 @@ mod tests {
 
     #[test]
     fn stream_state_uses_request_model_as_fallback() {
-        let http_resp = reqwest::Response::from(
-            http::Response::builder()
-                .status(200)
-                .body("")
-                .unwrap(),
+        let http_resp =
+            reqwest::Response::from(http::Response::builder().status(200).body("").unwrap());
+        let mut state = StreamState::new(
+            http_resp,
+            "test".into(),
+            "fallback-model".into(),
+            None,
+            Some(std::time::Duration::from_secs(30)),
         );
-        let mut state = StreamState::new(http_resp, "test".into(), "fallback-model".into(), None, Some(std::time::Duration::from_secs(30)));
         // response_model is empty, so finish_events should use the request model.
         let events = state.finish_events();
         match &events[0] {
@@ -1167,7 +1186,10 @@ mod tests {
             tool_call_id: None,
         };
         let translated = translate_messages(&[msg]);
-        assert_eq!(translated[0].content.as_deref(), Some("Let me check the weather"));
+        assert_eq!(
+            translated[0].content.as_deref(),
+            Some("Let me check the weather")
+        );
         let tool_calls = translated[0].tool_calls.as_ref().unwrap();
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0].function.name, "get_weather");
@@ -1191,7 +1213,11 @@ mod tests {
 
     #[test]
     fn translate_tool_message_has_tool_call_id() {
-        let msg = Message::tool_result("call_1", serde_json::Value::String("72F and sunny".into()), false);
+        let msg = Message::tool_result(
+            "call_1",
+            serde_json::Value::String("72F and sunny".into()),
+            false,
+        );
         let translated = translate_messages(&[msg]);
         assert_eq!(translated[0].role, "tool");
         assert_eq!(translated[0].tool_call_id.as_deref(), Some("call_1"));

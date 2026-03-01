@@ -2,12 +2,12 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use rmcp::service::{RoleClient, RunningService};
 use rmcp::transport::child_process::TokioChildProcess;
-use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use rmcp::transport::StreamableHttpClientTransport;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -58,8 +58,7 @@ impl McpClient {
                 PendingTransport::Stdio(transport)
             }
             McpTransport::Http { url, headers } => {
-                let http_config =
-                    StreamableHttpClientTransportConfig::with_uri(url.clone());
+                let http_config = StreamableHttpClientTransportConfig::with_uri(url.clone());
 
                 let mut builder = reqwest::Client::builder();
                 if !headers.is_empty() {
@@ -75,10 +74,8 @@ impl McpClient {
                 }
 
                 let http_client = builder.build()?;
-                let transport = StreamableHttpClientTransport::with_client(
-                    http_client,
-                    http_config,
-                );
+                let transport =
+                    StreamableHttpClientTransport::with_client(http_client, http_config);
 
                 PendingTransport::Http(transport)
             }
@@ -168,13 +165,8 @@ impl McpClient {
             .into_iter()
             .map(|tool| {
                 let name = tool.name.to_string();
-                let description = tool
-                    .description
-                    .as_deref()
-                    .unwrap_or("")
-                    .to_string();
-                let input_schema =
-                    serde_json::to_value(&*tool.input_schema).unwrap_or_default();
+                let description = tool.description.as_deref().unwrap_or("").to_string();
+                let input_schema = serde_json::to_value(&*tool.input_schema).unwrap_or_default();
                 (name, description, input_schema)
             })
             .collect();

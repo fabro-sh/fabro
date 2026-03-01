@@ -4,9 +4,9 @@ pub mod exit;
 pub mod fan_in;
 pub mod manager_loop;
 pub mod parallel;
+pub mod script;
 pub mod start;
 pub mod sub_pipeline;
-pub mod script;
 pub mod wait_human;
 
 use std::collections::HashMap;
@@ -56,7 +56,7 @@ pub struct HandlerRegistry {
 }
 
 impl HandlerRegistry {
-    #[must_use] 
+    #[must_use]
     pub fn new(default_handler: Box<dyn Handler>) -> Self {
         Self {
             handlers: HashMap::new(),
@@ -71,7 +71,7 @@ impl HandlerRegistry {
 
     /// Resolve which handler should execute for a given node.
     /// Priority: explicit type -> shape-based -> default.
-    #[must_use] 
+    #[must_use]
     pub fn resolve(&self, node: &Node) -> &dyn Handler {
         // 1. Explicit type attribute
         if let Some(node_type) = node.node_type() {

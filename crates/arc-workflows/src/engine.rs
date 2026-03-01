@@ -16,7 +16,7 @@ use crate::artifact::{offload_large_values, sync_artifacts_to_env, ArtifactStore
 use crate::checkpoint::Checkpoint;
 use crate::condition::evaluate_condition;
 use crate::context::Context;
-use crate::error::{ArcError, FailureClass, Result, classify_failure_reason};
+use crate::error::{classify_failure_reason, ArcError, FailureClass, Result};
 use crate::event::{EventEmitter, PipelineEvent};
 use crate::graph::{Edge, Graph, Node};
 use crate::handler::{EngineServices, HandlerRegistry};
@@ -308,7 +308,9 @@ pub fn node_dir(logs_root: &Path, node_id: &str, visit: usize) -> PathBuf {
     if visit <= 1 {
         logs_root.join("nodes").join(node_id)
     } else {
-        logs_root.join("nodes").join(format!("{node_id}-attempt_{visit}"))
+        logs_root
+            .join("nodes")
+            .join(format!("{node_id}-attempt_{visit}"))
     }
 }
 
@@ -343,10 +345,10 @@ fn normalize_label(label: &str) -> String {
     let s = label.trim().to_lowercase();
     // Strip "[X] " prefix
     if s.starts_with('[') {
-        if let Some(rest) = s.strip_prefix('[').and_then(|s| {
-            s.find(']')
-                .map(|i| s[i + 1..].trim_start().to_string())
-        }) {
+        if let Some(rest) = s
+            .strip_prefix('[')
+            .and_then(|s| s.find(']').map(|i| s[i + 1..].trim_start().to_string()))
+        {
             return rest;
         }
     }
@@ -373,9 +375,7 @@ fn best_by_weight_then_lexical<'a>(edges: &[&'a Edge]) -> Option<&'a Edge> {
     }
     let mut best = edges[0];
     for &edge in &edges[1..] {
-        if edge.weight() > best.weight()
-            || (edge.weight() == best.weight() && edge.to < best.to)
-        {
+        if edge.weight() > best.weight() || (edge.weight() == best.weight() && edge.to < best.to) {
             best = edge;
         }
     }
@@ -497,8 +497,7 @@ fn get_retry_target(failed_node_id: &str, graph: &Graph) -> Option<String> {
 
 /// Check whether a node is a terminal (exit) node.
 fn is_terminal(node: &Node) -> bool {
-    node.shape() == "Msquare"
-        || node.handler_type() == Some("exit")
+    node.shape() == "Msquare" || node.handler_type() == Some("exit")
 }
 
 // --- Pipeline engine ---
@@ -523,8 +522,17 @@ async fn git_checkpoint_host(
     shadow_sha: Option<String>,
 ) -> Option<String> {
     match tokio::task::spawn_blocking(move || {
-        crate::git::checkpoint_commit(&work_dir, &run_id, &node_id, &status, completed_count, shadow_sha.as_deref())
-    }).await {
+        crate::git::checkpoint_commit(
+            &work_dir,
+            &run_id,
+            &node_id,
+            &status,
+            completed_count,
+            shadow_sha.as_deref(),
+        )
+    })
+    .await
+    {
         Ok(Ok(sha)) => Some(sha),
         Ok(Err(_)) | Err(_) => None,
     }
@@ -532,9 +540,7 @@ async fn git_checkpoint_host(
 
 /// Run a git diff on the host filesystem.
 async fn git_diff_host(work_dir: PathBuf, base: String) -> Option<String> {
-    match tokio::task::spawn_blocking(move || {
-        crate::git::diff_against(&work_dir, &base)
-    }).await {
+    match tokio::task::spawn_blocking(move || crate::git::diff_against(&work_dir, &base)).await {
         Ok(Ok(patch)) => Some(patch),
         Ok(Err(_)) | Err(_) => None,
     }
@@ -550,7 +556,9 @@ async fn git_checkpoint_remote(
     shadow_sha: Option<String>,
 ) -> Option<String> {
     // Stage everything
-    let add_result = exec_env.exec_command("git add -A", 30_000, None, None, None).await;
+    let add_result = exec_env
+        .exec_command("git add -A", 30_000, None, None, None)
+        .await;
     if add_result.as_ref().map_or(true, |r| r.exit_code != 0) {
         return None;
     }
@@ -559,29 +567,47 @@ async fn git_checkpoint_remote(
     let subject = format!("arc({run_id}): {node_id} ({status})");
     let completed_str = completed_count.to_string();
     let mut trailers = vec![
-        Trailer { key: "Arc-Run", value: run_id },
-        Trailer { key: "Arc-Completed", value: &completed_str },
+        Trailer {
+            key: "Arc-Run",
+            value: run_id,
+        },
+        Trailer {
+            key: "Arc-Completed",
+            value: &completed_str,
+        },
     ];
     let shadow_sha_ref = shadow_sha.as_deref().unwrap_or("");
     if shadow_sha.is_some() {
-        trailers.push(Trailer { key: "Arc-Checkpoint", value: shadow_sha_ref });
+        trailers.push(Trailer {
+            key: "Arc-Checkpoint",
+            value: shadow_sha_ref,
+        });
     }
     let message = trailerlink::format_message(&subject, "", &trailers);
 
     // Write message to temp file in sandbox to avoid shell escaping issues
-    if exec_env.write_file("/tmp/arc-commit-msg", &message).await.is_err() {
+    if exec_env
+        .write_file("/tmp/arc-commit-msg", &message)
+        .await
+        .is_err()
+    {
         return None;
     }
 
     // Commit with arc identity using the message file
-    let commit_cmd = "git -c user.name=arc -c user.email=arc@local commit --allow-empty -F /tmp/arc-commit-msg";
-    let commit_result = exec_env.exec_command(commit_cmd, 30_000, None, None, None).await;
+    let commit_cmd =
+        "git -c user.name=arc -c user.email=arc@local commit --allow-empty -F /tmp/arc-commit-msg";
+    let commit_result = exec_env
+        .exec_command(commit_cmd, 30_000, None, None, None)
+        .await;
     if commit_result.as_ref().map_or(true, |r| r.exit_code != 0) {
         return None;
     }
 
     // Get the new HEAD SHA
-    let sha_result = exec_env.exec_command("git rev-parse HEAD", 10_000, None, None, None).await;
+    let sha_result = exec_env
+        .exec_command("git rev-parse HEAD", 10_000, None, None, None)
+        .await;
     match sha_result {
         Ok(r) if r.exit_code == 0 => Some(r.stdout.trim().to_string()),
         _ => None,
@@ -707,12 +733,10 @@ impl PipelineEngine {
                 let timed_result = if let Some(duration) = node_timeout {
                     match tokio::time::timeout(duration, panic_safe).await {
                         Ok(inner) => inner,
-                        Err(_elapsed) => {
-                            Ok(Ok(Outcome::fail(format!(
-                                "handler timed out after {}ms",
-                                duration.as_millis()
-                            ))))
-                        }
+                        Err(_elapsed) => Ok(Ok(Outcome::fail(format!(
+                            "handler timed out after {}ms",
+                            duration.as_millis()
+                        )))),
                     }
                 } else {
                     panic_safe.await
@@ -753,7 +777,8 @@ impl PipelineEngine {
                             name: node.label().to_string(),
                             index: stage_index,
                             attempt: usize::try_from(attempt).unwrap_or(usize::MAX),
-                            max_attempts: usize::try_from(policy.max_attempts).unwrap_or(usize::MAX),
+                            max_attempts: usize::try_from(policy.max_attempts)
+                                .unwrap_or(usize::MAX),
                             delay_ms: millis_u64(delay),
                         });
                         tokio::time::sleep(delay).await;
@@ -782,7 +807,8 @@ impl PipelineEngine {
                             name: node.label().to_string(),
                             index: stage_index,
                             attempt: usize::try_from(attempt).unwrap_or(usize::MAX),
-                            max_attempts: usize::try_from(policy.max_attempts).unwrap_or(usize::MAX),
+                            max_attempts: usize::try_from(policy.max_attempts)
+                                .unwrap_or(usize::MAX),
                             delay_ms: millis_u64(delay),
                         });
                         tokio::time::sleep(delay).await;
@@ -792,9 +818,7 @@ impl PipelineEngine {
                         return Ok((
                             Outcome {
                                 status: StageStatus::PartialSuccess,
-                                notes: Some(
-                                    "retries exhausted, partial accepted".to_string(),
-                                ),
+                                notes: Some("retries exhausted, partial accepted".to_string()),
                                 ..Outcome::success()
                             },
                             attempt,
@@ -866,13 +890,16 @@ impl PipelineEngine {
         // Initialize metadata branch for git-native checkpoint storage (best-effort)
         if config.meta_branch.is_some() {
             let store_path = match config.git_checkpoint {
-                Some(GitCheckpointMode::Host(ref p)) | Some(GitCheckpointMode::Remote(ref p)) => Some(p),
+                Some(GitCheckpointMode::Host(ref p)) | Some(GitCheckpointMode::Remote(ref p)) => {
+                    Some(p)
+                }
                 None => None,
             };
             if let Some(repo_path) = store_path {
                 let store = crate::git::MetadataStore::new(repo_path);
                 let manifest_bytes = serde_json::to_vec_pretty(&manifest).unwrap_or_default();
-                let dot_source = std::fs::read(config.logs_root.join("graph.dot")).unwrap_or_default();
+                let dot_source =
+                    std::fs::read(config.logs_root.join("graph.dot")).unwrap_or_default();
                 if let Err(e) = store.init_run(&config.run_id, &manifest_bytes, &dot_source) {
                     eprintln!("Warning: metadata branch init failed: {e}");
                 }
@@ -934,9 +961,7 @@ impl PipelineEngine {
                 }
             }
             // Gap #6: Check if the checkpointed node used full fidelity
-            if cp.context_values.get("internal.fidelity")
-                == Some(&serde_json::json!("full"))
-            {
+            if cp.context_values.get("internal.fidelity") == Some(&serde_json::json!("full")) {
                 degrade_fidelity_on_resume = true;
             }
         } else if let Some(start) = start_at {
@@ -960,7 +985,10 @@ impl PipelineEngine {
         // Store run_id and work_dir in context for handlers
         context.set("internal.run_id", serde_json::json!(run_id));
         if let Some(GitCheckpointMode::Host(ref wd)) = config.git_checkpoint {
-            context.set("internal.work_dir", serde_json::json!(wd.to_string_lossy().as_ref()));
+            context.set(
+                "internal.work_dir",
+                serde_json::json!(wd.to_string_lossy().as_ref()),
+            );
         }
 
         loop {
@@ -971,9 +999,10 @@ impl PipelineEngine {
                 }
             }
 
-            let node = graph.nodes.get(&current_node_id).ok_or_else(|| {
-                ArcError::Engine(format!("node not found: {current_node_id}"))
-            })?;
+            let node = graph
+                .nodes
+                .get(&current_node_id)
+                .ok_or_else(|| ArcError::Engine(format!("node not found: {current_node_id}")))?;
 
             // Always track visit count (used for stage directory naming)
             let count = node_visits.entry(current_node_id.clone()).or_insert(0);
@@ -990,15 +1019,14 @@ impl PipelineEngine {
                 match check_goal_gates(graph, &node_outcomes) {
                     Ok(()) => break,
                     Err(failed_node_id) => {
-                        if let Some(retry_target) =
-                            get_retry_target(&failed_node_id, graph)
-                        {
+                        if let Some(retry_target) = get_retry_target(&failed_node_id, graph) {
                             current_node_id = retry_target;
                             continue;
                         }
                         let duration_ms = millis_u64(run_start.elapsed());
-                        let error_msg =
-                            format!("goal gate unsatisfied for node {failed_node_id} and no retry target");
+                        let error_msg = format!(
+                            "goal gate unsatisfied for node {failed_node_id} and no retry target"
+                        );
                         self.services.emitter.emit(&PipelineEvent::PipelineFailed {
                             error: error_msg.clone(),
                             duration_ms,
@@ -1023,23 +1051,14 @@ impl PipelineEngine {
             if fidelity == "full" {
                 context.set("current.preamble", serde_json::json!(""));
             } else {
-                let preamble = build_preamble(
-                    &fidelity,
-                    &context,
-                    graph,
-                    &completed_nodes,
-                    &node_outcomes,
-                );
+                let preamble =
+                    build_preamble(&fidelity, &context, graph, &completed_nodes, &node_outcomes);
                 context.set("current.preamble", serde_json::json!(preamble));
             }
 
             // Thread context sharing: resolve thread ID and store in context for handlers
-            let resolved_thread_id = resolve_thread_id(
-                incoming_edge,
-                node,
-                graph,
-                previous_node_id.as_deref(),
-            );
+            let resolved_thread_id =
+                resolve_thread_id(incoming_edge, node, graph, previous_node_id.as_deref());
             if let Some(ref tid) = resolved_thread_id {
                 context.set(
                     format!("thread.{tid}.current_node"),
@@ -1064,15 +1083,20 @@ impl PipelineEngine {
                 max_attempts: usize::try_from(retry_policy.max_attempts).unwrap_or(usize::MAX),
             });
             if node.handler_type() != Some("wait.human") {
-                self.inform(
-                    &format!("Stage started: {}", node.label()),
-                    &node.id,
-                );
+                self.inform(&format!("Stage started: {}", node.label()), &node.id);
             }
             let stage_start = Instant::now();
 
             let (mut outcome, attempts_used) = self
-                .execute_with_retry(node, &context, graph, &config.logs_root, &retry_policy, stage_index, visit)
+                .execute_with_retry(
+                    node,
+                    &context,
+                    graph,
+                    &config.logs_root,
+                    &retry_policy,
+                    stage_index,
+                    visit,
+                )
                 .await?;
             // Gap #5: Track retry count per node
             node_retries.insert(node.id.clone(), attempts_used);
@@ -1086,7 +1110,9 @@ impl PipelineEngine {
             if node.auto_status() && outcome.status != StageStatus::Success {
                 outcome = Outcome {
                     status: StageStatus::Success,
-                    notes: Some("auto-status: handler completed without writing status".to_string()),
+                    notes: Some(
+                        "auto-status: handler completed without writing status".to_string(),
+                    ),
                     ..outcome
                 };
             }
@@ -1124,10 +1150,7 @@ impl PipelineEngine {
                     max_attempts: usize::try_from(retry_policy.max_attempts).unwrap_or(usize::MAX),
                     failure_class: outcome_failure_class.map(|fc| fc.to_string()),
                 });
-                self.inform(
-                    &format!("Stage completed: {}", node.label()),
-                    &node.id,
-                );
+                self.inform(&format!("Stage completed: {}", node.label()), &node.id);
             }
 
             // Write per-node status.json (spec 5.6)
@@ -1139,10 +1162,10 @@ impl PipelineEngine {
             }
 
             // Sync artifact files to the execution environment (no-op for local envs)
-            if let Err(e) = sync_artifacts_to_env(
-                &mut outcome.context_updates,
-                &*self.services.execution_env,
-            ).await {
+            if let Err(e) =
+                sync_artifacts_to_env(&mut outcome.context_updates, &*self.services.execution_env)
+                    .await
+            {
                 context.append_log(format!("artifact sync failed: {e}"));
             }
 
@@ -1157,9 +1180,7 @@ impl PipelineEngine {
             context.set("outcome", serde_json::json!(outcome.status.to_string()));
             context.set(
                 "failure_class",
-                serde_json::json!(
-                    outcome_failure_class.map_or(String::new(), |fc| fc.to_string())
-                ),
+                serde_json::json!(outcome_failure_class.map_or(String::new(), |fc| fc.to_string())),
             );
             if let Some(ref pref) = outcome.preferred_label {
                 context.set("preferred_label", serde_json::json!(pref));
@@ -1203,27 +1224,34 @@ impl PipelineEngine {
                         GitCheckpointMode::Host(ref p) | GitCheckpointMode::Remote(ref p) => p,
                     };
                     let store = crate::git::MetadataStore::new(repo_path);
-                    serde_json::to_vec_pretty(&checkpoint).ok().and_then(|cp_json| {
-                        let artifact_entries: Vec<(String, Vec<u8>)> = artifact_store.list().iter()
-                            .filter_map(|info| {
-                                info.file_path.as_ref().and_then(|path| {
-                                    std::fs::read(path).ok().map(|data| {
-                                        (format!("artifacts/{}.json", info.id), data)
+                    serde_json::to_vec_pretty(&checkpoint)
+                        .ok()
+                        .and_then(|cp_json| {
+                            let artifact_entries: Vec<(String, Vec<u8>)> = artifact_store
+                                .list()
+                                .iter()
+                                .filter_map(|info| {
+                                    info.file_path.as_ref().and_then(|path| {
+                                        std::fs::read(path).ok().map(|data| {
+                                            (format!("artifacts/{}.json", info.id), data)
+                                        })
                                     })
                                 })
-                            })
-                            .collect();
-                        let artifact_refs: Vec<(&str, &[u8])> = artifact_entries.iter()
-                            .map(|(k, v)| (k.as_str(), v.as_slice()))
-                            .collect();
-                        match store.write_checkpoint(&config.run_id, &cp_json, &artifact_refs) {
-                            Ok(sha) => Some(sha),
-                            Err(e) => {
-                                context.append_log(format!("metadata checkpoint write failed: {e}"));
-                                None
+                                .collect();
+                            let artifact_refs: Vec<(&str, &[u8])> = artifact_entries
+                                .iter()
+                                .map(|(k, v)| (k.as_str(), v.as_slice()))
+                                .collect();
+                            match store.write_checkpoint(&config.run_id, &cp_json, &artifact_refs) {
+                                Ok(sha) => Some(sha),
+                                Err(e) => {
+                                    context.append_log(format!(
+                                        "metadata checkpoint write failed: {e}"
+                                    ));
+                                    None
+                                }
                             }
-                        }
-                    })
+                        })
                 } else {
                     None
                 };
@@ -1236,10 +1264,26 @@ impl PipelineEngine {
 
                 let commit_result = match mode {
                     GitCheckpointMode::Host(work_dir) => {
-                        git_checkpoint_host(work_dir.clone(), rid, nid, status_str, completed_count, shadow_sha).await
+                        git_checkpoint_host(
+                            work_dir.clone(),
+                            rid,
+                            nid,
+                            status_str,
+                            completed_count,
+                            shadow_sha,
+                        )
+                        .await
                     }
                     GitCheckpointMode::Remote(_) => {
-                        git_checkpoint_remote(&*self.services.execution_env, &run_id, &node.id, &outcome.status.to_string(), completed_count, shadow_sha).await
+                        git_checkpoint_remote(
+                            &*self.services.execution_env,
+                            &run_id,
+                            &node.id,
+                            &outcome.status.to_string(),
+                            completed_count,
+                            shadow_sha,
+                        )
+                        .await
                     }
                 };
 
@@ -1256,7 +1300,8 @@ impl PipelineEngine {
                     });
 
                     // Save diff.patch for this stage
-                    let prev = last_git_sha.as_deref()
+                    let prev = last_git_sha
+                        .as_deref()
                         .or(config.base_sha.as_deref())
                         .unwrap_or(&sha);
                     let diff_base = prev.to_string();
@@ -1293,10 +1338,8 @@ impl PipelineEngine {
                             continue;
                         }
                         let duration_ms = millis_u64(run_start.elapsed());
-                        let error_msg = format!(
-                            "stage {} failed with no outgoing fail edge",
-                            node.id
-                        );
+                        let error_msg =
+                            format!("stage {} failed with no outgoing fail edge", node.id);
                         self.services.emitter.emit(&PipelineEvent::PipelineFailed {
                             error: error_msg.clone(),
                             duration_ms,
@@ -1321,7 +1364,8 @@ impl PipelineEngine {
                             None,
                             Some(&edge.to),
                             node_visits,
-                        )).await;
+                        ))
+                        .await;
                     }
                     current_node_id.clone_from(&edge.to);
                 }
@@ -1334,14 +1378,20 @@ impl PipelineEngine {
                 .values()
                 .filter_map(|o| o.usage.as_ref()?.cost)
                 .sum();
-            if sum > 0.0 { Some(sum) } else { None }
+            if sum > 0.0 {
+                Some(sum)
+            } else {
+                None
+            }
         };
-        self.services.emitter.emit(&PipelineEvent::PipelineCompleted {
-            duration_ms,
-            artifact_count: artifact_store.list().len(),
-            total_cost,
-            final_git_commit_sha: last_git_sha.clone(),
-        });
+        self.services
+            .emitter
+            .emit(&PipelineEvent::PipelineCompleted {
+                duration_ms,
+                artifact_count: artifact_store.list().len(),
+                total_cost,
+                final_git_commit_sha: last_git_sha.clone(),
+            });
 
         // Write final.patch: comprehensive diff from base_sha to HEAD
         if let (Some(ref mode), Some(ref base)) = (&config.git_checkpoint, &config.base_sha) {
@@ -1586,17 +1636,19 @@ mod tests {
         let graph = Graph::new("test");
         let policy = build_retry_policy(&node, &graph);
         assert_eq!(policy.max_attempts, 4); // 3 retries + 1 initial
-        // Should use default backoff, not a preset's backoff
+                                            // Should use default backoff, not a preset's backoff
         assert_eq!(policy.backoff.initial_delay_ms, 200);
     }
 
     #[test]
     fn build_retry_policy_all_presets() {
-        let presets = [("none", 1u32),
+        let presets = [
+            ("none", 1u32),
             ("standard", 5),
             ("aggressive", 5),
             ("linear", 3),
-            ("patient", 3)];
+            ("patient", 3),
+        ];
         let graph = Graph::new("test");
         let (name, expected) = presets[0];
         let mut node = Node::new("n");
@@ -1682,8 +1734,7 @@ mod tests {
     fn best_by_weight_highest_wins() {
         let e1 = Edge::new("a", "x");
         let mut e2 = Edge::new("a", "y");
-        e2.attrs
-            .insert("weight".to_string(), AttrValue::Integer(5));
+        e2.attrs.insert("weight".to_string(), AttrValue::Integer(5));
         let result = best_by_weight_then_lexical(&[&e1, &e2]).unwrap();
         assert_eq!(result.to, "y");
     }
@@ -1789,8 +1840,7 @@ mod tests {
     #[test]
     fn select_edge_weight_tiebreak() {
         let mut e1 = Edge::new("a", "low");
-        e1.attrs
-            .insert("weight".to_string(), AttrValue::Integer(1));
+        e1.attrs.insert("weight".to_string(), AttrValue::Integer(1));
         let mut e2 = Edge::new("a", "high");
         e2.attrs
             .insert("weight".to_string(), AttrValue::Integer(10));
@@ -1897,10 +1947,7 @@ mod tests {
         g.nodes.insert("work".to_string(), n);
         g.nodes.insert("plan".to_string(), Node::new("plan"));
 
-        assert_eq!(
-            get_retry_target("work", &g),
-            Some("plan".to_string())
-        );
+        assert_eq!(get_retry_target("work", &g), Some("plan".to_string()));
     }
 
     #[test]
@@ -1914,10 +1961,7 @@ mod tests {
         g.nodes.insert("work".to_string(), n);
         g.nodes.insert("plan".to_string(), Node::new("plan"));
 
-        assert_eq!(
-            get_retry_target("work", &g),
-            Some("plan".to_string())
-        );
+        assert_eq!(get_retry_target("work", &g), Some("plan".to_string()));
     }
 
     #[test]
@@ -1930,10 +1974,7 @@ mod tests {
             AttrValue::String("plan".to_string()),
         );
 
-        assert_eq!(
-            get_retry_target("work", &g),
-            Some("plan".to_string())
-        );
+        assert_eq!(get_retry_target("work", &g), Some("plan".to_string()));
     }
 
     #[test]
@@ -1971,10 +2012,8 @@ mod tests {
     #[test]
     fn terminal_by_type() {
         let mut n = Node::new("end");
-        n.attrs.insert(
-            "type".to_string(),
-            AttrValue::String("exit".to_string()),
-        );
+        n.attrs
+            .insert("type".to_string(), AttrValue::String("exit".to_string()));
         assert!(is_terminal(&n));
     }
 
@@ -2023,15 +2062,16 @@ mod tests {
     async fn engine_runs_simple_pipeline() {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
@@ -2042,15 +2082,16 @@ mod tests {
     async fn engine_saves_checkpoint() {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         engine.run(&g, &config).await.unwrap();
@@ -2075,10 +2116,10 @@ mod tests {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         engine.run(&g, &config).await.unwrap();
@@ -2093,15 +2134,16 @@ mod tests {
     async fn engine_error_when_no_start_node() {
         let dir = tempfile::tempdir().unwrap();
         let g = Graph::new("empty");
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         let result = engine.run(&g, &config).await;
@@ -2112,15 +2154,16 @@ mod tests {
     async fn engine_mirrors_graph_goal_to_context() {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         engine.run(&g, &config).await.unwrap();
@@ -2144,15 +2187,16 @@ mod tests {
         g.edges.push(Edge::new("start", "work"));
         g.edges.push(Edge::new("work", "exit"));
 
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
@@ -2183,10 +2227,8 @@ mod tests {
         );
         g.nodes.insert("exit".to_string(), exit);
 
-        g.nodes
-            .insert("path_a".to_string(), Node::new("path_a"));
-        g.nodes
-            .insert("path_b".to_string(), Node::new("path_b"));
+        g.nodes.insert("path_a".to_string(), Node::new("path_a"));
+        g.nodes.insert("path_b".to_string(), Node::new("path_b"));
 
         // start -> path_a (condition: outcome=fail)
         let mut e1 = Edge::new("start", "path_a");
@@ -2202,15 +2244,16 @@ mod tests {
         g.edges.push(Edge::new("path_a", "exit"));
         g.edges.push(Edge::new("path_b", "exit"));
 
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         engine.run(&g, &config).await.unwrap();
@@ -2278,15 +2321,16 @@ mod tests {
     async fn engine_writes_manifest_json() {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         engine.run(&g, &config).await.unwrap();
@@ -2306,15 +2350,16 @@ mod tests {
     async fn engine_writes_node_status_json() {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         engine.run(&g, &config).await.unwrap();
@@ -2331,15 +2376,16 @@ mod tests {
     async fn engine_stores_fidelity_in_context() {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         engine.run(&g, &config).await.unwrap();
@@ -2484,8 +2530,18 @@ mod tests {
     async fn engine_manifest_includes_goal() {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
-        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None, dry_run: false, run_id: "test-run".into(), git_checkpoint: None, base_sha: None, run_branch: None, meta_branch: None };
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+        };
         engine.run(&g, &config).await.unwrap();
 
         let manifest_path = dir.path().join("manifest.json");
@@ -2499,15 +2555,31 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut g = Graph::new("no_goal");
         let mut start = Node::new("start");
-        start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("start".to_string(), start);
         let mut exit = Node::new("exit");
-        exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
         g.nodes.insert("exit".to_string(), exit);
         g.edges.push(Edge::new("start", "exit"));
 
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
-        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None, dry_run: false, run_id: "test-run".into(), git_checkpoint: None, base_sha: None, run_branch: None, meta_branch: None };
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+        };
         engine.run(&g, &config).await.unwrap();
 
         let manifest_path = dir.path().join("manifest.json");
@@ -2524,17 +2596,28 @@ mod tests {
         let mut g = Graph::new("auto_status_test");
 
         let mut start = Node::new("start");
-        start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("start".to_string(), start);
 
         let mut work = Node::new("work");
-        work.attrs.insert("auto_status".to_string(), AttrValue::Boolean(true));
-        work.attrs.insert("type".to_string(), AttrValue::String("always_fail".to_string()));
-        work.attrs.insert("max_retries".to_string(), AttrValue::Integer(0));
+        work.attrs
+            .insert("auto_status".to_string(), AttrValue::Boolean(true));
+        work.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("always_fail".to_string()),
+        );
+        work.attrs
+            .insert("max_retries".to_string(), AttrValue::Integer(0));
         g.nodes.insert("work".to_string(), work);
 
         let mut exit = Node::new("exit");
-        exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
         g.nodes.insert("exit".to_string(), exit);
 
         g.edges.push(Edge::new("start", "work"));
@@ -2543,7 +2626,16 @@ mod tests {
         let mut registry = make_registry();
         registry.register("always_fail", Box::new(AlwaysFailHandler));
         let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None, dry_run: false, run_id: "test-run".into(), git_checkpoint: None, base_sha: None, run_branch: None, meta_branch: None };
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+        };
         let outcome = engine.run(&g, &config).await.unwrap();
 
         assert_eq!(outcome.status, StageStatus::Success);
@@ -2559,27 +2651,49 @@ mod tests {
         let mut g = Graph::new("no_auto_status_test");
 
         let mut start = Node::new("start");
-        start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("start".to_string(), start);
 
         let mut work = Node::new("work");
-        work.attrs.insert("type".to_string(), AttrValue::String("always_fail".to_string()));
-        work.attrs.insert("max_retries".to_string(), AttrValue::Integer(0));
+        work.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("always_fail".to_string()),
+        );
+        work.attrs
+            .insert("max_retries".to_string(), AttrValue::Integer(0));
         g.nodes.insert("work".to_string(), work);
 
         let mut exit = Node::new("exit");
-        exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
         g.nodes.insert("exit".to_string(), exit);
 
         g.edges.push(Edge::new("start", "work"));
         let mut fail_edge = Edge::new("work", "exit");
-        fail_edge.attrs.insert("condition".to_string(), AttrValue::String("outcome=fail".to_string()));
+        fail_edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("outcome=fail".to_string()),
+        );
         g.edges.push(fail_edge);
 
         let mut registry = make_registry();
         registry.register("always_fail", Box::new(AlwaysFailHandler));
         let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None, dry_run: false, run_id: "test-run".into(), git_checkpoint: None, base_sha: None, run_branch: None, meta_branch: None };
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+        };
         let result = engine.run(&g, &config).await;
 
         assert!(result.is_ok());
@@ -2597,28 +2711,51 @@ mod tests {
         let mut g = Graph::new("timeout_test");
 
         let mut start = Node::new("start");
-        start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("start".to_string(), start);
 
         let mut work = Node::new("work");
-        work.attrs.insert("timeout".to_string(), AttrValue::Duration(Duration::from_millis(50)));
-        work.attrs.insert("type".to_string(), AttrValue::String("slow".to_string()));
-        work.attrs.insert("max_retries".to_string(), AttrValue::Integer(0));
+        work.attrs.insert(
+            "timeout".to_string(),
+            AttrValue::Duration(Duration::from_millis(50)),
+        );
+        work.attrs
+            .insert("type".to_string(), AttrValue::String("slow".to_string()));
+        work.attrs
+            .insert("max_retries".to_string(), AttrValue::Integer(0));
         g.nodes.insert("work".to_string(), work);
 
         let mut exit = Node::new("exit");
-        exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
         g.nodes.insert("exit".to_string(), exit);
 
         g.edges.push(Edge::new("start", "work"));
         let mut fail_edge = Edge::new("work", "exit");
-        fail_edge.attrs.insert("condition".to_string(), AttrValue::String("outcome=fail".to_string()));
+        fail_edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("outcome=fail".to_string()),
+        );
         g.edges.push(fail_edge);
 
         let mut registry = make_registry();
         registry.register("slow", Box::new(SlowHandler { sleep_ms: 500 }));
         let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None, dry_run: false, run_id: "test-run".into(), git_checkpoint: None, base_sha: None, run_branch: None, meta_branch: None };
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+        };
         let result = engine.run(&g, &config).await;
         assert!(result.is_ok());
 
@@ -2634,16 +2771,24 @@ mod tests {
         let mut g = Graph::new("no_timeout_test");
 
         let mut start = Node::new("start");
-        start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("start".to_string(), start);
 
         let mut work = Node::new("work");
-        work.attrs.insert("type".to_string(), AttrValue::String("slow".to_string()));
-        work.attrs.insert("max_retries".to_string(), AttrValue::Integer(0));
+        work.attrs
+            .insert("type".to_string(), AttrValue::String("slow".to_string()));
+        work.attrs
+            .insert("max_retries".to_string(), AttrValue::Integer(0));
         g.nodes.insert("work".to_string(), work);
 
         let mut exit = Node::new("exit");
-        exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
         g.nodes.insert("exit".to_string(), exit);
 
         g.edges.push(Edge::new("start", "work"));
@@ -2652,7 +2797,16 @@ mod tests {
         let mut registry = make_registry();
         registry.register("slow", Box::new(SlowHandler { sleep_ms: 10 }));
         let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None, dry_run: false, run_id: "test-run".into(), git_checkpoint: None, base_sha: None, run_branch: None, meta_branch: None };
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+        };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
     }
@@ -2663,18 +2817,30 @@ mod tests {
         let mut g = Graph::new("timeout_auto_status_test");
 
         let mut start = Node::new("start");
-        start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("start".to_string(), start);
 
         let mut work = Node::new("work");
-        work.attrs.insert("timeout".to_string(), AttrValue::Duration(Duration::from_millis(50)));
-        work.attrs.insert("auto_status".to_string(), AttrValue::Boolean(true));
-        work.attrs.insert("type".to_string(), AttrValue::String("slow".to_string()));
-        work.attrs.insert("max_retries".to_string(), AttrValue::Integer(0));
+        work.attrs.insert(
+            "timeout".to_string(),
+            AttrValue::Duration(Duration::from_millis(50)),
+        );
+        work.attrs
+            .insert("auto_status".to_string(), AttrValue::Boolean(true));
+        work.attrs
+            .insert("type".to_string(), AttrValue::String("slow".to_string()));
+        work.attrs
+            .insert("max_retries".to_string(), AttrValue::Integer(0));
         g.nodes.insert("work".to_string(), work);
 
         let mut exit = Node::new("exit");
-        exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
         g.nodes.insert("exit".to_string(), exit);
 
         g.edges.push(Edge::new("start", "work"));
@@ -2683,7 +2849,16 @@ mod tests {
         let mut registry = make_registry();
         registry.register("slow", Box::new(SlowHandler { sleep_ms: 500 }));
         let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None, dry_run: false, run_id: "test-run".into(), git_checkpoint: None, base_sha: None, run_branch: None, meta_branch: None };
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+        };
         let outcome = engine.run(&g, &config).await.unwrap();
 
         assert_eq!(outcome.status, StageStatus::Success);
@@ -2737,10 +2912,10 @@ mod tests {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         engine.run(&g, &config).await.unwrap();
@@ -2749,7 +2924,9 @@ mod tests {
 
         let messages = informer.messages.lock().unwrap();
         assert!(
-            messages.iter().any(|(msg, stage)| msg.contains("Pipeline started") && stage == "pipeline"),
+            messages
+                .iter()
+                .any(|(msg, stage)| msg.contains("Pipeline started") && stage == "pipeline"),
             "expected 'Pipeline started' inform call, got: {messages:?}"
         );
     }
@@ -2769,10 +2946,10 @@ mod tests {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         engine.run(&g, &config).await.unwrap();
@@ -2781,11 +2958,15 @@ mod tests {
 
         let messages = informer.messages.lock().unwrap();
         assert!(
-            messages.iter().any(|(msg, _)| msg.contains("Stage started")),
+            messages
+                .iter()
+                .any(|(msg, _)| msg.contains("Stage started")),
             "expected 'Stage started' inform call, got: {messages:?}"
         );
         assert!(
-            messages.iter().any(|(msg, _)| msg.contains("Stage completed")),
+            messages
+                .iter()
+                .any(|(msg, _)| msg.contains("Stage completed")),
             "expected 'Stage completed' inform call, got: {messages:?}"
         );
     }
@@ -2794,15 +2975,16 @@ mod tests {
     async fn engine_without_interviewer_runs_normally() {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
@@ -2815,16 +2997,17 @@ mod tests {
     async fn engine_returns_cancelled_when_token_set_before_run() {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let cancel_token = Arc::new(AtomicBool::new(true));
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: Some(cancel_token),
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         let result = engine.run(&g, &config).await;
@@ -2836,16 +3019,17 @@ mod tests {
     async fn engine_runs_normally_with_unset_cancel_token() {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let cancel_token = Arc::new(AtomicBool::new(false));
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: Some(cancel_token),
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
@@ -2858,8 +3042,10 @@ mod tests {
         let mut g = simple_graph();
         // Insert a work node between start and exit
         let mut work = Node::new("work");
-        work.attrs.insert("type".to_string(), AttrValue::String("slow".to_string()));
-        work.attrs.insert("max_retries".to_string(), AttrValue::Integer(0));
+        work.attrs
+            .insert("type".to_string(), AttrValue::String("slow".to_string()));
+        work.attrs
+            .insert("max_retries".to_string(), AttrValue::Integer(0));
         g.nodes.insert("work".to_string(), work);
         g.edges.clear();
         g.edges.push(Edge::new("start", "work"));
@@ -2875,10 +3061,10 @@ mod tests {
             logs_root: dir.path().to_path_buf(),
             cancel_token: Some(cancel_token),
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
 
@@ -2900,15 +3086,11 @@ mod tests {
     /// Build a graph with a cycle: start -> work -> work (unconditional self-loop)
     fn cyclic_graph() -> Graph {
         let mut g = Graph::new("cyclic");
-        g.attrs.insert(
-            "goal".to_string(),
-            AttrValue::String("loop".to_string()),
-        );
+        g.attrs
+            .insert("goal".to_string(), AttrValue::String("loop".to_string()));
         // Disable default retries to keep test fast
-        g.attrs.insert(
-            "default_max_retry".to_string(),
-            AttrValue::Integer(0),
-        );
+        g.attrs
+            .insert("default_max_retry".to_string(), AttrValue::Integer(0));
 
         let mut start = Node::new("start");
         start.attrs.insert(
@@ -2943,19 +3125,18 @@ mod tests {
     async fn max_node_visits_errors_on_cycle() {
         let dir = tempfile::tempdir().unwrap();
         let mut g = cyclic_graph();
-        g.attrs.insert(
-            "max_node_visits".to_string(),
-            AttrValue::Integer(3),
-        );
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        g.attrs
+            .insert("max_node_visits".to_string(), AttrValue::Integer(3));
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         let result = engine.run(&g, &config).await;
@@ -2971,15 +3152,16 @@ mod tests {
     async fn dry_run_applies_default_visit_limit() {
         let dir = tempfile::tempdir().unwrap();
         let g = cyclic_graph();
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: true,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         let result = engine.run(&g, &config).await;
@@ -2995,19 +3177,18 @@ mod tests {
     async fn graph_attr_overrides_dry_run_default() {
         let dir = tempfile::tempdir().unwrap();
         let mut g = cyclic_graph();
-        g.attrs.insert(
-            "max_node_visits".to_string(),
-            AttrValue::Integer(2),
-        );
-        let engine = PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        g.attrs
+            .insert("max_node_visits".to_string(), AttrValue::Integer(2));
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: true,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
         let result = engine.run(&g, &config).await;
@@ -3079,10 +3260,9 @@ mod tests {
             "type".to_string(),
             AttrValue::String("panicker".to_string()),
         );
-        panic_node.attrs.insert(
-            "max_retries".to_string(),
-            AttrValue::Integer(0),
-        );
+        panic_node
+            .attrs
+            .insert("max_retries".to_string(), AttrValue::Integer(0));
         g.nodes.insert("boom".to_string(), panic_node);
         g.edges.push(Edge::new("start", "boom"));
 
@@ -3093,10 +3273,10 @@ mod tests {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
             meta_branch: None,
         };
 

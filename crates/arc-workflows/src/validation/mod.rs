@@ -73,14 +73,17 @@ mod tests {
     fn minimal_valid_graph() -> Graph {
         let mut g = Graph::new("test");
         let mut start = Node::new("start");
-        start
-            .attrs
-            .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("start".to_string(), start);
 
         let mut exit = Node::new("exit");
-        exit.attrs
-            .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
         g.nodes.insert("exit".to_string(), exit);
 
         g.edges.push(Edge::new("start", "exit"));
@@ -109,8 +112,10 @@ mod tests {
     fn validate_or_raise_fails_for_missing_start() {
         let mut g = Graph::new("test");
         let mut exit = Node::new("exit");
-        exit.attrs
-            .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
         g.nodes.insert("exit".to_string(), exit);
         let result = validate_or_raise(&g, &[]);
         assert!(result.is_err());
@@ -120,9 +125,10 @@ mod tests {
     fn validate_or_raise_fails_for_missing_exit() {
         let mut g = Graph::new("test");
         let mut start = Node::new("start");
-        start
-            .attrs
-            .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
         g.nodes.insert("start".to_string(), start);
         let result = validate_or_raise(&g, &[]);
         assert!(result.is_err());
@@ -132,7 +138,9 @@ mod tests {
     fn validate_runs_extra_rules() {
         struct AlwaysWarnRule;
         impl LintRule for AlwaysWarnRule {
-            fn name(&self) -> &'static str { "always_warn" }
+            fn name(&self) -> &'static str {
+                "always_warn"
+            }
             fn apply(&self, _graph: &Graph) -> Vec<Diagnostic> {
                 vec![Diagnostic {
                     rule: "always_warn".to_string(),
@@ -147,7 +155,10 @@ mod tests {
         let g = minimal_valid_graph();
         let extra = AlwaysWarnRule;
         let diagnostics = validate(&g, &[&extra]);
-        let custom: Vec<_> = diagnostics.iter().filter(|d| d.rule == "always_warn").collect();
+        let custom: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.rule == "always_warn")
+            .collect();
         assert_eq!(custom.len(), 1);
     }
 

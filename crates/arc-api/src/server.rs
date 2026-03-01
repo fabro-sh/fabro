@@ -15,9 +15,9 @@ use tokio_stream::StreamExt;
 
 use arc_agent::LocalExecutionEnvironment;
 
+use crate::jwt_auth::{AuthMode, AuthenticatedService};
 use arc_workflows::checkpoint::Checkpoint;
 use arc_workflows::context::Context;
-use crate::jwt_auth::{AuthMode, AuthenticatedService};
 use arc_workflows::engine::{PipelineEngine, RunConfig};
 use arc_workflows::event::{EventEmitter, PipelineEvent};
 use arc_workflows::handler::HandlerRegistry;
@@ -146,7 +146,10 @@ pub fn create_app_state_with_options(
     })
 }
 
-async fn list_pipelines(_auth: AuthenticatedService, State(state): State<Arc<AppState>>) -> Response {
+async fn list_pipelines(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+) -> Response {
     let pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
     let items: Vec<PipelineStatusResponse> = pipelines
         .iter()
@@ -168,7 +171,10 @@ async fn start_pipeline(
     let graph = match arc_workflows::pipeline::prepare_pipeline(&req.dot_source) {
         Ok(g) => g,
         Err(e) => {
-            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": e.to_string()})))
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
                 .into_response();
         }
     };
@@ -190,7 +196,8 @@ async fn start_pipeline(
 
     let registry = (state.registry_factory)(Arc::clone(&interviewer) as Arc<dyn Interviewer>);
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let execution_env: Arc<dyn arc_agent::ExecutionEnvironment> = Arc::new(LocalExecutionEnvironment::new(cwd));
+    let execution_env: Arc<dyn arc_agent::ExecutionEnvironment> =
+        Arc::new(LocalExecutionEnvironment::new(cwd));
     let engine = PipelineEngine::with_interviewer(
         registry,
         Arc::new(emitter),
@@ -222,7 +229,16 @@ async fn start_pipeline(
     tokio::spawn(async move {
         let logs_root = std::env::temp_dir().join(format!("arc-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&logs_root).expect("failed to create logs directory");
-        let config = RunConfig { logs_root, cancel_token: Some(cancel_token), dry_run: state_clone.dry_run, run_id: run_id_clone.clone(), git_checkpoint: None, base_sha: None, run_branch: None, meta_branch: None };
+        let config = RunConfig {
+            logs_root,
+            cancel_token: Some(cancel_token),
+            dry_run: state_clone.dry_run,
+            run_id: run_id_clone.clone(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+        };
 
         let result = tokio::select! {
             result = engine.run(&graph, &config) => result,
@@ -239,7 +255,10 @@ async fn start_pipeline(
         // Save final checkpoint
         let checkpoint = Checkpoint::load(&config.logs_root.join("checkpoint.json")).ok();
 
-        let mut pipelines = state_clone.pipelines.lock().expect("pipelines lock poisoned");
+        let mut pipelines = state_clone
+            .pipelines
+            .lock()
+            .expect("pipelines lock poisoned");
         if let Some(pipeline) = pipelines.get_mut(&run_id_clone) {
             match result {
                 Ok(_) => {
@@ -337,10 +356,7 @@ async fn submit_answer(
                         .and_then(|pq| pq.question.options.iter().find(|o| o.key == *key))
                         .cloned();
                     match option {
-                        Some(opt) => Answer::selected(
-                            key.clone(),
-                            opt,
-                        ),
+                        Some(opt) => Answer::selected(key.clone(), opt),
                         None => {
                             return (
                                 StatusCode::BAD_REQUEST,
@@ -521,7 +537,9 @@ mod tests {
         start -> exit
     }"#;
 
-    fn test_registry(_interviewer: Arc<dyn arc_workflows::interviewer::Interviewer>) -> HandlerRegistry {
+    fn test_registry(
+        _interviewer: Arc<dyn arc_workflows::interviewer::Interviewer>,
+    ) -> HandlerRegistry {
         let mut registry = HandlerRegistry::new(Box::new(StartHandler));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));

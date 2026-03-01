@@ -103,7 +103,9 @@ fn resolve_prompt(arg: Option<String>, stdin: Option<String>) -> Result<String> 
         (Some(s), Some(a)) => Ok(format!("{s}\n{a}")),
         (Some(s), None) => Ok(s),
         (None, Some(a)) => Ok(a),
-        (None, None) => bail!("Error: no prompt provided. Pass a prompt as an argument or pipe text via stdin."),
+        (None, None) => {
+            bail!("Error: no prompt provided. Pass a prompt as an argument or pipe text via stdin.")
+        }
     }
 }
 
@@ -243,8 +245,7 @@ async fn sync_models(url: &str, output: &str) -> Result<()> {
 
     let json: serde_json::Value =
         serde_json::from_str(&body).context("response is not valid JSON")?;
-    let pretty =
-        serde_json::to_string_pretty(&json).context("failed to format JSON")?;
+    let pretty = serde_json::to_string_pretty(&json).context("failed to format JSON")?;
 
     std::fs::write(output, &pretty).with_context(|| format!("failed to write {output}"))?;
 

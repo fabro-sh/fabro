@@ -4,9 +4,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 
 use arc_agent::{
+    subagent::{SessionFactory, SubAgentManager},
     AgentEvent, AnthropicProfile, ExecutionEnvironment, GeminiProfile, OpenAiProfile,
     ProviderProfile, Session, SessionConfig, Turn,
-    subagent::{SessionFactory, SubAgentManager},
 };
 use arc_llm::client::Client;
 use arc_llm::provider::Provider;
@@ -32,12 +32,7 @@ pub struct AgentBackend {
 
 impl AgentBackend {
     #[must_use]
-    pub fn new(
-        model: String,
-        provider: Provider,
-        verbose: u8,
-        styles: &'static Styles,
-    ) -> Self {
+    pub fn new(model: String, provider: Provider, verbose: u8, styles: &'static Styles) -> Self {
         Self {
             model,
             provider,
@@ -64,9 +59,9 @@ impl AgentBackend {
             ..SessionConfig::default()
         };
 
-        let manager = Arc::new(tokio::sync::Mutex::new(
-            SubAgentManager::new(config.max_subagent_depth),
-        ));
+        let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(
+            config.max_subagent_depth,
+        )));
         let manager_for_callback = manager.clone();
 
         // Build factory that creates child sessions WITHOUT subagent tools
@@ -77,9 +72,9 @@ impl AgentBackend {
         let factory: SessionFactory = Arc::new(move || {
             let child_profile: Arc<dyn ProviderProfile> = match factory_provider {
                 Provider::OpenAi => Arc::new(OpenAiProfile::new(&factory_model)),
-                Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => Arc::new(
-                    OpenAiProfile::new(&factory_model).with_provider(factory_provider),
-                ),
+                Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {
+                    Arc::new(OpenAiProfile::new(&factory_model).with_provider(factory_provider))
+                }
                 Provider::Gemini => Arc::new(GeminiProfile::new(&factory_model)),
                 Provider::Anthropic => Arc::new(AnthropicProfile::new(&factory_model)),
             };
@@ -97,7 +92,10 @@ impl AgentBackend {
         let session = Session::new(client, profile, Arc::clone(execution_env), config);
 
         // Wire subagent event callback to parent session's emitter
-        manager_for_callback.lock().await.set_event_callback(session.event_callback());
+        manager_for_callback
+            .lock()
+            .await
+            .set_event_callback(session.event_callback());
 
         Ok(session)
     }
@@ -132,8 +130,9 @@ impl CodergenBackend for AgentBackend {
             .map(String::from)
             .or_else(|| Some(self.provider.as_str().to_string()));
 
-        let max_tokens = node.max_tokens().or_else(||
-            arc_llm::catalog::get_model_info(model).and_then(|m| m.max_output));
+        let max_tokens = node
+            .max_tokens()
+            .or_else(|| arc_llm::catalog::get_model_info(model).and_then(|m| m.max_output));
 
         let request = arc_llm::types::Request {
             model: model.to_string(),
@@ -156,10 +155,7 @@ impl CodergenBackend for AgentBackend {
             let _ = tokio::fs::write(stage_dir.join("api_request.json"), json).await;
         }
 
-        let response = client
-            .complete(&request)
-            .await
-            .map_err(ArcError::Llm)?;
+        let response = client.complete(&request).await.map_err(ArcError::Llm)?;
 
         if let Ok(json) = serde_json::to_string_pretty(&response) {
             let _ = tokio::fs::write(stage_dir.join("api_response.json"), json).await;
@@ -224,8 +220,7 @@ impl CodergenBackend for AgentBackend {
         // File change tracking: shared between spawned task and main fn.
         let pending_tool_calls: Arc<Mutex<HashMap<String, String>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let files_touched: Arc<Mutex<HashSet<String>>> =
-            Arc::new(Mutex::new(HashSet::new()));
+        let files_touched: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
         let pending_clone = Arc::clone(&pending_tool_calls);
         let files_clone = Arc::clone(&files_touched);
 
@@ -246,11 +241,12 @@ impl CodergenBackend for AgentBackend {
                         arguments,
                     } => {
                         if tool_name == "write_file" || tool_name == "edit_file" {
-                            if let Some(path) = arguments.get("file_path").and_then(|v| v.as_str()) {
-                                pending_clone.lock().unwrap().insert(
-                                    tool_call_id.clone(),
-                                    path.to_string(),
-                                );
+                            if let Some(path) = arguments.get("file_path").and_then(|v| v.as_str())
+                            {
+                                pending_clone
+                                    .lock()
+                                    .unwrap()
+                                    .insert(tool_call_id.clone(), path.to_string());
                             }
                         }
                     }
@@ -437,7 +433,11 @@ impl CodergenBackend for AgentBackend {
             self.sessions.lock().unwrap().insert(key, session);
         }
 
-        Ok(CodergenResult::Text { text: response, usage: Some(stage_usage), files_touched })
+        Ok(CodergenResult::Text {
+            text: response,
+            usage: Some(stage_usage),
+            files_touched,
+        })
     }
 }
 
@@ -469,12 +469,7 @@ mod tests {
     #[test]
     fn agent_backend_stores_config() {
         let styles = Box::leak(Box::new(Styles::new(false)));
-        let backend = AgentBackend::new(
-            "claude-opus-4-6".to_string(),
-            Provider::OpenAi,
-            2,
-            styles,
-        );
+        let backend = AgentBackend::new("claude-opus-4-6".to_string(), Provider::OpenAi, 2, styles);
         assert_eq!(backend.model, "claude-opus-4-6");
         assert_eq!(backend.provider, Provider::OpenAi);
         assert_eq!(backend.verbose, 2);

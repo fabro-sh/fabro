@@ -13,8 +13,8 @@ pub struct ServerConfig {
 }
 
 pub fn load_server_config(path: &Path) -> anyhow::Result<ServerConfig> {
-    let contents =
-        std::fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
+    let contents = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
     parse_server_config(&contents)
 }
 
@@ -55,7 +55,8 @@ url = "http://localhost:3000"
 "#;
         let err = parse_server_config(toml).unwrap_err();
         assert!(
-            err.to_string().contains("Unsupported server config version 2"),
+            err.to_string()
+                .contains("Unsupported server config version 2"),
             "unexpected error: {err}"
         );
     }

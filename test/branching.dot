@@ -12,5 +12,5 @@ digraph Branch {
 
     start -> plan -> implement -> validate -> gate
     gate -> exit      [label="Yes", condition="outcome=success"]
-    gate -> implement [label="No", condition="outcome!=success"]
+    gate -> implement [label="No"]
 }

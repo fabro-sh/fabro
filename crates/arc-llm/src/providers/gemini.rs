@@ -1,7 +1,10 @@
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
 use futures::stream;
 
-use crate::error::{error_from_grpc_status, error_from_status_code, ProviderErrorDetail, ProviderErrorKind, SdkError};
+use crate::error::{
+    error_from_grpc_status, error_from_status_code, ProviderErrorDetail, ProviderErrorKind,
+    SdkError,
+};
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::providers::common::{
     extract_system_prompt, parse_error_body, parse_rate_limit_headers, parse_retry_after,
@@ -34,12 +37,16 @@ impl Adapter {
 
     #[must_use]
     pub fn with_default_headers(self, headers: std::collections::HashMap<String, String>) -> Self {
-        Self { http: self.http.with_default_headers(headers) }
+        Self {
+            http: self.http.with_default_headers(headers),
+        }
     }
 
     #[must_use]
     pub fn with_timeout(self, timeout: crate::types::AdapterTimeout) -> Self {
-        Self { http: self.http.with_timeout(timeout) }
+        Self {
+            http: self.http.with_timeout(timeout),
+        }
     }
 }
 
@@ -440,7 +447,10 @@ fn build_api_request(request: &Request) -> serde_json::Value {
 /// Known fields like `safety_settings` and `cached_content` are set directly.
 /// Any other fields are merged at the top level, allowing pass-through of
 /// Gemini-specific options not covered by the unified schema.
-fn merge_provider_options(body: &mut serde_json::Value, provider_options: Option<&serde_json::Value>) {
+fn merge_provider_options(
+    body: &mut serde_json::Value,
+    provider_options: Option<&serde_json::Value>,
+) {
     let Some(gemini_opts) = provider_options.and_then(|opts| opts.get("gemini")) else {
         return;
     };
@@ -494,12 +504,9 @@ async fn send_gemini_response(
     let status = http_resp.status();
     let retry_after = parse_retry_after(http_resp.headers());
     let headers = http_resp.headers().clone();
-    let body = http_resp
-        .text()
-        .await
-        .map_err(|e| SdkError::Network {
-            message: e.to_string(),
-        })?;
+    let body = http_resp.text().await.map_err(|e| SdkError::Network {
+        message: e.to_string(),
+    })?;
 
     if !status.is_success() {
         let (msg, code, raw) = parse_error_body(&body, "status");
@@ -518,8 +525,22 @@ fn gemini_error(
     retry_after: Option<f64>,
 ) -> SdkError {
     match grpc_status {
-        Some(grpc_code) => error_from_grpc_status(&grpc_code, msg, "gemini".to_string(), Some(grpc_code.clone()), raw, retry_after),
-        None => error_from_status_code(status_code, msg, "gemini".to_string(), None, raw, retry_after),
+        Some(grpc_code) => error_from_grpc_status(
+            &grpc_code,
+            msg,
+            "gemini".to_string(),
+            Some(grpc_code.clone()),
+            raw,
+            retry_after,
+        ),
+        None => error_from_status_code(
+            status_code,
+            msg,
+            "gemini".to_string(),
+            None,
+            raw,
+            retry_after,
+        ),
     }
 }
 
@@ -549,7 +570,12 @@ async fn send_streaming_request(
 
 /// Process a stream of SSE chunks from the Gemini `streamGenerateContent` endpoint
 /// and yield `StreamEvent` values.
-fn process_sse_stream(http_resp: reqwest::Response, model: String, rate_limit: Option<crate::types::RateLimitInfo>, stream_read_timeout: Option<std::time::Duration>) -> StreamEventStream {
+fn process_sse_stream(
+    http_resp: reqwest::Response,
+    model: String,
+    rate_limit: Option<crate::types::RateLimitInfo>,
+    stream_read_timeout: Option<std::time::Duration>,
+) -> StreamEventStream {
     Box::pin(stream::unfold(
         SseStreamState::new(http_resp, model, rate_limit, stream_read_timeout),
         |mut state| async move {
@@ -659,7 +685,12 @@ struct SseStreamState {
 }
 
 impl SseStreamState {
-    fn new(http_resp: reqwest::Response, model: String, rate_limit: Option<crate::types::RateLimitInfo>, stream_read_timeout: Option<std::time::Duration>) -> Self {
+    fn new(
+        http_resp: reqwest::Response,
+        model: String,
+        rate_limit: Option<crate::types::RateLimitInfo>,
+        stream_read_timeout: Option<std::time::Duration>,
+    ) -> Self {
         Self {
             line_reader: super::common::LineReader::new(http_resp, stream_read_timeout),
             model,
@@ -716,20 +747,17 @@ impl SseStreamState {
                 if is_thought {
                     if !self.reasoning_started {
                         self.reasoning_started = true;
-                        self.pending_events
-                            .push_back(StreamEvent::ReasoningStart);
+                        self.pending_events.push_back(StreamEvent::ReasoningStart);
                     }
                     self.accumulated_thinking.push_str(text);
-                    self.pending_events
-                        .push_back(StreamEvent::ReasoningDelta {
-                            delta: text.to_string(),
-                        });
+                    self.pending_events.push_back(StreamEvent::ReasoningDelta {
+                        delta: text.to_string(),
+                    });
                 } else {
                     // Transition from reasoning to text: close reasoning segment.
                     if self.reasoning_started {
                         self.reasoning_started = false;
-                        self.pending_events
-                            .push_back(StreamEvent::ReasoningEnd);
+                        self.pending_events.push_back(StreamEvent::ReasoningEnd);
                     }
                     if !self.text_started {
                         self.text_started = true;
@@ -759,10 +787,9 @@ impl SseStreamState {
                 }
 
                 // Gemini delivers function calls as complete objects in a single chunk.
-                self.pending_events
-                    .push_back(StreamEvent::ToolCallStart {
-                        tool_call: tool_call.clone(),
-                    });
+                self.pending_events.push_back(StreamEvent::ToolCallStart {
+                    tool_call: tool_call.clone(),
+                });
                 self.pending_events.push_back(StreamEvent::ToolCallEnd {
                     tool_call: tool_call.clone(),
                 });
@@ -781,8 +808,7 @@ impl SseStreamState {
         if has_finish_reason {
             if self.reasoning_started {
                 self.reasoning_started = false;
-                self.pending_events
-                    .push_back(StreamEvent::ReasoningEnd);
+                self.pending_events.push_back(StreamEvent::ReasoningEnd);
             }
             if self.text_started {
                 self.pending_events.push_back(StreamEvent::TextEnd {
@@ -795,8 +821,7 @@ impl SseStreamState {
     /// Build the final `Finish` event from accumulated state.
     fn build_finish_event(&self) -> StreamEvent {
         let has_tool_calls = !self.accumulated_tool_calls.is_empty();
-        let finish_reason =
-            map_finish_reason(self.finish_reason_str.as_deref(), has_tool_calls);
+        let finish_reason = map_finish_reason(self.finish_reason_str.as_deref(), has_tool_calls);
 
         let mut content_parts: Vec<ContentPart> = Vec::new();
         if !self.accumulated_thinking.is_empty() {
@@ -861,10 +886,9 @@ impl ProviderAdapter for Adapter {
         }
         let (body, headers) = send_gemini_response(gemini_req).await?;
 
-        let api_resp: ApiResponse =
-            serde_json::from_str(&body).map_err(|e| SdkError::Network {
-                message: format!("failed to parse Gemini response: {e}"),
-            })?;
+        let api_resp: ApiResponse = serde_json::from_str(&body).map_err(|e| SdkError::Network {
+            message: format!("failed to parse Gemini response: {e}"),
+        })?;
 
         let candidate = api_resp
             .candidates
@@ -886,8 +910,7 @@ impl ProviderAdapter for Adapter {
 
         // Gemini has no dedicated tool_calls finish reason; infer from parts
         let has_tool_calls = raw_parts.is_some_and(|p| parts_have_function_calls(p));
-        let finish_reason =
-            map_finish_reason(candidate.finish_reason.as_deref(), has_tool_calls);
+        let finish_reason = map_finish_reason(candidate.finish_reason.as_deref(), has_tool_calls);
 
         let usage = parse_usage(api_resp.usage_metadata.as_ref());
 
@@ -927,7 +950,12 @@ impl ProviderAdapter for Adapter {
         let http_resp = send_streaming_request(req.json(&api_body)).await?;
 
         let rate_limit = parse_rate_limit_headers(http_resp.headers());
-        Ok(process_sse_stream(http_resp, request.model.clone(), rate_limit, self.http.stream_read_timeout))
+        Ok(process_sse_stream(
+            http_resp,
+            request.model.clone(),
+            rate_limit,
+            self.http.stream_read_timeout,
+        ))
     }
 }
 
@@ -973,7 +1001,9 @@ mod tests {
         }));
 
         let body = build_api_request(&request);
-        let safety = body.get("safetySettings").expect("safetySettings should be present");
+        let safety = body
+            .get("safetySettings")
+            .expect("safetySettings should be present");
         let arr = safety.as_array().expect("should be an array");
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["category"], "HARM_CATEGORY_HARASSMENT");
@@ -990,7 +1020,8 @@ mod tests {
 
         let body = build_api_request(&request);
         assert_eq!(
-            body.get("cachedContent").and_then(serde_json::Value::as_str),
+            body.get("cachedContent")
+                .and_then(serde_json::Value::as_str),
             Some("projects/my-project/cachedContents/abc123")
         );
     }
@@ -1009,7 +1040,8 @@ mod tests {
         let body = build_api_request(&request);
         assert!(body.get("safetySettings").is_some());
         assert_eq!(
-            body.get("cachedContent").and_then(serde_json::Value::as_str),
+            body.get("cachedContent")
+                .and_then(serde_json::Value::as_str),
             Some("cache-id")
         );
         assert_eq!(
@@ -1043,11 +1075,24 @@ mod tests {
         }));
 
         let body = build_api_request(&request);
-        let gen_config = body.get("generationConfig").expect("generationConfig should exist");
-        assert_eq!(gen_config.get("temperature").and_then(serde_json::Value::as_f64), Some(0.5));
-        assert_eq!(gen_config.get("maxOutputTokens").and_then(serde_json::Value::as_i64), Some(100));
+        let gen_config = body
+            .get("generationConfig")
+            .expect("generationConfig should exist");
         assert_eq!(
-            body.get("cachedContent").and_then(serde_json::Value::as_str),
+            gen_config
+                .get("temperature")
+                .and_then(serde_json::Value::as_f64),
+            Some(0.5)
+        );
+        assert_eq!(
+            gen_config
+                .get("maxOutputTokens")
+                .and_then(serde_json::Value::as_i64),
+            Some(100)
+        );
+        assert_eq!(
+            body.get("cachedContent")
+                .and_then(serde_json::Value::as_str),
             Some("cache-id")
         );
     }
@@ -1140,22 +1185,88 @@ mod tests {
     fn gemini_error_uses_grpc_status_when_available() {
         use crate::error::ProviderErrorKind;
 
-        let err = gemini_error(400, "model not found".into(), Some("NOT_FOUND".into()), None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::NotFound, .. }));
+        let err = gemini_error(
+            400,
+            "model not found".into(),
+            Some("NOT_FOUND".into()),
+            None,
+            None,
+        );
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::NotFound,
+                ..
+            }
+        ));
 
-        let err = gemini_error(400, "bad args".into(), Some("INVALID_ARGUMENT".into()), None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::InvalidRequest, .. }));
+        let err = gemini_error(
+            400,
+            "bad args".into(),
+            Some("INVALID_ARGUMENT".into()),
+            None,
+            None,
+        );
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::InvalidRequest,
+                ..
+            }
+        ));
 
-        let err = gemini_error(429, "rate limited".into(), Some("RESOURCE_EXHAUSTED".into()), None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::RateLimit, .. }));
+        let err = gemini_error(
+            429,
+            "rate limited".into(),
+            Some("RESOURCE_EXHAUSTED".into()),
+            None,
+            None,
+        );
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::RateLimit,
+                ..
+            }
+        ));
 
-        let err = gemini_error(401, "bad key".into(), Some("UNAUTHENTICATED".into()), None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::Authentication, .. }));
+        let err = gemini_error(
+            401,
+            "bad key".into(),
+            Some("UNAUTHENTICATED".into()),
+            None,
+            None,
+        );
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::Authentication,
+                ..
+            }
+        ));
 
-        let err = gemini_error(403, "denied".into(), Some("PERMISSION_DENIED".into()), None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::AccessDenied, .. }));
+        let err = gemini_error(
+            403,
+            "denied".into(),
+            Some("PERMISSION_DENIED".into()),
+            None,
+            None,
+        );
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::AccessDenied,
+                ..
+            }
+        ));
 
-        let err = gemini_error(504, "timeout".into(), Some("DEADLINE_EXCEEDED".into()), None, None);
+        let err = gemini_error(
+            504,
+            "timeout".into(),
+            Some("DEADLINE_EXCEEDED".into()),
+            None,
+            None,
+        );
         assert!(matches!(err, SdkError::RequestTimeout { .. }));
     }
 
@@ -1164,10 +1275,22 @@ mod tests {
         use crate::error::ProviderErrorKind;
 
         let err = gemini_error(429, "rate limited".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::RateLimit, .. }));
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::RateLimit,
+                ..
+            }
+        ));
 
         let err = gemini_error(500, "internal".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::Server, .. }));
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::Server,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1226,7 +1349,9 @@ mod tests {
         match result {
             ContentPart::ToolCall(tc) => {
                 assert_eq!(tc.name, "get_weather");
-                let meta = tc.provider_metadata.expect("provider_metadata should be set");
+                let meta = tc
+                    .provider_metadata
+                    .expect("provider_metadata should be set");
                 assert_eq!(meta["thoughtSignature"], "abc123sig");
             }
             other => panic!("expected ToolCall, got {other:?}"),
@@ -1235,7 +1360,11 @@ mod tests {
 
     #[test]
     fn translate_messages_function_call_includes_thought_signature() {
-        let mut tc = ToolCall::new("call-1", "get_weather", serde_json::json!({"location": "NYC"}));
+        let mut tc = ToolCall::new(
+            "call-1",
+            "get_weather",
+            serde_json::json!({"location": "NYC"}),
+        );
         tc.provider_metadata = Some(serde_json::json!({"thoughtSignature": "sig456"}));
 
         let msg = Message {
@@ -1254,7 +1383,11 @@ mod tests {
 
     #[test]
     fn translate_messages_function_call_without_thought_signature() {
-        let tc = ToolCall::new("call-1", "get_weather", serde_json::json!({"location": "NYC"}));
+        let tc = ToolCall::new(
+            "call-1",
+            "get_weather",
+            serde_json::json!({"location": "NYC"}),
+        );
 
         let msg = Message {
             role: Role::Assistant,

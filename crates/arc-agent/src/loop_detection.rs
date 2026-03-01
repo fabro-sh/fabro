@@ -21,7 +21,7 @@ fn extract_signatures_from_assistant(turn: &Turn) -> Vec<u64> {
         .collect()
 }
 
-#[must_use] 
+#[must_use]
 pub fn detect_loop(history: &History, window_size: usize) -> bool {
     // Extract tool call signatures from the last N assistant turns that have tool calls
     let turns = history.turns();
@@ -94,8 +94,8 @@ fn is_repeating_pattern(signatures: &[u64], pattern_len: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::SystemTime;
     use arc_llm::types::{ToolCall, Usage};
+    use std::time::SystemTime;
 
     fn assistant_with_tool(name: &str, args: serde_json::Value) -> Turn {
         Turn::Assistant {
@@ -117,7 +117,10 @@ mod tests {
     #[test]
     fn single_turn_returns_false() {
         let mut history = History::default();
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "ls"}),
+        ));
         assert!(!detect_loop(&history, 10));
     }
 
@@ -125,9 +128,18 @@ mod tests {
     fn pattern_1_repeating_detected() {
         let mut history = History::default();
         // Same tool call repeated 3 times
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "ls"}),
+        ));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "ls"}),
+        ));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "ls"}),
+        ));
         assert!(detect_loop(&history, 10));
     }
 
@@ -135,10 +147,22 @@ mod tests {
     fn pattern_2_repeating_detected() {
         let mut history = History::default();
         // A-B-A-B pattern
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
-        history.push(assistant_with_tool("read_file", serde_json::json!({"path": "foo.rs"})));
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
-        history.push(assistant_with_tool("read_file", serde_json::json!({"path": "foo.rs"})));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "ls"}),
+        ));
+        history.push(assistant_with_tool(
+            "read_file",
+            serde_json::json!({"path": "foo.rs"}),
+        ));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "ls"}),
+        ));
+        history.push(assistant_with_tool(
+            "read_file",
+            serde_json::json!({"path": "foo.rs"}),
+        ));
         assert!(detect_loop(&history, 10));
     }
 
@@ -146,31 +170,70 @@ mod tests {
     fn pattern_3_repeating_detected() {
         let mut history = History::default();
         // A-B-C-A-B-C pattern
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
-        history.push(assistant_with_tool("read_file", serde_json::json!({"path": "a.rs"})));
-        history.push(assistant_with_tool("grep", serde_json::json!({"pattern": "fn"})));
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
-        history.push(assistant_with_tool("read_file", serde_json::json!({"path": "a.rs"})));
-        history.push(assistant_with_tool("grep", serde_json::json!({"pattern": "fn"})));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "ls"}),
+        ));
+        history.push(assistant_with_tool(
+            "read_file",
+            serde_json::json!({"path": "a.rs"}),
+        ));
+        history.push(assistant_with_tool(
+            "grep",
+            serde_json::json!({"pattern": "fn"}),
+        ));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "ls"}),
+        ));
+        history.push(assistant_with_tool(
+            "read_file",
+            serde_json::json!({"path": "a.rs"}),
+        ));
+        history.push(assistant_with_tool(
+            "grep",
+            serde_json::json!({"pattern": "fn"}),
+        ));
         assert!(detect_loop(&history, 10));
     }
 
     #[test]
     fn non_repeating_returns_false() {
         let mut history = History::default();
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
-        history.push(assistant_with_tool("read_file", serde_json::json!({"path": "a.rs"})));
-        history.push(assistant_with_tool("grep", serde_json::json!({"pattern": "fn"})));
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "cat"})));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "ls"}),
+        ));
+        history.push(assistant_with_tool(
+            "read_file",
+            serde_json::json!({"path": "a.rs"}),
+        ));
+        history.push(assistant_with_tool(
+            "grep",
+            serde_json::json!({"pattern": "fn"}),
+        ));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "cat"}),
+        ));
         assert!(!detect_loop(&history, 10));
     }
 
     #[test]
     fn same_name_different_args_are_different() {
         let mut history = History::default();
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "pwd"})));
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "cat"})));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "ls"}),
+        ));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "pwd"}),
+        ));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "cat"}),
+        ));
         assert!(!detect_loop(&history, 10));
     }
 
@@ -217,11 +280,23 @@ mod tests {
     fn window_size_limits_lookback() {
         let mut history = History::default();
         // Add non-repeating turns first
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "unique1"})));
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "unique2"})));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "unique1"}),
+        ));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "unique2"}),
+        ));
         // Then repeating turns
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
-        history.push(assistant_with_tool("shell", serde_json::json!({"cmd": "ls"})));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "ls"}),
+        ));
+        history.push(assistant_with_tool(
+            "shell",
+            serde_json::json!({"cmd": "ls"}),
+        ));
         // With window=2, we only see the last 2 which are repeating
         assert!(detect_loop(&history, 2));
     }

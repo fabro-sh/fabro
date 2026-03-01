@@ -1,14 +1,14 @@
-pub mod types;
-pub mod error;
-pub mod provider;
-pub mod middleware;
-pub mod client;
-pub mod tools;
-pub mod retry;
-pub mod generate;
 pub mod catalog;
-pub mod providers;
 pub mod cli;
+pub mod client;
+pub mod error;
+pub mod generate;
+pub mod middleware;
+pub mod provider;
+pub mod providers;
+pub mod retry;
+pub mod tools;
+pub mod types;
 
 // Re-export module-level default client helpers (Section 2.5).
 pub use generate::set_default_client;

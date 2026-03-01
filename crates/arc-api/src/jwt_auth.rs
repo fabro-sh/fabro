@@ -161,10 +161,7 @@ mod tests {
         let (_, decoding) = generate_test_keypair();
         let app = test_router(AuthMode::Jwt(Arc::new(decoding)));
 
-        let req = Request::builder()
-            .uri("/test")
-            .body(Body::empty())
-            .unwrap();
+        let req = Request::builder().uri("/test").body(Body::empty()).unwrap();
 
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -250,10 +247,7 @@ mod tests {
     async fn disabled_mode_allows_all_requests() {
         let app = test_router(AuthMode::Disabled);
 
-        let req = Request::builder()
-            .uri("/test")
-            .body(Body::empty())
-            .unwrap();
+        let req = Request::builder().uri("/test").body(Body::empty()).unwrap();
 
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);

@@ -1,4 +1,4 @@
-pub mod config;
 pub mod client;
-pub mod connection_manager;
 mod client_handler;
+pub mod config;
+pub mod connection_manager;

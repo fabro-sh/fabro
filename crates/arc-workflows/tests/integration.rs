@@ -2,7 +2,10 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::Arc;
 
+use arc_llm::provider::Provider;
+use arc_util::terminal::Styles;
 use arc_workflows::checkpoint::Checkpoint;
+use arc_workflows::cli::backend::AgentBackend;
 use arc_workflows::context::Context;
 use arc_workflows::engine::{PipelineEngine, RunConfig};
 use arc_workflows::error::ArcError;
@@ -10,10 +13,11 @@ use arc_workflows::event::{EventEmitter, PipelineEvent};
 use arc_workflows::graph::{AttrValue, Edge, Graph, Node};
 use arc_workflows::handler::codergen::{CodergenBackend, CodergenHandler, CodergenResult};
 use arc_workflows::handler::conditional::ConditionalHandler;
+use arc_workflows::handler::default_registry;
 use arc_workflows::handler::exit::ExitHandler;
 use arc_workflows::handler::manager_loop::ManagerLoopHandler;
-use arc_workflows::handler::start::StartHandler;
 use arc_workflows::handler::script::ScriptHandler;
+use arc_workflows::handler::start::StartHandler;
 use arc_workflows::handler::wait_human::WaitHumanHandler;
 use arc_workflows::handler::{Handler, HandlerRegistry};
 use arc_workflows::interviewer::auto_approve::AutoApproveInterviewer;
@@ -23,12 +27,10 @@ use arc_workflows::interviewer::{Answer, AnswerValue, Interviewer};
 use arc_workflows::outcome::{Outcome, StageStatus};
 use arc_workflows::parser::parse;
 use arc_workflows::stylesheet::{apply_stylesheet, parse_stylesheet};
-use arc_workflows::transform::{StylesheetApplicationTransform, Transform, VariableExpansionTransform};
-use arc_workflows::cli::backend::AgentBackend;
-use arc_workflows::handler::default_registry;
-use arc_llm::provider::Provider;
+use arc_workflows::transform::{
+    StylesheetApplicationTransform, Transform, VariableExpansionTransform,
+};
 use arc_workflows::validation::{validate, validate_or_raise, Severity};
-use arc_util::terminal::Styles;
 
 fn local_env() -> Arc<dyn arc_agent::ExecutionEnvironment> {
     Arc::new(arc_agent::LocalExecutionEnvironment::new(
@@ -182,10 +184,15 @@ async fn end_to_end_linear_pipeline() {
     validate_or_raise(&graph, &[]).expect("validation should pass");
 
     let dir = tempfile::tempdir().unwrap();
-    let engine = PipelineEngine::new(make_linear_registry(), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_linear_registry(),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -193,7 +200,10 @@ async fn end_to_end_linear_pipeline() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("run should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Checkpoint should exist
@@ -208,7 +218,10 @@ async fn end_to_end_linear_pipeline() {
 
     // Codergen handler writes prompt.md, response.md, status.json
     let stage_dir = dir.path().join("nodes").join("codergen_step");
-    assert!(stage_dir.join("prompt.md").exists(), "prompt.md should exist");
+    assert!(
+        stage_dir.join("prompt.md").exists(),
+        "prompt.md should exist"
+    );
     assert!(
         stage_dir.join("response.md").exists(),
         "response.md should exist"
@@ -242,19 +255,23 @@ async fn end_to_end_branching_pipeline() {
     // the engine should route gate -> success_path via condition match.
 
     let mut graph = Graph::new("BranchTest");
-    graph
-        .attrs
-        .insert("goal".to_string(), AttrValue::String("Test branching".to_string()));
+    graph.attrs.insert(
+        "goal".to_string(),
+        AttrValue::String("Test branching".to_string()),
+    );
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut work = Node::new("work");
@@ -267,8 +284,10 @@ async fn end_to_end_branching_pipeline() {
     graph.nodes.insert("work".to_string(), work);
 
     let mut gate = Node::new("gate");
-    gate.attrs
-        .insert("shape".to_string(), AttrValue::String("diamond".to_string()));
+    gate.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("diamond".to_string()),
+    );
     graph.nodes.insert("gate".to_string(), gate);
 
     graph
@@ -308,7 +327,8 @@ async fn end_to_end_branching_pipeline() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -316,7 +336,10 @@ async fn end_to_end_branching_pipeline() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("run should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
@@ -352,19 +375,24 @@ async fn end_to_end_human_gate_pipeline() {
     let mut graph = Graph::new("HumanGateTest");
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut gate = Node::new("gate");
-    gate.attrs
-        .insert("shape".to_string(), AttrValue::String("hexagon".to_string()));
+    gate.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("hexagon".to_string()),
+    );
     gate.attrs.insert(
         "type".to_string(),
         AttrValue::String("wait.human".to_string()),
@@ -418,7 +446,8 @@ async fn end_to_end_human_gate_pipeline() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -426,20 +455,19 @@ async fn end_to_end_human_gate_pipeline() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("run should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
-        checkpoint
-            .completed_nodes
-            .contains(&"reject".to_string()),
+        checkpoint.completed_nodes.contains(&"reject".to_string()),
         "should have traversed reject path"
     );
     assert!(
-        !checkpoint
-            .completed_nodes
-            .contains(&"approve".to_string()),
+        !checkpoint.completed_nodes.contains(&"approve".to_string()),
         "should NOT have traversed approve path"
     );
 }
@@ -485,14 +513,17 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
     let mut graph = Graph::new("GoalGateNoRetry");
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut gated_work = Node::new("gated_work");
@@ -506,9 +537,7 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
         "type".to_string(),
         AttrValue::String("always_fail".to_string()),
     );
-    graph
-        .nodes
-        .insert("gated_work".to_string(), gated_work);
+    graph.nodes.insert("gated_work".to_string(), gated_work);
 
     graph.edges.push(Edge::new("start", "gated_work"));
     graph.edges.push(Edge::new("gated_work", "exit"));
@@ -522,7 +551,8 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -531,7 +561,10 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
     };
 
     let result = engine.run(&graph, &config).await;
-    assert!(result.is_ok(), "goal gate unsatisfied with no retry_target should return Ok(fail outcome)");
+    assert!(
+        result.is_ok(),
+        "goal gate unsatisfied with no retry_target should return Ok(fail outcome)"
+    );
     let outcome = result.unwrap();
     assert_eq!(
         outcome.status,
@@ -589,14 +622,17 @@ async fn goal_gate_routes_to_retry_target_when_present() {
     let mut graph = Graph::new("GoalGateRetry");
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut gated_work = Node::new("gated_work");
@@ -614,9 +650,7 @@ async fn goal_gate_routes_to_retry_target_when_present() {
         "type".to_string(),
         AttrValue::String("fail_then_succeed".to_string()),
     );
-    graph
-        .nodes
-        .insert("gated_work".to_string(), gated_work);
+    graph.nodes.insert("gated_work".to_string(), gated_work);
 
     graph.edges.push(Edge::new("start", "gated_work"));
     graph.edges.push(Edge::new("gated_work", "exit"));
@@ -635,7 +669,8 @@ async fn goal_gate_routes_to_retry_target_when_present() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -686,18 +721,14 @@ fn variable_expansion_replaces_goal_in_prompts() {
         "prompt".to_string(),
         AttrValue::String("Implement $goal now".to_string()),
     );
-    graph
-        .nodes
-        .insert("implement".to_string(), impl_node);
+    graph.nodes.insert("implement".to_string(), impl_node);
 
     let mut no_var_node = Node::new("report");
     no_var_node.attrs.insert(
         "prompt".to_string(),
         AttrValue::String("Generate a report".to_string()),
     );
-    graph
-        .nodes
-        .insert("report".to_string(), no_var_node);
+    graph.nodes.insert("report".to_string(), no_var_node);
 
     let transform = VariableExpansionTransform;
     transform.apply(&mut graph);
@@ -749,16 +780,12 @@ fn stylesheet_application_by_specificity() {
     // implement node: class="code", should get .code overrides
     let mut implement = Node::new("implement");
     implement.classes.push("code".to_string());
-    graph
-        .nodes
-        .insert("implement".to_string(), implement);
+    graph.nodes.insert("implement".to_string(), implement);
 
     // critical_review node: class="code" AND id="critical_review", id wins
     let mut critical = Node::new("critical_review");
     critical.classes.push("code".to_string());
-    graph
-        .nodes
-        .insert("critical_review".to_string(), critical);
+    graph.nodes.insert("critical_review".to_string(), critical);
 
     // explicit node: has explicit llm_model, should NOT be overridden
     let mut explicit = Node::new("explicit_node");
@@ -766,9 +793,7 @@ fn stylesheet_application_by_specificity() {
         "llm_model".to_string(),
         AttrValue::String("my-custom-model".to_string()),
     );
-    graph
-        .nodes
-        .insert("explicit_node".to_string(), explicit);
+    graph.nodes.insert("explicit_node".to_string(), explicit);
 
     let transform = StylesheetApplicationTransform;
     transform.apply(&mut graph);
@@ -803,9 +828,7 @@ fn stylesheet_application_by_specificity() {
         Some(&AttrValue::String("openai".to_string()))
     );
     assert_eq!(
-        graph.nodes["critical_review"]
-            .attrs
-            .get("reasoning_effort"),
+        graph.nodes["critical_review"].attrs.get("reasoning_effort"),
         Some(&AttrValue::String("high".to_string()))
     );
 
@@ -911,14 +934,17 @@ async fn retry_on_failure_then_succeed() {
     let mut graph = Graph::new("RetryTest");
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut retry_node = Node::new("work");
@@ -948,7 +974,8 @@ async fn retry_on_failure_then_succeed() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -977,24 +1004,25 @@ async fn pipeline_with_many_nodes() {
     );
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let node_names: Vec<String> = (1..=10).map(|i| format!("step_{i}")).collect();
 
     for name in &node_names {
         let mut node = Node::new(name.clone());
-        node.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        node.attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         node.attrs.insert(
             "prompt".to_string(),
             AttrValue::String(format!("Execute {name}")),
@@ -1006,16 +1034,20 @@ async fn pipeline_with_many_nodes() {
     for pair in node_names.windows(2) {
         graph.edges.push(Edge::new(&pair[0], &pair[1]));
     }
-    graph.edges.push(Edge::new(
-        node_names.last().unwrap(),
-        "exit",
-    ));
+    graph
+        .edges
+        .push(Edge::new(node_names.last().unwrap(), "exit"));
 
     let dir = tempfile::tempdir().unwrap();
-    let engine = PipelineEngine::new(make_linear_registry(), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_linear_registry(),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -1059,10 +1091,7 @@ fn checkpoint_save_and_resume_roundtrip() {
     let checkpoint = Checkpoint::from_context(
         &ctx,
         "step_2",
-        vec![
-            "start".to_string(),
-            "step_1".to_string(),
-        ],
+        vec!["start".to_string(), "step_1".to_string()],
         retries,
         std::collections::HashMap::new(),
         None,
@@ -1209,10 +1238,7 @@ fn make_full_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
     registry.register("codergen", Box::new(CodergenHandler::new(None)));
     registry.register("conditional", Box::new(ConditionalHandler));
     registry.register("script", Box::new(ScriptHandler));
-    registry.register(
-        "wait.human",
-        Box::new(WaitHumanHandler::new(interviewer)),
-    );
+    registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
     registry.register(
         "stack.manager_loop",
         Box::new(ManagerLoopHandler::new(None)),
@@ -1223,13 +1249,16 @@ fn make_full_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
 fn make_graph_with_start_exit(name: &str) -> Graph {
     let mut graph = Graph::new(name);
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
     graph
 }
@@ -1254,14 +1283,17 @@ async fn smoke_test_with_mock_codergen_backend() {
     );
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut plan = Node::new("plan");
@@ -1274,8 +1306,10 @@ async fn smoke_test_with_mock_codergen_backend() {
     graph.nodes.insert("plan".to_string(), plan);
 
     let mut gate = Node::new("gate");
-    gate.attrs
-        .insert("shape".to_string(), AttrValue::String("diamond".to_string()));
+    gate.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("diamond".to_string()),
+    );
     graph.nodes.insert("gate".to_string(), gate);
 
     let mut implement = Node::new("implement");
@@ -1286,9 +1320,7 @@ async fn smoke_test_with_mock_codergen_backend() {
         "prompt".to_string(),
         AttrValue::String("Implement the plan".to_string()),
     );
-    graph
-        .nodes
-        .insert("implement".to_string(), implement);
+    graph.nodes.insert("implement".to_string(), implement);
 
     let mut fix = Node::new("fix");
     fix.attrs
@@ -1321,8 +1353,7 @@ async fn smoke_test_with_mock_codergen_backend() {
 
     let dir = tempfile::tempdir().unwrap();
     let backend = Box::new(MockCodergenBackend);
-    let mut registry =
-        HandlerRegistry::new(Box::new(CodergenHandler::new(Some(backend))));
+    let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(backend))));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     registry.register(
@@ -1334,7 +1365,8 @@ async fn smoke_test_with_mock_codergen_backend() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -1350,9 +1382,7 @@ async fn smoke_test_with_mock_codergen_backend() {
 
     let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
-        checkpoint
-            .completed_nodes
-            .contains(&"plan".to_string()),
+        checkpoint.completed_nodes.contains(&"plan".to_string()),
         "plan should have executed"
     );
     assert!(
@@ -1362,23 +1392,23 @@ async fn smoke_test_with_mock_codergen_backend() {
         "should route through implement (success path)"
     );
     assert!(
-        !checkpoint
-            .completed_nodes
-            .contains(&"fix".to_string()),
+        !checkpoint.completed_nodes.contains(&"fix".to_string()),
         "should NOT have traversed fix path"
     );
 
     // Verify response.md was written by the mock backend
-    let plan_response = std::fs::read_to_string(dir.path().join("nodes").join("plan").join("response.md"))
-        .expect("plan response should exist");
+    let plan_response =
+        std::fs::read_to_string(dir.path().join("nodes").join("plan").join("response.md"))
+            .expect("plan response should exist");
     assert!(
         plan_response.contains("Response for plan"),
         "mock backend should have written response, got: {plan_response}"
     );
 
     // Verify prompt.md had $goal expanded by the CodergenHandler
-    let plan_prompt = std::fs::read_to_string(dir.path().join("nodes").join("plan").join("prompt.md"))
-        .expect("plan prompt should exist");
+    let plan_prompt =
+        std::fs::read_to_string(dir.path().join("nodes").join("plan").join("prompt.md"))
+            .expect("plan prompt should exist");
     assert!(
         plan_prompt.ends_with("Plan to achieve: Build and validate"),
         "prompt should end with original prompt, got: {plan_prompt}"
@@ -1415,9 +1445,9 @@ async fn end_to_end_parallel_fan_out_fan_in() {
 
     let dir = tempfile::tempdir().unwrap();
 
-    let mut registry = HandlerRegistry::new(
-        Box::new(CodergenHandler::new(Some(Box::new(MockCodergenBackend)))),
-    );
+    let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(Box::new(
+        MockCodergenBackend,
+    )))));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     registry.register(
@@ -1433,7 +1463,8 @@ async fn end_to_end_parallel_fan_out_fan_in() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -1453,9 +1484,7 @@ async fn end_to_end_parallel_fan_out_fan_in() {
     // Branch nodes run inside the parallel handler, so they are not recorded
     // individually by the engine -- but fan_out and fan_in_node are top-level.
     assert!(
-        checkpoint
-            .completed_nodes
-            .contains(&"fan_out".to_string()),
+        checkpoint.completed_nodes.contains(&"fan_out".to_string()),
         "fan_out should have been executed"
     );
     assert!(
@@ -1541,7 +1570,8 @@ async fn resume_from_checkpoint_completes_pipeline() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -1596,10 +1626,9 @@ async fn resume_from_checkpoint_preserves_goal_gate_outcomes() {
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut gated_work = Node::new("gated_work");
-    gated_work.attrs.insert(
-        "goal_gate".to_string(),
-        AttrValue::Boolean(true),
-    );
+    gated_work
+        .attrs
+        .insert("goal_gate".to_string(), AttrValue::Boolean(true));
     graph.nodes.insert("gated_work".to_string(), gated_work);
 
     let step_b = Node::new("step_b");
@@ -1634,7 +1663,8 @@ async fn resume_from_checkpoint_preserves_goal_gate_outcomes() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -1666,10 +1696,15 @@ async fn graph_goal_in_context() {
     }"#;
     let graph = parse(input).expect("parse");
     let dir = tempfile::tempdir().unwrap();
-    let engine = PipelineEngine::new(make_linear_registry(), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_linear_registry(),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -1700,7 +1735,8 @@ async fn event_streaming_lifecycle() {
     let engine = PipelineEngine::new(make_linear_registry(), Arc::new(emitter), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -1768,10 +1804,15 @@ async fn context_flow_between_stages() {
     graph.edges.push(Edge::new("step_b", "exit"));
 
     let dir = tempfile::tempdir().unwrap();
-    let engine = PipelineEngine::new(make_linear_registry(), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_linear_registry(),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -1812,10 +1853,15 @@ async fn tool_handler_e2e() {
 
     let dir = tempfile::tempdir().unwrap();
     let interviewer = Arc::new(AutoApproveInterviewer);
-    let engine = PipelineEngine::new(make_full_registry(interviewer), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_full_registry(interviewer),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -1830,7 +1876,10 @@ async fn tool_handler_e2e() {
         .context_values
         .get("script.output")
         .expect("script.output should exist");
-    assert!(script_output.as_str().unwrap().contains("hello-from-script"));
+    assert!(script_output
+        .as_str()
+        .unwrap()
+        .contains("hello-from-script"));
 }
 
 #[tokio::test]
@@ -1845,10 +1894,8 @@ async fn auto_approve_interviewer_e2e() {
         "type".to_string(),
         AttrValue::String("wait.human".to_string()),
     );
-    gate.attrs.insert(
-        "label".to_string(),
-        AttrValue::String("Review".to_string()),
-    );
+    gate.attrs
+        .insert("label".to_string(), AttrValue::String("Review".to_string()));
     graph.nodes.insert("gate".to_string(), gate);
     graph
         .nodes
@@ -1874,10 +1921,15 @@ async fn auto_approve_interviewer_e2e() {
 
     let dir = tempfile::tempdir().unwrap();
     let interviewer = Arc::new(AutoApproveInterviewer);
-    let engine = PipelineEngine::new(make_full_registry(interviewer), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_full_registry(interviewer),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -1902,10 +1954,15 @@ async fn codergen_without_backend_simulated() {
     }"#;
     let graph = parse(input).expect("parse");
     let dir = tempfile::tempdir().unwrap();
-    let engine = PipelineEngine::new(make_linear_registry(), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_linear_registry(),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -1974,9 +2031,7 @@ async fn branching_loop_back_on_failure() {
         "type".to_string(),
         AttrValue::String("fail_then_succeed".to_string()),
     );
-    graph
-        .nodes
-        .insert("validate".to_string(), validate_node);
+    graph.nodes.insert("validate".to_string(), validate_node);
 
     graph.edges.push(Edge::new("start", "implement"));
     graph.edges.push(Edge::new("implement", "validate"));
@@ -2007,7 +2062,8 @@ async fn branching_loop_back_on_failure() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2041,10 +2097,8 @@ async fn human_gate_loops_back() {
         "type".to_string(),
         AttrValue::String("wait.human".to_string()),
     );
-    gate.attrs.insert(
-        "label".to_string(),
-        AttrValue::String("Review".to_string()),
-    );
+    gate.attrs
+        .insert("label".to_string(), AttrValue::String("Review".to_string()));
     graph.nodes.insert("gate".to_string(), gate);
     graph
         .nodes
@@ -2085,14 +2139,12 @@ async fn human_gate_loops_back() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register(
-        "wait.human",
-        Box::new(WaitHumanHandler::new(interviewer)),
-    );
+    registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2103,11 +2155,7 @@ async fn human_gate_loops_back() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
-    let gate_count = cp
-        .completed_nodes
-        .iter()
-        .filter(|n| *n == "gate")
-        .count();
+    let gate_count = cp.completed_nodes.iter().filter(|n| *n == "gate").count();
     assert!(
         gate_count >= 2,
         "gate should appear at least 2x, got {gate_count}"
@@ -2142,10 +2190,15 @@ async fn scenario_ship_a_feature() {
     let dir = tempfile::tempdir().unwrap();
     let mut emitter = EventEmitter::new();
     let events = collect_events(&mut emitter);
-    let engine = PipelineEngine::new(make_full_registry(interviewer), Arc::new(emitter), local_env());
+    let engine = PipelineEngine::new(
+        make_full_registry(interviewer),
+        Arc::new(emitter),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2156,7 +2209,10 @@ async fn scenario_ship_a_feature() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
-    let script_output = cp.context_values.get("script.output").expect("script.output");
+    let script_output = cp
+        .context_values
+        .get("script.output")
+        .expect("script.output");
     assert!(script_output.as_str().unwrap().contains("PASS"));
     assert!(cp.completed_nodes.contains(&"plan".to_string()));
     assert!(cp.completed_nodes.contains(&"implement".to_string()));
@@ -2204,9 +2260,9 @@ async fn scenario_parallel_expert_review() {
     let dir = tempfile::tempdir().unwrap();
 
     let interviewer: Arc<dyn Interviewer> = recorder.clone();
-    let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(
-        Box::new(MockCodergenBackend),
-    ))));
+    let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(Box::new(
+        MockCodergenBackend,
+    )))));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     registry.register(
@@ -2218,15 +2274,13 @@ async fn scenario_parallel_expert_review() {
         "parallel.fan_in",
         Box::new(FanInHandler::new(Some(Box::new(MockCodergenBackend)))),
     );
-    registry.register(
-        "wait.human",
-        Box::new(WaitHumanHandler::new(interviewer)),
-    );
+    registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2301,7 +2355,8 @@ async fn scenario_node_retries_on_retry_status() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2323,10 +2378,8 @@ async fn scenario_node_retries_on_retry_status() {
 async fn scenario_loop_restart_resets_context() {
     let mut graph = make_graph_with_start_exit("LoopRestartTest");
     let mut work = Node::new("work");
-    work.attrs.insert(
-        "type".to_string(),
-        AttrValue::String("counter".to_string()),
-    );
+    work.attrs
+        .insert("type".to_string(), AttrValue::String("counter".to_string()));
     graph.nodes.insert("work".to_string(), work);
 
     graph.edges.push(Edge::new("start", "work"));
@@ -2360,7 +2413,8 @@ async fn scenario_loop_restart_resets_context() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2423,7 +2477,8 @@ async fn scenario_bug_triage_router() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2474,7 +2529,8 @@ async fn scenario_crash_recovery() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2557,7 +2613,8 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2608,7 +2665,8 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2637,8 +2695,10 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
 fn validation_missing_start_node() {
     let mut graph = Graph::new("NoStartTest");
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let diagnostics = validate(&graph, &[]);
@@ -2656,13 +2716,12 @@ fn validation_missing_start_node() {
 fn validation_missing_exit_node() {
     let mut graph = Graph::new("NoExitTest");
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
-    graph
-        .nodes
-        .insert("work".to_string(), Node::new("work"));
+    graph.nodes.insert("work".to_string(), Node::new("work"));
     graph.edges.push(Edge::new("start", "work"));
 
     let diagnostics = validate(&graph, &[]);
@@ -2739,7 +2798,8 @@ async fn conditional_branching_success_fail_paths() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2761,10 +2821,9 @@ async fn edge_selection_condition_match_wins_over_weight() {
     graph
         .nodes
         .insert("cond_target".to_string(), Node::new("cond_target"));
-    graph.nodes.insert(
-        "weighted_target".to_string(),
-        Node::new("weighted_target"),
-    );
+    graph
+        .nodes
+        .insert("weighted_target".to_string(), Node::new("weighted_target"));
 
     graph.edges.push(Edge::new("start", "a"));
     let mut e_cond = Edge::new("a", "cond_target");
@@ -2788,7 +2847,8 @@ async fn edge_selection_condition_match_wins_over_weight() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2799,9 +2859,7 @@ async fn edge_selection_condition_match_wins_over_weight() {
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     assert!(cp.completed_nodes.contains(&"cond_target".to_string()));
-    assert!(!cp
-        .completed_nodes
-        .contains(&"weighted_target".to_string()));
+    assert!(!cp.completed_nodes.contains(&"weighted_target".to_string()));
 }
 
 #[tokio::test]
@@ -2832,7 +2890,8 @@ async fn edge_selection_weight_breaks_ties() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2851,9 +2910,7 @@ async fn edge_selection_lexical_tiebreak() {
     let mut graph = make_graph_with_start_exit("LexicalTieTest");
     graph.nodes.insert("a".to_string(), Node::new("a"));
     graph.nodes.insert("beta".to_string(), Node::new("beta"));
-    graph
-        .nodes
-        .insert("alpha".to_string(), Node::new("alpha"));
+    graph.nodes.insert("alpha".to_string(), Node::new("alpha"));
 
     graph.edges.push(Edge::new("start", "a"));
     graph.edges.push(Edge::new("a", "beta"));
@@ -2868,7 +2925,8 @@ async fn edge_selection_lexical_tiebreak() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2921,7 +2979,8 @@ async fn context_updates_visible_across_nodes() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -2953,10 +3012,15 @@ async fn stylesheet_applies_model_override() {
     assert_eq!(graph.nodes["work"].llm_model(), Some("custom-model"));
 
     let dir = tempfile::tempdir().unwrap();
-    let engine = PipelineEngine::new(make_linear_registry(), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_linear_registry(),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3007,7 +3071,8 @@ async fn custom_handler_registration_and_execution() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3066,10 +3131,15 @@ async fn integration_smoke_plan_implement_review_done() {
     let dir = tempfile::tempdir().unwrap();
     let mut emitter = EventEmitter::new();
     let events = collect_events(&mut emitter);
-    let engine = PipelineEngine::new(make_full_registry(interviewer), Arc::new(emitter), local_env());
+    let engine = PipelineEngine::new(
+        make_full_registry(interviewer),
+        Arc::new(emitter),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3086,8 +3156,18 @@ async fn integration_smoke_plan_implement_review_done() {
     assert!(cp.completed_nodes.contains(&"review".to_string()));
 
     // Verify prompt.md and response.md exist
-    assert!(dir.path().join("nodes").join("plan").join("prompt.md").exists());
-    assert!(dir.path().join("nodes").join("plan").join("response.md").exists());
+    assert!(dir
+        .path()
+        .join("nodes")
+        .join("plan")
+        .join("prompt.md")
+        .exists());
+    assert!(dir
+        .path()
+        .join("nodes")
+        .join("plan")
+        .join("response.md")
+        .exists());
 
     // Verify events
     let collected = events.lock().unwrap();
@@ -3130,7 +3210,8 @@ async fn sub_pipeline_e2e_through_engine() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3146,15 +3227,11 @@ async fn sub_pipeline_e2e_through_engine() {
 
     let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
-        checkpoint
-            .completed_nodes
-            .contains(&"generate".to_string()),
+        checkpoint.completed_nodes.contains(&"generate".to_string()),
         "generate should be in completed_nodes"
     );
     assert!(
-        checkpoint
-            .completed_nodes
-            .contains(&"validate".to_string()),
+        checkpoint.completed_nodes.contains(&"validate".to_string()),
         "validate should be in completed_nodes"
     );
 
@@ -3195,14 +3272,8 @@ async fn manager_loop_with_child_observer_e2e() {
         ) -> Result<(), arc_workflows::error::ArcError> {
             let cycle = self.observe_count.fetch_add(1, Ordering::SeqCst);
             if cycle >= 2 {
-                context.set(
-                    "context.stack.child.status",
-                    serde_json::json!("completed"),
-                );
-                context.set(
-                    "context.stack.child.outcome",
-                    serde_json::json!("success"),
-                );
+                context.set("context.stack.child.status", serde_json::json!("completed"));
+                context.set("context.stack.child.outcome", serde_json::json!("success"));
             }
             Ok(())
         }
@@ -3223,14 +3294,17 @@ async fn manager_loop_with_child_observer_e2e() {
     );
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut supervisor = Node::new("supervisor");
@@ -3253,9 +3327,7 @@ async fn manager_loop_with_child_observer_e2e() {
         "manager.stop_condition".to_string(),
         AttrValue::String(String::new()),
     );
-    graph
-        .nodes
-        .insert("supervisor".to_string(), supervisor);
+    graph.nodes.insert("supervisor".to_string(), supervisor);
 
     graph.edges.push(Edge::new("start", "supervisor"));
     graph.edges.push(Edge::new("supervisor", "exit"));
@@ -3277,7 +3349,8 @@ async fn manager_loop_with_child_observer_e2e() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3301,7 +3374,10 @@ async fn manager_loop_with_child_observer_e2e() {
 
     // The manager loop handler stores notes about child completion
     let supervisor_outcome = checkpoint.node_outcomes.get("supervisor");
-    assert!(supervisor_outcome.is_some(), "supervisor outcome should exist");
+    assert!(
+        supervisor_outcome.is_some(),
+        "supervisor outcome should exist"
+    );
     let notes = supervisor_outcome.unwrap().notes.as_deref().unwrap_or("");
     assert!(
         notes.contains("Child completed"),
@@ -3370,14 +3446,17 @@ async fn graph_merge_e2e_through_engine() {
     );
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     main_graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     main_graph.nodes.insert("exit".to_string(), exit);
 
     // Apply merge transform
@@ -3387,9 +3466,7 @@ async fn graph_merge_e2e_through_engine() {
     // Add cross-module edges
     main_graph.edges.push(Edge::new("start", "val.lint"));
     main_graph.edges.push(Edge::new("val.test", "dep.stage"));
-    main_graph
-        .edges
-        .push(Edge::new("dep.release", "exit"));
+    main_graph.edges.push(Edge::new("dep.release", "exit"));
 
     // Verify merged nodes exist
     assert!(main_graph.nodes.contains_key("val.lint"));
@@ -3398,10 +3475,15 @@ async fn graph_merge_e2e_through_engine() {
     assert!(main_graph.nodes.contains_key("dep.release"));
 
     let dir = tempfile::tempdir().unwrap();
-    let engine = PipelineEngine::new(make_linear_registry(), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_linear_registry(),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3417,15 +3499,11 @@ async fn graph_merge_e2e_through_engine() {
 
     let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
-        checkpoint
-            .completed_nodes
-            .contains(&"val.lint".to_string()),
+        checkpoint.completed_nodes.contains(&"val.lint".to_string()),
         "val.lint should be completed"
     );
     assert!(
-        checkpoint
-            .completed_nodes
-            .contains(&"val.test".to_string()),
+        checkpoint.completed_nodes.contains(&"val.test".to_string()),
         "val.test should be completed"
     );
     assert!(
@@ -3541,12 +3619,18 @@ async fn fidelity_default_is_compact() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3561,7 +3645,10 @@ async fn fidelity_default_is_compact() {
     assert_eq!(fidelities[0].1, "compact");
 
     let preambles = captures.preambles.lock().unwrap();
-    assert!(!preambles[0].1.is_empty(), "compact fidelity should produce a preamble");
+    assert!(
+        !preambles[0].1.is_empty(),
+        "compact fidelity should produce a preamble"
+    );
 }
 
 #[tokio::test]
@@ -3585,12 +3672,18 @@ async fn fidelity_graph_default_applied() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3628,12 +3721,18 @@ async fn fidelity_node_overrides_graph_default() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3677,12 +3776,18 @@ async fn fidelity_edge_overrides_node_and_graph() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3716,12 +3821,18 @@ async fn fidelity_full_produces_empty_preamble() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3734,7 +3845,10 @@ async fn fidelity_full_produces_empty_preamble() {
     assert_eq!(fidelities[0].1, "full");
 
     let preambles = captures.preambles.lock().unwrap();
-    assert_eq!(preambles[0].1, "", "full fidelity should produce empty preamble");
+    assert_eq!(
+        preambles[0].1, "",
+        "full fidelity should produce empty preamble"
+    );
 }
 
 #[tokio::test]
@@ -3762,12 +3876,18 @@ async fn fidelity_truncate_preamble_minimal() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3824,12 +3944,18 @@ async fn fidelity_summary_low_mode() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3881,12 +4007,18 @@ async fn fidelity_summary_medium_mode() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3938,12 +4070,18 @@ async fn fidelity_summary_high_mode() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -3988,12 +4126,18 @@ async fn fidelity_full_sets_thread_id_in_context() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4049,12 +4193,18 @@ async fn fidelity_full_nodes_share_thread_id() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4117,12 +4267,18 @@ async fn fidelity_resume_degrades_full_to_summary_high() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4201,12 +4357,18 @@ async fn fidelity_resume_degrade_only_affects_first_hop() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4272,12 +4434,18 @@ async fn fidelity_resume_no_degrade_when_not_full() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4314,7 +4482,8 @@ async fn fidelity_stored_in_checkpoint_context() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4385,12 +4554,18 @@ async fn fidelity_precedence_multi_node_pipeline() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4443,12 +4618,18 @@ async fn fidelity_compact_preamble_includes_completed_stages_and_context() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4480,13 +4661,25 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
     // summary:medium should include context values.
     // This verifies a behavioral difference between detail levels.
     let mut graph_low = make_graph_with_start_exit("SummaryLowExcludesContext");
-    graph_low.attrs.insert("goal".to_string(), AttrValue::String("Context exclusion test".to_string()));
-    graph_low.attrs.insert("default_fidelity".to_string(), AttrValue::String("summary:low".to_string()));
+    graph_low.attrs.insert(
+        "goal".to_string(),
+        AttrValue::String("Context exclusion test".to_string()),
+    );
+    graph_low.attrs.insert(
+        "default_fidelity".to_string(),
+        AttrValue::String("summary:low".to_string()),
+    );
     let mut step_a_low = Node::new("step_a");
-    step_a_low.attrs.insert("type".to_string(), AttrValue::String("fidelity_capture".to_string()));
+    step_a_low.attrs.insert(
+        "type".to_string(),
+        AttrValue::String("fidelity_capture".to_string()),
+    );
     graph_low.nodes.insert("step_a".to_string(), step_a_low);
     let mut step_b_low = Node::new("step_b");
-    step_b_low.attrs.insert("type".to_string(), AttrValue::String("fidelity_capture".to_string()));
+    step_b_low.attrs.insert(
+        "type".to_string(),
+        AttrValue::String("fidelity_capture".to_string()),
+    );
     graph_low.nodes.insert("step_b".to_string(), step_b_low);
     graph_low.edges.push(Edge::new("start", "step_a"));
     graph_low.edges.push(Edge::new("step_a", "step_b"));
@@ -4497,10 +4690,27 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
     let mut registry_low = HandlerRegistry::new(Box::new(StartHandler));
     registry_low.register("start", Box::new(StartHandler));
     registry_low.register("exit", Box::new(ExitHandler));
-    registry_low.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures_low.clone() }));
+    registry_low.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures_low.clone(),
+        }),
+    );
     let engine_low = PipelineEngine::new(registry_low, Arc::new(EventEmitter::new()), local_env());
-    let config_low = RunConfig { logs_root: dir_low.path().to_path_buf(), cancel_token: None, dry_run: false, run_id: "test-run".into(), git_checkpoint: None, base_sha: None, run_branch: None, meta_branch: None };
-    engine_low.run(&graph_low, &config_low).await.expect("run low");
+    let config_low = RunConfig {
+        logs_root: dir_low.path().to_path_buf(),
+        cancel_token: None,
+        dry_run: false,
+        run_id: "test-run".into(),
+        git_checkpoint: None,
+        base_sha: None,
+        run_branch: None,
+        meta_branch: None,
+    };
+    engine_low
+        .run(&graph_low, &config_low)
+        .await
+        .expect("run low");
 
     {
         let preambles_low = captures_low.preambles.lock().unwrap();
@@ -4514,13 +4724,25 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
 
     // Now run summary:medium and verify it DOES include context values
     let mut graph_med = make_graph_with_start_exit("SummaryMedIncludesContext");
-    graph_med.attrs.insert("goal".to_string(), AttrValue::String("Context exclusion test".to_string()));
-    graph_med.attrs.insert("default_fidelity".to_string(), AttrValue::String("summary:medium".to_string()));
+    graph_med.attrs.insert(
+        "goal".to_string(),
+        AttrValue::String("Context exclusion test".to_string()),
+    );
+    graph_med.attrs.insert(
+        "default_fidelity".to_string(),
+        AttrValue::String("summary:medium".to_string()),
+    );
     let mut step_a_med = Node::new("step_a");
-    step_a_med.attrs.insert("type".to_string(), AttrValue::String("fidelity_capture".to_string()));
+    step_a_med.attrs.insert(
+        "type".to_string(),
+        AttrValue::String("fidelity_capture".to_string()),
+    );
     graph_med.nodes.insert("step_a".to_string(), step_a_med);
     let mut step_b_med = Node::new("step_b");
-    step_b_med.attrs.insert("type".to_string(), AttrValue::String("fidelity_capture".to_string()));
+    step_b_med.attrs.insert(
+        "type".to_string(),
+        AttrValue::String("fidelity_capture".to_string()),
+    );
     graph_med.nodes.insert("step_b".to_string(), step_b_med);
     graph_med.edges.push(Edge::new("start", "step_a"));
     graph_med.edges.push(Edge::new("step_a", "step_b"));
@@ -4531,10 +4753,27 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
     let mut registry_med = HandlerRegistry::new(Box::new(StartHandler));
     registry_med.register("start", Box::new(StartHandler));
     registry_med.register("exit", Box::new(ExitHandler));
-    registry_med.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures_med.clone() }));
+    registry_med.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures_med.clone(),
+        }),
+    );
     let engine_med = PipelineEngine::new(registry_med, Arc::new(EventEmitter::new()), local_env());
-    let config_med = RunConfig { logs_root: dir_med.path().to_path_buf(), cancel_token: None, dry_run: false, run_id: "test-run".into(), git_checkpoint: None, base_sha: None, run_branch: None, meta_branch: None };
-    engine_med.run(&graph_med, &config_med).await.expect("run med");
+    let config_med = RunConfig {
+        logs_root: dir_med.path().to_path_buf(),
+        cancel_token: None,
+        dry_run: false,
+        run_id: "test-run".into(),
+        git_checkpoint: None,
+        base_sha: None,
+        run_branch: None,
+        meta_branch: None,
+    };
+    engine_med
+        .run(&graph_med, &config_med)
+        .await
+        .expect("run med");
 
     let preambles_med = captures_med.preambles.lock().unwrap();
     let med_preamble = &preambles_med[1].1;
@@ -4580,12 +4819,18 @@ async fn fidelity_thread_id_fallback_to_previous_node_in_pipeline() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4624,12 +4869,18 @@ async fn fidelity_thread_id_from_node_class_in_pipeline() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4671,12 +4922,18 @@ async fn fidelity_edge_thread_id_override_in_pipeline() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4719,12 +4976,18 @@ async fn fidelity_full_without_explicit_thread_id_uses_previous_node() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4745,7 +5008,10 @@ async fn fidelity_full_without_explicit_thread_id_uses_previous_node() {
     );
 
     let preambles = captures.preambles.lock().unwrap();
-    assert_eq!(preambles[0].1, "", "full fidelity should produce empty preamble");
+    assert_eq!(
+        preambles[0].1, "",
+        "full fidelity should produce empty preamble"
+    );
 }
 
 #[tokio::test]
@@ -4774,12 +5040,18 @@ async fn fidelity_from_parsed_dot_pipeline() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4822,7 +5094,8 @@ async fn fidelity_checkpoint_roundtrip_preserves_fidelity() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4877,12 +5150,18 @@ async fn fidelity_node_thread_id_overrides_edge_thread_id_in_pipeline() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -4951,12 +5230,18 @@ async fn fidelity_resume_preserves_context_values_across_checkpoint() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures.clone() }));
+    registry.register(
+        "fidelity_capture",
+        Box::new(FidelityCapturingHandler {
+            captures: captures.clone(),
+        }),
+    );
 
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -5037,7 +5322,11 @@ mod real_llm {
                 .complete(&request)
                 .await
                 .map_err(|e| ArcError::Handler(e.to_string()))?;
-            Ok(CodergenResult::Text { text: response.text(), usage: None, files_touched: Vec::new() })
+            Ok(CodergenResult::Text {
+                text: response.text(),
+                usage: None,
+                files_touched: Vec::new(),
+            })
         }
     }
 
@@ -5074,7 +5363,9 @@ mod real_llm {
     #[tokio::test]
     #[ignore]
     async fn real_llm_linear_pipeline() {
-        let client = if let Some(c) = make_llm_client().await { c } else {
+        let client = if let Some(c) = make_llm_client().await {
+            c
+        } else {
             eprintln!("Skipping: ANTHROPIC_API_KEY not set");
             return;
         };
@@ -5100,28 +5391,22 @@ mod real_llm {
         graph.nodes.insert("exit".to_string(), exit);
 
         let mut plan = Node::new("plan");
-        plan.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        plan.attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         plan.attrs.insert(
             "prompt".to_string(),
-            AttrValue::String(
-                "Briefly describe quicksort in 2-3 sentences.".to_string(),
-            ),
+            AttrValue::String("Briefly describe quicksort in 2-3 sentences.".to_string()),
         );
         graph.nodes.insert("plan".to_string(), plan);
 
         let mut review = Node::new("review");
-        review.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        review
+            .attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         review.attrs.insert(
             "prompt".to_string(),
             AttrValue::String(
-                "Review the previous description and add one improvement suggestion."
-                    .to_string(),
+                "Review the previous description and add one improvement suggestion.".to_string(),
             ),
         );
         graph.nodes.insert("review".to_string(), review);
@@ -5132,8 +5417,7 @@ mod real_llm {
 
         let dir = tempfile::tempdir().unwrap();
         let backend = make_llm_backend(client);
-        let mut registry =
-            HandlerRegistry::new(Box::new(CodergenHandler::new(Some(backend))));
+        let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(backend))));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
         registry.register(
@@ -5146,12 +5430,13 @@ mod real_llm {
         let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
-            cancel_token: None, dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
         };
 
         let outcome = tokio::time::timeout(
@@ -5176,7 +5461,8 @@ mod real_llm {
 
         // Verify actual LLM responses were written
         let plan_response =
-            std::fs::read_to_string(dir.path().join("nodes").join("plan").join("response.md")).unwrap();
+            std::fs::read_to_string(dir.path().join("nodes").join("plan").join("response.md"))
+                .unwrap();
         assert!(
             !plan_response.is_empty(),
             "LLM should have generated a response"
@@ -5190,7 +5476,9 @@ mod real_llm {
     #[tokio::test]
     #[ignore]
     async fn real_llm_two_stage_pipeline() {
-        let client = if let Some(c) = make_llm_client().await { c } else {
+        let client = if let Some(c) = make_llm_client().await {
+            c
+        } else {
             eprintln!("Skipping: ANTHROPIC_API_KEY not set");
             return;
         };
@@ -5216,10 +5504,9 @@ mod real_llm {
         graph.nodes.insert("exit".to_string(), exit);
 
         let mut generate = Node::new("generate");
-        generate.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        generate
+            .attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         generate.attrs.insert(
             "prompt".to_string(),
             AttrValue::String("Write a haiku about programming.".to_string()),
@@ -5227,10 +5514,9 @@ mod real_llm {
         graph.nodes.insert("generate".to_string(), generate);
 
         let mut review = Node::new("review");
-        review.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        review
+            .attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         review.attrs.insert(
             "prompt".to_string(),
             AttrValue::String("Rate the haiku on a scale of 1-10.".to_string()),
@@ -5255,12 +5541,13 @@ mod real_llm {
         let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
-            cancel_token: None, dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
         };
 
         let outcome = tokio::time::timeout(
@@ -5284,7 +5571,9 @@ mod real_llm {
     #[tokio::test]
     #[ignore]
     async fn real_llm_human_gate_auto_approve() {
-        let client = if let Some(c) = make_llm_client().await { c } else {
+        let client = if let Some(c) = make_llm_client().await {
+            c
+        } else {
             eprintln!("Skipping: ANTHROPIC_API_KEY not set");
             return;
         };
@@ -5310,10 +5599,9 @@ mod real_llm {
         graph.nodes.insert("exit".to_string(), exit);
 
         let mut write = Node::new("write");
-        write.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        write
+            .attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         write.attrs.insert(
             "prompt".to_string(),
             AttrValue::String("Write a one-line greeting.".to_string()),
@@ -5336,10 +5624,8 @@ mod real_llm {
         graph.nodes.insert("gate".to_string(), gate);
 
         let mut ship = Node::new("ship");
-        ship.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        ship.attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         ship.attrs.insert(
             "prompt".to_string(),
             AttrValue::String("Ship the greeting.".to_string()),
@@ -5347,10 +5633,9 @@ mod real_llm {
         graph.nodes.insert("ship".to_string(), ship);
 
         let mut revise = Node::new("revise");
-        revise.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        revise
+            .attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         revise.attrs.insert(
             "prompt".to_string(),
             AttrValue::String("Revise the greeting.".to_string()),
@@ -5394,12 +5679,13 @@ mod real_llm {
         let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
-            cancel_token: None, dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
         };
 
         let outcome = tokio::time::timeout(
@@ -5462,13 +5748,14 @@ mod real_llm {
         graph.nodes.insert("exit".to_string(), exit);
 
         let mut classify = Node::new("classify");
-        classify.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        classify
+            .attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         classify.attrs.insert(
             "prompt".to_string(),
-            AttrValue::String("Reply with exactly one word: is an apple a fruit or vegetable?".to_string()),
+            AttrValue::String(
+                "Reply with exactly one word: is an apple a fruit or vegetable?".to_string(),
+            ),
         );
         classify.attrs.insert(
             "codergen_mode".to_string(),
@@ -5500,11 +5787,11 @@ mod real_llm {
             logs_root: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-        run_id: "test-run".into(),
-        git_checkpoint: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
         };
 
         let outcome = tokio::time::timeout(
@@ -5517,7 +5804,11 @@ mod real_llm {
 
         assert_eq!(outcome.status, StageStatus::Success);
 
-        let response_path = dir.path().join("nodes").join("classify").join("response.md");
+        let response_path = dir
+            .path()
+            .join("nodes")
+            .join("classify")
+            .join("response.md");
         let response = std::fs::read_to_string(&response_path).unwrap();
         assert!(!response.is_empty(), "response.md should be non-empty");
     }
@@ -5536,19 +5827,24 @@ async fn human_gate_freeform_only_routes_text() {
     let mut graph = Graph::new("FreeformOnlyTest");
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut gate = Node::new("gate");
-    gate.attrs
-        .insert("shape".to_string(), AttrValue::String("hexagon".to_string()));
+    gate.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("hexagon".to_string()),
+    );
     gate.attrs.insert(
         "type".to_string(),
         AttrValue::String("wait.human".to_string()),
@@ -5584,7 +5880,8 @@ async fn human_gate_freeform_only_routes_text() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -5592,7 +5889,10 @@ async fn human_gate_freeform_only_routes_text() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("run should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
@@ -5629,19 +5929,24 @@ async fn human_gate_freeform_with_fixed_choice_match() {
     let mut graph = Graph::new("FreeformFixedMatchTest");
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut gate = Node::new("gate");
-    gate.attrs
-        .insert("shape".to_string(), AttrValue::String("hexagon".to_string()));
+    gate.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("hexagon".to_string()),
+    );
     gate.attrs.insert(
         "type".to_string(),
         AttrValue::String("wait.human".to_string()),
@@ -5704,7 +6009,8 @@ async fn human_gate_freeform_with_fixed_choice_match() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -5712,7 +6018,10 @@ async fn human_gate_freeform_with_fixed_choice_match() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("run should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
@@ -5738,19 +6047,24 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
     let mut graph = Graph::new("FreeformFallbackTest");
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut gate = Node::new("gate");
-    gate.attrs
-        .insert("shape".to_string(), AttrValue::String("hexagon".to_string()));
+    gate.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("hexagon".to_string()),
+    );
     gate.attrs.insert(
         "type".to_string(),
         AttrValue::String("wait.human".to_string()),
@@ -5809,7 +6123,8 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -5817,7 +6132,10 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("run should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
@@ -5862,19 +6180,24 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
     let mut graph = Graph::new("AllowFreeformTest");
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut gate = Node::new("gate");
-    gate.attrs
-        .insert("shape".to_string(), AttrValue::String("hexagon".to_string()));
+    gate.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("hexagon".to_string()),
+    );
     gate.attrs.insert(
         "type".to_string(),
         AttrValue::String("wait.human".to_string()),
@@ -5927,7 +6250,8 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -5935,11 +6259,18 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("run should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let recordings = recorder.recordings();
-    assert_eq!(recordings.len(), 1, "should have recorded exactly one question");
+    assert_eq!(
+        recordings.len(),
+        1,
+        "should have recorded exactly one question"
+    );
     assert!(
         recordings[0].0.allow_freeform,
         "Question should have allow_freeform=true when a freeform edge is present"
@@ -5955,19 +6286,24 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
     let mut graph = Graph::new("NoFreeformTest");
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut gate = Node::new("gate");
-    gate.attrs
-        .insert("shape".to_string(), AttrValue::String("hexagon".to_string()));
+    gate.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("hexagon".to_string()),
+    );
     gate.attrs.insert(
         "type".to_string(),
         AttrValue::String("wait.human".to_string()),
@@ -6021,7 +6357,8 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -6029,11 +6366,18 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("run should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let recordings = recorder.recordings();
-    assert_eq!(recordings.len(), 1, "should have recorded exactly one question");
+    assert_eq!(
+        recordings.len(),
+        1,
+        "should have recorded exactly one question"
+    );
     assert!(
         !recordings[0].0.allow_freeform,
         "Question should have allow_freeform=false when no freeform edge is present"
@@ -6069,10 +6413,7 @@ fn subgraph_node_defaults_scoped_to_subgraph() {
     // Plan inherits both thread_id and timeout from subgraph defaults
     let plan = &graph.nodes["plan"];
     assert_eq!(plan.thread_id(), Some("loop-a"));
-    assert_eq!(
-        plan.timeout(),
-        Some(std::time::Duration::from_secs(900))
-    );
+    assert_eq!(plan.timeout(), Some(std::time::Duration::from_secs(900)));
 
     // Implement inherits thread_id but overrides timeout
     let implement = &graph.nodes["implement"];
@@ -6108,7 +6449,9 @@ fn subgraph_class_derived_from_label() {
 
     // Nodes inside subgraph receive derived class "loop-a"
     assert!(graph.nodes["plan"].classes.contains(&"loop-a".to_string()));
-    assert!(graph.nodes["implement"].classes.contains(&"loop-a".to_string()));
+    assert!(graph.nodes["implement"]
+        .classes
+        .contains(&"loop-a".to_string()));
 
     // Nodes outside subgraph do not get the class
     assert!(!graph.nodes["start"].classes.contains(&"loop-a".to_string()));
@@ -6129,7 +6472,9 @@ fn subgraph_class_derivation_strips_special_chars() {
     let graph = parse(input).expect("parsing should succeed");
     // "Code Review!!!" -> lowercase "code review!!!" -> spaces to hyphens "code-review!!!"
     // -> strip non-alphanumeric except hyphens -> "code-review"
-    assert!(graph.nodes["reviewer"].classes.contains(&"code-review".to_string()));
+    assert!(graph.nodes["reviewer"]
+        .classes
+        .contains(&"code-review".to_string()));
 }
 
 #[test]
@@ -6151,17 +6496,11 @@ fn subgraph_scoping_does_not_leak_to_outer_scope() {
 
     // Inner node gets the subgraph-scoped timeout of 900s
     let inner = &graph.nodes["inner_node"];
-    assert_eq!(
-        inner.timeout(),
-        Some(std::time::Duration::from_secs(900))
-    );
+    assert_eq!(inner.timeout(), Some(std::time::Duration::from_secs(900)));
 
     // Outer node gets the graph-level default of 300s, not the subgraph's 900s
     let outer = &graph.nodes["outer_node"];
-    assert_eq!(
-        outer.timeout(),
-        Some(std::time::Duration::from_secs(300))
-    );
+    assert_eq!(outer.timeout(), Some(std::time::Duration::from_secs(300)));
 }
 
 #[test]
@@ -6185,19 +6524,13 @@ fn subgraph_global_defaults_plus_subgraph_defaults() {
     let step = &graph.nodes["step"];
     assert_eq!(step.shape(), "box");
     assert_eq!(step.thread_id(), Some("loop-thread"));
-    assert_eq!(
-        step.timeout(),
-        Some(std::time::Duration::from_secs(300))
-    );
+    assert_eq!(step.timeout(), Some(std::time::Duration::from_secs(300)));
 
     // Plain should have the global defaults but no thread_id
     let plain = &graph.nodes["plain"];
     assert_eq!(plain.shape(), "box");
     assert_eq!(plain.thread_id(), None);
-    assert_eq!(
-        plain.timeout(),
-        Some(std::time::Duration::from_secs(300))
-    );
+    assert_eq!(plain.timeout(), Some(std::time::Duration::from_secs(300)));
 }
 
 #[test]
@@ -6237,10 +6570,7 @@ fn subgraph_without_label_no_class_derived() {
     let worker = &graph.nodes["worker"];
     assert!(worker.classes.is_empty());
     // But the default should still apply
-    assert_eq!(
-        worker.timeout(),
-        Some(std::time::Duration::from_secs(600))
-    );
+    assert_eq!(worker.timeout(), Some(std::time::Duration::from_secs(600)));
 }
 
 // ---------------------------------------------------------------------------
@@ -6261,10 +6591,15 @@ async fn tool_hooks_pre_success_allows_pipeline_to_proceed() {
     validate_or_raise(&graph, &[]).expect("validation should pass");
 
     let dir = tempfile::tempdir().unwrap();
-    let engine = PipelineEngine::new(make_linear_registry(), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_linear_registry(),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -6272,7 +6607,10 @@ async fn tool_hooks_pre_success_allows_pipeline_to_proceed() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("run should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     // The work node should have executed normally
@@ -6301,10 +6639,15 @@ async fn tool_hooks_pre_failure_skips_tool_call() {
     validate_or_raise(&graph, &[]).expect("validation should pass");
 
     let dir = tempfile::tempdir().unwrap();
-    let engine = PipelineEngine::new(make_linear_registry(), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_linear_registry(),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -6312,7 +6655,10 @@ async fn tool_hooks_pre_failure_skips_tool_call() {
         meta_branch: None,
     };
 
-    engine.run(&graph, &config).await.expect("run should complete");
+    engine
+        .run(&graph, &config)
+        .await
+        .expect("run should complete");
 
     // The pipeline should still complete (skipped is not a fatal status),
     // but the work node's handler returns Skipped when pre-hook fails.
@@ -6344,10 +6690,15 @@ async fn tool_hooks_post_success_does_not_affect_outcome() {
     validate_or_raise(&graph, &[]).expect("validation should pass");
 
     let dir = tempfile::tempdir().unwrap();
-    let engine = PipelineEngine::new(make_linear_registry(), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_linear_registry(),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -6355,7 +6706,10 @@ async fn tool_hooks_post_success_does_not_affect_outcome() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("run should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let stage_dir = dir.path().join("nodes").join("work");
@@ -6379,10 +6733,15 @@ async fn tool_hooks_post_failure_does_not_block_pipeline() {
     validate_or_raise(&graph, &[]).expect("validation should pass");
 
     let dir = tempfile::tempdir().unwrap();
-    let engine = PipelineEngine::new(make_linear_registry(), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_linear_registry(),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -6390,7 +6749,10 @@ async fn tool_hooks_post_failure_does_not_block_pipeline() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("run should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("run should succeed");
     // Post-hook failure should not block the pipeline (spec 9.7)
     assert_eq!(outcome.status, StageStatus::Success);
 
@@ -6416,10 +6778,15 @@ async fn tool_hooks_graph_level_applies_to_all_nodes() {
     validate_or_raise(&graph, &[]).expect("validation should pass");
 
     let dir = tempfile::tempdir().unwrap();
-    let engine = PipelineEngine::new(make_linear_registry(), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_linear_registry(),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -6427,16 +6794,27 @@ async fn tool_hooks_graph_level_applies_to_all_nodes() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("run should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Both steps should have executed since graph-level pre-hook exits 0
     assert!(
-        dir.path().join("nodes").join("step1").join("response.md").exists(),
+        dir.path()
+            .join("nodes")
+            .join("step1")
+            .join("response.md")
+            .exists(),
         "step1 should execute with graph-level pre-hook success"
     );
     assert!(
-        dir.path().join("nodes").join("step2").join("response.md").exists(),
+        dir.path()
+            .join("nodes")
+            .join("step2")
+            .join("response.md")
+            .exists(),
         "step2 should execute with graph-level pre-hook success"
     );
 }
@@ -6456,10 +6834,15 @@ async fn tool_hooks_node_level_overrides_graph_level() {
     validate_or_raise(&graph, &[]).expect("validation should pass");
 
     let dir = tempfile::tempdir().unwrap();
-    let engine = PipelineEngine::new(make_linear_registry(), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_linear_registry(),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -6467,18 +6850,29 @@ async fn tool_hooks_node_level_overrides_graph_level() {
         meta_branch: None,
     };
 
-    let _outcome = engine.run(&graph, &config).await.expect("run should complete");
+    let _outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("run should complete");
 
     // step1 has node-level pre-hook "exit 1" which overrides graph-level "exit 0"
     // So step1's tool call should be skipped (no response.md)
     assert!(
-        !dir.path().join("nodes").join("step1").join("response.md").exists(),
+        !dir.path()
+            .join("nodes")
+            .join("step1")
+            .join("response.md")
+            .exists(),
         "step1 should be skipped because node-level pre-hook overrides graph-level"
     );
 
     // step2 inherits graph-level "exit 0", so it should execute normally
     assert!(
-        dir.path().join("nodes").join("step2").join("response.md").exists(),
+        dir.path()
+            .join("nodes")
+            .join("step2")
+            .join("response.md")
+            .exists(),
         "step2 should execute with inherited graph-level pre-hook"
     );
 }
@@ -6488,10 +6882,7 @@ async fn tool_hooks_pre_receives_node_id_env_var() {
     // Use a pre-hook that writes the ARC_NODE_ID env var to a file
     let dir = tempfile::tempdir().unwrap();
     let marker_path = dir.path().join("node_id.txt");
-    let hook_cmd = format!(
-        "echo $ARC_NODE_ID > {}",
-        marker_path.display()
-    );
+    let hook_cmd = format!("echo $ARC_NODE_ID > {}", marker_path.display());
 
     let input = format!(
         r#"digraph HookTest {{
@@ -6506,10 +6897,15 @@ async fn tool_hooks_pre_receives_node_id_env_var() {
     let graph = parse(&input).expect("parse should succeed");
     validate_or_raise(&graph, &[]).expect("validation should pass");
 
-    let engine = PipelineEngine::new(make_linear_registry(), Arc::new(EventEmitter::new()), local_env());
+    let engine = PipelineEngine::new(
+        make_linear_registry(),
+        Arc::new(EventEmitter::new()),
+        local_env(),
+    );
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -6517,10 +6913,12 @@ async fn tool_hooks_pre_receives_node_id_env_var() {
         meta_branch: None,
     };
 
-    engine.run(&graph, &config).await.expect("run should succeed");
+    engine
+        .run(&graph, &config)
+        .await
+        .expect("run should succeed");
 
-    let written = std::fs::read_to_string(&marker_path)
-        .expect("marker file should exist");
+    let written = std::fs::read_to_string(&marker_path).expect("marker file should exist");
     assert_eq!(
         written.trim(),
         "my_step",
@@ -6599,14 +6997,16 @@ async fn arc_e2e_with_real_llm() {
             Provider::Anthropic,
             0,
             &TEST_STYLES,
-        )) as Box<dyn arc_workflows::handler::codergen::CodergenBackend>)
+        ))
+            as Box<dyn arc_workflows::handler::codergen::CodergenBackend>)
     });
 
     let logs_dir = tempfile::tempdir().unwrap();
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: logs_dir.path().to_path_buf(),
-        cancel_token: None, dry_run: false,
+        cancel_token: None,
+        dry_run: false,
         run_id: "test-run".into(),
         git_checkpoint: None,
         base_sha: None,
@@ -6614,14 +7014,20 @@ async fn arc_e2e_with_real_llm() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("run should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("run should succeed");
 
     // 1. Pipeline completed successfully
     assert_eq!(outcome.status, StageStatus::Success);
 
     // 2. Artifacts exist
     let work_dir = logs_dir.path().join("nodes").join("work");
-    assert!(work_dir.join("prompt.md").exists(), "prompt.md should exist");
+    assert!(
+        work_dir.join("prompt.md").exists(),
+        "prompt.md should exist"
+    );
     assert!(
         work_dir.join("response.md").exists(),
         "response.md should exist"
@@ -6632,8 +7038,8 @@ async fn arc_e2e_with_real_llm() {
     );
 
     // 3. Goal gate: check checkpoint node outcomes
-    let checkpoint = Checkpoint::load(&logs_dir.path().join("checkpoint.json"))
-        .expect("checkpoint should load");
+    let checkpoint =
+        Checkpoint::load(&logs_dir.path().join("checkpoint.json")).expect("checkpoint should load");
     let work_outcome = checkpoint
         .node_outcomes
         .get("work")
@@ -6671,16 +7077,25 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
     );
 
     let mut start = Node::new("start");
-    start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     // Script node that produces test output via stdout
     let mut run_tests = Node::new("run_tests");
-    run_tests.attrs.insert("shape".to_string(), AttrValue::String("parallelogram".to_string()));
+    run_tests.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("parallelogram".to_string()),
+    );
     run_tests.attrs.insert(
         "script".to_string(),
         AttrValue::String("echo '10 passed, 0 failed'".to_string()),
@@ -6689,7 +7104,9 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
 
     // Codergen node that should receive the preamble
     let mut report = Node::new("report");
-    report.attrs.insert("shape".to_string(), AttrValue::String("box".to_string()));
+    report
+        .attrs
+        .insert("shape".to_string(), AttrValue::String("box".to_string()));
     report.attrs.insert(
         "prompt".to_string(),
         AttrValue::String("Summarize the test results".to_string()),
@@ -6722,7 +7139,10 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
         meta_branch: None,
     };
 
-    engine.run(&graph, &config).await.expect("pipeline should succeed");
+    engine
+        .run(&graph, &config)
+        .await
+        .expect("pipeline should succeed");
 
     std::fs::read_to_string(dir.path().join("nodes").join("report").join("prompt.md"))
         .expect("report/prompt.md should exist")
@@ -6733,11 +7153,26 @@ async fn fidelity_prompt_compact() {
     let prompt = run_fidelity_prompt_pipeline("compact").await;
 
     // Preamble should contain goal, completed stages with handler details, and context
-    assert!(prompt.contains("Validate the build"), "compact: should contain goal");
-    assert!(prompt.contains("## Completed stages"), "compact: should list completed stages");
-    assert!(prompt.contains("**run_tests**"), "compact: should mention run_tests node in bold");
-    assert!(prompt.contains("Script:"), "compact: should show script sub-item for run_tests");
-    assert!(prompt.contains("Stdout:"), "compact: should show stdout sub-item for run_tests");
+    assert!(
+        prompt.contains("Validate the build"),
+        "compact: should contain goal"
+    );
+    assert!(
+        prompt.contains("## Completed stages"),
+        "compact: should list completed stages"
+    );
+    assert!(
+        prompt.contains("**run_tests**"),
+        "compact: should mention run_tests node in bold"
+    );
+    assert!(
+        prompt.contains("Script:"),
+        "compact: should show script sub-item for run_tests"
+    );
+    assert!(
+        prompt.contains("Stdout:"),
+        "compact: should show stdout sub-item for run_tests"
+    );
 
     // Original prompt at the end
     assert!(
@@ -6751,8 +7186,14 @@ async fn fidelity_prompt_truncate() {
     let prompt = run_fidelity_prompt_pipeline("truncate").await;
 
     // Truncate is minimal: goal + run ID only, no completed stages
-    assert!(prompt.contains("Validate the build"), "truncate: should contain goal");
-    assert!(!prompt.contains("Completed stages:"), "truncate: should NOT list completed stages");
+    assert!(
+        prompt.contains("Validate the build"),
+        "truncate: should contain goal"
+    );
+    assert!(
+        !prompt.contains("Completed stages:"),
+        "truncate: should NOT list completed stages"
+    );
 
     // Original prompt at the end
     assert!(
@@ -6766,8 +7207,14 @@ async fn fidelity_prompt_summary_low() {
     let prompt = run_fidelity_prompt_pipeline("summary:low").await;
 
     // summary:low includes goal, stage count, recent stages, but NOT context values
-    assert!(prompt.contains("Validate the build"), "summary:low: should contain goal");
-    assert!(!prompt.contains("Context values:"), "summary:low: should NOT include context values");
+    assert!(
+        prompt.contains("Validate the build"),
+        "summary:low: should contain goal"
+    );
+    assert!(
+        !prompt.contains("Context values:"),
+        "summary:low: should NOT include context values"
+    );
 
     // Original prompt at the end
     assert!(
@@ -6781,10 +7228,22 @@ async fn fidelity_prompt_summary_medium() {
     let prompt = run_fidelity_prompt_pipeline("summary:medium").await;
 
     // summary:medium includes goal, stages, and compact handler details
-    assert!(prompt.contains("Validate the build"), "summary:medium: should contain goal");
-    assert!(prompt.contains("run_tests"), "summary:medium: should mention run_tests");
-    assert!(prompt.contains("Script:"), "summary:medium: should show script sub-item for run_tests");
-    assert!(prompt.contains("Stdout:"), "summary:medium: should show stdout sub-item for run_tests");
+    assert!(
+        prompt.contains("Validate the build"),
+        "summary:medium: should contain goal"
+    );
+    assert!(
+        prompt.contains("run_tests"),
+        "summary:medium: should mention run_tests"
+    );
+    assert!(
+        prompt.contains("Script:"),
+        "summary:medium: should show script sub-item for run_tests"
+    );
+    assert!(
+        prompt.contains("Stdout:"),
+        "summary:medium: should show stdout sub-item for run_tests"
+    );
 
     // Original prompt at the end
     assert!(
@@ -6798,10 +7257,22 @@ async fn fidelity_prompt_summary_high() {
     let prompt = run_fidelity_prompt_pipeline("summary:high").await;
 
     // summary:high includes goal, all stages as ## Stage headings
-    assert!(prompt.contains("Validate the build"), "summary:high: should contain goal");
-    assert!(prompt.contains("## Stage: run_tests"), "summary:high: should have stage heading for run_tests");
-    assert!(prompt.contains("## Stage: start"), "summary:high: should have stage heading for start");
-    assert!(prompt.contains("Pipeline progress:"), "summary:high: should show pipeline progress");
+    assert!(
+        prompt.contains("Validate the build"),
+        "summary:high: should contain goal"
+    );
+    assert!(
+        prompt.contains("## Stage: run_tests"),
+        "summary:high: should have stage heading for run_tests"
+    );
+    assert!(
+        prompt.contains("## Stage: start"),
+        "summary:high: should have stage heading for start"
+    );
+    assert!(
+        prompt.contains("Pipeline progress:"),
+        "summary:high: should show pipeline progress"
+    );
 
     // Original prompt at the end
     assert!(
@@ -6840,9 +7311,7 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
         "label".to_string(),
         AttrValue::String("Big Output".to_string()),
     );
-    graph
-        .nodes
-        .insert("big_output".to_string(), big_output);
+    graph.nodes.insert("big_output".to_string(), big_output);
 
     graph.edges.push(Edge::new("start", "big_output"));
     graph.edges.push(Edge::new("big_output", "exit"));
@@ -6873,8 +7342,9 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // The checkpoint context should contain an artifact pointer, not the full value
-    let checkpoint = arc_workflows::checkpoint::Checkpoint::load(&dir.path().join("checkpoint.json"))
-        .expect("checkpoint should load");
+    let checkpoint =
+        arc_workflows::checkpoint::Checkpoint::load(&dir.path().join("checkpoint.json"))
+            .expect("checkpoint should load");
     let pointer_value = checkpoint
         .context_values
         .get("response.big_output")
@@ -6896,12 +7366,16 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
     );
 
     // The artifact file should contain the original large value
-    let artifact_content = std::fs::read_to_string(&artifact_file)
-        .expect("should read artifact file");
+    let artifact_content =
+        std::fs::read_to_string(&artifact_file).expect("should read artifact file");
     let artifact_value: serde_json::Value =
         serde_json::from_str(&artifact_content).expect("should parse artifact JSON");
     let artifact_str = artifact_value.as_str().expect("should be a string");
-    assert_eq!(artifact_str.len(), 150 * 1024, "artifact should contain the original 150KB value");
+    assert_eq!(
+        artifact_str.len(),
+        150 * 1024,
+        "artifact should contain the original 150KB value"
+    );
 
     // PipelineCompleted event should report artifact_count > 0
     let evts = events.lock().unwrap();
@@ -6939,7 +7413,12 @@ impl RemoteMockEnv {
 
 #[async_trait::async_trait]
 impl arc_agent::ExecutionEnvironment for RemoteMockEnv {
-    async fn read_file(&self, _path: &str, _offset: Option<usize>, _limit: Option<usize>) -> std::result::Result<String, String> {
+    async fn read_file(
+        &self,
+        _path: &str,
+        _offset: Option<usize>,
+        _limit: Option<usize>,
+    ) -> std::result::Result<String, String> {
         Err("not implemented".to_string())
     }
 
@@ -6959,7 +7438,11 @@ impl arc_agent::ExecutionEnvironment for RemoteMockEnv {
         Ok(false)
     }
 
-    async fn list_directory(&self, _path: &str, _depth: Option<usize>) -> std::result::Result<Vec<arc_agent::DirEntry>, String> {
+    async fn list_directory(
+        &self,
+        _path: &str,
+        _depth: Option<usize>,
+    ) -> std::result::Result<Vec<arc_agent::DirEntry>, String> {
         Err("not implemented".to_string())
     }
 
@@ -6974,11 +7457,20 @@ impl arc_agent::ExecutionEnvironment for RemoteMockEnv {
         Err("not implemented".to_string())
     }
 
-    async fn grep(&self, _pattern: &str, _path: &str, _options: &arc_agent::GrepOptions) -> std::result::Result<Vec<String>, String> {
+    async fn grep(
+        &self,
+        _pattern: &str,
+        _path: &str,
+        _options: &arc_agent::GrepOptions,
+    ) -> std::result::Result<Vec<String>, String> {
         Err("not implemented".to_string())
     }
 
-    async fn glob(&self, _pattern: &str, _path: Option<&str>) -> std::result::Result<Vec<String>, String> {
+    async fn glob(
+        &self,
+        _pattern: &str,
+        _path: Option<&str>,
+    ) -> std::result::Result<Vec<String>, String> {
         Err("not implemented".to_string())
     }
 
@@ -7049,8 +7541,8 @@ async fn artifact_pointers_rewritten_for_remote_execution_env() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // The checkpoint context should contain a pointer rewritten for the remote env
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json"))
-        .expect("checkpoint should load");
+    let checkpoint =
+        Checkpoint::load(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
     let pointer_value = checkpoint
         .context_values
         .get("response.big_output")
@@ -7095,7 +7587,9 @@ async fn node_dir_uses_visit_count_on_revisit() {
             _logs_root: &Path,
             _services: &arc_workflows::handler::EngineServices,
         ) -> Result<Outcome, arc_workflows::error::ArcError> {
-            let n = self.call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let n = self
+                .call_count
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if n == 0 {
                 Ok(Outcome::fail("first attempt fails"))
             } else {
@@ -7111,16 +7605,26 @@ async fn node_dir_uses_visit_count_on_revisit() {
     let mut graph = Graph::new("VisitCountTest");
 
     let mut start = Node::new("start");
-    start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut gated_work = Node::new("gated_work");
-    gated_work.attrs.insert("goal_gate".to_string(), AttrValue::Boolean(true));
-    gated_work.attrs.insert("max_retries".to_string(), AttrValue::Integer(0));
+    gated_work
+        .attrs
+        .insert("goal_gate".to_string(), AttrValue::Boolean(true));
+    gated_work
+        .attrs
+        .insert("max_retries".to_string(), AttrValue::Integer(0));
     gated_work.attrs.insert(
         "retry_target".to_string(),
         AttrValue::String("start".to_string()),
@@ -7157,24 +7661,41 @@ async fn node_dir_uses_visit_count_on_revisit() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("pipeline should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     // First visit: nodes/gated_work/status.json
-    let first = dir.path().join("nodes").join("gated_work").join("status.json");
-    assert!(first.exists(), "first visit directory should exist at {}", first.display());
+    let first = dir
+        .path()
+        .join("nodes")
+        .join("gated_work")
+        .join("status.json");
+    assert!(
+        first.exists(),
+        "first visit directory should exist at {}",
+        first.display()
+    );
 
     // Second visit: nodes/gated_work-attempt_2/status.json
-    let second = dir.path().join("nodes").join("gated_work-attempt_2").join("status.json");
-    assert!(second.exists(), "second visit directory should exist at {}", second.display());
+    let second = dir
+        .path()
+        .join("nodes")
+        .join("gated_work-attempt_2")
+        .join("status.json");
+    assert!(
+        second.exists(),
+        "second visit directory should exist at {}",
+        second.display()
+    );
 
     // Verify distinct content (first = fail, second = success)
-    let first_json: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&first).unwrap()
-    ).unwrap();
-    let second_json: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&second).unwrap()
-    ).unwrap();
+    let first_json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&first).unwrap()).unwrap();
+    let second_json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&second).unwrap()).unwrap();
     assert_eq!(first_json["status"], "fail");
     assert_eq!(second_json["status"], "success");
 }
@@ -7228,12 +7749,20 @@ impl CliTestEnv {
 
 #[async_trait::async_trait]
 impl arc_agent::ExecutionEnvironment for CliTestEnv {
-    async fn read_file(&self, _path: &str, _offset: Option<usize>, _limit: Option<usize>) -> Result<String, String> {
+    async fn read_file(
+        &self,
+        _path: &str,
+        _offset: Option<usize>,
+        _limit: Option<usize>,
+    ) -> Result<String, String> {
         Ok(String::new())
     }
 
     async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
-        self.written_files.lock().unwrap().push((path.to_string(), content.to_string()));
+        self.written_files
+            .lock()
+            .unwrap()
+            .push((path.to_string(), content.to_string()));
         Ok(())
     }
 
@@ -7245,7 +7774,11 @@ impl arc_agent::ExecutionEnvironment for CliTestEnv {
         Ok(false)
     }
 
-    async fn list_directory(&self, _path: &str, _depth: Option<usize>) -> Result<Vec<arc_agent::DirEntry>, String> {
+    async fn list_directory(
+        &self,
+        _path: &str,
+        _depth: Option<usize>,
+    ) -> Result<Vec<arc_agent::DirEntry>, String> {
         Ok(vec![])
     }
 
@@ -7261,7 +7794,9 @@ impl arc_agent::ExecutionEnvironment for CliTestEnv {
 
         // git diff calls: first pair returns empty (before), second pair returns configured files
         if command.starts_with("git diff") || command.starts_with("git ls-files") {
-            let call_num = self.git_diff_call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let call_num = self
+                .git_diff_call_count
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             // Calls 0,1 = before snapshot (empty), calls 2,3 = after snapshot
             let stdout = if call_num >= 2 && command.starts_with("git diff") {
                 self.git_diff_after.clone()
@@ -7287,7 +7822,12 @@ impl arc_agent::ExecutionEnvironment for CliTestEnv {
         })
     }
 
-    async fn grep(&self, _pattern: &str, _path: &str, _options: &arc_agent::GrepOptions) -> Result<Vec<String>, String> {
+    async fn grep(
+        &self,
+        _pattern: &str,
+        _path: &str,
+        _options: &arc_agent::GrepOptions,
+    ) -> Result<Vec<String>, String> {
         Ok(vec![])
     }
 
@@ -7331,26 +7871,51 @@ async fn cli_backend_run_writes_prompt_and_calls_exec() {
     let dir = tempfile::tempdir().unwrap();
 
     let result = backend
-        .run(&node, "Fix the authentication bug", &context, None, &emitter, dir.path(), &env)
+        .run(
+            &node,
+            "Fix the authentication bug",
+            &context,
+            None,
+            &emitter,
+            dir.path(),
+            &env,
+        )
         .await
         .expect("CLI backend should succeed");
 
     // Verify prompt was written
     let written = test_env.recorded_written_files();
-    assert_eq!(written.len(), 1, "should write exactly one file (the prompt)");
+    assert_eq!(
+        written.len(),
+        1,
+        "should write exactly one file (the prompt)"
+    );
     assert_eq!(written[0].0, "/tmp/arc_cli_prompt.txt");
     assert_eq!(written[0].1, "Fix the authentication bug");
 
     // Verify the CLI command was called
     let commands = test_env.recorded_commands();
-    let cli_cmd = commands.iter().find(|c| c.contains("claude")).expect("should call claude CLI");
+    let cli_cmd = commands
+        .iter()
+        .find(|c| c.contains("claude"))
+        .expect("should call claude CLI");
     assert!(cli_cmd.contains("-p"), "should use pipe mode");
-    assert!(cli_cmd.contains("claude-opus-4-6"), "should use correct model");
-    assert!(cli_cmd.contains("/tmp/arc_cli_prompt.txt"), "should reference prompt file");
+    assert!(
+        cli_cmd.contains("claude-opus-4-6"),
+        "should use correct model"
+    );
+    assert!(
+        cli_cmd.contains("/tmp/arc_cli_prompt.txt"),
+        "should reference prompt file"
+    );
 
     // Verify parsed response
     match result {
-        CodergenResult::Text { text, usage, files_touched } => {
+        CodergenResult::Text {
+            text,
+            usage,
+            files_touched,
+        } => {
             assert_eq!(text, "I fixed the bug.");
             let usage = usage.expect("should have usage");
             assert_eq!(usage.input_tokens, 500);
@@ -7364,10 +7929,8 @@ async fn cli_backend_run_writes_prompt_and_calls_exec() {
 #[tokio::test]
 async fn cli_backend_run_detects_changed_files() {
     let claude_output = r#"{"type":"result","result":"Created new file.","usage":{"input_tokens":100,"output_tokens":50}}"#;
-    let env: Arc<dyn arc_agent::ExecutionEnvironment> = Arc::new(
-        CliTestEnv::new(claude_output)
-            .with_git_diff_after("src/main.rs\nsrc/lib.rs\n"),
-    );
+    let env: Arc<dyn arc_agent::ExecutionEnvironment> =
+        Arc::new(CliTestEnv::new(claude_output).with_git_diff_after("src/main.rs\nsrc/lib.rs\n"));
     let backend = CliBackend::new("claude-opus-4-6".into(), Provider::Anthropic);
 
     let node = Node::new("implement");
@@ -7376,7 +7939,15 @@ async fn cli_backend_run_detects_changed_files() {
     let dir = tempfile::tempdir().unwrap();
 
     let result = backend
-        .run(&node, "Add a new feature", &context, None, &emitter, dir.path(), &env)
+        .run(
+            &node,
+            "Add a new feature",
+            &context,
+            None,
+            &emitter,
+            dir.path(),
+            &env,
+        )
         .await
         .expect("CLI backend should succeed");
 
@@ -7401,15 +7972,29 @@ async fn cli_backend_run_with_codex_provider() {
     let dir = tempfile::tempdir().unwrap();
 
     let result = backend
-        .run(&node, "Build the API", &context, None, &emitter, dir.path(), &env)
+        .run(
+            &node,
+            "Build the API",
+            &context,
+            None,
+            &emitter,
+            dir.path(),
+            &env,
+        )
         .await
         .expect("CLI backend should succeed");
 
     // Verify codex command was called
     let commands = test_env.recorded_commands();
-    let cli_cmd = commands.iter().find(|c| c.contains("codex")).expect("should call codex CLI");
+    let cli_cmd = commands
+        .iter()
+        .find(|c| c.contains("codex"))
+        .expect("should call codex CLI");
     assert!(cli_cmd.contains("exec --json"), "should use exec mode");
-    assert!(cli_cmd.contains("gpt-5.3-codex"), "should use correct model");
+    assert!(
+        cli_cmd.contains("gpt-5.3-codex"),
+        "should use correct model"
+    );
 
     match result {
         CodergenResult::Text { text, usage, .. } => {
@@ -7430,24 +8015,81 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
     struct FailingCliEnv;
     #[async_trait::async_trait]
     impl arc_agent::ExecutionEnvironment for FailingCliEnv {
-        async fn read_file(&self, _: &str, _: Option<usize>, _: Option<usize>) -> Result<String, String> { Ok(String::new()) }
-        async fn write_file(&self, _: &str, _: &str) -> Result<(), String> { Ok(()) }
-        async fn delete_file(&self, _: &str) -> Result<(), String> { Ok(()) }
-        async fn file_exists(&self, _: &str) -> Result<bool, String> { Ok(false) }
-        async fn list_directory(&self, _: &str, _: Option<usize>) -> Result<Vec<arc_agent::DirEntry>, String> { Ok(vec![]) }
-        async fn exec_command(&self, command: &str, _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>, _: Option<tokio_util::sync::CancellationToken>) -> Result<arc_agent::ExecResult, String> {
-            if command.starts_with("git") {
-                return Ok(arc_agent::ExecResult { stdout: String::new(), stderr: String::new(), exit_code: 0, timed_out: false, duration_ms: 0 });
-            }
-            Ok(arc_agent::ExecResult { stdout: String::new(), stderr: "command not found: claude".into(), exit_code: 127, timed_out: false, duration_ms: 0 })
+        async fn read_file(
+            &self,
+            _: &str,
+            _: Option<usize>,
+            _: Option<usize>,
+        ) -> Result<String, String> {
+            Ok(String::new())
         }
-        async fn grep(&self, _: &str, _: &str, _: &arc_agent::GrepOptions) -> Result<Vec<String>, String> { Ok(vec![]) }
-        async fn glob(&self, _: &str, _: Option<&str>) -> Result<Vec<String>, String> { Ok(vec![]) }
-        async fn initialize(&self) -> Result<(), String> { Ok(()) }
-        async fn cleanup(&self) -> Result<(), String> { Ok(()) }
-        fn working_directory(&self) -> &str { "/tmp" }
-        fn platform(&self) -> &str { "darwin" }
-        fn os_version(&self) -> String { "Darwin 24.0.0".into() }
+        async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn delete_file(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn file_exists(&self, _: &str) -> Result<bool, String> {
+            Ok(false)
+        }
+        async fn list_directory(
+            &self,
+            _: &str,
+            _: Option<usize>,
+        ) -> Result<Vec<arc_agent::DirEntry>, String> {
+            Ok(vec![])
+        }
+        async fn exec_command(
+            &self,
+            command: &str,
+            _: u64,
+            _: Option<&str>,
+            _: Option<&std::collections::HashMap<String, String>>,
+            _: Option<tokio_util::sync::CancellationToken>,
+        ) -> Result<arc_agent::ExecResult, String> {
+            if command.starts_with("git") {
+                return Ok(arc_agent::ExecResult {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    timed_out: false,
+                    duration_ms: 0,
+                });
+            }
+            Ok(arc_agent::ExecResult {
+                stdout: String::new(),
+                stderr: "command not found: claude".into(),
+                exit_code: 127,
+                timed_out: false,
+                duration_ms: 0,
+            })
+        }
+        async fn grep(
+            &self,
+            _: &str,
+            _: &str,
+            _: &arc_agent::GrepOptions,
+        ) -> Result<Vec<String>, String> {
+            Ok(vec![])
+        }
+        async fn glob(&self, _: &str, _: Option<&str>) -> Result<Vec<String>, String> {
+            Ok(vec![])
+        }
+        async fn initialize(&self) -> Result<(), String> {
+            Ok(())
+        }
+        async fn cleanup(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn working_directory(&self) -> &str {
+            "/tmp"
+        }
+        fn platform(&self) -> &str {
+            "darwin"
+        }
+        fn os_version(&self) -> String {
+            "Darwin 24.0.0".into()
+        }
     }
 
     let failing_env: Arc<dyn arc_agent::ExecutionEnvironment> = Arc::new(FailingCliEnv);
@@ -7460,7 +8102,15 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
     let _ = env; // unused, just for the above struct
 
     let result = backend
-        .run(&node, "do something", &context, None, &emitter, dir.path(), &failing_env)
+        .run(
+            &node,
+            "do something",
+            &context,
+            None,
+            &emitter,
+            dir.path(),
+            &failing_env,
+        )
         .await;
 
     let err = match result {
@@ -7468,13 +8118,20 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
         Ok(_) => panic!("should fail on non-zero exit"),
     };
 
-    assert!(err.to_string().contains("exited with code 127"), "error: {err}");
-    assert!(err.to_string().contains("command not found"), "error: {err}");
+    assert!(
+        err.to_string().contains("exited with code 127"),
+        "error: {err}"
+    );
+    assert!(
+        err.to_string().contains("command not found"),
+        "error: {err}"
+    );
 }
 
 #[tokio::test]
 async fn cli_backend_run_fails_on_unparseable_output() {
-    let env: Arc<dyn arc_agent::ExecutionEnvironment> = Arc::new(CliTestEnv::new("this is not json at all"));
+    let env: Arc<dyn arc_agent::ExecutionEnvironment> =
+        Arc::new(CliTestEnv::new("this is not json at all"));
     let backend = CliBackend::new("claude-opus-4-6".into(), Provider::Anthropic);
 
     let node = Node::new("step");
@@ -7483,7 +8140,15 @@ async fn cli_backend_run_fails_on_unparseable_output() {
     let dir = tempfile::tempdir().unwrap();
 
     let result = backend
-        .run(&node, "do something", &context, None, &emitter, dir.path(), &env)
+        .run(
+            &node,
+            "do something",
+            &context,
+            None,
+            &emitter,
+            dir.path(),
+            &env,
+        )
         .await;
 
     let err = match result {
@@ -7491,18 +8156,25 @@ async fn cli_backend_run_fails_on_unparseable_output() {
         Ok(_) => panic!("should fail on unparseable output"),
     };
 
-    assert!(err.to_string().contains("Failed to parse CLI output"), "error: {err}");
+    assert!(
+        err.to_string().contains("Failed to parse CLI output"),
+        "error: {err}"
+    );
 }
 
 #[tokio::test]
 async fn cli_backend_run_uses_node_model_override() {
-    let claude_output = r#"{"type":"result","result":"ok","usage":{"input_tokens":10,"output_tokens":5}}"#;
+    let claude_output =
+        r#"{"type":"result","result":"ok","usage":{"input_tokens":10,"output_tokens":5}}"#;
     let test_env = Arc::new(CliTestEnv::new(claude_output));
     let env: Arc<dyn arc_agent::ExecutionEnvironment> = test_env.clone();
     let backend = CliBackend::new("default-model".into(), Provider::Anthropic);
 
     let mut node = Node::new("step");
-    node.attrs.insert("llm_model".to_string(), AttrValue::String("claude-sonnet-4-5".to_string()));
+    node.attrs.insert(
+        "llm_model".to_string(),
+        AttrValue::String("claude-sonnet-4-5".to_string()),
+    );
 
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::new());
@@ -7515,8 +8187,14 @@ async fn cli_backend_run_uses_node_model_override() {
 
     let commands = test_env.recorded_commands();
     let cli_cmd = commands.iter().find(|c| c.contains("claude")).unwrap();
-    assert!(cli_cmd.contains("claude-sonnet-4-5"), "should use node's model override, not default: {cli_cmd}");
-    assert!(!cli_cmd.contains("default-model"), "should NOT use default model: {cli_cmd}");
+    assert!(
+        cli_cmd.contains("claude-sonnet-4-5"),
+        "should use node's model override, not default: {cli_cmd}"
+    );
+    assert!(
+        !cli_cmd.contains("default-model"),
+        "should NOT use default model: {cli_cmd}"
+    );
 }
 
 #[tokio::test]
@@ -7527,8 +8205,14 @@ async fn cli_backend_run_uses_node_provider_override() {
     let backend = CliBackend::new("default-model".into(), Provider::Anthropic);
 
     let mut node = Node::new("step");
-    node.attrs.insert("llm_provider".to_string(), AttrValue::String("openai".to_string()));
-    node.attrs.insert("llm_model".to_string(), AttrValue::String("gpt-5.3-codex".to_string()));
+    node.attrs.insert(
+        "llm_provider".to_string(),
+        AttrValue::String("openai".to_string()),
+    );
+    node.attrs.insert(
+        "llm_model".to_string(),
+        AttrValue::String("gpt-5.3-codex".to_string()),
+    );
 
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::new());
@@ -7540,13 +8224,17 @@ async fn cli_backend_run_uses_node_provider_override() {
         .expect("should succeed");
 
     let commands = test_env.recorded_commands();
-    let cli_cmd = commands.iter().find(|c| c.contains("codex")).expect("should call codex based on provider override");
+    let cli_cmd = commands
+        .iter()
+        .find(|c| c.contains("codex"))
+        .expect("should call codex based on provider override");
     assert!(cli_cmd.contains("gpt-5.3-codex"));
 }
 
 #[tokio::test]
 async fn cli_backend_run_writes_provider_used_json() {
-    let claude_output = r#"{"type":"result","result":"done","usage":{"input_tokens":10,"output_tokens":5}}"#;
+    let claude_output =
+        r#"{"type":"result","result":"done","usage":{"input_tokens":10,"output_tokens":5}}"#;
     let env: Arc<dyn arc_agent::ExecutionEnvironment> = Arc::new(CliTestEnv::new(claude_output));
     let backend = CliBackend::new("claude-opus-4-6".into(), Provider::Anthropic);
 
@@ -7562,13 +8250,15 @@ async fn cli_backend_run_writes_provider_used_json() {
 
     let provider_path = dir.path().join("provider_used.json");
     assert!(provider_path.exists(), "should write provider_used.json");
-    let provider_json: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&provider_path).unwrap()
-    ).unwrap();
+    let provider_json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&provider_path).unwrap()).unwrap();
     assert_eq!(provider_json["mode"], "cli");
     assert_eq!(provider_json["provider"], "anthropic");
     assert_eq!(provider_json["model"], "claude-opus-4-6");
-    assert!(provider_json["command"].as_str().unwrap().contains("claude"));
+    assert!(provider_json["command"]
+        .as_str()
+        .unwrap()
+        .contains("claude"));
 }
 
 // -- BackendRouter e2e: delegates to correct backend --
@@ -7583,21 +8273,36 @@ async fn backend_router_delegates_to_cli_for_cli_node() {
     let router = BackendRouter::new(api_backend, cli);
 
     let mut node = Node::new("cli_step");
-    node.attrs.insert("backend".to_string(), AttrValue::String("cli".to_string()));
-    node.attrs.insert("prompt".to_string(), AttrValue::String("Fix the bug".to_string()));
+    node.attrs
+        .insert("backend".to_string(), AttrValue::String("cli".to_string()));
+    node.attrs.insert(
+        "prompt".to_string(),
+        AttrValue::String("Fix the bug".to_string()),
+    );
 
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::new());
     let dir = tempfile::tempdir().unwrap();
 
     let result = router
-        .run(&node, "Fix the bug", &context, None, &emitter, dir.path(), &env)
+        .run(
+            &node,
+            "Fix the bug",
+            &context,
+            None,
+            &emitter,
+            dir.path(),
+            &env,
+        )
         .await
         .expect("router should succeed");
 
     match result {
         CodergenResult::Text { text, .. } => {
-            assert_eq!(text, "CLI response", "should use CLI backend response, not mock API");
+            assert_eq!(
+                text, "CLI response",
+                "should use CLI backend response, not mock API"
+            );
         }
         CodergenResult::Full(_) => panic!("expected Text result"),
     }
@@ -7612,20 +8317,34 @@ async fn backend_router_delegates_to_api_for_normal_node() {
     let router = BackendRouter::new(api_backend, cli);
 
     let mut node = Node::new("api_step");
-    node.attrs.insert("prompt".to_string(), AttrValue::String("Plan the work".to_string()));
+    node.attrs.insert(
+        "prompt".to_string(),
+        AttrValue::String("Plan the work".to_string()),
+    );
 
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::new());
     let dir = tempfile::tempdir().unwrap();
 
     let result = router
-        .run(&node, "Plan the work", &context, None, &emitter, dir.path(), &env)
+        .run(
+            &node,
+            "Plan the work",
+            &context,
+            None,
+            &emitter,
+            dir.path(),
+            &env,
+        )
         .await
         .expect("router should succeed");
 
     match result {
         CodergenResult::Text { text, .. } => {
-            assert!(text.starts_with("Response for api_step"), "should use API mock response: {text}");
+            assert!(
+                text.starts_with("Response for api_step"),
+                "should use API mock response: {text}"
+            );
         }
         CodergenResult::Full(_) => panic!("expected Text result"),
     }
@@ -7641,21 +8360,36 @@ async fn backend_router_delegates_to_cli_for_backend_attr() {
     let router = BackendRouter::new(api_backend, cli);
 
     let mut node = Node::new("codex_step");
-    node.attrs.insert("backend".to_string(), AttrValue::String("cli".to_string()));
-    node.attrs.insert("llm_provider".to_string(), AttrValue::String("openai".to_string()));
+    node.attrs
+        .insert("backend".to_string(), AttrValue::String("cli".to_string()));
+    node.attrs.insert(
+        "llm_provider".to_string(),
+        AttrValue::String("openai".to_string()),
+    );
 
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::new());
     let dir = tempfile::tempdir().unwrap();
 
     let result = router
-        .run(&node, "Build it", &context, None, &emitter, dir.path(), &env)
+        .run(
+            &node,
+            "Build it",
+            &context,
+            None,
+            &emitter,
+            dir.path(),
+            &env,
+        )
         .await
         .expect("router should succeed");
 
     match result {
         CodergenResult::Text { text, .. } => {
-            assert_eq!(text, "Codex did it", "should route to CLI backend for backend=cli");
+            assert_eq!(
+                text, "Codex did it",
+                "should route to CLI backend for backend=cli"
+            );
         }
         CodergenResult::Full(_) => panic!("expected Text result"),
     }
@@ -7673,22 +8407,40 @@ async fn full_pipeline_with_cli_backend_node() {
     let mut graph = Graph::new("CliPipelineTest");
 
     let mut start = Node::new("start");
-    start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut api_work = Node::new("api_work");
-    api_work.attrs.insert("shape".to_string(), AttrValue::String("box".to_string()));
-    api_work.attrs.insert("prompt".to_string(), AttrValue::String("Plan the work".to_string()));
+    api_work
+        .attrs
+        .insert("shape".to_string(), AttrValue::String("box".to_string()));
+    api_work.attrs.insert(
+        "prompt".to_string(),
+        AttrValue::String("Plan the work".to_string()),
+    );
     graph.nodes.insert("api_work".to_string(), api_work);
 
     let mut cli_work = Node::new("cli_work");
-    cli_work.attrs.insert("shape".to_string(), AttrValue::String("box".to_string()));
-    cli_work.attrs.insert("prompt".to_string(), AttrValue::String("Implement via CLI".to_string()));
-    cli_work.attrs.insert("backend".to_string(), AttrValue::String("cli".to_string()));
+    cli_work
+        .attrs
+        .insert("shape".to_string(), AttrValue::String("box".to_string()));
+    cli_work.attrs.insert(
+        "prompt".to_string(),
+        AttrValue::String("Implement via CLI".to_string()),
+    );
+    cli_work
+        .attrs
+        .insert("backend".to_string(), AttrValue::String("cli".to_string()));
     graph.nodes.insert("cli_work".to_string(), cli_work);
 
     graph.edges.push(Edge::new("start", "api_work"));
@@ -7704,12 +8456,15 @@ async fn full_pipeline_with_cli_backend_node() {
     let mut registry = HandlerRegistry::new(Box::new(codergen_handler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("codergen", Box::new(CodergenHandler::new(Some(Box::new({
-        // Second BackendRouter for the "codergen" handler
-        let api2 = MockCodergenBackend;
-        let cli2 = CliBackend::new("claude-opus-4-6".into(), Provider::Anthropic);
-        BackendRouter::new(Box::new(api2), cli2)
-    })))));
+    registry.register(
+        "codergen",
+        Box::new(CodergenHandler::new(Some(Box::new({
+            // Second BackendRouter for the "codergen" handler
+            let api2 = MockCodergenBackend;
+            let cli2 = CliBackend::new("claude-opus-4-6".into(), Provider::Anthropic);
+            BackendRouter::new(Box::new(api2), cli2)
+        })))),
+    );
 
     let dir = tempfile::tempdir().unwrap();
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), env);
@@ -7724,25 +8479,49 @@ async fn full_pipeline_with_cli_backend_node() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("pipeline should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Verify api_work used mock (its response.md should contain "Response for")
     let api_response = std::fs::read_to_string(
-        dir.path().join("nodes").join("api_work").join("response.md")
-    ).unwrap();
-    assert!(api_response.starts_with("Response for api_work"), "API node should use mock: {api_response}");
+        dir.path()
+            .join("nodes")
+            .join("api_work")
+            .join("response.md"),
+    )
+    .unwrap();
+    assert!(
+        api_response.starts_with("Response for api_work"),
+        "API node should use mock: {api_response}"
+    );
 
     // Verify cli_work used CLI backend (its response.md should contain CLI response)
     let cli_response = std::fs::read_to_string(
-        dir.path().join("nodes").join("cli_work").join("response.md")
-    ).unwrap();
-    assert_eq!(cli_response, "CLI completed the task.", "CLI node should use CLI backend: {cli_response}");
+        dir.path()
+            .join("nodes")
+            .join("cli_work")
+            .join("response.md"),
+    )
+    .unwrap();
+    assert_eq!(
+        cli_response, "CLI completed the task.",
+        "CLI node should use CLI backend: {cli_response}"
+    );
 
     // Verify cli_work wrote provider_used.json with mode=cli
     let provider_json: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(dir.path().join("nodes").join("cli_work").join("provider_used.json")).unwrap()
-    ).unwrap();
+        &std::fs::read_to_string(
+            dir.path()
+                .join("nodes")
+                .join("cli_work")
+                .join("provider_used.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     assert_eq!(provider_json["mode"], "cli");
 }
 
@@ -7760,16 +8539,26 @@ async fn stylesheet_backend_property_routes_to_cli() {
     );
 
     let mut start = Node::new("start");
-    start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut exit = Node::new("exit");
-    exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
 
     let mut work = Node::new("work");
-    work.attrs.insert("shape".to_string(), AttrValue::String("box".to_string()));
-    work.attrs.insert("prompt".to_string(), AttrValue::String("Do work".to_string()));
+    work.attrs
+        .insert("shape".to_string(), AttrValue::String("box".to_string()));
+    work.attrs.insert(
+        "prompt".to_string(),
+        AttrValue::String("Do work".to_string()),
+    );
     work.classes.push("cli-node".to_string());
     graph.nodes.insert("work".to_string(), work);
 
@@ -7798,7 +8587,10 @@ async fn stylesheet_backend_property_routes_to_cli() {
     let api2 = MockCodergenBackend;
     let cli2 = CliBackend::new("claude-opus-4-6".into(), Provider::Anthropic);
     let router2 = BackendRouter::new(Box::new(api2), cli2);
-    registry.register("codergen", Box::new(CodergenHandler::new(Some(Box::new(router2)))));
+    registry.register(
+        "codergen",
+        Box::new(CodergenHandler::new(Some(Box::new(router2)))),
+    );
 
     let dir = tempfile::tempdir().unwrap();
     let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), env);
@@ -7813,13 +8605,18 @@ async fn stylesheet_backend_property_routes_to_cli() {
         meta_branch: None,
     };
 
-    let outcome = engine.run(&graph, &config).await.expect("pipeline should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let response = std::fs::read_to_string(
-        dir.path().join("nodes").join("work").join("response.md")
-    ).unwrap();
-    assert_eq!(response, "Styled CLI response.", "stylesheet-driven node should use CLI backend");
+    let response =
+        std::fs::read_to_string(dir.path().join("nodes").join("work").join("response.md")).unwrap();
+    assert_eq!(
+        response, "Styled CLI response.",
+        "stylesheet-driven node should use CLI backend"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -7834,16 +8631,27 @@ async fn run_real_cli_test(provider: Provider, model: &str) {
     let backend = CliBackend::new(model.to_string(), provider);
 
     let mut node = Node::new("real_cli_test");
-    node.attrs.insert("prompt".to_string(), AttrValue::String("What is 2+2? Reply with just the number.".to_string()));
+    node.attrs.insert(
+        "prompt".to_string(),
+        AttrValue::String("What is 2+2? Reply with just the number.".to_string()),
+    );
 
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::new());
     let dir = tempfile::tempdir().unwrap();
 
     let result = backend
-        .run(&node, "What is 2+2? Reply with just the number.", &context, None, &emitter, dir.path(), &env)
+        .run(
+            &node,
+            "What is 2+2? Reply with just the number.",
+            &context,
+            None,
+            &emitter,
+            dir.path(),
+            &env,
+        )
         .await
-        .expect(&format!("CLI backend ({provider}/{model}) should succeed"));
+        .unwrap_or_else(|_| panic!("CLI backend ({provider}/{model}) should succeed"));
 
     match result {
         CodergenResult::Text { text, usage, .. } => {
@@ -7851,18 +8659,24 @@ async fn run_real_cli_test(provider: Provider, model: &str) {
                 text.contains('4'),
                 "{provider}/{model}: expected response to contain '4', got: {text}"
             );
-            let usage = usage.expect(&format!("{provider}/{model}: should have usage"));
-            assert!(usage.input_tokens > 0, "{provider}/{model}: input_tokens should be > 0, got {}", usage.input_tokens);
+            let usage = usage.unwrap_or_else(|| panic!("{provider}/{model}: should have usage"));
+            assert!(
+                usage.input_tokens > 0,
+                "{provider}/{model}: input_tokens should be > 0, got {}",
+                usage.input_tokens
+            );
         }
         CodergenResult::Full(_) => panic!("expected Text result from {provider}/{model}"),
     }
 
     // Verify log files were written
     let provider_path = dir.path().join("provider_used.json");
-    assert!(provider_path.exists(), "{provider}/{model}: provider_used.json should exist");
-    let provider_json: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&provider_path).unwrap()
-    ).unwrap();
+    assert!(
+        provider_path.exists(),
+        "{provider}/{model}: provider_used.json should exist"
+    );
+    let provider_json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&provider_path).unwrap()).unwrap();
     assert_eq!(provider_json["mode"], "cli");
     assert_eq!(provider_json["provider"], provider.as_str());
 }
@@ -7942,8 +8756,16 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         .output()
         .unwrap();
     std::process::Command::new("git")
-        .args(["-c", "user.name=test", "-c", "user.email=test@test",
-               "commit", "--allow-empty", "-m", "init"])
+        .args([
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ])
         .current_dir(repo.path())
         .output()
         .unwrap();
@@ -7976,15 +8798,25 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
 
     // 3. Build a simple pipeline: start -> work -> exit
     let mut graph = Graph::new("DockerGitCheckpoint");
-    graph.attrs.insert("goal".to_string(), AttrValue::String("Test Host git checkpoint".to_string()));
+    graph.attrs.insert(
+        "goal".to_string(),
+        AttrValue::String("Test Host git checkpoint".to_string()),
+    );
     let mut start = Node::new("start");
-    start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
     let mut exit = Node::new("exit");
-    exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
     let mut work = Node::new("work");
-    work.attrs.insert("label".to_string(), AttrValue::String("Work".to_string()));
+    work.attrs
+        .insert("label".to_string(), AttrValue::String("Work".to_string()));
     graph.nodes.insert("work".to_string(), work);
     graph.edges.push(Edge::new("start", "work"));
     graph.edges.push(Edge::new("work", "exit"));
@@ -8014,7 +8846,10 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
     };
 
     // 5. Run pipeline
-    let outcome = engine.run(&graph, &config).await.expect("pipeline should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     // 6. Assert GitCheckpoint events were emitted
@@ -8022,7 +8857,12 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
     let git_events: Vec<_> = events
         .iter()
         .filter_map(|e| {
-            if let PipelineEvent::GitCheckpoint { node_id, git_commit_sha, .. } = e {
+            if let PipelineEvent::GitCheckpoint {
+                node_id,
+                git_commit_sha,
+                ..
+            } = e
+            {
                 Some((node_id.clone(), git_commit_sha.clone()))
             } else {
                 None
@@ -8037,17 +8877,23 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
     );
     // Each SHA should be a valid 40-char hex string
     assert!(
-        git_events.iter().all(|(_, sha)| sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit())),
+        git_events
+            .iter()
+            .all(|(_, sha)| sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit())),
         "all SHAs should be 40-char hex, got: {git_events:?}"
     );
 
     // 7. Assert diff.patch was written for the "work" node
-    let work_diff = logs_dir.path().join("nodes").join("work").join("diff.patch");
+    let work_diff = logs_dir
+        .path()
+        .join("nodes")
+        .join("work")
+        .join("diff.patch");
     assert!(work_diff.exists(), "diff.patch should exist for work node");
 
     // 8. Verify checkpoint.json has git_commit_sha
-    let checkpoint = Checkpoint::load(&logs_dir.path().join("checkpoint.json"))
-        .expect("checkpoint should load");
+    let checkpoint =
+        Checkpoint::load(&logs_dir.path().join("checkpoint.json")).expect("checkpoint should load");
     assert!(
         checkpoint.git_commit_sha.is_some(),
         "checkpoint should have git_commit_sha"
@@ -8055,9 +8901,15 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
 
     // 9. Assert final.patch exists and contains the changes
     let final_patch = logs_dir.path().join("final.patch");
-    assert!(final_patch.exists(), "final.patch should exist in logs_root");
+    assert!(
+        final_patch.exists(),
+        "final.patch should exist in logs_root"
+    );
     let patch_content = std::fs::read_to_string(&final_patch).unwrap();
-    assert!(patch_content.contains("hello.txt"), "final.patch should contain hello.txt changes");
+    assert!(
+        patch_content.contains("hello.txt"),
+        "final.patch should contain hello.txt changes"
+    );
 
     // Cleanup worktree
     let _ = std::process::Command::new("git")
@@ -8081,8 +8933,16 @@ async fn git_checkpoint_host_writes_shadow_branch() {
         .output()
         .unwrap();
     std::process::Command::new("git")
-        .args(["-c", "user.name=test", "-c", "user.email=test@test",
-               "commit", "--allow-empty", "-m", "init"])
+        .args([
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ])
         .current_dir(repo.path())
         .output()
         .unwrap();
@@ -8116,15 +8976,25 @@ async fn git_checkpoint_host_writes_shadow_branch() {
 
     // 3. Build a simple pipeline: start -> work -> exit
     let mut graph = Graph::new("ShadowBranchTest");
-    graph.attrs.insert("goal".to_string(), AttrValue::String("Test shadow branch".to_string()));
+    graph.attrs.insert(
+        "goal".to_string(),
+        AttrValue::String("Test shadow branch".to_string()),
+    );
     let mut start = Node::new("start");
-    start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
     let mut exit = Node::new("exit");
-    exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit);
     let mut work = Node::new("work");
-    work.attrs.insert("label".to_string(), AttrValue::String("Work".to_string()));
+    work.attrs
+        .insert("label".to_string(), AttrValue::String("Work".to_string()));
     graph.nodes.insert("work".to_string(), work);
     graph.edges.push(Edge::new("start", "work"));
     graph.edges.push(Edge::new("work", "exit"));
@@ -8156,7 +9026,10 @@ async fn git_checkpoint_host_writes_shadow_branch() {
     };
 
     // 5. Run pipeline
-    let outcome = engine.run(&graph, &config).await.expect("pipeline should succeed");
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     // 6. Assert shadow branch has checkpoint data on the host repo

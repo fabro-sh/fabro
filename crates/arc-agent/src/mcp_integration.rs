@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use arc_llm::types::ToolDefinition;
-use arc_mcp::connection_manager::{McpConnectionManager, call_result_to_string};
+use arc_mcp::connection_manager::{call_result_to_string, McpConnectionManager};
 
 use crate::tool_registry::RegisteredTool;
 
@@ -91,7 +91,10 @@ mod tests {
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment::default());
         let result = (tool.executor)(
             serde_json::json!({"message": "test message"}),
-            ToolContext { env, cancel: CancellationToken::new() },
+            ToolContext {
+                env,
+                cancel: CancellationToken::new(),
+            },
         )
         .await;
         assert_eq!(result.unwrap(), "test message");

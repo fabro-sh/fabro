@@ -88,7 +88,7 @@ pub struct Answer {
 }
 
 impl Answer {
-    #[must_use] 
+    #[must_use]
     pub const fn yes() -> Self {
         Self {
             value: AnswerValue::Yes,
@@ -97,7 +97,7 @@ impl Answer {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn no() -> Self {
         Self {
             value: AnswerValue::No,
@@ -106,7 +106,7 @@ impl Answer {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn skipped() -> Self {
         Self {
             value: AnswerValue::Skipped,
@@ -115,7 +115,7 @@ impl Answer {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn timeout() -> Self {
         Self {
             value: AnswerValue::Timeout,
@@ -145,10 +145,7 @@ impl Answer {
 
 /// Apply timeout enforcement to an interviewer ask call.
 /// Per spec 6.5: if `timeout_seconds` is set, returns default answer or `Answer::timeout()`.
-pub async fn ask_with_timeout(
-    interviewer: &dyn Interviewer,
-    question: Question,
-) -> Answer {
+pub async fn ask_with_timeout(interviewer: &dyn Interviewer, question: Question) -> Answer {
     let timeout_secs = question.timeout_seconds;
     let default_answer = question.default.clone();
 

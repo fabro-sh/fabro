@@ -172,8 +172,7 @@ pub fn error_from_status_code(
                 ProviderErrorKind::NotFound
             } else if lower_msg.contains("unauthorized") || lower_msg.contains("invalid key") {
                 ProviderErrorKind::Authentication
-            } else if lower_msg.contains("context length")
-                || lower_msg.contains("too many tokens")
+            } else if lower_msg.contains("context length") || lower_msg.contains("too many tokens")
             {
                 ProviderErrorKind::ContextLength
             } else if lower_msg.contains("content filter") || lower_msg.contains("safety") {
@@ -284,72 +283,176 @@ mod tests {
     fn non_retryable_provider_errors() {
         let detail = || Box::new(ProviderErrorDetail::new("error", "openai"));
 
-        let access_denied = SdkError::Provider { kind: ProviderErrorKind::AccessDenied, detail: detail() };
+        let access_denied = SdkError::Provider {
+            kind: ProviderErrorKind::AccessDenied,
+            detail: detail(),
+        };
         assert!(!access_denied.retryable());
 
-        let not_found = SdkError::Provider { kind: ProviderErrorKind::NotFound, detail: detail() };
+        let not_found = SdkError::Provider {
+            kind: ProviderErrorKind::NotFound,
+            detail: detail(),
+        };
         assert!(!not_found.retryable());
 
-        let invalid_req = SdkError::Provider { kind: ProviderErrorKind::InvalidRequest, detail: detail() };
+        let invalid_req = SdkError::Provider {
+            kind: ProviderErrorKind::InvalidRequest,
+            detail: detail(),
+        };
         assert!(!invalid_req.retryable());
 
-        let ctx_length = SdkError::Provider { kind: ProviderErrorKind::ContextLength, detail: detail() };
+        let ctx_length = SdkError::Provider {
+            kind: ProviderErrorKind::ContextLength,
+            detail: detail(),
+        };
         assert!(!ctx_length.retryable());
 
-        let quota = SdkError::Provider { kind: ProviderErrorKind::QuotaExceeded, detail: detail() };
+        let quota = SdkError::Provider {
+            kind: ProviderErrorKind::QuotaExceeded,
+            detail: detail(),
+        };
         assert!(!quota.retryable());
 
-        let content_filter = SdkError::Provider { kind: ProviderErrorKind::ContentFilter, detail: detail() };
+        let content_filter = SdkError::Provider {
+            kind: ProviderErrorKind::ContentFilter,
+            detail: detail(),
+        };
         assert!(!content_filter.retryable());
     }
 
     #[test]
     fn non_retryable_sdk_errors() {
-        let invalid_tool = SdkError::InvalidToolCall { message: "bad tool".into() };
+        let invalid_tool = SdkError::InvalidToolCall {
+            message: "bad tool".into(),
+        };
         assert!(!invalid_tool.retryable());
 
-        let no_object = SdkError::NoObjectGenerated { message: "no output".into() };
+        let no_object = SdkError::NoObjectGenerated {
+            message: "no output".into(),
+        };
         assert!(!no_object.retryable());
 
-        let abort = SdkError::Abort { message: "aborted".into() };
+        let abort = SdkError::Abort {
+            message: "aborted".into(),
+        };
         assert!(!abort.retryable());
     }
 
     #[test]
     fn error_from_status_code_mapping() {
-        let err = error_from_status_code(401, "unauthorized".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::Authentication, .. }));
+        let err = error_from_status_code(
+            401,
+            "unauthorized".into(),
+            "openai".into(),
+            None,
+            None,
+            None,
+        );
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::Authentication,
+                ..
+            }
+        ));
         assert!(!err.retryable());
 
-        let err = error_from_status_code(403, "forbidden".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::AccessDenied, .. }));
+        let err =
+            error_from_status_code(403, "forbidden".into(), "openai".into(), None, None, None);
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::AccessDenied,
+                ..
+            }
+        ));
 
-        let err = error_from_status_code(404, "not found".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::NotFound, .. }));
+        let err =
+            error_from_status_code(404, "not found".into(), "openai".into(), None, None, None);
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::NotFound,
+                ..
+            }
+        ));
 
-        let err = error_from_status_code(400, "bad request".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::InvalidRequest, .. }));
+        let err =
+            error_from_status_code(400, "bad request".into(), "openai".into(), None, None, None);
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::InvalidRequest,
+                ..
+            }
+        ));
 
-        let err = error_from_status_code(422, "unprocessable".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::InvalidRequest, .. }));
+        let err = error_from_status_code(
+            422,
+            "unprocessable".into(),
+            "openai".into(),
+            None,
+            None,
+            None,
+        );
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::InvalidRequest,
+                ..
+            }
+        ));
 
         let err = error_from_status_code(408, "timeout".into(), "openai".into(), None, None, None);
         assert!(matches!(err, SdkError::RequestTimeout { .. }));
 
-        let err = error_from_status_code(413, "too large".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::ContextLength, .. }));
+        let err =
+            error_from_status_code(413, "too large".into(), "openai".into(), None, None, None);
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::ContextLength,
+                ..
+            }
+        ));
 
-        let err = error_from_status_code(429, "rate limited".into(), "openai".into(), None, None, Some(5.0));
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::RateLimit, .. }));
+        let err = error_from_status_code(
+            429,
+            "rate limited".into(),
+            "openai".into(),
+            None,
+            None,
+            Some(5.0),
+        );
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::RateLimit,
+                ..
+            }
+        ));
         assert!(err.retryable());
         assert_eq!(err.retry_after(), Some(5.0));
 
         let err = error_from_status_code(500, "internal".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::Server, .. }));
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::Server,
+                ..
+            }
+        ));
         assert!(err.retryable());
 
-        let err = error_from_status_code(502, "bad gateway".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::Server, .. }));
+        let err =
+            error_from_status_code(502, "bad gateway".into(), "openai".into(), None, None, None);
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::Server,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -362,7 +465,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::ContextLength, .. }));
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::ContextLength,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -375,7 +484,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::ContextLength, .. }));
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::ContextLength,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -388,7 +503,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::ContentFilter, .. }));
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::ContentFilter,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -401,7 +522,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::ContentFilter, .. }));
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::ContentFilter,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -414,7 +541,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::NotFound, .. }));
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::NotFound,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -427,7 +560,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::NotFound, .. }));
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::NotFound,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -440,7 +579,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::Authentication, .. }));
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::Authentication,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -453,26 +598,91 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::Authentication, .. }));
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::Authentication,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn grpc_status_mapping() {
-        let err = error_from_grpc_status("NOT_FOUND", "model not found".into(), "gemini".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::NotFound, .. }));
+        let err = error_from_grpc_status(
+            "NOT_FOUND",
+            "model not found".into(),
+            "gemini".into(),
+            None,
+            None,
+            None,
+        );
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::NotFound,
+                ..
+            }
+        ));
 
-        let err = error_from_grpc_status("RESOURCE_EXHAUSTED", "rate limited".into(), "gemini".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::RateLimit, .. }));
+        let err = error_from_grpc_status(
+            "RESOURCE_EXHAUSTED",
+            "rate limited".into(),
+            "gemini".into(),
+            None,
+            None,
+            None,
+        );
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::RateLimit,
+                ..
+            }
+        ));
         assert!(err.retryable());
 
-        let err = error_from_grpc_status("UNAUTHENTICATED", "bad key".into(), "gemini".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::Authentication, .. }));
+        let err = error_from_grpc_status(
+            "UNAUTHENTICATED",
+            "bad key".into(),
+            "gemini".into(),
+            None,
+            None,
+            None,
+        );
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::Authentication,
+                ..
+            }
+        ));
 
-        let err = error_from_grpc_status("DEADLINE_EXCEEDED", "timeout".into(), "gemini".into(), None, None, None);
+        let err = error_from_grpc_status(
+            "DEADLINE_EXCEEDED",
+            "timeout".into(),
+            "gemini".into(),
+            None,
+            None,
+            None,
+        );
         assert!(matches!(err, SdkError::RequestTimeout { .. }));
 
-        let err = error_from_grpc_status("UNKNOWN_CODE", "something".into(), "gemini".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::Server, .. }));
+        let err = error_from_grpc_status(
+            "UNKNOWN_CODE",
+            "something".into(),
+            "gemini".into(),
+            None,
+            None,
+            None,
+        );
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::Server,
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -217,7 +217,11 @@ impl<'a> SnapshotStore<'a> {
     pub fn list(&self, prefix: &str) -> Result<Vec<String>> {
         let full_prefix = format!("refs/heads/{prefix}");
         let mut branches = Vec::new();
-        for reference in self.objects.repo().references_glob(&format!("{full_prefix}*"))? {
+        for reference in self
+            .objects
+            .repo()
+            .references_glob(&format!("{full_prefix}*"))?
+        {
             let reference = reference?;
             if let Some(name) = reference.name() {
                 if let Some(branch) = name.strip_prefix("refs/heads/") {
@@ -393,7 +397,10 @@ mod tests {
         let base_tree = store.write_empty_tree().unwrap();
 
         let mut metadata = BTreeMap::new();
-        metadata.insert(".meta/transcript.jsonl".to_string(), b"line1\nline2".to_vec());
+        metadata.insert(
+            ".meta/transcript.jsonl".to_string(),
+            b"line1\nline2".to_vec(),
+        );
 
         let result = snap
             .write(&WriteOptions {

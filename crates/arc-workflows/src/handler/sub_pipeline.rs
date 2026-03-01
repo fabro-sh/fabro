@@ -38,9 +38,17 @@ impl Handler for SubPipelineHandler {
         services: &EngineServices,
     ) -> Result<Outcome, ArcError> {
         // 1. Get DOT source from node attribute
-        let dot_source = match node.attrs.get("sub_pipeline.dot_source").and_then(|v| v.as_str()) {
+        let dot_source = match node
+            .attrs
+            .get("sub_pipeline.dot_source")
+            .and_then(|v| v.as_str())
+        {
             Some(s) if !s.is_empty() => s,
-            _ => return Ok(Outcome::fail("No sub_pipeline.dot_source attribute specified")),
+            _ => {
+                return Ok(Outcome::fail(
+                    "No sub_pipeline.dot_source attribute specified",
+                ))
+            }
         };
 
         // 2. Parse the sub-pipeline DOT
@@ -99,7 +107,10 @@ impl Handler for SubPipelineHandler {
 
             // Apply context updates from the outcome
             sub_context.apply_updates(&last_outcome.context_updates);
-            sub_context.set("outcome", serde_json::json!(last_outcome.status.to_string()));
+            sub_context.set(
+                "outcome",
+                serde_json::json!(last_outcome.status.to_string()),
+            );
 
             // Select next edge
             match select_edge(&current_node_id, &last_outcome, &sub_context, &sub_graph) {
@@ -139,13 +150,13 @@ impl Handler for SubPipelineHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::event::EventEmitter;
     use crate::graph::AttrValue;
     use crate::handler::exit::ExitHandler;
     use crate::handler::start::StartHandler;
     use crate::handler::HandlerRegistry;
     use crate::outcome::StageStatus;
+    use std::sync::Arc;
 
     fn local_env() -> Arc<dyn arc_agent::ExecutionEnvironment> {
         Arc::new(arc_agent::LocalExecutionEnvironment::new(

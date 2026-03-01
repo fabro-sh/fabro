@@ -6,10 +6,7 @@ use arc_mcp::config::{McpServerConfig, McpTransport};
 use arc_mcp::connection_manager::call_result_to_string;
 
 fn test_server_config() -> McpServerConfig {
-    let test_server = format!(
-        "{}/tests/test_mcp_server.py",
-        env!("CARGO_MANIFEST_DIR")
-    );
+    let test_server = format!("{}/tests/test_mcp_server.py", env!("CARGO_MANIFEST_DIR"));
     McpServerConfig {
         name: "test-echo".into(),
         transport: McpTransport::Stdio {
@@ -26,10 +23,7 @@ fn test_server_config() -> McpServerConfig {
 async fn stdio_client_initialize_and_list_tools() {
     let config = test_server_config();
     let client = McpClient::new(&config).unwrap();
-    client
-        .initialize(config.startup_timeout())
-        .await
-        .unwrap();
+    client.initialize(config.startup_timeout()).await.unwrap();
 
     let tools = client.list_tools().await.unwrap();
     assert_eq!(tools.len(), 1);
@@ -41,10 +35,7 @@ async fn stdio_client_initialize_and_list_tools() {
 async fn stdio_client_call_tool_echo() {
     let config = test_server_config();
     let client = McpClient::new(&config).unwrap();
-    client
-        .initialize(config.startup_timeout())
-        .await
-        .unwrap();
+    client.initialize(config.startup_timeout()).await.unwrap();
 
     let result = client
         .call_tool(

@@ -14,7 +14,10 @@ pub struct ToolContext {
 
 /// An execute handler for a tool.
 pub type ExecuteHandler = Arc<
-    dyn Fn(serde_json::Value, ToolContext) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send>>
+    dyn Fn(
+            serde_json::Value,
+            ToolContext,
+        ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send>>
         + Send
         + Sync,
 >;
@@ -76,7 +79,7 @@ impl Tool {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn is_active(&self) -> bool {
         self.execute.is_some()
     }
@@ -93,16 +96,12 @@ pub fn validate_tool_name(name: &str) -> Result<(), String> {
         return Err("Tool name cannot be empty".to_string());
     }
     if name.len() > 64 {
-        return Err(format!(
-            "Tool name '{name}' exceeds 64 character limit"
-        ));
+        return Err(format!("Tool name '{name}' exceeds 64 character limit"));
     }
     let mut chars = name.chars();
     if let Some(first) = chars.next() {
         if !first.is_ascii_alphabetic() {
-            return Err(format!(
-                "Tool name '{name}' must start with a letter"
-            ));
+            return Err(format!("Tool name '{name}' must start with a letter"));
         }
     }
     for ch in chars {
@@ -149,7 +148,10 @@ fn validate_tool_args(args: &serde_json::Value, schema: &serde_json::Value) -> R
             .filter(|key| !obj.contains_key(*key))
             .collect();
         if !missing.is_empty() {
-            return Err(format!("Missing required properties: {}", missing.join(", ")));
+            return Err(format!(
+                "Missing required properties: {}",
+                missing.join(", ")
+            ));
         }
     }
     Ok(())
@@ -325,7 +327,8 @@ mod tests {
 
     #[test]
     fn validate_tool_args_valid_object() {
-        let schema = serde_json::json!({"type": "object", "properties": {"name": {"type": "string"}}});
+        let schema =
+            serde_json::json!({"type": "object", "properties": {"name": {"type": "string"}}});
         let args = serde_json::json!({"name": "Alice"});
         assert!(validate_tool_args(&args, &schema).is_ok());
     }
@@ -370,7 +373,11 @@ mod tests {
                 Ok(serde_json::json!(format!("Hello, {}!", name)))
             },
         )];
-        let calls = vec![ToolCall::new("call_1", "greet", serde_json::json!({"name": "Alice"}))];
+        let calls = vec![ToolCall::new(
+            "call_1",
+            "greet",
+            serde_json::json!({"name": "Alice"}),
+        )];
         let tool_refs: Vec<&Tool> = tools.iter().collect();
 
         let results = execute_all_tools_with_repair(&tool_refs, &calls, &[], None, None).await;
@@ -396,7 +403,11 @@ mod tests {
         let results = execute_all_tools_with_repair(&tool_refs, &calls, &[], None, None).await;
         assert_eq!(results.len(), 1);
         assert!(results[0].is_error);
-        assert!(results[0].content.as_str().unwrap().contains("validation failed"));
+        assert!(results[0]
+            .content
+            .as_str()
+            .unwrap()
+            .contains("validation failed"));
     }
 
     #[tokio::test]
@@ -416,7 +427,8 @@ mod tests {
         let repair: RepairToolCallFn = Arc::new(|_call, _error| {
             Box::pin(async { Ok(serde_json::json!({"name": "Repaired"})) })
         });
-        let results = execute_all_tools_with_repair(&tool_refs, &calls, &[], None, Some(&repair)).await;
+        let results =
+            execute_all_tools_with_repair(&tool_refs, &calls, &[], None, Some(&repair)).await;
         assert_eq!(results.len(), 1);
         assert!(!results[0].is_error);
         assert_eq!(results[0].content, serde_json::json!("Hello, Repaired!"));
@@ -436,12 +448,16 @@ mod tests {
         let calls = vec![ToolCall::new("call_1", "greet", serde_json::json!({}))];
         let tool_refs: Vec<&Tool> = tools.iter().collect();
 
-        let repair: RepairToolCallFn = Arc::new(|_call, _error| {
-            Box::pin(async { Err("cannot repair".to_string()) })
-        });
-        let results = execute_all_tools_with_repair(&tool_refs, &calls, &[], None, Some(&repair)).await;
+        let repair: RepairToolCallFn =
+            Arc::new(|_call, _error| Box::pin(async { Err("cannot repair".to_string()) }));
+        let results =
+            execute_all_tools_with_repair(&tool_refs, &calls, &[], None, Some(&repair)).await;
         assert_eq!(results.len(), 1);
         assert!(results[0].is_error);
-        assert!(results[0].content.as_str().unwrap().contains("repair failed"));
+        assert!(results[0]
+            .content
+            .as_str()
+            .unwrap()
+            .contains("repair failed"));
     }
 }

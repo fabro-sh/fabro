@@ -13,7 +13,7 @@ pub struct RecordingInterviewer {
 }
 
 impl RecordingInterviewer {
-    #[must_use] 
+    #[must_use]
     pub fn new(inner: Box<dyn Interviewer>) -> Self {
         Self {
             inner,
@@ -25,7 +25,10 @@ impl RecordingInterviewer {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn recordings(&self) -> Vec<(Question, Answer)> {
-        self.recordings.lock().expect("recordings lock poisoned").clone()
+        self.recordings
+            .lock()
+            .expect("recordings lock poisoned")
+            .clone()
     }
 
     /// Serializes all recordings to a JSON string.
@@ -34,8 +37,7 @@ impl RecordingInterviewer {
     /// Returns an error if serialization fails.
     pub fn to_json(&self) -> Result<String, ArcError> {
         let recordings = self.recordings();
-        serde_json::to_string_pretty(&recordings)
-            .map_err(|e| ArcError::Io(e.to_string()))
+        serde_json::to_string_pretty(&recordings).map_err(|e| ArcError::Io(e.to_string()))
     }
 
     /// Deserializes recordings from a JSON string.
@@ -43,8 +45,7 @@ impl RecordingInterviewer {
     /// # Errors
     /// Returns an error if deserialization fails.
     pub fn from_json(json: &str) -> Result<Vec<(Question, Answer)>, ArcError> {
-        serde_json::from_str(json)
-            .map_err(|e| ArcError::Io(e.to_string()))
+        serde_json::from_str(json).map_err(|e| ArcError::Io(e.to_string()))
     }
 
     /// Saves recordings to a file as JSON.

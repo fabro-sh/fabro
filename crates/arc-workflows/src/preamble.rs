@@ -251,9 +251,7 @@ fn render_summary_high_stage_section(
                 ));
             }
             // Include full response from context_updates (or artifact pointer)
-            if let Some(resp_val) =
-                outcome.context_updates.get(&format!("response.{node_id}"))
-            {
+            if let Some(resp_val) = outcome.context_updates.get(&format!("response.{node_id}")) {
                 if let Some(path) = artifact_path(resp_val) {
                     lines.push(format!("- Response: {}", format_artifact_reference(path)));
                 } else {
@@ -404,8 +402,7 @@ fn build_summary_preamble(
             for node_id in completed_nodes {
                 let node = graph.nodes.get(node_id);
                 if let Some(outcome) = node_outcomes.get(node_id) {
-                    let section =
-                        render_summary_high_stage_section(node_id, node, outcome);
+                    let section = render_summary_high_stage_section(node_id, node, outcome);
                     parts.extend(section);
                     all_rendered_keys.extend(stage_rendered_keys(node_id, outcome));
                 } else {
@@ -444,12 +441,10 @@ fn build_summary_preamble(
                         parts.push(line);
 
                         let node = graph.nodes.get(*node_id);
-                        let details =
-                            render_compact_stage_details(node_id, node, outcome);
+                        let details = render_compact_stage_details(node_id, node, outcome);
                         parts.extend(details);
 
-                        all_rendered_keys
-                            .extend(stage_rendered_keys(node_id, outcome));
+                        all_rendered_keys.extend(stage_rendered_keys(node_id, outcome));
                     } else {
                         parts.push(format!("- {node_id}: completed"));
                     }
@@ -486,8 +481,7 @@ fn build_summary_preamble(
                         parts.push(line);
 
                         let node = graph.nodes.get(*node_id);
-                        let handler =
-                            node.and_then(|n| n.handler_type());
+                        let handler = node.and_then(|n| n.handler_type());
                         if let Some(h) = handler {
                             parts.push(format!("  - Handler: {h}"));
                         }
@@ -500,18 +494,13 @@ fn build_summary_preamble(
                                         .or_else(|| n.attrs.get("tool_command"))
                                         .and_then(|v| v.as_str())
                                     {
-                                        parts.push(format!(
-                                            "  - Script: `{cmd}`"
-                                        ));
+                                        parts.push(format!("  - Script: `{cmd}`"));
                                     }
                                 }
                             }
                             Some("codergen") => {
                                 if let Some(usage) = &outcome.usage {
-                                    parts.push(format!(
-                                        "  - Model: {}",
-                                        usage.model
-                                    ));
+                                    parts.push(format!("  - Model: {}", usage.model));
                                 }
                             }
                             _ => {}
@@ -556,9 +545,15 @@ mod tests {
             &node_outcomes,
         );
 
-        assert!(preamble.contains("Fix the login bug"), "should contain the goal");
+        assert!(
+            preamble.contains("Fix the login bug"),
+            "should contain the goal"
+        );
         assert!(preamble.contains("Run ID:"), "should contain run ID label");
-        assert!(preamble.contains("abc-123"), "should contain the run ID value");
+        assert!(
+            preamble.contains("abc-123"),
+            "should contain the run ID value"
+        );
     }
 
     #[test]
@@ -625,7 +620,10 @@ mod tests {
             preamble.contains("**plan**"),
             "should list completed stage 'plan' in bold"
         );
-        assert!(preamble.contains("success"), "should show plan's success status");
+        assert!(
+            preamble.contains("success"),
+            "should show plan's success status"
+        );
         assert!(
             preamble.contains("**code**"),
             "should list completed stage 'code' in bold"
@@ -722,7 +720,10 @@ mod tests {
             !preamble.contains("- preferred_label:"),
             "should exclude preferred_label"
         );
-        assert!(preamble.contains("user.name"), "should include non-internal keys");
+        assert!(
+            preamble.contains("user.name"),
+            "should include non-internal keys"
+        );
     }
 
     #[test]
@@ -790,20 +791,25 @@ mod tests {
             &node_outcomes,
         );
 
-        assert!(preamble.contains("Script: `echo '10 passed'`"), "should show script command");
+        assert!(
+            preamble.contains("Script: `echo '10 passed'`"),
+            "should show script command"
+        );
         assert!(preamble.contains("Stdout:"), "should show stdout label");
         assert!(preamble.contains("10 passed"), "should show stdout content");
-        assert!(preamble.contains("Stderr: (empty)"), "should show empty stderr");
+        assert!(
+            preamble.contains("Stderr: (empty)"),
+            "should show empty stderr"
+        );
     }
 
     #[test]
     fn compact_codergen_stage_shows_model_and_files() {
         let mut graph = Graph::new("test");
         let mut report = Node::new("report");
-        report.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        report
+            .attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         graph.nodes.insert("report".to_string(), report);
 
         let context = Context::new();
@@ -834,7 +840,10 @@ mod tests {
             preamble.contains("claude-sonnet-4-20250514"),
             "should show model name"
         );
-        assert!(preamble.contains("1.2k tokens in"), "should show token count");
+        assert!(
+            preamble.contains("1.2k tokens in"),
+            "should show token count"
+        );
         assert!(
             preamble.contains("src/lib.rs, src/main.rs"),
             "should show files touched"
@@ -904,10 +913,9 @@ mod tests {
         let completed_nodes = vec!["step".to_string()];
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
-        outcome.context_updates.insert(
-            "script.output".to_string(),
-            serde_json::json!("hi\n"),
-        );
+        outcome
+            .context_updates
+            .insert("script.output".to_string(), serde_json::json!("hi\n"));
         outcome
             .context_updates
             .insert("script.stderr".to_string(), serde_json::json!(""));
@@ -923,10 +931,7 @@ mod tests {
 
         // script.output should NOT appear in the Context section
         // because it's already rendered inline under the stage
-        let context_section = preamble
-            .split("## Context")
-            .nth(1)
-            .unwrap_or("");
+        let context_section = preamble.split("## Context").nth(1).unwrap_or("");
         assert!(
             !context_section.contains("script.output"),
             "script.output should be deduplicated from context section"
@@ -1000,7 +1005,10 @@ mod tests {
         assert!(!preamble.contains("step2"), "should omit older stages");
         assert!(preamble.contains("step3"), "should show recent stage");
         assert!(preamble.contains("step4"), "should show most recent stage");
-        assert!(preamble.contains("omitted"), "should indicate omitted stages");
+        assert!(
+            preamble.contains("omitted"),
+            "should indicate omitted stages"
+        );
         // Handler type should appear for nodes with known handlers
         assert!(
             preamble.contains("Handler: script"),
@@ -1059,10 +1067,9 @@ mod tests {
     fn summary_low_codergen_stage_shows_handler_and_model() {
         let mut graph = Graph::new("test");
         let mut report = Node::new("report");
-        report.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        report
+            .attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         graph.nodes.insert("report".to_string(), report);
 
         let context = Context::new();
@@ -1157,7 +1164,10 @@ mod tests {
         assert!(!preamble.contains("- s2:"), "should omit oldest stages");
         assert!(preamble.contains("s3"), "should show recent stage s3");
         assert!(preamble.contains("s7"), "should show most recent stage s7");
-        assert!(preamble.contains("omitted"), "should indicate omitted stages");
+        assert!(
+            preamble.contains("omitted"),
+            "should indicate omitted stages"
+        );
     }
 
     #[test]
@@ -1236,10 +1246,9 @@ mod tests {
     fn summary_medium_codergen_stage_shows_compact_details() {
         let mut graph = Graph::new("test");
         let mut report = Node::new("report");
-        report.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        report
+            .attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         graph.nodes.insert("report".to_string(), report);
 
         let context = Context::new();
@@ -1270,10 +1279,7 @@ mod tests {
             preamble.contains("claude-sonnet-4-20250514"),
             "should show model name"
         );
-        assert!(
-            preamble.contains("src/lib.rs"),
-            "should show files touched"
-        );
+        assert!(preamble.contains("src/lib.rs"), "should show files touched");
     }
 
     // --- summary:high mode ---
@@ -1456,10 +1462,9 @@ mod tests {
     fn summary_high_codergen_stage_with_response_preview() {
         let mut graph = Graph::new("test");
         let mut report = Node::new("report");
-        report.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        report
+            .attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         graph.nodes.insert("report".to_string(), report);
 
         let context = Context::new();
@@ -1633,7 +1638,10 @@ mod tests {
         );
 
         // Should behave like compact: include goal and stages
-        assert!(preamble.contains("Test fallback"), "should contain the goal");
+        assert!(
+            preamble.contains("Test fallback"),
+            "should contain the goal"
+        );
         assert!(
             preamble.contains("step1"),
             "should list completed stages like compact"

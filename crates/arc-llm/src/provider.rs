@@ -107,8 +107,7 @@ impl fmt::Display for ModelId {
 // ---------------------------------------------------------------------------
 
 /// Async stream of `StreamEvents` returned by streaming providers.
-pub type StreamEventStream =
-    Pin<Box<dyn Stream<Item = Result<StreamEvent, SdkError>> + Send>>;
+pub type StreamEventStream = Pin<Box<dyn Stream<Item = Result<StreamEvent, SdkError>> + Send>>;
 
 /// The contract that every provider adapter must implement (Section 2.4).
 #[async_trait::async_trait]
@@ -199,8 +198,14 @@ mod tests {
 
     #[test]
     fn parse_inception() {
-        assert_eq!("inception".parse::<Provider>().unwrap(), Provider::Inception);
-        assert_eq!("inception_labs".parse::<Provider>().unwrap(), Provider::Inception);
+        assert_eq!(
+            "inception".parse::<Provider>().unwrap(),
+            Provider::Inception
+        );
+        assert_eq!(
+            "inception_labs".parse::<Provider>().unwrap(),
+            Provider::Inception
+        );
     }
 
     #[test]

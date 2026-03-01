@@ -144,7 +144,10 @@ mod tests {
             Some(&serde_json::json!("test"))
         );
         assert_eq!(loaded.logs, vec!["log entry"]);
-        assert_eq!(loaded.node_outcomes.get("start").map(|o| &o.status), Some(&crate::outcome::StageStatus::Success));
+        assert_eq!(
+            loaded.node_outcomes.get("start").map(|o| &o.status),
+            Some(&crate::outcome::StageStatus::Success)
+        );
         assert_eq!(loaded.next_node_id.as_deref(), Some("next_step"));
     }
 

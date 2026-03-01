@@ -1,8 +1,8 @@
 use std::io::IsTerminal;
 
+use arc_util::terminal::Styles;
 use async_trait::async_trait;
 use dialoguer::console::Term;
-use arc_util::terminal::Styles;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use super::{Answer, AnswerValue, Interviewer, Question, QuestionType};
@@ -19,10 +19,7 @@ impl ConsoleInterviewer {
     }
 }
 
-fn find_matching_option(
-    response: &str,
-    options: &[super::QuestionOption],
-) -> Option<Answer> {
+fn find_matching_option(response: &str, options: &[super::QuestionOption]) -> Option<Answer> {
     let trimmed = response.trim();
     // Try matching by key (case-insensitive)
     for opt in options {
@@ -168,7 +165,9 @@ impl Interviewer for ConsoleInterviewer {
         eprintln!(
             "{bold}{cyan}?{reset} {}",
             question.text,
-            bold = s.bold, cyan = s.cyan, reset = s.reset,
+            bold = s.bold,
+            cyan = s.cyan,
+            reset = s.reset,
         );
 
         match question.question_type {
@@ -176,8 +175,12 @@ impl Interviewer for ConsoleInterviewer {
                 for (i, opt) in question.options.iter().enumerate() {
                     eprintln!(
                         "  {dim}[{reset}{bold}{}{reset}{dim}]{reset} {} - {}",
-                        i + 1, opt.key, opt.label,
-                        dim = s.dim, bold = s.bold, reset = s.reset,
+                        i + 1,
+                        opt.key,
+                        opt.label,
+                        dim = s.dim,
+                        bold = s.bold,
+                        reset = s.reset,
                     );
                 }
                 if question.allow_freeform {
@@ -191,8 +194,7 @@ impl Interviewer for ConsoleInterviewer {
                     return Answer::text(response);
                 }
                 // Fallback: try match again (spec says to do this)
-                find_matching_option(&response, &question.options)
-                    .unwrap_or_else(Answer::skipped)
+                find_matching_option(&response, &question.options).unwrap_or_else(Answer::skipped)
             }
             QuestionType::YesNo | QuestionType::Confirmation => {
                 let response = read_line("[Y/N]: ").await.unwrap_or_default();
@@ -214,7 +216,8 @@ impl Interviewer for ConsoleInterviewer {
         let s = self.styles;
         eprintln!(
             "{dim}[{stage}]{reset} {message}",
-            dim = s.dim, reset = s.reset,
+            dim = s.dim,
+            reset = s.reset,
         );
     }
 }

@@ -148,10 +148,8 @@ mod tests {
         impl Transform for TagTransform {
             fn apply(&self, graph: &mut crate::graph::Graph) {
                 for node in graph.nodes.values_mut() {
-                    node.attrs.insert(
-                        "tagged".to_string(),
-                        AttrValue::Boolean(true),
-                    );
+                    node.attrs
+                        .insert("tagged".to_string(), AttrValue::Boolean(true));
                 }
             }
         }

@@ -1,6 +1,6 @@
-use std::time::SystemTime;
 use arc_llm::types::{ContentPart, ThinkingData, ToolCall, ToolResult, Usage};
 use serde::{Deserialize, Serialize};
+use std::time::SystemTime;
 
 mod system_time_iso8601 {
     use chrono::{DateTime, Utc};
@@ -69,7 +69,9 @@ impl Turn {
         };
         provider_parts.iter().find_map(|p| match p {
             ContentPart::Thinking(ThinkingData {
-                text, redacted: false, ..
+                text,
+                redacted: false,
+                ..
             }) => Some(text.as_str()),
             _ => None,
         })
@@ -214,7 +216,13 @@ mod tests {
             estimated_tokens: 5000,
             context_window_size: 8000,
         };
-        assert!(matches!(started, AgentEvent::CompactionStarted { estimated_tokens: 5000, .. }));
+        assert!(matches!(
+            started,
+            AgentEvent::CompactionStarted {
+                estimated_tokens: 5000,
+                ..
+            }
+        ));
 
         let completed = AgentEvent::CompactionCompleted {
             original_turn_count: 20,
@@ -222,7 +230,13 @@ mod tests {
             summary_token_estimate: 500,
             tracked_file_count: 3,
         };
-        assert!(matches!(completed, AgentEvent::CompactionCompleted { original_turn_count: 20, .. }));
+        assert!(matches!(
+            completed,
+            AgentEvent::CompactionCompleted {
+                original_turn_count: 20,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -230,7 +244,9 @@ mod tests {
         let event = AgentEvent::SkillExpanded {
             skill_name: "commit".into(),
         };
-        assert!(matches!(event, AgentEvent::SkillExpanded { skill_name } if skill_name == "commit"));
+        assert!(
+            matches!(event, AgentEvent::SkillExpanded { skill_name } if skill_name == "commit")
+        );
     }
 
     #[test]
@@ -240,7 +256,10 @@ mod tests {
             depth: 1,
             task: "list files".into(),
         };
-        assert!(matches!(event, AgentEvent::SubAgentSpawned { depth: 1, .. }));
+        assert!(matches!(
+            event,
+            AgentEvent::SubAgentSpawned { depth: 1, .. }
+        ));
     }
 
     #[test]
@@ -251,7 +270,14 @@ mod tests {
             success: true,
             turns_used: 5,
         };
-        assert!(matches!(event, AgentEvent::SubAgentCompleted { success: true, turns_used: 5, .. }));
+        assert!(matches!(
+            event,
+            AgentEvent::SubAgentCompleted {
+                success: true,
+                turns_used: 5,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -291,10 +317,26 @@ mod tests {
     #[test]
     fn subagent_events_serde_round_trip() {
         let events = vec![
-            AgentEvent::SubAgentSpawned { agent_id: "sa-1".into(), depth: 0, task: "test".into() },
-            AgentEvent::SubAgentCompleted { agent_id: "sa-1".into(), depth: 0, success: true, turns_used: 3 },
-            AgentEvent::SubAgentFailed { agent_id: "sa-1".into(), depth: 0, error: "oops".into() },
-            AgentEvent::SubAgentClosed { agent_id: "sa-1".into(), depth: 0 },
+            AgentEvent::SubAgentSpawned {
+                agent_id: "sa-1".into(),
+                depth: 0,
+                task: "test".into(),
+            },
+            AgentEvent::SubAgentCompleted {
+                agent_id: "sa-1".into(),
+                depth: 0,
+                success: true,
+                turns_used: 3,
+            },
+            AgentEvent::SubAgentFailed {
+                agent_id: "sa-1".into(),
+                depth: 0,
+                error: "oops".into(),
+            },
+            AgentEvent::SubAgentClosed {
+                agent_id: "sa-1".into(),
+                depth: 0,
+            },
             AgentEvent::SubAgentEvent {
                 agent_id: "sa-1".into(),
                 depth: 1,
@@ -304,7 +346,9 @@ mod tests {
         let json = serde_json::to_string(&events).unwrap();
         let deserialized: Vec<AgentEvent> = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.len(), 5);
-        assert!(matches!(&deserialized[4], AgentEvent::SubAgentEvent { event, .. } if matches!(event.as_ref(), AgentEvent::SessionStarted)));
+        assert!(
+            matches!(&deserialized[4], AgentEvent::SubAgentEvent { event, .. } if matches!(event.as_ref(), AgentEvent::SessionStarted))
+        );
     }
 
     #[test]
@@ -332,7 +376,10 @@ mod tests {
             server_name: "filesystem".into(),
             tool_count: 3,
         };
-        assert!(matches!(event, AgentEvent::McpServerReady { tool_count: 3, .. }));
+        assert!(matches!(
+            event,
+            AgentEvent::McpServerReady { tool_count: 3, .. }
+        ));
     }
 
     #[test]
@@ -341,20 +388,34 @@ mod tests {
             server_name: "broken".into(),
             error: "connection refused".into(),
         };
-        assert!(matches!(event, AgentEvent::McpServerFailed { server_name, .. } if server_name == "broken"));
+        assert!(
+            matches!(event, AgentEvent::McpServerFailed { server_name, .. } if server_name == "broken")
+        );
     }
 
     #[test]
     fn mcp_events_serde_round_trip() {
         let events = vec![
-            AgentEvent::McpServerReady { server_name: "fs".into(), tool_count: 5 },
-            AgentEvent::McpServerFailed { server_name: "bad".into(), error: "timeout".into() },
+            AgentEvent::McpServerReady {
+                server_name: "fs".into(),
+                tool_count: 5,
+            },
+            AgentEvent::McpServerFailed {
+                server_name: "bad".into(),
+                error: "timeout".into(),
+            },
         ];
         let json = serde_json::to_string(&events).unwrap();
         let deserialized: Vec<AgentEvent> = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.len(), 2);
-        assert!(matches!(&deserialized[0], AgentEvent::McpServerReady { tool_count: 5, .. }));
-        assert!(matches!(&deserialized[1], AgentEvent::McpServerFailed { .. }));
+        assert!(matches!(
+            &deserialized[0],
+            AgentEvent::McpServerReady { tool_count: 5, .. }
+        ));
+        assert!(matches!(
+            &deserialized[1],
+            AgentEvent::McpServerFailed { .. }
+        ));
     }
 
     #[test]
@@ -375,7 +436,11 @@ mod tests {
             tool_call_count: 2,
         };
         match &event {
-            AgentEvent::AssistantMessage { usage, tool_call_count, .. } => {
+            AgentEvent::AssistantMessage {
+                usage,
+                tool_call_count,
+                ..
+            } => {
                 assert_eq!(*tool_call_count, 2);
                 assert_eq!(usage.input_tokens, 100);
                 assert_eq!(usage.cache_read_tokens, Some(80));

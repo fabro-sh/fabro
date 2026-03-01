@@ -11,7 +11,7 @@ pub struct QueueInterviewer {
 }
 
 impl QueueInterviewer {
-    #[must_use] 
+    #[must_use]
     pub const fn new(answers: VecDeque<Answer>) -> Self {
         Self {
             answers: Mutex::new(answers),

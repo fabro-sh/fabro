@@ -53,12 +53,18 @@ impl Adapter {
 
     #[must_use]
     pub fn with_default_headers(self, headers: std::collections::HashMap<String, String>) -> Self {
-        Self { http: self.http.with_default_headers(headers), ..self }
+        Self {
+            http: self.http.with_default_headers(headers),
+            ..self
+        }
     }
 
     #[must_use]
     pub fn with_timeout(self, timeout: crate::types::AdapterTimeout) -> Self {
-        Self { http: self.http.with_timeout(timeout), ..self }
+        Self {
+            http: self.http.with_timeout(timeout),
+            ..self
+        }
     }
 
     /// Build a `reqwest::RequestBuilder` with default headers, org/project headers, and auth.
@@ -244,9 +250,7 @@ fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Val
                             }));
                         }
                         // Round-trip opaque items (e.g. reasoning) back to the API
-                        ContentPart::Other { kind, data }
-                            if kind == "openai_reasoning" =>
-                        {
+                        ContentPart::Other { kind, data } if kind == "openai_reasoning" => {
                             input.push(data.clone());
                         }
                         _ => {}
@@ -438,8 +442,8 @@ fn parse_output(output: &[serde_json::Value]) -> (Vec<ContentPart>, bool) {
                     .get("arguments")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("{}");
-                let arguments = serde_json::from_str(args_str)
-                    .unwrap_or_else(|_| serde_json::json!({}));
+                let arguments =
+                    serde_json::from_str(args_str).unwrap_or_else(|_| serde_json::json!({}));
                 let mut tc = ToolCall::new(call_id, name, arguments);
                 tc.raw_arguments = Some(args_str.to_string());
                 // Preserve item-level ID (fc_xxx) for Responses API round-trip
@@ -509,9 +513,7 @@ fn parse_sse_message(message_block: &str) -> Option<(Option<String>, String)> {
 }
 
 /// Process the next chunk(s) from the byte stream and return `StreamEvent`s.
-async fn process_next_sse_events(
-    state: &mut SseStreamState,
-) -> Result<Vec<StreamEvent>, SdkError> {
+async fn process_next_sse_events(state: &mut SseStreamState) -> Result<Vec<StreamEvent>, SdkError> {
     loop {
         match state.line_reader.read_next_chunk("\n\n").await? {
             Some(message_block) => {
@@ -630,10 +632,7 @@ fn handle_tool_call_delta(
         &call_id
     };
 
-    let tc_index = state
-        .tool_calls
-        .iter()
-        .position(|tc| tc.id == *lookup_id);
+    let tc_index = state.tool_calls.iter().position(|tc| tc.id == *lookup_id);
 
     if let Some(idx) = tc_index {
         if let Some(ref mut raw) = state.tool_calls[idx].raw_arguments {
@@ -764,10 +763,7 @@ fn handle_response_completed(
         }
     }
 
-    if let Some(id) = response_data
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-    {
+    if let Some(id) = response_data.get("id").and_then(serde_json::Value::as_str) {
         state.response_id = id.to_string();
     }
     if let Some(model) = response_data
@@ -853,10 +849,9 @@ impl ProviderAdapter for Adapter {
         }
         let (body, headers) = send_and_read_response(req, "openai", "type").await?;
 
-        let api_resp: ApiResponse =
-            serde_json::from_str(&body).map_err(|e| SdkError::Network {
-                message: format!("failed to parse OpenAI response: {e}"),
-            })?;
+        let api_resp: ApiResponse = serde_json::from_str(&body).map_err(|e| SdkError::Network {
+            message: format!("failed to parse OpenAI response: {e}"),
+        })?;
 
         let (content_parts, has_tool_calls) = parse_output(&api_resp.output);
         let finish_reason = map_finish_reason(api_resp.status.as_deref(), has_tool_calls);
@@ -1105,7 +1100,14 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("X-Custom".to_string(), "value".to_string());
         let adapter = Adapter::new("sk-test").with_default_headers(headers);
-        assert_eq!(adapter.http.default_headers.get("X-Custom").map(String::as_str), Some("value"));
+        assert_eq!(
+            adapter
+                .http
+                .default_headers
+                .get("X-Custom")
+                .map(String::as_str),
+            Some("value")
+        );
     }
 
     #[test]
@@ -1129,9 +1131,14 @@ mod tests {
             tool_call_id: None,
         };
         let (_, input) = translate_input(&[msg]);
-        let content = input[0]["content"].as_array().expect("content should be array");
+        let content = input[0]["content"]
+            .as_array()
+            .expect("content should be array");
         assert_eq!(content[0]["type"], "input_text");
-        assert_eq!(content[0]["text"], "[Audio content not supported by this provider]");
+        assert_eq!(
+            content[0]["text"],
+            "[Audio content not supported by this provider]"
+        );
     }
 
     #[test]
@@ -1148,9 +1155,14 @@ mod tests {
             tool_call_id: None,
         };
         let (_, input) = translate_input(&[msg]);
-        let content = input[0]["content"].as_array().expect("content should be array");
+        let content = input[0]["content"]
+            .as_array()
+            .expect("content should be array");
         assert_eq!(content[0]["type"], "input_text");
-        assert_eq!(content[0]["text"], "[Document 'report.pdf': content type not supported by this provider]");
+        assert_eq!(
+            content[0]["text"],
+            "[Document 'report.pdf': content type not supported by this provider]"
+        );
     }
 
     #[test]
@@ -1167,9 +1179,14 @@ mod tests {
             tool_call_id: None,
         };
         let (_, input) = translate_input(&[msg]);
-        let content = input[0]["content"].as_array().expect("content should be array");
+        let content = input[0]["content"]
+            .as_array()
+            .expect("content should be array");
         assert_eq!(content[0]["type"], "input_text");
-        assert_eq!(content[0]["text"], "[Document content not supported by this provider]");
+        assert_eq!(
+            content[0]["text"],
+            "[Document content not supported by this provider]"
+        );
     }
 
     #[test]
@@ -1189,7 +1206,10 @@ mod tests {
                 // call_id is used as the ToolCall.id (links to tool results)
                 assert_eq!(tc.id, "call_xyz789");
                 // item-level id (fc_xxx) is preserved in provider_metadata
-                let meta = tc.provider_metadata.as_ref().expect("provider_metadata should be set");
+                let meta = tc
+                    .provider_metadata
+                    .as_ref()
+                    .expect("provider_metadata should be set");
                 assert_eq!(meta["id"], "fc_abc123");
             }
             other => panic!("expected ToolCall, got {other:?}"),
@@ -1198,7 +1218,11 @@ mod tests {
 
     #[test]
     fn translate_input_uses_item_id_for_id_field() {
-        let mut tc = ToolCall::new("call_xyz789", "get_weather", serde_json::json!({"location": "NYC"}));
+        let mut tc = ToolCall::new(
+            "call_xyz789",
+            "get_weather",
+            serde_json::json!({"location": "NYC"}),
+        );
         tc.provider_metadata = Some(serde_json::json!({"id": "fc_abc123"}));
 
         let msg = Message {

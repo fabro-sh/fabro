@@ -54,10 +54,14 @@ mod tests {
 
         let replayer = ReplayInterviewer::new(recordings);
 
-        let a1 = replayer.ask(Question::new("anything", QuestionType::YesNo)).await;
+        let a1 = replayer
+            .ask(Question::new("anything", QuestionType::YesNo))
+            .await;
         assert_eq!(a1.value, AnswerValue::Yes);
 
-        let a2 = replayer.ask(Question::new("anything", QuestionType::Freeform)).await;
+        let a2 = replayer
+            .ask(Question::new("anything", QuestionType::Freeform))
+            .await;
         assert_eq!(a2.value, AnswerValue::Text("Alice".to_string()));
     }
 
@@ -70,13 +74,19 @@ mod tests {
 
         let replayer = ReplayInterviewer::new(recordings);
 
-        let a1 = replayer.ask(Question::new("first", QuestionType::YesNo)).await;
+        let a1 = replayer
+            .ask(Question::new("first", QuestionType::YesNo))
+            .await;
         assert_eq!(a1.value, AnswerValue::Yes);
 
-        let a2 = replayer.ask(Question::new("second", QuestionType::YesNo)).await;
+        let a2 = replayer
+            .ask(Question::new("second", QuestionType::YesNo))
+            .await;
         assert_eq!(a2.value, AnswerValue::Skipped);
 
-        let a3 = replayer.ask(Question::new("third", QuestionType::YesNo)).await;
+        let a3 = replayer
+            .ask(Question::new("third", QuestionType::YesNo))
+            .await;
         assert_eq!(a3.value, AnswerValue::Skipped);
     }
 }

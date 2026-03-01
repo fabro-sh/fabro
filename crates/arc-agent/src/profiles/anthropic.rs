@@ -21,7 +21,10 @@ impl AnthropicProfile {
     }
 
     #[must_use]
-    pub fn with_summarizer(model: impl Into<String>, summarizer: Option<WebFetchSummarizer>) -> Self {
+    pub fn with_summarizer(
+        model: impl Into<String>,
+        summarizer: Option<WebFetchSummarizer>,
+    ) -> Self {
         let config = SessionConfig {
             default_command_timeout_ms: 120_000,
             ..SessionConfig::default()
@@ -150,7 +153,14 @@ information instead of returning the full page. URLs must start with http:// or 
 Write clean, maintainable code. Handle errors appropriately. Follow existing code conventions \
 in the project. Keep changes minimal and focused on the task.";
 
-        assemble_system_prompt(core_prompt, env, env_context, project_docs, user_instructions, skills)
+        assemble_system_prompt(
+            core_prompt,
+            env,
+            env_context,
+            project_docs,
+            user_instructions,
+            skills,
+        )
     }
 
     fn capabilities(&self) -> ProfileCapabilities {
@@ -300,7 +310,8 @@ mod tests {
         let profile = AnthropicProfile::new("claude-opus-4-6");
         let env = MockExecutionEnvironment::linux();
         let ctx = EnvContext::default();
-        let prompt = profile.build_system_prompt(&env, &ctx, &[], Some("Always write tests first"), &[]);
+        let prompt =
+            profile.build_system_prompt(&env, &ctx, &[], Some("Always write tests first"), &[]);
         assert!(prompt.contains("Always write tests first"));
         assert!(prompt.contains("# User Instructions"));
     }

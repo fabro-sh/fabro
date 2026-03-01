@@ -12,12 +12,8 @@ use crate::parser::lexer::combinators::{identifier, key, value, ws, ws_tag};
 
 /// Parse a single attribute: `key = value`.
 fn attr(input: &str) -> IResult<&str, (String, AstValue)> {
-    let (rest, (k, _, _, v)) = tuple((
-        preceded(ws, key),
-        ws,
-        char('='),
-        preceded(ws, value),
-    ))(input)?;
+    let (rest, (k, _, _, v)) =
+        tuple((preceded(ws, key), ws, char('='), preceded(ws, value)))(input)?;
     Ok((rest, (k, v)))
 }
 

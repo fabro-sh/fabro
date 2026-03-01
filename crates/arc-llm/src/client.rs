@@ -65,7 +65,8 @@ impl Client {
             }
             client.register_provider(Arc::new(adapter)).await?;
         }
-        if let Ok(key) = std::env::var("GEMINI_API_KEY").or_else(|_| std::env::var("GOOGLE_API_KEY"))
+        if let Ok(key) =
+            std::env::var("GEMINI_API_KEY").or_else(|_| std::env::var("GOOGLE_API_KEY"))
         {
             let mut adapter = providers::GeminiAdapter::new(key);
             if let Ok(base_url) = std::env::var("GEMINI_BASE_URL") {
@@ -80,17 +81,14 @@ impl Client {
             client.register_provider(Arc::new(adapter)).await?;
         }
         if let Ok(key) = std::env::var("ZAI_API_KEY") {
-            let adapter = providers::OpenAiCompatibleAdapter::new(
-                key,
-                "https://api.z.ai/api/coding/paas/v4",
-            )
-            .with_name("zai");
+            let adapter =
+                providers::OpenAiCompatibleAdapter::new(key, "https://api.z.ai/api/coding/paas/v4")
+                    .with_name("zai");
             client.register_provider(Arc::new(adapter)).await?;
         }
         if let Ok(key) = std::env::var("MINIMAX_API_KEY") {
-            let adapter =
-                providers::OpenAiCompatibleAdapter::new(key, "https://api.minimax.io/v1")
-                    .with_name("minimax");
+            let adapter = providers::OpenAiCompatibleAdapter::new(key, "https://api.minimax.io/v1")
+                .with_name("minimax");
             client.register_provider(Arc::new(adapter)).await?;
         }
         if let Ok(key) = std::env::var("INCEPTION_API_KEY") {
@@ -282,10 +280,7 @@ mod tests {
             })
         }
 
-        async fn stream(
-            &self,
-            _request: &Request,
-        ) -> Result<StreamEventStream, SdkError> {
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
             let text = self.response_text.clone();
             let provider = self.provider_name.clone();
             let events = vec![
@@ -331,7 +326,10 @@ mod tests {
     #[tokio::test]
     async fn complete_routes_to_default_provider() {
         let mut client = Client::new(HashMap::new(), None, vec![]);
-        client.register_provider(Arc::new(MockProvider::new("test", "Hello!"))).await.unwrap();
+        client
+            .register_provider(Arc::new(MockProvider::new("test", "Hello!")))
+            .await
+            .unwrap();
 
         let response = client.complete(&test_request()).await.unwrap();
         assert_eq!(response.text(), "Hello!");
@@ -341,8 +339,14 @@ mod tests {
     #[tokio::test]
     async fn complete_routes_to_named_provider() {
         let mut client = Client::new(HashMap::new(), None, vec![]);
-        client.register_provider(Arc::new(MockProvider::new("provider_a", "from A"))).await.unwrap();
-        client.register_provider(Arc::new(MockProvider::new("provider_b", "from B"))).await.unwrap();
+        client
+            .register_provider(Arc::new(MockProvider::new("provider_a", "from A")))
+            .await
+            .unwrap();
+        client
+            .register_provider(Arc::new(MockProvider::new("provider_b", "from B")))
+            .await
+            .unwrap();
 
         let mut req = test_request();
         req.provider = Some("provider_b".into());
@@ -364,7 +368,10 @@ mod tests {
     #[tokio::test]
     async fn complete_errors_on_unknown_provider() {
         let mut client = Client::new(HashMap::new(), None, vec![]);
-        client.register_provider(Arc::new(MockProvider::new("test", "Hello"))).await.unwrap();
+        client
+            .register_provider(Arc::new(MockProvider::new("test", "Hello")))
+            .await
+            .unwrap();
 
         let mut req = test_request();
         req.provider = Some("nonexistent".into());
@@ -381,10 +388,16 @@ mod tests {
         let mut client = Client::new(HashMap::new(), None, vec![]);
         assert_eq!(client.default_provider(), None);
 
-        client.register_provider(Arc::new(MockProvider::new("first", "1"))).await.unwrap();
+        client
+            .register_provider(Arc::new(MockProvider::new("first", "1")))
+            .await
+            .unwrap();
         assert_eq!(client.default_provider(), Some("first"));
 
-        client.register_provider(Arc::new(MockProvider::new("second", "2"))).await.unwrap();
+        client
+            .register_provider(Arc::new(MockProvider::new("second", "2")))
+            .await
+            .unwrap();
         assert_eq!(client.default_provider(), Some("first"));
     }
 
@@ -393,7 +406,10 @@ mod tests {
         use futures::StreamExt;
 
         let mut client = Client::new(HashMap::new(), None, vec![]);
-        client.register_provider(Arc::new(MockProvider::new("test", "streamed"))).await.unwrap();
+        client
+            .register_provider(Arc::new(MockProvider::new("test", "streamed")))
+            .await
+            .unwrap();
 
         let mut stream = client.stream(&test_request()).await.unwrap();
         let first = stream.next().await.unwrap().unwrap();
@@ -406,8 +422,14 @@ mod tests {
     #[tokio::test]
     async fn provider_names_returns_registered() {
         let mut client = Client::new(HashMap::new(), None, vec![]);
-        client.register_provider(Arc::new(MockProvider::new("alpha", ""))).await.unwrap();
-        client.register_provider(Arc::new(MockProvider::new("beta", ""))).await.unwrap();
+        client
+            .register_provider(Arc::new(MockProvider::new("alpha", "")))
+            .await
+            .unwrap();
+        client
+            .register_provider(Arc::new(MockProvider::new("beta", "")))
+            .await
+            .unwrap();
         let mut names = client.provider_names();
         names.sort_unstable();
         assert_eq!(names, vec!["alpha", "beta"]);
@@ -441,7 +463,10 @@ mod tests {
     #[tokio::test]
     async fn middleware_wraps_complete() {
         let mut client = Client::new(HashMap::new(), None, vec![]);
-        client.register_provider(Arc::new(MockProvider::new("test", "hello"))).await.unwrap();
+        client
+            .register_provider(Arc::new(MockProvider::new("test", "hello")))
+            .await
+            .unwrap();
         client.add_middleware(Arc::new(UppercaseMiddleware));
 
         let response = client.complete(&test_request()).await.unwrap();

@@ -14,34 +14,37 @@ pub mod loop_detection;
 pub mod mcp_integration;
 pub mod profiles;
 pub mod project_docs;
-pub mod read_before_write_env;
-pub mod skills;
 pub mod provider_profile;
+pub mod read_before_write_env;
 pub mod session;
+pub mod skills;
 pub mod subagent;
 pub mod tool_execution;
 pub mod tool_registry;
 pub mod tools;
 pub mod truncation;
-pub mod v4a_patch;
 pub mod types;
+pub mod v4a_patch;
 
-pub use config::{SessionConfig, ToolApprovalFn};
 pub use arc_mcp::config::McpServerConfig;
-pub use error::AgentError;
-pub use event::EventEmitter;
-pub use execution_env::{format_lines_numbered, DirEntry, ExecEnvEventCallback, ExecResult, ExecutionEnvEvent, ExecutionEnvironment, GrepOptions};
-pub use history::History;
+pub use config::{SessionConfig, ToolApprovalFn};
 #[cfg(feature = "docker")]
 pub use docker_env::{DockerConfig, DockerExecutionEnvironment};
+pub use error::AgentError;
+pub use event::EventEmitter;
+pub use execution_env::{
+    format_lines_numbered, DirEntry, ExecEnvEventCallback, ExecResult, ExecutionEnvEvent,
+    ExecutionEnvironment, GrepOptions,
+};
+pub use history::History;
 pub use local_env::LocalExecutionEnvironment;
 pub use loop_detection::detect_loop;
-pub use read_before_write_env::ReadBeforeWriteEnvironment;
-pub use project_docs::discover_project_docs;
-pub use skills::Skill;
 pub use profiles::{AnthropicProfile, EnvContext, GeminiProfile, OpenAiProfile};
+pub use project_docs::discover_project_docs;
 pub use provider_profile::{ProfileCapabilities, ProviderProfile};
+pub use read_before_write_env::ReadBeforeWriteEnvironment;
 pub use session::Session;
+pub use skills::Skill;
 pub use subagent::{SubAgent, SubAgentEventCallback, SubAgentManager, SubAgentResult};
 pub use tool_registry::ToolRegistry;
 pub use tools::{

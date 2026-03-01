@@ -22,11 +22,7 @@ pub type NextStreamFn = Arc<
 /// Middleware for intercepting `complete()` and streaming calls (Section 2.3).
 #[async_trait::async_trait]
 pub trait Middleware: Send + Sync {
-    async fn handle_complete(
-        &self,
-        request: Request,
-        next: NextFn,
-    ) -> Result<Response, SdkError>;
+    async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, SdkError>;
 
     async fn handle_stream(
         &self,

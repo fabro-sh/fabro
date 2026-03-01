@@ -1,4 +1,7 @@
-use crate::execution_env::{format_lines_numbered, DirEntry, ExecEnvEventCallback, ExecResult, ExecutionEnvEvent, ExecutionEnvironment, GrepOptions};
+use crate::execution_env::{
+    format_lines_numbered, DirEntry, ExecEnvEventCallback, ExecResult, ExecutionEnvEvent,
+    ExecutionEnvironment, GrepOptions,
+};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -15,7 +18,11 @@ pub struct LocalExecutionEnvironment {
 impl LocalExecutionEnvironment {
     #[must_use]
     pub fn new(working_directory: PathBuf) -> Self {
-        Self { working_directory, event_callback: None, rg_available: std::sync::OnceLock::new() }
+        Self {
+            working_directory,
+            event_callback: None,
+            rg_available: std::sync::OnceLock::new(),
+        }
     }
 
     pub fn set_event_callback(&mut self, cb: ExecEnvEventCallback) {
@@ -29,8 +36,16 @@ impl LocalExecutionEnvironment {
     }
 
     const ENV_SAFELIST: &'static [&'static str] = &[
-        "PATH", "HOME", "USER", "SHELL", "LANG", "TERM", "TMPDIR",
-        "GOPATH", "CARGO_HOME", "NVM_DIR",
+        "PATH",
+        "HOME",
+        "USER",
+        "SHELL",
+        "LANG",
+        "TERM",
+        "TMPDIR",
+        "GOPATH",
+        "CARGO_HOME",
+        "NVM_DIR",
     ];
 
     fn should_filter_env_var(key: &str) -> bool {
@@ -57,7 +72,12 @@ impl LocalExecutionEnvironment {
 
 #[async_trait]
 impl ExecutionEnvironment for LocalExecutionEnvironment {
-    async fn read_file(&self, path: &str, offset: Option<usize>, limit: Option<usize>) -> Result<String, String> {
+    async fn read_file(
+        &self,
+        path: &str,
+        offset: Option<usize>,
+        limit: Option<usize>,
+    ) -> Result<String, String> {
         let full_path = self.resolve_path(path);
         let content = tokio::fs::read_to_string(&full_path)
             .await
@@ -90,7 +110,11 @@ impl ExecutionEnvironment for LocalExecutionEnvironment {
         Ok(full_path.exists())
     }
 
-    async fn list_directory(&self, path: &str, depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
+    async fn list_directory(
+        &self,
+        path: &str,
+        depth: Option<usize>,
+    ) -> Result<Vec<DirEntry>, String> {
         let full_path = self.resolve_path(path);
         let max_depth = depth.unwrap_or(1);
 
@@ -158,10 +182,8 @@ impl ExecutionEnvironment for LocalExecutionEnvironment {
             }
         }
 
-        let effective_dir = working_dir.map_or_else(
-            || self.working_directory.clone(),
-            std::path::PathBuf::from,
-        );
+        let effective_dir =
+            working_dir.map_or_else(|| self.working_directory.clone(), std::path::PathBuf::from);
 
         let mut cmd = Command::new("/bin/bash");
         cmd.arg("-c")
@@ -284,15 +306,17 @@ impl ExecutionEnvironment for LocalExecutionEnvironment {
         };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let results: Vec<String> = stdout.lines().map(String::from).filter(|l| !l.is_empty()).collect();
+        let results: Vec<String> = stdout
+            .lines()
+            .map(String::from)
+            .filter(|l| !l.is_empty())
+            .collect();
         Ok(results)
     }
 
     async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String> {
-        let base_dir = path.map_or_else(
-            || self.working_directory.clone(),
-            std::path::PathBuf::from,
-        );
+        let base_dir =
+            path.map_or_else(|| self.working_directory.clone(), std::path::PathBuf::from);
 
         let full_pattern = if Path::new(pattern).is_absolute() {
             pattern.to_string()
@@ -321,24 +345,38 @@ impl ExecutionEnvironment for LocalExecutionEnvironment {
     }
 
     async fn initialize(&self) -> Result<(), String> {
-        self.emit(ExecutionEnvEvent::Initializing { env_type: "local".into() });
+        self.emit(ExecutionEnvEvent::Initializing {
+            env_type: "local".into(),
+        });
         let start = Instant::now();
         let result = tokio::fs::create_dir_all(&self.working_directory)
             .await
             .map_err(|e| format!("Failed to create working directory: {e}"));
         let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
         match &result {
-            Ok(()) => self.emit(ExecutionEnvEvent::Ready { env_type: "local".into(), duration_ms }),
-            Err(e) => self.emit(ExecutionEnvEvent::InitializeFailed { env_type: "local".into(), error: e.clone(), duration_ms }),
+            Ok(()) => self.emit(ExecutionEnvEvent::Ready {
+                env_type: "local".into(),
+                duration_ms,
+            }),
+            Err(e) => self.emit(ExecutionEnvEvent::InitializeFailed {
+                env_type: "local".into(),
+                error: e.clone(),
+                duration_ms,
+            }),
         }
         result
     }
 
     async fn cleanup(&self) -> Result<(), String> {
-        self.emit(ExecutionEnvEvent::CleanupStarted { env_type: "local".into() });
+        self.emit(ExecutionEnvEvent::CleanupStarted {
+            env_type: "local".into(),
+        });
         let start = Instant::now();
         let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        self.emit(ExecutionEnvEvent::CleanupCompleted { env_type: "local".into(), duration_ms });
+        self.emit(ExecutionEnvEvent::CleanupCompleted {
+            env_type: "local".into(),
+            duration_ms,
+        });
         Ok(())
     }
 
@@ -361,9 +399,7 @@ impl ExecutionEnvironment for LocalExecutionEnvironment {
     fn os_version(&self) -> String {
         #[cfg(unix)]
         {
-            let output = std::process::Command::new("uname")
-                .arg("-r")
-                .output();
+            let output = std::process::Command::new("uname").arg("-r").output();
             match output {
                 Ok(out) => {
                     let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -646,8 +682,12 @@ mod tests {
 
         let captured = events.lock().unwrap();
         assert_eq!(captured.len(), 2);
-        assert!(matches!(&captured[0], ExecutionEnvEvent::Initializing { env_type } if env_type == "local"));
-        assert!(matches!(&captured[1], ExecutionEnvEvent::Ready { env_type, .. } if env_type == "local"));
+        assert!(
+            matches!(&captured[0], ExecutionEnvEvent::Initializing { env_type } if env_type == "local")
+        );
+        assert!(
+            matches!(&captured[1], ExecutionEnvEvent::Ready { env_type, .. } if env_type == "local")
+        );
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -670,8 +710,12 @@ mod tests {
 
         let captured = events.lock().unwrap();
         assert_eq!(captured.len(), 2);
-        assert!(matches!(&captured[0], ExecutionEnvEvent::CleanupStarted { env_type } if env_type == "local"));
-        assert!(matches!(&captured[1], ExecutionEnvEvent::CleanupCompleted { env_type, .. } if env_type == "local"));
+        assert!(
+            matches!(&captured[0], ExecutionEnvEvent::CleanupStarted { env_type } if env_type == "local")
+        );
+        assert!(
+            matches!(&captured[1], ExecutionEnvEvent::CleanupCompleted { env_type, .. } if env_type == "local")
+        );
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -679,7 +723,11 @@ mod tests {
     #[tokio::test]
     async fn grep_finds_matches() {
         let dir = temp_dir();
-        std::fs::write(dir.join("test.rs"), "fn main() {\n    println!(\"hello\");\n}\n").unwrap();
+        std::fs::write(
+            dir.join("test.rs"),
+            "fn main() {\n    println!(\"hello\");\n}\n",
+        )
+        .unwrap();
 
         let env = LocalExecutionEnvironment::new(dir.clone());
         let results = env
@@ -749,5 +797,4 @@ mod tests {
         assert_eq!(results.len(), 2);
         std::fs::remove_dir_all(&dir).unwrap();
     }
-
 }

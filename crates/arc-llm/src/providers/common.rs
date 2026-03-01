@@ -176,12 +176,9 @@ pub async fn send_and_read_response(
     let status = http_resp.status();
     let retry_after = parse_retry_after(http_resp.headers());
     let headers = http_resp.headers().clone();
-    let body = http_resp
-        .text()
-        .await
-        .map_err(|e| SdkError::Network {
-            message: e.to_string(),
-        })?;
+    let body = http_resp.text().await.map_err(|e| SdkError::Network {
+        message: e.to_string(),
+    })?;
 
     if !status.is_success() {
         let (msg, code, raw) = parse_error_body(&body, error_code_field);
@@ -210,7 +207,10 @@ pub struct LineReader {
 }
 
 impl LineReader {
-    pub fn new(response: reqwest::Response, stream_read_timeout: Option<std::time::Duration>) -> Self {
+    pub fn new(
+        response: reqwest::Response,
+        stream_read_timeout: Option<std::time::Duration>,
+    ) -> Self {
         Self {
             response,
             buffer: String::new(),
@@ -364,7 +364,10 @@ mod tests {
     #[test]
     fn parse_rate_limit_headers_invalid_values_ignored() {
         let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("x-ratelimit-remaining-requests", "not-a-number".parse().unwrap());
+        headers.insert(
+            "x-ratelimit-remaining-requests",
+            "not-a-number".parse().unwrap(),
+        );
         headers.insert("x-ratelimit-limit-tokens", "10000".parse().unwrap());
 
         let info = parse_rate_limit_headers(&headers).unwrap();

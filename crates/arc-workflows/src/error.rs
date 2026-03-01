@@ -348,8 +348,14 @@ mod tests {
     fn failure_class_display_all_values() {
         assert_eq!(FailureClass::TransientInfra.to_string(), "transient_infra");
         assert_eq!(FailureClass::Deterministic.to_string(), "deterministic");
-        assert_eq!(FailureClass::BudgetExhausted.to_string(), "budget_exhausted");
-        assert_eq!(FailureClass::CompilationLoop.to_string(), "compilation_loop");
+        assert_eq!(
+            FailureClass::BudgetExhausted.to_string(),
+            "budget_exhausted"
+        );
+        assert_eq!(
+            FailureClass::CompilationLoop.to_string(),
+            "compilation_loop"
+        );
         assert_eq!(FailureClass::Canceled.to_string(), "canceled");
         assert_eq!(FailureClass::Structural.to_string(), "structural");
     }
@@ -412,7 +418,10 @@ mod tests {
             message: "connection refused".into(),
         };
         let err = ArcError::Llm(sdk_err);
-        assert_eq!(err.to_string(), "LLM error: Network error: connection refused");
+        assert_eq!(
+            err.to_string(),
+            "LLM error: Network error: connection refused"
+        );
     }
 
     #[test]
@@ -441,10 +450,7 @@ mod tests {
 
     #[test]
     fn failure_class_cancelled() {
-        assert_eq!(
-            ArcError::Cancelled.failure_class(),
-            FailureClass::Canceled
-        );
+        assert_eq!(ArcError::Cancelled.failure_class(), FailureClass::Canceled);
     }
 
     #[test]

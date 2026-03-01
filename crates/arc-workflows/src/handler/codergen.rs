@@ -57,7 +57,7 @@ pub struct CodergenHandler {
 }
 
 impl CodergenHandler {
-    #[must_use] 
+    #[must_use]
     pub fn new(backend: Option<Box<dyn CodergenBackend>>) -> Self {
         Self { backend }
     }
@@ -178,9 +178,7 @@ fn resolve_hook(node: &Node, graph: &Graph, key: &str) -> Option<String> {
 /// Execute a tool hook shell command. Returns true if the command succeeded (exit 0).
 fn run_hook(command: &str, node_id: &str, work_dir: Option<&Path>) -> bool {
     let mut cmd = std::process::Command::new("sh");
-    cmd.arg("-c")
-        .arg(command)
-        .env("ARC_NODE_ID", node_id);
+    cmd.arg("-c").arg(command).env("ARC_NODE_ID", node_id);
     if let Some(wd) = work_dir {
         cmd.current_dir(wd);
     }
@@ -220,7 +218,8 @@ impl Handler for CodergenHandler {
         tokio::fs::write(stage_dir.join("prompt.md"), &prompt).await?;
 
         // Resolve work_dir from context for hooks
-        let work_dir_str = context.get("internal.work_dir")
+        let work_dir_str = context
+            .get("internal.work_dir")
             .and_then(|v| v.as_str().map(String::from));
         let work_dir = work_dir_str.as_deref().map(Path::new);
 
@@ -238,39 +237,55 @@ impl Handler for CodergenHandler {
         let thread_id = context
             .get("internal.thread_id")
             .and_then(|v| v.as_str().map(String::from));
-        let (response_text, stage_usage, backend_files_touched) = if let Some(backend) = &self.backend {
-            let result = match mode {
-                CodergenMode::AgentLoop => {
-                    backend.run(node, &prompt, context, thread_id.as_deref(), &services.emitter, &stage_dir, &services.execution_env).await
+        let (response_text, stage_usage, backend_files_touched) =
+            if let Some(backend) = &self.backend {
+                let result = match mode {
+                    CodergenMode::AgentLoop => {
+                        backend
+                            .run(
+                                node,
+                                &prompt,
+                                context,
+                                thread_id.as_deref(),
+                                &services.emitter,
+                                &stage_dir,
+                                &services.execution_env,
+                            )
+                            .await
+                    }
+                    CodergenMode::OneShot => backend.one_shot(node, &prompt, &stage_dir).await,
+                };
+                match result {
+                    Ok(CodergenResult::Full(outcome)) => {
+                        let status_json = serde_json::to_string_pretty(&outcome)
+                            .unwrap_or_else(|_| "{}".to_string());
+                        tokio::fs::write(stage_dir.join("status.json"), &status_json).await?;
+                        return Ok(outcome);
+                    }
+                    Ok(CodergenResult::Text {
+                        text,
+                        usage,
+                        files_touched,
+                    }) => (text, usage, files_touched),
+                    Err(e) if e.is_retryable() => {
+                        return Err(e);
+                    }
+                    Err(e) => {
+                        return Ok(Outcome::fail(e.to_string()));
+                    }
                 }
-                CodergenMode::OneShot => backend.one_shot(node, &prompt, &stage_dir).await,
+            } else {
+                (
+                    format!("[Simulated] Response for stage: {}", node.id),
+                    None,
+                    Vec::new(),
+                )
             };
-            match result {
-                Ok(CodergenResult::Full(outcome)) => {
-                    let status_json = serde_json::to_string_pretty(&outcome)
-                        .unwrap_or_else(|_| "{}".to_string());
-                    tokio::fs::write(stage_dir.join("status.json"), &status_json).await?;
-                    return Ok(outcome);
-                }
-                Ok(CodergenResult::Text { text, usage, files_touched }) => (text, usage, files_touched),
-                Err(e) if e.is_retryable() => {
-                    return Err(e);
-                }
-                Err(e) => {
-                    return Ok(Outcome::fail(e.to_string()));
-                }
-            }
-        } else {
-            (format!("[Simulated] Response for stage: {}", node.id), None, Vec::new())
-        };
 
         // 5. Execute post-hook (spec 9.7)
         if let Some(post_hook) = resolve_hook(node, graph, "tool_hooks.post") {
             if !run_hook(&post_hook, &node.id, work_dir) {
-                context.append_log(format!(
-                    "post-hook failed for node {}, continuing",
-                    node.id
-                ));
+                context.append_log(format!("post-hook failed for node {}, continuing", node.id));
             }
         }
 
@@ -280,10 +295,9 @@ impl Handler for CodergenHandler {
         // 7. Build and write status
         let mut outcome = Outcome::success();
         outcome.notes = Some(format!("Stage completed: {}", node.id));
-        outcome.context_updates.insert(
-            "last_stage".to_string(),
-            serde_json::json!(node.id),
-        );
+        outcome
+            .context_updates
+            .insert("last_stage".to_string(), serde_json::json!(node.id));
         outcome.context_updates.insert(
             "last_response".to_string(),
             serde_json::json!(truncate(&response_text, 200)),
@@ -298,8 +312,8 @@ impl Handler for CodergenHandler {
         outcome.usage = stage_usage;
         outcome.files_touched = backend_files_touched;
 
-        let status_json = serde_json::to_string_pretty(&outcome)
-            .unwrap_or_else(|_| "{}".to_string());
+        let status_json =
+            serde_json::to_string_pretty(&outcome).unwrap_or_else(|_| "{}".to_string());
         tokio::fs::write(stage_dir.join("status.json"), &status_json).await?;
 
         Ok(outcome)
@@ -381,7 +395,8 @@ mod tests {
             .unwrap();
 
         let prompt_content =
-            std::fs::read_to_string(tmp.path().join("nodes").join("plan").join("prompt.md")).unwrap();
+            std::fs::read_to_string(tmp.path().join("nodes").join("plan").join("prompt.md"))
+                .unwrap();
         assert_eq!(prompt_content, "Achieve: Build a feature");
     }
 
@@ -403,7 +418,8 @@ mod tests {
             .unwrap();
 
         let prompt_content =
-            std::fs::read_to_string(tmp.path().join("nodes").join("work").join("prompt.md")).unwrap();
+            std::fs::read_to_string(tmp.path().join("nodes").join("work").join("prompt.md"))
+                .unwrap();
         assert_eq!(prompt_content, "Do work");
     }
 
@@ -470,11 +486,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Skipped);
-        assert!(outcome
-            .notes
-            .as_deref()
-            .unwrap()
-            .contains("pre-hook"));
+        assert!(outcome.notes.as_deref().unwrap().contains("pre-hook"));
     }
 
     #[tokio::test]
@@ -571,9 +583,12 @@ mod tests {
                 _stage_dir: &Path,
                 _execution_env: &Arc<dyn ExecutionEnvironment>,
             ) -> Result<CodergenResult, ArcError> {
-                *self.captured_thread_id.lock().unwrap() =
-                    Some(thread_id.map(String::from));
-                Ok(CodergenResult::Text { text: "ok".to_string(), usage: None, files_touched: Vec::new() })
+                *self.captured_thread_id.lock().unwrap() = Some(thread_id.map(String::from));
+                Ok(CodergenResult::Text {
+                    text: "ok".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
+                })
             }
         }
 
@@ -619,9 +634,12 @@ mod tests {
                 _stage_dir: &Path,
                 _execution_env: &Arc<dyn ExecutionEnvironment>,
             ) -> Result<CodergenResult, ArcError> {
-                *self.captured_thread_id.lock().unwrap() =
-                    Some(thread_id.map(String::from));
-                Ok(CodergenResult::Text { text: "ok".to_string(), usage: None, files_touched: Vec::new() })
+                *self.captured_thread_id.lock().unwrap() = Some(thread_id.map(String::from));
+                Ok(CodergenResult::Text {
+                    text: "ok".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
+                })
             }
         }
 
@@ -672,7 +690,9 @@ mod tests {
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
-        let result = handler.execute(&node, &context, &graph, tmp.path(), &make_services()).await;
+        let result = handler
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .await;
         let err = result.unwrap_err();
         assert!(err.is_retryable());
         assert!(err.to_string().contains("Request timed out"));
@@ -814,11 +834,17 @@ Some text in between.
         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
 
         let prompt_content =
-            std::fs::read_to_string(tmp.path().join("nodes").join("classify").join("prompt.md")).unwrap();
+            std::fs::read_to_string(tmp.path().join("nodes").join("classify").join("prompt.md"))
+                .unwrap();
         assert_eq!(prompt_content, "Classify this");
 
-        let response_content =
-            std::fs::read_to_string(tmp.path().join("nodes").join("classify").join("response.md")).unwrap();
+        let response_content = std::fs::read_to_string(
+            tmp.path()
+                .join("nodes")
+                .join("classify")
+                .join("response.md"),
+        )
+        .unwrap();
         assert_eq!(response_content, "one-shot response");
     }
 
@@ -840,8 +866,13 @@ Some text in between.
             .unwrap();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
 
-        let response_content =
-            std::fs::read_to_string(tmp.path().join("nodes").join("classify").join("response.md")).unwrap();
+        let response_content = std::fs::read_to_string(
+            tmp.path()
+                .join("nodes")
+                .join("classify")
+                .join("response.md"),
+        )
+        .unwrap();
         assert!(response_content.contains("[Simulated]"));
     }
 
@@ -1074,10 +1105,7 @@ Some text in between.
             AttrValue::String("Classify this".to_string()),
         );
         let context = Context::new();
-        context.set(
-            "current.preamble",
-            serde_json::json!("Prior output here"),
-        );
+        context.set("current.preamble", serde_json::json!("Prior output here"));
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
@@ -1116,7 +1144,8 @@ Some text in between.
             .unwrap();
 
         let prompt_content =
-            std::fs::read_to_string(tmp.path().join("nodes").join("report").join("prompt.md")).unwrap();
+            std::fs::read_to_string(tmp.path().join("nodes").join("report").join("prompt.md"))
+                .unwrap();
         assert!(
             prompt_content.contains("## Script Output\nAll tests passed"),
             "prompt.md should contain preamble"

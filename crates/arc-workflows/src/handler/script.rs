@@ -230,10 +230,8 @@ mod tests {
     async fn script_handler_failing_command() {
         let handler = ScriptHandler;
         let mut node = Node::new("script_node");
-        node.attrs.insert(
-            "script".to_string(),
-            AttrValue::String("false".to_string()),
-        );
+        node.attrs
+            .insert("script".to_string(), AttrValue::String("false".to_string()));
         let context = Context::new();
         let graph = Graph::new("test");
         let logs_root = tempfile::tempdir().unwrap();
@@ -397,7 +395,11 @@ mod tests {
             .await
             .unwrap();
 
-        let timing_path = logs_root.path().join("nodes").join("script_node").join("script_timing.json");
+        let timing_path = logs_root
+            .path()
+            .join("nodes")
+            .join("script_node")
+            .join("script_timing.json");
         let content = std::fs::read_to_string(&timing_path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert!(json["duration_ms"].is_u64());
@@ -409,10 +411,8 @@ mod tests {
     async fn writes_script_timing_json_on_failure() {
         let handler = ScriptHandler;
         let mut node = Node::new("script_node");
-        node.attrs.insert(
-            "script".to_string(),
-            AttrValue::String("false".to_string()),
-        );
+        node.attrs
+            .insert("script".to_string(), AttrValue::String("false".to_string()));
         let context = Context::new();
         let graph = Graph::new("test");
         let logs_root = tempfile::tempdir().unwrap();
@@ -422,7 +422,11 @@ mod tests {
             .await
             .unwrap();
 
-        let timing_path = logs_root.path().join("nodes").join("script_node").join("script_timing.json");
+        let timing_path = logs_root
+            .path()
+            .join("nodes")
+            .join("script_node")
+            .join("script_timing.json");
         let content = std::fs::read_to_string(&timing_path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(json["exit_code"], 1);
@@ -450,7 +454,11 @@ mod tests {
             .await
             .unwrap_err();
 
-        let timing_path = logs_root.path().join("nodes").join("script_node").join("script_timing.json");
+        let timing_path = logs_root
+            .path()
+            .join("nodes")
+            .join("script_node")
+            .join("script_timing.json");
         let content = std::fs::read_to_string(&timing_path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert!(json["duration_ms"].is_u64());
@@ -480,7 +488,10 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
         let script_output = outcome.context_updates.get("script.output").unwrap();
-        assert!(script_output.as_str().unwrap().contains("hello from python"));
+        assert!(script_output
+            .as_str()
+            .unwrap()
+            .contains("hello from python"));
     }
 
     #[tokio::test]
@@ -597,9 +608,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
-        assert!(outcome.context_updates.get("script.output").is_some());
+        assert!(outcome.context_updates.contains_key("script.output"));
         assert!(
-            outcome.context_updates.get("tool.output").is_none(),
+            !outcome.context_updates.contains_key("tool.output"),
             "tool.output should not be emitted"
         );
     }

@@ -29,7 +29,10 @@ async fn anthropic_complete() {
     let request = make_request("claude-haiku-4-5-20251001");
     let response = adapter.complete(&request).await.unwrap();
 
-    assert!(!response.text().is_empty(), "response text should not be empty");
+    assert!(
+        !response.text().is_empty(),
+        "response text should not be empty"
+    );
     assert_eq!(response.finish_reason, arc_llm::types::FinishReason::Stop);
     assert!(response.usage.input_tokens > 0);
     assert!(response.usage.output_tokens > 0);
@@ -45,7 +48,10 @@ async fn openai_complete() {
     let request = make_request("gpt-4o-mini");
     let response = adapter.complete(&request).await.unwrap();
 
-    assert!(!response.text().is_empty(), "response text should not be empty");
+    assert!(
+        !response.text().is_empty(),
+        "response text should not be empty"
+    );
     assert_eq!(response.finish_reason, arc_llm::types::FinishReason::Stop);
     assert!(response.usage.input_tokens > 0);
     assert!(response.usage.output_tokens > 0);
@@ -60,7 +66,10 @@ async fn openai_gpt_5_3_codex_complete() {
     let request = make_request("gpt-5.3-codex");
     let response = adapter.complete(&request).await.unwrap();
 
-    assert!(!response.text().is_empty(), "response text should not be empty");
+    assert!(
+        !response.text().is_empty(),
+        "response text should not be empty"
+    );
     assert!(response.usage.input_tokens > 0);
     assert!(response.usage.output_tokens > 0);
     assert_eq!(response.provider, "openai");
@@ -75,7 +84,10 @@ async fn gemini_complete() {
     let request = make_request("gemini-2.5-flash");
     let response = adapter.complete(&request).await.unwrap();
 
-    assert!(!response.text().is_empty(), "response text should not be empty");
+    assert!(
+        !response.text().is_empty(),
+        "response text should not be empty"
+    );
     assert_eq!(response.finish_reason, arc_llm::types::FinishReason::Stop);
     assert!(response.usage.input_tokens > 0);
     assert!(response.usage.output_tokens > 0);
@@ -131,7 +143,10 @@ async fn run_multi_turn_cache_test(
 
         let response = adapter.complete(&request).await.unwrap();
         let text = response.text();
-        assert!(!text.is_empty(), "response text should not be empty on turn {turn}");
+        assert!(
+            !text.is_empty(),
+            "response text should not be empty on turn {turn}"
+        );
 
         if turn == 5 {
             let cache_read = response.usage.cache_read_tokens.unwrap_or(0) as f64;

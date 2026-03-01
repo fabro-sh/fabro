@@ -1,15 +1,15 @@
 use crate::{
+    subagent::{SessionFactory, SubAgentManager},
     AgentEvent, AnthropicProfile, GeminiProfile, LocalExecutionEnvironment, OpenAiProfile,
     ProviderProfile, Session, SessionConfig, ToolApprovalFn, Turn,
-    subagent::{SessionFactory, SubAgentManager},
 };
-use clap::{Args, Parser, ValueEnum};
 use arc_llm::client::Client;
 use arc_llm::provider::{ModelId, Provider};
+use arc_util::terminal::Styles;
+use clap::{Args, Parser, ValueEnum};
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use arc_util::terminal::Styles;
 
 /// Public arguments for the agent command, usable from an external CLI.
 #[derive(Args)]
@@ -164,7 +164,10 @@ fn summarizer_model_id(provider: Provider) -> ModelId {
     }
 }
 
-fn build_summarizer(provider: Provider, llm_client: Option<Client>) -> Option<crate::tools::WebFetchSummarizer> {
+fn build_summarizer(
+    provider: Provider,
+    llm_client: Option<Client>,
+) -> Option<crate::tools::WebFetchSummarizer> {
     let client = llm_client?;
     Some(crate::tools::WebFetchSummarizer {
         client,
@@ -172,13 +175,17 @@ fn build_summarizer(provider: Provider, llm_client: Option<Client>) -> Option<cr
     })
 }
 
-fn build_profile(provider: Provider, model: &str, llm_client: Option<Client>) -> Box<dyn ProviderProfile> {
+fn build_profile(
+    provider: Provider,
+    model: &str,
+    llm_client: Option<Client>,
+) -> Box<dyn ProviderProfile> {
     let summarizer = build_summarizer(provider, llm_client);
     match provider {
         Provider::OpenAi => Box::new(OpenAiProfile::with_summarizer(model, summarizer)),
-        Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => Box::new(
-            OpenAiProfile::with_summarizer(model, summarizer).with_provider(provider),
-        ),
+        Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {
+            Box::new(OpenAiProfile::with_summarizer(model, summarizer).with_provider(provider))
+        }
         Provider::Gemini => Box::new(GeminiProfile::with_summarizer(model, summarizer)),
         Provider::Anthropic => Box::new(AnthropicProfile::with_summarizer(model, summarizer)),
     }
@@ -318,14 +325,16 @@ impl arc_llm::middleware::Middleware for VerboseMiddleware {
             "{}[verbose] request:{}\n{}",
             s.dim,
             s.reset,
-            serde_json::to_string_pretty(&request).unwrap_or_else(|e| format!("<serialize error: {e}>"))
+            serde_json::to_string_pretty(&request)
+                .unwrap_or_else(|e| format!("<serialize error: {e}>"))
         );
         let response = next(request).await?;
         eprintln!(
             "{}[verbose] response:{}\n{}",
             s.dim,
             s.reset,
-            serde_json::to_string_pretty(&response).unwrap_or_else(|e| format!("<serialize error: {e}>"))
+            serde_json::to_string_pretty(&response)
+                .unwrap_or_else(|e| format!("<serialize error: {e}>"))
         );
         Ok(response)
     }
@@ -344,7 +353,10 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
 
     // Parse provider string to enum early for compile-time safety
-    let provider: Provider = args.provider.parse().map_err(|e: String| anyhow::anyhow!("{e}"))?;
+    let provider: Provider = args
+        .provider
+        .parse()
+        .map_err(|e: String| anyhow::anyhow!("{e}"))?;
 
     // Validate provider API key
     if !validate_api_key(provider) {
@@ -367,10 +379,7 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
         .model
         .as_deref()
         .unwrap_or_else(|| default_model(provider));
-    eprintln!(
-        "{}Using model: {model}{}",
-        styles.dim, styles.reset,
-    );
+    eprintln!("{}Using model: {model}{}", styles.dim, styles.reset,);
     let mut profile = build_profile(provider, model, Some(client.clone()));
 
     // Build execution environment
@@ -389,9 +398,9 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
     };
 
     // Register subagent tools
-    let manager = Arc::new(tokio::sync::Mutex::new(
-        SubAgentManager::new(config.max_subagent_depth),
-    ));
+    let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(
+        config.max_subagent_depth,
+    )));
     let manager_for_callback = manager.clone();
     let factory_client = client.clone();
     let factory_model = model.to_string();
@@ -400,17 +409,22 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
     let factory: SessionFactory = Arc::new(move || {
         let child_summarizer = build_summarizer(provider, Some(factory_client.clone()));
         let child_profile: Arc<dyn ProviderProfile> = match provider {
-            Provider::OpenAi => {
-                Arc::new(OpenAiProfile::with_summarizer(&factory_model, child_summarizer))
-            }
+            Provider::OpenAi => Arc::new(OpenAiProfile::with_summarizer(
+                &factory_model,
+                child_summarizer,
+            )),
             Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => Arc::new(
                 OpenAiProfile::with_summarizer(&factory_model, child_summarizer)
                     .with_provider(provider),
             ),
-            Provider::Gemini => Arc::new(GeminiProfile::with_summarizer(&factory_model, child_summarizer)),
-            Provider::Anthropic => {
-                Arc::new(AnthropicProfile::with_summarizer(&factory_model, child_summarizer))
-            }
+            Provider::Gemini => Arc::new(GeminiProfile::with_summarizer(
+                &factory_model,
+                child_summarizer,
+            )),
+            Provider::Anthropic => Arc::new(AnthropicProfile::with_summarizer(
+                &factory_model,
+                child_summarizer,
+            )),
         };
         Session::new(
             factory_client.clone(),
@@ -428,7 +442,10 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
     let mut session = Session::new(client, profile, env, config);
 
     // Wire subagent event callback to parent session's emitter
-    manager_for_callback.lock().await.set_event_callback(session.event_callback());
+    manager_for_callback
+        .lock()
+        .await
+        .set_event_callback(session.event_callback());
 
     // SIGINT handler
     let cancel_token = session.cancel_token();
@@ -456,7 +473,11 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
                 let s = styles;
                 while let Ok(event) = rx.recv().await {
                     match &event.event {
-                        AgentEvent::ToolCallStarted { tool_name, arguments, .. } => {
+                        AgentEvent::ToolCallStarted {
+                            tool_name,
+                            arguments,
+                            ..
+                        } => {
                             eprintln!(
                                 "  {dim}\u{25cf}{reset} {bold}{cyan}{tool_name}{reset}{dim}({args}){reset}",
                                 dim = s.dim,
@@ -467,9 +488,16 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
                             );
                         }
                         AgentEvent::ToolCallCompleted {
-                            tool_name, output, is_error, ..
+                            tool_name,
+                            output,
+                            is_error,
+                            ..
                         } if verbose => {
-                            let label = if *is_error { "tool error" } else { "tool result" };
+                            let label = if *is_error {
+                                "tool error"
+                            } else {
+                                "tool result"
+                            };
                             eprintln!(
                                 "  {}[{label}] {tool_name}:{}\n{}",
                                 s.dim,
@@ -485,7 +513,12 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
                                 reset = s.reset,
                             );
                         }
-                        AgentEvent::SubAgentSpawned { agent_id, depth, task, .. } => {
+                        AgentEvent::SubAgentSpawned {
+                            agent_id,
+                            depth,
+                            task,
+                            ..
+                        } => {
                             let short_id = &agent_id[..8.min(agent_id.len())];
                             let task_preview = if task.len() > 60 { &task[..60] } else { task };
                             eprintln!(
@@ -493,14 +526,23 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
                                 dim = s.dim, reset = s.reset,
                             );
                         }
-                        AgentEvent::SubAgentCompleted { agent_id, depth, success, turns_used } => {
+                        AgentEvent::SubAgentCompleted {
+                            agent_id,
+                            depth,
+                            success,
+                            turns_used,
+                        } => {
                             let short_id = &agent_id[..8.min(agent_id.len())];
                             eprintln!(
                                 "  {dim}\u{25a0} subagent {short_id} completed (depth={depth}, success={success}, turns={turns_used}){reset}",
                                 dim = s.dim, reset = s.reset,
                             );
                         }
-                        AgentEvent::SubAgentFailed { agent_id, depth, error } => {
+                        AgentEvent::SubAgentFailed {
+                            agent_id,
+                            depth,
+                            error,
+                        } => {
                             let short_id = &agent_id[..8.min(agent_id.len())];
                             eprintln!(
                                 "  {red}\u{2717} subagent {short_id} failed (depth={depth}): {error}{reset}",
@@ -511,14 +553,20 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
                             let short_id = &agent_id[..8.min(agent_id.len())];
                             eprintln!(
                                 "  {dim}\u{25a0} subagent {short_id} closed (depth={depth}){reset}",
-                                dim = s.dim, reset = s.reset,
+                                dim = s.dim,
+                                reset = s.reset,
                             );
                         }
-                        AgentEvent::SubAgentEvent { agent_id, event: child_event, .. } if verbose => {
+                        AgentEvent::SubAgentEvent {
+                            agent_id,
+                            event: child_event,
+                            ..
+                        } if verbose => {
                             let short_id = &agent_id[..8.min(agent_id.len())];
                             eprintln!(
                                 "  {dim}[subagent {short_id}] {child_event:?}{reset}",
-                                dim = s.dim, reset = s.reset,
+                                dim = s.dim,
+                                reset = s.reset,
                             );
                         }
                         _ => {}

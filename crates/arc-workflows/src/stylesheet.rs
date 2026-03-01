@@ -94,9 +94,7 @@ fn parse_selector(remaining: &mut &str) -> Result<Selector, ArcError> {
             .find(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-')
             .unwrap_or(remaining.len());
         if end == 0 {
-            return Err(ArcError::Stylesheet(
-                "expected identifier after '#'".into(),
-            ));
+            return Err(ArcError::Stylesheet("expected identifier after '#'".into()));
         }
         let id = remaining[..end].to_string();
         *remaining = remaining[end..].trim();
@@ -107,9 +105,7 @@ fn parse_selector(remaining: &mut &str) -> Result<Selector, ArcError> {
             .find(|c: char| !c.is_ascii_lowercase() && !c.is_ascii_digit() && c != '-')
             .unwrap_or(remaining.len());
         if end == 0 {
-            return Err(ArcError::Stylesheet(
-                "expected class name after '.'".into(),
-            ));
+            return Err(ArcError::Stylesheet("expected class name after '.'".into()));
         }
         let class = remaining[..end].to_string();
         *remaining = remaining[end..].trim();
@@ -157,9 +153,7 @@ fn parse_declarations(remaining: &mut &str) -> Result<Vec<Declaration>, ArcError
         }
         *remaining = remaining[1..].trim();
 
-        let val_end = remaining
-            .find([';', '}'])
-            .unwrap_or(remaining.len());
+        let val_end = remaining.find([';', '}']).unwrap_or(remaining.len());
         let value = remaining[..val_end].trim().to_string();
         *remaining = remaining[val_end..].trim();
 
@@ -179,7 +173,8 @@ fn parse_declarations(remaining: &mut &str) -> Result<Vec<Declaration>, ArcError
 }
 
 /// Recognized stylesheet properties.
-const STYLESHEET_PROPERTIES: &[&str] = &["llm_model", "llm_provider", "reasoning_effort", "backend"];
+const STYLESHEET_PROPERTIES: &[&str] =
+    &["llm_model", "llm_provider", "reasoning_effort", "backend"];
 
 /// Apply a stylesheet to a graph. Rules are applied by specificity order;
 /// higher specificity wins. Explicit node attributes are never overridden.
@@ -213,10 +208,7 @@ pub fn apply_stylesheet(stylesheet: &Stylesheet, graph: &mut Graph) {
                         match applied.get(&decl.property) {
                             Some((_, existing_spec)) if spec < *existing_spec => {}
                             _ => {
-                                applied.insert(
-                                    decl.property.clone(),
-                                    (decl.value.clone(), spec),
-                                );
+                                applied.insert(decl.property.clone(), (decl.value.clone(), spec));
                             }
                         }
                     }
@@ -250,9 +242,8 @@ mod tests {
 
     #[test]
     fn parse_universal_rule() {
-        let ss =
-            parse_stylesheet("* { llm_model: claude-sonnet-4-5; llm_provider: anthropic; }")
-                .unwrap();
+        let ss = parse_stylesheet("* { llm_model: claude-sonnet-4-5; llm_provider: anthropic; }")
+            .unwrap();
         assert_eq!(ss.rules.len(), 1);
         assert_eq!(ss.rules[0].selector, Selector::Universal);
         assert_eq!(ss.rules[0].declarations.len(), 2);
@@ -268,14 +259,10 @@ mod tests {
 
     #[test]
     fn parse_id_rule() {
-        let ss = parse_stylesheet(
-            "#critical_review { llm_model: gpt-5.2; reasoning_effort: high; }",
-        )
-        .unwrap();
-        assert_eq!(
-            ss.rules[0].selector,
-            Selector::Id("critical_review".into())
-        );
+        let ss =
+            parse_stylesheet("#critical_review { llm_model: gpt-5.2; reasoning_effort: high; }")
+                .unwrap();
+        assert_eq!(ss.rules[0].selector, Selector::Id("critical_review".into()));
         assert_eq!(ss.rules[0].declarations.len(), 2);
     }
 
@@ -322,8 +309,7 @@ mod tests {
 
     #[test]
     fn apply_class_overrides_universal() {
-        let ss =
-            parse_stylesheet("* { llm_model: sonnet; } .code { llm_model: opus; }").unwrap();
+        let ss = parse_stylesheet("* { llm_model: sonnet; } .code { llm_model: opus; }").unwrap();
         let mut graph = Graph::new("test");
 
         let mut code_node = Node::new("impl");
@@ -347,10 +333,8 @@ mod tests {
 
     #[test]
     fn apply_id_overrides_class() {
-        let ss = parse_stylesheet(
-            ".code { llm_model: opus; } #special { llm_model: gpt; }",
-        )
-        .unwrap();
+        let ss =
+            parse_stylesheet(".code { llm_model: opus; } #special { llm_model: gpt; }").unwrap();
         let mut graph = Graph::new("test");
 
         let mut node = Node::new("special");
@@ -434,9 +418,7 @@ mod tests {
             Some(&AttrValue::String("openai".into()))
         );
         assert_eq!(
-            graph.nodes["critical_review"]
-                .attrs
-                .get("reasoning_effort"),
+            graph.nodes["critical_review"].attrs.get("reasoning_effort"),
             Some(&AttrValue::String("high".into()))
         );
     }
@@ -476,8 +458,7 @@ mod tests {
 
     #[test]
     fn shape_overrides_universal_specificity() {
-        let ss =
-            parse_stylesheet("* { llm_model: sonnet; } box { llm_model: opus; }").unwrap();
+        let ss = parse_stylesheet("* { llm_model: sonnet; } box { llm_model: opus; }").unwrap();
         let mut graph = Graph::new("test");
         graph.nodes.insert("a".into(), Node::new("a")); // default shape = box
         apply_stylesheet(&ss, &mut graph);
@@ -489,8 +470,7 @@ mod tests {
 
     #[test]
     fn class_overrides_shape_specificity() {
-        let ss =
-            parse_stylesheet("box { llm_model: opus; } .fast { llm_model: flash; }").unwrap();
+        let ss = parse_stylesheet("box { llm_model: opus; } .fast { llm_model: flash; }").unwrap();
         let mut graph = Graph::new("test");
         let mut node = Node::new("a");
         node.classes.push("fast".into());
@@ -504,10 +484,7 @@ mod tests {
 
     #[test]
     fn class_overrides_universal_specificity() {
-        let ss = parse_stylesheet(
-            "* { llm_model: sonnet; } .special { llm_model: gpt; }",
-        )
-        .unwrap();
+        let ss = parse_stylesheet("* { llm_model: sonnet; } .special { llm_model: gpt; }").unwrap();
         let mut graph = Graph::new("test");
 
         let mut node_a = Node::new("a");
