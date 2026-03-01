@@ -601,10 +601,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     // Auto-derive retro (always, cheap) and optionally run retro agent
     {
         let (failed, failure_reason) = match &engine_result {
-            Ok(o) => (
-                o.status == StageStatus::Fail,
-                o.failure_reason.clone(),
-            ),
+            Ok(o) => (o.status == StageStatus::Fail, o.failure_reason.clone()),
             Err(e) => (true, Some(e.to_string())),
         };
         generate_retro(
@@ -924,10 +921,7 @@ async fn run_from_branch(
     // Auto-derive retro
     {
         let (failed, failure_reason) = match &engine_result {
-            Ok(o) => (
-                o.status == StageStatus::Fail,
-                o.failure_reason.clone(),
-            ),
+            Ok(o) => (o.status == StageStatus::Fail, o.failure_reason.clone()),
             Err(e) => (true, Some(e.to_string())),
         };
 

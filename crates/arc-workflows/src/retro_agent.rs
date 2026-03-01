@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use arc_agent::{
-    AnthropicProfile, ExecutionEnvironment, GeminiProfile, OpenAiProfile, ProviderProfile,
-    Session, SessionConfig,
+    AnthropicProfile, ExecutionEnvironment, GeminiProfile, OpenAiProfile, ProviderProfile, Session,
+    SessionConfig,
 };
 use arc_llm::client::Client;
 use arc_llm::provider::Provider;
@@ -178,9 +178,10 @@ pub async fn run_retro_agent(
          rather than reading the entire file. When done, call the `submit_retro` tool with your analysis."
     );
 
-    session.process_input(&prompt).await.map_err(|e| {
-        anyhow::anyhow!("Retro agent session failed: {e}")
-    })?;
+    session
+        .process_input(&prompt)
+        .await
+        .map_err(|e| anyhow::anyhow!("Retro agent session failed: {e}"))?;
 
     // Extract the captured narrative
     let narrative = captured
@@ -273,10 +274,7 @@ mod tests {
         });
 
         let narrative: RetroNarrative = serde_json::from_value(args).unwrap();
-        assert_eq!(
-            narrative.smoothness,
-            crate::retro::SmoothnessRating::Smooth
-        );
+        assert_eq!(narrative.smoothness, crate::retro::SmoothnessRating::Smooth);
         assert_eq!(narrative.intent, "Fix the login bug");
         assert_eq!(narrative.learnings.len(), 1);
         assert_eq!(narrative.friction_points.len(), 1);

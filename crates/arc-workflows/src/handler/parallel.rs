@@ -230,8 +230,15 @@ impl Handler for ParallelHandler {
                     let wd = work_dir.clone();
                     let rid = gs.run_id.clone();
                     let nid = node.id.clone();
-                    crate::engine::git_checkpoint_host(wd, rid, nid, "parallel_base".into(), 0, None)
-                        .await
+                    crate::engine::git_checkpoint_host(
+                        wd,
+                        rid,
+                        nid,
+                        "parallel_base".into(),
+                        0,
+                        None,
+                    )
+                    .await
                 }
                 GitCheckpointMode::Remote(_) => {
                     crate::engine::git_checkpoint_remote(
@@ -330,10 +337,8 @@ impl Handler for ParallelHandler {
                                 )));
                             }
                             // Reset worktree to the base SHA for a clean start
-                            let reset_cmd = format!(
-                                "{} reset --hard {bsha}",
-                                crate::engine::GIT_REMOTE
-                            );
+                            let reset_cmd =
+                                format!("{} reset --hard {bsha}", crate::engine::GIT_REMOTE);
                             let reset_result = services
                                 .execution_env
                                 .exec_command(&reset_cmd, 30_000, Some(&wt_path_str), None, None)
@@ -343,10 +348,8 @@ impl Handler for ParallelHandler {
                                     "failed to reset remote worktree {wt_path_str}"
                                 )));
                             }
-                            branch_context.set(
-                                "internal.work_dir",
-                                serde_json::json!(&wt_path_str),
-                            );
+                            branch_context
+                                .set("internal.work_dir", serde_json::json!(&wt_path_str));
                             let env: Arc<dyn ExecutionEnvironment> = Arc::new(WorktreeEnv {
                                 inner: Arc::clone(&services.execution_env),
                                 worktree_dir: wt_path_str.clone(),
@@ -391,10 +394,8 @@ impl Handler for ParallelHandler {
                 let branch_start = Instant::now();
 
                 let Some(target_node) = graph.nodes.get(&setup.target_id) else {
-                    let outcome = Outcome::fail(format!(
-                        "branch target node not found: {}",
-                        setup.target_id
-                    ));
+                    let outcome =
+                        Outcome::fail(format!("branch target node not found: {}", setup.target_id));
                     emitter.emit(&PipelineEvent::ParallelBranchCompleted {
                         branch: setup.target_id.clone(),
                         index: setup.branch_index,
@@ -582,17 +583,13 @@ impl Handler for ParallelHandler {
                     GitCheckpointMode::Host(work_dir) => {
                         let wd = work_dir.clone();
                         let s = sha.clone();
-                        let _ = tokio::task::spawn_blocking(move || {
-                            crate::git::merge_ff_only(&wd, &s)
-                        })
-                        .await;
+                        let _ =
+                            tokio::task::spawn_blocking(move || crate::git::merge_ff_only(&wd, &s))
+                                .await;
                     }
                     GitCheckpointMode::Remote(_) => {
-                        crate::engine::git_merge_ff_only_remote(
-                            &*services.execution_env,
-                            sha,
-                        )
-                        .await;
+                        crate::engine::git_merge_ff_only_remote(&*services.execution_env, sha)
+                            .await;
                     }
                 }
             }

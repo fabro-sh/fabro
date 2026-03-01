@@ -86,10 +86,8 @@ impl Handler for FanInHandler {
                 crate::engine::GitCheckpointMode::Host(work_dir) => {
                     let wd = work_dir.clone();
                     let s = sha.clone();
-                    let _ = tokio::task::spawn_blocking(move || {
-                        crate::git::merge_ff_only(&wd, &s)
-                    })
-                    .await;
+                    let _ = tokio::task::spawn_blocking(move || crate::git::merge_ff_only(&wd, &s))
+                        .await;
                 }
                 crate::engine::GitCheckpointMode::Remote(_) => {
                     crate::engine::git_merge_ff_only_remote(&*services.execution_env, sha).await;

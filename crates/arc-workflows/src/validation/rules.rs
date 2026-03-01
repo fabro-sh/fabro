@@ -2632,10 +2632,8 @@ mod tests {
     fn script_absolute_cd_skips_non_script_nodes() {
         let mut g = minimal_graph();
         let mut node = Node::new("gen");
-        node.attrs.insert(
-            "shape".to_string(),
-            AttrValue::String("box".to_string()),
-        );
+        node.attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
         node.attrs.insert(
             "prompt".to_string(),
             AttrValue::String("cd /tmp and do stuff".to_string()),

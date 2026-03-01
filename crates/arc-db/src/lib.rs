@@ -53,11 +53,12 @@ mod tests {
         let pool = connect_memory().await.unwrap();
         initialize_db(&pool).await.unwrap();
 
-        let row: (String,) =
-            sqlx::query_as("SELECT name FROM sqlite_master WHERE type='table' AND name='workflow_runs'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let row: (String,) = sqlx::query_as(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='workflow_runs'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(row.0, "workflow_runs");
     }
 

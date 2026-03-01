@@ -268,8 +268,7 @@ async fn start_pipeline(
                 Ok(_) => (false, None),
                 Err(e) => (true, Some(e.to_string())),
             };
-            let stage_durations =
-                arc_workflows::retro::extract_stage_durations(&config.logs_root);
+            let stage_durations = arc_workflows::retro::extract_stage_durations(&config.logs_root);
             let retro = arc_workflows::retro::derive_retro(
                 &run_id_clone,
                 "pipeline",

@@ -586,15 +586,17 @@ async fn daytona_parallel_git_branching_e2e() {
     );
 
     let mut start = Node::new("start");
-    start
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
     graph.nodes.insert("start".to_string(), start);
 
     let mut fan_out = Node::new("fan_out");
-    fan_out
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("component".to_string()));
+    fan_out.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("component".to_string()),
+    );
     graph.nodes.insert("fan_out".to_string(), fan_out);
 
     let branch_a = Node::new("branch_a");
@@ -611,9 +613,10 @@ async fn daytona_parallel_git_branching_e2e() {
     graph.nodes.insert("fan_in".to_string(), fan_in);
 
     let mut exit_node = Node::new("exit");
-    exit_node
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    exit_node.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
     graph.nodes.insert("exit".to_string(), exit_node);
 
     graph.edges.push(Edge::new("start", "fan_out"));
@@ -664,8 +667,8 @@ async fn daytona_parallel_git_branching_e2e() {
     );
 
     // Verify parallel.results has head_sha for each branch
-    let checkpoint = Checkpoint::load(&logs_dir.path().join("checkpoint.json"))
-        .expect("checkpoint should load");
+    let checkpoint =
+        Checkpoint::load(&logs_dir.path().join("checkpoint.json")).expect("checkpoint should load");
     let parallel_results = checkpoint
         .context_values
         .get("parallel.results")
@@ -700,7 +703,10 @@ async fn daytona_parallel_git_branching_e2e() {
         .get("parallel.fan_in.best_id")
         .and_then(|v| v.as_str().map(String::from))
         .expect("fan_in should have selected a best_id");
-    assert_eq!(best_id, "branch_a", "heuristic should pick branch_a (lexical)");
+    assert_eq!(
+        best_id, "branch_a",
+        "heuristic should pick branch_a (lexical)"
+    );
 
     let best_head_sha = checkpoint
         .context_values
