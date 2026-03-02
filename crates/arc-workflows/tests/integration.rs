@@ -10671,4 +10671,262 @@ async fn e2e_loop_restart_allowed_for_transient_infra() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Stall watchdog e2e tests
+// ---------------------------------------------------------------------------
+
+/// Handler that sleeps forever (for stall watchdog testing).
+struct HangingHandler;
+
+#[async_trait::async_trait]
+impl Handler for HangingHandler {
+    async fn execute(
+        &self,
+        _node: &Node,
+        _context: &Context,
+        _graph: &Graph,
+        _logs_root: &Path,
+        _services: &arc_workflows::handler::EngineServices,
+    ) -> Result<Outcome, ArcError> {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        Ok(Outcome::success())
+    }
+}
+
+/// Handler that emits keepalive events periodically, then succeeds.
+struct KeepaliveHandler {
+    interval_ms: u64,
+    total_ms: u64,
+}
+
+#[async_trait::async_trait]
+impl Handler for KeepaliveHandler {
+    async fn execute(
+        &self,
+        node: &Node,
+        _context: &Context,
+        _graph: &Graph,
+        _logs_root: &Path,
+        services: &arc_workflows::handler::EngineServices,
+    ) -> Result<Outcome, ArcError> {
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_millis(self.total_ms) {
+            tokio::time::sleep(std::time::Duration::from_millis(self.interval_ms)).await;
+            services.emitter.emit(&PipelineEvent::Prompt {
+                stage: node.id.clone(),
+                text: "keepalive".to_string(),
+            });
+        }
+        Ok(Outcome::success())
+    }
+}
+
+#[tokio::test]
+async fn e2e_stall_watchdog_triggers_from_dot_parsed_pipeline() {
+    // Parse a DOT graph with stall_timeout set to 200ms
+    let dot = r#"digraph StallTest {
+        graph [goal="Test stall watchdog", stall_timeout="200ms", default_max_retry=0]
+        start [shape=Mdiamond]
+        work  [type="hanging", label="Work"]
+        exit  [shape=Msquare]
+        start -> work -> exit
+    }"#;
+    let graph = parse(dot).expect("parse should succeed");
+
+    // Verify the stall_timeout was parsed correctly
+    assert_eq!(
+        graph.stall_timeout(),
+        Some(std::time::Duration::from_millis(200)),
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut registry = HandlerRegistry::new(Box::new(StartHandler));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+    registry.register("hanging", Box::new(HangingHandler));
+
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let mut emitter = EventEmitter::new();
+    emitter.on_event(move |event| {
+        events_clone
+            .lock()
+            .unwrap()
+            .push(format!("{event:?}"));
+    });
+
+    let engine = PipelineEngine::new(registry, Arc::new(emitter), local_env());
+    let config = RunConfig {
+        logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
+        dry_run: false,
+        run_id: "stall-e2e".into(),
+        git_checkpoint: None,
+        base_sha: None,
+        run_branch: None,
+        meta_branch: None,
+    };
+
+    let result = engine.run(&graph, &config).await;
+    assert!(result.is_err(), "expected stall watchdog error");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("stall watchdog"),
+        "expected error to contain 'stall watchdog', got: {err}"
+    );
+
+    // Verify StallWatchdogTimeout event was emitted
+    let collected = events.lock().unwrap();
+    assert!(
+        collected.iter().any(|e| e.contains("StallWatchdogTimeout")),
+        "expected StallWatchdogTimeout event in: {collected:?}"
+    );
+}
+
+#[tokio::test]
+async fn e2e_stall_watchdog_kept_alive_by_handler_events() {
+    // Parse a DOT graph with stall_timeout 200ms, but the handler emits events
+    // every 100ms for 500ms total — the watchdog should NOT trigger.
+    let dot = r#"digraph StallAliveTest {
+        graph [goal="Test stall keepalive", stall_timeout="200ms", default_max_retry=0]
+        start [shape=Mdiamond]
+        work  [type="keepalive", label="Work"]
+        exit  [shape=Msquare]
+        start -> work -> exit
+    }"#;
+    let graph = parse(dot).expect("parse should succeed");
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut registry = HandlerRegistry::new(Box::new(StartHandler));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+    registry.register(
+        "keepalive",
+        Box::new(KeepaliveHandler {
+            interval_ms: 100,
+            total_ms: 500,
+        }),
+    );
+
+    let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
+    let config = RunConfig {
+        logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
+        dry_run: false,
+        run_id: "stall-alive-e2e".into(),
+        git_checkpoint: None,
+        base_sha: None,
+        run_branch: None,
+        meta_branch: None,
+    };
+
+    let outcome = engine.run(&graph, &config).await.expect("pipeline should succeed");
+    assert_eq!(outcome.status, StageStatus::Success);
+}
+
+#[tokio::test]
+async fn e2e_stall_watchdog_disabled_with_zero_timeout() {
+    // Parse a DOT graph with stall_timeout="0s" — watchdog should be disabled,
+    // and a short sleep handler should complete successfully.
+    let dot = r#"digraph StallDisabledTest {
+        graph [goal="Test stall disabled", stall_timeout="0s", default_max_retry=0]
+        start [shape=Mdiamond]
+        work  [type="slow", label="Work"]
+        exit  [shape=Msquare]
+        start -> work -> exit
+    }"#;
+    let graph = parse(dot).expect("parse should succeed");
+    assert_eq!(graph.stall_timeout(), None, "zero timeout should disable watchdog");
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut registry = HandlerRegistry::new(Box::new(StartHandler));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+    registry.register("slow", Box::new(SlowTestHandler { sleep_ms: 200 }));
+
+    let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
+    let config = RunConfig {
+        logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
+        dry_run: false,
+        run_id: "stall-disabled-e2e".into(),
+        git_checkpoint: None,
+        base_sha: None,
+        run_branch: None,
+        meta_branch: None,
+    };
+
+    let outcome = engine.run(&graph, &config).await.expect("pipeline should succeed");
+    assert_eq!(outcome.status, StageStatus::Success);
+}
+
+/// Handler that sleeps for a configurable duration, then succeeds (for e2e tests).
+struct SlowTestHandler {
+    sleep_ms: u64,
+}
+
+#[async_trait::async_trait]
+impl Handler for SlowTestHandler {
+    async fn execute(
+        &self,
+        _node: &Node,
+        _context: &Context,
+        _graph: &Graph,
+        _logs_root: &Path,
+        _services: &arc_workflows::handler::EngineServices,
+    ) -> Result<Outcome, ArcError> {
+        tokio::time::sleep(std::time::Duration::from_millis(self.sleep_ms)).await;
+        Ok(Outcome::success())
+    }
+}
+
+#[tokio::test]
+async fn e2e_stall_watchdog_with_explicit_timeout_override() {
+    // A short stall_timeout of 100ms should trigger faster than the default 600s.
+    // This tests that the graph attribute is actually respected.
+    let dot = r#"digraph StallOverrideTest {
+        graph [goal="Test stall override", stall_timeout="100ms", default_max_retry=0]
+        start [shape=Mdiamond]
+        work  [type="hanging", label="Work"]
+        exit  [shape=Msquare]
+        start -> work -> exit
+    }"#;
+    let graph = parse(dot).expect("parse should succeed");
+    assert_eq!(
+        graph.stall_timeout(),
+        Some(std::time::Duration::from_millis(100)),
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut registry = HandlerRegistry::new(Box::new(StartHandler));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+    registry.register("hanging", Box::new(HangingHandler));
+
+    let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
+    let config = RunConfig {
+        logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
+        dry_run: false,
+        run_id: "stall-override-e2e".into(),
+        git_checkpoint: None,
+        base_sha: None,
+        run_branch: None,
+        meta_branch: None,
+    };
+
+    let start = std::time::Instant::now();
+    let result = engine.run(&graph, &config).await;
+    let elapsed = start.elapsed();
+
+    assert!(result.is_err(), "expected stall watchdog error");
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("stall watchdog"), "got: {err}");
+    // Should trigger well under 2 seconds (100ms timeout + check interval overhead)
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "stall watchdog took too long: {elapsed:?}"
+    );
+}
+
 // Daytona parallel git branching test is in daytona_integration.rs

@@ -559,6 +559,9 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             };
             format!("[SETUP_FAILED] index={index} command=\"{command}\" exit_code={exit_code} stderr=\"{truncated}\"")
         }
+        PipelineEvent::StallWatchdogTimeout { node, idle_seconds } => {
+            format!("[STALL_WATCHDOG_TIMEOUT] node={node} idle_seconds={idle_seconds}")
+        }
     };
     format!("{dim}{body}{reset}", dim = styles.dim, reset = styles.reset)
 }
@@ -903,6 +906,9 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
         }
         PipelineEvent::SetupFailed { command, index, exit_code, stderr } => {
             format!("{d}── SETUP_FAILED ─────────────────────────────{r}\n  {d}index:{r}     {index}\n  {d}command:{r}   {command}\n  {d}exit_code:{r} {exit_code}\n  {d}stderr:{r}    {stderr}\n")
+        }
+        PipelineEvent::StallWatchdogTimeout { node, idle_seconds } => {
+            format!("{d}── STALL_WATCHDOG_TIMEOUT ────────────────────{r}\n  {d}node:{r}         {node}\n  {d}idle_seconds:{r} {idle_seconds}\n")
         }
     }
 }

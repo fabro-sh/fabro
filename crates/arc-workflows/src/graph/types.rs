@@ -429,6 +429,15 @@ impl Graph {
             .map_or(3, |v| v as usize)
     }
 
+    /// Graph-level `stall_timeout`. Defaults to 600s. Returns `None` when set to zero (disabled).
+    pub fn stall_timeout(&self) -> Option<Duration> {
+        match self.attrs.get("stall_timeout").and_then(AttrValue::as_duration) {
+            Some(d) if d.is_zero() => None,
+            Some(d) => Some(d),
+            None => Some(Duration::from_secs(600)),
+        }
+    }
+
     /// Graph-level `max_node_visits` (default 0 = disabled).
     pub fn max_node_visits(&self) -> u64 {
         self.attrs
@@ -693,6 +702,32 @@ mod tests {
     fn graph_no_start_node() {
         let g = Graph::new("empty");
         assert!(g.find_start_node().is_none());
+    }
+
+    #[test]
+    fn graph_stall_timeout_default() {
+        let g = Graph::new("empty");
+        assert_eq!(g.stall_timeout(), Some(Duration::from_secs(600)));
+    }
+
+    #[test]
+    fn graph_stall_timeout_set() {
+        let mut g = Graph::new("test");
+        g.attrs.insert(
+            "stall_timeout".to_string(),
+            AttrValue::Duration(Duration::from_millis(200)),
+        );
+        assert_eq!(g.stall_timeout(), Some(Duration::from_millis(200)));
+    }
+
+    #[test]
+    fn graph_stall_timeout_zero_disables() {
+        let mut g = Graph::new("test");
+        g.attrs.insert(
+            "stall_timeout".to_string(),
+            AttrValue::Duration(Duration::ZERO),
+        );
+        assert_eq!(g.stall_timeout(), None);
     }
 
     #[test]

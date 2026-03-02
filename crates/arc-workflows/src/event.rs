@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicI64, Ordering};
+
 use serde::{Deserialize, Serialize};
 
 use crate::outcome::StageUsage;
@@ -170,6 +172,10 @@ pub enum PipelineEvent {
         index: usize,
         exit_code: i32,
         stderr: String,
+    },
+    StallWatchdogTimeout {
+        node: String,
+        idle_seconds: u64,
     },
 }
 
@@ -422,8 +428,22 @@ impl PipelineEvent {
             } => {
                 error!(command, index, exit_code, "Setup command failed");
             }
+            Self::StallWatchdogTimeout {
+                node,
+                idle_seconds,
+            } => {
+                warn!(node, idle_seconds, "Stall watchdog timeout");
+            }
         }
     }
+}
+
+/// Current time as epoch milliseconds.
+fn epoch_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }
 
 /// Listener callback type for pipeline events.
@@ -432,12 +452,15 @@ type EventListener = Box<dyn Fn(&PipelineEvent) + Send + Sync>;
 /// Callback-based event emitter for pipeline events.
 pub struct EventEmitter {
     listeners: Vec<EventListener>,
+    /// Epoch milliseconds of the last `emit()` or `touch()` call. 0 until first event.
+    last_event_at: AtomicI64,
 }
 
 impl std::fmt::Debug for EventEmitter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EventEmitter")
             .field("listener_count", &self.listeners.len())
+            .field("last_event_at", &self.last_event_at.load(Ordering::Relaxed))
             .finish()
     }
 }
@@ -453,6 +476,7 @@ impl EventEmitter {
     pub fn new() -> Self {
         Self {
             listeners: Vec::new(),
+            last_event_at: AtomicI64::new(0),
         }
     }
 
@@ -461,10 +485,22 @@ impl EventEmitter {
     }
 
     pub fn emit(&self, event: &PipelineEvent) {
+        self.last_event_at.store(epoch_millis(), Ordering::Relaxed);
         event.trace();
         for listener in &self.listeners {
             listener(event);
         }
+    }
+
+    /// Returns the epoch milliseconds of the last `emit()` or `touch()` call.
+    /// Returns 0 if neither has been called.
+    pub fn last_event_at(&self) -> i64 {
+        self.last_event_at.load(Ordering::Relaxed)
+    }
+
+    /// Manually update the last-event timestamp (e.g. to seed the watchdog at pipeline start).
+    pub fn touch(&self) {
+        self.last_event_at.store(epoch_millis(), Ordering::Relaxed);
     }
 }
 
@@ -949,6 +985,51 @@ mod tests {
 
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
         assert!(matches!(deserialized, PipelineEvent::ExecutionEnv { .. }));
+    }
+
+    #[test]
+    fn emitter_last_event_at_initially_zero() {
+        let emitter = EventEmitter::new();
+        assert_eq!(emitter.last_event_at(), 0);
+    }
+
+    #[test]
+    fn emitter_last_event_at_updates_after_emit() {
+        let emitter = EventEmitter::new();
+        assert_eq!(emitter.last_event_at(), 0);
+        emitter.emit(&PipelineEvent::PipelineStarted {
+            name: "test".to_string(),
+            run_id: "1".to_string(),
+            base_sha: None,
+            run_branch: None,
+            worktree_dir: None,
+        });
+        assert!(emitter.last_event_at() > 0);
+    }
+
+    #[test]
+    fn emitter_touch_updates_last_event_at() {
+        let emitter = EventEmitter::new();
+        assert_eq!(emitter.last_event_at(), 0);
+        emitter.touch();
+        assert!(emitter.last_event_at() > 0);
+    }
+
+    #[test]
+    fn stall_watchdog_timeout_serialization() {
+        let event = PipelineEvent::StallWatchdogTimeout {
+            node: "work".to_string(),
+            idle_seconds: 600,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("StallWatchdogTimeout"));
+        assert!(json.contains("\"node\":\"work\""));
+        assert!(json.contains("\"idle_seconds\":600"));
+
+        let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
+        assert!(
+            matches!(deserialized, PipelineEvent::StallWatchdogTimeout { node, idle_seconds } if node == "work" && idle_seconds == 600)
+        );
     }
 
     #[test]

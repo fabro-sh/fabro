@@ -9,6 +9,7 @@ use arc_agent::ExecutionEnvironment;
 use chrono::Utc;
 use futures::FutureExt;
 use rand::Rng;
+use tokio_util::sync::CancellationToken;
 
 use arc_git_storage::trailerlink::{self, Trailer};
 
@@ -1096,6 +1097,44 @@ impl PipelineEngine {
             );
         }
 
+        // Stall watchdog: background task that cancels `stall_token` when no events
+        // have been emitted for longer than `stall_timeout`.
+        let stall_token = graph.stall_timeout().map(|timeout| {
+            let token = CancellationToken::new();
+            let shutdown = CancellationToken::new();
+            let check_interval = (timeout / 10)
+                .max(std::time::Duration::from_millis(50))
+                .min(std::time::Duration::from_secs(5));
+            self.services.emitter.touch();
+            let emitter = Arc::clone(&self.services.emitter);
+            let cancel = token.clone();
+            let stop = shutdown.clone();
+            tracing::debug!(
+                stall_timeout_ms = timeout.as_millis() as u64,
+                check_interval_ms = check_interval.as_millis() as u64,
+                "Stall watchdog started"
+            );
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        () = stop.cancelled() => break,
+                        () = tokio::time::sleep(check_interval) => {
+                            let last = emitter.last_event_at();
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as i64;
+                            if now - last >= timeout.as_millis() as i64 {
+                                cancel.cancel();
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+            (token, shutdown)
+        });
+
         loop {
             // Check for cancellation before processing each node
             if let Some(ref token) = config.cancel_token {
@@ -1195,17 +1234,28 @@ impl PipelineEngine {
             }
             let stage_start = Instant::now();
 
-            let (mut outcome, attempts_used) = self
-                .execute_with_retry(
-                    node,
-                    &context,
-                    graph,
-                    &config.logs_root,
-                    &retry_policy,
-                    stage_index,
-                    visit,
-                )
-                .await?;
+            let (mut outcome, attempts_used) = if let Some((ref token, _)) = stall_token {
+                tokio::select! {
+                    result = self.execute_with_retry(
+                        node, &context, graph, &config.logs_root, &retry_policy, stage_index, visit,
+                    ) => result?,
+                    () = token.cancelled() => {
+                        let idle_secs = graph.stall_timeout().map_or(0, |d| d.as_secs());
+                        self.services.emitter.emit(&PipelineEvent::StallWatchdogTimeout {
+                            node: node.id.clone(),
+                            idle_seconds: idle_secs,
+                        });
+                        return Err(ArcError::Engine(format!(
+                            "stall watchdog: node \"{}\" had no activity for {}s",
+                            node.id, idle_secs,
+                        )));
+                    }
+                }
+            } else {
+                self.execute_with_retry(
+                    node, &context, graph, &config.logs_root, &retry_policy, stage_index, visit,
+                ).await?
+            };
             // Gap #5: Track retry count per node
             node_retries.insert(node.id.clone(), attempts_used);
             context.set(
@@ -1540,6 +1590,11 @@ impl PipelineEngine {
                     current_node_id.clone_from(&edge.to);
                 }
             }
+        }
+
+        // Shut down stall watchdog
+        if let Some((_, ref shutdown)) = stall_token {
+            shutdown.cancel();
         }
 
         let duration_ms = millis_u64(run_start.elapsed());
@@ -3827,6 +3882,207 @@ mod tests {
                 || err.contains("circuit breaker"),
             "expected loop_restart guard or circuit breaker error, got: {err}"
         );
+    }
+
+    /// Handler that emits events every `interval_ms` for `total_ms`, then succeeds.
+    struct EmittingHandler {
+        interval_ms: u64,
+        total_ms: u64,
+    }
+
+    #[async_trait]
+    impl HandlerTrait for EmittingHandler {
+        async fn execute(
+            &self,
+            node: &Node,
+            _context: &Context,
+            _graph: &Graph,
+            _logs_root: &Path,
+            services: &crate::handler::EngineServices,
+        ) -> std::result::Result<Outcome, ArcError> {
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_millis(self.total_ms) {
+                tokio::time::sleep(Duration::from_millis(self.interval_ms)).await;
+                services.emitter.emit(&PipelineEvent::Prompt {
+                    stage: node.id.clone(),
+                    text: "keepalive".to_string(),
+                });
+            }
+            Ok(Outcome::success())
+        }
+    }
+
+    #[tokio::test]
+    async fn stall_watchdog_triggers_on_hung_handler() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut g = Graph::new("stall_test");
+        g.attrs
+            .insert("goal".to_string(), AttrValue::String("test".to_string()));
+        g.attrs.insert(
+            "stall_timeout".to_string(),
+            AttrValue::Duration(Duration::from_millis(200)),
+        );
+        g.attrs
+            .insert("default_max_retry".to_string(), AttrValue::Integer(0));
+
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        g.nodes.insert("start".to_string(), start);
+
+        let mut work = Node::new("work");
+        work.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("slow".to_string()),
+        );
+        g.nodes.insert("work".to_string(), work);
+
+        let mut exit = Node::new("exit");
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
+        g.nodes.insert("exit".to_string(), exit);
+
+        g.edges.push(Edge::new("start", "work"));
+        g.edges.push(Edge::new("work", "exit"));
+
+        let mut registry = make_registry();
+        registry.register("slow", Box::new(SlowHandler { sleep_ms: 60_000 }));
+        let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+        };
+        let result = engine.run(&g, &config).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("stall watchdog"),
+            "expected stall watchdog error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stall_watchdog_active_handler_resets_timer() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut g = Graph::new("stall_active_test");
+        g.attrs
+            .insert("goal".to_string(), AttrValue::String("test".to_string()));
+        g.attrs.insert(
+            "stall_timeout".to_string(),
+            AttrValue::Duration(Duration::from_millis(200)),
+        );
+        g.attrs
+            .insert("default_max_retry".to_string(), AttrValue::Integer(0));
+
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        g.nodes.insert("start".to_string(), start);
+
+        let mut work = Node::new("work");
+        work.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("emitting".to_string()),
+        );
+        g.nodes.insert("work".to_string(), work);
+
+        let mut exit = Node::new("exit");
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
+        g.nodes.insert("exit".to_string(), exit);
+
+        g.edges.push(Edge::new("start", "work"));
+        g.edges.push(Edge::new("work", "exit"));
+
+        let mut registry = make_registry();
+        registry.register(
+            "emitting",
+            Box::new(EmittingHandler {
+                interval_ms: 100,
+                total_ms: 500,
+            }),
+        );
+        let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+        };
+        let outcome = engine.run(&g, &config).await.unwrap();
+        assert_eq!(outcome.status, StageStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn stall_watchdog_disabled_when_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut g = Graph::new("stall_disabled_test");
+        g.attrs
+            .insert("goal".to_string(), AttrValue::String("test".to_string()));
+        g.attrs.insert(
+            "stall_timeout".to_string(),
+            AttrValue::Duration(Duration::ZERO),
+        );
+        g.attrs
+            .insert("default_max_retry".to_string(), AttrValue::Integer(0));
+
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        g.nodes.insert("start".to_string(), start);
+
+        let mut work = Node::new("work");
+        work.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("slow".to_string()),
+        );
+        g.nodes.insert("work".to_string(), work);
+
+        let mut exit = Node::new("exit");
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
+        g.nodes.insert("exit".to_string(), exit);
+
+        g.edges.push(Edge::new("start", "work"));
+        g.edges.push(Edge::new("work", "exit"));
+
+        let mut registry = make_registry();
+        registry.register("slow", Box::new(SlowHandler { sleep_ms: 200 }));
+        let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+        };
+        let outcome = engine.run(&g, &config).await.unwrap();
+        assert_eq!(outcome.status, StageStatus::Success);
     }
 
     #[tokio::test]
