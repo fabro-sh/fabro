@@ -1,8 +1,8 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Arc Pipeline API
- * HTTP API for managing Arc pipeline executions.
+ * Arc Run API
+ * HTTP API for managing Arc workflow run executions.
  *
  * The version of the OpenAPI document: 0.1.0
  * 
@@ -15,11 +15,11 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PipelineStatus } from './pipeline-status';
+import type { RunStatus } from './run-status';
 
-export interface PipelineStatusResponse {
+export interface RunStatusResponse {
     'id': string;
-    'status': PipelineStatus;
+    'status': RunStatus;
     'error'?: string;
 }
 

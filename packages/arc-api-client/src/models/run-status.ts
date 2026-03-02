@@ -1,8 +1,8 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Arc Pipeline API
- * HTTP API for managing Arc pipeline executions.
+ * Arc Run API
+ * HTTP API for managing Arc workflow run executions.
  *
  * The version of the OpenAPI document: 0.1.0
  * 
@@ -15,14 +15,14 @@
 
 
 
-export const PipelineStatus = {
+export const RunStatus = {
     RUNNING: 'running',
     COMPLETED: 'completed',
     FAILED: 'failed',
     CANCELLED: 'cancelled'
 } as const;
 
-export type PipelineStatus = typeof PipelineStatus[keyof typeof PipelineStatus];
+export type RunStatus = typeof RunStatus[keyof typeof RunStatus];
 
 
 

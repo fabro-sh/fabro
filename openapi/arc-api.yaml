@@ -1,45 +1,45 @@
 openapi: "3.1.0"
 info:
-  title: Arc Pipeline API
+  title: Arc Run API
   version: "0.1.0"
-  description: HTTP API for managing Arc pipeline executions.
+  description: HTTP API for managing Arc workflow run executions.
 
 tags:
-  - name: Pipelines
-    description: Pipeline management operations
+  - name: Runs
+    description: Run management operations
 
 paths:
-  /pipelines:
+  /runs:
     get:
-      operationId: listPipelines
-      tags: [Pipelines]
-      summary: List all pipelines
+      operationId: listRuns
+      tags: [Runs]
+      summary: List all runs
       responses:
         "200":
-          description: Array of pipeline statuses
+          description: Array of run statuses
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/PipelineStatusResponse"
+                  $ref: "#/components/schemas/RunStatusResponse"
     post:
-      operationId: startPipeline
-      tags: [Pipelines]
-      summary: Start a new pipeline
+      operationId: startRun
+      tags: [Runs]
+      summary: Start a new run
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/StartPipelineRequest"
+              $ref: "#/components/schemas/StartRunRequest"
       responses:
         "201":
-          description: Pipeline created
+          description: Run created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StartPipelineResponse"
+                $ref: "#/components/schemas/StartRunResponse"
         "400":
           description: Invalid DOT source
           content:
@@ -47,11 +47,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /pipelines/{id}:
+  /runs/{id}:
     get:
-      operationId: getPipelineStatus
-      tags: [Pipelines]
-      summary: Get pipeline status
+      operationId: getRunStatus
+      tags: [Runs]
+      summary: Get run status
       parameters:
         - name: id
           in: path
@@ -60,19 +60,19 @@ paths:
             type: string
       responses:
         "200":
-          description: Pipeline status
+          description: Run status
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PipelineStatusResponse"
+                $ref: "#/components/schemas/RunStatusResponse"
         "404":
-          description: Pipeline not found
+          description: Run not found
 
-  /pipelines/{id}/cancel:
+  /runs/{id}/cancel:
     post:
-      operationId: cancelPipeline
-      tags: [Pipelines]
-      summary: Cancel a running pipeline
+      operationId: cancelRun
+      tags: [Runs]
+      summary: Cancel a running run
       parameters:
         - name: id
           in: path
@@ -81,7 +81,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Pipeline cancelled
+          description: Run cancelled
           content:
             application/json:
               schema:
@@ -92,19 +92,19 @@ paths:
                 required:
                   - cancelled
         "404":
-          description: Pipeline not found
+          description: Run not found
         "409":
-          description: Pipeline is not running
+          description: Run is not running
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /pipelines/{id}/graph:
+  /runs/{id}/graph:
     get:
       operationId: getGraph
-      tags: [Pipelines]
-      summary: Get pipeline graph as SVG
+      tags: [Runs]
+      summary: Get run graph as SVG
       parameters:
         - name: id
           in: path
@@ -113,13 +113,13 @@ paths:
             type: string
       responses:
         "200":
-          description: SVG image of the pipeline graph
+          description: SVG image of the workflow graph
           content:
             image/svg+xml:
               schema:
                 type: string
         "404":
-          description: Pipeline not found
+          description: Run not found
         "502":
           description: Graphviz not available
           content:
@@ -127,11 +127,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /pipelines/{id}/checkpoint:
+  /runs/{id}/checkpoint:
     get:
       operationId: getCheckpoint
-      tags: [Pipelines]
-      summary: Get pipeline checkpoint
+      tags: [Runs]
+      summary: Get run checkpoint
       parameters:
         - name: id
           in: path
@@ -145,13 +145,13 @@ paths:
             application/json:
               schema: {}
         "404":
-          description: Pipeline not found
+          description: Run not found
 
-  /pipelines/{id}/context:
+  /runs/{id}/context:
     get:
       operationId: getContext
-      tags: [Pipelines]
-      summary: Get pipeline context
+      tags: [Runs]
+      summary: Get run context
       parameters:
         - name: id
           in: path
@@ -166,13 +166,13 @@ paths:
               schema:
                 type: object
         "404":
-          description: Pipeline not found
+          description: Run not found
 
-  /pipelines/{id}/events:
+  /runs/{id}/events:
     get:
       operationId: getEvents
-      tags: [Pipelines]
-      summary: Subscribe to pipeline events via SSE
+      tags: [Runs]
+      summary: Subscribe to run events via SSE
       parameters:
         - name: id
           in: path
@@ -187,15 +187,15 @@ paths:
               schema:
                 type: string
         "404":
-          description: Pipeline not found
+          description: Run not found
         "410":
           description: Event stream closed
 
-  /pipelines/{id}/questions:
+  /runs/{id}/questions:
     get:
       operationId: getQuestions
-      tags: [Pipelines]
-      summary: Get pending questions for a pipeline
+      tags: [Runs]
+      summary: Get pending questions for a run
       parameters:
         - name: id
           in: path
@@ -212,12 +212,12 @@ paths:
                 items:
                   $ref: "#/components/schemas/ApiQuestion"
         "404":
-          description: Pipeline not found
+          description: Run not found
 
-  /pipelines/{id}/questions/{qid}/answer:
+  /runs/{id}/questions/{qid}/answer:
     post:
       operationId: submitAnswer
-      tags: [Pipelines]
+      tags: [Runs]
       summary: Submit an answer to a question
       parameters:
         - name: id
@@ -250,13 +250,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Pipeline not found
+          description: Run not found
 
-  /pipelines/{id}/retro:
+  /runs/{id}/retro:
     get:
       operationId: getRetro
-      tags: [Pipelines]
-      summary: Get pipeline retrospective
+      tags: [Runs]
+      summary: Get run retrospective
       parameters:
         - name: id
           in: path
@@ -270,11 +270,11 @@ paths:
             application/json:
               schema: {}
         "404":
-          description: Pipeline not found
+          description: Run not found
 
 components:
   schemas:
-    PipelineStatus:
+    RunStatus:
       type: string
       enum:
         - running
@@ -282,7 +282,7 @@ components:
         - failed
         - cancelled
 
-    StartPipelineRequest:
+    StartRunRequest:
       type: object
       required:
         - dot_source
@@ -290,7 +290,7 @@ components:
         dot_source:
           type: string
 
-    StartPipelineResponse:
+    StartRunResponse:
       type: object
       required:
         - id
@@ -298,7 +298,7 @@ components:
         id:
           type: string
 
-    PipelineStatusResponse:
+    RunStatusResponse:
       type: object
       required:
         - id
@@ -307,7 +307,7 @@ components:
         id:
           type: string
         status:
-          $ref: "#/components/schemas/PipelineStatus"
+          $ref: "#/components/schemas/RunStatus"
         error:
           type: string
 
