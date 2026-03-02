@@ -407,8 +407,8 @@ paths:
   /runs/{id}/preview:
     post:
       operationId: generatePreviewUrl
-      tags: [Runs]
-      summary: Generate a sandbox preview URL
+      tags: [Sandbox]
+      summary: Preview URL
       parameters:
         - $ref: "#/components/parameters/RunId"
       requestBody:

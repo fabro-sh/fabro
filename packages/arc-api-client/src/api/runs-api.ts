@@ -26,10 +26,6 @@ import type { CancelRun200Response } from '../models';
 // @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
-import type { PreviewUrlRequest } from '../models';
-// @ts-ignore
-import type { PreviewUrlResponse } from '../models';
-// @ts-ignore
 import type { RunFiles } from '../models';
 // @ts-ignore
 import type { RunListItem } from '../models';
@@ -74,45 +70,6 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * 
-         * @summary Generate a sandbox preview URL
-         * @param {string} id 
-         * @param {PreviewUrlRequest} previewUrlRequest 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        generatePreviewUrl: async (id: string, previewUrlRequest: PreviewUrlRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'id' is not null or undefined
-            assertParamExists('generatePreviewUrl', 'id', id)
-            // verify required parameter 'previewUrlRequest' is not null or undefined
-            assertParamExists('generatePreviewUrl', 'previewUrlRequest', previewUrlRequest)
-            const localVarPath = `/runs/{id}/preview`
-                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(previewUrlRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -383,20 +340,6 @@ export const RunsApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
-         * @summary Generate a sandbox preview URL
-         * @param {string} id 
-         * @param {PreviewUrlRequest} previewUrlRequest 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async generatePreviewUrl(id: string, previewUrlRequest: PreviewUrlRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PreviewUrlResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.generatePreviewUrl(id, previewUrlRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunsApi.generatePreviewUrl']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * 
          * @summary List Run Files
          * @param {string} id 
          * @param {string} [checkpoint] 
@@ -507,17 +450,6 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
         },
         /**
          * 
-         * @summary Generate a sandbox preview URL
-         * @param {string} id 
-         * @param {PreviewUrlRequest} previewUrlRequest 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        generatePreviewUrl(id: string, previewUrlRequest: PreviewUrlRequest, options?: RawAxiosRequestConfig): AxiosPromise<PreviewUrlResponse> {
-            return localVarFp.generatePreviewUrl(id, previewUrlRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * 
          * @summary List Run Files
          * @param {string} id 
          * @param {string} [checkpoint] 
@@ -602,18 +534,6 @@ export class RunsApi extends BaseAPI {
      */
     public cancelRun(id: string, options?: RawAxiosRequestConfig) {
         return RunsApiFp(this.configuration).cancelRun(id, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * 
-     * @summary Generate a sandbox preview URL
-     * @param {string} id 
-     * @param {PreviewUrlRequest} previewUrlRequest 
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public generatePreviewUrl(id: string, previewUrlRequest: PreviewUrlRequest, options?: RawAxiosRequestConfig) {
-        return RunsApiFp(this.configuration).generatePreviewUrl(id, previewUrlRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
