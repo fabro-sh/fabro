@@ -58,10 +58,10 @@ mod server_lifecycle {
         let state = create_app_state(test_db().await, gate_registry);
         let app = build_router(Arc::clone(&state), arc_api::jwt_auth::AuthMode::Disabled);
 
-        // 1. Start pipeline
+        // 1. Start run
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": GATE_DOT})).unwrap(),
@@ -71,15 +71,15 @@ mod server_lifecycle {
         let response = app.clone().oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = body_json(response.into_body()).await;
-        let pipeline_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().to_string();
 
-        // 2. Poll for question to appear (pipeline runs start -> work -> gate, then blocks)
+        // 2. Poll for question to appear (run goes start -> work -> gate, then blocks)
         let mut question_id = String::new();
         for _ in 0..500 {
             tokio::time::sleep(Duration::from_millis(10)).await;
             let req = Request::builder()
                 .method("GET")
-                .uri(format!("/pipelines/{pipeline_id}/questions"))
+                .uri(format!("/runs/{run_id}/questions"))
                 .body(Body::empty())
                 .unwrap();
             let response = app.clone().oneshot(req).await.unwrap();
@@ -96,7 +96,7 @@ mod server_lifecycle {
         let req = Request::builder()
             .method("POST")
             .uri(format!(
-                "/pipelines/{pipeline_id}/questions/{question_id}/answer"
+                "/runs/{run_id}/questions/{question_id}/answer"
             ))
             .header("content-type", "application/json")
             .body(Body::from(
@@ -114,7 +114,7 @@ mod server_lifecycle {
             tokio::time::sleep(Duration::from_millis(10)).await;
             let req = Request::builder()
                 .method("GET")
-                .uri(format!("/pipelines/{pipeline_id}"))
+                .uri(format!("/runs/{run_id}"))
                 .body(Body::empty())
                 .unwrap();
             let response = app.clone().oneshot(req).await.unwrap();
@@ -130,7 +130,7 @@ mod server_lifecycle {
         // 5. Verify context endpoint returns an object
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/pipelines/{pipeline_id}/context"))
+            .uri(format!("/runs/{run_id}/context"))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -141,7 +141,7 @@ mod server_lifecycle {
         // 6. Verify no pending questions
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/pipelines/{pipeline_id}/questions"))
+            .uri(format!("/runs/{run_id}/questions"))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -157,10 +157,10 @@ mod server_lifecycle {
         let state = create_app_state(test_db().await, gate_registry);
         let app = build_router(Arc::clone(&state), arc_api::jwt_auth::AuthMode::Disabled);
 
-        // Start a pipeline that will block at the human gate
+        // Start a run that will block at the human gate
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": GATE_DOT})).unwrap(),
@@ -168,15 +168,15 @@ mod server_lifecycle {
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        let pipeline_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().to_string();
 
-        // Wait briefly for pipeline to start running
+        // Wait briefly for run to start running
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         // Cancel it
         let req = Request::builder()
             .method("POST")
-            .uri(format!("/pipelines/{pipeline_id}/cancel"))
+            .uri(format!("/runs/{run_id}/cancel"))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -187,7 +187,7 @@ mod server_lifecycle {
         // Verify status is cancelled
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/pipelines/{pipeline_id}"))
+            .uri(format!("/runs/{run_id}"))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -242,10 +242,10 @@ mod sse_events {
         let state = create_app_state(test_db().await, simple_registry);
         let app = build_router(Arc::clone(&state), arc_api::jwt_auth::AuthMode::Disabled);
 
-        // Start pipeline
+        // Start run
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": SIMPLE_DOT})).unwrap(),
@@ -257,12 +257,12 @@ mod sse_events {
             .await
             .unwrap();
         let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        let pipeline_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().to_string();
 
         // Get SSE stream
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/pipelines/{pipeline_id}/events"))
+            .uri(format!("/runs/{run_id}/events"))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -305,7 +305,7 @@ mod sse_events {
             }
         }
 
-        // Verify we got events (pipeline may have completed before we subscribed,
+        // Verify we got events (run may have completed before we subscribed,
         // so we check that the stream was valid SSE)
         // If events were emitted before subscribe, the stream may be empty.
         // That's OK -- the main assertion is content-type + valid SSE format.
@@ -325,7 +325,7 @@ mod sse_events {
 
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/pipelines/{pipeline_id}/checkpoint"))
+            .uri(format!("/runs/{run_id}/checkpoint"))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -335,7 +335,7 @@ mod sse_events {
             .await
             .unwrap();
         let cp_body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        // If pipeline completed, checkpoint should have completed_nodes
+        // If run completed, checkpoint should have completed_nodes
         if !cp_body.is_null() {
             let completed = cp_body["completed_nodes"].as_array();
             if let Some(nodes) = completed {
@@ -387,13 +387,13 @@ mod serve_dry_run {
     }
 
     #[tokio::test]
-    async fn dry_run_serve_starts_and_runs_pipeline() {
+    async fn dry_run_serve_starts_and_runs_workflow() {
         let app = dry_run_app().await;
 
-        // POST /pipelines to start a pipeline
+        // POST /runs to start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -404,16 +404,16 @@ mod serve_dry_run {
         assert_eq!(response.status(), StatusCode::CREATED);
 
         let body = body_json(response.into_body()).await;
-        let pipeline_id = body["id"].as_str().unwrap().to_string();
-        assert!(!pipeline_id.is_empty());
+        let run_id = body["id"].as_str().unwrap().to_string();
+        assert!(!run_id.is_empty());
 
-        // Wait for pipeline to complete
+        // Wait for run to complete
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        // GET /pipelines/{id} to verify completion
+        // GET /runs/{id} to verify completion
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/pipelines/{pipeline_id}"))
+            .uri(format!("/runs/{run_id}"))
             .body(Body::empty())
             .unwrap();
 
@@ -430,7 +430,7 @@ mod serve_dry_run {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": "not valid dot"})).unwrap(),

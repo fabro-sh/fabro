@@ -19,24 +19,24 @@ use arc_agent::LocalExecutionEnvironment;
 use crate::jwt_auth::{AuthMode, AuthenticatedService};
 use arc_workflows::checkpoint::Checkpoint;
 use arc_workflows::context::Context;
-use arc_workflows::engine::{PipelineEngine, RunConfig};
-use arc_workflows::event::{EventEmitter, PipelineEvent};
+use arc_workflows::engine::{WorkflowRunEngine, RunConfig};
+use arc_workflows::event::{EventEmitter, WorkflowRunEvent};
 use arc_workflows::handler::HandlerRegistry;
 use arc_workflows::interviewer::web::WebInterviewer;
 use arc_workflows::interviewer::{Answer, Interviewer};
 
 pub use arc_types::{
-    ApiQuestion, ApiQuestionOption, PipelineStatus, PipelineStatusResponse, StartPipelineRequest,
-    StartPipelineResponse, SubmitAnswerRequest, SubmitAnswerResponse,
+    ApiQuestion, ApiQuestionOption, RunStatus, RunStatusResponse, StartRunRequest,
+    StartRunResponse, SubmitAnswerRequest, SubmitAnswerResponse,
 };
 
-/// Snapshot of a managed pipeline.
-struct ManagedPipeline {
+/// Snapshot of a managed run.
+struct ManagedRun {
     dot_source: String,
-    status: PipelineStatus,
+    status: RunStatus,
     error: Option<String>,
     interviewer: Arc<WebInterviewer>,
-    event_tx: Option<broadcast::Sender<PipelineEvent>>,
+    event_tx: Option<broadcast::Sender<WorkflowRunEvent>>,
     context: Option<Context>,
     checkpoint: Option<Checkpoint>,
     cancel_tx: Option<tokio::sync::oneshot::Sender<()>>,
@@ -46,35 +46,35 @@ struct ManagedPipeline {
 
 /// Shared application state for the server.
 pub struct AppState {
-    pipelines: Mutex<HashMap<String, ManagedPipeline>>,
+    runs: Mutex<HashMap<String, ManagedRun>>,
     registry_factory: Box<dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync>,
     dry_run: bool,
     pub db: sqlx::SqlitePool,
 }
 
-/// Build the axum Router with all pipeline endpoints.
+/// Build the axum Router with all run endpoints.
 pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
     Router::new()
-        .route("/pipelines", get(list_pipelines).post(start_pipeline))
-        .route("/pipelines/{id}", get(get_pipeline_status))
-        .route("/pipelines/{id}/questions", get(get_questions))
+        .route("/runs", get(list_runs).post(start_run))
+        .route("/runs/{id}", get(get_run_status))
+        .route("/runs/{id}/questions", get(get_questions))
         .route(
-            "/pipelines/{id}/questions/{qid}/answer",
+            "/runs/{id}/questions/{qid}/answer",
             post(submit_answer),
         )
-        .route("/pipelines/{id}/events", get(get_events))
-        .route("/pipelines/{id}/checkpoint", get(get_checkpoint))
-        .route("/pipelines/{id}/context", get(get_context))
-        .route("/pipelines/{id}/cancel", post(cancel_pipeline))
-        .route("/pipelines/{id}/graph", get(get_graph))
-        .route("/pipelines/{id}/retro", get(get_retro))
+        .route("/runs/{id}/events", get(get_events))
+        .route("/runs/{id}/checkpoint", get(get_checkpoint))
+        .route("/runs/{id}/context", get(get_context))
+        .route("/runs/{id}/cancel", post(cancel_run))
+        .route("/runs/{id}/graph", get(get_graph))
+        .route("/runs/{id}/retro", get(get_retro))
         .layer(axum::Extension(auth_mode))
         .with_state(state)
 }
 
 /// Create an `AppState` with the given registry factory and database pool.
 ///
-/// The factory receives the pipeline's `WebInterviewer` so it can wire it
+/// The factory receives the run's `WebInterviewer` so it can wire it
 /// into handlers that need human-in-the-loop interaction (e.g., `WaitHumanHandler`).
 pub fn create_app_state(
     db: sqlx::SqlitePool,
@@ -90,36 +90,36 @@ pub fn create_app_state_with_options(
     dry_run: bool,
 ) -> Arc<AppState> {
     Arc::new(AppState {
-        pipelines: Mutex::new(HashMap::new()),
+        runs: Mutex::new(HashMap::new()),
         registry_factory: Box::new(registry_factory),
         dry_run,
         db,
     })
 }
 
-async fn list_pipelines(
+async fn list_runs(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
-    let items: Vec<PipelineStatusResponse> = pipelines
+    let runs = state.runs.lock().expect("runs lock poisoned");
+    let items: Vec<RunStatusResponse> = runs
         .iter()
-        .map(|(id, pipeline)| PipelineStatusResponse {
+        .map(|(id, managed_run)| RunStatusResponse {
             id: id.clone(),
-            status: pipeline.status,
-            error: pipeline.error.clone(),
+            status: managed_run.status,
+            error: managed_run.error.clone(),
         })
         .collect();
     (StatusCode::OK, Json(items)).into_response()
 }
 
-async fn start_pipeline(
+async fn start_run(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
-    Json(req): Json<StartPipelineRequest>,
+    Json(req): Json<StartRunRequest>,
 ) -> Response {
     // Parse the DOT source
-    let graph = match arc_workflows::pipeline::prepare_pipeline(&req.dot_source) {
+    let graph = match arc_workflows::workflow::prepare_workflow(&req.dot_source) {
         Ok(g) => g,
         Err(e) => {
             return (
@@ -131,7 +131,7 @@ async fn start_pipeline(
     };
 
     let run_id = ulid::Ulid::new().to_string();
-    info!(run_id = %run_id, "Pipeline started");
+    info!(run_id = %run_id, "Run started");
     let interviewer = Arc::new(WebInterviewer::new());
     let (event_tx, _) = broadcast::channel(256);
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
@@ -150,7 +150,7 @@ async fn start_pipeline(
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let execution_env: Arc<dyn arc_agent::ExecutionEnvironment> =
         Arc::new(LocalExecutionEnvironment::new(cwd));
-    let engine = PipelineEngine::with_interviewer(
+    let engine = WorkflowRunEngine::with_interviewer(
         registry,
         Arc::new(emitter),
         Arc::clone(&interviewer) as Arc<dyn Interviewer>,
@@ -158,12 +158,12 @@ async fn start_pipeline(
     );
 
     {
-        let mut pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
-        pipelines.insert(
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        runs.insert(
             run_id.clone(),
-            ManagedPipeline {
+            ManagedRun {
                 dot_source: req.dot_source,
-                status: PipelineStatus::Running,
+                status: RunStatus::Running,
                 error: None,
                 interviewer: Arc::clone(&interviewer),
                 event_tx: Some(event_tx),
@@ -176,7 +176,7 @@ async fn start_pipeline(
         );
     }
 
-    // Spawn pipeline execution
+    // Spawn run execution
     let state_clone = Arc::clone(&state);
     let run_id_clone = run_id.clone();
     tokio::spawn(async move {
@@ -197,10 +197,10 @@ async fn start_pipeline(
         let result = tokio::select! {
             result = engine.run(&graph, &config) => result,
             _ = cancel_rx => {
-                let mut pipelines = state_clone.pipelines.lock().expect("pipelines lock poisoned");
-                if let Some(pipeline) = pipelines.get_mut(&run_id_clone) {
-                    pipeline.status = PipelineStatus::Cancelled;
-                    pipeline.event_tx = None;
+                let mut runs = state_clone.runs.lock().expect("runs lock poisoned");
+                if let Some(managed_run) = runs.get_mut(&run_id_clone) {
+                    managed_run.status = RunStatus::Cancelled;
+                    managed_run.event_tx = None;
                 }
                 return;
             }
@@ -218,7 +218,7 @@ async fn start_pipeline(
             let stage_durations = arc_workflows::retro::extract_stage_durations(&config.logs_root);
             let retro = arc_workflows::retro::derive_retro(
                 &run_id_clone,
-                "pipeline",
+                "workflow",
                 "",
                 cp,
                 failed,
@@ -229,52 +229,52 @@ async fn start_pipeline(
             let _ = retro.save(&config.logs_root);
         }
 
-        let mut pipelines = state_clone
-            .pipelines
+        let mut runs = state_clone
+            .runs
             .lock()
-            .expect("pipelines lock poisoned");
-        if let Some(pipeline) = pipelines.get_mut(&run_id_clone) {
+            .expect("runs lock poisoned");
+        if let Some(managed_run) = runs.get_mut(&run_id_clone) {
             match result {
                 Ok(_) => {
-                    info!(run_id = %run_id_clone, "Pipeline completed");
-                    pipeline.status = PipelineStatus::Completed;
+                    info!(run_id = %run_id_clone, "Run completed");
+                    managed_run.status = RunStatus::Completed;
                 }
                 Err(arc_workflows::error::ArcError::Cancelled) => {
-                    info!(run_id = %run_id_clone, "Pipeline cancelled");
-                    pipeline.status = PipelineStatus::Cancelled;
+                    info!(run_id = %run_id_clone, "Run cancelled");
+                    managed_run.status = RunStatus::Cancelled;
                 }
                 Err(e) => {
-                    error!(run_id = %run_id_clone, error = %e, "Pipeline failed");
-                    pipeline.status = PipelineStatus::Failed;
-                    pipeline.error = Some(e.to_string());
+                    error!(run_id = %run_id_clone, error = %e, "Run failed");
+                    managed_run.status = RunStatus::Failed;
+                    managed_run.error = Some(e.to_string());
                 }
             }
-            pipeline.checkpoint = checkpoint;
-            pipeline.logs_root = Some(config.logs_root.clone());
-            pipeline.event_tx = None;
+            managed_run.checkpoint = checkpoint;
+            managed_run.logs_root = Some(config.logs_root.clone());
+            managed_run.event_tx = None;
         }
     });
 
     (
         StatusCode::CREATED,
-        Json(StartPipelineResponse { id: run_id }),
+        Json(StartRunResponse { id: run_id }),
     )
         .into_response()
 }
 
-async fn get_pipeline_status(
+async fn get_run_status(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    let pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
-    match pipelines.get(&id) {
-        Some(pipeline) => (
+    let runs = state.runs.lock().expect("runs lock poisoned");
+    match runs.get(&id) {
+        Some(managed_run) => (
             StatusCode::OK,
-            Json(PipelineStatusResponse {
+            Json(RunStatusResponse {
                 id: id.clone(),
-                status: pipeline.status,
-                error: pipeline.error.clone(),
+                status: managed_run.status,
+                error: managed_run.error.clone(),
             }),
         )
             .into_response(),
@@ -287,10 +287,10 @@ async fn get_questions(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    let pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
-    match pipelines.get(&id) {
-        Some(pipeline) => {
-            let pending = pipeline.interviewer.pending_questions();
+    let runs = state.runs.lock().expect("runs lock poisoned");
+    match runs.get(&id) {
+        Some(managed_run) => {
+            let pending = managed_run.interviewer.pending_questions();
             let questions: Vec<ApiQuestion> = pending
                 .into_iter()
                 .map(|pq| ApiQuestion {
@@ -321,12 +321,12 @@ async fn submit_answer(
     Path((id, qid)): Path<(String, String)>,
     Json(req): Json<SubmitAnswerRequest>,
 ) -> Response {
-    let pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
-    match pipelines.get(&id) {
-        Some(pipeline) => {
+    let runs = state.runs.lock().expect("runs lock poisoned");
+    match runs.get(&id) {
+        Some(managed_run) => {
             let answer = match &req.selected_option_key {
                 Some(key) => {
-                    let option = pipeline
+                    let option = managed_run
                         .interviewer
                         .pending_questions()
                         .iter()
@@ -346,7 +346,7 @@ async fn submit_answer(
                 }
                 None => Answer::text(req.value),
             };
-            let accepted = pipeline.interviewer.submit_answer(&qid, answer);
+            let accepted = managed_run.interviewer.submit_answer(&qid, answer);
             (StatusCode::OK, Json(SubmitAnswerResponse { accepted })).into_response()
         }
         None => StatusCode::NOT_FOUND.into_response(),
@@ -359,9 +359,9 @@ async fn get_events(
     Path(id): Path<String>,
 ) -> Response {
     let rx = {
-        let pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
-        match pipelines.get(&id) {
-            Some(pipeline) => match &pipeline.event_tx {
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        match runs.get(&id) {
+            Some(managed_run) => match &managed_run.event_tx {
                 Some(tx) => tx.subscribe(),
                 None => return StatusCode::GONE.into_response(),
             },
@@ -388,9 +388,9 @@ async fn get_checkpoint(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    let pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
-    match pipelines.get(&id) {
-        Some(pipeline) => match &pipeline.checkpoint {
+    let runs = state.runs.lock().expect("runs lock poisoned");
+    match runs.get(&id) {
+        Some(managed_run) => match &managed_run.checkpoint {
             Some(cp) => (StatusCode::OK, Json(cp.clone())).into_response(),
             None => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
         },
@@ -403,9 +403,9 @@ async fn get_context(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    let pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
-    match pipelines.get(&id) {
-        Some(pipeline) => match &pipeline.context {
+    let runs = state.runs.lock().expect("runs lock poisoned");
+    match runs.get(&id) {
+        Some(managed_run) => match &managed_run.context {
             Some(ctx) => (StatusCode::OK, Json(ctx.snapshot())).into_response(),
             None => (StatusCode::OK, Json(serde_json::json!({}))).into_response(),
         },
@@ -413,26 +413,26 @@ async fn get_context(
     }
 }
 
-async fn cancel_pipeline(
+async fn cancel_run(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    let mut pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
-    match pipelines.get_mut(&id) {
-        Some(pipeline) => {
-            if pipeline.status != PipelineStatus::Running {
+    let mut runs = state.runs.lock().expect("runs lock poisoned");
+    match runs.get_mut(&id) {
+        Some(managed_run) => {
+            if managed_run.status != RunStatus::Running {
                 return (
                     StatusCode::CONFLICT,
-                    Json(serde_json::json!({"error": "pipeline is not running"})),
+                    Json(serde_json::json!({"error": "run is not running"})),
                 )
                     .into_response();
             }
-            pipeline.cancel_token.store(true, Ordering::Relaxed);
-            if let Some(cancel_tx) = pipeline.cancel_tx.take() {
+            managed_run.cancel_token.store(true, Ordering::Relaxed);
+            if let Some(cancel_tx) = managed_run.cancel_tx.take() {
                 let _ = cancel_tx.send(());
             }
-            pipeline.status = PipelineStatus::Cancelled;
+            managed_run.status = RunStatus::Cancelled;
             (StatusCode::OK, Json(serde_json::json!({"cancelled": true}))).into_response()
         }
         None => StatusCode::NOT_FOUND.into_response(),
@@ -445,9 +445,9 @@ async fn get_retro(
     Path(id): Path<String>,
 ) -> Response {
     let logs_root = {
-        let pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
-        match pipelines.get(&id) {
-            Some(pipeline) => pipeline.logs_root.clone(),
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        match runs.get(&id) {
+            Some(managed_run) => managed_run.logs_root.clone(),
             None => return StatusCode::NOT_FOUND.into_response(),
         }
     };
@@ -468,9 +468,9 @@ async fn get_graph(
     Path(id): Path<String>,
 ) -> Response {
     let dot_source = {
-        let pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
-        match pipelines.get(&id) {
-            Some(pipeline) => pipeline.dot_source.clone(),
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        match runs.get(&id) {
+            Some(managed_run) => managed_run.dot_source.clone(),
             None => return StatusCode::NOT_FOUND.into_response(),
         }
     };
@@ -564,12 +564,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_pipelines_starts_pipeline_and_returns_id() {
+    async fn post_runs_starts_run_and_returns_id() {
         let app = test_app_with(test_db().await);
 
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -585,12 +585,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_pipelines_invalid_dot_returns_bad_request() {
+    async fn post_runs_invalid_dot_returns_bad_request() {
         let app = test_app_with(test_db().await);
 
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": "not a graph"})).unwrap(),
@@ -602,14 +602,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_pipeline_status_returns_status() {
+    async fn get_run_status_returns_status() {
         let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
-        // Start a pipeline
+        // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -620,13 +620,13 @@ mod tests {
         let body = body_json(response.into_body()).await;
         let run_id = body["id"].as_str().unwrap().to_string();
 
-        // Give pipeline a moment to start
+        // Give run a moment to start
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
         // Check status
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/pipelines/{run_id}"))
+            .uri(format!("/runs/{run_id}"))
             .body(Body::empty())
             .unwrap();
 
@@ -644,12 +644,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_pipeline_status_not_found() {
+    async fn get_run_status_not_found() {
         let app = test_app_with(test_db().await);
 
         let req = Request::builder()
             .method("GET")
-            .uri("/pipelines/nonexistent")
+            .uri("/runs/nonexistent")
             .body(Body::empty())
             .unwrap();
 
@@ -662,10 +662,10 @@ mod tests {
         let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
-        // Start a pipeline
+        // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -676,10 +676,10 @@ mod tests {
         let body = body_json(response.into_body()).await;
         let run_id = body["id"].as_str().unwrap().to_string();
 
-        // Get questions (should be empty for a pipeline without wait.human nodes)
+        // Get questions (should be empty for a run without wait.human nodes)
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/pipelines/{run_id}/questions"))
+            .uri(format!("/runs/{run_id}/questions"))
             .body(Body::empty())
             .unwrap();
 
@@ -691,12 +691,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn submit_answer_not_found_pipeline() {
+    async fn submit_answer_not_found_run() {
         let app = test_app_with(test_db().await);
 
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines/nonexistent/questions/q1/answer")
+            .uri("/runs/nonexistent/questions/q1/answer")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"value": "yes"})).unwrap(),
@@ -713,7 +713,7 @@ mod tests {
 
         let req = Request::builder()
             .method("GET")
-            .uri("/pipelines/nonexistent/events")
+            .uri("/runs/nonexistent/events")
             .body(Body::empty())
             .unwrap();
 
@@ -726,10 +726,10 @@ mod tests {
         let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
-        // Start a pipeline
+        // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -740,10 +740,10 @@ mod tests {
         let body = body_json(response.into_body()).await;
         let run_id = body["id"].as_str().unwrap().to_string();
 
-        // Get checkpoint immediately (before pipeline completes, may be null)
+        // Get checkpoint immediately (before run completes, may be null)
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/pipelines/{run_id}/checkpoint"))
+            .uri(format!("/runs/{run_id}/checkpoint"))
             .body(Body::empty())
             .unwrap();
 
@@ -756,10 +756,10 @@ mod tests {
         let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
-        // Start a pipeline
+        // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -773,7 +773,7 @@ mod tests {
         // Get context
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/pipelines/{run_id}/context"))
+            .uri(format!("/runs/{run_id}/context"))
             .body(Body::empty())
             .unwrap();
 
@@ -785,14 +785,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancel_pipeline_succeeds() {
+    async fn cancel_run_succeeds() {
         let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
-        // Start a pipeline
+        // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -806,7 +806,7 @@ mod tests {
         // Cancel it
         let req = Request::builder()
             .method("POST")
-            .uri(format!("/pipelines/{run_id}/cancel"))
+            .uri(format!("/runs/{run_id}/cancel"))
             .body(Body::empty())
             .unwrap();
 
@@ -820,12 +820,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancel_nonexistent_pipeline_returns_not_found() {
+    async fn cancel_nonexistent_run_returns_not_found() {
         let app = test_app_with(test_db().await);
 
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines/nonexistent/cancel")
+            .uri("/runs/nonexistent/cancel")
             .body(Body::empty())
             .unwrap();
 
@@ -838,10 +838,10 @@ mod tests {
         let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
-        // Start a pipeline
+        // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -855,7 +855,7 @@ mod tests {
         // Request the SSE stream
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/pipelines/{run_id}/events"))
+            .uri(format!("/runs/{run_id}/events"))
             .body(Body::empty())
             .unwrap();
 
@@ -876,14 +876,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pipeline_completes_and_status_is_completed() {
+    async fn run_completes_and_status_is_completed() {
         let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
-        // Start a pipeline
+        // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -894,13 +894,13 @@ mod tests {
         let body = body_json(response.into_body()).await;
         let run_id = body["id"].as_str().unwrap().to_string();
 
-        // Poll until pipeline completes
+        // Poll until run completes
         let mut status = String::new();
         for _ in 0..100 {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             let req = Request::builder()
                 .method("GET")
-                .uri(format!("/pipelines/{run_id}"))
+                .uri(format!("/runs/{run_id}"))
                 .body(Body::empty())
                 .unwrap();
             let response = app.clone().oneshot(req).await.unwrap();
@@ -919,10 +919,10 @@ mod tests {
         let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
-        // Start a pipeline
+        // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -936,7 +936,7 @@ mod tests {
         // Request graph SVG
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/pipelines/{run_id}/graph"))
+            .uri(format!("/runs/{run_id}/graph"))
             .body(Body::empty())
             .unwrap();
 
@@ -974,7 +974,7 @@ mod tests {
 
         let req = Request::builder()
             .method("GET")
-            .uri("/pipelines/nonexistent/graph")
+            .uri("/runs/nonexistent/graph")
             .body(Body::empty())
             .unwrap();
 
@@ -983,14 +983,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_pipelines_returns_started_pipeline() {
+    async fn list_runs_returns_started_run() {
         let state = create_app_state(test_db().await, test_registry);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // List should be empty initially
         let req = Request::builder()
             .method("GET")
-            .uri("/pipelines")
+            .uri("/runs")
             .body(Body::empty())
             .unwrap();
 
@@ -999,10 +999,10 @@ mod tests {
         let body = body_json(response.into_body()).await;
         assert_eq!(body.as_array().unwrap().len(), 0);
 
-        // Start a pipeline
+        // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/pipelines")
+            .uri("/runs")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -1013,10 +1013,10 @@ mod tests {
         let body = body_json(response.into_body()).await;
         let run_id = body["id"].as_str().unwrap().to_string();
 
-        // List should now contain one pipeline
+        // List should now contain one run
         let req = Request::builder()
             .method("GET")
-            .uri("/pipelines")
+            .uri("/runs")
             .body(Body::empty())
             .unwrap();
 
