@@ -248,6 +248,7 @@ async fn start_pipeline(
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: std::collections::HashMap::new(),
         };
 
         let result = tokio::select! {

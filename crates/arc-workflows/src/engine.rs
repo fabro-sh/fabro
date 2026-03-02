@@ -304,6 +304,9 @@ fn write_manifest(logs_root: &Path, graph: &Graph, config: &RunConfig) -> serde_
     if let Some(ref base) = config.base_sha {
         manifest["base_sha"] = serde_json::Value::String(base.clone());
     }
+    if !config.labels.is_empty() {
+        manifest["labels"] = serde_json::to_value(&config.labels).unwrap_or_default();
+    }
     if let Ok(json) = serde_json::to_string_pretty(&manifest) {
         let _ = std::fs::create_dir_all(logs_root);
         let _ = std::fs::write(logs_root.join("manifest.json"), json);
@@ -736,6 +739,8 @@ pub struct RunConfig {
     pub run_branch: Option<String>,
     /// Metadata branch name for git-native checkpoint storage (e.g. `refs/arc/{run_id}`).
     pub meta_branch: Option<String>,
+    /// User-defined key-value labels for this run.
+    pub labels: HashMap<String, String>,
 }
 
 /// The pipeline execution engine.
@@ -2306,6 +2311,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -2326,6 +2332,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         engine.run(&g, &config).await.unwrap();
         let checkpoint_path = dir.path().join("checkpoint.json");
@@ -2354,6 +2361,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2378,6 +2386,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -2398,6 +2407,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2431,6 +2441,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -2488,6 +2499,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2565,6 +2577,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2577,6 +2590,56 @@ mod tests {
         assert!(manifest["start_time"].is_string());
         assert!(manifest["node_count"].is_number());
         assert!(manifest["edge_count"].is_number());
+    }
+
+    #[tokio::test]
+    async fn manifest_includes_labels_when_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = simple_graph();
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "labels-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+            labels: HashMap::from([("env".into(), "test".into())]),
+        };
+        engine.run(&g, &config).await.unwrap();
+
+        let manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join("manifest.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["labels"]["env"], "test");
+    }
+
+    #[tokio::test]
+    async fn manifest_omits_labels_when_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = simple_graph();
+        let engine =
+            PipelineEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "no-labels-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+            labels: HashMap::new(),
+        };
+        engine.run(&g, &config).await.unwrap();
+
+        let manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join("manifest.json")).unwrap())
+                .unwrap();
+        assert!(manifest.get("labels").is_none());
     }
 
     #[tokio::test]
@@ -2594,6 +2657,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2620,6 +2684,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2774,6 +2839,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2812,6 +2878,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2868,6 +2935,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
 
@@ -2926,6 +2994,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let result = engine.run(&g, &config).await;
 
@@ -2988,6 +3057,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_ok());
@@ -3039,6 +3109,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -3091,6 +3162,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
 
@@ -3150,6 +3222,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         engine.run(&g, &config).await.unwrap();
         // Give spawned inform tasks time to complete
@@ -3184,6 +3257,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         engine.run(&g, &config).await.unwrap();
         // Give spawned inform tasks time to complete
@@ -3219,6 +3293,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -3242,6 +3317,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3264,6 +3340,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -3299,6 +3376,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
 
         // Set cancel after a short delay (while the slow handler is running)
@@ -3371,6 +3449,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3396,6 +3475,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3423,6 +3503,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3511,6 +3592,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
 
         // The engine returns Err because the Fail outcome has no outgoing fail edge,
@@ -3735,6 +3817,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3765,6 +3848,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3802,6 +3886,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3879,6 +3964,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3969,6 +4055,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4034,6 +4121,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -4088,6 +4176,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -4141,6 +4230,7 @@ mod tests {
             base_sha: None,
             run_branch: None,
             meta_branch: None,
+            labels: HashMap::new(),
         };
         let _outcome = engine.run(&g, &config).await.unwrap();
 

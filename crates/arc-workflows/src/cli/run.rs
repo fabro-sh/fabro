@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -561,6 +562,12 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         base_sha: worktree_base_sha.or(daytona_base_sha),
         run_branch: worktree_branch.or(daytona_branch),
         meta_branch,
+        labels: args
+            .label
+            .iter()
+            .filter_map(|s| s.split_once('='))
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
     };
 
     let run_start = Instant::now();
@@ -907,6 +914,7 @@ async fn run_from_branch(
         base_sha,
         run_branch: Some(run_branch.to_string()),
         meta_branch,
+        labels: HashMap::new(),
     };
 
     let run_start = Instant::now();

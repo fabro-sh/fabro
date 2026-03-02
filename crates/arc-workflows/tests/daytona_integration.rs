@@ -284,6 +284,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         base_sha: None,
         run_branch: None,
         meta_branch: None,
+        labels: std::collections::HashMap::new(),
     };
 
     let outcome = engine
@@ -474,6 +475,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         base_sha: Some(base_sha),
         run_branch: Some(branch_name),
         meta_branch: None,
+        labels: std::collections::HashMap::new(),
     };
 
     let outcome = engine
@@ -653,6 +655,7 @@ async fn daytona_parallel_git_branching_e2e() {
         base_sha: Some(base_sha),
         run_branch: Some(branch_name),
         meta_branch: None,
+        labels: std::collections::HashMap::new(),
     };
 
     let outcome = engine
@@ -977,6 +980,7 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         base_sha: Some(base_sha),
         run_branch: Some(branch_name),
         meta_branch: Some(meta_branch),
+        labels: std::collections::HashMap::new(),
     };
 
     let outcome = engine

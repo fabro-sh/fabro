@@ -28,6 +28,8 @@ enum Command {
     Run(arc_workflows::cli::RunArgs),
     /// Validate a pipeline
     Validate(arc_workflows::cli::ValidateArgs),
+    /// List and manage pipeline runs
+    Runs(arc_workflows::cli::runs::RunsArgs),
     /// Start the HTTP API server
     Serve(arc_api::serve::ServeArgs),
 }
@@ -59,6 +61,7 @@ async fn main() -> Result<()> {
         Command::Agent(_) => "agent",
         Command::Run(_) => "run",
         Command::Validate(_) => "validate",
+        Command::Runs(_) => "runs",
         Command::Serve(_) => "serve",
     };
     debug!(command = %command_name, "CLI command started");
@@ -77,6 +80,9 @@ async fn main() -> Result<()> {
         Command::Validate(args) => {
             let styles = arc_util::terminal::Styles::detect_stderr();
             arc_workflows::cli::validate::validate_command(&args, &styles)?;
+        }
+        Command::Runs(args) => {
+            arc_workflows::cli::runs::runs_command(args)?;
         }
         Command::Serve(args) => {
             let styles: &'static arc_util::terminal::Styles =

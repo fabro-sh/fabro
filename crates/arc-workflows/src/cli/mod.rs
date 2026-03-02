@@ -1,6 +1,7 @@
 pub mod backend;
 pub mod cli_backend;
 pub mod run;
+pub mod runs;
 pub mod task_config;
 pub mod validate;
 
@@ -112,6 +113,10 @@ pub struct RunArgs {
     /// Execution environment for agent tools
     #[arg(long, value_enum)]
     pub execution_env: Option<ExecutionEnvKind>,
+
+    /// Attach a label to this run (repeatable, format: KEY=VALUE)
+    #[arg(long = "label", value_name = "KEY=VALUE")]
+    pub label: Vec<String>,
 }
 
 #[derive(Args)]
