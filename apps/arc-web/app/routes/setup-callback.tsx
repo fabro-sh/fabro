@@ -46,7 +46,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     `export GITHUB_APP_CLIENT_ID=${data.client_id}`,
     `export GITHUB_APP_CLIENT_SECRET=${data.client_secret}`,
     `export GITHUB_APP_WEBHOOK_SECRET=${data.webhook_secret}`,
-    `export GITHUB_APP_PRIVATE_KEY="${data.pem}"`,
+    `export GITHUB_APP_PRIVATE_KEY=${Buffer.from(data.pem).toString("base64")}`,
   ].join("\n");
 
   const envContent = existing ? `${existing.trimEnd()}\n\n${newVars}\n` : `${newVars}\n`;
@@ -57,7 +57,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   process.env.GITHUB_APP_CLIENT_ID = data.client_id;
   process.env.GITHUB_APP_CLIENT_SECRET = data.client_secret;
   process.env.GITHUB_APP_WEBHOOK_SECRET = data.webhook_secret;
-  process.env.GITHUB_APP_PRIVATE_KEY = data.pem;
+  process.env.GITHUB_APP_PRIVATE_KEY = Buffer.from(data.pem).toString("base64");
 
   throw redirect("/auth/login");
 }
