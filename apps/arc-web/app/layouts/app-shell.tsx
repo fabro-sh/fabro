@@ -20,15 +20,19 @@ import {
   SunIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { Link, Outlet, useLocation, useMatches } from "react-router";
+import { Form, Link, Outlet, redirect, useLocation, useMatches } from "react-router";
 import { useTheme } from "../lib/theme";
+import { isGitHubAppConfigured } from "../lib/github.server";
+import { requireUser } from "../lib/session.server";
+import type { Route } from "./+types/app-shell";
 
-const user = {
-  name: "Tom Cook",
-  email: "tom@example.com",
-  imageUrl:
-    "https://avatars.githubusercontent.com/u/19?v=4",
-};
+export async function loader({ request }: Route.LoaderArgs) {
+  if (!isGitHubAppConfigured()) {
+    throw redirect("/setup");
+  }
+  const user = await requireUser(request);
+  return { user };
+}
 
 const navigation = [
   { name: "Start", href: "/start", icon: SparklesIcon },
@@ -40,13 +44,12 @@ const navigation = [
   { name: "Settings", href: "/settings", icon: Cog6ToothIcon },
 ];
 
-const userNavigation = [{ name: "Sign out", href: "#" }];
-
 function classNames(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-export default function AppShell() {
+export default function AppShell({ loaderData }: Route.ComponentProps) {
+  const { user } = loaderData;
   const { pathname } = useLocation();
   const matches = useMatches();
   const { theme, toggle } = useTheme();
@@ -113,7 +116,7 @@ export default function AppShell() {
                     <span className="sr-only">Open user menu</span>
                     <img
                       alt=""
-                      src={user.imageUrl}
+                      src={user.avatarUrl}
                       className="size-8 rounded-full outline -outline-offset-1 outline-line-strong"
                     />
                   </MenuButton>
@@ -122,16 +125,16 @@ export default function AppShell() {
                     transition
                     className="absolute right-0 z-10 mt-2 w-48 origin-top-right rounded-md bg-panel py-1 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:transform data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
                   >
-                    {userNavigation.map((item) => (
-                      <MenuItem key={item.name}>
-                        <a
-                          href={item.href}
-                          className="block px-4 py-2 text-sm text-fg-3 data-focus:bg-overlay data-focus:outline-hidden"
+                    <MenuItem>
+                      <Form method="POST" action="/auth/logout">
+                        <button
+                          type="submit"
+                          className="block w-full px-4 py-2 text-left text-sm text-fg-3 data-focus:bg-overlay data-focus:outline-hidden"
                         >
-                          {item.name}
-                        </a>
-                      </MenuItem>
-                    ))}
+                          Sign out
+                        </button>
+                      </Form>
+                    </MenuItem>
                   </MenuItems>
                 </Menu>
               </div>
@@ -181,7 +184,7 @@ export default function AppShell() {
               <div className="shrink-0">
                 <img
                   alt=""
-                  src={user.imageUrl}
+                  src={user.avatarUrl}
                   className="size-10 rounded-full outline -outline-offset-1 outline-line-strong"
                 />
               </div>
@@ -204,16 +207,15 @@ export default function AppShell() {
               </button>
             </div>
             <div className="mt-3 space-y-1 px-2">
-              {userNavigation.map((item) => (
+              <Form method="POST" action="/auth/logout">
                 <DisclosureButton
-                  key={item.name}
-                  as="a"
-                  href={item.href}
-                  className="block rounded-md px-3 py-2 text-base font-medium text-fg-muted hover:bg-overlay hover:text-fg"
+                  as="button"
+                  type="submit"
+                  className="block w-full rounded-md px-3 py-2 text-left text-base font-medium text-fg-muted hover:bg-overlay hover:text-fg"
                 >
-                  {item.name}
+                  Sign out
                 </DisclosureButton>
-              ))}
+              </Form>
             </div>
           </div>
         </DisclosurePanel>

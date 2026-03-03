@@ -7,6 +7,11 @@ import {
 
 export default [
   index("routes/redirect-home.tsx"),
+  route("setup", "routes/setup.tsx"),
+  route("setup/callback", "routes/setup-callback.tsx"),
+  route("auth/login", "routes/auth-login.tsx"),
+  route("auth/callback", "routes/auth-callback.tsx"),
+  route("auth/logout", "routes/auth-logout.tsx"),
   layout("layouts/app-shell.tsx", [
     route("start", "routes/start.tsx"),
     route("sessions/:sessionId", "routes/session-detail.tsx"),
