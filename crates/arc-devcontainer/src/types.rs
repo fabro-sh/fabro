@@ -122,6 +122,10 @@ pub struct FeatureMetadata {
     /// Hard dependencies: feature IDs that must be present (auto-installed if missing)
     #[serde(default)]
     pub depends_on: HashMap<String, serde_json::Value>,
+
+    /// Environment variables contributed by this feature
+    #[serde(default)]
+    pub container_env: HashMap<String, String>,
 }
 
 /// A single option for a devcontainer feature.
@@ -242,6 +246,20 @@ mod tests {
         let json = r#"{"image": "ubuntu", "unknownField": true, "customizations": {}}"#;
         let config: DevcontainerJson = serde_json::from_str(json).unwrap();
         assert_eq!(config.image.as_deref(), Some("ubuntu"));
+    }
+
+    #[test]
+    fn parse_feature_metadata_container_env() {
+        let json = r#"{
+            "id": "node",
+            "containerEnv": {
+                "NODE_ENV": "development",
+                "PATH": "/usr/local/bin:${PATH}"
+            }
+        }"#;
+        let meta: FeatureMetadata = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.container_env.len(), 2);
+        assert_eq!(meta.container_env.get("NODE_ENV").map(String::as_str), Some("development"));
     }
 
     #[test]

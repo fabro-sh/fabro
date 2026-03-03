@@ -248,17 +248,31 @@ impl DevcontainerResolver {
         };
 
         // Features
-        let feature_layers = if !devcontainer.features.is_empty() {
+        let resolved_features = if !devcontainer.features.is_empty() {
             features::resolve_features(&devcontainer.features, &build_context).await?
         } else {
-            Vec::new()
+            features::ResolvedFeatures::default()
+        };
+
+        // Merge feature containerEnv with devcontainer.json containerEnv
+        // (devcontainer.json wins on conflicts)
+        let mut merged_container_env = resolved_features.container_env;
+        if let Some(env) = &devcontainer.container_env {
+            for (k, v) in env {
+                merged_container_env.insert(k.clone(), variables::substitute(v, &vars));
+            }
+        }
+        let container_env_option = if merged_container_env.is_empty() {
+            None
+        } else {
+            Some(merged_container_env.clone())
         };
 
         // Generate final Dockerfile
         let dockerfile_content = dockerfile::generate(
             &base_dockerfile,
-            &feature_layers,
-            &devcontainer.container_env,
+            &resolved_features.layers,
+            &container_env_option,
             devcontainer.remote_user.as_deref(),
         );
 
@@ -281,7 +295,7 @@ impl DevcontainerResolver {
             post_create_commands: Self::collect_commands(&devcontainer.post_create_command, &vars),
             post_start_commands: Self::collect_commands(&devcontainer.post_start_command, &vars),
             environment,
-            container_env: Self::collect_container_env(&devcontainer.container_env, &vars),
+            container_env: merged_container_env,
             remote_user: devcontainer.remote_user.clone(),
             workspace_folder,
             forwarded_ports,

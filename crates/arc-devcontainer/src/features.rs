@@ -17,6 +17,13 @@ pub struct FeatureLayer {
     pub dockerfile_snippet: String,
 }
 
+/// All resolved feature data: layers, environment, and lifecycle hooks.
+#[derive(Debug, Clone, Default)]
+pub struct ResolvedFeatures {
+    pub layers: Vec<FeatureLayer>,
+    pub container_env: HashMap<String, String>,
+}
+
 /// Extract the directory name from a feature ID.
 /// e.g. "ghcr.io/devcontainers/features/node:1" -> "node"
 fn dir_name_from_id(feature_id: &str) -> String {
@@ -333,9 +340,9 @@ fn generate_layer(
 pub async fn resolve_features(
     features: &HashMap<String, serde_json::Value>,
     _build_context: &Path,
-) -> crate::Result<Vec<FeatureLayer>> {
+) -> crate::Result<ResolvedFeatures> {
     if features.is_empty() {
-        return Ok(Vec::new());
+        return Ok(ResolvedFeatures::default());
     }
 
     ensure_oras().await?;
@@ -387,8 +394,8 @@ pub async fn resolve_features(
     // Topologically sort features
     let sorted_ids = topo_sort(&feature_ids, &metadata_map);
 
-    // Generate layers
-    let mut layers = Vec::new();
+    // Generate layers and collect container_env
+    let mut resolved = ResolvedFeatures::default();
     for id in &sorted_ids {
         let dir_name = dir_name_from_id(id);
         let options = all_options.get(id).cloned().unwrap_or(serde_json::Value::Object(
@@ -404,17 +411,23 @@ pub async fn resolve_features(
                 options: HashMap::new(),
                 installs_after: Vec::new(),
                 depends_on: HashMap::new(),
+                container_env: HashMap::new(),
             });
 
+        // Collect feature containerEnv (later features override earlier)
+        for (k, v) in &metadata.container_env {
+            resolved.container_env.insert(k.clone(), v.clone());
+        }
+
         let dockerfile_snippet = generate_layer(id, &dir_name, &options, &metadata);
-        layers.push(FeatureLayer {
+        resolved.layers.push(FeatureLayer {
             id: id.clone(),
             dir_name,
             dockerfile_snippet,
         });
     }
 
-    Ok(layers)
+    Ok(resolved)
 }
 
 #[cfg(test)]
@@ -458,6 +471,7 @@ mod tests {
                         options: HashMap::new(),
                         installs_after: Vec::new(),
                     depends_on: HashMap::new(),
+                    container_env: HashMap::new(),
                     },
                 )
             })
@@ -481,6 +495,7 @@ mod tests {
                 options: HashMap::new(),
                 installs_after: vec!["b".to_string()],
                 depends_on: HashMap::new(),
+                container_env: HashMap::new(),
             },
         );
         metadata.insert(
@@ -492,6 +507,7 @@ mod tests {
                 options: HashMap::new(),
                 installs_after: Vec::new(),
                 depends_on: HashMap::new(),
+                container_env: HashMap::new(),
             },
         );
 
@@ -519,6 +535,7 @@ mod tests {
                 options: HashMap::new(),
                 installs_after: Vec::new(),
                 depends_on: HashMap::new(),
+                container_env: HashMap::new(),
             },
         );
         metadata.insert(
@@ -530,6 +547,7 @@ mod tests {
                 options: HashMap::new(),
                 installs_after: vec!["a".to_string()],
                 depends_on: HashMap::new(),
+                container_env: HashMap::new(),
             },
         );
         metadata.insert(
@@ -541,6 +559,7 @@ mod tests {
                 options: HashMap::new(),
                 installs_after: vec!["a".to_string()],
                 depends_on: HashMap::new(),
+                container_env: HashMap::new(),
             },
         );
         metadata.insert(
@@ -552,6 +571,7 @@ mod tests {
                 options: HashMap::new(),
                 installs_after: vec!["b".to_string(), "c".to_string()],
                 depends_on: HashMap::new(),
+                container_env: HashMap::new(),
             },
         );
 
@@ -586,6 +606,7 @@ mod tests {
             options: meta_options,
             installs_after: Vec::new(),
             depends_on: HashMap::new(),
+            container_env: HashMap::new(),
         };
 
         let snippet = generate_layer(
@@ -621,6 +642,7 @@ mod tests {
             options: meta_options,
             installs_after: Vec::new(),
             depends_on: HashMap::new(),
+            container_env: HashMap::new(),
         };
 
         let snippet = generate_layer(
@@ -644,6 +666,7 @@ mod tests {
             options: HashMap::new(),
             installs_after: Vec::new(),
             depends_on: HashMap::new(),
+            container_env: HashMap::new(),
         };
 
         let snippet = generate_layer(
@@ -675,6 +698,7 @@ mod tests {
                 options: HashMap::new(),
                 installs_after: Vec::new(),
                 depends_on: depends,
+                container_env: HashMap::new(),
             },
         );
         metadata.insert(
@@ -686,6 +710,7 @@ mod tests {
                 options: HashMap::new(),
                 installs_after: Vec::new(),
                 depends_on: HashMap::new(),
+                container_env: HashMap::new(),
             },
         );
 
@@ -709,6 +734,7 @@ mod tests {
                 options: HashMap::new(),
                 installs_after: vec!["b".to_string()],
                 depends_on: depends,
+                container_env: HashMap::new(),
             },
         );
         metadata.insert(
@@ -720,6 +746,7 @@ mod tests {
                 options: HashMap::new(),
                 installs_after: Vec::new(),
                 depends_on: HashMap::new(),
+                container_env: HashMap::new(),
             },
         );
 
@@ -748,9 +775,53 @@ mod tests {
             "ghcr.io/devcontainers/features/node:1".to_string(),
             serde_json::json!({"version": "20"}),
         );
-        let layers = resolve_features(&features, tmp.path()).await.unwrap();
-        assert_eq!(layers.len(), 1);
-        assert_eq!(layers[0].dir_name, "node");
-        assert!(layers[0].dockerfile_snippet.contains("export VERSION=\"20\""));
+        let resolved = resolve_features(&features, tmp.path()).await.unwrap();
+        assert_eq!(resolved.layers.len(), 1);
+        assert_eq!(resolved.layers[0].dir_name, "node");
+        assert!(resolved.layers[0].dockerfile_snippet.contains("export VERSION=\"20\""));
+    }
+
+    #[test]
+    fn feature_container_env_collected() {
+        // Simulate what resolve_features does: collect container_env from metadata in sort order
+        let mut resolved = ResolvedFeatures::default();
+
+        let meta_a = FeatureMetadata {
+            id: Some("a".to_string()),
+            name: None,
+            version: None,
+            options: HashMap::new(),
+            installs_after: Vec::new(),
+            depends_on: HashMap::new(),
+            container_env: {
+                let mut env = HashMap::new();
+                env.insert("FOO".to_string(), "from_a".to_string());
+                env.insert("BAR".to_string(), "from_a".to_string());
+                env
+            },
+        };
+        let meta_b = FeatureMetadata {
+            id: Some("b".to_string()),
+            name: None,
+            version: None,
+            options: HashMap::new(),
+            installs_after: Vec::new(),
+            depends_on: HashMap::new(),
+            container_env: {
+                let mut env = HashMap::new();
+                env.insert("FOO".to_string(), "from_b".to_string());
+                env
+            },
+        };
+
+        // A is sorted first, then B — B's FOO overrides A's
+        for meta in [&meta_a, &meta_b] {
+            for (k, v) in &meta.container_env {
+                resolved.container_env.insert(k.clone(), v.clone());
+            }
+        }
+
+        assert_eq!(resolved.container_env.get("FOO").map(String::as_str), Some("from_b"));
+        assert_eq!(resolved.container_env.get("BAR").map(String::as_str), Some("from_a"));
     }
 }
