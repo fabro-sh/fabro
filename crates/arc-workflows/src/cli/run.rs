@@ -108,6 +108,44 @@ fn resolve_model_provider(
     }
 }
 
+/// Parse sandbox provider from an optional `SandboxConfig`.
+fn parse_sandbox_provider(
+    sandbox: Option<&run_config::SandboxConfig>,
+) -> anyhow::Result<Option<SandboxProvider>> {
+    sandbox
+        .and_then(|s| s.provider.as_deref())
+        .map(|s| s.parse::<SandboxProvider>())
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("Invalid sandbox provider: {e}"))
+}
+
+/// Resolve sandbox provider: CLI flag > TOML config > run defaults > default.
+fn resolve_sandbox_provider(
+    cli: Option<SandboxProvider>,
+    run_cfg: Option<&WorkflowRunConfig>,
+    run_defaults: &RunDefaults,
+) -> anyhow::Result<SandboxProvider> {
+    let toml = parse_sandbox_provider(run_cfg.and_then(|c| c.sandbox.as_ref()))?;
+    let defaults = parse_sandbox_provider(run_defaults.sandbox.as_ref())?;
+    Ok(cli.or(toml).or(defaults).unwrap_or_default())
+}
+
+/// Resolve daytona config: TOML config > run defaults.
+fn resolve_daytona_config(
+    run_cfg: Option<&WorkflowRunConfig>,
+    run_defaults: &RunDefaults,
+) -> Option<crate::daytona_sandbox::DaytonaConfig> {
+    run_cfg
+        .and_then(|c| c.sandbox.as_ref())
+        .and_then(|e| e.daytona.clone())
+        .or_else(|| {
+            run_defaults
+                .sandbox
+                .as_ref()
+                .and_then(|s| s.daytona.clone())
+        })
+}
+
 /// Accumulates token usage and cost across all workflow stages.
 #[derive(Default)]
 struct CostAccumulator {
@@ -206,27 +244,9 @@ pub async fn run_command(
 
     // 2. Pre-flight: check git cleanliness before creating any files
     //    (must happen before logs dir is created, which may be inside the repo)
-    let sandbox_provider_preview = {
-        let toml_exec = run_cfg
-            .as_ref()
-            .and_then(|c| c.sandbox.as_ref())
-            .and_then(|e| e.provider.as_deref())
-            .map(|s| s.parse::<SandboxProvider>())
-            .transpose()
-            .ok()
-            .flatten();
-        let defaults_exec = run_defaults
-            .sandbox
-            .as_ref()
-            .and_then(|s| s.provider.as_deref())
-            .map(|s| s.parse::<SandboxProvider>())
-            .transpose()
-            .ok()
-            .flatten();
-        args.sandbox.or(toml_exec).or(defaults_exec).unwrap_or_default()
-    };
+    let sandbox_provider = resolve_sandbox_provider(args.sandbox, run_cfg.as_ref(), &run_defaults)?;
     let original_cwd = std::env::current_dir()?;
-    let git_clean = match sandbox_provider_preview {
+    let git_clean = match sandbox_provider {
         SandboxProvider::Local | SandboxProvider::Docker => {
             crate::git::ensure_clean(&original_cwd).is_ok()
         }
@@ -234,7 +254,7 @@ pub async fn run_command(
     };
 
     if args.preflight {
-        return run_preflight(&graph, &run_cfg, &args, &run_defaults, git_clean, sandbox_provider_preview, styles).await;
+        return run_preflight(&graph, &run_cfg, &args, &run_defaults, git_clean, sandbox_provider, styles).await;
     }
 
     // 3. Create logs directory
@@ -398,27 +418,6 @@ pub async fn run_command(
         Arc::new(ConsoleInterviewer::new(styles))
     };
 
-    // 5. Resolve sandbox: CLI flag > TOML (with defaults applied) > run defaults > default
-    let toml_sandbox = run_cfg
-        .as_ref()
-        .and_then(|c| c.sandbox.as_ref())
-        .and_then(|e| e.provider.as_deref())
-        .map(|s| s.parse::<SandboxProvider>())
-        .transpose()
-        .map_err(|e| anyhow::anyhow!("Invalid sandbox in TOML: {e}"))?;
-    let defaults_sandbox = run_defaults
-        .sandbox
-        .as_ref()
-        .and_then(|s| s.provider.as_deref())
-        .map(|s| s.parse::<SandboxProvider>())
-        .transpose()
-        .map_err(|e| anyhow::anyhow!("Invalid sandbox in server config: {e}"))?;
-    let sandbox_provider = args
-        .sandbox
-        .or(toml_sandbox)
-        .or(defaults_sandbox)
-        .unwrap_or_default();
-
     // Set up git worktree for local execution (must happen before cwd is captured)
     let (worktree_run_id, worktree_work_dir, worktree_path, worktree_branch, worktree_base_sha) =
         if git_clean {
@@ -439,16 +438,7 @@ pub async fn run_command(
         };
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let daytona_config = run_cfg
-        .as_ref()
-        .and_then(|c| c.sandbox.as_ref())
-        .and_then(|e| e.daytona.clone())
-        .or_else(|| {
-            run_defaults
-                .sandbox
-                .as_ref()
-                .and_then(|s| s.daytona.clone())
-        });
+    let daytona_config = resolve_daytona_config(run_cfg.as_ref(), &run_defaults);
 
     // Wrap emitter in Arc now so we can share it with exec env callbacks
     let emitter = Arc::new(emitter);
@@ -1102,10 +1092,7 @@ async fn run_preflight(
 
     // 1. Sandbox boot check
     let original_cwd = std::env::current_dir()?;
-    let daytona_config = run_cfg
-        .as_ref()
-        .and_then(|c| c.sandbox.as_ref())
-        .and_then(|e| e.daytona.clone());
+    let daytona_config = resolve_daytona_config(run_cfg.as_ref(), run_defaults);
 
     let sandbox_result: Result<Arc<dyn Sandbox>, String> = match sandbox_provider {
         SandboxProvider::Docker => {
