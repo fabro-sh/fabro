@@ -280,10 +280,12 @@ impl Handler for ParallelHandler {
             let (branch_sandbox, worktree_path): (Arc<dyn Sandbox>, Option<PathBuf>) =
                 if let (Some(ref gs), Some(ref bsha)) = (&git_state, &base_sha) {
                     let branch_key = &target_id;
+                    let visit = crate::engine::visit_from_context(&branch_context);
                     let branch_name = format!(
-                        "arc/run/parallel/{}/{}/{}",
+                        "arc/run/parallel/{}/{}/pass{}/{}",
                         gs.run_id,
                         crate::git::sanitize_ref_component(&node.id),
+                        visit,
                         crate::git::sanitize_ref_component(branch_key),
                     );
 

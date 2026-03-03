@@ -9582,7 +9582,7 @@ async fn parallel_git_branching_host_e2e() {
     );
 
     // 10. Verify parallel branch refs still exist (for debugging)
-    let branch_ref_a = format!("arc/run/parallel/{run_id}/fan-out/branch-a");
+    let branch_ref_a = format!("arc/run/parallel/{run_id}/fan-out/pass1/branch-a");
     let ref_check = std::process::Command::new("git")
         .args(["rev-parse", "--verify", &branch_ref_a])
         .current_dir(repo.path())
