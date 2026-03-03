@@ -16,7 +16,6 @@ mod mtls_e2e {
     use arc_workflows::handler::start::StartHandler;
     use arc_workflows::handler::HandlerRegistry;
     use arc_workflows::interviewer::Interviewer;
-    use rustls;
     use tokio::net::TcpListener;
 
     fn simple_registry(_interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {

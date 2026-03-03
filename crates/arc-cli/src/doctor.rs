@@ -1,9 +1,11 @@
 use std::fmt::Write;
 use std::path::PathBuf;
+use std::process::Command;
 
-use arc_api::server_config::{ApiAuthenticationStrategy, AuthProvider};
+use arc_api::server_config::{ApiAuthStrategy, AuthProvider};
 use arc_llm::provider::Provider;
 use arc_util::terminal::Styles;
+use regex::Regex;
 
 // ---------------------------------------------------------------------------
 // Core types
@@ -131,6 +133,154 @@ impl DoctorReport {
         }
 
         out
+    }
+}
+
+// ---------------------------------------------------------------------------
+// System dependency types and parsers
+// ---------------------------------------------------------------------------
+
+pub struct DepProbeResult {
+    pub name: &'static str,
+    pub required: bool,
+    pub raw_output: Option<String>,
+    pub success: bool,
+    pub version: Option<(u32, u32, u32)>,
+    pub min_version: (u32, u32, u32),
+}
+
+pub fn parse_openssl_version(output: &str) -> Option<(u32, u32, u32)> {
+    let re = Regex::new(r"(?:OpenSSL|LibreSSL)\s+(\d+)\.(\d+)\.(\d+)").ok()?;
+    let caps = re.captures(output)?;
+    Some((caps[1].parse().ok()?, caps[2].parse().ok()?, caps[3].parse().ok()?))
+}
+
+pub fn parse_node_version(output: &str) -> Option<(u32, u32, u32)> {
+    let re = Regex::new(r"v(\d+)\.(\d+)\.(\d+)").ok()?;
+    let caps = re.captures(output)?;
+    Some((caps[1].parse().ok()?, caps[2].parse().ok()?, caps[3].parse().ok()?))
+}
+
+pub fn parse_gh_version(output: &str) -> Option<(u32, u32, u32)> {
+    let re = Regex::new(r"gh version (\d+)\.(\d+)\.(\d+)").ok()?;
+    let caps = re.captures(output)?;
+    Some((caps[1].parse().ok()?, caps[2].parse().ok()?, caps[3].parse().ok()?))
+}
+
+pub fn parse_dot_version(output: &str) -> Option<(u32, u32, u32)> {
+    let re = Regex::new(r"graphviz version (\d+)\.(\d+)\.(\d+)").ok()?;
+    let caps = re.captures(output)?;
+    Some((caps[1].parse().ok()?, caps[2].parse().ok()?, caps[3].parse().ok()?))
+}
+
+fn format_version(v: (u32, u32, u32)) -> String {
+    format!("{}.{}.{}", v.0, v.1, v.2)
+}
+
+pub fn probe_system_deps() -> Vec<DepProbeResult> {
+    let specs: Vec<(&str, &[&str], bool, (u32, u32, u32), fn(&str) -> Option<(u32, u32, u32)>)> = vec![
+        ("openssl", &["openssl", "version"], true, (3, 0, 0), parse_openssl_version),
+        ("node", &["node", "--version"], true, (20, 0, 0), parse_node_version),
+        ("gh", &["gh", "--version"], false, (2, 0, 0), parse_gh_version),
+        ("dot", &["dot", "-V"], false, (2, 0, 0), parse_dot_version),
+    ];
+
+    specs
+        .into_iter()
+        .map(|(name, args, required, min_version, parser)| {
+            let result = Command::new(args[0])
+                .args(&args[1..])
+                .output()
+                .ok();
+
+            let success = result.as_ref().is_some_and(|o| o.status.success());
+
+            let output = result.map(|o| {
+                let stdout = String::from_utf8_lossy(&o.stdout);
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                format!("{stdout}{stderr}")
+            });
+
+            let version = output.as_deref().and_then(parser);
+
+            DepProbeResult {
+                name,
+                required,
+                raw_output: output,
+                success,
+                version,
+                min_version,
+            }
+        })
+        .collect()
+}
+
+pub fn check_system_deps(deps: &[DepProbeResult]) -> CheckResult {
+    let mut details = Vec::new();
+    let mut worst_status = CheckStatus::Pass;
+
+    for dep in deps {
+        let (status, text) = match (&dep.raw_output, dep.success, dep.version) {
+            (None, _, _) => {
+                if dep.required {
+                    (CheckStatus::Error, format!("{}: not found (required)", dep.name))
+                } else {
+                    (CheckStatus::Warning, format!("{}: not found (optional)", dep.name))
+                }
+            }
+            (Some(_), false, _) => {
+                if dep.required {
+                    (CheckStatus::Error, format!("{}: command failed (required)", dep.name))
+                } else {
+                    (CheckStatus::Warning, format!("{}: command failed (optional)", dep.name))
+                }
+            }
+            (Some(_), true, None) => {
+                (CheckStatus::Pass, format!("{}: version unknown", dep.name))
+            }
+            (Some(_), true, Some(v)) => {
+                if v < dep.min_version {
+                    (
+                        CheckStatus::Warning,
+                        format!(
+                            "{}: {} (minimum {})",
+                            dep.name,
+                            format_version(v),
+                            format_version(dep.min_version),
+                        ),
+                    )
+                } else {
+                    (CheckStatus::Pass, format!("{}: {}", dep.name, format_version(v)))
+                }
+            }
+        };
+
+        if status == CheckStatus::Error
+            || (status == CheckStatus::Warning && worst_status != CheckStatus::Error)
+        {
+            worst_status = status;
+        }
+
+        details.push(CheckDetail { text });
+    }
+
+    let summary = match worst_status {
+        CheckStatus::Pass => "all found".to_string(),
+        CheckStatus::Warning => "some issues".to_string(),
+        CheckStatus::Error => "missing required tools".to_string(),
+    };
+
+    let remediation = match worst_status {
+        CheckStatus::Pass => None,
+        _ => Some("Install missing system dependencies".to_string()),
+    };
+
+    CheckResult {
+        name: "System dependencies".to_string(),
+        status: worst_status,
+        summary,
+        details,
+        remediation,
     }
 }
 
@@ -468,7 +618,7 @@ pub fn check_github_app(status: &GithubAppStatus) -> CheckResult {
 
 pub struct ApiStatus {
     pub base_url: String,
-    pub authentication_strategy: String,
+    pub authentication_strategies: String,
 }
 
 pub fn check_api(
@@ -480,7 +630,7 @@ pub fn check_api(
             text: format!("Base URL: {}", status.base_url),
         },
         CheckDetail {
-            text: format!("Authentication: {}", status.authentication_strategy),
+            text: format!("Authentication: {}", status.authentication_strategies),
         },
     ];
 
@@ -640,10 +790,16 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
 
     let api_status = ApiStatus {
         base_url: server_config.api.base_url.clone(),
-        authentication_strategy: match server_config.api.authentication_strategy {
-            ApiAuthenticationStrategy::Jwt => "jwt".to_string(),
-            ApiAuthenticationStrategy::InsecureDisabled => "insecure_disabled".to_string(),
-        },
+        authentication_strategies: server_config
+            .api
+            .authentication_strategies
+            .iter()
+            .map(|s| match s {
+                ApiAuthStrategy::Jwt => "jwt",
+                ApiAuthStrategy::Mtls => "mtls",
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
     };
 
     let web_status = WebStatus {
@@ -664,6 +820,8 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
     };
 
     let daytona_configured = std::env::var("DAYTONA_API_KEY").is_ok();
+
+    let dep_results = probe_system_deps();
 
     // Live probes (only when --live is set)
     let sandbox_status;
@@ -733,6 +891,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
     let report = DoctorReport {
         checks: vec![
             check_config(if config_exists { config_path } else { None }),
+            check_system_deps(&dep_results),
             check_api(&api_status, api_live_result.as_ref()),
             check_web(&web_status, web_live_result.as_ref()),
             check_llm_providers(&llm_statuses, llm_live_results.as_deref()),
@@ -1135,7 +1294,7 @@ mod tests {
     fn check_api_shows_base_url() {
         let status = ApiStatus {
             base_url: "http://localhost:3000".to_string(),
-            authentication_strategy: "jwt".to_string(),
+            authentication_strategies: "jwt".to_string(),
         };
         let result = check_api(&status, None);
         assert_eq!(result.status, CheckStatus::Pass);
@@ -1146,7 +1305,7 @@ mod tests {
     fn check_api_details_show_auth_strategy() {
         let status = ApiStatus {
             base_url: "https://api.example.com".to_string(),
-            authentication_strategy: "jwt".to_string(),
+            authentication_strategies: "jwt".to_string(),
         };
         let result = check_api(&status, None);
         assert!(result.details.iter().any(|d| d.text.contains("jwt")));
@@ -1160,7 +1319,7 @@ mod tests {
     fn check_api_live_ok() {
         let status = ApiStatus {
             base_url: "http://localhost:3000".to_string(),
-            authentication_strategy: "jwt".to_string(),
+            authentication_strategies: "jwt".to_string(),
         };
         let live = Ok(());
         let result = check_api(&status, Some(&live));
@@ -1172,7 +1331,7 @@ mod tests {
     fn check_api_live_error() {
         let status = ApiStatus {
             base_url: "http://localhost:3000".to_string(),
-            authentication_strategy: "jwt".to_string(),
+            authentication_strategies: "jwt".to_string(),
         };
         let live = Err("connection refused".to_string());
         let result = check_api(&status, Some(&live));
@@ -1248,5 +1407,168 @@ mod tests {
         };
         let out = report.render(&Styles::new(false), false, false);
         assert!(out.contains("2 categories"));
+    }
+
+    // -- version parsers --
+
+    #[test]
+    fn parse_openssl_version_valid() {
+        assert_eq!(
+            parse_openssl_version("OpenSSL 3.4.1 11 Feb 2025 (Library: OpenSSL 3.4.1 11 Feb 2025)"),
+            Some((3, 4, 1)),
+        );
+    }
+
+    #[test]
+    fn parse_openssl_version_libressl() {
+        assert_eq!(
+            parse_openssl_version("LibreSSL 3.3.6"),
+            Some((3, 3, 6)),
+        );
+    }
+
+    #[test]
+    fn parse_openssl_version_garbage() {
+        assert_eq!(parse_openssl_version("not a version"), None);
+    }
+
+    #[test]
+    fn parse_node_version_valid() {
+        assert_eq!(parse_node_version("v22.14.0"), Some((22, 14, 0)));
+    }
+
+    #[test]
+    fn parse_node_version_garbage() {
+        assert_eq!(parse_node_version("node not found"), None);
+    }
+
+    #[test]
+    fn parse_gh_version_valid() {
+        assert_eq!(
+            parse_gh_version("gh version 2.67.0 (2025-01-31)\nhttps://github.com/cli/cli/releases/tag/v2.67.0"),
+            Some((2, 67, 0)),
+        );
+    }
+
+    #[test]
+    fn parse_gh_version_garbage() {
+        assert_eq!(parse_gh_version("something else"), None);
+    }
+
+    #[test]
+    fn parse_dot_version_valid() {
+        assert_eq!(
+            parse_dot_version("dot - graphviz version 12.2.1 (20241206.2024)"),
+            Some((12, 2, 1)),
+        );
+    }
+
+    #[test]
+    fn parse_dot_version_garbage() {
+        assert_eq!(parse_dot_version("no version here"), None);
+    }
+
+    // -- check_system_deps --
+
+    fn dep(
+        name: &'static str,
+        required: bool,
+        raw_output: Option<&str>,
+        success: bool,
+        version: Option<(u32, u32, u32)>,
+        min_version: (u32, u32, u32),
+    ) -> DepProbeResult {
+        DepProbeResult {
+            name,
+            required,
+            raw_output: raw_output.map(String::from),
+            success,
+            version,
+            min_version,
+        }
+    }
+
+    #[test]
+    fn check_system_deps_all_present() {
+        let deps = vec![
+            dep("openssl", true, Some("OpenSSL 3.4.1"), true, Some((3, 4, 1)), (3, 0, 0)),
+            dep("node", true, Some("v22.14.0"), true, Some((22, 14, 0)), (20, 0, 0)),
+            dep("gh", false, Some("gh version 2.67.0"), true, Some((2, 67, 0)), (2, 0, 0)),
+            dep("dot", false, Some("graphviz version 12.2.1"), true, Some((12, 2, 1)), (2, 0, 0)),
+        ];
+        let result = check_system_deps(&deps);
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert_eq!(result.summary, "all found");
+    }
+
+    #[test]
+    fn check_system_deps_required_missing_is_error() {
+        let deps = vec![
+            dep("openssl", true, None, false, None, (3, 0, 0)),
+        ];
+        let result = check_system_deps(&deps);
+        assert_eq!(result.status, CheckStatus::Error);
+        assert!(result.details[0].text.contains("not found (required)"));
+    }
+
+    #[test]
+    fn check_system_deps_optional_missing_is_warning() {
+        let deps = vec![
+            dep("gh", false, None, false, None, (2, 0, 0)),
+        ];
+        let result = check_system_deps(&deps);
+        assert_eq!(result.status, CheckStatus::Warning);
+        assert!(result.details[0].text.contains("not found (optional)"));
+    }
+
+    #[test]
+    fn check_system_deps_outdated_is_warning() {
+        let deps = vec![
+            dep("openssl", true, Some("OpenSSL 1.1.1"), true, Some((1, 1, 1)), (3, 0, 0)),
+        ];
+        let result = check_system_deps(&deps);
+        assert_eq!(result.status, CheckStatus::Warning);
+        assert!(result.details[0].text.contains("1.1.1"));
+        assert!(result.details[0].text.contains("minimum 3.0.0"));
+    }
+
+    #[test]
+    fn check_system_deps_unparseable_success_is_pass() {
+        let deps = vec![
+            dep("openssl", true, Some("weird output"), true, None, (3, 0, 0)),
+        ];
+        let result = check_system_deps(&deps);
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert!(result.details[0].text.contains("version unknown"));
+    }
+
+    #[test]
+    fn check_system_deps_required_command_failed_is_error() {
+        let deps = vec![
+            dep("node", true, Some("dyld: Library not loaded"), false, None, (20, 0, 0)),
+        ];
+        let result = check_system_deps(&deps);
+        assert_eq!(result.status, CheckStatus::Error);
+        assert!(result.details[0].text.contains("command failed (required)"));
+    }
+
+    #[test]
+    fn check_system_deps_optional_command_failed_is_warning() {
+        let deps = vec![
+            dep("gh", false, Some("some error"), false, None, (2, 0, 0)),
+        ];
+        let result = check_system_deps(&deps);
+        assert_eq!(result.status, CheckStatus::Warning);
+        assert!(result.details[0].text.contains("command failed (optional)"));
+    }
+
+    #[test]
+    fn check_system_deps_error_beats_warning() {
+        let deps = vec![
+            dep("openssl", true, None, false, None, (3, 0, 0)),
+            dep("gh", false, None, false, None, (2, 0, 0)),
+        ];
+        let result = check_system_deps(&deps);
+        assert_eq!(result.status, CheckStatus::Error);
     }
 }
