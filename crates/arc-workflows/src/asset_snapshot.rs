@@ -97,7 +97,7 @@ pub fn build_find_command(root: &str, platform: &str) -> String {
         }
         _ => {
             // Linux: use -printf for size, mtime, and relative path
-            cmd.push_str(&format!(" -printf '%s\\t%T@\\t%P\\n'"));
+            cmd.push_str(" -printf '%s\\t%T@\\t%P\\n'");
         }
     }
 
