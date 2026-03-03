@@ -1,0 +1,7 @@
+{
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "./go-feature": "1.21"
+  },
+  "remoteUser": "developer"
+}

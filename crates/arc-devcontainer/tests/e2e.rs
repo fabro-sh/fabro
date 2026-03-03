@@ -429,6 +429,86 @@ async fn feature_lifecycle_hooks_appended() {
     assert!(post_start.contains(&"echo node-started"));
 }
 
+/// Fix 1: Shorthand version syntax "1.21" is normalized to {"version": "1.21"}.
+#[tokio::test]
+async fn feature_shorthand_version_syntax() {
+    let config = DevcontainerResolver::resolve(&fixture_path("feature-options"))
+        .await
+        .unwrap();
+
+    // "1.21" string should become version=1.21 env var
+    assert!(
+        config.dockerfile.contains("export VERSION=\"1.21\""),
+        "shorthand string \"1.21\" should set VERSION env var, got:\n{}",
+        config.dockerfile,
+    );
+}
+
+/// Fix 2: Hyphenated option IDs are converted to valid env var names (node-version → NODE_VERSION).
+#[tokio::test]
+async fn feature_option_id_hyphen_to_underscore() {
+    let config = DevcontainerResolver::resolve(&fixture_path("feature-options"))
+        .await
+        .unwrap();
+
+    // node-version default "none" should export as NODE_VERSION (not NODE-VERSION)
+    assert!(
+        config.dockerfile.contains("export NODE_VERSION=\"none\""),
+        "hyphenated option 'node-version' should become NODE_VERSION env var, got:\n{}",
+        config.dockerfile,
+    );
+    assert!(
+        !config.dockerfile.contains("NODE-VERSION"),
+        "NODE-VERSION (with hyphen) should not appear in Dockerfile",
+    );
+}
+
+/// Fix 3: _REMOTE_USER and related env vars are emitted in feature install snippets.
+#[tokio::test]
+async fn feature_install_user_env_vars() {
+    let config = DevcontainerResolver::resolve(&fixture_path("feature-options"))
+        .await
+        .unwrap();
+
+    // remoteUser is "developer", so _REMOTE_USER should be "developer"
+    assert!(
+        config.dockerfile.contains("_REMOTE_USER=\"developer\""),
+        "_REMOTE_USER should be set to remoteUser value, got:\n{}",
+        config.dockerfile,
+    );
+    assert!(
+        config.dockerfile.contains("_CONTAINER_USER=\"root\""),
+        "_CONTAINER_USER should always be root",
+    );
+    assert!(
+        config.dockerfile.contains("_REMOTE_USER_HOME=\"/home/developer\""),
+        "_REMOTE_USER_HOME should be /home/developer",
+    );
+    assert!(
+        config.dockerfile.contains("_CONTAINER_USER_HOME=\"/root\""),
+        "_CONTAINER_USER_HOME should always be /root",
+    );
+}
+
+/// Fix 3: _REMOTE_USER defaults to root when remoteUser is not set.
+#[tokio::test]
+async fn feature_install_user_env_vars_default_root() {
+    let config = DevcontainerResolver::resolve(&fixture_path("local-features"))
+        .await
+        .unwrap();
+
+    // local-features has remoteUser: "vscode"
+    assert!(
+        config.dockerfile.contains("_REMOTE_USER=\"vscode\""),
+        "_REMOTE_USER should be set to vscode, got:\n{}",
+        config.dockerfile,
+    );
+    assert!(
+        config.dockerfile.contains("_REMOTE_USER_HOME=\"/home/vscode\""),
+        "_REMOTE_USER_HOME should be /home/vscode",
+    );
+}
+
 /// Gap 2+3: Feature ordering affects both containerEnv and lifecycle hook collection.
 /// python-feature installsAfter node-feature, so node's env/hooks come first.
 #[tokio::test]

@@ -1,0 +1,16 @@
+{
+  "id": "go-feature",
+  "version": "1.0.0",
+  "options": {
+    "version": {
+      "type": "string",
+      "default": "latest",
+      "description": "Go version"
+    },
+    "node-version": {
+      "type": "string",
+      "default": "none",
+      "description": "Optional Node.js version (hyphenated option ID)"
+    }
+  }
+}

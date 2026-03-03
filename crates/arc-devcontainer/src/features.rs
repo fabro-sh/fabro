@@ -415,29 +415,66 @@ fn topo_sort(
     sorted
 }
 
+/// Convert an option ID to an environment variable name per the dev container spec.
+/// Replaces non-alphanumeric, non-underscore chars with `_`, strips leading digits/underscores,
+/// and uppercases the result.
+fn option_id_to_env_name(id: &str) -> String {
+    let replaced: String = id
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    let trimmed = replaced.trim_start_matches(|c: char| c == '_' || c.is_ascii_digit());
+    if trimmed.is_empty() {
+        "_".to_string()
+    } else {
+        trimmed.to_uppercase()
+    }
+}
+
 /// Generate a Dockerfile snippet for a single feature layer.
 fn generate_layer(
     feature_id: &str,
     dir_name: &str,
     options: &serde_json::Value,
     metadata: &FeatureMetadata,
+    remote_user: Option<&str>,
 ) -> String {
     let mut env_lines = Vec::new();
 
-    // Collect all option names from metadata to set defaults
-    let user_options: HashMap<String, String> = match options.as_object() {
-        Some(obj) => obj
-            .iter()
-            .map(|(k, v)| {
-                let val = match v {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                (k.clone(), val)
-            })
-            .collect(),
-        None => HashMap::new(),
+    // Emit built-in user env vars expected by community features
+    let ru = remote_user.unwrap_or("root");
+    let ru_home = if ru == "root" {
+        "/root".to_string()
+    } else {
+        format!("/home/{ru}")
     };
+    env_lines.push(format!("    export _REMOTE_USER=\"{ru}\" && \\"));
+    env_lines.push("    export _CONTAINER_USER=\"root\" && \\".to_string());
+    env_lines.push(format!("    export _REMOTE_USER_HOME=\"{ru_home}\" && \\"));
+    env_lines.push("    export _CONTAINER_USER_HOME=\"/root\" && \\".to_string());
+
+    // Normalize shorthand version syntax: "1.18" → {"version": "1.18"}
+    let options_obj = match options {
+        serde_json::Value::String(s) => {
+            let mut map = serde_json::Map::new();
+            map.insert("version".to_string(), serde_json::Value::String(s.clone()));
+            map
+        }
+        serde_json::Value::Object(obj) => obj.clone(),
+        _ => serde_json::Map::new(),
+    };
+
+    // Collect all option names from metadata to set defaults
+    let user_options: HashMap<String, String> = options_obj
+        .iter()
+        .map(|(k, v)| {
+            let val = match v {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            (k.clone(), val)
+        })
+        .collect();
 
     // Merge metadata defaults with user-provided options
     let mut merged_options: Vec<(String, String)> = Vec::new();
@@ -467,7 +504,7 @@ fn generate_layer(
     merged_options.sort_by(|a, b| a.0.cmp(&b.0));
 
     for (name, value) in &merged_options {
-        let env_name = name.to_uppercase();
+        let env_name = option_id_to_env_name(name);
         env_lines.push(format!("    export {env_name}=\"{value}\" && \\"));
     }
 
@@ -492,6 +529,7 @@ fn generate_layer(
 pub async fn resolve_features(
     features: &HashMap<String, serde_json::Value>,
     devcontainer_dir: &Path,
+    remote_user: Option<&str>,
 ) -> crate::Result<ResolvedFeatures> {
     if features.is_empty() {
         return Ok(ResolvedFeatures::default());
@@ -592,7 +630,7 @@ pub async fn resolve_features(
             resolved.post_start_commands.push(cmd.clone());
         }
 
-        let dockerfile_snippet = generate_layer(id, &dir_name, &options, &metadata);
+        let dockerfile_snippet = generate_layer(id, &dir_name, &options, &metadata, remote_user);
         resolved.layers.push(FeatureLayer {
             id: id.clone(),
             dir_name,
@@ -869,6 +907,7 @@ mod tests {
             "node",
             &options,
             &metadata,
+            None,
         );
 
         assert!(snippet.contains("# Feature: ghcr.io/devcontainers/features/node:1"));
@@ -908,6 +947,7 @@ mod tests {
             "node",
             &options,
             &metadata,
+            None,
         );
 
         // Default value "lts" should be used
@@ -935,12 +975,15 @@ mod tests {
             "common-utils",
             &options,
             &metadata,
+            None,
         );
 
         assert!(snippet.contains("# Feature: ghcr.io/devcontainers/features/common-utils:1"));
         assert!(snippet.contains("COPY common-utils/ /tmp/devcontainer-features/common-utils/"));
         assert!(snippet.contains("chmod +x install.sh"));
-        assert!(!snippet.contains("export "));
+        // Should have built-in user env vars but no feature-specific options
+        assert!(snippet.contains("_REMOTE_USER"));
+        assert!(!snippet.contains("export VERSION"));
     }
 
     #[test]
@@ -1048,7 +1091,7 @@ mod tests {
             "ghcr.io/devcontainers/features/node:1".to_string(),
             serde_json::json!({"version": "20"}),
         );
-        let resolved = resolve_features(&features, tmp.path()).await.unwrap();
+        let resolved = resolve_features(&features, tmp.path(), None).await.unwrap();
         assert_eq!(resolved.layers.len(), 1);
         assert_eq!(resolved.layers[0].dir_name, "node");
         assert!(resolved.layers[0].dockerfile_snippet.contains("export VERSION=\"20\""));
@@ -1123,5 +1166,86 @@ mod tests {
         assert_eq!(resolved.post_create_commands.len(), 1);
         assert!(matches!(&resolved.post_create_commands[0], LifecycleCommand::Array(arr) if arr.len() == 2));
         assert_eq!(resolved.post_start_commands.len(), 1);
+    }
+
+    #[test]
+    fn option_id_to_env_name_hyphenated() {
+        assert_eq!(option_id_to_env_name("node-version"), "NODE_VERSION");
+    }
+
+    #[test]
+    fn option_id_to_env_name_leading_digit() {
+        assert_eq!(option_id_to_env_name("2fast"), "FAST");
+    }
+
+    #[test]
+    fn option_id_to_env_name_simple() {
+        assert_eq!(option_id_to_env_name("simple"), "SIMPLE");
+    }
+
+    #[test]
+    fn generate_layer_shorthand_version() {
+        let options = serde_json::json!("20");
+        let mut meta_options = HashMap::new();
+        meta_options.insert(
+            "version".to_string(),
+            FeatureOption {
+                option_type: Some("string".to_string()),
+                default: Some(serde_json::Value::String("lts".to_string())),
+                description: Some("Node.js version".to_string()),
+            },
+        );
+        let metadata = FeatureMetadata {
+            id: Some("node".to_string()),
+            name: None,
+            version: None,
+            options: meta_options,
+            installs_after: Vec::new(),
+            depends_on: HashMap::new(),
+            container_env: HashMap::new(),
+            on_create_command: None,
+            post_create_command: None,
+            post_start_command: None,
+        };
+
+        let snippet = generate_layer(
+            "ghcr.io/devcontainers/features/node:1",
+            "node",
+            &options,
+            &metadata,
+            None,
+        );
+
+        assert!(snippet.contains("export VERSION=\"20\""));
+    }
+
+    #[test]
+    fn generate_layer_install_env_vars() {
+        let options = serde_json::json!({});
+        let metadata = FeatureMetadata {
+            id: Some("node".to_string()),
+            name: None,
+            version: None,
+            options: HashMap::new(),
+            installs_after: Vec::new(),
+            depends_on: HashMap::new(),
+            container_env: HashMap::new(),
+            on_create_command: None,
+            post_create_command: None,
+            post_start_command: None,
+        };
+
+        let snippet = generate_layer(
+            "ghcr.io/devcontainers/features/node:1",
+            "node",
+            &options,
+            &metadata,
+            Some("vscode"),
+        );
+
+        assert!(snippet.contains("_REMOTE_USER=\"vscode\""));
+        assert!(snippet.contains("_CONTAINER_USER=\"root\""));
+        assert!(snippet.contains("_REMOTE_USER_HOME=\"/home/vscode\""));
+        assert!(snippet.contains("_CONTAINER_USER_HOME=\"/root\""));
     }
 }
