@@ -1,0 +1,6 @@
+rules:
+  stale-action-refs:
+    ignore:
+      - rust.yml:37
+      - rust.yml:49
+      - rust.yml:62
