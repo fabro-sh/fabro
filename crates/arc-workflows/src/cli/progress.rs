@@ -218,9 +218,9 @@ impl ProgressUI {
                 let cost_str = usage
                     .as_ref()
                     .and_then(compute_stage_cost)
-                    .map(|c| format!("   {}", format_cost(c)))
+                    .map(|c| format!("{}   ", format_cost(c)))
                     .unwrap_or_default();
-                let prefix = format!("{dur}{cost_str}");
+                let prefix = format!("{cost_str}{dur}");
                 let glyph = if succeeded {
                     green_check()
                 } else {
