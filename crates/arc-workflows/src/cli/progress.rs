@@ -314,8 +314,19 @@ impl ProgressUI {
                 };
                 self.finish_stage(node_id, name, glyph, &prefix);
             }
-            WorkflowRunEvent::StageFailed { node_id, name, .. } => {
+            WorkflowRunEvent::StageFailed {
+                node_id,
+                name,
+                failure,
+                ..
+            } => {
                 self.finish_stage(node_id, name, red_cross(), "");
+                let red = Style::new().red();
+                self.insert_info_line(&format!(
+                    "{} {}",
+                    red.apply_to("Error:"),
+                    failure.message,
+                ));
             }
             WorkflowRunEvent::ParallelStarted { .. } => {
                 // The fork stage is the (only) active stage at this point.
@@ -661,12 +672,10 @@ impl ProgressUI {
                 let dim = Style::new().dim();
                 self.insert_info_line_for_stage(
                     stage_node_id,
-                    &format!(
-                        "{}",
-                        dim.apply_to(format!(
-                            "\u{27f3} compaction: {original_turn_count} \u{2192} {preserved_turn_count} turns, {tracked_file_count} files"
-                        ))
-                    ),
+                    &dim.apply_to(format!(
+                        "\u{27f3} compaction: {original_turn_count} \u{2192} {preserved_turn_count} turns, {tracked_file_count} files"
+                    ))
+                    .to_string(),
                 );
             }
             AgentEvent::LlmRetry {
@@ -694,13 +703,11 @@ impl ProgressUI {
                 let short_id = &agent_id[..agent_id.len().min(8)];
                 self.insert_info_line_for_stage(
                     stage_node_id,
-                    &format!(
-                        "{}",
-                        dim.apply_to(format!(
-                            "\u{25b8} subagent[{short_id}] \"{}\"",
-                            truncate(task, 50)
-                        ))
-                    ),
+                    &dim.apply_to(format!(
+                        "\u{25b8} subagent[{short_id}] \"{}\"",
+                        truncate(task, 50)
+                    ))
+                    .to_string(),
                 );
             }
             AgentEvent::SubAgentCompleted {

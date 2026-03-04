@@ -246,7 +246,11 @@ pub async fn run_command(
 
     // 2. Pre-flight: check git cleanliness before creating any files
     //    (must happen before logs dir is created, which may be inside the repo)
-    let sandbox_provider = resolve_sandbox_provider(args.sandbox, run_cfg.as_ref(), &run_defaults)?;
+    let sandbox_provider = if args.dry_run {
+        SandboxProvider::Local
+    } else {
+        resolve_sandbox_provider(args.sandbox, run_cfg.as_ref(), &run_defaults)?
+    };
     let preserve_sandbox =
         resolve_preserve_sandbox(args.preserve_sandbox, run_cfg.as_ref(), &run_defaults);
     let original_cwd = std::env::current_dir()?;
