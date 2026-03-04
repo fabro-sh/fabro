@@ -584,6 +584,16 @@ pub fn format_tokens_human(tokens: i64) -> String {
     }
 }
 
+/// Shorten an absolute path by replacing the home directory prefix with `~`.
+pub fn tilde_path(path: &Path) -> String {
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(suffix) = path.strip_prefix(&home) {
+            return format!("~/{}", suffix.display());
+        }
+    }
+    path.display().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

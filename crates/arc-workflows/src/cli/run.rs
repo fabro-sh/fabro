@@ -219,7 +219,7 @@ pub async fn run_command(
 
     let goal = graph.goal();
     if !goal.is_empty() {
-        eprintln!("{} {goal}", styles.bold.apply_to("Goal:"));
+        eprintln!("{} {goal}\n", styles.bold.apply_to("Goal:"));
     }
 
     print_diagnostics(&diagnostics, styles);
@@ -277,7 +277,7 @@ pub async fn run_command(
         eprintln!(
             "{} {}",
             styles.dim.apply_to("Logs:"),
-            styles.underline.apply_to(logs_dir.display()),
+            styles.underline.apply_to(super::tilde_path(&logs_dir)),
         );
     } else {
         progress_ui
@@ -708,12 +708,15 @@ pub async fn run_command(
     if total_tokens > 0 {
         if acc.has_pricing {
             eprintln!(
-                "Cost: {} ({} tokens)",
-                format_cost(acc.total_cost),
-                format_tokens_human(total_tokens)
+                "{}",
+                styles.dim.apply_to(format!(
+                    "Cost: {} ({} tokens)",
+                    format_cost(acc.total_cost),
+                    format_tokens_human(total_tokens)
+                ))
             );
         } else {
-            eprintln!("Tokens: {}", format_tokens_human(total_tokens));
+            eprintln!("{}", styles.dim.apply_to(format!("Tokens: {}", format_tokens_human(total_tokens))));
         }
         if acc.total_cache_read_tokens > 0 {
             eprintln!(
@@ -1217,6 +1220,8 @@ async fn generate_retro(
     }
 
     // Run retro agent session
+    eprintln!("{}", styles.dim.apply_to("Running retro..."));
+    let retro_start = std::time::Instant::now();
     let narrative_result = if dry_run_mode {
         Ok(crate::retro_agent::dry_run_narrative())
     } else if let Some(client) = llm_client {
@@ -1224,18 +1229,29 @@ async fn generate_retro(
     } else {
         Err(anyhow::anyhow!("No LLM client available"))
     };
+    let retro_dur = progress::format_duration_short(retro_start.elapsed());
 
     match narrative_result {
         Ok(narrative) => {
             retro.apply_narrative(narrative);
             match retro.save(logs_dir) {
                 Ok(()) => {
+                    let retro_path = format!(
+                        "{}/retro.json",
+                        super::tilde_path(logs_dir)
+                    );
+                    let msg = format!("Retro saved to {retro_path}");
+                    let term_width = console::Term::stderr()
+                        .size()
+                        .1 as usize;
+                    let dur_len = retro_dur.len();
+                    let pad = term_width.saturating_sub(msg.len() + dur_len);
                     eprintln!(
-                        "{} {}",
+                        "{} {}{:pad$}{}",
                         styles.dim.apply_to("Retro saved to"),
-                        styles
-                            .underline
-                            .apply_to(format!("{}/retro.json", logs_dir.display())),
+                        styles.underline.apply_to(&retro_path),
+                        "",
+                        styles.dim.apply_to(&retro_dur),
                     );
                 }
                 Err(e) => {

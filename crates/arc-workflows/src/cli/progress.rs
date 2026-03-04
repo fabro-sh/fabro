@@ -59,7 +59,7 @@ fn red_cross() -> &'static str {
 
 // ── Duration formatting ─────────────────────────────────────────────────
 
-fn format_duration_short(d: Duration) -> String {
+pub(crate) fn format_duration_short(d: Duration) -> String {
     let secs = d.as_secs();
     if secs >= 60 {
         format!("{}m{:02}s", secs / 60, secs % 60)
@@ -311,7 +311,7 @@ impl ProgressUI {
     // ── Logs dir (called externally) ────────────────────────────────────
 
     pub fn show_logs_dir(&mut self, logs_dir: &Path) {
-        let path_str = logs_dir.display().to_string();
+        let path_str = super::tilde_path(logs_dir);
         match &self.renderer {
             ProgressRenderer::Tty(tty) => {
                 let bar = tty.multi.add(ProgressBar::new_spinner());
