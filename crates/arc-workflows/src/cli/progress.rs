@@ -149,6 +149,7 @@ struct ToolCallEntry {
     tool_call_id: String,
     status: ToolCallStatus,
     bar: ProgressBar,
+    is_branch: bool,
 }
 
 // ── Active stage ────────────────────────────────────────────────────────
@@ -182,6 +183,7 @@ pub struct ProgressUI {
     sandbox_bar: Option<ProgressBar>,
     setup_bar: Option<ProgressBar>,
     any_stage_started: bool,
+    parallel_parent: Option<String>,
 }
 
 impl ProgressUI {
@@ -200,6 +202,7 @@ impl ProgressUI {
             sandbox_bar: None,
             setup_bar: None,
             any_stage_started: false,
+            parallel_parent: None,
         }
     }
 
@@ -216,7 +219,11 @@ impl ProgressUI {
     pub fn finish(&mut self) {
         for (_id, stage) in self.active_stages.drain() {
             for entry in &stage.tool_calls {
-                entry.bar.finish_and_clear();
+                if entry.is_branch {
+                    entry.bar.abandon();
+                } else {
+                    entry.bar.finish_and_clear();
+                }
             }
             stage.spinner.finish_and_clear();
         }
@@ -280,6 +287,30 @@ impl ProgressUI {
             }
             WorkflowRunEvent::StageFailed { node_id, name, .. } => {
                 self.finish_stage(node_id, name, red_cross(), "");
+            }
+            WorkflowRunEvent::ParallelStarted { .. } => {
+                // The fork stage is the (only) active stage at this point.
+                // In Plain mode active_stages is empty, so use a sentinel.
+                self.parallel_parent = self
+                    .active_stages
+                    .keys()
+                    .next()
+                    .cloned()
+                    .or_else(|| Some(String::new()));
+            }
+            WorkflowRunEvent::ParallelBranchStarted { branch, .. } => {
+                self.on_parallel_branch_started(branch);
+            }
+            WorkflowRunEvent::ParallelBranchCompleted {
+                branch,
+                duration_ms,
+                status,
+                ..
+            } => {
+                self.on_parallel_branch_completed(branch, *duration_ms, status);
+            }
+            WorkflowRunEvent::ParallelCompleted { .. } => {
+                self.parallel_parent = None;
             }
             WorkflowRunEvent::Agent { stage, event } => {
                 self.on_agent_event(stage, event);
@@ -435,7 +466,12 @@ impl ProgressUI {
             ProgressRenderer::Tty(_) => {
                 if let Some(stage) = self.active_stages.remove(node_id) {
                     for entry in &stage.tool_calls {
-                        entry.bar.finish_and_clear();
+                        if entry.is_branch {
+                            // Already finished by on_parallel_branch_completed; keep visible
+                            entry.bar.abandon();
+                        } else {
+                            entry.bar.finish_and_clear();
+                        }
                     }
                     stage.spinner.set_style(style_stage_done());
                     stage.spinner.set_prefix(prefix.to_string());
@@ -523,7 +559,74 @@ impl ProgressUI {
                     tool_call_id: tool_call_id.to_string(),
                     status: ToolCallStatus::Running,
                     bar,
+                    is_branch: false,
                 });
+            }
+        }
+    }
+
+    // ── Parallel branches ─────────────────────────────────────────────
+
+    fn on_parallel_branch_started(&mut self, branch: &str) {
+        let parent_id = match &self.parallel_parent {
+            Some(id) => id.clone(),
+            None => return,
+        };
+
+        if let ProgressRenderer::Tty(tty) = &self.renderer {
+            if let Some(stage) = self.active_stages.get_mut(&parent_id) {
+                let bar = tty.multi.insert_after(
+                    stage.tool_calls.back().map_or(&stage.spinner, |e| &e.bar),
+                    ProgressBar::new_spinner(),
+                );
+                bar.set_style(style_tool_running());
+                bar.set_message(branch.to_string());
+                bar.enable_steady_tick(Duration::from_millis(100));
+                stage.tool_calls.push_back(ToolCallEntry {
+                    display_name: branch.to_string(),
+                    tool_call_id: branch.to_string(),
+                    status: ToolCallStatus::Running,
+                    bar,
+                    is_branch: true,
+                });
+            }
+        }
+    }
+
+    fn on_parallel_branch_completed(&mut self, branch: &str, duration_ms: u64, status: &str) {
+        let succeeded = matches!(status, "success" | "partial_success");
+        let glyph = if succeeded { green_check() } else { red_cross() };
+        let dur = format_duration_ms(duration_ms);
+
+        let parent_id = match &self.parallel_parent {
+            Some(id) => id.clone(),
+            None => return,
+        };
+
+        match &self.renderer {
+            ProgressRenderer::Tty(_) => {
+                if let Some(stage) = self.active_stages.get_mut(&parent_id) {
+                    if let Some(entry) = stage
+                        .tool_calls
+                        .iter_mut()
+                        .find(|e| e.tool_call_id == branch)
+                    {
+                        entry.status = if succeeded {
+                            ToolCallStatus::Succeeded
+                        } else {
+                            ToolCallStatus::Failed
+                        };
+                        let elapsed = format_duration_short(entry.bar.elapsed());
+                        entry.bar.set_style(style_tool_done());
+                        entry.bar.set_prefix(elapsed);
+                        entry
+                            .bar
+                            .finish_with_message(format!("{glyph} {}", entry.display_name));
+                    }
+                }
+            }
+            ProgressRenderer::Plain => {
+                eprintln!("      {glyph} {branch}  {dur}");
             }
         }
     }
@@ -607,5 +710,132 @@ impl Interviewer for ProgressAwareInterviewer {
         self.hide_bars();
         self.inner.inform(message, stage).await;
         self.show_bars();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stage_started(node_id: &str, name: &str) -> WorkflowRunEvent {
+        WorkflowRunEvent::StageStarted {
+            node_id: node_id.into(),
+            name: name.into(),
+            index: 0,
+            handler_type: None,
+            script: None,
+            attempt: 1,
+            max_attempts: 1,
+        }
+    }
+
+    #[test]
+    fn parallel_branches_tracked_as_tool_calls() {
+        let mut ui = ProgressUI::new(true);
+
+        ui.handle_event(&stage_started("fork1", "Fork Analysis"));
+        assert!(ui.active_stages.contains_key("fork1"));
+        assert!(ui.parallel_parent.is_none());
+
+        ui.handle_event(&WorkflowRunEvent::ParallelStarted {
+            branch_count: 2,
+            join_policy: "wait_all".into(),
+            error_policy: "continue".into(),
+        });
+        assert_eq!(ui.parallel_parent.as_deref(), Some("fork1"));
+
+        // Branch started → creates a tool_call entry
+        ui.handle_event(&WorkflowRunEvent::ParallelBranchStarted {
+            branch: "security".into(),
+            index: 0,
+        });
+        let stage = ui.active_stages.get("fork1").unwrap();
+        assert_eq!(stage.tool_calls.len(), 1);
+        assert_eq!(stage.tool_calls[0].tool_call_id, "security");
+        assert!(matches!(stage.tool_calls[0].status, ToolCallStatus::Running));
+
+        // Branch completed → marks entry as succeeded
+        ui.handle_event(&WorkflowRunEvent::ParallelBranchCompleted {
+            branch: "security".into(),
+            index: 0,
+            duration_ms: 2000,
+            status: "success".into(),
+        });
+        let stage = ui.active_stages.get("fork1").unwrap();
+        assert!(matches!(
+            stage.tool_calls[0].status,
+            ToolCallStatus::Succeeded
+        ));
+
+        // Second branch
+        ui.handle_event(&WorkflowRunEvent::ParallelBranchStarted {
+            branch: "quality".into(),
+            index: 1,
+        });
+        ui.handle_event(&WorkflowRunEvent::ParallelBranchCompleted {
+            branch: "quality".into(),
+            index: 1,
+            duration_ms: 3000,
+            status: "success".into(),
+        });
+        let stage = ui.active_stages.get("fork1").unwrap();
+        assert_eq!(stage.tool_calls.len(), 2);
+
+        // Parallel completed → clears parent
+        ui.handle_event(&WorkflowRunEvent::ParallelCompleted {
+            duration_ms: 3000,
+            success_count: 2,
+            failure_count: 0,
+        });
+        assert!(ui.parallel_parent.is_none());
+    }
+
+    #[test]
+    fn parallel_branch_failure_tracked() {
+        let mut ui = ProgressUI::new(true);
+
+        ui.handle_event(&stage_started("fork1", "Fork"));
+        ui.handle_event(&WorkflowRunEvent::ParallelStarted {
+            branch_count: 1,
+            join_policy: "wait_all".into(),
+            error_policy: "continue".into(),
+        });
+        ui.handle_event(&WorkflowRunEvent::ParallelBranchStarted {
+            branch: "risky".into(),
+            index: 0,
+        });
+        ui.handle_event(&WorkflowRunEvent::ParallelBranchCompleted {
+            branch: "risky".into(),
+            index: 0,
+            duration_ms: 500,
+            status: "fail".into(),
+        });
+
+        let stage = ui.active_stages.get("fork1").unwrap();
+        assert!(matches!(
+            stage.tool_calls[0].status,
+            ToolCallStatus::Failed
+        ));
+    }
+
+    #[test]
+    fn plain_mode_sets_parallel_parent() {
+        let mut ui = ProgressUI::new(false);
+
+        ui.handle_event(&stage_started("fork1", "Fork"));
+        ui.handle_event(&WorkflowRunEvent::ParallelStarted {
+            branch_count: 2,
+            join_policy: "wait_all".into(),
+            error_policy: "continue".into(),
+        });
+        // In Plain mode, active_stages is empty so parallel_parent is a sentinel
+        assert!(ui.parallel_parent.is_some());
+
+        ui.handle_event(&WorkflowRunEvent::ParallelCompleted {
+            duration_ms: 1000,
+            success_count: 2,
+            failure_count: 0,
+        });
+        assert!(ui.parallel_parent.is_none());
     }
 }
