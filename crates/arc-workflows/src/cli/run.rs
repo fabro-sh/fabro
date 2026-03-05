@@ -151,22 +151,18 @@ fn resolve_daytona_config(
         })
 }
 
-/// Resolve the fallback chain from config: task config wins, then run defaults.
+/// Resolve the fallback chain from config.
+///
+/// `apply_defaults` must be called on `run_cfg` before this — it merges
+/// `run_defaults.llm.fallbacks` into `run_cfg.llm.fallbacks` already.
 fn resolve_fallback_chain(
     provider: Provider,
     model: &str,
     run_cfg: Option<&WorkflowRunConfig>,
-    run_defaults: &RunDefaults,
 ) -> Vec<arc_llm::catalog::FallbackTarget> {
     let fallbacks = run_cfg
         .and_then(|c| c.llm.as_ref())
-        .and_then(|l| l.fallbacks.as_ref())
-        .or_else(|| {
-            run_defaults
-                .llm
-                .as_ref()
-                .and_then(|l| l.fallbacks.as_ref())
-        });
+        .and_then(|l| l.fallbacks.as_ref());
 
     match fallbacks {
         Some(map) => arc_llm::catalog::build_fallback_chain(provider.as_str(), model, map),
@@ -628,7 +624,6 @@ pub async fn run_command(
         provider_enum,
         &model,
         run_cfg.as_ref(),
-        &run_defaults,
     );
 
     // 7. Build engine

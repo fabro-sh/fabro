@@ -142,22 +142,21 @@ impl SdkError {
 
     /// Whether this error is eligible for provider-level failover.
     ///
-    /// Transient provider issues (rate limits, server errors, quota, timeouts,
-    /// network, stream) can be retried on a different provider. Deterministic
-    /// errors (auth, invalid request, context length, content filter) and
-    /// non-provider errors (abort, configuration) cannot.
+    /// Includes everything that is `retryable()` (transient errors good for
+    /// same-provider retry) plus `QuotaExceeded` — a different provider won't
+    /// share the same quota.
     #[must_use]
     pub const fn failover_eligible(&self) -> bool {
-        match self {
-            Self::Provider { kind, .. } => matches!(
-                kind,
-                ProviderErrorKind::RateLimit
-                    | ProviderErrorKind::Server
-                    | ProviderErrorKind::QuotaExceeded
-            ),
-            Self::RequestTimeout { .. } | Self::Network { .. } | Self::Stream { .. } => true,
-            _ => false,
+        if self.retryable() {
+            return true;
         }
+        matches!(
+            self,
+            Self::Provider {
+                kind: ProviderErrorKind::QuotaExceeded,
+                ..
+            }
+        )
     }
 
     #[must_use]

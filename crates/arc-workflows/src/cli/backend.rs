@@ -19,6 +19,81 @@ use crate::graph::Node;
 use crate::handler::codergen::{CodergenBackend, CodergenResult};
 use crate::outcome::StageUsage;
 
+fn build_profile(model: &str, provider: Provider) -> Box<dyn ProviderProfile> {
+    match provider {
+        Provider::OpenAi => Box::new(OpenAiProfile::new(model)),
+        Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {
+            Box::new(OpenAiProfile::new(model).with_provider(provider))
+        }
+        Provider::Gemini => Box::new(GeminiProfile::new(model)),
+        Provider::Anthropic => Box::new(AnthropicProfile::new(model)),
+    }
+}
+
+/// Spawn a task that subscribes to session events and:
+/// 1. Tracks file changes (write_file/edit_file tool calls) into shared state.
+/// 2. Forwards non-streaming agent events to the pipeline emitter.
+fn spawn_event_forwarder(
+    session: &Session,
+    node_id: String,
+    emitter: Arc<crate::event::EventEmitter>,
+    pending_tool_calls: Arc<Mutex<HashMap<String, String>>>,
+    files_touched: Arc<Mutex<HashSet<String>>>,
+) {
+    let mut rx = session.subscribe();
+    tokio::spawn(async move {
+        while let Ok(event) = rx.recv().await {
+            // Track file changes from tool calls
+            match &event.event {
+                AgentEvent::ToolCallStarted {
+                    tool_name,
+                    tool_call_id,
+                    arguments,
+                } => {
+                    if tool_name == "write_file" || tool_name == "edit_file" {
+                        if let Some(path) = arguments.get("file_path").and_then(|v| v.as_str()) {
+                            pending_tool_calls
+                                .lock()
+                                .unwrap()
+                                .insert(tool_call_id.clone(), path.to_string());
+                        }
+                    }
+                }
+                AgentEvent::ToolCallCompleted {
+                    tool_call_id,
+                    is_error,
+                    ..
+                } => {
+                    if !*is_error {
+                        if let Some(path) = pending_tool_calls.lock().unwrap().remove(tool_call_id) {
+                            files_touched.lock().unwrap().insert(path);
+                        }
+                    } else {
+                        pending_tool_calls.lock().unwrap().remove(tool_call_id);
+                    }
+                }
+                _ => {}
+            }
+
+            // Forward non-streaming agent events to pipeline
+            if !matches!(
+                &event.event,
+                AgentEvent::SessionStarted
+                    | AgentEvent::SessionEnded
+                    | AgentEvent::AssistantTextStart
+                    | AgentEvent::TextDelta { .. }
+                    | AgentEvent::ToolCallOutputDelta { .. }
+                    | AgentEvent::SkillExpanded { .. }
+            ) {
+                emitter.emit(&WorkflowRunEvent::Agent {
+                    stage: node_id.clone(),
+                    event: event.event.clone(),
+                });
+            }
+        }
+    });
+}
+
 /// LLM backend that delegates to an `agent` Session per invocation.
 ///
 /// For `full` fidelity nodes sharing a thread key, sessions are cached
@@ -46,11 +121,26 @@ impl AgentApiBackend {
         node: &Node,
         sandbox: &Arc<dyn Sandbox>,
     ) -> Result<Session, ArcError> {
+        Self::create_session_for(
+            &self.model,
+            self.provider,
+            node,
+            sandbox,
+        )
+        .await
+    }
+
+    async fn create_session_for(
+        model: &str,
+        provider: Provider,
+        node: &Node,
+        sandbox: &Arc<dyn Sandbox>,
+    ) -> Result<Session, ArcError> {
         let client = Client::from_env()
             .await
             .map_err(|e| ArcError::handler(format!("Failed to create LLM client: {e}")))?;
 
-        let mut profile = self.build_profile();
+        let mut profile = build_profile(model, provider);
 
         let config = SessionConfig {
             max_tokens: node.max_tokens(),
@@ -65,14 +155,13 @@ impl AgentApiBackend {
 
         // Build factory that creates child sessions WITHOUT subagent tools
         let factory_client = client.clone();
-        let factory_provider = self.provider;
-        let factory_model = self.model.clone();
+        let factory_model = model.to_string();
         let factory_env = Arc::clone(sandbox);
         let factory: SessionFactory = Arc::new(move || {
-            let child_profile: Arc<dyn ProviderProfile> = match factory_provider {
+            let child_profile: Arc<dyn ProviderProfile> = match provider {
                 Provider::OpenAi => Arc::new(OpenAiProfile::new(&factory_model)),
                 Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {
-                    Arc::new(OpenAiProfile::new(&factory_model).with_provider(factory_provider))
+                    Arc::new(OpenAiProfile::new(&factory_model).with_provider(provider))
                 }
                 Provider::Gemini => Arc::new(GeminiProfile::new(&factory_model)),
                 Provider::Anthropic => Arc::new(AnthropicProfile::new(&factory_model)),
@@ -97,17 +186,6 @@ impl AgentApiBackend {
             .set_event_callback(session.event_callback());
 
         Ok(session)
-    }
-
-    fn build_profile(&self) -> Box<dyn ProviderProfile> {
-        match self.provider {
-            Provider::OpenAi => Box::new(OpenAiProfile::new(&self.model)),
-            Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => {
-                Box::new(OpenAiProfile::new(&self.model).with_provider(self.provider))
-            }
-            Provider::Gemini => Box::new(GeminiProfile::new(&self.model)),
-            Provider::Anthropic => Box::new(AnthropicProfile::new(&self.model)),
-        }
     }
 }
 
@@ -155,32 +233,32 @@ impl CodergenBackend for AgentApiBackend {
         }
 
         // Build per-request fallback chain: if the node overrides the provider,
-        // compute a fresh chain for that provider; otherwise use the backend's.
-        let fallback_chain = if node.llm_provider().is_some() {
-            // Node-level override: build fallback chain if we have fallback config
-            // For node overrides without explicit fallbacks, no failover is available.
-            Vec::new()
+        // no failover is available; otherwise use the backend's.
+        let fallback_chain: &[FallbackTarget] = if node.llm_provider().is_some() {
+            &[]
         } else {
-            self.fallback_chain.clone()
+            &self.fallback_chain
         };
 
         let result = client.complete(&request).await;
+
+        let default_provider = self.provider.as_str().to_string();
 
         let (response, actual_model, actual_provider) = match result {
             Ok(resp) => (
                 resp,
                 request.model.clone(),
-                request.provider.clone().unwrap_or_else(|| "anthropic".to_string()),
+                request.provider.clone().unwrap_or_else(|| default_provider.clone()),
             ),
             Err(sdk_err) if sdk_err.failover_eligible() && !fallback_chain.is_empty() => {
                 let error_msg = sdk_err.to_string();
-                let from_provider = request.provider.clone().unwrap_or_else(|| "anthropic".to_string());
+                let from_provider = request.provider.clone().unwrap_or_else(|| default_provider.clone());
                 let from_model = request.model.clone();
 
                 let mut last_err = sdk_err;
                 let mut found = None;
 
-                for target in &fallback_chain {
+                for target in fallback_chain {
                     tracing::warn!(
                         stage = node.id.as_str(),
                         from_provider = from_provider.as_str(),
@@ -287,67 +365,15 @@ impl CodergenBackend for AgentApiBackend {
         let pending_tool_calls: Arc<Mutex<HashMap<String, String>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let files_touched: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-        let pending_clone = Arc::clone(&pending_tool_calls);
-        let files_clone = Arc::clone(&files_touched);
 
-        // Subscribe to session events: forward to pipeline emitter.
-        let node_id = node.id.clone();
-        let pipeline_emitter = Arc::clone(emitter);
-        let mut rx = session.subscribe();
-        tokio::spawn(async move {
-            use crate::event::WorkflowRunEvent;
-            while let Ok(event) = rx.recv().await {
-                // Track file changes from tool calls
-                match &event.event {
-                    AgentEvent::ToolCallStarted {
-                        tool_name,
-                        tool_call_id,
-                        arguments,
-                    } => {
-                        if tool_name == "write_file" || tool_name == "edit_file" {
-                            if let Some(path) = arguments.get("file_path").and_then(|v| v.as_str())
-                            {
-                                pending_clone
-                                    .lock()
-                                    .unwrap()
-                                    .insert(tool_call_id.clone(), path.to_string());
-                            }
-                        }
-                    }
-                    AgentEvent::ToolCallCompleted {
-                        tool_call_id,
-                        is_error,
-                        ..
-                    } => {
-                        if !*is_error {
-                            if let Some(path) = pending_clone.lock().unwrap().remove(tool_call_id) {
-                                files_clone.lock().unwrap().insert(path);
-                            }
-                        } else {
-                            pending_clone.lock().unwrap().remove(tool_call_id);
-                        }
-                    }
-                    _ => {}
-                }
-
-                // Forward non-streaming agent events to pipeline
-                if !matches!(
-                    &event.event,
-                    AgentEvent::SessionStarted
-                        | AgentEvent::SessionEnded
-                        | AgentEvent::AssistantTextStart
-                        | AgentEvent::TextDelta { .. }
-                        | AgentEvent::ToolCallOutputDelta { .. }
-                        | AgentEvent::SkillExpanded { .. }
-                ) {
-                    pipeline_emitter.emit(&WorkflowRunEvent::Agent {
-                        stage: node_id.clone(),
-                        event: event.event.clone(),
-                    });
-                }
-
-            }
-        });
+        // Subscribe to session events: forward to pipeline emitter + track files.
+        spawn_event_forwarder(
+            &session,
+            node.id.clone(),
+            Arc::clone(emitter),
+            Arc::clone(&pending_tool_calls),
+            Arc::clone(&files_touched),
+        );
 
         // Emit Prompt event before processing
         emitter.emit(&crate::event::WorkflowRunEvent::Prompt {
@@ -392,13 +418,14 @@ impl CodergenBackend for AgentApiBackend {
                         Err(_) => continue,
                     };
 
-                    // Create a temporary backend with fallback provider/model for session creation
-                    let fallback_backend = AgentApiBackend::new(
-                        target.model.clone(),
+                    let new_session = match Self::create_session_for(
+                        &target.model,
                         target_provider,
-                        Vec::new(),
-                    );
-                    let new_session = match fallback_backend.create_session(node, sandbox).await {
+                        node,
+                        sandbox,
+                    )
+                    .await
+                    {
                         Ok(s) => s,
                         Err(e) => {
                             last_err = e;
@@ -407,28 +434,14 @@ impl CodergenBackend for AgentApiBackend {
                     };
                     session = new_session;
 
-                    // Re-subscribe to forward events from the new session
-                    let node_id2 = node.id.clone();
-                    let emitter2 = Arc::clone(emitter);
-                    let mut rx2 = session.subscribe();
-                    tokio::spawn(async move {
-                        while let Ok(event) = rx2.recv().await {
-                            if !matches!(
-                                &event.event,
-                                AgentEvent::SessionStarted
-                                    | AgentEvent::SessionEnded
-                                    | AgentEvent::AssistantTextStart
-                                    | AgentEvent::TextDelta { .. }
-                                    | AgentEvent::ToolCallOutputDelta { .. }
-                                    | AgentEvent::SkillExpanded { .. }
-                            ) {
-                                emitter2.emit(&WorkflowRunEvent::Agent {
-                                    stage: node_id2.clone(),
-                                    event: event.event.clone(),
-                                });
-                            }
-                        }
-                    });
+                    // Re-subscribe to forward events + track files from the new session
+                    spawn_event_forwarder(
+                        &session,
+                        node.id.clone(),
+                        Arc::clone(emitter),
+                        Arc::clone(&pending_tool_calls),
+                        Arc::clone(&files_touched),
+                    );
 
                     session.initialize().await;
                     match session.process_input(prompt).await {
@@ -548,8 +561,7 @@ mod tests {
 
     #[test]
     fn build_profile_can_register_subagent_tools() {
-        let backend = AgentApiBackend::new("claude-opus-4-6".to_string(), Provider::Anthropic, Vec::new());
-        let mut profile = backend.build_profile();
+        let mut profile = build_profile("claude-opus-4-6", Provider::Anthropic);
         let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(1)));
         let factory: SessionFactory = Arc::new(|| {
             panic!("factory should not be called in this test");
