@@ -1,5 +1,4 @@
-use crate::error::ArcError;
-use crate::parser::{grammar, lexer};
+use std::io::Write;
 
 use super::{read_dot_file, ParseArgs};
 
@@ -9,21 +8,15 @@ use super::{read_dot_file, ParseArgs};
 ///
 /// Returns an error if the file cannot be read, parsed, or contains trailing content.
 pub fn parse_command(args: &ParseArgs) -> anyhow::Result<()> {
+    let stdout = std::io::stdout();
+    parse_command_to(args, stdout.lock())
+}
+
+fn parse_command_to(args: &ParseArgs, mut out: impl Write) -> anyhow::Result<()> {
     let source = read_dot_file(&args.workflow)?;
-    let stripped = lexer::strip_comments(&source);
-    let (rest, ast) = grammar::parse_dot_graph(&stripped)
-        .map_err(|e| ArcError::Parse(format!("grammar error: {e}")))?;
-
-    let remaining = rest.trim();
-    if !remaining.is_empty() {
-        return Err(ArcError::Parse(format!(
-            "unexpected trailing content: {:?}",
-            &remaining[..remaining.len().min(50)]
-        ))
-        .into());
-    }
-
-    println!("{}", serde_json::to_string_pretty(&ast)?);
+    let ast = crate::parser::parse_ast(&source)?;
+    serde_json::to_writer_pretty(&mut out, &ast)?;
+    writeln!(out)?;
     Ok(())
 }
 
@@ -50,16 +43,10 @@ mod tests {
         let args = ParseArgs {
             workflow: tmp.path().to_path_buf(),
         };
-        let result = parse_command(&args);
-        assert!(result.is_ok(), "expected Ok but got: {result:?}");
+        let mut buf = Vec::new();
+        parse_command_to(&args, &mut buf).unwrap();
 
-        // Re-run and capture stdout by reading the file through the parser directly
-        let source = std::fs::read_to_string(tmp.path()).unwrap();
-        let stripped = lexer::strip_comments(&source);
-        let (_, ast) = grammar::parse_dot_graph(&stripped).unwrap();
-        let json = serde_json::to_string_pretty(&ast).unwrap();
-        let deserialized: DotGraph = serde_json::from_str(&json).unwrap();
-
+        let deserialized: DotGraph = serde_json::from_slice(&buf).unwrap();
         assert_eq!(deserialized.name, "Hello");
         assert_eq!(deserialized.statements.len(), 3);
     }
@@ -72,7 +59,7 @@ mod tests {
         let args = ParseArgs {
             workflow: tmp.path().to_path_buf(),
         };
-        let result = parse_command(&args);
+        let result = parse_command_to(&args, Vec::new());
         assert!(result.is_err(), "expected Err for invalid syntax");
     }
 
@@ -81,7 +68,7 @@ mod tests {
         let args = ParseArgs {
             workflow: PathBuf::from("/tmp/nonexistent_parse_test_12345.dot"),
         };
-        let result = parse_command(&args);
+        let result = parse_command_to(&args, Vec::new());
         assert!(result.is_err(), "expected Err for missing file");
     }
 }

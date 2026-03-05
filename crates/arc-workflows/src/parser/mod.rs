@@ -6,16 +6,18 @@ pub mod semantic;
 use crate::error::ArcError;
 use crate::graph::types::Graph;
 
-/// Parse a DOT source string into a semantic `Graph`.
+use self::ast::DotGraph;
+
+/// Parse a DOT source string into a raw `DotGraph` AST.
 ///
-/// Strips comments, parses the grammar, and performs semantic transformation
-/// (expanding chained edges, applying defaults, flattening subgraphs).
+/// Strips comments, parses the grammar, and validates there is no
+/// trailing content. Does NOT perform semantic transformation.
 ///
 /// # Errors
 ///
 /// Returns an error if the input is not valid DOT syntax or contains
 /// trailing content after the graph definition.
-pub fn parse(input: &str) -> Result<Graph, ArcError> {
+pub fn parse_ast(input: &str) -> Result<DotGraph, ArcError> {
     let stripped = lexer::strip_comments(input);
     let (rest, dot_graph) = grammar::parse_dot_graph(&stripped)
         .map_err(|e| ArcError::Parse(format!("grammar error: {e}")))?;
@@ -28,6 +30,20 @@ pub fn parse(input: &str) -> Result<Graph, ArcError> {
         )));
     }
 
+    Ok(dot_graph)
+}
+
+/// Parse a DOT source string into a semantic `Graph`.
+///
+/// Strips comments, parses the grammar, and performs semantic transformation
+/// (expanding chained edges, applying defaults, flattening subgraphs).
+///
+/// # Errors
+///
+/// Returns an error if the input is not valid DOT syntax or contains
+/// trailing content after the graph definition.
+pub fn parse(input: &str) -> Result<Graph, ArcError> {
+    let dot_graph = parse_ast(input)?;
     semantic::ast_to_graph(&dot_graph)
 }
 
