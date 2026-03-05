@@ -22,9 +22,9 @@ import { DUMMY_BASE_URL, assertParamExists, setApiKeyToObject, setBasicAuthToObj
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError, operationServerMap } from '../base';
 // @ts-ignore
-import type { ApiQuestion } from '../models';
-// @ts-ignore
 import type { ErrorResponse } from '../models';
+// @ts-ignore
+import type { PaginatedApiQuestionList } from '../models';
 // @ts-ignore
 import type { PreviewUrlRequest } from '../models';
 // @ts-ignore
@@ -227,7 +227,7 @@ export const HumanInTheLoopApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listRunQuestions(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Array<ApiQuestion>>> {
+        async listRunQuestions(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedApiQuestionList>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.listRunQuestions(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.listRunQuestions']?.[localVarOperationServerIndex]?.url;
@@ -289,7 +289,7 @@ export const HumanInTheLoopApiFactory = function (configuration?: Configuration,
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listRunQuestions(id: string, options?: RawAxiosRequestConfig): AxiosPromise<Array<ApiQuestion>> {
+        listRunQuestions(id: string, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedApiQuestionList> {
             return localVarFp.listRunQuestions(id, options).then((request) => request(axios, basePath));
         },
         /**

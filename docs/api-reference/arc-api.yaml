@@ -298,9 +298,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ApiQuestion"
+                $ref: "#/components/schemas/PaginatedApiQuestionList"
         "404":
           description: Run not found
           content:
@@ -379,9 +377,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/RunStage"
+                $ref: "#/components/schemas/PaginatedRunStageList"
         "404":
           description: Run not found
           content:
@@ -477,9 +473,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/RunVerification"
+                $ref: "#/components/schemas/PaginatedRunVerificationList"
         "404":
           description: Run not found
           content:
@@ -673,9 +667,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/VerificationCategory"
+                $ref: "#/components/schemas/PaginatedVerificationCategoryList"
 
   /verifications/{slug}:
     get:
@@ -1190,6 +1182,58 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/StageTurn"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    PaginatedApiQuestionList:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApiQuestion"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    PaginatedRunStageList:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunStage"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    PaginatedRunVerificationList:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunVerification"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    PaginatedVerificationCategoryList:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerificationCategory"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 

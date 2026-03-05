@@ -24,11 +24,11 @@ import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError
 // @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
+import type { PaginatedRunVerificationList } from '../models';
+// @ts-ignore
 import type { RunFiles } from '../models';
 // @ts-ignore
 import type { RunUsage } from '../models';
-// @ts-ignore
-import type { RunVerification } from '../models';
 /**
  * RunOutputsApi - axios parameter creator
  */
@@ -171,7 +171,7 @@ export const RunOutputsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listRunVerifications(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Array<RunVerification>>> {
+        async listRunVerifications(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedRunVerificationList>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.listRunVerifications(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunOutputsApi.listRunVerifications']?.[localVarOperationServerIndex]?.url;
@@ -217,7 +217,7 @@ export const RunOutputsApiFactory = function (configuration?: Configuration, bas
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listRunVerifications(id: string, options?: RawAxiosRequestConfig): AxiosPromise<Array<RunVerification>> {
+        listRunVerifications(id: string, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedRunVerificationList> {
             return localVarFp.listRunVerifications(id, options).then((request) => request(axios, basePath));
         },
         /**

@@ -12,6 +12,7 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
+use serde_json::json;
 use tracing::{error, info};
 
 use arc_agent::LocalSandbox;
@@ -644,7 +645,7 @@ async fn get_questions(
         Some(managed_run) => {
             let interviewer = match &managed_run.interviewer {
                 Some(i) => i,
-                None => return (StatusCode::OK, Json(Vec::<ApiQuestion>::new())).into_response(),
+                None => return (StatusCode::OK, Json(json!({ "data": Vec::<ApiQuestion>::new(), "meta": { "has_more": false } }))).into_response(),
             };
             let pending = interviewer.pending_questions();
             let questions: Vec<ApiQuestion> = pending
@@ -665,7 +666,7 @@ async fn get_questions(
                     allow_freeform: pq.question.allow_freeform,
                 })
                 .collect();
-            (StatusCode::OK, Json(questions)).into_response()
+            (StatusCode::OK, Json(json!({ "data": questions, "meta": { "has_more": false } }))).into_response()
         }
         None => ApiError::not_found("Run not found.").into_response(),
     }
@@ -1041,7 +1042,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = body_json(response.into_body()).await;
-        assert!(body.is_array());
+        assert!(body["data"].is_array());
+        assert_eq!(body["meta"]["has_more"], false);
     }
 
     #[tokio::test]

@@ -22,6 +22,10 @@ fn paginated_response<T: serde::Serialize>(items: Vec<T>, pagination: &Paginatio
     (StatusCode::OK, Json(json!({ "data": data, "meta": { "has_more": has_more } }))).into_response()
 }
 
+fn list_response<T: serde::Serialize>(items: T) -> Response {
+    (StatusCode::OK, Json(json!({ "data": items, "meta": { "has_more": false } }))).into_response()
+}
+
 // ── Runs ───────────────────────────────────────────────────────────────
 
 pub async fn list_runs(
@@ -48,7 +52,7 @@ pub async fn get_run_stages(
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
-    (StatusCode::OK, Json(runs::stages())).into_response()
+    list_response(runs::stages())
 }
 
 pub async fn get_stage_turns(
@@ -88,7 +92,7 @@ pub async fn get_run_verifications(
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
-    (StatusCode::OK, Json(runs::verifications())).into_response()
+    list_response(runs::verifications())
 }
 
 pub async fn get_run_configuration(
@@ -150,7 +154,7 @@ pub async fn get_questions_stub(
     Path(_id): Path<String>,
 ) -> Response {
     let empty: Vec<arc_types::ApiQuestion> = vec![];
-    (StatusCode::OK, Json(empty)).into_response()
+    list_response(empty)
 }
 
 pub async fn answer_stub(
@@ -459,7 +463,7 @@ pub async fn list_verifications(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
-    (StatusCode::OK, Json(verifications::categories())).into_response()
+    list_response(verifications::categories())
 }
 
 pub async fn get_verification_detail(

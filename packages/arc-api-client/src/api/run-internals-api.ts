@@ -24,9 +24,9 @@ import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError
 // @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
-import type { PaginatedStageTurnList } from '../models';
+import type { PaginatedRunStageList } from '../models';
 // @ts-ignore
-import type { RunStage } from '../models';
+import type { PaginatedStageTurnList } from '../models';
 /**
  * RunInternalsApi - axios parameter creator
  */
@@ -232,7 +232,7 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listRunStages(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Array<RunStage>>> {
+        async listRunStages(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedRunStageList>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.listRunStages(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.listRunStages']?.[localVarOperationServerIndex]?.url;
@@ -309,7 +309,7 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listRunStages(id: string, options?: RawAxiosRequestConfig): AxiosPromise<Array<RunStage>> {
+        listRunStages(id: string, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedRunStageList> {
             return localVarFp.listRunStages(id, options).then((request) => request(axios, basePath));
         },
         /**

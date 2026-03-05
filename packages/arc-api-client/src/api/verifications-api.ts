@@ -24,7 +24,7 @@ import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError
 // @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
-import type { VerificationCategory } from '../models';
+import type { PaginatedVerificationCategoryList } from '../models';
 // @ts-ignore
 import type { VerificationDetailResponse } from '../models';
 /**
@@ -111,7 +111,7 @@ export const VerificationsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listVerifications(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Array<VerificationCategory>>> {
+        async listVerifications(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedVerificationCategoryList>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.listVerifications(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['VerificationsApi.listVerifications']?.[localVarOperationServerIndex]?.url;
@@ -145,7 +145,7 @@ export const VerificationsApiFactory = function (configuration?: Configuration, 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listVerifications(options?: RawAxiosRequestConfig): AxiosPromise<Array<VerificationCategory>> {
+        listVerifications(options?: RawAxiosRequestConfig): AxiosPromise<PaginatedVerificationCategoryList> {
             return localVarFp.listVerifications(options).then((request) => request(axios, basePath));
         },
         /**

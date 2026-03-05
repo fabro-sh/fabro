@@ -496,7 +496,7 @@ mod server_lifecycle {
                 .unwrap();
             let response = app.clone().oneshot(req).await.unwrap();
             let body = body_json(response.into_body()).await;
-            let arr = body.as_array().unwrap();
+            let arr = body["data"].as_array().unwrap();
             if !arr.is_empty() {
                 question_id = arr[0]["id"].as_str().unwrap().to_string();
                 break;
@@ -557,7 +557,7 @@ mod server_lifecycle {
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
         assert!(
-            body.as_array().unwrap().is_empty(),
+            body["data"].as_array().unwrap().is_empty(),
             "no pending questions after completion"
         );
     }
