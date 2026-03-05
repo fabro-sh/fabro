@@ -3,3 +3,120 @@ title: "Models"
 description: "How Arc routes tasks to LLM models and providers"
 ---
 
+No single model is best at everything. Arc lets you assign the right model to each workflow step — cheap, fast models for boilerplate, frontier models for hard reasoning, and a different provider for cross-critique so the reviewer brings fresh eyes. When a provider goes down, Arc can fail over automatically.
+
+<Frame>
+  <img src="/images/ensemble-workflow.svg" alt="Ensemble workflow: fan out to Opus and Gemini Pro, merge, then synthesize" />
+</Frame>
+
+## Model catalog
+
+| Model | Provider | Aliases | Context | Cost (in/out per Mtok) | Speed |
+|---|---|---|---|---|---|
+| `claude-opus-4-6` | anthropic | `opus`, `claude-opus` | 1M | $15.00 / $75.00 | 25 tok/s |
+| `claude-sonnet-4-5` | anthropic | `sonnet`, `claude-sonnet` | 200K | $3.00 / $15.00 | 50 tok/s |
+| `claude-haiku-4-5` | anthropic | `haiku`, `claude-haiku` | 200K | $0.80 / $4.00 | 100 tok/s |
+| `gpt-5.2` | openai | `gpt5` | 1M | $1.80 / $14.00 | 65 tok/s |
+| `gpt-5-mini` | openai | `gpt5-mini` | 1M | $0.20 / $2.00 | 70 tok/s |
+| `gpt-5.2-codex` | openai | | 1M | $1.80 / $14.00 | 100 tok/s |
+| `gpt-5.3-codex` | openai | `codex` | 1M | $1.80 / $14.00 | 100 tok/s |
+| `gemini-3.1-pro-preview` | gemini | `gemini-pro` | 1M | $2.00 / $12.00 | 85 tok/s |
+| `gemini-3-flash-preview` | gemini | `gemini-flash` | 1M | $0.50 / $3.00 | 150 tok/s |
+| `gemini-3.1-flash-lite-preview` | gemini | `gemini-flash-lite` | 1M | $0.20 / $1.50 | 200 tok/s |
+| `kimi-k2.5` | kimi | `kimi` | 262K | $0.60 / $3.00 | 50 tok/s |
+| `glm-4.7` | zai | `glm`, `glm4` | 203K | $0.60 / $2.20 | 100 tok/s |
+| `minimax-m2.5` | minimax | `minimax` | 197K | $0.30 / $1.20 | 45 tok/s |
+| `mercury-2` | inception | `mercury` | 131K | $0.20 / $0.80 | 1000 tok/s |
+
+Each provider requires its own API key set via environment variable (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`). See the [Quick Start](/getting-started/quick-start) for setup.
+
+## Using models in workflows
+
+Assign models to workflow nodes using [model stylesheets](/workflows/stylesheets), which use a CSS-like syntax:
+
+```dot
+digraph Example {
+    graph [
+        model_stylesheet="
+            *        { llm_model: claude-haiku-4-5; }
+            .coding  { llm_model: claude-sonnet-4-5; reasoning_effort: high; }
+            #review  { llm_model: gemini-3.1-pro-preview; }
+        "
+    ]
+
+    spec     [label="Write Spec"]
+    implement [label="Implement", class="coding"]
+    review   [label="Review"]
+}
+```
+
+This routes the spec node to Haiku (the default), implementation to Sonnet, and review to Gemini Pro.
+
+## Overriding the default model
+
+Model stylesheets set per-node models inside the workflow graph, but you can also override the default model for an entire run. This is useful for quick experimentation or when you want to swap models without editing the DOT file.
+
+### CLI flags
+
+Pass `--model` and optionally `--provider` to `arc run start`:
+
+```bash
+arc run start demo/01-hello.dot --model claude-opus-4-6
+arc run start demo/04-pipeline.dot --model gemini-3.1-pro-preview --provider gemini
+```
+
+These flags set the default model for all nodes that don't have an explicit model assigned via a stylesheet.
+
+### Run config TOML
+
+For repeatable runs, set the model in a run config file:
+
+```toml
+version = 1
+goal = "Implement the feature"
+graph = "implement.dot"
+
+[llm]
+model = "claude-sonnet-4-5"
+provider = "anthropic"
+
+[llm.fallbacks]
+anthropic = ["gemini", "openai"]
+gemini = ["anthropic", "openai"]
+```
+
+Then launch with:
+
+```bash
+arc run start run.toml
+```
+
+The `[llm.fallbacks]` table is optional. It maps each provider to an ordered list of fallback providers to try when the primary is unavailable.
+
+<Note>
+The precedence order is: node-level stylesheet > run config TOML > CLI flags > server defaults. More specific settings always win.
+</Note>
+
+## CLI commands
+
+### List models
+
+View all available models, or filter by provider:
+
+```bash
+arc models list
+arc models list --provider anthropic
+arc models list --query codex
+```
+
+### Test models
+
+Verify that your API keys are working by sending a test prompt to each configured provider:
+
+```bash
+arc models test
+arc models test --model claude-sonnet-4-5
+arc models test --provider openai
+```
+
+This is useful for confirming connectivity after setup or when adding a new provider key.

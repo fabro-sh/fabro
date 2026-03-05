@@ -1,5 +1,157 @@
 ---
 title: "Transitions"
-description: "Defining transitions between stages"
+description: "How Arc decides which node to execute next"
 ---
 
+After each node finishes, Arc must decide which edge to follow to the next node. This decision is fully deterministic — given the same outcome and context, Arc always picks the same edge. Understanding the transition logic helps you design workflows that route reliably.
+
+## How transitions work
+
+When a node completes, it produces an **outcome** with a status (`success`, `fail`, `partial_success`) and optional signals like a preferred label or suggested next node. Arc evaluates the outgoing edges in a fixed priority order:
+
+1. **Condition match** — Edges with a `condition` attribute are evaluated first. If one or more conditions match, the edge with the highest `weight` wins (lexical tiebreak on target node ID).
+2. **Preferred label** — If the node's outcome includes a preferred label (e.g. from a human gate selection), the edge whose `label` matches is chosen.
+3. **Suggested next** — If the node suggests a specific next node ID, the edge pointing to that node is chosen.
+4. **Unconditional fallback** — Edges without conditions are considered last, again using `weight` then lexical tiebreak.
+
+If no edge matches at all, the workflow halts with an error.
+
+## Edge attributes
+
+| Attribute | Description |
+|---|---|
+| `label` | Display text on the edge; also used for human gate option matching |
+| `condition` | Boolean expression that must evaluate to true for this edge (see below) |
+| `weight` | Numeric priority for tiebreaking (higher wins, default: 0) |
+
+## Conditions
+
+Edge conditions are boolean expressions evaluated against the stage outcome and run context. Conditions go in the `condition` attribute on an edge:
+
+```dot
+gate -> exit      [label="Pass", condition="outcome=success"]
+gate -> implement [label="Fix", condition="outcome=fail"]
+```
+
+### Available keys
+
+| Key | Resolves to |
+|---|---|
+| `outcome` | The stage status: `success`, `fail`, or `partial_success` |
+| `preferred_label` | The label selected by a human gate |
+| `context.KEY` | A value from the run context (e.g. `context.tests_passed`) |
+| `KEY` | Shorthand for context lookup (without the `context.` prefix) |
+
+### Operators
+
+| Operator | Example | Description |
+|---|---|---|
+| `=` | `outcome=success` | Equality |
+| `!=` | `outcome!=fail` | Inequality |
+| `>` | `context.score > 80` | Greater than (numeric) |
+| `<` | `context.count < 5` | Less than (numeric) |
+| `>=` | `context.score >= 80` | Greater than or equal (numeric) |
+| `<=` | `context.count <= 10` | Less than or equal (numeric) |
+| `contains` | `context.message contains error` | Substring match, or array membership |
+| `matches` | `context.version matches ^v\d+` | Regular expression match |
+
+A bare key with no operator is a **truthiness check** — it passes if the value is non-empty, not `"false"`, and not `"0"`:
+
+```dot
+gate -> next [condition="my_flag"]
+```
+
+### Combining conditions
+
+Use `&&` (AND), `||` (OR), and `!` (NOT) to build compound expressions. `&&` binds tighter than `||`:
+
+```dot
+// Both must be true
+gate -> deploy [condition="outcome=success && context.tests_passed=true"]
+
+// Either can be true
+gate -> proceed [condition="outcome=success || outcome=partial_success"]
+
+// Negation
+gate -> retry [condition="!outcome=success"]
+
+// Mixed precedence: (a AND b) OR c
+gate -> next [condition="outcome=success && context.ready=true || context.override"]
+```
+
+## Agent transitions
+
+Agent and prompt nodes can influence which edge is taken by including a JSON object in their response with routing directives. Arc scans the LLM output for the last JSON object containing any of these fields:
+
+```json
+{
+  "preferred_next_label": "fix",
+  "suggested_next_ids": ["implement", "review"],
+  "context_updates": { "tests_passed": true }
+}
+```
+
+| Field | Effect |
+|---|---|
+| `preferred_next_label` | Matched against edge labels (same as human gate selection) |
+| `suggested_next_ids` | Ordered list of preferred target node IDs |
+| `context_updates` | Key-value pairs merged into the run context for downstream conditions |
+
+Arc automatically scans LLM output for these JSON objects — no special configuration is needed. However, you do need to instruct the LLM to emit the JSON in your prompt. For example:
+
+```dot
+review [
+    label="Review",
+    shape=tab,
+    prompt="Review the implementation for correctness and \
+        code quality. If changes are needed, respond with: \
+        {\"preferred_next_label\": \"fix\"}. If everything \
+        looks good, respond with: \
+        {\"preferred_next_label\": \"approve\"}."
+]
+
+review -> fix     [label="Fix"]
+review -> approve [label="Approve"]
+```
+
+The LLM's natural language response can contain other text — Arc finds the last JSON object with a recognized routing field and extracts the directives from it.
+
+## Human gate transitions
+
+Human gates use edge labels to present options to the user. The selected label becomes the `preferred_label` in the outcome, and Arc matches it to the corresponding edge:
+
+```dot
+approve [shape=hexagon, label="Approve Plan"]
+
+approve -> implement [label="[A] Approve"]
+approve -> plan      [label="[R] Revise"]
+approve -> skip      [label="[S] Skip"]
+```
+
+The `[A]`, `[R]`, `[S]` prefixes are keyboard accelerators — Arc strips them when matching, so the user can type just the letter.
+
+## Unconditional edges
+
+An edge without a `condition` attribute always matches. When a node has a single outgoing edge, it doesn't need a condition:
+
+```dot
+start -> plan -> implement -> exit
+```
+
+When mixing conditional and unconditional edges, conditional matches take priority. An unconditional edge acts as the default fallback:
+
+```dot
+gate -> fast_path [condition="outcome=success"]
+gate -> slow_path
+```
+
+## Weight tiebreaking
+
+When multiple edges match (e.g. two unconditional edges), `weight` determines the winner. Higher weight wins:
+
+```dot
+node -> preferred [weight=10]
+node -> fallback  [weight=1]
+```
+
+If weights are equal, the edge with the lexicographically first target node ID is chosen. This makes the behavior fully deterministic.

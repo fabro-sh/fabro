@@ -3,3 +3,89 @@ title: "How Arc Works"
 description: "Understand the Arc architecture and execution model"
 ---
 
+Arc is a workflow engine that reads a graph definition, executes nodes one at a time (or in parallel), and uses edge selection rules to decide what happens next. Here's the end-to-end flow.
+
+<Frame>
+  <img src="/images/how-arc-works.svg" alt="How Arc works: author-time inputs flow into the workflow engine, which dispatches to handlers that interact with LLMs, sandboxes, and humans" />
+</Frame>
+
+## Author time
+
+You provide three inputs:
+
+1. **Workflow graph** (`.dot`) — A Graphviz DOT file defining nodes, edges, and their attributes. This is the core of what Arc executes. See [Workflows](/core-concepts/workflows).
+2. **Run config** (`.toml`, optional) — Overrides for the default model, sandbox provider, setup commands, and variables. See [Run Configuration](/execution/run-configuration).
+3. **API keys** (`.env`) — Provider credentials for LLM APIs. See [Quick Start](/getting-started/quick-start).
+
+## Parse and validate
+
+When you run `arc run start`, Arc:
+
+1. Parses the DOT file into an in-memory graph of nodes and edges
+2. Validates the graph structure (exactly one start node, one exit node, all edges point to valid nodes)
+3. Applies the [model stylesheet](/workflows/stylesheets) to resolve which LLM model each node uses
+4. Merges run config defaults with CLI flags (CLI flags override the config, config overrides graph defaults)
+
+## The execution loop
+
+The engine walks the graph starting from the start node. For each node it:
+
+1. **Resolves context** — Assembles the node's input from prior stage outputs, run context, and the workflow goal. The [fidelity](/workflows/stages-and-nodes#agent) setting controls how much prior context is included.
+2. **Dispatches to a handler** — Each [node type](/workflows/stages-and-nodes) has a handler: the agent handler runs an LLM tool loop, the command handler runs a shell script, the human handler waits for input, and so on.
+3. **Collects the outcome** — The handler returns a status (`success`, `fail`, `partial_success`), optional routing directives, and any context updates.
+4. **Selects the next edge** — Arc evaluates outgoing edges using conditions, labels, and weights to pick the next node. See [Transitions](/workflows/transitions).
+5. **Checkpoints** — After each stage, Arc writes a checkpoint so the run can be resumed if interrupted.
+
+This loop repeats until execution reaches the exit node or an unrecoverable error occurs.
+
+## Retries and error handling
+
+When a node fails, Arc consults its [retry policy](/workflows/stages-and-nodes#common-node-attributes). If retries remain, the node re-executes with exponential backoff. If all retries are exhausted, the failure propagates to edge selection — a `condition="outcome=fail"` edge can route to a fix node, creating a recovery loop.
+
+For workflows with loops, Arc tracks failure signatures to detect infinite retry cycles. If the same failure repeats beyond the configured limit, the workflow aborts rather than looping forever.
+
+## Goal gates
+
+Before completing, Arc checks all nodes marked with `goal_gate=true`. If any goal gate node didn't succeed, the workflow fails — even though execution reached the exit node. This ensures critical quality checks can't be skipped by routing around them.
+
+## Parallel execution
+
+When the engine hits a [parallel fan-out node](/workflows/stages-and-nodes#parallel-fan-out), it spawns concurrent branches, each with an isolated copy of the context. A [merge node](/workflows/stages-and-nodes#merge-fan-in) collects the results according to the join policy before the workflow continues on a single path.
+
+## Sandboxes
+
+Node handlers execute tools (bash commands, file edits) inside a **sandbox**. Arc supports three sandbox modes:
+
+| Sandbox | Description |
+|---|---|
+| `local` | Tools run directly on the host machine (default) |
+| `docker` | Tools run inside a Docker container |
+| `daytona` | Tools run in a cloud sandbox with SSH access |
+
+The sandbox is configured per-run via CLI flags (`--sandbox docker`) or the run config TOML.
+
+## Events and observability
+
+Every significant action — stage starts, LLM calls, tool invocations, edge selections, stage completions — is emitted as a structured event. These events power:
+
+- The **web UI** for real-time run monitoring
+- **Retrospectives** generated automatically after each run
+- **DuckDB queries** via `arc insights` for SQL-based analysis across runs
+
+See [Insights](/execution/insights) for more on querying run data.
+
+## Resuming runs
+
+Because Arc checkpoints after every stage, interrupted runs can be resumed from where they left off:
+
+```bash
+arc run start --resume path/to/checkpoint.json
+```
+
+Or resume from a git run branch:
+
+```bash
+arc run start --run-branch arc/runs/abc123
+```
+
+The engine restores the full context, node visit counts, and retry state, then continues execution from the next node.

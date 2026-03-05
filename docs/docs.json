@@ -36,7 +36,6 @@
             "group": "Defining Workflows",
             "icon": "diagram-project",
             "pages": [
-              "workflows/ingestion",
               "workflows/stages-and-nodes",
               "workflows/transitions",
               "workflows/variables",

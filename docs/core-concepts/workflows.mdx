@@ -3,3 +3,134 @@ title: "Workflows"
 description: "Core workflow concepts in Arc"
 ---
 
+A workflow is a directed graph that defines a repeatable process for AI agents, shell commands, and human decisions. Unlike a DAG (directed acyclic graph), an Arc workflow can and often does include loops — for example, implement-test-fix cycles that repeat until tests pass. You write workflows in [Graphviz DOT](/reference/dot-language), check them into version control, and run them with `arc run start`.
+
+## Anatomy of a workflow
+
+Every workflow is a `digraph` with a `goal`, a `start` node, an `exit` node, and one or more processing nodes connected by edges:
+
+<Frame>
+  <img src="/images/anatomy-workflow.svg" alt="Simple workflow: Start → Scan Files → Analyze → Exit" />
+</Frame>
+
+```dot
+digraph MyWorkflow {
+    graph [goal="Describe the project"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    scan    [label="Scan Files", shape=parallelogram, script="find . -maxdepth 2 -type f | head -30"]
+    analyze [label="Analyze", prompt="Review the file listing. Summarize the project structure.", shape=tab]
+
+    start -> scan -> analyze -> exit
+}
+```
+
+The `goal` attribute describes what the workflow accomplishes. Arc uses it to guide agent behavior and generate retrospectives.
+
+## Key node types
+
+Each node's Graphviz **shape** determines how it executes. The three most important types are:
+
+**Agents** (default `box` shape) run an LLM with access to tools — bash, file editing, sub-agents — looping autonomously until the task is complete:
+
+```dot
+implement [label="Implement", prompt="Read plan.md and implement every step."]
+```
+
+**Commands** (`parallelogram`) run shell scripts and capture output for downstream nodes:
+
+```dot
+validate [label="Run Tests", shape=parallelogram, script="cargo test 2>&1 || true"]
+```
+
+**Human gates** (`hexagon`) pause the workflow and wait for a person to choose a path. Edge labels define the options:
+
+```dot
+approve [shape=hexagon, label="Approve Plan"]
+
+approve -> implement [label="[A] Approve"]
+approve -> plan      [label="[R] Revise"]
+```
+
+Arc supports additional node types for one-shot prompts, conditional branching, parallel fan-out/fan-in, and more. See [Stages and Nodes](/workflows/stages-and-nodes) for the full reference.
+
+## Branching and loops
+
+<Frame>
+  <img src="/images/branch-loop-workflow.svg" alt="Branching and loop workflow" />
+</Frame>
+
+Edges can have **conditions** that route execution based on outcomes:
+
+```dot
+gate [shape=diamond, label="Tests passing?"]
+
+gate -> exit      [label="Pass", condition="outcome=success"]
+gate -> implement [label="Fix"]
+```
+
+Loops are natural — just point an edge back to an earlier node. Use `max_visits` on a node to prevent infinite loops:
+
+```dot
+fix [label="Fix Failures", prompt="Fix the failing tests.", max_visits=3]
+```
+
+## Parallel execution
+
+<Frame>
+  <img src="/images/parallel-workflow.svg" alt="Parallel fan-out and merge workflow" />
+</Frame>
+
+Fan out to run branches concurrently, then merge the results:
+
+```dot
+fork [label="Fan Out", shape=component]
+merge [label="Merge", shape=tripleoctagon]
+
+fork -> security
+fork -> architecture
+fork -> quality
+security    -> merge
+architecture -> merge
+quality     -> merge
+merge -> report -> exit
+```
+
+## Model stylesheets
+
+Assign models to nodes using CSS-like selectors with increasing specificity:
+
+```
+*            { llm_model: claude-haiku-4-5; }     /* all nodes */
+.coding      { llm_model: claude-sonnet-4-5; }    /* nodes with class="coding" */
+#review      { llm_model: gemini-3.1-pro-preview; } /* node with id "review" */
+```
+
+Selectors cascade by specificity: `*` (0) < `shape` (1) < `.class` (2) < `#id` (3). Explicit node attributes always override stylesheets. See [Model Stylesheets](/workflows/stylesheets) for details.
+
+## Goal gates
+
+Mark critical nodes with `goal_gate=true`. The workflow fails if any goal gate doesn't succeed — even if execution reaches the exit node:
+
+```dot
+validate [label="Validate", prompt="Run the test suite and verify all tests pass.", goal_gate=true]
+```
+
+## Running a workflow
+
+From the CLI:
+
+```bash
+arc run start workflow.dot
+```
+
+Or from a [run config TOML](/execution/run-configuration) for repeatable, parameterized runs:
+
+```bash
+arc run start run.toml
+```
+
+See the [Quick Start](/getting-started/quick-start) to try it out, or browse the [example workflows](/examples/implement-feature) for real-world patterns.
