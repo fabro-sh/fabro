@@ -12,19 +12,6 @@ pub enum DispatchAction {
     Ignored,
 }
 
-impl PartialEq for DispatchAction {
-    fn eq(&self, other: &Self) -> bool {
-        matches!(
-            (self, other),
-            (Self::Connected, Self::Connected)
-                | (Self::Reconnect, Self::Reconnect)
-                | (Self::Ignored, Self::Ignored)
-        )
-    }
-}
-
-impl Eq for DispatchAction {}
-
 pub fn dispatch(envelope: &SocketEnvelope, thread_registry: &ThreadRegistry) -> DispatchAction {
     match classify_envelope(envelope) {
         SocketEventKind::Hello => DispatchAction::Connected,
@@ -74,7 +61,7 @@ mod tests {
             payload: None,
         };
         let action = dispatch(&envelope, &registry);
-        assert_eq!(action, DispatchAction::Connected);
+        assert!(matches!(action, DispatchAction::Connected));
     }
 
     #[test]
@@ -116,7 +103,7 @@ mod tests {
             })),
         };
         let action = dispatch(&envelope, &registry);
-        assert_eq!(action, DispatchAction::Ignored);
+        assert!(matches!(action, DispatchAction::Ignored));
     }
 
     #[test]
@@ -128,7 +115,7 @@ mod tests {
             payload: None,
         };
         let action = dispatch(&envelope, &registry);
-        assert_eq!(action, DispatchAction::Ignored);
+        assert!(matches!(action, DispatchAction::Ignored));
     }
 
     #[test]
@@ -140,7 +127,7 @@ mod tests {
             payload: None,
         };
         let action = dispatch(&envelope, &registry);
-        assert_eq!(action, DispatchAction::Reconnect);
+        assert!(matches!(action, DispatchAction::Reconnect));
     }
 
     #[test]
@@ -154,7 +141,7 @@ mod tests {
             })),
         };
         let action = dispatch(&envelope, &registry);
-        assert_eq!(action, DispatchAction::Ignored);
+        assert!(matches!(action, DispatchAction::Ignored));
     }
 
     #[test]
@@ -205,7 +192,7 @@ mod tests {
             })),
         };
         let action = dispatch(&envelope, &registry);
-        assert_eq!(action, DispatchAction::Ignored);
+        assert!(matches!(action, DispatchAction::Ignored));
     }
 
     #[test]
@@ -217,6 +204,6 @@ mod tests {
             payload: None,
         };
         let action = dispatch(&envelope, &registry);
-        assert_eq!(action, DispatchAction::Ignored);
+        assert!(matches!(action, DispatchAction::Ignored));
     }
 }

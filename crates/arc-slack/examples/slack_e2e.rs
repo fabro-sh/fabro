@@ -166,28 +166,21 @@ async fn main() {
 
     eprintln!("Connecting to Slack Socket Mode...");
 
-    let wss_url = connection::open_socket_url(&app_token)
+    let slack_client = SlackClient::new(bot_token);
+    let wss_url = connection::open_socket_url(slack_client.http(), &app_token)
         .await
         .expect("Failed to open socket URL");
 
-    let slack_client = SlackClient::new(bot_token.clone());
     let interviewer = Arc::new(WebInterviewer::new());
     let thread_registry = Arc::new(ThreadRegistry::new());
 
     // Start the event loop in the background
     let interviewer_for_loop = Arc::clone(&interviewer);
     let thread_registry_for_loop = Arc::clone(&thread_registry);
-    let slack_client_for_loop = SlackClient::new(bot_token);
     tokio::spawn(async move {
-        connection::run_event_loop(
-            &wss_url,
-            &interviewer_for_loop,
-            &thread_registry_for_loop,
-            &slack_client_for_loop,
-            None,
-        )
-        .await
-        .ok();
+        connection::run_event_loop(&wss_url, &interviewer_for_loop, &thread_registry_for_loop)
+            .await
+            .ok();
     });
 
     // Wait for the socket to connect

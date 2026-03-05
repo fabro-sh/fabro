@@ -10,8 +10,9 @@ pub struct PostedMessage {
     pub ts: String,
 }
 
+#[derive(Clone)]
 pub struct SlackClient {
-    pub bot_token: String,
+    bot_token: String,
     http: Client,
 }
 
@@ -21,6 +22,10 @@ impl SlackClient {
             bot_token,
             http: Client::new(),
         }
+    }
+
+    pub fn http(&self) -> &Client {
+        &self.http
     }
 
     pub async fn post_message(
@@ -70,37 +75,29 @@ impl SlackClient {
             .await
             .map_err(|e| SlackApiError::Http(e.to_string()))?;
 
-        if json["ok"].as_bool() != Some(true) {
-            let error = json["error"].as_str().unwrap_or("unknown_error");
-            return Err(SlackApiError::Api(error.to_string()));
-        }
-
+        check_ok(&json)?;
         Ok(())
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SlackApiError {
+    #[error("Slack HTTP error: {0}")]
     Http(String),
+    #[error("Slack API error: {0}")]
     Api(String),
 }
 
-impl std::fmt::Display for SlackApiError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Http(e) => write!(f, "Slack HTTP error: {e}"),
-            Self::Api(e) => write!(f, "Slack API error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for SlackApiError {}
-
-pub fn parse_post_message_response(response: &Value) -> Result<PostedMessage, SlackApiError> {
+fn check_ok(response: &Value) -> Result<(), SlackApiError> {
     if response["ok"].as_bool() != Some(true) {
         let error = response["error"].as_str().unwrap_or("unknown_error");
         return Err(SlackApiError::Api(error.to_string()));
     }
+    Ok(())
+}
+
+pub fn parse_post_message_response(response: &Value) -> Result<PostedMessage, SlackApiError> {
+    check_ok(response)?;
     let channel_id = response["channel"]
         .as_str()
         .ok_or_else(|| SlackApiError::Api("missing channel in response".to_string()))?;
@@ -114,10 +111,7 @@ pub fn parse_post_message_response(response: &Value) -> Result<PostedMessage, Sl
 }
 
 pub fn parse_wss_url(response: &Value) -> Result<String, SlackApiError> {
-    if response["ok"].as_bool() != Some(true) {
-        let error = response["error"].as_str().unwrap_or("unknown_error");
-        return Err(SlackApiError::Api(error.to_string()));
-    }
+    check_ok(response)?;
     response["url"]
         .as_str()
         .map(|s| s.to_string())
@@ -146,12 +140,6 @@ fn build_update_message_body(channel: &str, ts: &str, blocks: &[Value]) -> Value
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn new_client_stores_token() {
-        let client = SlackClient::new("xoxb-test-token".to_string());
-        assert_eq!(client.bot_token, "xoxb-test-token");
-    }
 
     #[test]
     fn post_message_request_body_format() {

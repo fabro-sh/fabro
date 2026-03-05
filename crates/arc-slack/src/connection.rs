@@ -10,24 +10,15 @@ use crate::dispatch::{dispatch, DispatchAction};
 use crate::socket::{SocketAck, SocketEnvelope};
 use crate::threads::ThreadRegistry;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
+    #[error("WebSocket error: {0}")]
     WebSocket(String),
+    #[error("Protocol error: {0}")]
     Protocol(String),
-    Api(SlackApiError),
+    #[error("API error: {0}")]
+    Api(#[from] SlackApiError),
 }
-
-impl std::fmt::Display for ConnectionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::WebSocket(e) => write!(f, "WebSocket error: {e}"),
-            Self::Protocol(e) => write!(f, "Protocol error: {e}"),
-            Self::Api(e) => write!(f, "API error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for ConnectionError {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ProcessOutcome {
@@ -65,8 +56,10 @@ pub fn process_message(
 }
 
 /// Fetch a WebSocket URL from Slack's `apps.connections.open` endpoint.
-pub async fn open_socket_url(app_token: &str) -> Result<String, ConnectionError> {
-    let http = reqwest::Client::new();
+pub async fn open_socket_url(
+    http: &reqwest::Client,
+    app_token: &str,
+) -> Result<String, ConnectionError> {
     let resp = http
         .post("https://slack.com/api/apps.connections.open")
         .bearer_auth(app_token)
@@ -89,8 +82,6 @@ pub async fn run_event_loop(
     wss_url: &str,
     interviewer: &Arc<WebInterviewer>,
     thread_registry: &ThreadRegistry,
-    _slack_client: &SlackClient,
-    _default_channel: Option<&str>,
 ) -> Result<(), ConnectionError> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(wss_url)
         .await
@@ -157,17 +148,16 @@ pub async fn run_event_loop(
 
 /// Top-level runner: connects, runs the event loop, and reconnects on disconnect.
 pub async fn run(
+    slack_client: &SlackClient,
     app_token: &str,
     interviewer: Arc<WebInterviewer>,
     thread_registry: &ThreadRegistry,
-    slack_client: &SlackClient,
-    default_channel: Option<&str>,
 ) {
     let mut backoff = std::time::Duration::from_secs(1);
     let max_backoff = std::time::Duration::from_secs(30);
 
     loop {
-        let wss_url = match open_socket_url(app_token).await {
+        let wss_url = match open_socket_url(slack_client.http(), app_token).await {
             Ok(url) => {
                 backoff = std::time::Duration::from_secs(1);
                 url
@@ -180,15 +170,7 @@ pub async fn run(
             }
         };
 
-        match run_event_loop(
-            &wss_url,
-            &interviewer,
-            thread_registry,
-            slack_client,
-            default_channel,
-        )
-        .await
-        {
+        match run_event_loop(&wss_url, &interviewer, thread_registry).await {
             Ok(()) => {
                 info!("Event loop ended, reconnecting...");
                 backoff = std::time::Duration::from_secs(1);
@@ -217,7 +199,7 @@ mod tests {
         let (ack, outcome, action) = process_message(text, &registry());
         assert!(ack.is_none());
         assert_eq!(outcome, ProcessOutcome::Continue);
-        assert_eq!(action, DispatchAction::Connected);
+        assert!(matches!(action, DispatchAction::Connected));
     }
 
     #[test]
@@ -256,7 +238,7 @@ mod tests {
         let (ack, outcome, action) = process_message(text, &registry());
         assert!(ack.is_none());
         assert_eq!(outcome, ProcessOutcome::Reconnect);
-        assert_eq!(action, DispatchAction::Reconnect);
+        assert!(matches!(action, DispatchAction::Reconnect));
     }
 
     #[test]
@@ -265,7 +247,7 @@ mod tests {
         let (ack, outcome, action) = process_message(text, &registry());
         assert!(ack.is_none());
         assert_eq!(outcome, ProcessOutcome::Continue);
-        assert_eq!(action, DispatchAction::Ignored);
+        assert!(matches!(action, DispatchAction::Ignored));
     }
 
     #[test]
@@ -281,7 +263,7 @@ mod tests {
         assert!(ack.is_some());
         assert!(ack.unwrap().contains("env-99"));
         assert_eq!(outcome, ProcessOutcome::Continue);
-        assert_eq!(action, DispatchAction::Ignored);
+        assert!(matches!(action, DispatchAction::Ignored));
     }
 
     #[test]
