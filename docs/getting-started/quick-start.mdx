@@ -3,3 +3,103 @@ title: "Quick Start"
 description: "Get up and running with Arc"
 ---
 
+## Prerequisites
+
+- [Rust](https://rustup.rs/) (latest stable)
+- [Bun](https://bun.sh/) (for the web frontend)
+- At least one LLM API key (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`)
+
+## Clone and build
+
+```bash
+git clone https://github.com/qltysh/arc.git
+cd arc
+cargo build --release
+```
+
+## Configure API keys
+
+Copy the example environment file and fill in your API keys:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and add at least one LLM provider key:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...
+export GEMINI_API_KEY=AI...
+```
+
+<Note>
+You only need one provider key to get started. Add more to enable multi-model workflows.
+</Note>
+
+## Run the setup wizard
+
+The interactive setup wizard validates your environment and walks you through configuration:
+
+```bash
+./target/release/arc setup
+```
+
+## Verify your installation
+
+```bash
+./target/release/arc doctor --live
+```
+
+This checks that your API keys, tools, and environment are working correctly.
+
+## Run a workflow from the CLI
+
+Try the hello world workflow:
+
+```bash
+./target/release/arc run start demo/01-hello.dot
+```
+
+Or a multi-step plan-approve-implement workflow with a human approval gate:
+
+```bash
+./target/release/arc run start demo/10-plan-implement.dot
+```
+
+## Start the API server
+
+The API server exposes a REST API for launching and managing workflow runs:
+
+```bash
+./target/release/arc serve
+```
+
+This starts the server on `http://localhost:3000`. To try it with demo data (no API keys required):
+
+```bash
+./target/release/arc serve --demo
+```
+
+## Start the web frontend
+
+In a separate terminal, install dependencies and start the React dev server:
+
+```bash
+cd apps/arc-web
+bun install
+bun run dev
+```
+
+The web UI is available at `http://localhost:5173` and connects to the API server on port 3000.
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Why Arc?" icon="lightbulb" href="/getting-started/why-arc">
+    Understand the problems Arc solves.
+  </Card>
+  <Card title="Workflows" icon="diagram-project" href="/core-concepts/workflows">
+    Learn how to define workflow graphs in DOT.
+  </Card>
+</Columns>
