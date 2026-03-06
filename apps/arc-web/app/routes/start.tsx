@@ -173,7 +173,7 @@ export default function Start({ loaderData }: Route.ComponentProps) {
                   </div>
                 )}
 
-                <div className="flex items-center gap-3">
+                <div className="ml-auto flex items-center gap-3">
                   <span className="text-xs text-fg-muted select-none">
                     <kbd className="font-mono">Enter</kbd> to submit
                   </span>
