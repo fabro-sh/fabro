@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -52,7 +51,7 @@ pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &s
         Provider::Gemini => format!("gemini -o json --yolo{model_flag} < {prompt_file}"),
         // --dangerously-skip-permissions: bypass all permission checks (required for non-interactive use).
         // CLAUDECODE= unset to allow running inside a Claude Code session.
-        Provider::Anthropic => format!("CLAUDECODE= claude -p --output-format stream-json --dangerously-skip-permissions{model_flag} < {prompt_file}"),
+        Provider::Anthropic => format!("CLAUDECODE= claude -p --verbose --output-format stream-json --dangerously-skip-permissions{model_flag} < {prompt_file}"),
     }
 }
 
@@ -318,15 +317,33 @@ impl CodergenBackend for AgentCliBackend {
             let _ = tokio::fs::write(stage_dir.join("provider_used.json"), json).await;
         }
 
-        // Forward provider API keys so CLI tools can authenticate
-        let env_vars: HashMap<String, String> = provider
+        // Forward provider API key so the CLI tool can authenticate.
+        // Written to a temp file and sourced, since Daytona's exec API doesn't
+        // support env vars and inline export would leak keys in logs.
+        let env_file = "/tmp/arc_cli_env.sh";
+        let env_lines: Vec<String> = provider
             .api_key_env_vars()
             .iter()
-            .filter_map(|name| std::env::var(name).ok().map(|val| (name.to_string(), val)))
+            .filter_map(|name| {
+                std::env::var(name)
+                    .ok()
+                    .map(|val| format!("export {name}='{val}'"))
+            })
             .collect();
+        if !env_lines.is_empty() {
+            sandbox
+                .write_file(env_file, &env_lines.join("\n"))
+                .await
+                .map_err(|e| ArcError::handler(format!("Failed to write env file: {e}")))?;
+        }
+        let full_command = if env_lines.is_empty() {
+            command.clone()
+        } else {
+            format!(". {env_file} && {command}")
+        };
 
         let result = sandbox
-            .exec_command(&command, 600_000, None, Some(&env_vars), None)
+            .exec_command(&full_command, 600_000, None, None, None)
             .await
             .map_err(|e| ArcError::handler(format!("CLI command failed: {e}")))?;
 
