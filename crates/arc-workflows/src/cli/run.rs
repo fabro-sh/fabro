@@ -459,7 +459,7 @@ pub async fn run_command(
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to create Daytona client: {e}"))?;
             let config = daytona_config.clone().unwrap_or_default();
-            let mut env = crate::daytona_sandbox::DaytonaSandbox::new(daytona_client, config, github_app.clone());
+            let mut env = crate::daytona_sandbox::DaytonaSandbox::new(daytona_client, config, github_app);
             let emitter_cb = Arc::clone(&emitter);
             env.set_event_callback(Arc::new(move |event| {
                 emitter_cb.emit(&crate::event::WorkflowRunEvent::Sandbox { event });

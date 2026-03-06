@@ -66,6 +66,7 @@ pub fn sign_app_jwt(app_id: &str, private_key_pem: &str) -> Result<String, Strin
 
 /// Check whether a GitHub repository is public using the App JWT.
 pub async fn is_repo_public(
+    client: &reqwest::Client,
     jwt: &str,
     owner: &str,
     repo: &str,
@@ -77,7 +78,6 @@ pub async fn is_repo_public(
     }
 
     let url = format!("{base_url}/repos/{owner}/{repo}");
-    let client = reqwest::Client::new();
     let response = client
         .get(&url)
         .header("Authorization", format!("Bearer {jwt}"))
@@ -104,6 +104,7 @@ pub async fn is_repo_public(
 /// Uses the App JWT to find the installation for `owner/repo`, then requests
 /// a token scoped to `contents: read` on that single repository.
 pub async fn create_installation_access_token(
+    client: &reqwest::Client,
     jwt: &str,
     owner: &str,
     repo: &str,
@@ -118,8 +119,6 @@ pub async fn create_installation_access_token(
     struct AccessToken {
         token: String,
     }
-
-    let client = reqwest::Client::new();
 
     // Step 1: Find the installation for this repo
     let install_url = format!("{base_url}/repos/{owner}/{repo}/installation");
@@ -228,13 +227,14 @@ pub async fn resolve_clone_credentials(
     repo: &str,
 ) -> Result<(Option<String>, Option<String>), String> {
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
+    let client = reqwest::Client::new();
 
-    if is_repo_public(&jwt, owner, repo, GITHUB_API_BASE_URL).await? {
+    if is_repo_public(&client, &jwt, owner, repo, GITHUB_API_BASE_URL).await? {
         return Ok((None, None));
     }
 
     let token =
-        create_installation_access_token(&jwt, owner, repo, GITHUB_API_BASE_URL).await?;
+        create_installation_access_token(&client, &jwt, owner, repo, GITHUB_API_BASE_URL).await?;
     Ok((
         Some("x-access-token".to_string()),
         Some(token),
@@ -365,7 +365,8 @@ mod tests {
             .create_async()
             .await;
 
-        let result = is_repo_public("test-jwt", "owner", "repo", &server.url()).await;
+        let client = reqwest::Client::new();
+        let result = is_repo_public(&client, "test-jwt", "owner", "repo", &server.url()).await;
         assert_eq!(result.unwrap(), true);
         mock.assert_async().await;
     }
@@ -380,7 +381,8 @@ mod tests {
             .create_async()
             .await;
 
-        let result = is_repo_public("test-jwt", "owner", "repo", &server.url()).await;
+        let client = reqwest::Client::new();
+        let result = is_repo_public(&client, "test-jwt", "owner", "repo", &server.url()).await;
         assert_eq!(result.unwrap(), false);
         mock.assert_async().await;
     }
@@ -394,7 +396,8 @@ mod tests {
             .create_async()
             .await;
 
-        let result = is_repo_public("test-jwt", "owner", "repo", &server.url()).await;
+        let client = reqwest::Client::new();
+        let result = is_repo_public(&client, "test-jwt", "owner", "repo", &server.url()).await;
         assert_eq!(result.unwrap(), false);
         mock.assert_async().await;
     }
@@ -426,8 +429,9 @@ mod tests {
             .create_async()
             .await;
 
+        let client = reqwest::Client::new();
         let token =
-            create_installation_access_token("test-jwt", "owner", "repo", &server.url())
+            create_installation_access_token(&client, "test-jwt", "owner", "repo", &server.url())
                 .await
                 .unwrap();
         assert_eq!(token, "ghs_xxx");
@@ -449,7 +453,8 @@ mod tests {
             .create_async()
             .await;
 
-        let err = create_installation_access_token("jwt", "owner", "repo", &server.url())
+        let client = reqwest::Client::new();
+        let err = create_installation_access_token(&client, "jwt", "owner", "repo", &server.url())
             .await
             .unwrap_err();
         assert!(err.contains("not installed"), "got: {err}");
@@ -465,7 +470,8 @@ mod tests {
             .create_async()
             .await;
 
-        let err = create_installation_access_token("jwt", "owner", "repo", &server.url())
+        let client = reqwest::Client::new();
+        let err = create_installation_access_token(&client, "jwt", "owner", "repo", &server.url())
             .await
             .unwrap_err();
         assert!(err.contains("suspended"), "got: {err}");
@@ -486,7 +492,8 @@ mod tests {
             .create_async()
             .await;
 
-        let err = create_installation_access_token("jwt", "owner", "repo", &server.url())
+        let client = reqwest::Client::new();
+        let err = create_installation_access_token(&client, "jwt", "owner", "repo", &server.url())
             .await
             .unwrap_err();
         assert!(err.contains("does not have access"), "got: {err}");
@@ -502,7 +509,8 @@ mod tests {
             .create_async()
             .await;
 
-        let err = create_installation_access_token("jwt", "owner", "repo", &server.url())
+        let client = reqwest::Client::new();
+        let err = create_installation_access_token(&client, "jwt", "owner", "repo", &server.url())
             .await
             .unwrap_err();
         assert!(err.contains("authentication failed"), "got: {err}");

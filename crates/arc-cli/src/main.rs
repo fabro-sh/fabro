@@ -83,10 +83,14 @@ fn build_github_app_credentials(
     config: &arc_api::server_config::ServerConfig,
 ) -> Option<arc_workflows::github_app::GitHubAppCredentials> {
     let app_id = config.git.app_id.as_ref()?;
-    let key_b64 = std::env::var("GITHUB_APP_PRIVATE_KEY").ok()?;
-    let pem_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key_b64)
-        .ok()?;
-    let private_key_pem = String::from_utf8(pem_bytes).ok()?;
+    let raw = std::env::var("GITHUB_APP_PRIVATE_KEY").ok()?;
+    let private_key_pem = if raw.starts_with("-----") {
+        raw
+    } else {
+        let pem_bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &raw).ok()?;
+        String::from_utf8(pem_bytes).ok()?
+    };
     Some(arc_workflows::github_app::GitHubAppCredentials {
         app_id: app_id.clone(),
         private_key_pem,
