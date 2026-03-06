@@ -14,6 +14,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { Link } from "react-router";
 import { apiJson } from "../api-client";
+import { timeAgo, timeUntil } from "../lib/time";
 import type { PaginatedWorkflowList } from "@qltysh/arc-api-client";
 import type { Route } from "./+types/workflows";
 
@@ -110,10 +111,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     name: w.name,
     slug: w.slug,
     filename: w.filename,
-    lastRun: w.last_run?.label ?? "never",
+    lastRun: w.last_run?.ran_at ? timeAgo(w.last_run.ran_at) : "never",
     color: slugColorMap[w.slug] ?? "var(--color-teal-500)",
     schedule: w.schedule?.expression,
-    nextRun: w.schedule?.next_run,
+    nextRun: w.schedule?.next_run ? timeUntil(w.schedule.next_run) : undefined,
   }));
   return { workflows };
 }

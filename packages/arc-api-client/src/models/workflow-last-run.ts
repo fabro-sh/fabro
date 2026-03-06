@@ -19,8 +19,8 @@
  */
 export interface WorkflowLastRun {
     /**
-     * Human-readable relative timestamp.
+     * ISO 8601 timestamp of the most recent run.
      */
-    'label': string;
+    'ran_at': string;
 }
 

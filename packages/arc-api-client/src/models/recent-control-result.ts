@@ -31,7 +31,7 @@ export interface RecentControlResult {
     'workflow': WorkflowReference;
     'result': VerificationStatus;
     /**
-     * Human-readable relative timestamp of the evaluation.
+     * ISO 8601 timestamp of the evaluation.
      */
     'timestamp': string;
 }

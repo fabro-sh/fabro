@@ -56,6 +56,7 @@ import type {
   VerificationStatus,
 } from "../data/verifications";
 import { apiJson } from "../api-client";
+import { timeAgo } from "../lib/time";
 import type { VerificationDetailResponse } from "@qltysh/arc-api-client";
 import type { Route } from "./+types/verification-detail";
 
@@ -317,7 +318,7 @@ export default function VerificationDetail({ loaderData }: Route.ComponentProps)
                     <ResultIcon result={run.result} />
                   </td>
                   <td className="py-2.5 px-3 text-fg-muted">{run.workflow}</td>
-                  <td className="py-2.5 pl-3 pr-4 text-right text-fg-muted">{run.timestamp}</td>
+                  <td className="py-2.5 pl-3 pr-4 text-right text-fg-muted">{timeAgo(run.timestamp)}</td>
                 </tr>
               ))}
             </tbody>

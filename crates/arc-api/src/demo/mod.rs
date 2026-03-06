@@ -1104,6 +1104,7 @@ mod usage {
 }
 
 mod workflows {
+    use super::ts;
     use arc_types::*;
 
     pub fn list_items() -> Vec<WorkflowListItem> {
@@ -1112,28 +1113,28 @@ mod workflows {
                 name: "Fix Build".into(),
                 slug: "fix_build".into(),
                 filename: "fix_build.dot".into(),
-                last_run: Some(WorkflowLastRun { label: "2 hours ago".into() }),
+                last_run: Some(WorkflowLastRun { ran_at: ts("2025-09-15T12:00:00Z") }),
                 schedule: None,
             },
             WorkflowListItem {
                 name: "Implement Feature".into(),
                 slug: "implement".into(),
                 filename: "implement.dot".into(),
-                last_run: Some(WorkflowLastRun { label: "4 days ago".into() }),
+                last_run: Some(WorkflowLastRun { ran_at: ts("2025-09-11T10:00:00Z") }),
                 schedule: None,
             },
             WorkflowListItem {
                 name: "Sync Drift".into(),
                 slug: "sync_drift".into(),
                 filename: "sync_drift.dot".into(),
-                last_run: Some(WorkflowLastRun { label: "1 day ago".into() }),
+                last_run: Some(WorkflowLastRun { ran_at: ts("2025-09-14T14:00:00Z") }),
                 schedule: None,
             },
             WorkflowListItem {
                 name: "Expand Product".into(),
                 slug: "expand".into(),
                 filename: "expand.dot".into(),
-                last_run: Some(WorkflowLastRun { label: "2 weeks ago".into() }),
+                last_run: Some(WorkflowLastRun { ran_at: ts("2025-09-01T08:00:00Z") }),
                 schedule: None,
             },
         ]
@@ -1373,6 +1374,7 @@ disk = 10
 }
 
 mod verifications {
+    use super::ts;
     use arc_types::*;
 
     // ── Category definitions (name, question, controls) ─────────────────
@@ -1417,35 +1419,35 @@ mod verifications {
             run_title: "PR #312 \u{2014} Add OAuth2 PKCE flow",
             workflow: "code_review",
             result: VerificationStatus::Pass,
-            timestamp: "2h ago",
+            timestamp: "2025-09-15T12:00:00Z",
         },
         RecentResultDef {
             run_id: "run-046",
             run_title: "PR #311 \u{2014} Update rate limiter config",
             workflow: "code_review",
             result: VerificationStatus::Pass,
-            timestamp: "5h ago",
+            timestamp: "2025-09-15T09:00:00Z",
         },
         RecentResultDef {
             run_id: "run-044",
             run_title: "PR #309 \u{2014} Migrate to pnpm",
             workflow: "code_review",
             result: VerificationStatus::Pass,
-            timestamp: "1d ago",
+            timestamp: "2025-09-14T14:00:00Z",
         },
         RecentResultDef {
             run_id: "run-042",
             run_title: "PR #307 \u{2014} Fix session timeout",
             workflow: "fix_build",
             result: VerificationStatus::Pass,
-            timestamp: "2d ago",
+            timestamp: "2025-09-13T14:00:00Z",
         },
         RecentResultDef {
             run_id: "run-040",
             run_title: "PR #305 \u{2014} Add webhook retries",
             workflow: "code_review",
             result: VerificationStatus::Pass,
-            timestamp: "3d ago",
+            timestamp: "2025-09-12T14:00:00Z",
         },
     ];
 
@@ -1455,35 +1457,35 @@ mod verifications {
             run_title: "PR #312 \u{2014} Add OAuth2 PKCE flow",
             workflow: "code_review",
             result: VerificationStatus::Pass,
-            timestamp: "2h ago",
+            timestamp: "2025-09-15T12:00:00Z",
         },
         RecentResultDef {
             run_id: "run-046",
             run_title: "PR #311 \u{2014} Update rate limiter config",
             workflow: "code_review",
             result: VerificationStatus::Pass,
-            timestamp: "5h ago",
+            timestamp: "2025-09-15T09:00:00Z",
         },
         RecentResultDef {
             run_id: "run-044",
             run_title: "PR #309 \u{2014} Migrate to pnpm",
             workflow: "code_review",
             result: VerificationStatus::Fail,
-            timestamp: "1d ago",
+            timestamp: "2025-09-14T14:00:00Z",
         },
         RecentResultDef {
             run_id: "run-042",
             run_title: "PR #307 \u{2014} Fix session timeout",
             workflow: "fix_build",
             result: VerificationStatus::Pass,
-            timestamp: "2d ago",
+            timestamp: "2025-09-13T14:00:00Z",
         },
         RecentResultDef {
             run_id: "run-040",
             run_title: "PR #305 \u{2014} Add webhook retries",
             workflow: "code_review",
             result: VerificationStatus::Pass,
-            timestamp: "3d ago",
+            timestamp: "2025-09-12T14:00:00Z",
         },
     ];
 
@@ -1493,35 +1495,35 @@ mod verifications {
             run_title: "PR #312 \u{2014} Add OAuth2 PKCE flow",
             workflow: "code_review",
             result: VerificationStatus::Pass,
-            timestamp: "2h ago",
+            timestamp: "2025-09-15T12:00:00Z",
         },
         RecentResultDef {
             run_id: "run-046",
             run_title: "PR #311 \u{2014} Update rate limiter config",
             workflow: "code_review",
             result: VerificationStatus::Fail,
-            timestamp: "5h ago",
+            timestamp: "2025-09-15T09:00:00Z",
         },
         RecentResultDef {
             run_id: "run-044",
             run_title: "PR #309 \u{2014} Migrate to pnpm",
             workflow: "code_review",
             result: VerificationStatus::Pass,
-            timestamp: "1d ago",
+            timestamp: "2025-09-14T14:00:00Z",
         },
         RecentResultDef {
             run_id: "run-042",
             run_title: "PR #307 \u{2014} Fix session timeout",
             workflow: "fix_build",
             result: VerificationStatus::Pass,
-            timestamp: "2d ago",
+            timestamp: "2025-09-13T14:00:00Z",
         },
         RecentResultDef {
             run_id: "run-040",
             run_title: "PR #305 \u{2014} Add webhook retries",
             workflow: "code_review",
             result: VerificationStatus::Fail,
-            timestamp: "3d ago",
+            timestamp: "2025-09-12T14:00:00Z",
         },
     ];
 
@@ -1531,35 +1533,35 @@ mod verifications {
             run_title: "PR #312 \u{2014} Add OAuth2 PKCE flow",
             workflow: "code_review",
             result: VerificationStatus::Fail,
-            timestamp: "2h ago",
+            timestamp: "2025-09-15T12:00:00Z",
         },
         RecentResultDef {
             run_id: "run-046",
             run_title: "PR #311 \u{2014} Update rate limiter config",
             workflow: "code_review",
             result: VerificationStatus::Pass,
-            timestamp: "5h ago",
+            timestamp: "2025-09-15T09:00:00Z",
         },
         RecentResultDef {
             run_id: "run-044",
             run_title: "PR #309 \u{2014} Migrate to pnpm",
             workflow: "code_review",
             result: VerificationStatus::Fail,
-            timestamp: "1d ago",
+            timestamp: "2025-09-14T14:00:00Z",
         },
         RecentResultDef {
             run_id: "run-042",
             run_title: "PR #307 \u{2014} Fix session timeout",
             workflow: "fix_build",
             result: VerificationStatus::Fail,
-            timestamp: "2d ago",
+            timestamp: "2025-09-13T14:00:00Z",
         },
         RecentResultDef {
             run_id: "run-040",
             run_title: "PR #305 \u{2014} Add webhook retries",
             workflow: "code_review",
             result: VerificationStatus::Pass,
-            timestamp: "3d ago",
+            timestamp: "2025-09-12T14:00:00Z",
         },
     ];
 
@@ -2027,7 +2029,7 @@ mod verifications {
                 run: RunReference { id: r.run_id.into(), title: r.run_title.into() },
                 workflow: WorkflowReference { slug: r.workflow.into() },
                 result: r.result,
-                timestamp: r.timestamp.into(),
+                timestamp: ts(r.timestamp),
             })
             .collect()
     }
@@ -2420,14 +2422,14 @@ mod insights {
             HistoryEntry {
                 id: "h1".into(),
                 sql: "SELECT workflow_name, COUNT(*) FROM runs GROUP BY 1".into(),
-                timestamp: "2 min ago".into(),
+                timestamp: ts("2025-09-15T13:58:00Z"),
                 elapsed: 0.342,
                 row_count: 6,
             },
             HistoryEntry {
                 id: "h2".into(),
                 sql: "SELECT * FROM runs WHERE status = 'failed' LIMIT 100".into(),
-                timestamp: "8 min ago".into(),
+                timestamp: ts("2025-09-15T13:52:00Z"),
                 elapsed: 0.127,
                 row_count: 23,
             },
@@ -2435,7 +2437,7 @@ mod insights {
                 id: "h3".into(),
                 sql: "SELECT date_trunc('day', created_at) as d, COUNT(*) FROM runs GROUP BY 1"
                     .into(),
-                timestamp: "15 min ago".into(),
+                timestamp: ts("2025-09-15T13:45:00Z"),
                 elapsed: 0.531,
                 row_count: 30,
             },

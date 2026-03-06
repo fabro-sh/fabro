@@ -23,7 +23,7 @@ export interface WorkflowSchedule {
      */
     'expression': string;
     /**
-     * Human-readable relative timestamp of the next run.
+     * ISO 8601 timestamp of the next scheduled run.
      */
     'next_run'?: string;
 }

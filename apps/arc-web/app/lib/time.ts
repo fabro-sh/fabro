@@ -13,6 +13,20 @@ export function timeAgo(iso: string): string {
 }
 
 /**
+ * Format an ISO 8601 timestamp as a relative future time string (e.g. "in 2h", "in 3d").
+ */
+export function timeUntil(iso: string): string {
+  const seconds = Math.floor((new Date(iso).getTime() - Date.now()) / 1000);
+  if (seconds < 60) return "in <1m";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `in ${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `in ${days}d`;
+}
+
+/**
  * Return a human-readable date label for grouping (e.g. "Today", "Yesterday", "Previous 7 days").
  */
 function dateLabel(iso: string): string {

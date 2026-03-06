@@ -27,7 +27,7 @@ export interface HistoryEntry {
      */
     'sql': string;
     /**
-     * Human-readable relative timestamp of execution.
+     * ISO 8601 timestamp of execution.
      */
     'timestamp': string;
     /**

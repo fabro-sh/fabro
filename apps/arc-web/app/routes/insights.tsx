@@ -1,6 +1,7 @@
 import { Link, Outlet, useNavigate } from "react-router";
 import { PlusIcon } from "@heroicons/react/24/outline";
 import { apiJson } from "../api-client";
+import { timeAgo } from "../lib/time";
 import type { PaginatedSavedQueryList, PaginatedHistoryEntryList } from "@qltysh/arc-api-client";
 import type { Route } from "./+types/insights";
 
@@ -108,7 +109,7 @@ export default function InsightsLayout({ loaderData }: Route.ComponentProps) {
                     {entry.sql}
                   </span>
                   <span className="font-mono text-[10px] text-fg-muted">
-                    {entry.timestamp} · {entry.rowsReturned} rows
+                    {timeAgo(entry.timestamp)} · {entry.rowsReturned} rows
                   </span>
                 </button>
               ))}
