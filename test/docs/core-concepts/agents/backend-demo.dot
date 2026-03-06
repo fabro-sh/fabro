@@ -8,10 +8,7 @@ digraph BackendDemo {
     exit  [shape=Msquare, label="Exit"]
 
     // Line 47: CLI backend with explicit provider
-    // NOTE: backend="cli" requires the claude CLI installed in the sandbox.
-    // Using API backend for testing; the original snippet is:
-    //   implement [label="Implement", backend="cli", llm_provider="anthropic"]
-    implement [label="Implement", llm_provider="anthropic", prompt="Implement the plan."]
+    implement [label="Implement", backend="cli", llm_provider="anthropic"]
 
     // Line 95-96: Inline prompt
     plan [label="Plan", prompt="Analyze the codebase and write a step-by-step plan."]
