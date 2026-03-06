@@ -94,6 +94,12 @@ impl Default for WebConfig {
     }
 }
 
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct FeatureFlags {
+    #[serde(default)]
+    pub session_sandboxes: bool,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct ServerConfig {
     pub data_dir: Option<PathBuf>,
@@ -104,6 +110,8 @@ pub struct ServerConfig {
     pub api: ApiConfig,
     #[serde(default)]
     pub git: GitConfig,
+    #[serde(default)]
+    pub feature_flags: FeatureFlags,
     #[serde(flatten)]
     pub run_defaults: RunDefaults,
     #[serde(flatten)]
@@ -415,6 +423,20 @@ matcher = "agent_loop"
             config.hook_config.hooks[1].matcher.as_deref(),
             Some("agent_loop")
         );
+    }
+
+    #[test]
+    fn parse_feature_flags() {
+        let toml = "[feature_flags]\nsession_sandboxes = true";
+        let config: ServerConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.feature_flags.session_sandboxes, true);
+    }
+
+    #[test]
+    fn parse_feature_flags_defaults() {
+        let toml = "";
+        let config: ServerConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.feature_flags.session_sandboxes, false);
     }
 
     #[test]

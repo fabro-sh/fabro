@@ -1,2 +1,5 @@
 [api]
 base_url = "http://api:3000"
+
+[feature_flags]
+session_sandboxes = false

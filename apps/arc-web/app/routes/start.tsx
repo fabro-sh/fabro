@@ -20,7 +20,9 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { Link } from "react-router";
+import { timeAgo } from "../lib/time";
 import { apiJson } from "../api-client";
+import { getAppConfig } from "../lib/config.server";
 import type { PaginatedProjectList, PaginatedSessionGroupList } from "@qltysh/arc-api-client";
 import type { Route } from "./+types/start";
 
@@ -31,6 +33,7 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const { feature_flags } = getAppConfig();
   const [{ data: apiProjects }, { data: apiSessions }] = await Promise.all([
     apiJson<PaginatedProjectList>("/projects", { request }),
     apiJson<PaginatedSessionGroupList>("/sessions", { request }),
@@ -41,11 +44,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     sessions: g.sessions.map((s) => ({
       id: s.id,
       title: s.title,
-      repo: s.repo,
-      time: s.time,
+      created_at: s.created_at,
     })),
   }));
-  return { projects, sessionGroups };
+  return { projects, sessionGroups, feature_flags };
 }
 
 const branches = [
@@ -62,7 +64,7 @@ function BranchIcon({ className }: { className?: string }) {
   );
 }
 
-function SessionSidebar({ groups }: { groups: { label: string; sessions: { id: string; title: string; repo: string; time: string }[] }[] }) {
+function SessionSidebar({ groups }: { groups: { label: string; sessions: { id: string; title: string; created_at: string }[] }[] }) {
   return (
     <aside className="w-64 shrink-0 border-r border-line flex flex-col h-[calc(100vh-4rem)]">
       <div className="p-3">
@@ -86,8 +88,7 @@ function SessionSidebar({ groups }: { groups: { label: string; sessions: { id: s
                   >
                     <span className="truncate text-sm">{session.title}</span>
                     <span className="flex items-center gap-1.5 mt-0.5">
-                      <span className="font-mono text-[11px] text-teal-500">{session.repo}</span>
-                      <span className="text-[11px] text-fg-muted">{session.time}</span>
+                      <span className="text-[11px] text-fg-muted">{timeAgo(session.created_at)}</span>
                     </span>
                   </Link>
                 </li>
@@ -101,7 +102,7 @@ function SessionSidebar({ groups }: { groups: { label: string; sessions: { id: s
 }
 
 export default function Start({ loaderData }: Route.ComponentProps) {
-  const { projects, sessionGroups } = loaderData;
+  const { projects, sessionGroups, feature_flags } = loaderData;
   const [prompt, setPrompt] = useState("");
   const [project, setProject] = useState(projects[0]);
   const [branch, setBranch] = useState(branches[0]);
@@ -160,20 +161,22 @@ export default function Start({ loaderData }: Route.ComponentProps) {
               />
 
               <div className="absolute bottom-3 inset-x-3 flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <Picker
-                    value={project}
-                    onChange={setProject}
-                    options={projects}
-                    icon={<FolderIcon className="size-3.5 text-fg-muted" />}
-                  />
-                  <Picker
-                    value={branch}
-                    onChange={setBranch}
-                    options={branches}
-                    icon={<BranchIcon className="size-3.5 text-fg-muted" />}
-                  />
-                </div>
+                {feature_flags.session_sandboxes && (
+                  <div className="flex items-center gap-1.5">
+                    <Picker
+                      value={project}
+                      onChange={setProject}
+                      options={projects}
+                      icon={<FolderIcon className="size-3.5 text-fg-muted" />}
+                    />
+                    <Picker
+                      value={branch}
+                      onChange={setBranch}
+                      options={branches}
+                      icon={<BranchIcon className="size-3.5 text-fg-muted" />}
+                    />
+                  </div>
+                )}
 
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-fg-muted select-none">

@@ -19,6 +19,10 @@ interface GitConfig {
   client_id: string | null;
 }
 
+interface FeatureFlags {
+  session_sandboxes: boolean;
+}
+
 interface WebConfig {
   url: string;
   auth: AuthConfig;
@@ -28,6 +32,7 @@ export interface AppConfig {
   web: WebConfig;
   api: ApiConfig;
   git: GitConfig;
+  feature_flags: FeatureFlags;
 }
 
 const AUTH_DEFAULTS: AuthConfig = {
@@ -51,6 +56,10 @@ const GIT_DEFAULTS: GitConfig = {
   client_id: null,
 };
 
+const FEATURE_FLAGS_DEFAULTS: FeatureFlags = {
+  session_sandboxes: false,
+};
+
 export const ARC_CONFIG_PATH = join(homedir(), ".arc", "server.toml");
 
 function loadAppConfig(): AppConfig {
@@ -67,6 +76,7 @@ function loadAppConfig(): AppConfig {
   const rawWebAuth = (rawWeb.auth ?? {}) as Partial<AuthConfig>;
   const rawApi = (raw.api ?? {}) as Partial<ApiConfig>;
   const rawGit = (raw.git ?? {}) as Partial<GitConfig>;
+  const rawFeatureFlags = (raw.feature_flags ?? {}) as Partial<FeatureFlags>;
 
   const demo = process.env.ARC_DEMO === "1";
 
@@ -82,6 +92,7 @@ function loadAppConfig(): AppConfig {
       ? { ...API_DEFAULTS, ...rawApi, authentication_strategy: "insecure_disabled" }
       : { ...API_DEFAULTS, ...rawApi },
     git: { ...GIT_DEFAULTS, ...rawGit },
+    feature_flags: { ...FEATURE_FLAGS_DEFAULTS, ...rawFeatureFlags },
   };
 }
 
