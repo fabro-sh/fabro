@@ -272,34 +272,26 @@ pub fn resolve_thread_id(
 
 // --- Run directory helpers (spec 5.6) ---
 
-/// Write manifest.json at the start of a workflow run. Returns the manifest value.
-fn write_manifest(logs_root: &Path, graph: &Graph, config: &RunConfig) -> serde_json::Value {
+/// Write manifest.json at the start of a workflow run. Returns the manifest.
+fn write_manifest(logs_root: &Path, graph: &Graph, config: &RunConfig) -> crate::manifest::Manifest {
     let workflow_name = if graph.name.is_empty() {
-        "unnamed"
+        "unnamed".to_string()
     } else {
-        &graph.name
+        graph.name.clone()
     };
-    let mut manifest = serde_json::json!({
-        "run_id": config.run_id,
-        "workflow_name": workflow_name,
-        "goal": graph.goal(),
-        "start_time": Utc::now().to_rfc3339(),
-        "node_count": graph.nodes.len(),
-        "edge_count": graph.edges.len(),
-    });
-    if let Some(ref branch) = config.run_branch {
-        manifest["run_branch"] = serde_json::Value::String(branch.clone());
-    }
-    if let Some(ref base) = config.base_sha {
-        manifest["base_sha"] = serde_json::Value::String(base.clone());
-    }
-    if !config.labels.is_empty() {
-        manifest["labels"] = serde_json::to_value(&config.labels).unwrap_or_default();
-    }
-    if let Ok(json) = serde_json::to_string_pretty(&manifest) {
-        let _ = std::fs::create_dir_all(logs_root);
-        let _ = std::fs::write(logs_root.join("manifest.json"), json);
-    }
+    let manifest = crate::manifest::Manifest {
+        run_id: config.run_id.clone(),
+        workflow_name,
+        goal: graph.goal().to_string(),
+        start_time: Utc::now(),
+        node_count: graph.nodes.len(),
+        edge_count: graph.edges.len(),
+        run_branch: config.run_branch.clone(),
+        base_sha: config.base_sha.clone(),
+        labels: config.labels.clone(),
+    };
+    let _ = std::fs::create_dir_all(logs_root);
+    let _ = manifest.save(&logs_root.join("manifest.json"));
     manifest
 }
 
@@ -2939,13 +2931,11 @@ mod tests {
 
         let manifest_path = dir.path().join("manifest.json");
         assert!(manifest_path.exists());
-        let manifest: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
-        assert_eq!(manifest["workflow_name"], "test_pipeline");
-        assert_eq!(manifest["goal"], "Run tests");
-        assert!(manifest["start_time"].is_string());
-        assert!(manifest["node_count"].is_number());
-        assert!(manifest["edge_count"].is_number());
+        let manifest = crate::manifest::Manifest::load(&manifest_path).unwrap();
+        assert_eq!(manifest.workflow_name, "test_pipeline");
+        assert_eq!(manifest.goal, "Run tests");
+        assert!(manifest.node_count > 0);
+        assert!(manifest.edge_count > 0);
     }
 
     #[tokio::test]
@@ -2967,11 +2957,9 @@ mod tests {
         };
         engine.run(&g, &config).await.unwrap();
 
-        let manifest: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(dir.path().join("manifest.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(manifest["labels"]["env"], "test");
+        let manifest =
+            crate::manifest::Manifest::load(&dir.path().join("manifest.json")).unwrap();
+        assert_eq!(manifest.labels.get("env").map(String::as_str), Some("test"));
     }
 
     #[tokio::test]
@@ -2993,11 +2981,9 @@ mod tests {
         };
         engine.run(&g, &config).await.unwrap();
 
-        let manifest: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(dir.path().join("manifest.json")).unwrap(),
-        )
-        .unwrap();
-        assert!(manifest.get("labels").is_none());
+        let manifest =
+            crate::manifest::Manifest::load(&dir.path().join("manifest.json")).unwrap();
+        assert!(manifest.labels.is_empty());
     }
 
     #[tokio::test]
@@ -3202,9 +3188,8 @@ mod tests {
         engine.run(&g, &config).await.unwrap();
 
         let manifest_path = dir.path().join("manifest.json");
-        let manifest: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
-        assert_eq!(manifest["goal"], "Run tests");
+        let manifest = crate::manifest::Manifest::load(&manifest_path).unwrap();
+        assert_eq!(manifest.goal, "Run tests");
     }
 
     #[tokio::test]
@@ -3241,9 +3226,8 @@ mod tests {
         engine.run(&g, &config).await.unwrap();
 
         let manifest_path = dir.path().join("manifest.json");
-        let manifest: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
-        assert_eq!(manifest["goal"], "");
+        let manifest = crate::manifest::Manifest::load(&manifest_path).unwrap();
+        assert_eq!(manifest.goal, "");
     }
 
     // --- Gap #1: Auto status tests ---

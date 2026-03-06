@@ -346,13 +346,13 @@ impl MetadataStore {
         }
     }
 
-    /// Read the manifest JSON from the metadata branch. Returns `None` if not found.
-    pub fn read_manifest(repo_path: &Path, run_id: &str) -> Result<Option<serde_json::Value>> {
+    /// Read the manifest from the metadata branch. Returns `None` if not found.
+    pub fn read_manifest(repo_path: &Path, run_id: &str) -> Result<Option<crate::manifest::Manifest>> {
         match Self::read_file(repo_path, run_id, "manifest.json")? {
             Some(bytes) => {
-                let val: serde_json::Value = serde_json::from_slice(&bytes)
+                let manifest: crate::manifest::Manifest = serde_json::from_slice(&bytes)
                     .map_err(|e| git_error(format!("manifest deserialize failed: {e}")))?;
-                Ok(Some(val))
+                Ok(Some(manifest))
             }
             None => Ok(None),
         }
@@ -707,15 +707,15 @@ mod tests {
         init_repo(dir.path());
 
         let store = MetadataStore::new(dir.path());
-        let manifest = br#"{"run_id":"RUN1","pipeline":"test"}"#;
+        let manifest = br#"{"run_id":"RUN1","workflow_name":"test","goal":"g","start_time":"2025-01-01T00:00:00Z","node_count":2,"edge_count":1}"#;
         let dot = b"digraph { start -> end }";
         store.init_run("RUN1", manifest, dot).unwrap();
 
         let read_manifest = MetadataStore::read_manifest(dir.path(), "RUN1")
             .unwrap()
             .unwrap();
-        assert_eq!(read_manifest["run_id"], "RUN1");
-        assert_eq!(read_manifest["pipeline"], "test");
+        assert_eq!(read_manifest.run_id, "RUN1");
+        assert_eq!(read_manifest.workflow_name, "test");
 
         let read_dot = MetadataStore::read_graph_dot(dir.path(), "RUN1")
             .unwrap()

@@ -712,18 +712,14 @@ pub async fn run_command(
             Ok(o) => (o.status.to_string(), o.failure_reason().map(String::from)),
             Err(e) => ("fail".to_string(), Some(e.to_string())),
         };
-        let mut final_json = serde_json::json!({
-            "timestamp": Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            "status": status,
-            "duration_ms": run_duration_ms,
-            "failure_reason": failure_reason,
-        });
-        if let Some(sha) = last_git_sha.lock().unwrap().clone() {
-            final_json["final_git_commit_sha"] = serde_json::Value::String(sha);
-        }
-        if let Ok(json) = serde_json::to_string_pretty(&final_json) {
-            let _ = tokio::fs::write(logs_dir.join("final.json"), json).await;
-        }
+        let run_final = crate::run_final::RunFinal {
+            timestamp: Utc::now(),
+            status,
+            duration_ms: run_duration_ms,
+            failure_reason,
+            final_git_commit_sha: last_git_sha.lock().unwrap().clone(),
+        };
+        let _ = run_final.save(&logs_dir.join("final.json"));
     }
 
     // Finish progress bars before printing summary
@@ -991,7 +987,7 @@ async fn run_from_branch(
     std::env::set_current_dir(&worktree_path)?;
 
     let base_sha = crate::git::MetadataStore::read_manifest(&original_cwd, &run_id)?
-        .and_then(|m| m.get("base_sha").and_then(|v| v.as_str()).map(String::from));
+        .and_then(|m| m.base_sha);
 
     // Build minimal sandbox (local only for now)
     let emitter = Arc::new(EventEmitter::new());

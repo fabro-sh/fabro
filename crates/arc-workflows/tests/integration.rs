@@ -10019,7 +10019,7 @@ async fn git_checkpoint_host_writes_shadow_branch() {
     let manifest = MetadataStore::read_manifest(repo.path(), run_id)
         .expect("read_manifest should not error")
         .expect("shadow branch should contain manifest");
-    assert_eq!(manifest["run_id"], run_id);
+    assert_eq!(manifest.run_id, run_id);
 
     // Cleanup worktree
     let _ = std::process::Command::new("git")

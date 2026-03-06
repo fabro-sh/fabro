@@ -88,20 +88,13 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
 
         let manifest_path = path.join("manifest.json");
         if manifest_path.exists() {
-            let manifest_text = std::fs::read_to_string(&manifest_path)?;
             debug!(dir = %dir_name, "reading manifest");
-            let manifest: serde_json::Value = serde_json::from_str(&manifest_text)?;
+            let manifest = crate::manifest::Manifest::load(&manifest_path)?;
 
-            let run_id = manifest["run_id"].as_str().unwrap_or(&dir_name).to_string();
-            let workflow_name = manifest["workflow_name"]
-                .as_str()
-                .unwrap_or("unknown")
-                .to_string();
-            let start_time = manifest["start_time"].as_str().unwrap_or("").to_string();
-            let labels: HashMap<String, String> = manifest
-                .get("labels")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
+            let run_id = manifest.run_id;
+            let workflow_name = manifest.workflow_name;
+            let start_time = manifest.start_time.to_rfc3339();
+            let labels = manifest.labels;
 
             let status = read_status(&path);
 
@@ -148,12 +141,8 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
 fn read_status(run_dir: &Path) -> String {
     let final_path = run_dir.join("final.json");
     if final_path.exists() {
-        if let Ok(text) = std::fs::read_to_string(&final_path) {
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
-                if let Some(status) = val["status"].as_str() {
-                    return status.to_string();
-                }
-            }
+        if let Ok(run_final) = crate::run_final::RunFinal::load(&final_path) {
+            return run_final.status;
         }
         "unknown".to_string()
     } else if run_dir.join("run.pid").exists() {
@@ -354,10 +343,13 @@ mod tests {
             Some(serde_json::json!({
                 "run_id": "abc123",
                 "workflow_name": "my-pipeline",
+                "goal": "test goal",
                 "start_time": "2026-01-01T12:00:00Z",
+                "node_count": 2,
+                "edge_count": 1,
                 "labels": { "env": "prod" }
             })),
-            Some(serde_json::json!({ "status": "success" })),
+            Some(serde_json::json!({ "timestamp": "2026-01-01T12:01:00Z", "status": "success", "duration_ms": 60000 })),
             false,
         );
 
@@ -388,7 +380,10 @@ mod tests {
             Some(serde_json::json!({
                 "run_id": "running-1",
                 "workflow_name": "pipeline-a",
-                "start_time": "2026-01-15T10:00:00Z"
+                "goal": "",
+                "start_time": "2026-01-15T10:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
             })),
             None,
             true,
@@ -535,9 +530,12 @@ mod tests {
             Some(serde_json::json!({
                 "run_id": "to-prune",
                 "workflow_name": "old-pipeline",
-                "start_time": "2025-01-01T12:00:00Z"
+                "goal": "",
+                "start_time": "2025-01-01T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
             })),
-            Some(serde_json::json!({ "status": "success" })),
+            Some(serde_json::json!({ "timestamp": "2025-01-01T12:01:00Z", "status": "success", "duration_ms": 60000 })),
             false,
         );
 
@@ -564,9 +562,12 @@ mod tests {
             Some(serde_json::json!({
                 "run_id": "to-prune",
                 "workflow_name": "old-pipeline",
-                "start_time": "2025-01-01T12:00:00Z"
+                "goal": "",
+                "start_time": "2025-01-01T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
             })),
-            Some(serde_json::json!({ "status": "success" })),
+            Some(serde_json::json!({ "timestamp": "2025-01-01T12:01:00Z", "status": "success", "duration_ms": 60000 })),
             false,
         );
 
@@ -577,9 +578,12 @@ mod tests {
             Some(serde_json::json!({
                 "run_id": "keep-this",
                 "workflow_name": "new-pipeline",
-                "start_time": "2026-03-01T12:00:00Z"
+                "goal": "",
+                "start_time": "2026-03-01T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
             })),
-            Some(serde_json::json!({ "status": "success" })),
+            Some(serde_json::json!({ "timestamp": "2026-03-01T12:01:00Z", "status": "success", "duration_ms": 60000 })),
             false,
         );
 
