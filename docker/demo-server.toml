@@ -3,3 +3,17 @@ base_url = "http://api:3000"
 
 [feature_flags]
 session_sandboxes = false
+
+[checkpoint]
+exclude_globs = [
+  "**/node_modules/**",
+  "**/.pnpm-store/**",
+  "**/.npm/**",
+  "**/.cache/**",
+  "**/playwright-report/**",
+  "**/test-results/**",
+  "**/.cargo-target*/**",
+  "**/.cargo_target*/**",
+  "**/.wasm-pack/**",
+  "**/.tmpbuild/**",
+]

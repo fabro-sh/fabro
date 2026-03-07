@@ -243,6 +243,7 @@ impl Handler for ParallelHandler {
                         "parallel_base".into(),
                         0,
                         None,
+                        gs.checkpoint_exclude_globs.clone(),
                     )
                     .await
                 }
@@ -254,6 +255,7 @@ impl Handler for ParallelHandler {
                         "parallel_base",
                         0,
                         None,
+                        &gs.checkpoint_exclude_globs,
                     )
                     .await
                 }

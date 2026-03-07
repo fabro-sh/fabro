@@ -144,11 +144,21 @@ pub fn checkpoint_commit(
     status: &str,
     completed_count: usize,
     shadow_sha: Option<&str>,
+    excludes: &[String],
 ) -> Result<String> {
     tracing::debug!(path = %work_dir.display(), node_id, "Creating git checkpoint commit");
-    // Stage everything
-    let output = git_cmd(work_dir)
-        .args(["add", "-A"])
+    // Stage everything (with optional excludes)
+    let mut cmd = git_cmd(work_dir);
+    cmd.args(["add", "-A", "--"]);
+    if excludes.is_empty() {
+        cmd.arg(".");
+    } else {
+        cmd.arg(".");
+        for glob in excludes {
+            cmd.arg(format!(":(glob,exclude){glob}"));
+        }
+    }
+    let output = cmd
         .output()
         .map_err(|e| git_error(format!("git add failed: {e}")))?;
 
@@ -497,7 +507,7 @@ mod tests {
         let wt = dir.path().join("ff-wt");
         add_worktree(dir.path(), &wt, "ff-branch").unwrap();
         fs::write(wt.join("new.txt"), "data").unwrap();
-        checkpoint_commit(&wt, "run", "node", "ok", 1, None).unwrap();
+        checkpoint_commit(&wt, "run", "node", "ok", 1, None, &[]).unwrap();
         let advanced_sha = head_sha(&wt).unwrap();
         remove_worktree(dir.path(), &wt).unwrap();
 
@@ -569,7 +579,7 @@ mod tests {
         // Simulate a shadow commit SHA
         let shadow_sha = "abcdef1234567890abcdef1234567890abcdef12";
         let sha =
-            checkpoint_commit(&wt_path, "run1", "nodeA", "success", 3, Some(shadow_sha)).unwrap();
+            checkpoint_commit(&wt_path, "run1", "nodeA", "success", 3, Some(shadow_sha), &[]).unwrap();
         assert_eq!(sha.len(), 40);
         assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
 
@@ -608,7 +618,7 @@ mod tests {
         let wt_path = dir.path().join("worktree");
         add_worktree(dir.path(), &wt_path, "run-branch2").unwrap();
 
-        let sha = checkpoint_commit(&wt_path, "run2", "nodeB", "completed", 1, None).unwrap();
+        let sha = checkpoint_commit(&wt_path, "run2", "nodeB", "completed", 1, None, &[]).unwrap();
         assert_eq!(sha.len(), 40);
 
         // Verify Arc-Completed trailer present but no Arc-Meta
@@ -652,7 +662,7 @@ mod tests {
         let wt_path = dir.path().join("worktree");
         add_worktree(dir.path(), &wt_path, "fallback-branch").unwrap();
 
-        let sha = checkpoint_commit(&wt_path, "run2", "nodeB", "completed", 0, None).unwrap();
+        let sha = checkpoint_commit(&wt_path, "run2", "nodeB", "completed", 0, None, &[]).unwrap();
         assert_eq!(sha.len(), 40);
 
         remove_worktree(dir.path(), &wt_path).unwrap();
@@ -920,5 +930,80 @@ mod tests {
         reset_hard(dir.path(), &initial_sha).unwrap();
         assert_eq!(head_sha(dir.path()).unwrap(), initial_sha);
         assert!(!dir.path().join("file.txt").exists());
+    }
+
+    #[test]
+    fn checkpoint_commit_with_excludes_skips_matching_files() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        create_branch(dir.path(), "excl-branch").unwrap();
+
+        let wt_path = dir.path().join("worktree");
+        add_worktree(dir.path(), &wt_path, "excl-branch").unwrap();
+
+        // Create files: one should be staged, one excluded
+        fs::write(wt_path.join("kept.txt"), "keep me").unwrap();
+        fs::create_dir_all(wt_path.join("node_modules/pkg")).unwrap();
+        fs::write(wt_path.join("node_modules/pkg/index.js"), "module").unwrap();
+
+        let excludes = vec!["**/node_modules/**".to_string()];
+        checkpoint_commit(&wt_path, "run", "node", "ok", 1, None, &excludes).unwrap();
+
+        // Verify kept.txt was committed
+        let output = Command::new("git")
+            .args(["show", "--name-only", "--format=", "HEAD"])
+            .current_dir(&wt_path)
+            .output()
+            .unwrap();
+        let committed_files = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            committed_files.contains("kept.txt"),
+            "kept.txt should be committed"
+        );
+        assert!(
+            !committed_files.contains("node_modules"),
+            "node_modules should be excluded"
+        );
+
+        remove_worktree(dir.path(), &wt_path).unwrap();
+    }
+
+    #[test]
+    fn checkpoint_commit_with_excludes_skips_modified_tracked_files() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        create_branch(dir.path(), "excl-mod-branch").unwrap();
+
+        let wt_path = dir.path().join("worktree");
+        add_worktree(dir.path(), &wt_path, "excl-mod-branch").unwrap();
+
+        // Create and commit a file in the excluded dir first
+        fs::create_dir_all(wt_path.join(".cache")).unwrap();
+        fs::write(wt_path.join(".cache/data.bin"), "v1").unwrap();
+        checkpoint_commit(&wt_path, "run", "setup", "ok", 0, None, &[]).unwrap();
+
+        // Now modify the tracked excluded file and add a new non-excluded file
+        fs::write(wt_path.join(".cache/data.bin"), "v2").unwrap();
+        fs::write(wt_path.join("result.txt"), "done").unwrap();
+
+        let excludes = vec!["**/.cache/**".to_string()];
+        checkpoint_commit(&wt_path, "run", "step", "ok", 1, None, &excludes).unwrap();
+
+        let output = Command::new("git")
+            .args(["show", "--name-only", "--format=", "HEAD"])
+            .current_dir(&wt_path)
+            .output()
+            .unwrap();
+        let committed_files = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            committed_files.contains("result.txt"),
+            "result.txt should be committed"
+        );
+        assert!(
+            !committed_files.contains(".cache"),
+            ".cache should be excluded"
+        );
+
+        remove_worktree(dir.path(), &wt_path).unwrap();
     }
 }

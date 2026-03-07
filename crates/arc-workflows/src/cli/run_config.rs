@@ -8,6 +8,12 @@ use crate::daytona_sandbox::DaytonaConfig;
 
 const SUPPORTED_VERSION: u32 = 1;
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct CheckpointConfig {
+    #[serde(default)]
+    pub exclude_globs: Vec<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowRunConfig {
@@ -21,6 +27,8 @@ pub struct WorkflowRunConfig {
     pub vars: Option<HashMap<String, String>>,
     #[serde(default)]
     pub hooks: Vec<crate::hook::HookDefinition>,
+    #[serde(default)]
+    pub checkpoint: CheckpointConfig,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -55,6 +63,8 @@ pub struct RunDefaults {
     pub setup: Option<SetupConfig>,
     pub sandbox: Option<SandboxConfig>,
     pub vars: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub checkpoint: CheckpointConfig,
 }
 
 impl WorkflowRunConfig {
@@ -134,6 +144,15 @@ impl WorkflowRunConfig {
                 merged.extend(task_vars.clone());
             }
             self.vars = Some(merged);
+        }
+
+        // Union checkpoint exclude globs from defaults and task config, dedup
+        if !defaults.checkpoint.exclude_globs.is_empty() {
+            let mut merged = defaults.checkpoint.exclude_globs.clone();
+            merged.extend(self.checkpoint.exclude_globs.drain(..));
+            merged.sort();
+            merged.dedup();
+            self.checkpoint.exclude_globs = merged;
         }
     }
 }
@@ -1235,6 +1254,120 @@ auto_stop_interval = 60
             Some(crate::daytona_sandbox::DaytonaNetwork::AllowList(vec![
                 "10.0.0.0/8".into(),
             ]))
+        );
+    }
+
+    #[test]
+    fn parse_toml_with_checkpoint_exclude_globs() {
+        let toml = r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+
+[checkpoint]
+exclude_globs = ["**/node_modules/**", "**/.cache/**"]
+"#;
+        let config = parse_run_config(toml).unwrap();
+        assert_eq!(
+            config.checkpoint.exclude_globs,
+            vec!["**/node_modules/**", "**/.cache/**"]
+        );
+    }
+
+    #[test]
+    fn parse_toml_without_checkpoint_defaults_empty() {
+        let toml = r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+"#;
+        let config = parse_run_config(toml).unwrap();
+        assert!(config.checkpoint.exclude_globs.is_empty());
+    }
+
+    #[test]
+    fn apply_defaults_unions_checkpoint_exclude_globs() {
+        let mut cfg = parse_run_config(
+            r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+
+[checkpoint]
+exclude_globs = ["**/dist/**", "**/.cache/**"]
+"#,
+        )
+        .unwrap();
+        let defaults = RunDefaults {
+            checkpoint: CheckpointConfig {
+                exclude_globs: vec![
+                    "**/.cache/**".into(),
+                    "**/node_modules/**".into(),
+                ],
+            },
+            ..RunDefaults::default()
+        };
+        cfg.apply_defaults(&defaults);
+        assert_eq!(
+            cfg.checkpoint.exclude_globs,
+            vec!["**/.cache/**", "**/dist/**", "**/node_modules/**"]
+        );
+    }
+
+    #[test]
+    fn apply_defaults_checkpoint_from_defaults_only() {
+        let mut cfg = parse_run_config(
+            r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+"#,
+        )
+        .unwrap();
+        let defaults = RunDefaults {
+            checkpoint: CheckpointConfig {
+                exclude_globs: vec!["**/node_modules/**".into()],
+            },
+            ..RunDefaults::default()
+        };
+        cfg.apply_defaults(&defaults);
+        assert_eq!(
+            cfg.checkpoint.exclude_globs,
+            vec!["**/node_modules/**"]
+        );
+    }
+
+    #[test]
+    fn apply_defaults_checkpoint_from_task_only() {
+        let mut cfg = parse_run_config(
+            r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+
+[checkpoint]
+exclude_globs = ["**/dist/**"]
+"#,
+        )
+        .unwrap();
+        let defaults = RunDefaults::default();
+        cfg.apply_defaults(&defaults);
+        assert_eq!(
+            cfg.checkpoint.exclude_globs,
+            vec!["**/dist/**"]
+        );
+    }
+
+    #[test]
+    fn parse_run_defaults_with_checkpoint() {
+        let toml = r#"
+[checkpoint]
+exclude_globs = ["**/node_modules/**"]
+"#;
+        let defaults: RunDefaults = toml::from_str(toml).unwrap();
+        assert_eq!(
+            defaults.checkpoint.exclude_globs,
+            vec!["**/node_modules/**"]
         );
     }
 }

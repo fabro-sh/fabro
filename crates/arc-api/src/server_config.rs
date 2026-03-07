@@ -446,4 +446,24 @@ matcher = "agent_loop"
         let config: ServerConfig = toml::from_str(toml).unwrap();
         assert!(config.hook_config.hooks.is_empty());
     }
+
+    #[test]
+    fn parse_config_with_checkpoint_exclude_globs() {
+        let toml = r#"
+[checkpoint]
+exclude_globs = ["**/node_modules/**", "**/.cache/**"]
+"#;
+        let config: ServerConfig = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.run_defaults.checkpoint.exclude_globs,
+            vec!["**/node_modules/**", "**/.cache/**"]
+        );
+    }
+
+    #[test]
+    fn parse_config_checkpoint_defaults_empty() {
+        let toml = "";
+        let config: ServerConfig = toml::from_str(toml).unwrap();
+        assert!(config.run_defaults.checkpoint.exclude_globs.is_empty());
+    }
 }

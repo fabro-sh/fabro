@@ -666,6 +666,10 @@ pub async fn run_command(
     } else {
         None
     };
+    let checkpoint_exclude_globs = run_cfg
+        .as_ref()
+        .map(|c| c.checkpoint.exclude_globs.clone())
+        .unwrap_or_default();
     let config = RunConfig {
         logs_root: logs_dir.clone(),
         cancel_token: None,
@@ -689,6 +693,7 @@ pub async fn run_command(
             .filter_map(|s| s.split_once('='))
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
+        checkpoint_exclude_globs,
     };
 
     let run_start = Instant::now();
@@ -1054,6 +1059,7 @@ async fn run_from_branch(
         run_branch: Some(run_branch.to_string()),
         meta_branch,
         labels: HashMap::new(),
+        checkpoint_exclude_globs: Vec::new(),
     };
 
     let run_start = Instant::now();
@@ -1538,6 +1544,7 @@ mod tests {
             sandbox: None,
             vars: None,
             hooks: Vec::new(),
+            checkpoint: Default::default(),
         };
         let (model, provider) = resolve_model_provider(
             Some("gpt-5.2"),
@@ -1578,6 +1585,7 @@ mod tests {
             sandbox: None,
             vars: None,
             hooks: Vec::new(),
+            checkpoint: Default::default(),
         };
         let (model, provider) = resolve_model_provider(None, None, Some(&cfg), &defaults, &graph);
         assert_eq!(model, "toml-model");
@@ -1653,6 +1661,7 @@ mod tests {
             sandbox: None,
             vars: None,
             hooks: Vec::new(),
+            checkpoint: Default::default(),
         };
         let (model, provider) = resolve_model_provider(None, None, Some(&cfg), &defaults, &graph);
         assert_eq!(model, "toml-model");
@@ -1676,6 +1685,7 @@ mod tests {
             }),
             vars: None,
             hooks: Vec::new(),
+            checkpoint: Default::default(),
         };
         let defaults = RunDefaults::default();
         assert!(resolve_preserve_sandbox(true, Some(&cfg), &defaults));
@@ -1698,6 +1708,7 @@ mod tests {
             }),
             vars: None,
             hooks: Vec::new(),
+            checkpoint: Default::default(),
         };
         let defaults = RunDefaults {
             sandbox: Some(run_config::SandboxConfig {

@@ -577,6 +577,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         run_branch: None,
         meta_branch: None,
         labels: std::collections::HashMap::new(),
+        checkpoint_exclude_globs: Vec::new(),
     };
 
     let result = tokio::select! {

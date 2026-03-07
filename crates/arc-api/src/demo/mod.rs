@@ -969,6 +969,7 @@ mod runs {
                 ("branch".into(), "feature/rate-limiting".into()),
             ])),
             hooks: vec![],
+            checkpoint: Default::default(),
         })
         .unwrap()
     }
@@ -1088,6 +1089,7 @@ mod workflows {
                         ("branch".into(), "main".into()),
                     ])),
                     hooks: vec![],
+                    checkpoint: Default::default(),
                 }),
                 graph: r#"digraph fix_build {
     graph [
@@ -1152,6 +1154,7 @@ mod workflows {
                         ("test_framework".into(), "vitest".into()),
                     ])),
                     hooks: vec![],
+                    checkpoint: Default::default(),
                 }),
                 graph: r#"digraph implement {
     graph [
@@ -1228,6 +1231,7 @@ mod workflows {
                         ("drift_threshold".into(), "warn".into()),
                     ])),
                     hooks: vec![],
+                    checkpoint: Default::default(),
                 }),
                 graph: r#"digraph sync {
     graph [
@@ -1293,6 +1297,7 @@ mod workflows {
                         ("min_confidence".into(), "0.8".into()),
                     ])),
                     hooks: vec![],
+                    checkpoint: Default::default(),
                 }),
                 graph: r#"digraph expand {
     graph [
@@ -2680,6 +2685,7 @@ mod settings {
                     exe: None,
                 }),
                 vars: None,
+                checkpoint: Default::default(),
             },
             hook_config: arc_workflows::hook::HookConfig {
                 hooks: vec![],

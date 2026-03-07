@@ -520,6 +520,7 @@ pub struct GitState {
     pub base_sha: String,
     pub run_branch: Option<String>,
     pub meta_branch: Option<String>,
+    pub checkpoint_exclude_globs: Vec<String>,
 }
 
 /// How git checkpointing should be performed for a workflow run.
@@ -540,6 +541,7 @@ pub async fn git_checkpoint_host(
     status: String,
     completed_count: usize,
     shadow_sha: Option<String>,
+    exclude_globs: Vec<String>,
 ) -> Option<String> {
     match tokio::task::spawn_blocking(move || {
         crate::git::checkpoint_commit(
@@ -549,6 +551,7 @@ pub async fn git_checkpoint_host(
             &status,
             completed_count,
             shadow_sha.as_deref(),
+            &exclude_globs,
         )
     })
     .await
@@ -583,9 +586,18 @@ pub async fn git_checkpoint_remote(
     status: &str,
     completed_count: usize,
     shadow_sha: Option<String>,
+    exclude_globs: &[String],
 ) -> Option<String> {
-    // Stage everything
-    let add_cmd = format!("{GIT_REMOTE} add -A");
+    // Stage everything (with optional excludes)
+    let add_cmd = if exclude_globs.is_empty() {
+        format!("{GIT_REMOTE} add -A")
+    } else {
+        let pathspecs: Vec<String> = exclude_globs
+            .iter()
+            .map(|g| format!("':(glob,exclude){g}'"))
+            .collect();
+        format!("{GIT_REMOTE} add -A -- . {}", pathspecs.join(" "))
+    };
     let add_result = sandbox
         .exec_command(&add_cmd, 30_000, None, None, None)
         .await;
@@ -744,6 +756,9 @@ pub struct RunConfig {
     pub meta_branch: Option<String>,
     /// User-defined key-value labels for this run.
     pub labels: HashMap<String, String>,
+    /// Glob patterns to exclude from git checkpoint staging.
+    #[allow(clippy::struct_field_names)]
+    pub checkpoint_exclude_globs: Vec<String>,
 }
 
 /// The workflow run execution engine.
@@ -1121,6 +1136,7 @@ impl WorkflowRunEngine {
                 base_sha: base_sha.clone(),
                 run_branch: config.run_branch.clone(),
                 meta_branch: config.meta_branch.clone(),
+                checkpoint_exclude_globs: config.checkpoint_exclude_globs.clone(),
             })),
             _ => None,
         };
@@ -1843,6 +1859,7 @@ impl WorkflowRunEngine {
                             status_str,
                             completed_count,
                             shadow_sha,
+                            config.checkpoint_exclude_globs.clone(),
                         )
                         .await
                     }
@@ -1854,6 +1871,7 @@ impl WorkflowRunEngine {
                             &outcome.status.to_string(),
                             completed_count,
                             shadow_sha,
+                            &config.checkpoint_exclude_globs,
                         )
                         .await
                     }
@@ -2711,6 +2729,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -2732,6 +2751,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         engine.run(&g, &config).await.unwrap();
         let checkpoint_path = dir.path().join("checkpoint.json");
@@ -2761,6 +2781,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2786,6 +2807,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -2807,6 +2829,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2841,6 +2864,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -2899,6 +2923,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2984,6 +3009,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3012,6 +3038,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::from([("env".into(), "test".into())]),
+            checkpoint_exclude_globs: Vec::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3036,6 +3063,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3060,6 +3088,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3087,6 +3116,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3242,6 +3272,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3280,6 +3311,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3336,6 +3368,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
 
@@ -3395,6 +3428,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
 
@@ -3458,6 +3492,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_ok());
@@ -3510,6 +3545,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -3563,6 +3599,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
 
@@ -3591,6 +3628,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -3615,6 +3653,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3638,6 +3677,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -3674,6 +3714,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
 
         // Set cancel after a short delay (while the slow handler is running)
@@ -3747,6 +3788,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3773,6 +3815,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3801,6 +3844,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3834,6 +3878,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3865,6 +3910,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3893,6 +3939,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3982,6 +4029,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
 
         // The engine returns Err because the Fail outcome has no outgoing fail edge,
@@ -4186,6 +4234,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4217,6 +4266,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4255,6 +4305,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4333,6 +4384,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4422,6 +4474,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4488,6 +4541,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -4541,6 +4595,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -4595,6 +4650,7 @@ mod tests {
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
         };
         let _outcome = engine.run(&g, &config).await.unwrap();
 
