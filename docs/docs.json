@@ -108,9 +108,7 @@
           {
             "group": "Overview",
             "icon": "compass",
-            "pages": [
-              "getting-started/comparison"
-            ]
+            "pages": []
           },
           {
             "group": "Workflow Tutorials",
