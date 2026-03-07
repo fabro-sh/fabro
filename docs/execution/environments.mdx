@@ -5,13 +5,14 @@ description: "Sandbox providers for workflow execution"
 
 When an agent runs a shell command, edits a file, or searches code, it does so inside a **sandbox**. The sandbox is the execution environment for all tool operations — it controls where commands run, which files are visible, and how much isolation exists between the agent and the host.
 
-Arc supports three sandbox providers. Each one implements the same interface (file I/O, command execution, grep, glob), so workflows run identically regardless of which provider you choose. The difference is in where and how the tools execute.
+Arc supports four sandbox providers. Each one implements the same interface (file I/O, command execution, grep, glob), so workflows run identically regardless of which provider you choose. The difference is in where and how the tools execute.
 
 | Provider | Runs on | Isolation | Use case |
 |---|---|---|---|
 | `local` | Host machine | None | Development, trusted workflows |
 | `docker` | Docker container | Container-level | Reproducible environments, untrusted code |
 | `daytona` | Cloud VM | Full machine | CI/CD, team-shared runs, SSH debugging |
+| `exe` | Cloud VM ([exe.dev](https://exe.dev)) | Full machine | Fast ephemeral VMs, lightweight cloud sandboxing |
 
 ## Choosing a provider
 
@@ -22,6 +23,7 @@ Set the sandbox provider via CLI flag, [run config TOML](/execution/run-configur
 arc run start workflow.dot --sandbox local
 arc run start workflow.dot --sandbox docker
 arc run start workflow.dot --sandbox daytona
+arc run start workflow.dot --sandbox exe
 ```
 
 ```toml
@@ -48,7 +50,7 @@ The local sandbox runs all tool operations directly on the host machine. It's th
 The local sandbox filters sensitive environment variables before passing them to commands. Variables ending in `_API_KEY`, `_SECRET`, `_TOKEN`, `_PASSWORD`, or `_CREDENTIAL` are stripped. A safelist of common variables (`PATH`, `HOME`, `USER`, `SHELL`, `LANG`, `TERM`, `TMPDIR`, `GOPATH`, `CARGO_HOME`, `NVM_DIR`) is always passed through.
 
 <Note>
-The local sandbox offers no isolation. Agents can read and modify any file on the host. Use `docker` or `daytona` when running untrusted workflows or when you need a reproducible environment.
+The local sandbox offers no isolation. Agents can read and modify any file on the host. Use `docker`, `daytona`, or `exe` when running untrusted workflows or when you need a reproducible environment.
 </Note>
 
 ## Docker
@@ -189,6 +191,35 @@ The `auto_stop_interval` setting (in minutes) tells Daytona to stop the sandbox 
 auto_stop_interval = 30
 ```
 
+## Exe
+
+<Warning>
+The exe.dev sandbox provider is in **beta**. Its configuration surface and behavior may change in future releases.
+</Warning>
+
+The Exe sandbox runs all tool operations inside a cloud VM managed by [exe.dev](https://exe.dev). It provides full machine-level isolation with fast VM startup via SSH.
+
+### Prerequisites
+
+- SSH keys configured for `exe.dev` (added via the exe.dev dashboard)
+
+### How it works
+
+- **VM lifecycle** — On `initialize()`, Arc connects to the exe.dev management plane via SSH and runs `new --json` to create a VM. The response contains the VM name and an SSH destination (e.g. `my-vm.exe.xyz`). On `cleanup()`, Arc runs `rm <vm_name>` to destroy the VM.
+- **Working directory** — Fixed at `/home/exedev`. Relative paths resolve against this directory.
+- **Commands** — Executed via SSH on the data plane (`<vmname>.exe.xyz`). Environment variables and working directory overrides are supported.
+- **File I/O** — Reads use `cat` over SSH. Writes use SCP upload. Parent directories are created automatically.
+- **Ephemeral** — Each run gets a fresh VM that is destroyed on cleanup.
+
+### Configuration
+
+```toml
+[sandbox]
+provider = "exe"
+```
+
+The exe.dev provider does not currently have additional configuration options.
+
 ## Sandboxing
 
 Sandboxes isolate agent execution from the host machine. When an agent runs a shell command, edits a file, or searches code, it does so inside a sandbox — preventing unintended side effects and providing a reproducible environment for each run.
@@ -202,8 +233,9 @@ Each provider offers a different level of filesystem isolation:
 | `local` | None | The entire host filesystem. Agents can read and modify any file. |
 | `docker` | Container-level | Only the bind-mounted working directory (`/workspace` by default) and whatever is in the container image. Host files outside the mount are inaccessible. |
 | `daytona` | Full machine | A cloud VM with the repository cloned into `/home/daytona/workspace`. The host filesystem is completely inaccessible. |
+| `exe` | Full machine | A cloud VM with an empty working directory at `/home/exedev`. The host filesystem is completely inaccessible. |
 
-For `local`, Arc filters sensitive environment variables (those ending in `_API_KEY`, `_SECRET`, `_TOKEN`, `_PASSWORD`, or `_CREDENTIAL`) but does not restrict file access. Use `docker` or `daytona` when running untrusted workflows.
+For `local`, Arc filters sensitive environment variables (those ending in `_API_KEY`, `_SECRET`, `_TOKEN`, `_PASSWORD`, or `_CREDENTIAL`) but does not restrict file access. Use `docker`, `daytona`, or `exe` when running untrusted workflows.
 
 ### Network
 
@@ -214,6 +246,7 @@ Each provider handles outbound network access differently:
 | `local` | Full access | No network isolation. Agents have the same network access as the host. |
 | `docker` | Bridge network | Set via the `network_mode` config option. Supports all Docker network modes (`bridge`, `none`, `host`, etc.). |
 | `daytona` | Full access | Configurable via the `network` setting with three modes: `"allow_all"`, `"block"`, or CIDR-based allow lists. |
+| `exe` | Full access | No network isolation controls. VMs have full outbound access. |
 
 For Daytona, network access is configured in the `[sandbox.daytona]` section:
 
