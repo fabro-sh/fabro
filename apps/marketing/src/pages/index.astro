@@ -38,18 +38,18 @@ const cssExample = `<span class="text-ice-300">/* Fast model for planning */</sp
 
 <Layout title="Arc — AI Software Factory">
   <!-- Nav -->
-  <nav class="fixed top-0 z-50 w-full border-b border-navy-800 bg-navy-950/80 backdrop-blur-md">
+  <nav class="fixed top-0 z-50 w-full border-b border-navy-800/60 bg-navy-950/70 backdrop-blur-xl">
     <div class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
       <a href="/" class="flex items-center gap-3">
         <img src="/symbol.svg" alt="Arc" class="h-8 w-8" />
-        <span class="text-xl font-bold tracking-tight text-ice-50">Arc</span>
+        <span class="font-display text-xl font-bold tracking-tight text-ice-50">Arc</span>
       </a>
       <div class="flex items-center gap-6">
         <a href="https://docs.arc.computer" class="text-sm text-ice-300 hover:text-ice-50 transition-colors">Docs</a>
         <a href="https://github.com/qltysh/arc" class="text-sm text-ice-300 hover:text-ice-50 transition-colors">GitHub</a>
         <a
           href="https://docs.arc.computer/getting-started/quick-start"
-          class="rounded-lg bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-500 transition-colors"
+          class="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-teal-500 hover:shadow-[0_0_20px_-4px_rgba(53,127,158,0.5)]"
         >
           Get started
         </a>
@@ -59,30 +59,37 @@ const cssExample = `<span class="text-ice-300">/* Fast model for planning */</sp
 
   <main>
     <!-- Hero -->
-    <section class="relative overflow-hidden pt-32 pb-24">
-      <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--color-navy-800)_0%,_transparent_60%)]"></div>
-      <div class="relative mx-auto max-w-4xl px-6 text-center">
-        <p class="mb-4 inline-block rounded-full border border-teal-700/40 bg-teal-700/10 px-4 py-1.5 text-sm font-medium text-teal-300">
-          Open Source
-        </p>
-        <h1 class="text-5xl font-bold leading-tight tracking-tight text-ice-50 sm:text-6xl">
-          The AI software factory for<br />
-          <span class="text-teal-500">expert engineering teams</span>
+    <section class="relative overflow-hidden pt-40 pb-32">
+      <!-- Atmosphere -->
+      <div class="absolute inset-0 dot-grid"></div>
+      <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--color-navy-800)_0%,_transparent_50%)]"></div>
+      <div class="pointer-events-none absolute top-16 -left-40 h-[500px] w-[500px] rounded-full bg-teal-500/8 blur-[120px] animate-float"></div>
+      <div class="pointer-events-none absolute -top-10 -right-20 h-[400px] w-[400px] rounded-full bg-mint/5 blur-[100px] animate-float" style="animation-delay: -3s"></div>
+
+      <div class="relative mx-auto max-w-5xl px-6 text-center">
+        <div class="reveal">
+          <p class="mb-6 inline-block rounded-full border border-teal-700/40 bg-teal-700/10 px-4 py-1.5 text-sm font-medium text-teal-300">
+            Open Source
+          </p>
+        </div>
+        <h1 class="reveal reveal-d1 font-display text-5xl font-extrabold leading-[1.08] tracking-tight text-ice-50 sm:text-7xl">
+          The AI software factory<br />
+          for <span class="gradient-text">expert engineering teams</span>
         </h1>
-        <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-ice-300">
+        <p class="reveal reveal-d2 mx-auto mt-8 max-w-2xl text-lg leading-relaxed text-ice-300">
           Ship production code through long-horizon deterministic workflows, built-in verification,
           and full observability — without trading quality for speed.
         </p>
-        <div class="mt-10 flex items-center justify-center gap-4">
+        <div class="reveal reveal-d3 mt-12 flex items-center justify-center gap-4">
           <a
             href="https://docs.arc.computer/getting-started/quick-start"
-            class="rounded-lg bg-teal-700 px-6 py-3 text-sm font-semibold text-white hover:bg-teal-500 transition-colors"
+            class="rounded-xl bg-teal-700 px-7 py-3.5 text-sm font-semibold text-white transition-all hover:bg-teal-500 hover:shadow-[0_0_24px_-4px_rgba(53,127,158,0.5)]"
           >
             Get started
           </a>
           <a
             href="https://docs.arc.computer"
-            class="rounded-lg border border-navy-600 px-6 py-3 text-sm font-semibold text-ice-300 hover:border-ice-300 hover:text-ice-50 transition-colors"
+            class="rounded-xl border border-navy-600 px-7 py-3.5 text-sm font-semibold text-ice-300 transition-all hover:border-teal-700/60 hover:text-ice-50"
           >
             Read the docs
           </a>
@@ -91,12 +98,13 @@ const cssExample = `<span class="text-ice-300">/* Fast model for planning */</sp
     </section>
 
     <!-- Core Promise -->
-    <section class="border-t border-navy-800 py-24">
-      <div class="mx-auto max-w-3xl px-6 text-center">
-        <h2 class="text-3xl font-bold tracking-tight text-ice-50">
-          Controlled, auditable pipelines for real engineering
+    <section class="relative py-28">
+      <div class="section-divider mx-auto max-w-xs"></div>
+      <div class="mx-auto max-w-3xl px-6 pt-28 text-center">
+        <h2 class="reveal font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
+          Controlled, auditable pipelines<br class="hidden sm:inline" /> for real engineering
         </h2>
-        <p class="mt-4 text-lg leading-relaxed text-ice-300">
+        <p class="reveal reveal-d1 mt-5 text-lg leading-relaxed text-ice-300">
           Instead of one-shot code generation, Arc runs workflows: plan, implement, verify, review, ship — using
           the right model at each step, with guardrails that fail closed.
         </p>
@@ -104,77 +112,84 @@ const cssExample = `<span class="text-ice-300">/* Fast model for planning */</sp
     </section>
 
     <!-- Feature Grid -->
-    <section class="border-t border-navy-800 py-24">
-      <div class="mx-auto max-w-6xl px-6">
-        <div class="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
-          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-8">
-            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700/20">
+    <section class="relative py-28">
+      <div class="section-divider mx-auto max-w-xs"></div>
+      <div class="mx-auto max-w-6xl px-6 pt-28">
+        <div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+          <div class="glow-card reveal rounded-xl border border-navy-800 bg-navy-800/25 p-8 relative overflow-hidden">
+            <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-teal-700/40 to-transparent"></div>
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700/15">
               <svg class="h-5 w-5 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-ice-50">Deterministic long-horizon runs</h3>
+            <h3 class="font-display text-lg font-semibold text-ice-50">Deterministic long-horizon runs</h3>
             <p class="mt-2 text-sm leading-relaxed text-ice-300">
               Predictable automation with guardrails and rerun-ability. Human-in-the-loop when needed, fully automated when it's not.
             </p>
           </div>
 
-          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-8">
-            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700/20">
-              <svg class="h-5 w-5 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <div class="glow-card reveal reveal-d1 rounded-xl border border-navy-800 bg-navy-800/25 p-8 relative overflow-hidden">
+            <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-mint/30 to-transparent"></div>
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-mint/10">
+              <svg class="h-5 w-5 text-mint" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-ice-50">Verification-first pipeline</h3>
+            <h3 class="font-display text-lg font-semibold text-ice-50">Verification-first pipeline</h3>
             <p class="mt-2 text-sm leading-relaxed text-ice-300">
               Builds, tests, static analysis, LLM review, and human approval — baked into every workflow, not bolted on after.
             </p>
           </div>
 
-          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-8">
-            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700/20">
+          <div class="glow-card reveal reveal-d2 rounded-xl border border-navy-800 bg-navy-800/25 p-8 relative overflow-hidden">
+            <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-teal-700/40 to-transparent"></div>
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700/15">
               <svg class="h-5 w-5 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-ice-50">Multi-model orchestration</h3>
+            <h3 class="font-display text-lg font-semibold text-ice-50">Multi-model orchestration</h3>
             <p class="mt-2 text-sm leading-relaxed text-ice-300">
               Use the right model for each step. CSS-like stylesheets assign fast models for breadth, frontier models for correctness.
             </p>
           </div>
 
-          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-8">
-            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700/20">
-              <svg class="h-5 w-5 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <div class="glow-card reveal reveal-d3 rounded-xl border border-navy-800 bg-navy-800/25 p-8 relative overflow-hidden">
+            <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber/25 to-transparent"></div>
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-amber/10">
+              <svg class="h-5 w-5 text-amber" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-ice-50">Total observability</h3>
+            <h3 class="font-display text-lg font-semibold text-ice-50">Total observability</h3>
             <p class="mt-2 text-sm leading-relaxed text-ice-300">
               Trace every step down to each tool call. Inspect inputs, outputs, and timing. Compare runs and diagnose regressions.
             </p>
           </div>
 
-          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-8">
-            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700/20">
-              <svg class="h-5 w-5 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <div class="glow-card reveal reveal-d4 rounded-xl border border-navy-800 bg-navy-800/25 p-8 relative overflow-hidden">
+            <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-mint/30 to-transparent"></div>
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-mint/10">
+              <svg class="h-5 w-5 text-mint" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-ice-50">Cloud sandboxes</h3>
+            <h3 class="font-display text-lg font-semibold text-ice-50">Cloud sandboxes</h3>
             <p class="mt-2 text-sm leading-relaxed text-ice-300">
               Ephemeral sandboxes for safe execution. Preview environments to validate changes end-to-end. SSH access when you need it.
             </p>
           </div>
 
-          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-8">
-            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700/20">
-              <svg class="h-5 w-5 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <div class="glow-card reveal reveal-d5 rounded-xl border border-navy-800 bg-navy-800/25 p-8 relative overflow-hidden">
+            <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-coral/25 to-transparent"></div>
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-coral/10">
+              <svg class="h-5 w-5 text-coral" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-ice-50">Open source, forkable</h3>
+            <h3 class="font-display text-lg font-semibold text-ice-50">Open source, forkable</h3>
             <p class="mt-2 text-sm leading-relaxed text-ice-300">
               Written in Rust. AGPL-licensed. Fork it, extend it, make it the center of your engineering process.
             </p>
@@ -184,14 +199,15 @@ const cssExample = `<span class="text-ice-300">/* Fast model for planning */</sp
     </section>
 
     <!-- Built for Real Engineering -->
-    <section class="border-t border-navy-800 py-24">
-      <div class="mx-auto max-w-6xl px-6">
+    <section class="relative py-28">
+      <div class="section-divider mx-auto max-w-xs"></div>
+      <div class="mx-auto max-w-6xl px-6 pt-28">
         <div class="grid items-start gap-16 lg:grid-cols-2">
-          <div>
-            <h2 class="text-3xl font-bold tracking-tight text-ice-50">
-              Built for real engineering, not promptware
+          <div class="reveal">
+            <h2 class="font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
+              Built for real engineering,<br class="hidden sm:inline" /> not promptware
             </h2>
-            <p class="mt-4 text-lg leading-relaxed text-ice-300">
+            <p class="mt-5 text-lg leading-relaxed text-ice-300">
               Arc is built like infrastructure: solid architecture, strong defaults, and the reliability you expect from production tooling.
             </p>
             <ul class="mt-8 space-y-4">
@@ -211,12 +227,12 @@ const cssExample = `<span class="text-ice-300">/* Fast model for planning */</sp
           </div>
 
           <!-- Workflow-as-Code example -->
-          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-6">
+          <div class="reveal reveal-d2 rounded-xl border border-navy-800 bg-navy-900/60 p-6 shadow-[0_0_60px_-15px_rgba(103,178,215,0.08)]">
             <div class="mb-3 flex items-center gap-2">
-              <span class="h-3 w-3 rounded-full bg-coral"></span>
-              <span class="h-3 w-3 rounded-full bg-amber"></span>
-              <span class="h-3 w-3 rounded-full bg-mint"></span>
-              <span class="ml-3 text-xs text-ice-300 font-mono">workflow.dot</span>
+              <span class="h-3 w-3 rounded-full bg-coral/70"></span>
+              <span class="h-3 w-3 rounded-full bg-amber/70"></span>
+              <span class="h-3 w-3 rounded-full bg-mint/70"></span>
+              <span class="ml-3 text-xs text-ice-300/60 font-mono">workflow.dot</span>
             </div>
             <pre class="overflow-x-auto text-sm leading-relaxed"><code class="font-mono" set:html={dotExample} /></pre>
           </div>
@@ -225,42 +241,43 @@ const cssExample = `<span class="text-ice-300">/* Fast model for planning */</sp
     </section>
 
     <!-- Verification -->
-    <section class="border-t border-navy-800 py-24">
-      <div class="mx-auto max-w-6xl px-6">
+    <section class="relative py-28">
+      <div class="section-divider mx-auto max-w-xs"></div>
+      <div class="mx-auto max-w-6xl px-6 pt-28">
         <div class="grid items-start gap-16 lg:grid-cols-2">
-          <div class="order-2 lg:order-1">
+          <div class="order-2 lg:order-1 reveal reveal-d1">
             <div class="grid grid-cols-2 gap-4">
-              <div class="rounded-lg border border-navy-800 bg-navy-800/30 p-5">
-                <div class="mb-2 text-xs font-medium uppercase tracking-wider text-teal-500">Gate</div>
-                <div class="text-sm font-medium text-ice-50">Build + Tests</div>
+              <div class="glow-card rounded-lg border border-navy-800 bg-navy-800/25 p-5">
+                <div class="mb-2 text-xs font-semibold uppercase tracking-wider text-teal-500">Gate</div>
+                <div class="font-display text-sm font-semibold text-ice-50">Build + Tests</div>
                 <p class="mt-1 text-xs text-ice-300">Hard gate. Fails block the pipeline.</p>
               </div>
-              <div class="rounded-lg border border-navy-800 bg-navy-800/30 p-5">
-                <div class="mb-2 text-xs font-medium uppercase tracking-wider text-teal-500">Gate</div>
-                <div class="text-sm font-medium text-ice-50">Static Analysis</div>
+              <div class="glow-card rounded-lg border border-navy-800 bg-navy-800/25 p-5">
+                <div class="mb-2 text-xs font-semibold uppercase tracking-wider text-teal-500">Gate</div>
+                <div class="font-display text-sm font-semibold text-ice-50">Static Analysis</div>
                 <p class="mt-1 text-xs text-ice-300">Policy checks enforced at every stage.</p>
               </div>
-              <div class="rounded-lg border border-navy-800 bg-navy-800/30 p-5">
-                <div class="mb-2 text-xs font-medium uppercase tracking-wider text-teal-500">Layer</div>
-                <div class="text-sm font-medium text-ice-50">LLM Review</div>
+              <div class="glow-card rounded-lg border border-navy-800 bg-navy-800/25 p-5">
+                <div class="mb-2 text-xs font-semibold uppercase tracking-wider text-amber">Layer</div>
+                <div class="font-display text-sm font-semibold text-ice-50">LLM Review</div>
                 <p class="mt-1 text-xs text-ice-300">Additional layer, not a substitute for real checks.</p>
               </div>
-              <div class="rounded-lg border border-navy-800 bg-navy-800/30 p-5">
-                <div class="mb-2 text-xs font-medium uppercase tracking-wider text-teal-500">Loop</div>
-                <div class="text-sm font-medium text-ice-50">Human Review</div>
+              <div class="glow-card rounded-lg border border-navy-800 bg-navy-800/25 p-5">
+                <div class="mb-2 text-xs font-semibold uppercase tracking-wider text-mint">Loop</div>
+                <div class="font-display text-sm font-semibold text-ice-50">Human Review</div>
                 <p class="mt-1 text-xs text-ice-300">Integrated cleanly into the workflow graph.</p>
               </div>
             </div>
           </div>
-          <div class="order-1 lg:order-2">
-            <h2 class="text-3xl font-bold tracking-tight text-ice-50">
-              Verification is a first-class concept
+          <div class="order-1 lg:order-2 reveal">
+            <h2 class="font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
+              Verification is a<br class="hidden sm:inline" /> first-class concept
             </h2>
-            <p class="mt-4 text-lg leading-relaxed text-ice-300">
+            <p class="mt-5 text-lg leading-relaxed text-ice-300">
               Arc doesn't just produce output — it validates it. Builds and tests are gates, not suggestions.
               LLM review adds a layer. Human review loops close the gap.
             </p>
-            <p class="mt-6 text-sm font-medium text-teal-500">
+            <p class="mt-6 text-sm font-semibold text-teal-500">
               Mergeable results that survive CI and code review.
             </p>
           </div>
@@ -269,14 +286,15 @@ const cssExample = `<span class="text-ice-300">/* Fast model for planning */</sp
     </section>
 
     <!-- Multi-model -->
-    <section class="border-t border-navy-800 py-24">
-      <div class="mx-auto max-w-6xl px-6">
+    <section class="relative py-28">
+      <div class="section-divider mx-auto max-w-xs"></div>
+      <div class="mx-auto max-w-6xl px-6 pt-28">
         <div class="grid items-start gap-16 lg:grid-cols-2">
-          <div>
-            <h2 class="text-3xl font-bold tracking-tight text-ice-50">
+          <div class="reveal">
+            <h2 class="font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
               Multi-model, multi-provider
             </h2>
-            <p class="mt-4 text-lg leading-relaxed text-ice-300">
+            <p class="mt-5 text-lg leading-relaxed text-ice-300">
               Different steps deserve different models. Arc orchestrates an ensemble so you get the best
               quality per dollar — fast models for breadth, frontier models for correctness.
             </p>
@@ -296,12 +314,12 @@ const cssExample = `<span class="text-ice-300">/* Fast model for planning */</sp
             </ul>
           </div>
 
-          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-6">
+          <div class="reveal reveal-d2 rounded-xl border border-navy-800 bg-navy-900/60 p-6 shadow-[0_0_60px_-15px_rgba(103,178,215,0.08)]">
             <div class="mb-3 flex items-center gap-2">
-              <span class="h-3 w-3 rounded-full bg-coral"></span>
-              <span class="h-3 w-3 rounded-full bg-amber"></span>
-              <span class="h-3 w-3 rounded-full bg-mint"></span>
-              <span class="ml-3 text-xs text-ice-300 font-mono">models.css</span>
+              <span class="h-3 w-3 rounded-full bg-coral/70"></span>
+              <span class="h-3 w-3 rounded-full bg-amber/70"></span>
+              <span class="h-3 w-3 rounded-full bg-mint/70"></span>
+              <span class="ml-3 text-xs text-ice-300/60 font-mono">models.css</span>
             </div>
             <pre class="overflow-x-auto text-sm leading-relaxed"><code class="font-mono" set:html={cssExample} /></pre>
           </div>
@@ -310,54 +328,100 @@ const cssExample = `<span class="text-ice-300">/* Fast model for planning */</sp
     </section>
 
     <!-- Observability -->
-    <section class="border-t border-navy-800 py-24">
-      <div class="mx-auto max-w-3xl px-6 text-center">
-        <h2 class="text-3xl font-bold tracking-tight text-ice-50">
-          Ground-up observability
-        </h2>
-        <p class="mt-4 text-lg leading-relaxed text-ice-300">
-          If you can't see what happened, you can't trust it. Full traceability across runs — inspect every model
-          call, every tool invocation, every decision point. Compare runs, diagnose regressions, tune workflows.
-        </p>
+    <section class="relative py-28">
+      <div class="section-divider mx-auto max-w-xs"></div>
+      <div class="mx-auto max-w-4xl px-6 pt-28">
+        <div class="text-center">
+          <h2 class="reveal font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
+            Ground-up observability
+          </h2>
+          <p class="reveal reveal-d1 mt-5 text-lg leading-relaxed text-ice-300">
+            If you can't see what happened, you can't trust it. Full traceability across runs — inspect every model
+            call, every tool invocation, every decision point.
+          </p>
+        </div>
+
+        <!-- Trace visualization -->
+        <div class="reveal reveal-d2 mt-16 rounded-xl border border-navy-800 bg-navy-900/40 p-6 overflow-hidden">
+          <div class="mb-5 flex items-center gap-2.5">
+            <div class="h-2 w-2 rounded-full bg-mint animate-pulse-glow"></div>
+            <span class="text-xs font-mono text-ice-300/70">arc.workflow.run — trace</span>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center gap-3">
+              <span class="shrink-0 w-20 text-right text-xs font-mono text-ice-300/50">workflow</span>
+              <div class="relative h-7 flex-1">
+                <div class="absolute inset-x-0 h-full rounded-md bg-teal-700/25 border border-teal-700/30 flex items-center px-3">
+                  <span class="text-[11px] font-mono text-teal-300">arc.workflow.run — 24.3s</span>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="shrink-0 w-20 text-right text-xs font-mono text-ice-300/50">plan</span>
+              <div class="relative h-7 flex-1">
+                <div class="absolute left-[1%] h-full rounded-md bg-teal-500/15 border border-teal-500/25 flex items-center px-3" style="width: 18%">
+                  <span class="text-[11px] font-mono text-teal-300 truncate">4.1s</span>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="shrink-0 w-20 text-right text-xs font-mono text-ice-300/50">implement</span>
+              <div class="relative h-7 flex-1">
+                <div class="absolute left-[20%] h-full rounded-md bg-mint/12 border border-mint/20 flex items-center px-3" style="width: 42%">
+                  <span class="text-[11px] font-mono text-mint truncate">12.7s</span>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="shrink-0 w-20 text-right text-xs font-mono text-ice-300/50">verify</span>
+              <div class="relative h-7 flex-1">
+                <div class="absolute left-[63%] h-full rounded-md bg-amber/12 border border-amber/20 flex items-center px-3" style="width: 28%">
+                  <span class="text-[11px] font-mono text-amber truncate">7.5s</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
     <!-- Why Arc -->
-    <section class="border-t border-navy-800 py-24">
-      <div class="mx-auto max-w-4xl px-6 text-center">
-        <h2 class="text-3xl font-bold tracking-tight text-ice-50">
-          Shippable outcomes, not impressive output
+    <section class="relative py-28">
+      <div class="section-divider mx-auto max-w-xs"></div>
+      <div class="mx-auto max-w-4xl px-6 pt-28 text-center">
+        <h2 class="reveal font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
+          Shippable outcomes,<br class="hidden sm:inline" /> not impressive output
         </h2>
-        <p class="mt-4 text-lg text-ice-300">
+        <p class="reveal reveal-d1 mt-5 text-lg text-ice-300">
           Most AI coding tools optimize for impressive output. Arc optimizes for what actually merges.
         </p>
-        <div class="mt-12 grid gap-6 text-left sm:grid-cols-2">
+        <div class="reveal reveal-d2 mt-14 grid gap-x-8 gap-y-8 text-left sm:grid-cols-2">
           <div class="flex items-start gap-4">
             <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
             <div>
-              <div class="font-medium text-ice-50">Reviewable changes</div>
-              <div class="text-sm text-ice-300">Not massive diffs</div>
+              <div class="font-display font-semibold text-ice-50">Reviewable changes</div>
+              <div class="text-sm text-ice-300/40 line-through decoration-ice-300/20">Not massive diffs</div>
             </div>
           </div>
           <div class="flex items-start gap-4">
             <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
             <div>
-              <div class="font-medium text-ice-50">Verification gates</div>
-              <div class="text-sm text-ice-300">Not vibes</div>
+              <div class="font-display font-semibold text-ice-50">Verification gates</div>
+              <div class="text-sm text-ice-300/40 line-through decoration-ice-300/20">Not vibes</div>
             </div>
           </div>
           <div class="flex items-start gap-4">
             <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
             <div>
-              <div class="font-medium text-ice-50">Audit trails</div>
-              <div class="text-sm text-ice-300">Not opaque agents</div>
+              <div class="font-display font-semibold text-ice-50">Audit trails</div>
+              <div class="text-sm text-ice-300/40 line-through decoration-ice-300/20">Not opaque agents</div>
             </div>
           </div>
           <div class="flex items-start gap-4">
             <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
             <div>
-              <div class="font-medium text-ice-50">Repeatable workflows</div>
-              <div class="text-sm text-ice-300">Not one-off prompts</div>
+              <div class="font-display font-semibold text-ice-50">Repeatable workflows</div>
+              <div class="text-sm text-ice-300/40 line-through decoration-ice-300/20">Not one-off prompts</div>
             </div>
           </div>
         </div>
@@ -365,34 +429,42 @@ const cssExample = `<span class="text-ice-300">/* Fast model for planning */</sp
     </section>
 
     <!-- Workflow as Code -->
-    <section class="border-t border-navy-800 py-24">
-      <div class="mx-auto max-w-3xl px-6 text-center">
-        <h2 class="text-3xl font-bold tracking-tight text-ice-50">
+    <section class="relative py-28">
+      <div class="section-divider mx-auto max-w-xs"></div>
+      <div class="mx-auto max-w-3xl px-6 pt-28 text-center">
+        <h2 class="reveal font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
           Workflow-as-Code
         </h2>
-        <p class="mt-4 text-lg leading-relaxed text-ice-300">
+        <p class="reveal reveal-d1 mt-5 text-lg leading-relaxed text-ice-300">
           Define how work gets done in version-controlled graph files, then run it consistently.
           Composable steps. Auditable history. Repeatable results. IaC for coding.
         </p>
+        <div class="reveal reveal-d2 mt-10 inline-block rounded-lg border border-navy-800 bg-navy-900/50 px-6 py-3">
+          <code class="text-sm font-mono text-teal-300">$ arc run workflow.dot</code>
+        </div>
       </div>
     </section>
 
     <!-- CTA -->
-    <section class="border-t border-navy-800 py-24">
-      <div class="mx-auto max-w-3xl px-6 text-center">
-        <h2 class="text-3xl font-bold tracking-tight text-ice-50">
-          Workflows you can audit.<br />Output you can trust.
+    <section class="relative overflow-hidden py-32">
+      <div class="absolute inset-0 dot-grid"></div>
+      <div class="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[600px] w-[600px] rounded-full bg-teal-700/6 blur-[150px]"></div>
+      <div class="section-divider mx-auto max-w-xs"></div>
+      <div class="relative mx-auto max-w-3xl px-6 pt-32 text-center">
+        <h2 class="reveal font-display text-4xl font-bold tracking-tight text-ice-50 sm:text-5xl">
+          Workflows you can audit.<br />
+          <span class="gradient-text">Output you can trust.</span>
         </h2>
-        <div class="mt-10 flex items-center justify-center gap-4">
+        <div class="reveal reveal-d1 mt-12 flex items-center justify-center gap-4">
           <a
             href="https://docs.arc.computer/getting-started/quick-start"
-            class="rounded-lg bg-teal-700 px-6 py-3 text-sm font-semibold text-white hover:bg-teal-500 transition-colors"
+            class="rounded-xl bg-teal-700 px-7 py-3.5 text-sm font-semibold text-white transition-all hover:bg-teal-500 hover:shadow-[0_0_24px_-4px_rgba(53,127,158,0.5)]"
           >
             Get started
           </a>
           <a
             href="https://github.com/qltysh/arc"
-            class="rounded-lg border border-navy-600 px-6 py-3 text-sm font-semibold text-ice-300 hover:border-ice-300 hover:text-ice-50 transition-colors"
+            class="rounded-xl border border-navy-600 px-7 py-3.5 text-sm font-semibold text-ice-300 transition-all hover:border-teal-700/60 hover:text-ice-50"
           >
             View on GitHub
           </a>
@@ -402,7 +474,7 @@ const cssExample = `<span class="text-ice-300">/* Fast model for planning */</sp
   </main>
 
   <!-- Footer -->
-  <footer class="border-t border-navy-800 py-12">
+  <footer class="border-t border-navy-800/60 py-12">
     <div class="mx-auto max-w-6xl px-6">
       <div class="flex flex-col items-center justify-between gap-4 sm:flex-row">
         <div class="flex items-center gap-3">
@@ -416,4 +488,19 @@ const cssExample = `<span class="text-ice-300">/* Fast model for planning */</sp
       </div>
     </div>
   </footer>
+
+  <script>
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("revealed");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15, rootMargin: "0px 0px -40px 0px" }
+    );
+    document.querySelectorAll(".reveal").forEach((el) => observer.observe(el));
+  </script>
 </Layout>

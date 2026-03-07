@@ -6,6 +6,7 @@
   --color-teal-700: #357F9E;
 
   --color-navy-950: #0F1729;
+  --color-navy-900: #141C2F;
   --color-navy-800: #252C3D;
   --color-navy-600: #4B5768;
 
@@ -17,6 +18,75 @@
   --color-amber: #F0A45B;
   --color-coral: #E86B6B;
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --animate-float: float 8s ease-in-out infinite;
+  --animate-pulse-glow: pulse-glow 4s ease-in-out infinite;
+}
+
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-20px); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* Animated gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, var(--color-teal-300), var(--color-mint), var(--color-teal-500));
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gradient-shift 6s ease infinite;
+}
+
+/* Subtle dot grid overlay */
+.dot-grid {
+  background-image: radial-gradient(var(--color-teal-500) 0.5px, transparent 0.5px);
+  background-size: 24px 24px;
+  opacity: 0.05;
+  pointer-events: none;
+}
+
+/* Feature card hover glow */
+.glow-card {
+  transition: border-color 0.4s ease, box-shadow 0.4s ease, transform 0.4s ease;
+}
+.glow-card:hover {
+  border-color: rgba(103, 178, 215, 0.25);
+  box-shadow: 0 0 40px -8px rgba(103, 178, 215, 0.12), inset 0 1px 0 rgba(103, 178, 215, 0.06);
+  transform: translateY(-2px);
+}
+
+/* Scroll reveal */
+.reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.8s cubic-bezier(0.22, 1, 0.36, 1), transform 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.reveal.revealed {
+  opacity: 1;
+  transform: translateY(0);
+}
+.reveal-d1 { transition-delay: 100ms; }
+.reveal-d2 { transition-delay: 200ms; }
+.reveal-d3 { transition-delay: 300ms; }
+.reveal-d4 { transition-delay: 400ms; }
+.reveal-d5 { transition-delay: 500ms; }
+
+/* Section gradient divider */
+.section-divider {
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--color-navy-600), transparent);
 }
