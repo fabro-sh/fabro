@@ -36,3 +36,5 @@ arc-util = { path = "../arc-util" }
 http = "1"
 tokio = { workspace = true, features = ["test-util", "macros"] }
 dotenvy.workspace = true
+httpmock = "0.8"
+serde_json.workspace = true

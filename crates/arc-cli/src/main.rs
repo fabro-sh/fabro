@@ -18,8 +18,24 @@ struct Cli {
     #[arg(long, global = true)]
     debug: bool,
 
+    /// Execution mode: standalone (in-process) or server (delegate to API)
+    #[arg(long, global = true, value_parser = parse_execution_mode)]
+    mode: Option<cli_config::ExecutionMode>,
+
+    /// Server URL (overrides server.base_url from cli.toml)
+    #[arg(long, global = true)]
+    server_url: Option<String>,
+
     #[command(subcommand)]
     command: Command,
+}
+
+fn parse_execution_mode(s: &str) -> Result<cli_config::ExecutionMode, String> {
+    match s {
+        "standalone" => Ok(cli_config::ExecutionMode::Standalone),
+        "server" => Ok(cli_config::ExecutionMode::Server),
+        _ => Err(format!("invalid mode '{s}', expected 'standalone' or 'server'")),
+    }
 }
 
 #[derive(Subcommand)]
@@ -184,7 +200,25 @@ async fn main() -> Result<()> {
         Command::Parse(args) => {
             arc_workflows::cli::parse::parse_command(&args)?;
         }
-        Command::Models { command } => arc_llm::cli::run_models(command).await?,
+        Command::Models { command } => {
+            let cli_config = cli_config::load_cli_config(None)?;
+            let resolved = cli_config::resolve_mode(
+                cli.mode,
+                cli.server_url.as_deref(),
+                &cli_config,
+            );
+            let server = match resolved.mode {
+                cli_config::ExecutionMode::Server => {
+                    let client = cli_config::build_server_client(resolved.tls.as_ref())?;
+                    Some(arc_llm::cli::ServerConnection {
+                        client,
+                        base_url: resolved.server_base_url,
+                    })
+                }
+                cli_config::ExecutionMode::Standalone => None,
+            };
+            arc_llm::cli::run_models(command, server).await?
+        }
         Command::Serve(args) => {
             let styles: &'static arc_util::terminal::Styles =
                 Box::leak(Box::new(arc_util::terminal::Styles::detect_stderr()));

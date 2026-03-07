@@ -20,6 +20,16 @@ CLI flags always take the highest priority:
 ## Full example
 
 ```toml
+mode = "server"
+
+[server]
+base_url = "https://arc.example.com:3000"
+
+[server.tls]
+cert = "~/.arc/tls/client.crt"
+key = "~/.arc/tls/client.key"
+ca = "~/.arc/tls/ca.crt"
+
 [agent]
 provider = "anthropic"
 model = "claude-opus-4-6"
@@ -67,3 +77,51 @@ Defaults for `arc llm prompt` and `arc llm chat`.
 <Note>
 The `[llm]` section only sets the default model. Use `[agent]` to configure provider, permissions, and output format for `arc agent`.
 </Note>
+
+## `mode`
+
+Controls whether commands run in-process or delegate to a running Arc API server.
+
+| Value | Description |
+|---|---|
+| `"standalone"` | Execute locally (default) |
+| `"server"` | Delegate to an Arc API server |
+
+Override with the `--mode` CLI flag:
+
+```bash
+arc --mode server models list
+```
+
+## `[server]` section
+
+Configuration for server mode.
+
+| Key | Description | Default |
+|---|---|---|
+| `base_url` | Server URL | `"http://localhost:3000"` |
+
+Override the URL with the `--server-url` CLI flag:
+
+```bash
+arc --mode server --server-url https://arc.example.com:3000 models list
+```
+
+### `[server.tls]` section
+
+Optional mTLS configuration for authenticating with the server. When present, the CLI presents a client certificate during the TLS handshake.
+
+| Key | Description |
+|---|---|
+| `cert` | Path to client certificate PEM file |
+| `key` | Path to client private key PEM file |
+| `ca` | Path to CA certificate PEM file (to verify the server) |
+
+Paths support `~/` expansion. Example:
+
+```toml
+[server.tls]
+cert = "~/.arc/tls/client.crt"
+key = "~/.arc/tls/client.key"
+ca = "~/.arc/tls/ca.crt"
+```

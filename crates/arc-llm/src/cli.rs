@@ -7,12 +7,18 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use clap::{Args, Subcommand};
 use futures::StreamExt;
+use serde::Deserialize;
 
 use arc_util::terminal::Styles;
 
 use crate::catalog;
 use crate::generate::{self, GenerateParams};
-use crate::types::Message;
+use crate::types::{Message, ModelInfo};
+
+pub struct ServerConnection {
+    pub client: reqwest::Client,
+    pub base_url: String,
+}
 
 #[derive(Args)]
 pub struct PromptArgs {
@@ -348,7 +354,50 @@ pub async fn run_prompt(args: PromptArgs) -> Result<()> {
     Ok(())
 }
 
-pub async fn run_models(command: Option<ModelsCommand>) -> Result<()> {
+#[derive(Deserialize)]
+struct PaginatedModelsResponse {
+    data: Vec<ModelInfo>,
+}
+
+async fn fetch_models_from_server(
+    client: &reqwest::Client,
+    base_url: &str,
+    provider: Option<&str>,
+) -> Result<Vec<ModelInfo>> {
+    let url = format!("{base_url}/models?page[limit]=100");
+    tracing::debug!(url = %url, "Fetching models from server");
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .with_context(|| format!("Failed to connect to server at {base_url}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        bail!("Server returned {status}: {body}");
+    }
+
+    let parsed: PaginatedModelsResponse = response
+        .json()
+        .await
+        .context("Failed to parse models response from server")?;
+
+    let mut models = parsed.data;
+    tracing::debug!(model_count = models.len(), "Models received from server");
+
+    if let Some(p) = provider {
+        models.retain(|m| m.provider == p);
+    }
+
+    Ok(models)
+}
+
+pub async fn run_models(
+    command: Option<ModelsCommand>,
+    server: Option<ServerConnection>,
+) -> Result<()> {
     let command = command.unwrap_or(ModelsCommand::List {
         provider: None,
         query: None,
@@ -358,7 +407,12 @@ pub async fn run_models(command: Option<ModelsCommand>) -> Result<()> {
 
     match command {
         ModelsCommand::List { provider, query } => {
-            let mut models = catalog::list_models(provider.as_deref());
+            let mut models = match &server {
+                Some(s) => {
+                    fetch_models_from_server(&s.client, &s.base_url, provider.as_deref()).await?
+                }
+                None => catalog::list_models(provider.as_deref()),
+            };
 
             if let Some(q) = &query {
                 let q_lower = q.to_lowercase();
@@ -374,6 +428,9 @@ pub async fn run_models(command: Option<ModelsCommand>) -> Result<()> {
             print_models_table(&models, &styles);
         }
         ModelsCommand::Test { provider, model } => {
+            if server.is_some() {
+                bail!("models test is not supported in server mode");
+            }
             test_models(provider.as_deref(), model.as_deref(), &styles).await?;
         }
     }
@@ -632,5 +689,121 @@ mod tests {
         assert_eq!(result.temperature, None);
         assert_eq!(result.max_tokens, None);
         assert_eq!(result.provider_options, None);
+    }
+
+    // --- run_models server mode rejection ---
+
+    #[tokio::test]
+    async fn models_test_rejects_server_mode() {
+        let server = ServerConnection {
+            client: reqwest::Client::new(),
+            base_url: "http://unused".to_string(),
+        };
+        let command = Some(ModelsCommand::Test {
+            provider: None,
+            model: None,
+        });
+        let result = run_models(command, Some(server)).await;
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "models test is not supported in server mode"
+        );
+    }
+
+    // --- fetch_models_from_server ---
+
+    #[tokio::test]
+    async fn fetch_models_from_server_parses_response() {
+        let server = httpmock::MockServer::start_async().await;
+        let mock = server.mock_async(|when, then| {
+            when.method("GET").path("/models").query_param("page[limit]", "100");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .body(serde_json::json!({
+                    "data": [{
+                        "id": "test-model",
+                        "provider": "test-provider",
+                        "family": "test",
+                        "display_name": "Test Model",
+                        "limits": { "context_window": 128000, "max_output": 4096 },
+                        "training": null,
+                        "features": { "tools": true, "vision": false, "reasoning": false },
+                        "costs": { "input_cost_per_mtok": 1.0, "output_cost_per_mtok": 2.0, "cache_input_cost_per_mtok": null },
+                        "estimated_output_tps": 100.0,
+                        "aliases": ["tm"],
+                        "default": false
+                    }],
+                    "meta": { "has_more": false }
+                }).to_string());
+        }).await;
+
+        let client = reqwest::Client::new();
+        let models = fetch_models_from_server(&client, &server.url(""), None)
+            .await
+            .unwrap();
+
+        mock.assert_async().await;
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "test-model");
+        assert_eq!(models[0].provider, "test-provider");
+    }
+
+    #[tokio::test]
+    async fn fetch_models_from_server_filters_by_provider() {
+        let server = httpmock::MockServer::start_async().await;
+        server.mock_async(|when, then| {
+            when.method("GET").path("/models");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .body(serde_json::json!({
+                    "data": [
+                        {
+                            "id": "model-a",
+                            "provider": "alpha",
+                            "family": "a",
+                            "display_name": "Model A",
+                            "limits": { "context_window": 8000 },
+                            "features": { "tools": false, "vision": false, "reasoning": false },
+                            "costs": {},
+                            "aliases": [],
+                            "default": false
+                        },
+                        {
+                            "id": "model-b",
+                            "provider": "beta",
+                            "family": "b",
+                            "display_name": "Model B",
+                            "limits": { "context_window": 8000 },
+                            "features": { "tools": false, "vision": false, "reasoning": false },
+                            "costs": {},
+                            "aliases": [],
+                            "default": false
+                        }
+                    ],
+                    "meta": { "has_more": false }
+                }).to_string());
+        }).await;
+
+        let client = reqwest::Client::new();
+        let models = fetch_models_from_server(&client, &server.url(""), Some("alpha"))
+            .await
+            .unwrap();
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "model-a");
+    }
+
+    #[tokio::test]
+    async fn fetch_models_from_server_error_on_failure() {
+        let server = httpmock::MockServer::start_async().await;
+        server.mock_async(|when, then| {
+            when.method("GET").path("/models");
+            then.status(500).body("internal error");
+        }).await;
+
+        let client = reqwest::Client::new();
+        let result = fetch_models_from_server(&client, &server.url(""), None).await;
+        assert!(result.is_err());
     }
 }
