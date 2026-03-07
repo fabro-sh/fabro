@@ -3,18 +3,6 @@ title: "Slack interviews, hooks, model failover, and GPT-5.4"
 date: "2026-03-05"
 ---
 
-<Warning>
-**`script.output` and `script.stderr` context keys renamed to `command.output` and `command.stderr`.** The old names were inconsistent with the handler name (`command`).
-
-To migrate: Update any DOT workflow prompts referencing `{{script.output}}` or `{{script.stderr}}` to use `{{command.output}}` and `{{command.stderr}}`.
-</Warning>
-
-<Warning>
-**`GET /runs/{id}/files` renamed to `GET /runs/{id}/compare`.** The endpoint returns the same data but the path now reflects its purpose of comparing file changes between checkpoints.
-
-To migrate: Update API integrations using `/files` to use `/compare`.
-</Warning>
-
 ## Slack integration for interviews
 
 Arc can now conduct human-in-the-loop interviews directly in Slack. The new Slack Socket Mode integration supports all five question types — yes/no, confirmation, multiple choice, multi-select, and freeform (via threaded replies). Because it uses Socket Mode, no public URL or webhook endpoint is required.
@@ -78,3 +66,15 @@ stage_a [model="gpt54-pro"];
 - MODEL column in CLI tables widened from 24 to 30 characters to avoid truncating longer model names
 - Unknown `$variable` placeholders in DOT prompts now produce clear error messages instead of being silently passed through
 </Accordion>
+
+<Warning>
+**`script.output` and `script.stderr` context keys renamed to `command.output` and `command.stderr`.** The old names were inconsistent with the handler name (`command`).
+
+To migrate: Update any DOT workflow prompts referencing `{{script.output}}` or `{{script.stderr}}` to use `{{command.output}}` and `{{command.stderr}}`.
+</Warning>
+
+<Warning>
+**`GET /runs/{id}/files` renamed to `GET /runs/{id}/compare`.** The endpoint returns the same data but the path now reflects its purpose of comparing file changes between checkpoints.
+
+To migrate: Update API integrations using `/files` to use `/compare`.
+</Warning>

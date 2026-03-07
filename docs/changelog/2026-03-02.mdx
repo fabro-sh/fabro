@@ -3,15 +3,6 @@ title: "Devcontainer support and sessions"
 date: "2026-03-02"
 ---
 
-<Warning>
-**"Pipeline" renamed to "Workflow" and "Run" across the entire system.** API endpoints, CLI commands, config files, and the web UI now use `workflow` and `run` instead of `pipeline`.
-
-To migrate:
-1. Replace `pipeline` with `workflow` in DOT files and TOML configs
-2. Update API integrations to use new endpoint paths (e.g., `/runs` instead of `/pipelines`)
-3. Regenerate API clients with `bun run generate`
-</Warning>
-
 ## Devcontainer support
 
 Sandbox environments can now be defined using standard `devcontainer.json` files. Arc parses and resolves the full devcontainer spec — features, lifecycle hooks (`onCreateCommand`, `postStartCommand`), build args, `containerEnv`, feature dependencies, and Compose-based configurations.
@@ -39,3 +30,12 @@ Persistent chat sessions with SQLite storage. Start a conversation with an agent
 - Styled 404 and 500 error pages matching the Arc design system
 - `--debug` flag switches log level from INFO to DEBUG for troubleshooting
 </Accordion>
+
+<Warning>
+**"Pipeline" renamed to "Workflow" and "Run" across the entire system.** API endpoints, CLI commands, config files, and the web UI now use `workflow` and `run` instead of `pipeline`.
+
+To migrate:
+1. Replace `pipeline` with `workflow` in DOT files and TOML configs
+2. Update API integrations to use new endpoint paths (e.g., `/runs` instead of `/pipelines`)
+3. Regenerate API clients with `bun run generate`
+</Warning>
