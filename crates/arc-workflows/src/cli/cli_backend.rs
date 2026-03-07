@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use arc_agent::sandbox::ExecResult;
 use arc_agent::Sandbox;
 use arc_llm::provider::Provider;
 use async_trait::async_trait;
@@ -291,20 +292,27 @@ impl CodergenBackend for AgentCliBackend {
         // 1. Snapshot git state before the CLI run
         let files_before = self.detect_changed_files(sandbox).await;
 
-        // 2. Write prompt to temp file
-        let prompt_path = "/tmp/arc_cli_prompt.txt";
+        // 2. Generate unique paths for this run
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let tmp_prefix = format!("/tmp/arc_cli_{run_id}");
+        let prompt_path = format!("{tmp_prefix}_prompt.txt");
+        let stdout_path = format!("{tmp_prefix}_stdout.log");
+        let stderr_path = format!("{tmp_prefix}_stderr.log");
+        let exit_code_path = format!("{tmp_prefix}_exit_code");
+        let env_path = format!("{tmp_prefix}_env.sh");
+
         sandbox
-            .write_file(prompt_path, prompt)
+            .write_file(&prompt_path, prompt)
             .await
             .map_err(|e| ArcError::handler(format!("Failed to write prompt file: {e}")))?;
 
-        // 3. Build and execute CLI command
+        // 3. Build CLI command
         let model = node.llm_model().unwrap_or(&self.model);
         let provider = node
             .llm_provider()
             .and_then(|s| s.parse::<Provider>().ok())
             .unwrap_or(self.provider);
-        let command = cli_command_for_provider(provider, model, prompt_path);
+        let command = cli_command_for_provider(provider, model, &prompt_path);
 
         let _ = tokio::fs::create_dir_all(stage_dir).await;
         let provider_used = serde_json::json!({
@@ -320,7 +328,6 @@ impl CodergenBackend for AgentCliBackend {
         // Forward provider API key so the CLI tool can authenticate.
         // Written to a temp file and sourced, since Daytona's exec API doesn't
         // support env vars and inline export would leak keys in logs.
-        let env_file = "/tmp/arc_cli_env.sh";
         let env_lines: Vec<String> = provider
             .api_key_env_vars()
             .iter()
@@ -332,20 +339,80 @@ impl CodergenBackend for AgentCliBackend {
             .collect();
         if !env_lines.is_empty() {
             sandbox
-                .write_file(env_file, &env_lines.join("\n"))
+                .write_file(&env_path, &env_lines.join("\n"))
                 .await
                 .map_err(|e| ArcError::handler(format!("Failed to write env file: {e}")))?;
         }
-        let full_command = if env_lines.is_empty() {
+
+        // 3a. Disable auto-stop so the sandbox stays alive during long CLI runs
+        if let Err(e) = sandbox.set_autostop_interval(0).await {
+            tracing::warn!("Failed to disable sandbox auto-stop: {e}");
+        }
+
+        // 3b. Launch CLI command in background
+        let inner_command = if env_lines.is_empty() {
             command.clone()
         } else {
-            format!(". {env_file} && {command}")
+            format!(". {env_path} && {command}")
+        };
+        let bg_command = format!(
+            "({inner_command} > {stdout_path} 2>{stderr_path}; echo $? > {exit_code_path}) &\necho $!"
+        );
+        let launch_start = std::time::Instant::now();
+        let launch_result = sandbox
+            .exec_command(&bg_command, 30_000, None, None, None)
+            .await
+            .map_err(|e| ArcError::handler(format!("Failed to launch CLI command: {e}")))?;
+        let pid = launch_result.stdout.trim();
+        tracing::info!(pid, "CLI process launched in background");
+
+        // 3c. Poll for completion
+        let poll_command = format!(
+            "[ -f {exit_code_path} ] && cat {exit_code_path} || echo running"
+        );
+        let poll_interval = std::time::Duration::from_secs(5);
+        let exit_code: i32 = loop {
+            tokio::time::sleep(poll_interval).await;
+            let poll_result = sandbox
+                .exec_command(&poll_command, 30_000, None, None, None)
+                .await
+                .map_err(|e| ArcError::handler(format!("Failed to poll CLI command: {e}")))?;
+            let status = poll_result.stdout.trim();
+            if status != "running" {
+                break status.parse::<i32>().unwrap_or(-1);
+            }
         };
 
-        let result = sandbox
-            .exec_command(&full_command, 600_000, None, None, None)
+        // 3d. Read results
+        let duration_ms =
+            u64::try_from(launch_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let stdout_result = sandbox
+            .exec_command(&format!("cat {stdout_path}"), 60_000, None, None, None)
             .await
-            .map_err(|e| ArcError::handler(format!("CLI command failed: {e}")))?;
+            .map_err(|e| ArcError::handler(format!("Failed to read stdout: {e}")))?;
+        let stderr_result = sandbox
+            .exec_command(&format!("cat {stderr_path}"), 60_000, None, None, None)
+            .await
+            .map_err(|e| ArcError::handler(format!("Failed to read stderr: {e}")))?;
+
+        let result = ExecResult {
+            stdout: stdout_result.stdout,
+            stderr: stderr_result.stdout,
+            exit_code,
+            timed_out: false,
+            duration_ms,
+        };
+
+        // 3e. Cleanup temp files
+        let _ = sandbox
+            .exec_command(
+                &format!("rm -f {tmp_prefix}_*"),
+                30_000,
+                None,
+                None,
+                None,
+            )
+            .await;
 
         if let Ok(json) = serde_json::to_string_pretty(&serde_json::json!({
             "exit_code": result.exit_code,

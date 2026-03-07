@@ -96,6 +96,10 @@ macro_rules! delegate_sandbox {
             async fn refresh_push_credentials(&self) -> Result<(), String> {
                 self.$field.refresh_push_credentials().await
             }
+
+            async fn set_autostop_interval(&self, minutes: i32) -> Result<(), String> {
+                self.$field.set_autostop_interval(minutes).await
+            }
         }
     };
 }
@@ -337,6 +341,12 @@ pub trait Sandbox: Send + Sync {
     /// Refresh git push credentials (e.g. rotate an expiring GitHub App token).
     /// Default is a no-op; Daytona overrides to update the remote URL with a fresh token.
     async fn refresh_push_credentials(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Set the auto-stop interval in minutes (0 to disable).
+    /// Default is a no-op; Daytona overrides to call the Daytona API.
+    async fn set_autostop_interval(&self, _minutes: i32) -> Result<(), String> {
         Ok(())
     }
 }

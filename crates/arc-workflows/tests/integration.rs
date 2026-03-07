@@ -8733,7 +8733,62 @@ impl arc_agent::Sandbox for CliTestEnv {
             });
         }
 
-        // CLI command: return configured stdout
+        // Background launch: return PID
+        if command.contains("echo $!") {
+            return Ok(arc_agent::ExecResult {
+                stdout: "12345\n".into(),
+                stderr: String::new(),
+                exit_code: 0,
+                timed_out: false,
+                duration_ms: 1,
+            });
+        }
+
+        // Poll for completion: return exit code 0 immediately
+        if command.contains("exit_code") && command.contains("echo running") {
+            return Ok(arc_agent::ExecResult {
+                stdout: "0\n".into(),
+                stderr: String::new(),
+                exit_code: 0,
+                timed_out: false,
+                duration_ms: 1,
+            });
+        }
+
+        // Read stdout file
+        if command.starts_with("cat") && command.contains("stdout.log") {
+            return Ok(arc_agent::ExecResult {
+                stdout: self.cli_stdout.clone(),
+                stderr: String::new(),
+                exit_code: 0,
+                timed_out: false,
+                duration_ms: 1,
+            });
+        }
+
+        // Read stderr file
+        if command.starts_with("cat") && command.contains("stderr.log") {
+            return Ok(arc_agent::ExecResult {
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: 0,
+                timed_out: false,
+                duration_ms: 1,
+            });
+        }
+
+        // Cleanup temp files
+        if command.starts_with("rm -f") {
+            return Ok(arc_agent::ExecResult {
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: 0,
+                timed_out: false,
+                duration_ms: 1,
+            });
+        }
+
+        // Fallback
         Ok(arc_agent::ExecResult {
             stdout: self.cli_stdout.clone(),
             stderr: String::new(),
@@ -8810,27 +8865,30 @@ async fn cli_backend_run_writes_prompt_and_calls_exec() {
 
     // Verify prompt was written
     let written = test_env.recorded_written_files();
-    assert_eq!(
-        written.len(),
-        1,
-        "should write exactly one file (the prompt)"
+    let prompt_file = written
+        .iter()
+        .find(|(path, _)| path.contains("_prompt.txt"))
+        .expect("should write a prompt file");
+    assert!(
+        prompt_file.0.starts_with("/tmp/arc_cli_") && prompt_file.0.ends_with("_prompt.txt"),
+        "prompt path should use UUID prefix: {}",
+        prompt_file.0
     );
-    assert_eq!(written[0].0, "/tmp/arc_cli_prompt.txt");
-    assert_eq!(written[0].1, "Fix the authentication bug");
+    assert_eq!(prompt_file.1, "Fix the authentication bug");
 
-    // Verify the CLI command was called
+    // Verify the CLI command was called (now wrapped in background launch)
     let commands = test_env.recorded_commands();
     let cli_cmd = commands
         .iter()
-        .find(|c| c.contains("claude"))
-        .expect("should call claude CLI");
+        .find(|c| c.contains("claude") && c.contains("echo $!"))
+        .expect("should launch claude CLI in background");
     assert!(cli_cmd.contains("-p"), "should use pipe mode");
     assert!(
         cli_cmd.contains("claude-opus-4-6"),
         "should use correct model"
     );
     assert!(
-        cli_cmd.contains("/tmp/arc_cli_prompt.txt"),
+        cli_cmd.contains("_prompt.txt"),
         "should reference prompt file"
     );
 
@@ -8909,12 +8967,12 @@ async fn cli_backend_run_with_codex_provider() {
         .await
         .expect("CLI backend should succeed");
 
-    // Verify codex command was called
+    // Verify codex command was called (now wrapped in background launch)
     let commands = test_env.recorded_commands();
     let cli_cmd = commands
         .iter()
-        .find(|c| c.contains("codex"))
-        .expect("should call codex CLI");
+        .find(|c| c.contains("codex") && c.contains("echo $!"))
+        .expect("should launch codex CLI in background");
     assert!(cli_cmd.contains("exec --json"), "should use exec mode");
     assert!(
         cli_cmd.contains("gpt-5.3-codex"),
@@ -8981,10 +9039,40 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
                     duration_ms: 0,
                 });
             }
+            // Background launch: return PID
+            if command.contains("echo $!") {
+                return Ok(arc_agent::ExecResult {
+                    stdout: "12345\n".into(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    timed_out: false,
+                    duration_ms: 0,
+                });
+            }
+            // Poll: return non-zero exit code
+            if command.contains("exit_code") && command.contains("echo running") {
+                return Ok(arc_agent::ExecResult {
+                    stdout: "127\n".into(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    timed_out: false,
+                    duration_ms: 0,
+                });
+            }
+            // Read stderr file
+            if command.starts_with("cat") && command.contains("stderr.log") {
+                return Ok(arc_agent::ExecResult {
+                    stdout: "command not found: claude".into(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    timed_out: false,
+                    duration_ms: 0,
+                });
+            }
             Ok(arc_agent::ExecResult {
                 stdout: String::new(),
-                stderr: "command not found: claude".into(),
-                exit_code: 127,
+                stderr: String::new(),
+                exit_code: 0,
                 timed_out: false,
                 duration_ms: 0,
             })
@@ -9113,7 +9201,10 @@ async fn cli_backend_run_uses_node_model_override() {
         .expect("should succeed");
 
     let commands = test_env.recorded_commands();
-    let cli_cmd = commands.iter().find(|c| c.contains("claude")).unwrap();
+    let cli_cmd = commands
+        .iter()
+        .find(|c| c.contains("claude") && c.contains("echo $!"))
+        .unwrap();
     assert!(
         cli_cmd.contains("claude-sonnet-4-5"),
         "should use node's model override, not default: {cli_cmd}"
@@ -9153,8 +9244,8 @@ async fn cli_backend_run_uses_node_provider_override() {
     let commands = test_env.recorded_commands();
     let cli_cmd = commands
         .iter()
-        .find(|c| c.contains("codex"))
-        .expect("should call codex based on provider override");
+        .find(|c| c.contains("codex") && c.contains("echo $!"))
+        .expect("should launch codex based on provider override");
     assert!(cli_cmd.contains("gpt-5.3-codex"));
 }
 

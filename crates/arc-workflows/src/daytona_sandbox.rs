@@ -728,6 +728,19 @@ impl Sandbox for DaytonaSandbox {
         Ok(())
     }
 
+    async fn set_autostop_interval(&self, minutes: i32) -> Result<(), String> {
+        let sandbox_id = self.sandbox()?.id.clone();
+        let mut sandbox = self
+            .client
+            .get(&sandbox_id)
+            .await
+            .map_err(|e| format!("Failed to get sandbox for autostop update: {e}"))?;
+        sandbox
+            .set_autostop_interval(minutes)
+            .await
+            .map_err(|e| format!("Failed to set autostop interval: {e}"))
+    }
+
     async fn read_file(
         &self,
         path: &str,
