@@ -1160,8 +1160,7 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: >
-        Ed25519-signed JWT issued by arc-web. Required claims: iss ("arc-web"),
-        iat, exp. Optional sub claim (GitHub profile URL) identifies the user.
+        JWT bearer token issued by arc-web. See the [Authentication](/api-reference/overview#authentication) guide for details.
     # OpenAPI 3.1 defines type: mutualTLS, but our parser (openapiv3) only
     # supports 3.0 scheme types. We use apiKey as a placeholder; actual mTLS
     # enforcement happens at the transport layer via client certificates.
