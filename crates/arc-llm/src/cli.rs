@@ -354,6 +354,191 @@ pub async fn run_prompt(args: PromptArgs) -> Result<()> {
     Ok(())
 }
 
+pub async fn run_prompt_via_server(args: PromptArgs, server: &ServerConnection) -> Result<()> {
+    let stdin_prompt = read_stdin_prompt();
+    let prompt_text = resolve_prompt(args.prompt, stdin_prompt)?;
+
+    // Extract known options
+    let mut temperature: Option<f64> = None;
+    let mut max_tokens: Option<i64> = None;
+    let mut top_p: Option<f64> = None;
+    for (key, value) in &args.option {
+        match key.as_str() {
+            "temperature" => {
+                temperature = Some(
+                    value
+                        .parse()
+                        .with_context(|| format!("invalid temperature value: {value}"))?,
+                );
+            }
+            "max_tokens" => {
+                max_tokens = Some(
+                    value
+                        .parse()
+                        .with_context(|| format!("invalid max_tokens value: {value}"))?,
+                );
+            }
+            "top_p" => {
+                top_p = Some(
+                    value
+                        .parse()
+                        .with_context(|| format!("invalid top_p value: {value}"))?,
+                );
+            }
+            _ => {}
+        }
+    }
+
+    let schema: Option<serde_json::Value> = match &args.schema {
+        Some(s) => Some(serde_json::from_str(s).context("--schema must be valid JSON")?),
+        None => None,
+    };
+
+    // Force non-streaming for structured output
+    let use_stream = !args.no_stream && schema.is_none();
+
+    let mut body = serde_json::json!({
+        "prompt": prompt_text,
+        "stream": use_stream,
+    });
+    if let Some(ref model) = args.model {
+        body["model"] = serde_json::Value::String(model.clone());
+    }
+    if let Some(ref system) = args.system {
+        body["system"] = serde_json::Value::String(system.clone());
+    }
+    if let Some(ref schema) = schema {
+        body["schema"] = schema.clone();
+    }
+    if let Some(t) = temperature {
+        body["temperature"] = serde_json::json!(t);
+    }
+    if let Some(m) = max_tokens {
+        body["max_tokens"] = serde_json::json!(m);
+    }
+    if let Some(t) = top_p {
+        body["top_p"] = serde_json::json!(t);
+    }
+
+    let url = format!("{}/completions", server.base_url);
+
+    if use_stream {
+        let response = server
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .with_context(|| format!("Failed to connect to server at {}", server.base_url))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().await.unwrap_or_default();
+            bail!("Server returned {status}: {text}");
+        }
+
+        // Parse SSE stream
+        let mut stream = response.bytes_stream();
+        let mut buffer = String::new();
+        let mut output_usage: Option<serde_json::Value> = None;
+
+        use futures::StreamExt;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("Error reading stream")?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            // Process complete SSE frames (separated by blank lines)
+            while let Some(pos) = buffer.find("\n\n") {
+                let frame = buffer[..pos].to_string();
+                buffer = buffer[pos + 2..].to_string();
+
+                let mut event_type = String::new();
+                let mut data = String::new();
+                for line in frame.lines() {
+                    if let Some(val) = line.strip_prefix("event: ") {
+                        event_type = val.to_string();
+                    } else if let Some(val) = line.strip_prefix("data: ") {
+                        data = val.to_string();
+                    }
+                }
+
+                match event_type.as_str() {
+                    "content_block_delta" => {
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&data) {
+                            if let Some(text) = parsed["delta"]["text"].as_str() {
+                                print!("{text}");
+                                let _ = io::stdout().flush();
+                            }
+                        }
+                    }
+                    "message_delta" => {
+                        if args.usage {
+                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&data) {
+                                output_usage = Some(parsed);
+                            }
+                        }
+                    }
+                    "error" => {
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&data) {
+                            let msg = parsed["error"]["message"]
+                                .as_str()
+                                .unwrap_or("Unknown error");
+                            bail!("Server error: {msg}");
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        println!();
+
+        if args.usage {
+            if let Some(usage) = output_usage {
+                let output_tokens = usage["usage"]["output_tokens"].as_i64().unwrap_or(0);
+                eprintln!("Tokens: output {output_tokens}");
+            }
+        }
+    } else {
+        // Non-streaming
+        let response = server
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .with_context(|| format!("Failed to connect to server at {}", server.base_url))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().await.unwrap_or_default();
+            bail!("Server returned {status}: {text}");
+        }
+
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Failed to parse completion response")?;
+
+        if schema.is_some() {
+            if let Some(output) = result.get("output") {
+                println!("{}", serde_json::to_string_pretty(output)?);
+            } else if let Some(content) = result["content"].as_str() {
+                print!("{content}");
+            }
+        } else if let Some(content) = result["content"].as_str() {
+            print!("{content}");
+        }
+
+        if args.usage {
+            let input = result["usage"]["input_tokens"].as_i64().unwrap_or(0);
+            let output = result["usage"]["output_tokens"].as_i64().unwrap_or(0);
+            eprintln!("Tokens: {} input, {} output, {} total", input, output, input + output);
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Deserialize)]
 struct PaginatedModelsResponse {
     data: Vec<ModelInfo>,
@@ -950,5 +1135,84 @@ mod tests {
         let client = reqwest::Client::new();
         let result = fetch_models_from_server(&client, &server.url(""), None).await;
         assert!(result.is_err());
+    }
+
+    // --- run_prompt_via_server ---
+
+    #[tokio::test]
+    async fn run_prompt_via_server_non_streaming() {
+        let mock_server = httpmock::MockServer::start_async().await;
+        let mock = mock_server.mock_async(|when, then| {
+            when.method("POST").path("/completions");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .body(serde_json::json!({
+                    "id": "msg_123",
+                    "model": "test-model",
+                    "content": "Hello world",
+                    "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 10, "output_tokens": 5}
+                }).to_string());
+        }).await;
+
+        let server = ServerConnection {
+            client: reqwest::Client::new(),
+            base_url: mock_server.url(""),
+        };
+
+        let args = PromptArgs {
+            prompt: Some("Hello".into()),
+            model: Some("test-model".into()),
+            system: None,
+            no_stream: true,
+            usage: false,
+            schema: None,
+            option: vec![],
+        };
+
+        let result = run_prompt_via_server(args, &server).await;
+        assert!(result.is_ok());
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn run_prompt_via_server_streaming() {
+        let mock_server = httpmock::MockServer::start_async().await;
+        let sse_body = "\
+event: message_start\n\
+data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"test\",\"stop_reason\":null,\"usage\":{\"input_tokens\":5}}}\n\
+\n\
+event: content_block_delta\n\
+data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi\"}}\n\
+\n\
+event: message_stop\n\
+data: {\"type\":\"message_stop\"}\n\
+\n";
+
+        let mock = mock_server.mock_async(|when, then| {
+            when.method("POST").path("/completions");
+            then.status(200)
+                .header("Content-Type", "text/event-stream")
+                .body(sse_body);
+        }).await;
+
+        let server = ServerConnection {
+            client: reqwest::Client::new(),
+            base_url: mock_server.url(""),
+        };
+
+        let args = PromptArgs {
+            prompt: Some("Hello".into()),
+            model: Some("test-model".into()),
+            system: None,
+            no_stream: false,
+            usage: false,
+            schema: None,
+            option: vec![],
+        };
+
+        let result = run_prompt_via_server(args, &server).await;
+        assert!(result.is_ok());
+        mock.assert_async().await;
     }
 }

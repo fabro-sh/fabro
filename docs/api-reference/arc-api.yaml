@@ -29,6 +29,8 @@ tags:
     description: Run retrospectives
   - name: Models
     description: Available LLM models
+  - name: Completions
+    description: Single-turn LLM completions
   - name: Settings
     description: Platform configuration
 
@@ -1093,6 +1095,38 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  # ── Completions ───────────────────────────────────────────────────────
+
+  /completions:
+    post:
+      operationId: createCompletion
+      tags: [Completions]
+      summary: Create Completion
+      description: |
+        Generate a text completion. Set `stream: true` for Anthropic-style SSE streaming.
+
+        SSE event types: message_start, content_block_start, content_block_delta,
+        content_block_stop, message_delta, message_stop, ping, error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCompletionRequest"
+      responses:
+        "200":
+          description: Completion result (JSON when stream=false, SSE when stream=true)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompletionResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ── Settings ──────────────────────────────────────────────────────────
 
   /settings:
@@ -1473,6 +1507,67 @@ components:
           type: string
           nullable: true
           description: Error details when status is "error".
+
+    # ── Completion Schemas ─────────────────────────────────────────────
+
+    CreateCompletionRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+          description: The user prompt text.
+        model:
+          type: string
+          description: Model ID or alias. Server picks default if omitted.
+        system:
+          type: string
+          description: System prompt.
+        stream:
+          type: boolean
+          default: true
+          description: Stream response via SSE.
+        schema:
+          description: JSON Schema for structured output.
+        temperature:
+          type: number
+          format: double
+        max_tokens:
+          type: integer
+          format: int64
+        top_p:
+          type: number
+          format: double
+
+    CompletionUsage:
+      type: object
+      required: [input_tokens, output_tokens]
+      properties:
+        input_tokens:
+          type: integer
+          format: int64
+        output_tokens:
+          type: integer
+          format: int64
+
+    CompletionResponse:
+      type: object
+      required: [id, model, content, stop_reason, usage]
+      properties:
+        id:
+          type: string
+        model:
+          type: string
+        content:
+          type: string
+          description: Generated text.
+        stop_reason:
+          type: string
+          description: Why generation stopped (end_turn, max_tokens).
+        usage:
+          $ref: "#/components/schemas/CompletionUsage"
+        output:
+          description: Parsed structured output when schema was provided.
 
     PaginatedSavedQueryList:
       description: Paginated list of saved queries.

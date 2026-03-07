@@ -15,27 +15,20 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SettingField } from './setting-field';
+import type { CompletionUsage } from './completion-usage';
 
-/**
- * A logical group of related settings.
- */
-export interface SettingGroup {
-    /**
-     * Machine-readable group identifier.
-     */
+export interface CompletionResponse {
     'id': string;
+    'model': string;
     /**
-     * Human-readable group name.
+     * Generated text.
      */
-    'name': string;
+    'content': string;
     /**
-     * Prose description of the settings group.
+     * Why generation stopped (end_turn, max_tokens).
      */
-    'description': string;
-    /**
-     * Settings within this group.
-     */
-    'fields': Array<SettingField>;
+    'stop_reason': string;
+    'usage': CompletionUsage;
+    'output'?: any;
 }
 

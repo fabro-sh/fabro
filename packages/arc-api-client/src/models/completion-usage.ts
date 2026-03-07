@@ -14,17 +14,8 @@
 
 
 
-/**
- * Outcome of a single verification evaluation.
- */
-
-export const EvaluationResult = {
-    PASS: 'pass',
-    FAIL: 'fail',
-    SKIP: 'skip'
-} as const;
-
-export type EvaluationResult = typeof EvaluationResult[keyof typeof EvaluationResult];
-
-
+export interface CompletionUsage {
+    'input_tokens': number;
+    'output_tokens': number;
+}
 

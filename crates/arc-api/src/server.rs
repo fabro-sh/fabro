@@ -239,6 +239,7 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/insights/history", get(crate::demo::list_query_history))
         .route("/models", get(crate::demo::list_models))
         .route("/models/{id}/test", post(test_model))
+        .route("/completions", post(create_completion))
         .route("/settings", get(crate::demo::get_server_configuration))
         .route("/usage", get(crate::demo::get_aggregate_usage))
 }
@@ -290,6 +291,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/insights/history", get(not_implemented))
         .route("/models", get(crate::demo::list_models))
         .route("/models/{id}/test", post(test_model))
+        .route("/completions", post(create_completion))
         .route("/settings", get(not_implemented))
         .route("/usage", get(get_aggregate_usage))
 }
@@ -977,6 +979,243 @@ async fn test_model(
             "error_message": "timeout (30s)",
         }))
         .into_response(),
+    }
+}
+
+fn finish_reason_to_stop_reason(reason: &arc_llm::types::FinishReason) -> &'static str {
+    match reason {
+        arc_llm::types::FinishReason::Stop => "end_turn",
+        arc_llm::types::FinishReason::Length => "max_tokens",
+        _ => "end_turn",
+    }
+}
+
+async fn create_completion(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<arc_types::CreateCompletionRequest>,
+) -> Response {
+    // Resolve model
+    let model_id = req.model.unwrap_or_else(|| {
+        arc_llm::catalog::list_models(None)
+            .first()
+            .map_or_else(|| "claude-sonnet-4-5".to_string(), |m| m.id.clone())
+    });
+
+    let info = arc_llm::catalog::get_model_info(&model_id);
+
+    // Build GenerateParams
+    let mut params = arc_llm::generate::GenerateParams::new(&model_id).prompt(&req.prompt);
+    if let Some(ref info) = info {
+        params = params.provider(&info.provider);
+    }
+    if let Some(system) = req.system {
+        params = params.system(&system);
+    }
+    if let Some(temp) = req.temperature {
+        params = params.temperature(temp);
+    }
+    if let Some(max_tokens) = req.max_tokens {
+        params = params.max_tokens(max_tokens);
+    }
+    if let Some(top_p) = req.top_p {
+        params = params.top_p(top_p);
+    }
+
+    // Force non-streaming for structured output
+    let use_stream = req.stream && req.schema.is_none();
+
+    // Dry-run mode returns a stub response
+    if state.dry_run {
+        let msg_id = ulid::Ulid::new().to_string();
+        if use_stream {
+            let sse_stream = futures_util::stream::iter(vec![
+                Ok::<_, std::convert::Infallible>(
+                    Event::default()
+                        .event("message_start")
+                        .data(serde_json::json!({
+                            "type": "message_start",
+                            "message": {
+                                "id": msg_id,
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [],
+                                "model": model_id,
+                                "stop_reason": null,
+                                "usage": {"input_tokens": 0}
+                            }
+                        }).to_string()),
+                ),
+                Ok(Event::default()
+                    .event("message_stop")
+                    .data(serde_json::json!({"type": "message_stop"}).to_string())),
+            ]);
+            return Sse::new(sse_stream).into_response();
+        }
+        return Json(arc_types::CompletionResponse {
+            id: msg_id,
+            model: model_id,
+            content: String::new(),
+            stop_reason: "end_turn".to_string(),
+            usage: arc_types::CompletionUsage {
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+            output: None,
+        })
+        .into_response();
+    }
+
+    if use_stream {
+        // Streaming path
+        let stream_result = match arc_llm::generate::stream(params).await {
+            Ok(s) => s,
+            Err(e) => {
+                return ApiError::new(StatusCode::BAD_GATEWAY, format!("LLM error: {e}"))
+                    .into_response()
+            }
+        };
+
+        let msg_id = ulid::Ulid::new().to_string();
+        let model_for_stream = model_id.clone();
+
+        let sse_stream = futures_util::stream::once(futures_util::future::ready(Ok::<_, std::convert::Infallible>(
+            Event::default()
+                .event("message_start")
+                .data(serde_json::json!({
+                    "type": "message_start",
+                    "message": {
+                        "id": msg_id,
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [],
+                        "model": model_for_stream,
+                        "stop_reason": null,
+                        "usage": {"input_tokens": 0}
+                    }
+                }).to_string()),
+        )))
+        .chain(futures_util::stream::once(futures_util::future::ready(Ok(
+            Event::default()
+                .event("content_block_start")
+                .data(serde_json::json!({
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "text", "text": ""}
+                }).to_string()),
+        ))))
+        .chain(futures_util::stream::once(futures_util::future::ready(Ok(
+            Event::default()
+                .event("ping")
+                .data(serde_json::json!({"type": "ping"}).to_string()),
+        ))))
+        .chain(
+            tokio_stream::StreamExt::map(stream_result, |event| {
+                match event {
+                    Ok(arc_llm::types::StreamEvent::TextDelta { delta, .. }) => Ok(
+                        Event::default()
+                            .event("content_block_delta")
+                            .data(serde_json::json!({
+                                "type": "content_block_delta",
+                                "index": 0,
+                                "delta": {"type": "text_delta", "text": delta}
+                            }).to_string()),
+                    ),
+                    Ok(arc_llm::types::StreamEvent::TextEnd { .. }) => Ok(
+                        Event::default()
+                            .event("content_block_stop")
+                            .data(serde_json::json!({"type": "content_block_stop", "index": 0}).to_string()),
+                    ),
+                    Ok(arc_llm::types::StreamEvent::Finish { finish_reason, usage, .. }) => Ok(
+                        Event::default()
+                            .event("message_delta")
+                            .data(serde_json::json!({
+                                "type": "message_delta",
+                                "delta": {"stop_reason": finish_reason_to_stop_reason(&finish_reason)},
+                                "usage": {"output_tokens": usage.output_tokens}
+                            }).to_string()),
+                    ),
+                    Ok(arc_llm::types::StreamEvent::Error { error, .. }) => Ok(
+                        Event::default()
+                            .event("error")
+                            .data(serde_json::json!({
+                                "type": "error",
+                                "error": {"type": "server_error", "message": error.to_string()}
+                            }).to_string()),
+                    ),
+                    Err(e) => Ok(
+                        Event::default()
+                            .event("error")
+                            .data(serde_json::json!({
+                                "type": "error",
+                                "error": {"type": "server_error", "message": e.to_string()}
+                            }).to_string()),
+                    ),
+                    // Skip events we don't map (StreamStart, TextStart, reasoning, tool calls, etc.)
+                    _ => Ok(Event::default().comment("ignored")),
+                }
+            }),
+        )
+        .chain(futures_util::stream::once(futures_util::future::ready(Ok(
+            Event::default()
+                .event("message_stop")
+                .data(serde_json::json!({"type": "message_stop"}).to_string()),
+        ))));
+
+        Sse::new(sse_stream)
+            .keep_alive(
+                axum::response::sse::KeepAlive::new()
+                    .interval(Duration::from_secs(15))
+                    .event(
+                        Event::default()
+                            .event("ping")
+                            .data(serde_json::json!({"type": "ping"}).to_string()),
+                    ),
+            )
+            .into_response()
+    } else {
+        // Non-streaming path
+        let msg_id = ulid::Ulid::new().to_string();
+
+        if let Some(schema) = req.schema {
+            match arc_llm::generate::generate_object(params, schema).await {
+                Ok(result) => Json(arc_types::CompletionResponse {
+                    id: msg_id,
+                    model: model_id,
+                    content: result.text(),
+                    stop_reason: finish_reason_to_stop_reason(&result.finish_reason).to_string(),
+                    usage: arc_types::CompletionUsage {
+                        input_tokens: result.usage.input_tokens,
+                        output_tokens: result.usage.output_tokens,
+                    },
+                    output: result.output,
+                })
+                .into_response(),
+                Err(e) => {
+                    ApiError::new(StatusCode::BAD_GATEWAY, format!("LLM error: {e}"))
+                        .into_response()
+                }
+            }
+        } else {
+            match arc_llm::generate::generate(params).await {
+                Ok(result) => Json(arc_types::CompletionResponse {
+                    id: msg_id,
+                    model: model_id,
+                    content: result.text(),
+                    stop_reason: finish_reason_to_stop_reason(&result.finish_reason).to_string(),
+                    usage: arc_types::CompletionUsage {
+                        input_tokens: result.usage.input_tokens,
+                        output_tokens: result.usage.output_tokens,
+                    },
+                    output: None,
+                })
+                .into_response(),
+                Err(e) => {
+                    ApiError::new(StatusCode::BAD_GATEWAY, format!("LLM error: {e}"))
+                        .into_response()
+                }
+            }
+        }
     }
 }
 
@@ -1913,5 +2152,92 @@ mod tests {
 
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn create_completion_non_streaming_returns_json() {
+        let state = create_app_state_with_options(
+            test_db().await,
+            test_registry,
+            true,
+            5,
+            arc_workflows::git::GitAuthor::default(),
+        );
+        let app = build_router(state, AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/completions")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({
+                    "prompt": "Hello",
+                    "stream": false
+                }))
+                .unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = body_json(response.into_body()).await;
+        assert!(body["id"].is_string());
+        assert!(body["model"].is_string());
+        assert_eq!(body["stop_reason"], "end_turn");
+        assert!(body["usage"]["input_tokens"].is_number());
+        assert!(body["usage"]["output_tokens"].is_number());
+    }
+
+    #[tokio::test]
+    async fn create_completion_streaming_returns_sse() {
+        let state = create_app_state_with_options(
+            test_db().await,
+            test_registry,
+            true,
+            5,
+            arc_workflows::git::GitAuthor::default(),
+        );
+        let app = build_router(state, AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/completions")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({
+                    "prompt": "Hello",
+                    "stream": true
+                }))
+                .unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "text/event-stream"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_completion_missing_prompt_returns_422() {
+        let app = test_app_with(test_db().await);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/completions")
+            .header("content-type", "application/json")
+            .body(Body::from("{}"))
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 }

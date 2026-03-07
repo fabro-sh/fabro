@@ -16,6 +16,7 @@ arc-util = { path = "../arc-util" }
 arc-db = { path = "../arc-db" }
 arc-types = { path = "../arc-types" }
 chrono.workspace = true
+futures-util.workspace = true
 axum = "0.8"
 dirs.workspace = true
 sqlx.workspace = true

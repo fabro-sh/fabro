@@ -145,6 +145,7 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "futures-util",
  "http-body-util",
  "hyper",
  "hyper-util",
