@@ -52,12 +52,17 @@ To migrate:
 3. Update any code that displays timestamps — the API now returns ISO 8601 strings instead of pre-formatted relative times
 </Warning>
 
----
+## More
 
-- Fixes dry-run mode issues with stub scripts, runner working directory, and transition weights
-- Fixes GitHub App repo visibility check incorrectly treating 401/403 responses as public
-- Fixes duplicate `.env` variables when re-running `arc setup`
+<Accordion title="Improvements">
 - Adds pagination parameters to `listRunQuestions`, `listRunStages`, and `listRunVerifications` endpoints
-- Fixes 27 OpenAPI spec review items across verifications, insights, HITL, run outputs, workflows, and configuration
 - Removes redundant API response types (`StartRunResponse`, `CancelRunResponse`, `SteerRunResponse`, `SubmitAnswerResponse`)
 - Filters preamble noise by excluding meta nodes, blank context values, and empty sections
+- Fixes 27 OpenAPI spec review items across verifications, insights, HITL, run outputs, workflows, and configuration
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed dry-run mode issues with stub scripts, runner working directory, and transition weights
+- Fixed GitHub App repo visibility check incorrectly treating 401/403 responses as public
+- Fixed duplicate `.env` variables when re-running `arc setup`
+</Accordion>

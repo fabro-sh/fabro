@@ -44,9 +44,17 @@ To migrate:
 2. Update any direct API calls to use the new paths
 </Warning>
 
----
+## More
 
-- Fixes sub-workflow context diffs leaking child engine-internal keys (`internal.*`, `graph.*`, `thread.*`) into the parent run
-- Fixes turn and tool-call counts always showing 0 in non-TTY mode
-- Fixes push credentials for public repos in Daytona sandboxes
-- Fixes Daytona CLI installation with rootless Node.js install and better error messages
+<Accordion title="Workflows">
+- Sub-workflow context diffs no longer leak child engine-internal keys (`internal.*`, `graph.*`, `thread.*`) into the parent run
+</Accordion>
+
+<Accordion title="CLI">
+- Turn and tool-call counts now display correctly in non-TTY mode
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed push credentials for public repos in Daytona sandboxes
+- Fixed Daytona CLI installation with rootless Node.js install and better error messages
+</Accordion>
