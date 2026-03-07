@@ -189,7 +189,7 @@ impl Handler for SubWorkflowHandler {
 
                     tracing::debug!(
                         node = %node.id,
-                        propagated_keys = ?diff.keys().collect::<Vec<_>>(),
+                        propagated_keys = ?diff.keys(),
                         "Sub-workflow context diff filtered"
                     );
 
