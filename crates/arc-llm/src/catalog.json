@@ -113,6 +113,20 @@
     "aliases": ["codex"]
   },
   {
+    "id": "gpt-5.3-codex-spark",
+    "provider": "openai",
+    "display_name": "GPT-5.3 Codex Spark",
+    "context_window": 131072,
+    "max_output": 128000,
+    "supports_tools": true,
+    "supports_vision": false,
+    "supports_reasoning": true,
+    "input_cost_per_million": null,
+    "output_cost_per_million": null,
+    "estimated_output_tps": 1000,
+    "aliases": ["codex-spark"]
+  },
+  {
     "id": "gpt-5.4",
     "provider": "openai",
     "display_name": "GPT-5.4",

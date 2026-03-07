@@ -239,7 +239,7 @@ mod tests {
         assert!(anthropic.iter().all(|m| m.provider == "anthropic"));
 
         let openai = list_models(Some("openai"));
-        assert_eq!(openai.len(), 6);
+        assert_eq!(openai.len(), 7);
 
         let gemini = list_models(Some("gemini"));
         assert_eq!(gemini.len(), 3);
@@ -344,6 +344,29 @@ mod tests {
     #[test]
     fn gpt54_alias() {
         assert_eq!(get_model_info("gpt54").unwrap().id, "gpt-5.4");
+    }
+
+    #[test]
+    fn gpt_5_3_codex_spark_in_catalog() {
+        let m = get_model_info("gpt-5.3-codex-spark").unwrap();
+        assert_eq!(m.provider, "openai");
+        assert_eq!(m.display_name, "GPT-5.3 Codex Spark");
+        assert_eq!(m.context_window, 131072);
+        assert_eq!(m.max_output, Some(128000));
+        assert!(m.supports_tools);
+        assert!(!m.supports_vision);
+        assert!(m.supports_reasoning);
+        assert_eq!(m.input_cost_per_million, None);
+        assert_eq!(m.output_cost_per_million, None);
+        assert_eq!(m.estimated_output_tps, Some(1000.0));
+    }
+
+    #[test]
+    fn codex_spark_alias() {
+        assert_eq!(
+            get_model_info("codex-spark").unwrap().id,
+            "gpt-5.3-codex-spark"
+        );
     }
 
     #[test]
