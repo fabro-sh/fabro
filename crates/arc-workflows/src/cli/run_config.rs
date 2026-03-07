@@ -42,6 +42,7 @@ pub struct SandboxConfig {
     pub provider: Option<String>,
     pub preserve: Option<bool>,
     pub daytona: Option<DaytonaConfig>,
+    pub exe: Option<arc_exe::ExeConfig>,
 }
 
 /// Defaults for workflow runs, loaded from the server config.
@@ -754,6 +755,7 @@ preserve = true
                 provider: None,
                 preserve: Some(false),
                 daytona: None,
+                exe: None,
             }),
             ..RunDefaults::default()
         };
@@ -779,6 +781,7 @@ provider = "docker"
                 provider: None,
                 preserve: Some(true),
                 daytona: None,
+                exe: None,
             }),
             ..RunDefaults::default()
         };
@@ -807,6 +810,7 @@ provider = "daytona"
                     auto_stop_interval: Some(30),
                     ..DaytonaConfig::default()
                 }),
+                exe: None,
             }),
             ..RunDefaults::default()
         };
@@ -842,6 +846,7 @@ auto_stop_interval = 60
                     labels: Some(HashMap::from([("env".into(), "prod".into())])),
                     ..DaytonaConfig::default()
                 }),
+                exe: None,
             }),
             ..RunDefaults::default()
         };
@@ -876,6 +881,7 @@ env = "from_task"
                     ])),
                     ..DaytonaConfig::default()
                 }),
+                exe: None,
             }),
             ..RunDefaults::default()
         };
@@ -914,6 +920,7 @@ cpu = 2
                     }),
                     ..DaytonaConfig::default()
                 }),
+                exe: None,
             }),
             ..RunDefaults::default()
         };
@@ -951,6 +958,7 @@ auto_stop_interval = 60
                     }),
                     ..DaytonaConfig::default()
                 }),
+                exe: None,
             }),
             ..RunDefaults::default()
         };
@@ -1183,6 +1191,7 @@ network = "block"
                     network: Some(crate::daytona_sandbox::DaytonaNetwork::AllowAll),
                     ..DaytonaConfig::default()
                 }),
+                exe: None,
             }),
             ..RunDefaults::default()
         };
@@ -1216,6 +1225,7 @@ auto_stop_interval = 60
                     ])),
                     ..DaytonaConfig::default()
                 }),
+                exe: None,
             }),
             ..RunDefaults::default()
         };

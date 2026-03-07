@@ -267,7 +267,7 @@ pub async fn run_command(
         SandboxProvider::Local | SandboxProvider::Docker => {
             crate::git::ensure_clean(&original_cwd).is_ok()
         }
-        SandboxProvider::Daytona => false,
+        SandboxProvider::Daytona | SandboxProvider::Exe => false,
     };
 
     if args.preflight {
@@ -456,6 +456,17 @@ pub async fn run_command(
             let daytona_arc = Arc::new(env);
             daytona_sandbox_ref = Some(Arc::clone(&daytona_arc));
             daytona_arc
+        }
+        SandboxProvider::Exe => {
+            let mgmt_ssh = arc_exe::OpensshRunner::connect_raw("exe.dev")
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to connect to exe.dev: {e}"))?;
+            let mut env = arc_exe::ExeSandbox::new(Box::new(mgmt_ssh));
+            let emitter_cb = Arc::clone(&emitter);
+            env.set_event_callback(Arc::new(move |event| {
+                emitter_cb.emit(&crate::event::WorkflowRunEvent::Sandbox { event });
+            }));
+            Arc::new(env)
         }
         SandboxProvider::Local => {
             let mut env = LocalSandbox::new(cwd);
@@ -667,6 +678,7 @@ pub async fn run_command(
             SandboxProvider::Daytona => daytona_base_sha
                 .as_ref()
                 .map(|_| GitCheckpointMode::Remote(original_cwd.clone())),
+            SandboxProvider::Exe => None,
         },
         base_sha: worktree_base_sha.or(daytona_base_sha),
         run_branch: worktree_branch.or(daytona_branch),
@@ -1202,6 +1214,13 @@ async fn run_preflight(
             }
             Err(e) => Err(format!("Daytona client creation failed: {e}")),
         },
+        SandboxProvider::Exe => match arc_exe::OpensshRunner::connect_raw("exe.dev").await {
+            Ok(mgmt_ssh) => {
+                let env = arc_exe::ExeSandbox::new(Box::new(mgmt_ssh));
+                Ok(Arc::new(env) as Arc<dyn Sandbox>)
+            }
+            Err(e) => Err(format!("exe.dev SSH connection failed: {e}")),
+        },
         SandboxProvider::Local => {
             Ok(Arc::new(LocalSandbox::new(original_cwd.clone())) as Arc<dyn Sandbox>)
         }
@@ -1653,6 +1672,7 @@ mod tests {
                 provider: None,
                 preserve: Some(false),
                 daytona: None,
+                exe: None,
             }),
             vars: None,
             hooks: Vec::new(),
@@ -1674,6 +1694,7 @@ mod tests {
                 provider: None,
                 preserve: Some(true),
                 daytona: None,
+                exe: None,
             }),
             vars: None,
             hooks: Vec::new(),
@@ -1683,6 +1704,7 @@ mod tests {
                 provider: None,
                 preserve: Some(false),
                 daytona: None,
+                exe: None,
             }),
             ..RunDefaults::default()
         };
@@ -1696,6 +1718,7 @@ mod tests {
                 provider: None,
                 preserve: Some(true),
                 daytona: None,
+                exe: None,
             }),
             ..RunDefaults::default()
         };

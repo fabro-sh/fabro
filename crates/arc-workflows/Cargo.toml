@@ -17,6 +17,7 @@ clap.workspace = true
 anyhow.workspace = true
 dotenvy.workspace = true
 arc-agent = { path = "../arc-agent" }
+arc-exe = { path = "../arc-exe" }
 arc-util = { path = "../arc-util" }
 arc-git-storage = { path = "../arc-git-storage" }
 arc-llm = { path = "../arc-llm" }

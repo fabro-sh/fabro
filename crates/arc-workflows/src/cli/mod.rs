@@ -28,6 +28,8 @@ pub enum SandboxProvider {
     Docker,
     /// Run tools inside a Daytona cloud sandbox
     Daytona,
+    /// Run tools inside an exe.dev VM
+    Exe,
 }
 
 impl fmt::Display for SandboxProvider {
@@ -36,6 +38,7 @@ impl fmt::Display for SandboxProvider {
             Self::Local => write!(f, "local"),
             Self::Docker => write!(f, "docker"),
             Self::Daytona => write!(f, "daytona"),
+            Self::Exe => write!(f, "exe"),
         }
     }
 }
@@ -48,6 +51,7 @@ impl FromStr for SandboxProvider {
             "local" => Ok(Self::Local),
             "docker" => Ok(Self::Docker),
             "daytona" => Ok(Self::Daytona),
+            "exe" => Ok(Self::Exe),
             other => Err(format!("unknown sandbox provider: {other}")),
         }
     }
@@ -255,6 +259,14 @@ mod tests {
             "LOCAL".parse::<SandboxProvider>().unwrap(),
             SandboxProvider::Local
         );
+        assert_eq!(
+            "exe".parse::<SandboxProvider>().unwrap(),
+            SandboxProvider::Exe
+        );
+        assert_eq!(
+            "EXE".parse::<SandboxProvider>().unwrap(),
+            SandboxProvider::Exe
+        );
         assert!("invalid".parse::<SandboxProvider>().is_err());
     }
 
@@ -263,6 +275,7 @@ mod tests {
         assert_eq!(SandboxProvider::Local.to_string(), "local");
         assert_eq!(SandboxProvider::Docker.to_string(), "docker");
         assert_eq!(SandboxProvider::Daytona.to_string(), "daytona");
+        assert_eq!(SandboxProvider::Exe.to_string(), "exe");
     }
 
     #[test]
