@@ -15,23 +15,16 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { VerificationControl } from './verification-control';
+import type { PaginationMeta } from './pagination-meta';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { VerificationControlListItem } from './verification-control-list-item';
 
 /**
- * A group of related verification controls.
+ * Paginated list of verification controls.
  */
-export interface VerificationCategory {
-    /**
-     * Category name.
-     */
-    'name': string;
-    /**
-     * Guiding question for the category.
-     */
-    'question': string;
-    /**
-     * Verification controls in this category.
-     */
-    'controls': Array<VerificationControl>;
+export interface PaginatedVerificationControlList {
+    'data': Array<VerificationControlListItem>;
+    'meta': PaginationMeta;
 }
 

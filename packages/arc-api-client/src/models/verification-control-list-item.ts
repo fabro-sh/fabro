@@ -18,25 +18,37 @@
 import type { CriterionReference } from './criterion-reference';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { VerificationMode } from './verification-mode';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { VerificationType } from './verification-type';
 
 /**
- * Core metadata about a verification control.
+ * A verification control in a flat list view with criterion reference.
  */
-export interface ControlInfo {
+export interface VerificationControlListItem {
     /**
      * Human-readable control name.
      */
     'name': string;
     /**
-     * URL-safe slug.
+     * URL-safe slug for API lookups.
      */
     'slug': string;
     /**
      * Short description of what the control verifies.
      */
     'description': string;
-    'type'?: VerificationType;
+    'type': VerificationType;
+    'mode'?: VerificationMode;
+    /**
+     * F1 score of the control\'s AI evaluator.
+     */
+    'f1'?: number;
+    /**
+     * Pass@1 rate.
+     */
+    'pass_at_1'?: number;
     'criterion': CriterionReference;
 }
 

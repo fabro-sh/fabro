@@ -57,18 +57,18 @@ import type {
 import { apiJson } from "../api-client";
 import { timeAgo } from "../lib/time";
 import type { VerificationDetailResponse } from "@qltysh/arc-api-client";
-import type { Route } from "./+types/verification-detail";
+import type { Route } from "./+types/verification-control";
 
 export const handle = { hideHeader: true };
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const data = await apiJson<VerificationDetailResponse>(`/verifications/${params.slug}`, { request });
+  const data = await apiJson<VerificationDetailResponse>(`/verification/controls/${params.id}`, { request });
   return { data };
 }
 
 export function meta({ data }: Route.MetaArgs) {
   const name = data?.data?.control?.name ?? "Verification";
-  return [{ title: `${name} — Verifications — Arc` }];
+  return [{ title: `${name} — Verification — Arc` }];
 }
 
 type IconComponent = React.ComponentType<{ className?: string }>;
@@ -213,7 +213,7 @@ export default function VerificationDetail({ loaderData }: Route.ComponentProps)
     description: controlInfo.description,
     type: (controlInfo.type ?? null) as VerificationType | null,
   };
-  const categoryName = controlInfo.category.name;
+  const categoryName = controlInfo.criterion.name;
   const performance = {
     f1: apiPerf.f1 ?? null,
     passAt1: apiPerf.pass_at_1 ?? null,
@@ -251,7 +251,7 @@ export default function VerificationDetail({ loaderData }: Route.ComponentProps)
     <div className="space-y-6">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1 text-sm text-fg-muted">
-        <Link to="/verifications" className="text-fg-3 hover:text-fg">Verifications</Link>
+        <Link to="/verification/criteria" className="text-fg-3 hover:text-fg">Verification</Link>
         <ChevronRightIcon className="size-3" />
         <span className="text-fg-3">{categoryName}</span>
         <ChevronRightIcon className="size-3" />
@@ -371,7 +371,7 @@ export default function VerificationDetail({ loaderData }: Route.ComponentProps)
                       </td>
                       <td className="py-2.5 pl-2 pr-3">
                         <Link
-                          to={`/verifications/${sibling.slug}`}
+                          to={`/verification/controls/${sibling.slug}`}
                           className="font-medium text-fg-2 hover:text-fg"
                         >
                           {sibling.name}

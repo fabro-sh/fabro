@@ -17,8 +17,8 @@ tags:
     description: Internal run details (stages, turns, context, configuration)
   - name: Workflows
     description: Workflow definitions and execution
-  - name: Verifications
-    description: Verification categories and controls
+  - name: Verification
+    description: Verification criteria and controls
   - name: Usage
     description: Token and cost usage
   - name: Insights
@@ -479,19 +479,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/verifications:
+  /runs/{id}/verification:
     get:
-      operationId: listRunVerifications
+      operationId: retrieveRunVerification
       tags: [Run Outputs]
-      summary: List Run Verifications
-      description: Returns verification results for a run, organized by category with individual control statuses.
+      summary: Retrieve Run Verification
+      description: Returns verification results for a run, organized by criterion with individual control statuses.
       parameters:
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/PageOffset"
       responses:
         "200":
-          description: Array of verification categories with controls
+          description: Array of verification criteria with controls
           content:
             application/json:
               schema:
@@ -680,33 +680,72 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  # ── Verifications ─────────────────────────────────────────────────────
+  # ── Verification ──────────────────────────────────────────────────────
 
-  /verifications:
+  /verification/criteria:
     get:
-      operationId: listVerificationCategories
-      tags: [Verifications]
-      summary: List Verification Categories
-      description: Returns paginated verification categories with their controls and performance metrics. Each category contains controls; retrieve a specific control via `/verifications/{slug}`.
+      operationId: listVerificationCriteria
+      tags: [Verification]
+      summary: List Verification Criteria
+      description: Returns paginated verification criteria with their controls and performance metrics. Each criterion contains controls; retrieve a specific control via `/verification/controls/{id}`.
       parameters:
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/PageOffset"
       responses:
         "200":
-          description: Array of verification categories
+          description: Array of verification criteria
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PaginatedVerificationCategoryList"
+                $ref: "#/components/schemas/PaginatedVerificationCriterionList"
 
-  /verifications/{slug}:
+  /verification/criteria/{id}:
+    get:
+      operationId: retrieveVerificationCriterion
+      tags: [Verification]
+      summary: Retrieve Verification Criterion
+      description: Returns a specific verification criterion with its controls and performance metrics.
+      parameters:
+        - $ref: "#/components/parameters/CriterionId"
+      responses:
+        "200":
+          description: Verification criterion detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationCriterionDetail"
+        "404":
+          description: Criterion not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /verification/controls:
+    get:
+      operationId: listVerificationControls
+      tags: [Verification]
+      summary: List Verification Controls
+      description: Returns a flat paginated list of all verification controls across all criteria.
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageOffset"
+      responses:
+        "200":
+          description: Array of verification controls
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedVerificationControlList"
+
+  /verification/controls/{id}:
     get:
       operationId: retrieveVerificationControl
-      tags: [Verifications]
+      tags: [Verification]
       summary: Retrieve Verification Control
-      description: Returns detailed information about a specific verification control, including performance data, recent results, and sibling controls in the same category. Controls are listed within categories returned by `/verifications`.
+      description: Returns detailed information about a specific verification control, including performance data, recent results, and sibling controls in the same criterion.
       parameters:
-        - $ref: "#/components/parameters/VerificationSlug"
+        - $ref: "#/components/parameters/ControlId"
       responses:
         "200":
           description: Verification control detail
@@ -1161,8 +1200,17 @@ components:
         type: string
       example: fix_build
 
-    VerificationSlug:
-      name: slug
+    CriterionId:
+      name: id
+      in: path
+      required: true
+      description: URL-safe slug identifying a verification criterion.
+      schema:
+        type: string
+      example: traceability
+
+    ControlId:
+      name: id
       in: path
       required: true
       description: URL-safe slug identifying a verification control.
@@ -1420,8 +1468,8 @@ components:
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 
-    PaginatedVerificationCategoryList:
-      description: Paginated list of verification categories.
+    PaginatedVerificationCriterionList:
+      description: Paginated list of verification criteria.
       type: object
       required:
         - data
@@ -1430,7 +1478,7 @@ components:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/VerificationCategory"
+            $ref: "#/components/schemas/VerificationCriterion"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 
@@ -1699,15 +1747,15 @@ components:
           description: Repository name.
           example: api-server
 
-    CategoryReference:
-      description: Reference to a verification category by name.
+    CriterionReference:
+      description: Reference to a verification criterion by name.
       type: object
       required:
         - name
       properties:
         name:
           type: string
-          description: Category name.
+          description: Criterion name.
           example: Traceability
 
     TokenUsage:
@@ -2559,7 +2607,7 @@ components:
           items:
             $ref: "#/components/schemas/VerificationResult"
 
-    VerificationCategory:
+    VerificationCriterion:
       description: A group of related verification controls.
       type: object
       required:
@@ -2569,15 +2617,88 @@ components:
       properties:
         name:
           type: string
-          description: Category name.
+          description: Criterion name.
           example: Traceability
         question:
           type: string
-          description: Guiding question for the category.
+          description: Guiding question for the criterion.
           example: Do we understand what this change is and why we're making it?
         controls:
           type: array
-          description: Verification controls in this category.
+          description: Verification controls in this criterion.
+          items:
+            $ref: "#/components/schemas/VerificationControl"
+
+    VerificationControlListItem:
+      description: A verification control in a flat list view with criterion reference.
+      type: object
+      required:
+        - name
+        - slug
+        - description
+        - type
+        - criterion
+      properties:
+        name:
+          type: string
+          description: Human-readable control name.
+          example: Motivation
+        slug:
+          type: string
+          description: URL-safe slug for API lookups.
+          example: motivation
+        description:
+          type: string
+          description: Short description of what the control verifies.
+          example: Origin of proposal identified
+        type:
+          $ref: "#/components/schemas/VerificationType"
+        mode:
+          $ref: "#/components/schemas/VerificationMode"
+        f1:
+          type: number
+          description: F1 score of the control's AI evaluator.
+          example: 0.87
+        pass_at_1:
+          type: number
+          description: Pass@1 rate.
+          example: 0.82
+        criterion:
+          $ref: "#/components/schemas/CriterionReference"
+
+    PaginatedVerificationControlList:
+      description: Paginated list of verification controls.
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerificationControlListItem"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    VerificationCriterionDetail:
+      description: Detail view of a verification criterion with inline controls and performance metrics.
+      type: object
+      required:
+        - name
+        - question
+        - controls
+      properties:
+        name:
+          type: string
+          description: Criterion name.
+          example: Traceability
+        question:
+          type: string
+          description: Guiding question for the criterion.
+          example: Do we understand what this change is and why we're making it?
+        controls:
+          type: array
+          description: Verification controls in this criterion with performance metrics.
           items:
             $ref: "#/components/schemas/VerificationControl"
 
@@ -2588,7 +2709,7 @@ components:
         - name
         - slug
         - description
-        - category
+        - criterion
       properties:
         name:
           type: string
@@ -2604,8 +2725,8 @@ components:
           example: Origin of proposal identified
         type:
           $ref: "#/components/schemas/VerificationType"
-        category:
-          $ref: "#/components/schemas/CategoryReference"
+        criterion:
+          $ref: "#/components/schemas/CriterionReference"
 
     ControlPerformance:
       description: Performance metrics for a verification control.

@@ -18,13 +18,13 @@
 import type { PaginationMeta } from './pagination-meta';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { VerificationCategory } from './verification-category';
+import type { VerificationCriterion } from './verification-criterion';
 
 /**
- * Paginated list of verification categories.
+ * Paginated list of verification criteria.
  */
-export interface PaginatedVerificationCategoryList {
-    'data': Array<VerificationCategory>;
+export interface PaginatedVerificationCriterionList {
+    'data': Array<VerificationCriterion>;
     'meta': PaginationMeta;
 }
 

@@ -63,11 +63,11 @@ import type {
   CriterionPerformance,
 } from "../data/verifications";
 import { apiJson } from "../api-client";
-import type { VerificationCategory as ApiVerificationCategory } from "@qltysh/arc-api-client";
-import type { Route } from "./+types/verifications";
+import type { VerificationCriterion as ApiVerificationCriterion } from "@qltysh/arc-api-client";
+import type { Route } from "./+types/verification-criteria";
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { data: apiCategories } = await apiJson<{ data: ApiVerificationCategory[] }>("/verifications", { request });
+  const { data: apiCategories } = await apiJson<{ data: ApiVerificationCriterion[] }>("/verification/criteria", { request });
   const categories: VerificationCategory[] = apiCategories.map((cat) => ({
     name: cat.name,
     question: cat.question,
@@ -178,7 +178,7 @@ function CriterionRow({ slug, children }: { slug: string; children: React.ReactN
   return (
     <tr
       className="border-b border-line last:border-b-0 cursor-pointer transition-colors hover:bg-overlay"
-      onClick={() => navigate(`/verifications/${slug}`)}
+      onClick={() => navigate(`/verification/controls/${slug}`)}
     >
       {children}
     </tr>

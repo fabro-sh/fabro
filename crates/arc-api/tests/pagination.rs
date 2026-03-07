@@ -109,8 +109,8 @@ const ENDPOINTS: &[PaginatedEndpoint] = &[
         name: "listRunStages",
     },
     PaginatedEndpoint {
-        path: "/runs/run-1/verifications",
-        name: "listRunVerifications",
+        path: "/runs/run-1/verification",
+        name: "retrieveRunVerification",
     },
 ];
 

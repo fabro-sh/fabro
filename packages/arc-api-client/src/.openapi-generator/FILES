@@ -10,7 +10,7 @@ api/runs-api.ts
 api/sessions-api.ts
 api/settings-api.ts
 api/usage-api.ts
-api/verifications-api.ts
+api/verification-api.ts
 api/workflows-api.ts
 base.ts
 common.ts
@@ -26,7 +26,6 @@ models/assistant-turn.ts
 models/auth-configuration.ts
 models/board-column.ts
 models/branch.ts
-models/category-reference.ts
 models/check-run-status.ts
 models/check-run.ts
 models/code-location.ts
@@ -35,6 +34,7 @@ models/control-info.ts
 models/control-performance.ts
 models/create-session-request.ts
 models/create-session-response.ts
+models/criterion-reference.ts
 models/daytona-configuration-network-one-of.ts
 models/daytona-configuration-network.ts
 models/daytona-configuration.ts
@@ -73,7 +73,8 @@ models/paginated-run-verification-list.ts
 models/paginated-saved-query-list.ts
 models/paginated-session-list.ts
 models/paginated-stage-turn-list.ts
-models/paginated-verification-category-list.ts
+models/paginated-verification-control-list.ts
+models/paginated-verification-criterion-list.ts
 models/paginated-workflow-list.ts
 models/pagination-meta.ts
 models/preview-url-request.ts
@@ -135,8 +136,10 @@ models/usage-stage.ts
 models/usage-totals.ts
 models/user-response.ts
 models/user-turn.ts
-models/verification-category.ts
+models/verification-control-list-item.ts
 models/verification-control.ts
+models/verification-criterion-detail.ts
+models/verification-criterion.ts
 models/verification-detail-response.ts
 models/verification-mode.ts
 models/verification-result.ts

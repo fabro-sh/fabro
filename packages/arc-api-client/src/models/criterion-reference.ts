@@ -15,11 +15,11 @@
 
 
 /**
- * Reference to a verification category by name.
+ * Reference to a verification criterion by name.
  */
-export interface CategoryReference {
+export interface CriterionReference {
     /**
-     * Category name.
+     * Criterion name.
      */
     'name': string;
 }

@@ -175,8 +175,8 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/compare", get(crate::demo::get_run_compare))
         .route("/runs/{id}/usage", get(crate::demo::get_run_usage))
         .route(
-            "/runs/{id}/verifications",
-            get(crate::demo::get_run_verifications),
+            "/runs/{id}/verification",
+            get(crate::demo::get_run_verification),
         )
         .route(
             "/runs/{id}/configuration",
@@ -193,10 +193,21 @@ fn demo_routes() -> Router<Arc<AppState>> {
             "/workflows/{name}/runs",
             get(crate::demo::list_workflow_runs).post(crate::demo::trigger_workflow_run_stub),
         )
-        .route("/verifications", get(crate::demo::list_verifications))
         .route(
-            "/verifications/{slug}",
-            get(crate::demo::get_verification_detail),
+            "/verification/criteria",
+            get(crate::demo::list_verification_criteria),
+        )
+        .route(
+            "/verification/criteria/{id}",
+            get(crate::demo::get_verification_criterion),
+        )
+        .route(
+            "/verification/controls",
+            get(crate::demo::list_verification_controls),
+        )
+        .route(
+            "/verification/controls/{id}",
+            get(crate::demo::get_verification_control),
         )
         .route("/retros", get(crate::demo::list_retros))
         .route(
@@ -246,7 +257,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/stages/{stageId}/turns", get(not_implemented))
         .route("/runs/{id}/compare", get(not_implemented))
         .route("/runs/{id}/usage", get(not_implemented))
-        .route("/runs/{id}/verifications", get(not_implemented))
+        .route("/runs/{id}/verification", get(not_implemented))
         .route("/runs/{id}/configuration", get(not_implemented))
         .route("/runs/{id}/steer", post(not_implemented))
         .route("/runs/{id}/preview", post(not_implemented))
@@ -256,8 +267,10 @@ fn real_routes() -> Router<Arc<AppState>> {
             "/workflows/{name}/runs",
             get(not_implemented).post(not_implemented),
         )
-        .route("/verifications", get(not_implemented))
-        .route("/verifications/{slug}", get(not_implemented))
+        .route("/verification/criteria", get(not_implemented))
+        .route("/verification/criteria/{id}", get(not_implemented))
+        .route("/verification/controls", get(not_implemented))
+        .route("/verification/controls/{id}", get(not_implemented))
         .route("/retros", get(not_implemented))
         .route("/sessions", get(not_implemented).post(not_implemented))
         .route("/sessions/{id}", get(not_implemented))

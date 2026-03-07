@@ -94,7 +94,7 @@ pub async fn get_run_usage(
     (StatusCode::OK, Json(runs::usage())).into_response()
 }
 
-pub async fn get_run_verifications(
+pub async fn get_run_verification(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -295,24 +295,43 @@ pub async fn trigger_workflow_run_stub(
         .into_response()
 }
 
-// ── Verifications ──────────────────────────────────────────────────────
+// ── Verification ──────────────────────────────────────────────────────
 
-pub async fn list_verifications(
+pub async fn list_verification_criteria(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Response {
-    paginated_response(verifications::categories(), &pagination)
+    paginated_response(verifications::criteria(), &pagination)
 }
 
-pub async fn get_verification_detail(
+pub async fn get_verification_criterion(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
-    Path(slug): Path<String>,
+    Path(id): Path<String>,
 ) -> Response {
-    match verifications::detail(&slug) {
+    match verifications::criterion_detail(&id) {
         Some(detail) => (StatusCode::OK, Json(detail)).into_response(),
-        None => ApiError::not_found("Verification not found.").into_response(),
+        None => ApiError::not_found("Criterion not found.").into_response(),
+    }
+}
+
+pub async fn list_verification_controls(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Query(pagination): Query<PaginationParams>,
+) -> Response {
+    paginated_response(verifications::controls(), &pagination)
+}
+
+pub async fn get_verification_control(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    match verifications::control_detail(&id) {
+        Some(detail) => (StatusCode::OK, Json(detail)).into_response(),
+        None => ApiError::not_found("Control not found.").into_response(),
     }
 }
 
@@ -1970,12 +1989,23 @@ mod verifications {
         }
     }
 
+    fn slugify(name: &str) -> String {
+        name.to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '-' })
+            .collect::<String>()
+            .split('-')
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("-")
+    }
+
     // ── Public API ──────────────────────────────────────────────────────
 
-    pub fn categories() -> Vec<VerificationCategory> {
+    pub fn criteria() -> Vec<VerificationCriterion> {
         ALL_CATEGORIES
             .iter()
-            .map(|cat| VerificationCategory {
+            .map(|cat| VerificationCriterion {
                 name: cat.name.into(),
                 question: cat.question.into(),
                 controls: cat
@@ -1996,7 +2026,49 @@ mod verifications {
             .collect()
     }
 
-    pub fn detail(slug: &str) -> Option<VerificationDetailResponse> {
+    pub fn criterion_detail(id: &str) -> Option<VerificationCriterionDetail> {
+        ALL_CATEGORIES
+            .iter()
+            .find(|cat| slugify(cat.name) == id)
+            .map(|cat| VerificationCriterionDetail {
+                name: cat.name.into(),
+                question: cat.question.into(),
+                controls: cat
+                    .controls
+                    .iter()
+                    .map(|c| VerificationControl {
+                        name: c.name.into(),
+                        slug: c.slug.into(),
+                        description: c.description.into(),
+                        type_: c.type_,
+                        mode: Some(c.mode),
+                        f1: c.f1,
+                        pass_at_1: c.pass_at_1,
+                        evaluations: c.evaluations.to_vec(),
+                    })
+                    .collect(),
+            })
+    }
+
+    pub fn controls() -> Vec<VerificationControlListItem> {
+        ALL_CATEGORIES
+            .iter()
+            .flat_map(|cat| {
+                cat.controls.iter().map(move |c| VerificationControlListItem {
+                    name: c.name.into(),
+                    slug: c.slug.into(),
+                    description: c.description.into(),
+                    type_: c.type_,
+                    mode: Some(c.mode),
+                    f1: c.f1,
+                    pass_at_1: c.pass_at_1,
+                    criterion: CriterionReference { name: cat.name.into() },
+                })
+            })
+            .collect()
+    }
+
+    pub fn control_detail(slug: &str) -> Option<VerificationDetailResponse> {
         for cat in ALL_CATEGORIES {
             for (idx, ctrl) in cat.controls.iter().enumerate() {
                 if ctrl.slug == slug {
@@ -2024,7 +2096,7 @@ mod verifications {
                             slug: ctrl.slug.into(),
                             description: ctrl.description.into(),
                             type_: Some(ctrl.type_),
-                            category: CategoryReference { name: cat.name.into() },
+                            criterion: CriterionReference { name: cat.name.into() },
                         },
                         performance: ControlPerformance {
                             mode: ctrl.mode,
