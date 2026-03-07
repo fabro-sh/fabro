@@ -27,6 +27,21 @@ impl History {
             timestamp: std::time::SystemTime::now(),
         });
         self.turns.extend(preserved);
+        self.strip_opaque_reasoning();
+    }
+
+    /// Remove provider-specific reasoning items that are no longer valid after compaction.
+    /// OpenAI reasoning items are opaque round-trip data tied to specific API responses;
+    /// after compaction replaces their surrounding context with a summary, they serve no
+    /// purpose and can violate API constraints (reasoning must be followed by its output).
+    fn strip_opaque_reasoning(&mut self) {
+        for turn in &mut self.turns {
+            if let Turn::Assistant { provider_parts, .. } = turn {
+                provider_parts.retain(|p| {
+                    !matches!(p, ContentPart::Other { kind, .. } if kind == "openai_reasoning")
+                });
+            }
+        }
     }
 
     #[must_use]
@@ -391,5 +406,118 @@ mod tests {
         assert_eq!(messages[0].role, Role::User);
         assert_eq!(messages[1].role, Role::Assistant);
         assert_eq!(messages[2].role, Role::Tool);
+    }
+
+    #[test]
+    fn compact_strips_openai_reasoning_from_preserved_turns() {
+        let mut history = History::default();
+        history.push(Turn::User {
+            content: "old msg".into(),
+            timestamp: SystemTime::now(),
+        });
+        history.push(Turn::User {
+            content: "recent msg".into(),
+            timestamp: SystemTime::now(),
+        });
+        let reasoning = ContentPart::Other {
+            kind: "openai_reasoning".into(),
+            data: serde_json::json!({"type": "reasoning", "id": "rs_abc"}),
+        };
+        let tc = ToolCall::new("call_1", "search", serde_json::json!({}));
+        history.push(Turn::Assistant {
+            content: "response".into(),
+            tool_calls: vec![tc],
+            provider_parts: vec![reasoning],
+            usage: Usage::default(),
+            response_id: "resp_1".into(),
+            timestamp: SystemTime::now(),
+        });
+
+        history.compact(2, "Summary".into());
+
+        let assistant_turn = &history.turns()[2];
+        if let Turn::Assistant {
+            provider_parts,
+            tool_calls,
+            content,
+            ..
+        } = assistant_turn
+        {
+            assert!(provider_parts.is_empty(), "reasoning items should be stripped");
+            assert_eq!(tool_calls.len(), 1, "tool_calls should be preserved");
+            assert_eq!(content, "response", "text content should be preserved");
+        } else {
+            panic!("expected Assistant turn");
+        }
+    }
+
+    #[test]
+    fn compact_preserves_anthropic_thinking_blocks() {
+        let mut history = History::default();
+        history.push(Turn::User {
+            content: "old msg".into(),
+            timestamp: SystemTime::now(),
+        });
+        history.push(Turn::User {
+            content: "recent msg".into(),
+            timestamp: SystemTime::now(),
+        });
+        let thinking = ContentPart::Thinking(arc_llm::types::ThinkingData {
+            text: "deep thought".into(),
+            signature: Some("sig_xyz".into()),
+            redacted: false,
+        });
+        history.push(Turn::Assistant {
+            content: "answer".into(),
+            tool_calls: vec![],
+            provider_parts: vec![thinking],
+            usage: Usage::default(),
+            response_id: "resp_1".into(),
+            timestamp: SystemTime::now(),
+        });
+
+        history.compact(2, "Summary".into());
+
+        let assistant_turn = &history.turns()[2];
+        if let Turn::Assistant { provider_parts, .. } = assistant_turn {
+            assert_eq!(provider_parts.len(), 1, "thinking block should be preserved");
+            assert!(matches!(&provider_parts[0], ContentPart::Thinking(_)));
+        } else {
+            panic!("expected Assistant turn");
+        }
+    }
+
+    #[test]
+    fn compact_strips_reasoning_from_all_preserved_assistant_turns() {
+        let mut history = History::default();
+        history.push(Turn::User {
+            content: "old msg".into(),
+            timestamp: SystemTime::now(),
+        });
+        // Two assistant turns that will both be preserved
+        for i in 0..2 {
+            history.push(Turn::Assistant {
+                content: format!("response {i}"),
+                tool_calls: vec![],
+                provider_parts: vec![ContentPart::Other {
+                    kind: "openai_reasoning".into(),
+                    data: serde_json::json!({"type": "reasoning", "id": format!("rs_{i}")}),
+                }],
+                usage: Usage::default(),
+                response_id: format!("resp_{i}"),
+                timestamp: SystemTime::now(),
+            });
+        }
+
+        history.compact(2, "Summary".into());
+
+        for turn in history.turns() {
+            if let Turn::Assistant { provider_parts, .. } = turn {
+                assert!(
+                    provider_parts.is_empty(),
+                    "all reasoning items should be stripped from all assistant turns"
+                );
+            }
+        }
     }
 }
