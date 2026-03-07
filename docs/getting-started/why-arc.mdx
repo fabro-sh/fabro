@@ -15,6 +15,8 @@ AI coding agents have transformed software engineering productivity, but the sur
 - **Token costs are primed to explode.** ROI per token diverges wildly across tasks, models, and harnesses. Every unnecessary frontier token is one that can't be spent where it matters.
 - **The continuous improvement loop broke.** Data is lost at every sub-process boundary. Organizations can't train LLMs the way they train people, and memory files make no guarantees.
 
+<img src="/images/run-detail.png" alt="Arc run detail view showing verifications for a pipeline event types change, including Traceability, Readability, Reliability, Code Coverage, and more" />
+
 ## How Arc solves this
 
 Arc gives you a deterministic harness around non-deterministic AI. You define **workflow graphs** in DOT files that specify exactly what happens, in what order, with which models, and where humans weigh in. Arc handles orchestration, parallelism, model routing, verification, and observability.
@@ -39,6 +41,8 @@ Arc gives you a deterministic harness around non-deterministic AI. You define **
     Licensed under AGPL. Written in Rust with minimal dependencies. Runs on a single node with no databases to set up.
   </Card>
 </Columns>
+
+<img src="/images/workflow-example.png" alt="Arc workflow diagram for Fix Build showing stages from Start through Analyze Build Errors, Diagnose Root Cause, Validate Build, and Review Changes to Exit" />
 
 ## What a workflow looks like
 
