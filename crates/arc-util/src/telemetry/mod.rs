@@ -24,9 +24,21 @@ pub struct Telemetry {
 }
 
 impl Telemetry {
-    pub fn new() -> Result<Self> {
+    pub fn for_server() -> Result<Self> {
         let level = telemetry_level();
-        let anonymous_id = anonymous_id::load_or_create_anonymous_id()?;
+        let anonymous_id = anonymous_id::load_or_create_server_id()?;
+        let context = context::build_context();
+
+        Ok(Self {
+            level,
+            anonymous_id,
+            context,
+        })
+    }
+
+    pub fn for_cli() -> Result<Self> {
+        let level = telemetry_level();
+        let anonymous_id = anonymous_id::compute_cli_id()?;
         let context = context::build_context();
 
         Ok(Self {

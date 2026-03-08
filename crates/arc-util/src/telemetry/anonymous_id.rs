@@ -3,13 +3,14 @@ use std::fs;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-fn anonymous_id_path() -> Result<PathBuf> {
+fn dot_id_path() -> Result<PathBuf> {
     let home = dirs::home_dir().context("could not determine home directory")?;
-    Ok(home.join(".arc").join("anonymous_id"))
+    Ok(home.join(".arc").join(".id"))
 }
 
-pub fn load_or_create_anonymous_id() -> Result<String> {
-    let path = anonymous_id_path()?;
+/// Server: UUID persisted at ~/.arc/.id
+pub fn load_or_create_server_id() -> Result<String> {
+    let path = dot_id_path()?;
 
     if let Ok(contents) = fs::read_to_string(&path) {
         let id = contents.trim().to_string();
@@ -31,17 +32,40 @@ pub fn load_or_create_anonymous_id() -> Result<String> {
     Ok(id)
 }
 
+/// CLI: prefer existing ~/.arc/.id, else MD5 of MAC address
+pub fn compute_cli_id() -> Result<String> {
+    let path = dot_id_path()?;
+
+    if let Ok(contents) = fs::read_to_string(&path) {
+        let id = contents.trim().to_string();
+        if !id.is_empty() {
+            return Ok(id);
+        }
+    }
+
+    let mac = mac_address::get_mac_address()
+        .context("failed to get MAC address")?
+        .context("no MAC address found")?;
+
+    let digest = md5::compute(mac.bytes());
+    Ok(format!("{:x}", digest))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn load_or_create_returns_stable_id() {
-        // Calls the real function, which uses ~/.arc/anonymous_id
-        let id1 = load_or_create_anonymous_id().unwrap();
-        let id2 = load_or_create_anonymous_id().unwrap();
+    fn compute_cli_id_returns_non_empty_string() {
+        let id = compute_cli_id().unwrap();
+        assert!(!id.is_empty());
+    }
+
+    #[test]
+    fn load_or_create_server_id_returns_stable_uuid() {
+        let id1 = load_or_create_server_id().unwrap();
+        let id2 = load_or_create_server_id().unwrap();
         assert_eq!(id1, id2);
-        // Should be a valid UUID
         Uuid::parse_str(&id1).unwrap();
     }
 }

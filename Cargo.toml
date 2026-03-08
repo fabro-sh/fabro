@@ -42,6 +42,8 @@ semver = "1"
 aho-corasick = "1"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono"] }
 dirs = "6"
+mac_address = "1"
+md5 = "0.7"
 indicatif = "0.18"
 termimad = "0.34"
 toml = "0.8"

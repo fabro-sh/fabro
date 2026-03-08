@@ -23,6 +23,8 @@ base64.workspace = true
 dirs.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
+mac_address.workspace = true
+md5.workspace = true
 
 [build-dependencies]
 toml = "0.8"
