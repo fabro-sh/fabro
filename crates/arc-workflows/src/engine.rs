@@ -1410,6 +1410,8 @@ impl WorkflowRunEngine {
             (token, shutdown)
         });
 
+        let start_node_id = graph.find_start_node().map(|n| n.id.clone());
+
         loop {
             // Check for cancellation before processing each node
             if let Some(ref token) = config.cancel_token {
@@ -1894,11 +1896,7 @@ impl WorkflowRunEngine {
 
             // Step 6b: Write shadow branch first, then run branch commit with trailer
             // Skip git checkpoint for the start node — it's a no-op, so the commit is always empty.
-            let is_start_node = graph
-                .find_start_node()
-                .map(|n| n.id == node.id)
-                .unwrap_or(false);
-            if !is_start_node {
+            if start_node_id.as_deref() != Some(&*node.id) {
             if let Some(ref mode) = config.git_checkpoint {
                 // Shadow commit (best-effort): extract repo path from either variant
                 let shadow_sha: Option<String> = if config.meta_branch.is_some() {
