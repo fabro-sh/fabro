@@ -58,7 +58,7 @@ Read filenames in `docs/changelog/` to find the most recent entry date. If no en
 
 ### 2. Gather changes
 
-Run `git log --oneline --no-merges main` for commits since the last entry date. Read commit messages and changed files to understand the actual user-facing impact — don't just reword commit messages.
+Run `git log --oneline --no-merges main` for commits **on or after** the last entry date (inclusive). This ensures re-running the skill on the same day picks up commits that landed after the previous run. Read commit messages and changed files to understand the actual user-facing impact — don't just reword commit messages.
 
 ### 3. Filter and group by date
 
@@ -83,7 +83,7 @@ If there are no user-facing changes in the entire range, tell the user and stop.
 
 ### 4. Write changelog entries
 
-Create one file per date at `docs/changelog/YYYY-MM-DD.mdx`, using the commit date (not today's date). See [references/format.md](references/format.md) for the exact MDX format.
+Create one file per date at `docs/changelog/YYYY-MM-DD.mdx`, using the commit date (not today's date). If a file already exists for a date, regenerate it with the full set of commits for that day (not just new ones). See [references/format.md](references/format.md) for the exact MDX format.
 
 Within each date's entry:
 - **2-3 hero features as H2 headings** with narrative and code examples — only for changes that fundamentally alter what users can do
