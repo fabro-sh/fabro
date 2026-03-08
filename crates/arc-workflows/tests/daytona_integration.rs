@@ -146,12 +146,12 @@ async fn daytona_exec_command_local_timeout() {
     let env = create_env_with_github_app(Some(creds)).await;
     env.initialize().await.unwrap();
 
-    // Use a tiny timeout_ms of 100ms, our local timeout is 100 + 5000 = 5100ms.
+    // Use a tiny timeout_ms of 100ms, our local timeout is 100 + 2000 = 2100ms.
     // If the server doesn't enforce the timeout properly or drops the connection,
     // our local timeout should catch it. To simulate this without making a bad server,
     // we can't easily force the local timeout to hit before the server timeout 
     // without mocking. But if we run `sleep 10` and Daytona does NOT respect the 
-    // short timeout parameter, the local 5.1s timeout will definitely fire.
+    // short timeout parameter, the local 2.1s timeout will definitely fire.
     // Let's at least test that a 100ms timeout works and doesn't run for 10s.
     let start = std::time::Instant::now();
     let result = env
@@ -161,10 +161,10 @@ async fn daytona_exec_command_local_timeout() {
 
     let duration = start.elapsed();
     
-    // It should either fail with Daytona's timeout (duration < 5000ms) or our 
-    // local timeout (duration ~5100ms). Both are valid success conditions for 
+    // It should either fail with Daytona's timeout (duration < 2000ms) or our 
+    // local timeout (duration ~2100ms). Both are valid success conditions for 
     // the system as a whole avoiding a stall.
-    assert!(duration < std::time::Duration::from_millis(6000), "Command stalled for longer than the local timeout mechanism");
+    assert!(duration < std::time::Duration::from_millis(3000), "Command stalled for longer than the local timeout mechanism");
     assert!(result.exit_code != 0);
 
     env.cleanup().await.unwrap();

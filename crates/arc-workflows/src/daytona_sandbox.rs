@@ -916,9 +916,8 @@ impl Sandbox for DaytonaSandbox {
         // The Daytona API uses direct exec, not a shell.
         let wrapped = wrap_bash_command(&command_with_env);
 
-        let timeout_duration = std::time::Duration::from_millis(timeout_ms + 5000); // 5s grace period
+        let timeout_duration = std::time::Duration::from_millis(timeout_ms + 2000); // 2s grace period
         let token = cancel_token.unwrap_or_default();
-
         let exec_future = process_svc.execute_command(&wrapped, options);
 
         let result = tokio::select! {
