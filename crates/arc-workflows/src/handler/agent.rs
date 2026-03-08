@@ -45,6 +45,7 @@ pub trait CodergenBackend: Send + Sync {
         &self,
         _node: &Node,
         _prompt: &str,
+        _system_prompt: Option<&str>,
         _stage_dir: &Path,
     ) -> Result<CodergenResult, ArcError> {
         Err(ArcError::Validation(

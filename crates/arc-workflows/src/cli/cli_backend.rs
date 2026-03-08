@@ -696,10 +696,13 @@ impl CodergenBackend for BackendRouter {
         &self,
         node: &Node,
         prompt: &str,
+        system_prompt: Option<&str>,
         stage_dir: &Path,
     ) -> Result<CodergenResult, ArcError> {
         // CLI backend doesn't support one_shot, always route to API
-        self.api_backend.one_shot(node, prompt, stage_dir).await
+        self.api_backend
+            .one_shot(node, prompt, system_prompt, stage_dir)
+            .await
     }
 }
 

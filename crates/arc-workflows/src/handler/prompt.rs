@@ -2,6 +2,8 @@ use std::path::Path;
 
 use async_trait::async_trait;
 
+use arc_llm::provider::Provider;
+
 use crate::context::keys;
 use crate::context::Context;
 use crate::error::ArcError;
@@ -33,7 +35,7 @@ impl Handler for PromptHandler {
         context: &Context,
         graph: &Graph,
         logs_root: &Path,
-        _services: &EngineServices,
+        services: &EngineServices,
     ) -> Result<Outcome, ArcError> {
         // 1. Build prompt (prepend fidelity preamble if present)
         let raw_prompt = node
@@ -48,6 +50,25 @@ impl Handler for PromptHandler {
             format!("{preamble}\n\n{expanded}")
         };
 
+        // 1b. Discover project docs for system prompt when project_memory is enabled
+        let system_prompt = if node.project_memory() {
+            let working_dir = services.sandbox.working_directory();
+            let provider = node
+                .llm_provider()
+                .and_then(|s| s.parse::<Provider>().ok())
+                .unwrap_or(Provider::Anthropic);
+            let docs =
+                arc_agent::discover_project_docs(&*services.sandbox, working_dir, working_dir, provider).await;
+            tracing::debug!(node = %node.id, doc_count = docs.len(), "Project docs discovered for prompt node");
+            if docs.is_empty() {
+                None
+            } else {
+                Some(docs.join("\n\n"))
+            }
+        } else {
+            None
+        };
+
         // 2. Write prompt to logs
         let visit = crate::engine::visit_from_context(context);
         let stage_dir = crate::engine::node_dir(logs_root, &node.id, visit);
@@ -57,7 +78,9 @@ impl Handler for PromptHandler {
         // 3. Call LLM backend (one_shot)
         let (response_text, stage_usage, backend_files_touched) =
             if let Some(backend) = &self.backend {
-                let result = backend.one_shot(node, &prompt, &stage_dir).await;
+                let result = backend
+                    .one_shot(node, &prompt, system_prompt.as_deref(), &stage_dir)
+                    .await;
                 match result {
                     Ok(CodergenResult::Full(outcome)) => {
                         let status_json = serde_json::to_string_pretty(&outcome)
@@ -191,6 +214,7 @@ mod tests {
                 &self,
                 _node: &Node,
                 _prompt: &str,
+                _system_prompt: Option<&str>,
                 _stage_dir: &Path,
             ) -> Result<CodergenResult, ArcError> {
                 Ok(CodergenResult::Text {
@@ -235,6 +259,7 @@ mod tests {
 
         struct OneShotCapturingBackend {
             captured_prompt: Arc<Mutex<Option<String>>>,
+            captured_system_prompt: Arc<Mutex<Option<Option<String>>>>,
         }
 
         #[async_trait]
@@ -256,9 +281,12 @@ mod tests {
                 &self,
                 _node: &Node,
                 prompt: &str,
+                system_prompt: Option<&str>,
                 _stage_dir: &Path,
             ) -> Result<CodergenResult, ArcError> {
                 *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
+                *self.captured_system_prompt.lock().unwrap() =
+                    Some(system_prompt.map(String::from));
                 Ok(CodergenResult::Text {
                     text: "classified".to_string(),
                     usage: None,
@@ -270,6 +298,7 @@ mod tests {
         let captured = Arc::new(Mutex::new(None));
         let backend = OneShotCapturingBackend {
             captured_prompt: captured.clone(),
+            captured_system_prompt: Arc::new(Mutex::new(None)),
         };
         let handler = PromptHandler::new(Some(Box::new(backend)));
 
@@ -294,5 +323,144 @@ mod tests {
             "one_shot prompt should start with preamble, got: {prompt}"
         );
         assert!(prompt.ends_with("Classify this"));
+    }
+
+    #[tokio::test]
+    async fn prompt_handler_passes_system_prompt_when_project_memory_enabled() {
+        use std::sync::Mutex;
+
+        use arc_agent::Sandbox;
+
+        struct CapturingBackend {
+            captured_system_prompt: Arc<Mutex<Option<Option<String>>>>,
+        }
+
+        #[async_trait]
+        impl CodergenBackend for CapturingBackend {
+            async fn run(
+                &self,
+                _node: &Node,
+                _prompt: &str,
+                _context: &Context,
+                _thread_id: Option<&str>,
+                _emitter: &Arc<crate::event::EventEmitter>,
+                _stage_dir: &Path,
+                _sandbox: &Arc<dyn Sandbox>,
+            ) -> Result<CodergenResult, ArcError> {
+                panic!("run() should not be called for prompt handler");
+            }
+
+            async fn one_shot(
+                &self,
+                _node: &Node,
+                _prompt: &str,
+                system_prompt: Option<&str>,
+                _stage_dir: &Path,
+            ) -> Result<CodergenResult, ArcError> {
+                *self.captured_system_prompt.lock().unwrap() =
+                    Some(system_prompt.map(String::from));
+                Ok(CodergenResult::Text {
+                    text: "ok".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
+                })
+            }
+        }
+
+        let captured_sys = Arc::new(Mutex::new(None));
+        let backend = CapturingBackend {
+            captured_system_prompt: captured_sys.clone(),
+        };
+        let handler = PromptHandler::new(Some(Box::new(backend)));
+
+        // project_memory defaults to true; sandbox working_directory points to cwd
+        // which likely has no AGENTS.md/CLAUDE.md, so system_prompt should be None
+        let mut node = Node::new("classify");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Classify this".to_string()),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        handler
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .await
+            .unwrap();
+
+        // With project_memory=true (default), one_shot is called (system_prompt captured)
+        let sys = captured_sys.lock().unwrap().clone();
+        assert!(sys.is_some(), "one_shot should have been called");
+    }
+
+    #[tokio::test]
+    async fn prompt_handler_passes_none_system_prompt_when_project_memory_false() {
+        use std::sync::Mutex;
+
+        use arc_agent::Sandbox;
+
+        struct CapturingBackend {
+            captured_system_prompt: Arc<Mutex<Option<Option<String>>>>,
+        }
+
+        #[async_trait]
+        impl CodergenBackend for CapturingBackend {
+            async fn run(
+                &self,
+                _node: &Node,
+                _prompt: &str,
+                _context: &Context,
+                _thread_id: Option<&str>,
+                _emitter: &Arc<crate::event::EventEmitter>,
+                _stage_dir: &Path,
+                _sandbox: &Arc<dyn Sandbox>,
+            ) -> Result<CodergenResult, ArcError> {
+                panic!("run() should not be called for prompt handler");
+            }
+
+            async fn one_shot(
+                &self,
+                _node: &Node,
+                _prompt: &str,
+                system_prompt: Option<&str>,
+                _stage_dir: &Path,
+            ) -> Result<CodergenResult, ArcError> {
+                *self.captured_system_prompt.lock().unwrap() =
+                    Some(system_prompt.map(String::from));
+                Ok(CodergenResult::Text {
+                    text: "ok".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
+                })
+            }
+        }
+
+        let captured_sys = Arc::new(Mutex::new(None));
+        let backend = CapturingBackend {
+            captured_system_prompt: captured_sys.clone(),
+        };
+        let handler = PromptHandler::new(Some(Box::new(backend)));
+
+        let mut node = Node::new("classify");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Classify this".to_string()),
+        );
+        node.attrs.insert(
+            "project_memory".to_string(),
+            AttrValue::Boolean(false),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        handler
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .await
+            .unwrap();
+
+        let sys = captured_sys.lock().unwrap().clone();
+        assert_eq!(sys, Some(None), "system_prompt should be None when project_memory=false");
     }
 }

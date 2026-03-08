@@ -218,6 +218,11 @@ impl Node {
     }
 
     #[must_use]
+    pub fn project_memory(&self) -> bool {
+        self.bool_attr("project_memory").unwrap_or(true)
+    }
+
+    #[must_use]
     pub fn retry_policy(&self) -> Option<&str> {
         self.str_attr("retry_policy")
     }
@@ -525,6 +530,15 @@ mod tests {
         assert!(!node.allow_partial());
         assert_eq!(node.retry_policy(), None);
         assert_eq!(node.max_visits(), None);
+        assert!(node.project_memory());
+    }
+
+    #[test]
+    fn node_project_memory_false_overrides_default() {
+        let mut node = Node::new("x");
+        node.attrs
+            .insert("project_memory".to_string(), AttrValue::Boolean(false));
+        assert!(!node.project_memory());
     }
 
     #[test]

@@ -199,6 +199,7 @@ impl CodergenBackend for AgentApiBackend {
         &self,
         node: &Node,
         prompt: &str,
+        system_prompt: Option<&str>,
         stage_dir: &std::path::Path,
     ) -> Result<CodergenResult, ArcError> {
         let client = Client::from_env()
@@ -215,9 +216,15 @@ impl CodergenBackend for AgentApiBackend {
             .max_tokens()
             .or_else(|| arc_llm::catalog::get_model_info(model).and_then(|m| m.limits.max_output));
 
+        let mut messages = Vec::new();
+        if let Some(sys) = system_prompt {
+            messages.push(arc_llm::types::Message::system(sys));
+        }
+        messages.push(arc_llm::types::Message::user(prompt));
+
         let request = arc_llm::types::Request {
             model: model.to_string(),
-            messages: vec![arc_llm::types::Message::user(prompt)],
+            messages,
             provider,
             reasoning_effort: Some(node.reasoning_effort().to_string()),
             tools: None,
