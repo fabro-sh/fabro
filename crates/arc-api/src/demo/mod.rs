@@ -1249,7 +1249,7 @@ mod runs {
     pub fn configuration() -> serde_json::Value {
         serde_json::to_value(arc_workflows::cli::run_config::WorkflowRunConfig {
             version: 1,
-            goal: "Add rate limiting to auth endpoints".into(),
+            goal: Some("Add rate limiting to auth endpoints".into()),
             graph: "implement.dot".into(),
             directory: Some("/workspace/api-server".into()),
             llm: Some(arc_workflows::cli::run_config::LlmConfig {
@@ -1405,7 +1405,7 @@ mod workflows {
                 description: "Automatically diagnoses and fixes CI build failures by analyzing error logs, identifying root causes, and applying targeted code changes.".into(),
                 config: run_config_to_api(arc_workflows::cli::run_config::WorkflowRunConfig {
                     version: 1,
-                    goal: "Diagnose and fix CI build failures".into(),
+                    goal: Some("Diagnose and fix CI build failures".into()),
                     graph: "fix_build.dot".into(),
                     directory: None,
                     llm: Some(arc_workflows::cli::run_config::LlmConfig {
@@ -1467,7 +1467,7 @@ mod workflows {
                 description: "Generates production-ready code from a technical blueprint, including tests, documentation, and a pull request ready for review.".into(),
                 config: run_config_to_api(arc_workflows::cli::run_config::WorkflowRunConfig {
                     version: 1,
-                    goal: "Implement feature from technical blueprint".into(),
+                    goal: Some("Implement feature from technical blueprint".into()),
                     graph: "implement.dot".into(),
                     directory: None,
                     llm: Some(arc_workflows::cli::run_config::LlmConfig {
@@ -1547,7 +1547,7 @@ mod workflows {
                 description: "Detects configuration and code drift between environments, then generates reconciliation patches to bring everything back in sync.".into(),
                 config: run_config_to_api(arc_workflows::cli::run_config::WorkflowRunConfig {
                     version: 1,
-                    goal: "Detect and reconcile configuration drift across environments".into(),
+                    goal: Some("Detect and reconcile configuration drift across environments".into()),
                     graph: "sync_drift.dot".into(),
                     directory: None,
                     llm: Some(arc_workflows::cli::run_config::LlmConfig {
@@ -1615,7 +1615,7 @@ mod workflows {
                 description: "Evolves the product by analyzing usage patterns and specifications to propose and implement incremental improvements.".into(),
                 config: run_config_to_api(arc_workflows::cli::run_config::WorkflowRunConfig {
                     version: 1,
-                    goal: "Propose and implement incremental product improvements".into(),
+                    goal: Some("Propose and implement incremental product improvements".into()),
                     graph: "expand.dot".into(),
                     directory: None,
                     llm: Some(arc_workflows::cli::run_config::LlmConfig {
