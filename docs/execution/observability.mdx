@@ -140,7 +140,7 @@ cat ~/.arc/logs/01JKXYZ.../live.json
 Arc uses the `tracing` crate to write structured logs to `~/.arc/logs/YYYY-MM-DD.log`. Control the log level with the `ARC_LOG` environment variable:
 
 ```bash
-ARC_LOG=debug arc run start workflow.dot
+ARC_LOG=debug arc run workflow.dot
 ```
 
 | Level | What's logged |
@@ -168,14 +168,14 @@ The CLI displays a live progress bar during execution with per-stage status, dur
 
 ### Listing runs
 
-Browse your run history with `arc run list`:
+Browse your run history with `arc ps`:
 
 ```bash
-arc run list
-arc run list --workflow PlanImplement
-arc run list --before 2026-03-01
-arc run list --label team=platform
-arc run list --json
+arc ps
+arc ps --workflow PlanImplement
+arc ps --before 2026-03-01
+arc ps --label team=platform
+arc ps --json
 ```
 
 This scans `~/.arc/logs/` and displays each run's ID, workflow name, status, and start time. Use `--json` for machine-readable output.

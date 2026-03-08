@@ -17,4 +17,4 @@ The OpenAPI spec at `docs/api-reference/arc-api.yaml` is the source of truth for
 
 ## Testing workflows
 
-When manually testing workflows with `arc run start`, use `--no-retro` to skip the retro step and finish faster.
+When manually testing workflows with `arc run`, use `--no-retro` to skip the retro step and finish faster.

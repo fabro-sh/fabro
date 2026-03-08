@@ -11,10 +11,10 @@ SSH access is only available with the Daytona sandbox provider. Local, Docker, a
 
 ## Enabling SSH access
 
-Pass the `--ssh` flag to `arc run start`:
+Pass the `--ssh` flag to `arc run`:
 
 ```bash
-arc run start workflow.dot --sandbox daytona --ssh
+arc run workflow.dot --sandbox daytona --ssh
 ```
 
 After the sandbox is created, Arc generates temporary SSH credentials (valid for 60 minutes) and prints the connection command:
@@ -31,7 +31,7 @@ Copy and run the `ssh` command in a separate terminal to connect.
 By default, Daytona sandboxes are destroyed when the workflow finishes. To keep the sandbox running after the workflow completes — so you can continue debugging — combine `--ssh` with `--preserve-sandbox`:
 
 ```bash
-arc run start workflow.dot --sandbox daytona --ssh --preserve-sandbox
+arc run workflow.dot --sandbox daytona --ssh --preserve-sandbox
 ```
 
 Without `--preserve-sandbox`, the SSH session is terminated when the run ends and the sandbox is cleaned up.

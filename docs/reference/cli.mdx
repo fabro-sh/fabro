@@ -35,14 +35,14 @@ CLI flags always override `cli.toml` values, which override hardcoded defaults.
 
 ---
 
-## `arc run start`
+## `arc run`
 
 Launch a workflow from a `.dot` workflow file or `.toml` task config.
 
 ```bash
-arc run start <WORKFLOW>
-arc run start run.toml
-arc run start --run-branch arc/run/abc123
+arc run <WORKFLOW>
+arc run run.toml
+arc run --run-branch arc/run/abc123
 ```
 
 | Argument / Flag | Description |
@@ -68,14 +68,14 @@ arc run start --run-branch arc/run/abc123
 `--preflight` conflicts with `--resume`, `--run-branch`, and `--dry-run`. `--run-branch` conflicts with `--resume`.
 </Note>
 
-## `arc run list`
+## `arc ps`
 
 List workflow runs stored in `~/.arc/logs`.
 
 ```bash
-arc run list
-arc run list --workflow deploy --label env=prod
-arc run list --json
+arc ps
+arc ps --workflow deploy --label env=prod
+arc ps --json
 ```
 
 | Flag | Description |
@@ -86,14 +86,14 @@ arc run list --json
 | `--orphans` | Include orphan directories (no `manifest.json`) |
 | `--json` | Output as JSON |
 
-## `arc run prune`
+## `arc system prune`
 
 Delete old workflow runs. Dry-run by default — pass `--yes` to actually delete.
 
 ```bash
-arc run prune --before 2026-01-01
-arc run prune --before 2026-01-01 --yes
-arc run prune --orphans --yes
+arc system prune --before 2026-01-01
+arc system prune --before 2026-01-01 --yes
+arc system prune --orphans --yes
 ```
 
 | Flag | Description |

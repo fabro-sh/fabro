@@ -420,7 +420,6 @@ fn dry_run_simple() {
     arc()
         .args([
             "run",
-            "start",
             "--dry-run",
             "--auto-approve",
             "../../test/simple.dot",
@@ -434,7 +433,6 @@ fn dry_run_branching() {
     arc()
         .args([
             "run",
-            "start",
             "--dry-run",
             "--auto-approve",
             "../../test/branching.dot",
@@ -448,7 +446,6 @@ fn dry_run_conditions() {
     arc()
         .args([
             "run",
-            "start",
             "--dry-run",
             "--auto-approve",
             "../../test/conditions.dot",
@@ -462,7 +459,6 @@ fn dry_run_parallel() {
     arc()
         .args([
             "run",
-            "start",
             "--dry-run",
             "--auto-approve",
             "../../test/parallel.dot",
@@ -476,7 +472,6 @@ fn dry_run_styled() {
     arc()
         .args([
             "run",
-            "start",
             "--dry-run",
             "--auto-approve",
             "../../test/styled.dot",
@@ -490,7 +485,6 @@ fn dry_run_legacy_tool() {
     arc()
         .args([
             "run",
-            "start",
             "--dry-run",
             "--auto-approve",
             "../../test/legacy_tool.dot",
@@ -548,7 +542,6 @@ fn dry_run_writes_jsonl_and_live_json() {
     arc()
         .args([
             "run",
-            "start",
             "--dry-run",
             "--auto-approve",
             "--logs-dir",

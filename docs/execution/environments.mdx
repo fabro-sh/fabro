@@ -20,10 +20,10 @@ Set the sandbox provider via CLI flag, [run config TOML](/execution/run-configur
 
 ```bash
 # CLI flag
-arc run start workflow.dot --sandbox local
-arc run start workflow.dot --sandbox docker
-arc run start workflow.dot --sandbox daytona
-arc run start workflow.dot --sandbox exe
+arc run workflow.dot --sandbox local
+arc run workflow.dot --sandbox docker
+arc run workflow.dot --sandbox daytona
+arc run workflow.dot --sandbox exe
 ```
 
 ```toml title="run.toml"
@@ -90,7 +90,7 @@ The Docker sandbox is configured through the `DockerSandboxConfig`:
 By default, the container is destroyed when the run finishes. To keep it alive for debugging:
 
 ```bash
-arc run start workflow.dot --sandbox docker --preserve-sandbox
+arc run workflow.dot --sandbox docker --preserve-sandbox
 ```
 
 Or in the run config:
@@ -167,7 +167,7 @@ When using server defaults, labels are merged — run config labels override def
 Connect to a running Daytona sandbox via SSH for live debugging:
 
 ```bash
-arc run start workflow.dot --sandbox daytona --ssh
+arc run workflow.dot --sandbox daytona --ssh
 ```
 
 This creates temporary SSH credentials (valid for 60 minutes) and prints the connection command.
@@ -177,7 +177,7 @@ This creates temporary SSH credentials (valid for 60 minutes) and prints the con
 Like Docker, Daytona sandboxes are destroyed on cleanup by default. Use `--preserve-sandbox` to keep them alive:
 
 ```bash
-arc run start workflow.dot --sandbox daytona --preserve-sandbox
+arc run workflow.dot --sandbox daytona --preserve-sandbox
 ```
 
 Arc prints the sandbox name so you can find it in the [Daytona dashboard](https://app.daytona.io/dashboard/sandboxes).

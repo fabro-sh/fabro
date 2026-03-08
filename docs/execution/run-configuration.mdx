@@ -6,7 +6,7 @@ description: "Configure workflow runs with TOML files"
 A run config is a TOML file that bundles a workflow graph with all the settings needed to execute it — the goal, model, sandbox, setup commands, variables, and hooks. Instead of passing a dozen CLI flags, you check a `.toml` file into version control and launch with a single command:
 
 ```bash
-arc run start run.toml
+arc run run.toml
 ```
 
 ## Minimal example
@@ -331,5 +331,5 @@ Arc validates the run config when it loads:
 Use `--preflight` to validate a run config without executing it:
 
 ```bash
-arc run start run.toml --preflight
+arc run run.toml --preflight
 ```

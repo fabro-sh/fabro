@@ -12,7 +12,7 @@ At the core of both modes is the `WorkflowRunEngine`. It parses the DOT graph, w
 ## CLI mode
 
 ```bash
-arc run start workflow.dot --goal "Implement the login feature"
+arc run workflow.dot --goal "Implement the login feature"
 ```
 
 The CLI parses the workflow, creates the engine with a `ConsoleInterviewer`, and executes synchronously. Events are printed to stderr, progress is shown with terminal indicators, and human-in-the-loop questions are answered via interactive terminal prompts. When the run finishes, the process exits.
@@ -91,7 +91,7 @@ The UI provides:
 
 | Feature | CLI mode | API mode |
 |---|---|---|
-| Command | `arc run start` | `arc serve` |
+| Command | `arc run` | `arc serve` |
 | Execution | Synchronous, single run | Async, queued with scheduler |
 | Concurrency | One run per process | Configurable (default 5) |
 | Human-in-the-loop | Terminal prompts | HTTP endpoints |

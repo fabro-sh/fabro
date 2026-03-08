@@ -75,11 +75,11 @@ Model stylesheets set per-node models inside the workflow graph, but you can als
 
 ### CLI flags
 
-Pass `--model` and optionally `--provider` to `arc run start`:
+Pass `--model` and optionally `--provider` to `arc run`:
 
 ```bash
-arc run start demo/01-hello.dot --model claude-opus-4-6
-arc run start demo/04-pipeline.dot --model gemini-3.1-pro-preview --provider gemini
+arc run demo/01-hello.dot --model claude-opus-4-6
+arc run demo/04-pipeline.dot --model gemini-3.1-pro-preview --provider gemini
 ```
 
 These flags set the default model for all nodes that don't have an explicit model assigned via a stylesheet.
@@ -105,7 +105,7 @@ gemini = ["anthropic", "openai"]
 Then launch with:
 
 ```bash
-arc run start run.toml
+arc run run.toml
 ```
 
 The `[llm.fallbacks]` table is optional. It maps each provider to an ordered list of fallback providers to try when the primary is unavailable.

@@ -3,7 +3,7 @@ title: "Workflows"
 description: "Core workflow concepts in Arc"
 ---
 
-A workflow is a directed graph that defines a repeatable process for AI agents, shell commands, and human decisions. Unlike a DAG (directed acyclic graph), an Arc workflow can and often does include loops — for example, implement-test-fix cycles that repeat until tests pass. You write workflows in [Graphviz DOT](/reference/dot-language), check them into version control, and run them with `arc run start`.
+A workflow is a directed graph that defines a repeatable process for AI agents, shell commands, and human decisions. Unlike a DAG (directed acyclic graph), an Arc workflow can and often does include loops — for example, implement-test-fix cycles that repeat until tests pass. You write workflows in [Graphviz DOT](/reference/dot-language), check them into version control, and run them with `arc run`.
 
 ## Anatomy of a workflow
 
@@ -112,13 +112,13 @@ validate [label="Validate", prompt="Run the test suite and verify all tests pass
 From the CLI:
 
 ```bash
-arc run start workflow.dot
+arc run workflow.dot
 ```
 
 Or from a [run config TOML](/execution/run-configuration) for repeatable, parameterized runs:
 
 ```bash
-arc run start run.toml
+arc run run.toml
 ```
 
 See the [Quick Start](/getting-started/quick-start) to try it out, or browse the [example workflows](/examples/implement-feature) for real-world patterns.

@@ -49,11 +49,8 @@ enum Command {
     },
     /// Run an agentic coding session
     Exec(arc_agent::cli::AgentArgs),
-    /// Launch and manage workflow runs
-    Run {
-        #[command(subcommand)]
-        command: RunCommand,
-    },
+    /// Launch a workflow run
+    Run(arc_workflows::cli::RunArgs),
     /// Validate a workflow
     Validate(arc_workflows::cli::ValidateArgs),
     /// Parse a DOT file and print its AST
@@ -77,14 +74,17 @@ enum Command {
     },
     /// Interactive setup wizard for Arc
     Setup,
+    /// List workflow runs
+    Ps(arc_workflows::cli::runs::RunsListArgs),
+    /// System maintenance commands
+    System {
+        #[command(subcommand)]
+        command: SystemCommand,
+    },
 }
 
 #[derive(Subcommand)]
-enum RunCommand {
-    /// Launch a workflow from a .dot or .toml task file
-    Start(arc_workflows::cli::RunArgs),
-    /// List workflow runs
-    List(arc_workflows::cli::runs::RunsListArgs),
+enum SystemCommand {
     /// Delete old workflow runs
     Prune(arc_workflows::cli::runs::RunsPruneArgs),
 }
@@ -130,13 +130,15 @@ async fn main() -> Result<()> {
     let command_name = match &cli.command {
         Command::Llm { .. } => "llm",
         Command::Exec(_) => "exec",
-        Command::Run { .. } => "run",
+        Command::Run(_) => "run",
         Command::Validate(_) => "validate",
         Command::Parse(_) => "parse",
         Command::Model { .. } => "model",
         Command::Serve(_) => "serve",
         Command::Doctor { .. } => "doctor",
         Command::Setup => "setup",
+        Command::Ps(_) => "ps",
+        Command::System { .. } => "system",
     };
 
     let config_log_level = if let Command::Serve(ref args) = cli.command {
@@ -216,41 +218,33 @@ async fn main() -> Result<()> {
             );
             arc_agent::cli::run_with_args(args).await?
         }
-        Command::Run { command } => match command {
-            RunCommand::Start(mut args) => {
-                let styles: &'static arc_util::terminal::Styles =
-                    Box::leak(Box::new(arc_util::terminal::Styles::detect_stderr()));
-                let server_config = arc_api::server_config::load_server_config(None)?;
-                let cli_config = cli_config::load_cli_config(None)?;
-                args.verbose = args.verbose || cli_config.verbose;
-                let github_app = build_github_app_credentials(&server_config);
+        Command::Run(mut args) => {
+            let styles: &'static arc_util::terminal::Styles =
+                Box::leak(Box::new(arc_util::terminal::Styles::detect_stderr()));
+            let server_config = arc_api::server_config::load_server_config(None)?;
+            let cli_config = cli_config::load_cli_config(None)?;
+            args.verbose = args.verbose || cli_config.verbose;
+            let github_app = build_github_app_credentials(&server_config);
 
-                let cli_author = cli_config.git.as_ref().map(|g| &g.author);
-                let git_author = arc_workflows::git::GitAuthor::from_options(
-                    cli_author
-                        .and_then(|a| a.name.clone())
-                        .or_else(|| server_config.git.author.name.clone()),
-                    cli_author
-                        .and_then(|a| a.email.clone())
-                        .or_else(|| server_config.git.author.email.clone()),
-                );
+            let cli_author = cli_config.git.as_ref().map(|g| &g.author);
+            let git_author = arc_workflows::git::GitAuthor::from_options(
+                cli_author
+                    .and_then(|a| a.name.clone())
+                    .or_else(|| server_config.git.author.name.clone()),
+                cli_author
+                    .and_then(|a| a.email.clone())
+                    .or_else(|| server_config.git.author.email.clone()),
+            );
 
-                arc_workflows::cli::run::run_command(
-                    args,
-                    server_config.run_defaults,
-                    styles,
-                    github_app,
-                    git_author,
-                )
-                .await?;
-            }
-            RunCommand::List(args) => {
-                arc_workflows::cli::runs::list_command(&args)?;
-            }
-            RunCommand::Prune(args) => {
-                arc_workflows::cli::runs::prune_command(&args)?;
-            }
-        },
+            arc_workflows::cli::run::run_command(
+                args,
+                server_config.run_defaults,
+                styles,
+                github_app,
+                git_author,
+            )
+            .await?;
+        }
         Command::Validate(args) => {
             let styles = arc_util::terminal::Styles::detect_stderr();
             arc_workflows::cli::validate::validate_command(&args, &styles)?;
@@ -288,6 +282,14 @@ async fn main() -> Result<()> {
         Command::Setup => {
             setup::run_setup().await?;
         }
+        Command::Ps(args) => {
+            arc_workflows::cli::runs::list_command(&args)?;
+        }
+        Command::System { command } => match command {
+            SystemCommand::Prune(args) => {
+                arc_workflows::cli::runs::prune_command(&args)?;
+            }
+        },
     }
 
     Ok(())

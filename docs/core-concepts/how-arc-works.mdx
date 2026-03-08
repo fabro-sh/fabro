@@ -15,7 +15,7 @@ Arc has two interfaces, both backed by the same workflow engine:
 
 | | CLI mode | API mode |
 |---|---|---|
-| **Command** | `arc run start workflow.dot` | `arc serve` |
+| **Command** | `arc run workflow.dot` | `arc serve` |
 | **Best for** | Local development, one-off runs | Production use, web UI, integrations |
 | **Execution** | Immediate, single run | Queued, up to N concurrent runs |
 | **Human-in-the-loop** | Terminal prompts | HTTP endpoints |
@@ -36,7 +36,7 @@ You provide three inputs:
 
 ## Parse and validate
 
-When you run `arc run start`, Arc:
+When you run `arc run`, Arc:
 
 1. Parses the DOT file into an in-memory graph of nodes and edges
 2. Validates the graph structure (exactly one start node, one exit node, all edges point to valid nodes)
@@ -96,13 +96,13 @@ See [Observability](/execution/observability) for more on querying run data.
 Because Arc checkpoints after every stage, interrupted runs can be resumed from where they left off:
 
 ```bash
-arc run start --resume path/to/checkpoint.json
+arc run --resume path/to/checkpoint.json
 ```
 
 Or resume from a git run branch:
 
 ```bash
-arc run start --run-branch arc/runs/abc123
+arc run --run-branch arc/runs/abc123
 ```
 
 The engine restores the full context, node visit counts, and retry state, then continues execution from the next node.

@@ -49,19 +49,19 @@
 | 39 | workflows/variables/check.dot | PASS | has run.toml |
 | 40 | workflows/variables/example.dot | PASS | added start/exit |
 
-## Phase 2: Dry Run (`arc run start --dry-run --auto-approve`)
+## Phase 2: Dry Run (`arc run --dry-run --auto-approve`)
 
 | # | File | Status | Notes |
 |---|------|--------|-------|
 | 1-40 | (all) | | |
 
-## Phase 3: Haiku (`arc run start --model claude-haiku-4-5 --auto-approve`)
+## Phase 3: Haiku (`arc run --model claude-haiku-4-5 --auto-approve`)
 
 | # | File | Status | Notes |
 |---|------|--------|-------|
 | 1-40 | (all) | | |
 
-## Phase 4: Full (`arc run start --auto-approve`)
+## Phase 4: Full (`arc run --auto-approve`)
 
 | # | File | Status | Notes |
 |---|------|--------|-------|

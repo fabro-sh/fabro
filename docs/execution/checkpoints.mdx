@@ -97,7 +97,7 @@ There are two ways to resume an interrupted run:
 Resume from a `checkpoint.json` saved in the logs directory:
 
 ```bash
-arc run start workflow.dot --resume path/to/logs/checkpoint.json
+arc run workflow.dot --resume path/to/logs/checkpoint.json
 ```
 
 Arc loads the checkpoint, restores the context and execution state, and continues from the next node after the checkpoint.
@@ -107,7 +107,7 @@ Arc loads the checkpoint, restores the context and execution state, and continue
 Resume from the Git branches created during a previous run:
 
 ```bash
-arc run start --run-branch arc/run/01JKXYZ...
+arc run --run-branch arc/run/01JKXYZ...
 ```
 
 This reads the checkpoint, manifest, and graph DOT from the metadata branch (`refs/arc/01JKXYZ...`), re-attaches a worktree to the existing run branch, and resumes execution. No workflow file argument is needed — everything is recovered from Git.

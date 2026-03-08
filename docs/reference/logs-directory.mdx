@@ -17,7 +17,7 @@ The log level defaults to `info`. Set `ARC_LOG=debug` or pass `--debug` for verb
 
 ## Run directories
 
-Each `arc run start` invocation creates a timestamped directory:
+Each `arc run` invocation creates a timestamped directory:
 
 ```
 ~/.arc/logs/arc-run-20260307-143022/
@@ -81,12 +81,12 @@ Manager nodes that run sub-workflows write a nested `child/` directory containin
 
 ## Browsing runs
 
-Use `arc run list` to scan the logs directory and display a table of all runs with their status, workflow name, and timestamps. Pass `--json` for machine-readable output.
+Use `arc ps` to scan the logs directory and display a table of all runs with their status, workflow name, and timestamps. Pass `--json` for machine-readable output.
 
 ```bash
-arc run list
-arc run list --json
-arc run list --filter workflow=my-workflow
+arc ps
+arc ps --json
+arc ps --filter workflow=my-workflow
 ```
 
 ## Full directory tree
