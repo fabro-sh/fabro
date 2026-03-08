@@ -12,6 +12,7 @@ categories = ["api-bindings"]
 [features]
 default = ["docker"]
 docker = ["bollard", "tar"]
+quarantine = []
 
 [lib]
 doctest = false
