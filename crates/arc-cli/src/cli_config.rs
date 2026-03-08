@@ -45,18 +45,14 @@ pub struct CliGitConfig {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
-pub struct LogConfig {
-    pub level: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct CliConfig {
     pub mode: Option<ExecutionMode>,
     pub server: Option<ServerDefaults>,
     pub exec: Option<ExecDefaults>,
     pub llm: Option<LlmDefaults>,
     pub git: Option<CliGitConfig>,
-    pub log: Option<LogConfig>,
+    #[serde(default)]
+    pub log: arc_api::server_config::LogConfig,
 }
 
 #[derive(Debug, PartialEq)]
@@ -360,10 +356,7 @@ email = "me@local"
     fn parse_log_level() {
         let toml = "[log]\nlevel = \"debug\"";
         let config: CliConfig = toml::from_str(toml).unwrap();
-        assert_eq!(
-            config.log.unwrap().level.as_deref(),
-            Some("debug")
-        );
+        assert_eq!(config.log.level.as_deref(), Some("debug"));
     }
 
     #[test]

@@ -143,7 +143,7 @@ async fn main() -> Result<()> {
         server_config.log.level
     } else {
         let cli_config = cli_config::load_cli_config(None)?;
-        cli_config.log.and_then(|l| l.level)
+        cli_config.log.level
     };
 
     let log_prefix = if command_name == "serve" { "serve" } else { "cli" };
