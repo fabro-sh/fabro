@@ -42,6 +42,7 @@ cached_style!(
     "      {spinner:.dim} {wide_msg} {elapsed:.dim}"
 );
 cached_style!(style_tool_done, "      {wide_msg} {prefix:.dim}");
+cached_style!(style_subagent_info, "        {wide_msg}");
 cached_style!(style_static_dim, "    {wide_msg:.dim}");
 cached_style!(style_sandbox_detail, "             {wide_msg:.dim}");
 cached_style!(style_empty, " ");
@@ -846,7 +847,7 @@ impl ProgressUI {
             AgentEvent::SubAgentSpawned { agent_id, task, .. } if self.verbose => {
                 let dim = Style::new().dim();
                 let short_id = &agent_id[..agent_id.len().min(8)];
-                self.insert_info_line_for_stage(
+                self.insert_subagent_line_for_stage(
                     stage_node_id,
                     &dim.apply_to(format!(
                         "\u{25b8} subagent[{short_id}] \"{}\"",
@@ -863,7 +864,7 @@ impl ProgressUI {
             } if self.verbose => {
                 let short_id = &agent_id[..agent_id.len().min(8)];
                 let glyph = if *success { green_check() } else { red_cross() };
-                self.insert_info_line_for_stage(
+                self.insert_subagent_line_for_stage(
                     stage_node_id,
                     &format!("{glyph} subagent[{short_id}] ({turns_used} turns)"),
                 );
@@ -1009,6 +1010,25 @@ impl ProgressUI {
             }
             ProgressRenderer::Plain => {
                 eprintln!("      {message}");
+            }
+        }
+    }
+
+    /// Insert a static info line for a subagent, indented deeper than tool calls.
+    fn insert_subagent_line_for_stage(&mut self, stage_node_id: &str, message: &str) {
+        match &self.renderer {
+            ProgressRenderer::Tty(tty) => {
+                let bar = if let Some(stage) = self.active_stages.get(stage_node_id) {
+                    tty.multi
+                        .insert_after(stage.last_bar(), ProgressBar::new_spinner())
+                } else {
+                    tty.multi.add(ProgressBar::new_spinner())
+                };
+                bar.set_style(style_subagent_info());
+                bar.finish_with_message(message.to_string());
+            }
+            ProgressRenderer::Plain => {
+                eprintln!("        {message}");
             }
         }
     }
