@@ -302,6 +302,25 @@ pub fn push_ref(repo: &Path, url: &str, refname: &str) -> Result<()> {
     Ok(())
 }
 
+/// Push a local branch to the named remote using the user's configured credentials.
+pub fn push_branch(repo: &Path, remote: &str, branch: &str) -> Result<()> {
+    tracing::info!(
+        repo_dir = %repo.display(),
+        remote,
+        branch,
+        "Pushing branch to remote"
+    );
+    let output = git_cmd(repo)
+        .args(["push", remote, branch])
+        .output()
+        .map_err(|e| git_error(format!("git push failed: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(git_error(format!("git push failed: {stderr}")));
+    }
+    Ok(())
+}
+
 /// Sanitize a string for use as a git ref component.
 /// Lowercases, replaces non-alphanumeric chars with dashes, collapses runs.
 pub fn sanitize_ref_component(s: &str) -> String {
@@ -1193,5 +1212,73 @@ mod tests {
             stdout.contains("test-push"),
             "remote should have test-push branch"
         );
+    }
+
+    #[test]
+    fn push_branch_to_remote() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo_dir = dir.path().join("repo");
+        let remote_dir = dir.path().join("remote.git");
+
+        // Create a bare remote
+        Command::new("git")
+            .args(["init", "--bare"])
+            .arg(&remote_dir)
+            .output()
+            .unwrap();
+
+        // Create a local repo with origin pointing at the bare remote
+        Command::new("git")
+            .args(["init"])
+            .arg(&repo_dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(&remote_dir)
+            .current_dir(&repo_dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args([
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@test",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "init",
+            ])
+            .current_dir(&repo_dir)
+            .output()
+            .unwrap();
+
+        // Rename default branch to "main" for predictability
+        Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(&repo_dir)
+            .output()
+            .unwrap();
+
+        // Push using push_branch
+        push_branch(&repo_dir, "origin", "main").unwrap();
+
+        // Verify the remote now has the commit
+        let output = Command::new("git")
+            .args(["branch", "--list", "main"])
+            .current_dir(&remote_dir)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("main"), "remote should have main branch");
+    }
+
+    #[test]
+    fn push_branch_fails_for_nonexistent_remote() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        let result = push_branch(dir.path(), "nonexistent", "main");
+        assert!(result.is_err());
     }
 }
