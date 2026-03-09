@@ -436,6 +436,18 @@ impl Sandbox for DaytonaSandbox {
         let sandbox = self.sandbox()?;
         let resolved = self.resolve_path(remote_path);
 
+        // Ensure parent directory exists
+        if let Some(parent) = Path::new(&resolved).parent() {
+            let parent_str = parent.to_string_lossy();
+            if parent_str != "/" {
+                let fs_svc = sandbox
+                    .fs()
+                    .await
+                    .map_err(|e| format!("Failed to get fs service: {e}"))?;
+                let _ = fs_svc.create_folder(&parent_str, None).await;
+            }
+        }
+
         let bytes = tokio::fs::read(local_path)
             .await
             .map_err(|e| format!("Failed to read {}: {e}", local_path.display()))?;

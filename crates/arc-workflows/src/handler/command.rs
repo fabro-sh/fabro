@@ -14,9 +14,12 @@ fn timeout_ms(node: &Node) -> Option<u64> {
     node.timeout().map(|d| d.as_millis() as u64)
 }
 
-/// Shell-escape a string by wrapping in single quotes (POSIX-safe).
+/// Shell-escape a string using `shlex::try_quote` (POSIX-safe).
 fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
+    shlex::try_quote(s).map_or_else(
+        |_| format!("'{}'", s.replace('\'', "'\\''")),
+        |q| q.to_string(),
+    )
 }
 
 /// Executes an external script configured via node attributes.

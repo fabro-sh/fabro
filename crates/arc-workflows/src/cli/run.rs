@@ -557,7 +557,7 @@ pub async fn run_command(
         );
     }
 
-    let (worktree_work_dir, _worktree_path, worktree_branch, worktree_base_sha) =
+    let (worktree_work_dir, worktree_path, worktree_branch, worktree_base_sha) =
         if should_create_worktree {
             match setup_worktree(&original_cwd, &logs_dir, &run_id) {
                 Ok((wd, wt, branch, base)) => (Some(wd), Some(wt), Some(branch), Some(base)),
@@ -573,7 +573,7 @@ pub async fn run_command(
             (None, None, None, None)
         };
 
-    if let Some(ref wt) = _worktree_path {
+    if let Some(ref wt) = worktree_path {
         progress_ui
             .lock()
             .expect("progress lock poisoned")

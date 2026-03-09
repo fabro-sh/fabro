@@ -181,6 +181,22 @@ pub async fn reconnect(record: &SandboxRecord) -> Result<Box<dyn arc_agent::sand
     }
 }
 
+/// Load and reconnect to a sandbox from a run directory.
+async fn load_sandbox(
+    base: &Path,
+    run_prefix: &str,
+) -> Result<Box<dyn arc_agent::sandbox::Sandbox>> {
+    let run_dir = find_run_by_prefix(base, run_prefix)?;
+    let sandbox_json = run_dir.join("sandbox.json");
+    debug!(path = %sandbox_json.display(), "Loading sandbox record");
+    let record = SandboxRecord::load(&sandbox_json).context(
+        "Failed to load sandbox.json — was this run started with a recent version of arc?",
+    )?;
+
+    info!(run_id = %run_prefix, provider = %record.provider, "Connecting to sandbox");
+    reconnect(&record).await
+}
+
 pub async fn cp_command(args: CpArgs) -> Result<()> {
     let direction = parse_direction(&args.src, &args.dst)?;
     let base = default_logs_base();
@@ -191,15 +207,7 @@ pub async fn cp_command(args: CpArgs) -> Result<()> {
             remote_path,
             local_path,
         } => {
-            let run_dir = find_run_by_prefix(&base, &run_prefix)?;
-            let sandbox_json = run_dir.join("sandbox.json");
-            debug!(path = %sandbox_json.display(), "Loading sandbox record");
-            let record = SandboxRecord::load(&sandbox_json).context(
-                "Failed to load sandbox.json — was this run started with a recent version of arc?",
-            )?;
-
-            info!(run_id = %run_prefix, provider = %record.provider, "Connecting to sandbox");
-            let sandbox = reconnect(&record).await?;
+            let sandbox = load_sandbox(&base, &run_prefix).await?;
 
             if args.recursive {
                 download_recursive(&*sandbox, &remote_path, &local_path).await?;
@@ -217,15 +225,7 @@ pub async fn cp_command(args: CpArgs) -> Result<()> {
             run_prefix,
             remote_path,
         } => {
-            let run_dir = find_run_by_prefix(&base, &run_prefix)?;
-            let sandbox_json = run_dir.join("sandbox.json");
-            debug!(path = %sandbox_json.display(), "Loading sandbox record");
-            let record = SandboxRecord::load(&sandbox_json).context(
-                "Failed to load sandbox.json — was this run started with a recent version of arc?",
-            )?;
-
-            info!(run_id = %run_prefix, provider = %record.provider, "Connecting to sandbox");
-            let sandbox = reconnect(&record).await?;
+            let sandbox = load_sandbox(&base, &run_prefix).await?;
 
             if args.recursive {
                 upload_recursive(&*sandbox, &local_path, &remote_path).await?;
@@ -256,11 +256,15 @@ async fn download_recursive(
 
     let mut file_count = 0usize;
     for entry in &entries {
+        if entry.is_dir {
+            continue;
+        }
         let remote_file = format!("{remote_path}/{}", entry.name);
         let local_file = local_path.join(&entry.name);
-        if entry.is_dir {
-            // Directories are listed with their contents via depth traversal
-            continue;
+        if let Some(parent) = local_file.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .with_context(|| format!("Failed to create directory {}", parent.display()))?;
         }
         debug!(path = %remote_file, "Downloading file from sandbox");
         sandbox
@@ -293,7 +297,7 @@ async fn upload_recursive(
             let file_name = entry.file_name().to_string_lossy().to_string();
             let remote_file = format!("{dir_remote}/{file_name}");
 
-            if entry_path.is_dir() {
+            if entry.file_type().await?.is_dir() {
                 stack.push((entry_path, remote_file));
             } else {
                 debug!(path = %remote_file, "Uploading file to sandbox");

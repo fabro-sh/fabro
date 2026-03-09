@@ -774,11 +774,7 @@ impl Sandbox for ExeSandbox {
         remote_path: &str,
     ) -> Result<(), String> {
         let ssh = self.data_ssh()?;
-        let resolved = if Path::new(remote_path).is_absolute() {
-            remote_path.to_string()
-        } else {
-            format!("{WORKING_DIRECTORY}/{remote_path}")
-        };
+        let resolved = self.resolve_path(remote_path);
 
         let bytes = tokio::fs::read(local_path)
             .await
