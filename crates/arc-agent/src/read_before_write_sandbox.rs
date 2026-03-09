@@ -61,6 +61,10 @@ impl ReadBeforeWriteSandbox {
     }
 
     async fn guard_write(&self, path: &str) -> Result<(), String> {
+        let normalized = self.normalize_path(path);
+        if normalized.starts_with("/tmp/") {
+            return Ok(());
+        }
         let exists = self.inner.file_exists(path).await?;
         if exists && !self.has_read(path) {
             warn!(path = %path, "Write blocked: file not read by agent");
@@ -99,13 +103,18 @@ mod tests {
     use crate::test_support::MockSandbox;
     use std::collections::HashMap;
 
+    fn mock_with_files(files: HashMap<String, String>) -> MockSandbox {
+        MockSandbox {
+            files,
+            working_dir: "/work",
+            ..Default::default()
+        }
+    }
+
     // Cycle 1: write to existing unread file → error
     #[tokio::test]
     async fn write_to_existing_unread_file_returns_error() {
-        let mock = MockSandbox {
-            files: HashMap::from([("a.ts".into(), "content".into())]),
-            ..Default::default()
-        };
+        let mock = mock_with_files(HashMap::from([("a.ts".into(), "content".into())]));
         let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
 
         let result = env.write_file("a.ts", "new content").await;
@@ -119,7 +128,7 @@ mod tests {
     // Cycle 2: write to non-existent file → success
     #[tokio::test]
     async fn write_to_nonexistent_file_succeeds() {
-        let mock = MockSandbox::default();
+        let mock = mock_with_files(HashMap::new());
         let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
 
         let result = env.write_file("new.ts", "content").await;
@@ -130,10 +139,7 @@ mod tests {
     // Cycle 3: mark_agent_read then write → success
     #[tokio::test]
     async fn read_then_write_succeeds() {
-        let mock = MockSandbox {
-            files: HashMap::from([("a.ts".into(), "content".into())]),
-            ..Default::default()
-        };
+        let mock = mock_with_files(HashMap::from([("a.ts".into(), "content".into())]));
         let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
 
         env.mark_agent_read("a.ts");
@@ -145,10 +151,7 @@ mod tests {
     // Cycle 4: read_file alone does NOT satisfy guard
     #[tokio::test]
     async fn read_file_alone_does_not_satisfy_guard() {
-        let mock = MockSandbox {
-            files: HashMap::from([("a.ts".into(), "content".into())]),
-            ..Default::default()
-        };
+        let mock = mock_with_files(HashMap::from([("a.ts".into(), "content".into())]));
         let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
 
         env.read_file("a.ts", None, None).await.unwrap();
@@ -163,6 +166,7 @@ mod tests {
         let mock = MockSandbox {
             files: HashMap::from([("b.ts".into(), "content".into())]),
             grep_results: vec!["b.ts:1:content".into()],
+            working_dir: "/work",
             ..Default::default()
         };
         let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
@@ -181,6 +185,7 @@ mod tests {
         let mock = MockSandbox {
             files: HashMap::from([("b.ts".into(), "content".into())]),
             grep_results: vec!["b.ts:1:content".into()],
+            working_dir: "/work",
             ..Default::default()
         };
         let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
@@ -197,6 +202,7 @@ mod tests {
         let mock = MockSandbox {
             files: HashMap::from([("c.ts".into(), "content".into())]),
             glob_results: vec!["c.ts".into()],
+            working_dir: "/work",
             ..Default::default()
         };
         let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
@@ -229,10 +235,7 @@ mod tests {
     // Cycle 9: delete unread file → error
     #[tokio::test]
     async fn delete_unread_file_returns_error() {
-        let mock = MockSandbox {
-            files: HashMap::from([("d.ts".into(), "content".into())]),
-            ..Default::default()
-        };
+        let mock = mock_with_files(HashMap::from([("d.ts".into(), "content".into())]));
         let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
 
         let result = env.delete_file("d.ts").await;
@@ -243,15 +246,27 @@ mod tests {
     // Cycle 10: error message is actionable
     #[tokio::test]
     async fn error_message_is_actionable() {
-        let mock = MockSandbox {
-            files: HashMap::from([("main.rs".into(), "fn main() {}".into())]),
-            ..Default::default()
-        };
+        let mock = mock_with_files(HashMap::from([("main.rs".into(), "fn main() {}".into())]));
         let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
 
         let err = env.write_file("main.rs", "new").await.unwrap_err();
 
         assert!(err.contains("main.rs"));
         assert!(err.contains("read_file"));
+    }
+
+    // Cycle 11: write to /tmp bypasses guard
+    #[tokio::test]
+    async fn write_to_tmp_bypasses_guard() {
+        let mock = MockSandbox {
+            files: HashMap::from([("/tmp/arc-commit-msg".into(), "old".into())]),
+            working_dir: "/work",
+            ..Default::default()
+        };
+        let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
+
+        let result = env.write_file("/tmp/arc-commit-msg", "new").await;
+
+        assert!(result.is_ok());
     }
 }

@@ -71,7 +71,7 @@ impl Default for MockSandbox {
             },
             grep_results: vec![],
             glob_results: vec![],
-            working_dir: "/tmp/test",
+            working_dir: "/work",
             platform_str: "darwin",
             os_version_str: "Darwin 24.0.0".into(),
             apply_read_offset_limit: false,
@@ -360,7 +360,7 @@ impl Sandbox for MutableMockSandbox {
     }
 
     fn working_directory(&self) -> &'static str {
-        "/tmp"
+        "/work"
     }
 
     fn platform(&self) -> &'static str {

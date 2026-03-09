@@ -449,7 +449,7 @@ mod tests {
     fn mock_env_platform() {
         let env = MockSandbox::default();
         assert_eq!(env.platform(), "darwin");
-        assert_eq!(env.working_directory(), "/tmp/test");
+        assert_eq!(env.working_directory(), "/work");
         assert_eq!(env.os_version(), "Darwin 24.0.0");
     }
 
