@@ -1,5 +1,5 @@
 version = 1
-graph = "implement-and-simplify.dot"
+graph = "workflow.dot"
 
 [sandbox]
 provider = "local"
