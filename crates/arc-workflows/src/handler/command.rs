@@ -14,6 +14,11 @@ fn timeout_ms(node: &Node) -> Option<u64> {
     node.timeout().map(|d| d.as_millis() as u64)
 }
 
+/// Shell-escape a string by wrapping in single quotes (POSIX-safe).
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 /// Executes an external script configured via node attributes.
 pub struct CommandHandler;
 
@@ -65,103 +70,77 @@ impl Handler for CommandHandler {
         )
         .await?;
 
-        let cmd_future = if language == "python" {
-            tokio::process::Command::new("python3")
-                .arg("-c")
-                .arg(script)
-                .envs(&services.env)
-                .output()
+        let command = if language == "python" {
+            format!("python3 -c {}", shell_quote(script))
         } else {
-            tokio::process::Command::new("sh")
-                .arg("-c")
-                .arg(script)
-                .envs(&services.env)
-                .output()
+            script.to_string()
         };
 
-        let started = std::time::Instant::now();
-
-        let output = if let Some(timeout_dur) = node.timeout() {
-            match tokio::time::timeout(timeout_dur, cmd_future).await {
-                Ok(result) => result,
-                Err(_elapsed) => {
-                    let duration_ms = started.elapsed().as_millis() as u64;
-                    let timing = serde_json::json!({
-                        "duration_ms": duration_ms,
-                        "exit_code": null,
-                        "timed_out": true,
-                    });
-                    tokio::fs::write(
-                        stage_dir.join("script_timing.json"),
-                        serde_json::to_string_pretty(&timing).unwrap(),
-                    )
-                    .await?;
-
-                    return Err(ArcError::handler(format!(
-                        "Script timed out after {}ms: {script}",
-                        timeout_dur.as_millis()
-                    )));
-                }
-            }
+        let timeout_ms = node.timeout().map_or(600_000, |d| d.as_millis() as u64);
+        let env_vars = if services.env.is_empty() {
+            None
         } else {
-            cmd_future.await
+            Some(&services.env)
         };
 
-        let duration_ms = started.elapsed().as_millis() as u64;
+        let result = services
+            .sandbox
+            .exec_command(&command, timeout_ms, None, env_vars, None)
+            .await
+            .map_err(|e| ArcError::handler(format!("Failed to spawn script: {e}")))?;
 
-        match output {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        tokio::fs::write(stage_dir.join("stdout.log"), &result.stdout).await?;
+        tokio::fs::write(stage_dir.join("stderr.log"), &result.stderr).await?;
 
-                tokio::fs::write(stage_dir.join("stdout.log"), &stdout).await?;
-                tokio::fs::write(stage_dir.join("stderr.log"), &stderr).await?;
+        let timing = serde_json::json!({
+            "duration_ms": result.duration_ms,
+            "exit_code": if result.timed_out { serde_json::Value::Null } else { serde_json::json!(result.exit_code) },
+            "timed_out": result.timed_out,
+        });
+        tokio::fs::write(
+            stage_dir.join("script_timing.json"),
+            serde_json::to_string_pretty(&timing).unwrap(),
+        )
+        .await?;
 
-                let timing = serde_json::json!({
-                    "duration_ms": duration_ms,
-                    "exit_code": output.status.code(),
-                    "timed_out": false,
-                });
-                tokio::fs::write(
-                    stage_dir.join("script_timing.json"),
-                    serde_json::to_string_pretty(&timing).unwrap(),
-                )
-                .await?;
+        if result.timed_out {
+            return Err(ArcError::handler(format!(
+                "Script timed out after {timeout_ms}ms: {script}",
+            )));
+        }
 
-                if output.status.success() {
-                    let mut outcome = Outcome::success();
-                    outcome
-                        .context_updates
-                        .insert(keys::COMMAND_OUTPUT.to_string(), serde_json::json!(stdout));
-                    outcome
-                        .context_updates
-                        .insert(keys::COMMAND_STDERR.to_string(), serde_json::json!(stderr));
-                    outcome.notes = Some(format!("Script completed: {script}"));
-                    Ok(outcome)
-                } else {
-                    let mut reason = format!(
-                        "Script failed with exit code: {}",
-                        output.status.code().unwrap_or(-1)
-                    );
-                    if !stdout.trim().is_empty() {
-                        reason.push_str("\n\n## stdout\n");
-                        reason.push_str(&stdout);
-                    }
-                    if !stderr.trim().is_empty() {
-                        reason.push_str("\n\n## stderr\n");
-                        reason.push_str(&stderr);
-                    }
-                    let mut outcome = Outcome::fail_classify(reason);
-                    outcome
-                        .context_updates
-                        .insert(keys::COMMAND_OUTPUT.to_string(), serde_json::json!(stdout));
-                    outcome
-                        .context_updates
-                        .insert(keys::COMMAND_STDERR.to_string(), serde_json::json!(stderr));
-                    Ok(outcome)
-                }
+        if result.exit_code == 0 {
+            let mut outcome = Outcome::success();
+            outcome.context_updates.insert(
+                keys::COMMAND_OUTPUT.to_string(),
+                serde_json::json!(result.stdout),
+            );
+            outcome.context_updates.insert(
+                keys::COMMAND_STDERR.to_string(),
+                serde_json::json!(result.stderr),
+            );
+            outcome.notes = Some(format!("Script completed: {script}"));
+            Ok(outcome)
+        } else {
+            let mut reason = format!("Script failed with exit code: {}", result.exit_code);
+            if !result.stdout.trim().is_empty() {
+                reason.push_str("\n\n## stdout\n");
+                reason.push_str(&result.stdout);
             }
-            Err(e) => Err(ArcError::handler(format!("Failed to spawn script: {e}"))),
+            if !result.stderr.trim().is_empty() {
+                reason.push_str("\n\n## stderr\n");
+                reason.push_str(&result.stderr);
+            }
+            let mut outcome = Outcome::fail_classify(reason);
+            outcome.context_updates.insert(
+                keys::COMMAND_OUTPUT.to_string(),
+                serde_json::json!(result.stdout),
+            );
+            outcome.context_updates.insert(
+                keys::COMMAND_STDERR.to_string(),
+                serde_json::json!(result.stderr),
+            );
+            Ok(outcome)
         }
     }
 }
@@ -590,6 +569,232 @@ mod tests {
             command_stderr.as_str().unwrap().contains("err"),
             "command.stderr should contain 'err', got: {:?}",
             command_stderr
+        );
+    }
+
+    /// A sandbox that returns a canned `ExecResult` and captures the command,
+    /// proving that `CommandHandler` delegates to the sandbox rather than
+    /// spawning a host process.
+    struct SpySandbox {
+        exec_result: arc_agent::sandbox::ExecResult,
+        captured_command: std::sync::Mutex<Option<String>>,
+        captured_env_vars: std::sync::Mutex<Option<std::collections::HashMap<String, String>>>,
+    }
+
+    impl SpySandbox {
+        fn new(exec_result: arc_agent::sandbox::ExecResult) -> Self {
+            Self {
+                exec_result,
+                captured_command: std::sync::Mutex::new(None),
+                captured_env_vars: std::sync::Mutex::new(None),
+            }
+        }
+
+        fn captured_command(&self) -> Option<String> {
+            self.captured_command.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl arc_agent::sandbox::Sandbox for SpySandbox {
+        async fn read_file(
+            &self,
+            _: &str,
+            _: Option<usize>,
+            _: Option<usize>,
+        ) -> Result<String, String> {
+            unimplemented!()
+        }
+        async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
+            unimplemented!()
+        }
+        async fn delete_file(&self, _: &str) -> Result<(), String> {
+            unimplemented!()
+        }
+        async fn file_exists(&self, _: &str) -> Result<bool, String> {
+            unimplemented!()
+        }
+        async fn list_directory(
+            &self,
+            _: &str,
+            _: Option<usize>,
+        ) -> Result<Vec<arc_agent::sandbox::DirEntry>, String> {
+            unimplemented!()
+        }
+        async fn exec_command(
+            &self,
+            command: &str,
+            _timeout_ms: u64,
+            _working_dir: Option<&str>,
+            env_vars: Option<&std::collections::HashMap<String, String>>,
+            _cancel_token: Option<tokio_util::sync::CancellationToken>,
+        ) -> Result<arc_agent::sandbox::ExecResult, String> {
+            *self.captured_command.lock().unwrap() = Some(command.to_string());
+            *self.captured_env_vars.lock().unwrap() = env_vars.cloned();
+            Ok(self.exec_result.clone())
+        }
+        async fn grep(
+            &self,
+            _: &str,
+            _: &str,
+            _: &arc_agent::sandbox::GrepOptions,
+        ) -> Result<Vec<String>, String> {
+            unimplemented!()
+        }
+        async fn glob(&self, _: &str, _: Option<&str>) -> Result<Vec<String>, String> {
+            unimplemented!()
+        }
+        async fn download_file_to_local(&self, _: &str, _: &std::path::Path) -> Result<(), String> {
+            unimplemented!()
+        }
+        async fn initialize(&self) -> Result<(), String> {
+            Ok(())
+        }
+        async fn cleanup(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn working_directory(&self) -> &str {
+            "/mock"
+        }
+        fn platform(&self) -> &str {
+            "linux"
+        }
+        fn os_version(&self) -> String {
+            "Mock".into()
+        }
+    }
+
+    fn make_spy_services(sandbox: std::sync::Arc<SpySandbox>) -> EngineServices {
+        EngineServices {
+            registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
+            emitter: std::sync::Arc::new(EventEmitter::new()),
+            sandbox,
+            git_state: std::sync::RwLock::new(None),
+            hook_runner: None,
+            env: std::collections::HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn executes_script_via_sandbox() {
+        let spy = std::sync::Arc::new(SpySandbox::new(arc_agent::sandbox::ExecResult {
+            stdout: "SANDBOX_MARKER\n".into(),
+            stderr: String::new(),
+            exit_code: 0,
+            timed_out: false,
+            duration_ms: 5,
+        }));
+
+        let handler = CommandHandler;
+        let mut node = Node::new("script_node");
+        node.attrs.insert(
+            "script".to_string(),
+            AttrValue::String("echo hello".to_string()),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let logs_root = tempfile::tempdir().unwrap();
+
+        let outcome = handler
+            .execute(
+                &node,
+                &context,
+                &graph,
+                logs_root.path(),
+                &make_spy_services(spy.clone()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.status, StageStatus::Success);
+        let command_output = outcome.context_updates.get(keys::COMMAND_OUTPUT).unwrap();
+        assert_eq!(
+            command_output.as_str().unwrap(),
+            "SANDBOX_MARKER\n",
+            "CommandHandler must delegate to the sandbox, not spawn a host process"
+        );
+        assert_eq!(
+            spy.captured_command().as_deref(),
+            Some("echo hello"),
+            "sandbox should receive the script as the command"
+        );
+    }
+
+    #[tokio::test]
+    async fn executes_python_script_via_sandbox() {
+        let spy = std::sync::Arc::new(SpySandbox::new(arc_agent::sandbox::ExecResult {
+            stdout: "PYTHON_SANDBOX\n".into(),
+            stderr: String::new(),
+            exit_code: 0,
+            timed_out: false,
+            duration_ms: 5,
+        }));
+
+        let handler = CommandHandler;
+        let mut node = Node::new("script_node");
+        node.attrs.insert(
+            "script".to_string(),
+            AttrValue::String("print('hi')".to_string()),
+        );
+        node.attrs.insert(
+            "language".to_string(),
+            AttrValue::String("python".to_string()),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let logs_root = tempfile::tempdir().unwrap();
+
+        let outcome = handler
+            .execute(
+                &node,
+                &context,
+                &graph,
+                logs_root.path(),
+                &make_spy_services(spy.clone()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.status, StageStatus::Success);
+        let captured = spy.captured_command().unwrap();
+        assert!(
+            captured.starts_with("python3 -c ") && captured.contains("print"),
+            "sandbox command should invoke python3 with the script, got: {captured}"
+        );
+    }
+
+    #[tokio::test]
+    async fn passes_env_vars_to_sandbox() {
+        let spy = std::sync::Arc::new(SpySandbox::new(arc_agent::sandbox::ExecResult {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+            timed_out: false,
+            duration_ms: 5,
+        }));
+
+        let handler = CommandHandler;
+        let mut node = Node::new("script_node");
+        node.attrs
+            .insert("script".to_string(), AttrValue::String("true".to_string()));
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let logs_root = tempfile::tempdir().unwrap();
+
+        let mut services = make_spy_services(spy.clone());
+        services
+            .env
+            .insert("MY_VAR".to_string(), "my_value".to_string());
+
+        handler
+            .execute(&node, &context, &graph, logs_root.path(), &services)
+            .await
+            .unwrap();
+
+        let captured_env = spy.captured_env_vars.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            captured_env.get("MY_VAR").map(String::as_str),
+            Some("my_value")
         );
     }
 
