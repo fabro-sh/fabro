@@ -1004,7 +1004,7 @@ pub async fn run_command(
     progress_ui.lock().expect("progress lock poisoned").finish();
 
     // Auto-derive retro (always, cheap) and optionally run retro agent
-    if !args.no_retro {
+    if !args.no_retro && super::project_config::is_retro_enabled() {
         let (failed, failure_reason) = match &engine_result {
             Ok(o) => (
                 o.status == StageStatus::Fail,
@@ -1547,7 +1547,7 @@ async fn run_from_branch(
     let _ = sandbox.cleanup().await;
 
     // Auto-derive retro
-    if !args.no_retro {
+    if !args.no_retro && super::project_config::is_retro_enabled() {
         let (failed, failure_reason) = match &engine_result {
             Ok(o) => (
                 o.status == StageStatus::Fail,

@@ -18,16 +18,23 @@ pub struct ProjectConfig {
 pub struct ProjectArcConfig {
     #[serde(default = "default_root")]
     pub root: String,
+    #[serde(default = "default_retro")]
+    pub retro: bool,
 }
 
 fn default_root() -> String {
     ".".to_string()
 }
 
+fn default_retro() -> bool {
+    true
+}
+
 impl Default for ProjectArcConfig {
     fn default() -> Self {
         Self {
             root: default_root(),
+            retro: default_retro(),
         }
     }
 }
@@ -112,6 +119,16 @@ fn resolve_workflow_arg_from(arg: &Path, start_dir: &Path) -> PathBuf {
     }
 }
 
+/// Check whether retros are enabled in the project config.
+/// Returns `true` (the default) if no config is found or on error.
+pub fn is_retro_enabled() -> bool {
+    let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    match discover_project_config(&start) {
+        Ok(Some((_path, config))) => config.arc.retro,
+        _ => true,
+    }
+}
+
 /// Resolve the arc root directory from a config file path and its config.
 /// The returned path is the directory containing `arc.toml` joined with the `root` value.
 pub fn resolve_arc_root(config_path: &Path, config: &ProjectConfig) -> PathBuf {
@@ -136,6 +153,7 @@ mod tests {
                 version: 1,
                 arc: ProjectArcConfig {
                     root: ".".to_string(),
+                    retro: true,
                 },
             }
         );
@@ -145,6 +163,12 @@ mod tests {
     fn parse_full_config() {
         let config = parse_project_config("version = 1\n[arc]\nroot = \"arc/\"\n").unwrap();
         assert_eq!(config.arc.root, "arc/");
+    }
+
+    #[test]
+    fn parse_retro_false() {
+        let config = parse_project_config("version = 1\n[arc]\nretro = false\n").unwrap();
+        assert!(!config.arc.retro);
     }
 
     #[test]
@@ -199,6 +223,7 @@ mod tests {
             version: 1,
             arc: ProjectArcConfig {
                 root: "arc/".to_string(),
+                ..Default::default()
             },
         };
         assert_eq!(
@@ -214,6 +239,7 @@ mod tests {
             version: 1,
             arc: ProjectArcConfig {
                 root: ".".to_string(),
+                ..Default::default()
             },
         };
         assert_eq!(resolve_arc_root(config_path, &config), Path::new("/repo/."));
