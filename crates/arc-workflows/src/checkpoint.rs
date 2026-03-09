@@ -33,6 +33,9 @@ pub struct Checkpoint {
     /// Failure signature counts across loop_restart edges.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub restart_failure_signatures: HashMap<FailureSignature, usize>,
+    /// Per-node visit counts persisted for accurate resume.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub node_visits: HashMap<String, usize>,
 }
 
 impl Checkpoint {
@@ -47,6 +50,7 @@ impl Checkpoint {
         next_node_id: Option<String>,
         loop_failure_signatures: HashMap<FailureSignature, usize>,
         restart_failure_signatures: HashMap<FailureSignature, usize>,
+        node_visits: HashMap<String, usize>,
     ) -> Self {
         Self {
             timestamp: Utc::now(),
@@ -60,6 +64,7 @@ impl Checkpoint {
             git_commit_sha: None,
             loop_failure_signatures,
             restart_failure_signatures,
+            node_visits,
         }
     }
 
@@ -103,6 +108,7 @@ mod tests {
             None,
             HashMap::new(),
             HashMap::new(),
+            HashMap::new(),
         );
 
         assert_eq!(cp.current_node, "node_a");
@@ -140,6 +146,7 @@ mod tests {
             retries,
             outcomes,
             Some("next_step".to_string()),
+            HashMap::new(),
             HashMap::new(),
             HashMap::new(),
         );
@@ -190,6 +197,7 @@ mod tests {
             None,
             HashMap::new(),
             HashMap::new(),
+            HashMap::new(),
         );
 
         let json = serde_json::to_string(&cp).unwrap();
@@ -230,6 +238,7 @@ mod tests {
             None,
             loop_sigs,
             restart_sigs,
+            HashMap::new(),
         );
         cp.save(&path).unwrap();
 

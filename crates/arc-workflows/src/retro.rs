@@ -350,6 +350,7 @@ mod tests {
             git_commit_sha: None,
             loop_failure_signatures: HashMap::new(),
             restart_failure_signatures: HashMap::new(),
+            node_visits: HashMap::new(),
         }
     }
 
@@ -410,6 +411,7 @@ mod tests {
             git_commit_sha: None,
             loop_failure_signatures: HashMap::new(),
             restart_failure_signatures: HashMap::new(),
+            node_visits: HashMap::new(),
         };
 
         let retro = derive_retro(

@@ -1141,6 +1141,7 @@ fn checkpoint_save_and_resume_roundtrip() {
         None,
         std::collections::HashMap::new(),
         std::collections::HashMap::new(),
+        std::collections::HashMap::new(),
     );
 
     checkpoint.save(&path).expect("save should succeed");
@@ -1620,6 +1621,7 @@ async fn resume_from_checkpoint_completes_pipeline() {
         Some("step_b".to_string()),
         std::collections::HashMap::new(),
         std::collections::HashMap::new(),
+        std::collections::HashMap::new(),
     );
 
     let dir = tempfile::tempdir().unwrap();
@@ -1719,6 +1721,7 @@ async fn resume_from_checkpoint_preserves_goal_gate_outcomes() {
         std::collections::HashMap::new(),
         outcomes,
         Some("step_b".to_string()),
+        std::collections::HashMap::new(),
         std::collections::HashMap::new(),
         std::collections::HashMap::new(),
     );
@@ -2670,6 +2673,7 @@ async fn scenario_crash_recovery() {
         std::collections::HashMap::new(),
         outcomes,
         Some("b".to_string()),
+        std::collections::HashMap::new(),
         std::collections::HashMap::new(),
         std::collections::HashMap::new(),
     );
@@ -4678,6 +4682,7 @@ async fn fidelity_resume_degrades_full_to_summary_high() {
         Some("step_b".to_string()),
         std::collections::HashMap::new(),
         std::collections::HashMap::new(),
+        std::collections::HashMap::new(),
     );
 
     let captures = FidelityCaptures::new();
@@ -4776,6 +4781,7 @@ async fn fidelity_resume_degrade_only_affects_first_hop() {
         Some("step_b".to_string()),
         std::collections::HashMap::new(),
         std::collections::HashMap::new(),
+        std::collections::HashMap::new(),
     );
 
     let captures = FidelityCaptures::new();
@@ -4859,6 +4865,7 @@ async fn fidelity_resume_no_degrade_when_not_full() {
         std::collections::HashMap::new(),
         outcomes,
         Some("step_b".to_string()),
+        std::collections::HashMap::new(),
         std::collections::HashMap::new(),
         std::collections::HashMap::new(),
     );
@@ -5737,6 +5744,7 @@ async fn fidelity_resume_preserves_context_values_across_checkpoint() {
         std::collections::HashMap::new(),
         outcomes,
         Some("step_b".to_string()),
+        std::collections::HashMap::new(),
         std::collections::HashMap::new(),
         std::collections::HashMap::new(),
     );
@@ -11903,6 +11911,7 @@ fn e2e_checkpoint_signatures_roundtrip() {
         None,
         loop_sigs,
         restart_sigs,
+        std::collections::HashMap::new(),
     );
     cp.save(&path).unwrap();
 

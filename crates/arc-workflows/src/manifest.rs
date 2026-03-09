@@ -20,6 +20,8 @@ pub struct Manifest {
     pub base_sha: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub labels: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_branch: Option<String>,
 }
 
 impl Manifest {
@@ -47,6 +49,7 @@ mod tests {
             run_branch: Some("feature/test".to_string()),
             base_sha: Some("abc123".to_string()),
             labels: HashMap::from([("env".into(), "test".into())]),
+            base_branch: None,
         }
     }
 

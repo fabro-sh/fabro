@@ -850,6 +850,7 @@ mod tests {
             Some("node_b".to_string()),
             std::collections::HashMap::new(),
             std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
         );
         let cp_json = serde_json::to_vec_pretty(&cp).unwrap();
         store.write_checkpoint("RUN2", &cp_json, &[]).unwrap();
@@ -884,6 +885,7 @@ mod tests {
             None,
             std::collections::HashMap::new(),
             std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
         );
         let cp1_json = serde_json::to_vec_pretty(&cp1).unwrap();
         store.write_checkpoint("RUN3", &cp1_json, &[]).unwrap();
@@ -895,6 +897,7 @@ mod tests {
             std::collections::HashMap::new(),
             std::collections::HashMap::new(),
             Some("node_c".to_string()),
+            std::collections::HashMap::new(),
             std::collections::HashMap::new(),
             std::collections::HashMap::new(),
         );

@@ -102,6 +102,9 @@ pub struct Outcome {
     /// Used by the parallel handler to skip re-executing branch nodes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jump_to_node: Option<String>,
+    /// Wall-clock duration of the stage execution in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
 }
 
 impl Outcome {
@@ -117,6 +120,7 @@ impl Outcome {
             usage: None,
             files_touched: Vec::new(),
             jump_to_node: None,
+            duration_ms: None,
         }
     }
 
@@ -132,6 +136,7 @@ impl Outcome {
             usage: None,
             files_touched: Vec::new(),
             jump_to_node: None,
+            duration_ms: None,
         }
     }
 
@@ -149,6 +154,7 @@ impl Outcome {
             usage: None,
             files_touched: Vec::new(),
             jump_to_node: None,
+            duration_ms: None,
         }
     }
 
@@ -166,6 +172,7 @@ impl Outcome {
             usage: None,
             files_touched: Vec::new(),
             jump_to_node: None,
+            duration_ms: None,
         }
     }
 
@@ -190,6 +197,7 @@ impl Outcome {
             usage: None,
             files_touched: Vec::new(),
             jump_to_node: None,
+            duration_ms: None,
         }
     }
 

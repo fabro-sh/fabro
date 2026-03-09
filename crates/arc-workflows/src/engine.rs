@@ -303,6 +303,7 @@ fn write_manifest(
         run_branch: config.run_branch.clone(),
         base_sha: config.base_sha.clone(),
         labels: config.labels.clone(),
+        base_branch: config.base_branch.clone(),
     };
     let _ = std::fs::create_dir_all(logs_root);
     let _ = manifest.save(&logs_root.join("manifest.json"));
@@ -1328,9 +1329,13 @@ impl WorkflowRunEngine {
                 context.append_log(log_entry.clone());
             }
             completed_nodes = cp.completed_nodes.clone();
-            // Rebuild visit counts from completed_nodes (which records every visit)
-            for id in &completed_nodes {
-                *loop_state.node_visits.entry(id.clone()).or_insert(0) += 1;
+            // Use persisted node_visits; fall back to reconstruction for old checkpoints
+            if cp.node_visits.is_empty() {
+                for id in &completed_nodes {
+                    *loop_state.node_visits.entry(id.clone()).or_insert(0) += 1;
+                }
+            } else {
+                loop_state.node_visits = cp.node_visits.clone();
             }
             // Gap #5: Restore retry counters from checkpoint
             node_retries = cp.node_retries.clone();
@@ -1781,6 +1786,7 @@ impl WorkflowRunEngine {
             }
 
             // Step 3: Record completion
+            outcome.duration_ms = Some(stage_duration_ms);
             completed_nodes.push(node.id.clone());
             node_outcomes.insert(node.id.clone(), outcome.clone());
             previous_node_id = Some(node.id.clone());
@@ -1881,6 +1887,7 @@ impl WorkflowRunEngine {
                 next_node_id_for_checkpoint,
                 loop_state.loop_failure_signatures.clone(),
                 loop_state.restart_failure_signatures.clone(),
+                loop_state.node_visits.clone(),
             );
             let checkpoint_path = config.logs_root.join("checkpoint.json");
             if let Err(e) = checkpoint.save(&checkpoint_path) {
