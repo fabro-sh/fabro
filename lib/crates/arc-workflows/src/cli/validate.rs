@@ -1,6 +1,7 @@
 use anyhow::bail;
 use arc_util::terminal::Styles;
 
+use crate::cli::run_config;
 use crate::validation::Severity;
 use crate::workflow::prepare_from_file;
 
@@ -12,7 +13,14 @@ use super::{print_diagnostics, ValidateArgs};
 ///
 /// Returns an error if the file cannot be read, parsed, or has validation errors.
 pub fn validate_command(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<()> {
-    let (graph, diagnostics) = prepare_from_file(&args.workflow)?;
+    let dot_path = if args.workflow.extension().is_some_and(|ext| ext == "toml") {
+        let cfg = run_config::load_run_config(&args.workflow)?;
+        run_config::resolve_graph_path(&args.workflow, &cfg.graph)
+    } else {
+        args.workflow.clone()
+    };
+
+    let (graph, diagnostics) = prepare_from_file(&dot_path)?;
 
     eprintln!(
         "{} ({} nodes, {} edges)",
