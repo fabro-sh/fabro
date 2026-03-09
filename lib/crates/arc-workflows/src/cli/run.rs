@@ -410,6 +410,7 @@ pub async fn run_command(
     let progress_ui = Arc::new(Mutex::new(progress::ProgressUI::new(is_tty, args.verbose)));
     {
         let mut ui = progress_ui.lock().expect("progress lock poisoned");
+        ui.show_version();
         ui.show_run_id(&run_id);
         ui.show_time(&Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
         ui.show_logs_dir(&logs_dir);

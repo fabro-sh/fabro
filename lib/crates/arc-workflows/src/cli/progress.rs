@@ -655,6 +655,20 @@ impl ProgressUI {
         }
     }
 
+    pub fn show_version(&mut self) {
+        let version = arc_util::version::LONG_VERSION.as_str();
+        match &self.renderer {
+            ProgressRenderer::Tty(tty) => {
+                let bar = tty.multi.add(ProgressBar::new_spinner());
+                bar.set_style(style_static_dim());
+                bar.finish_with_message(format!("Version: {version}"));
+            }
+            ProgressRenderer::Plain => {
+                eprintln!("    Version: {version}");
+            }
+        }
+    }
+
     pub fn show_run_id(&mut self, run_id: &str) {
         match &self.renderer {
             ProgressRenderer::Tty(tty) => {

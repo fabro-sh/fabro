@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use tracing::debug;
 
 #[derive(Parser)]
-#[command(name = "arc", version)]
+#[command(name = "arc", version, long_version = arc_util::version::LONG_VERSION.as_str())]
 struct Cli {
     /// Skip loading .env file
     #[arg(long, global = true)]
