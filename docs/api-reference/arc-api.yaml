@@ -3860,11 +3860,23 @@ components:
           $ref: "#/components/schemas/DaytonaConfiguration"
         exe:
           $ref: "#/components/schemas/ExeConfiguration"
+        local:
+          $ref: "#/components/schemas/LocalSandboxConfiguration"
         env:
           type: object
           additionalProperties:
             type: string
           description: Environment variables injected into the sandbox.
+
+    LocalSandboxConfiguration:
+      description: Local sandbox settings.
+      type: object
+      properties:
+        worktree_mode:
+          type: string
+          description: Git worktree mode for local sandbox.
+          enum: [always, clean, dirty, never]
+          default: clean
 
     ExeConfiguration:
       description: exe.dev sandbox configuration.
