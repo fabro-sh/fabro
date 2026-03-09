@@ -98,6 +98,7 @@ async fn pr_create_from(
         &diff,
         &model,
         true,
+        &run_dir,
     )
     .await
     .map_err(|e| anyhow::anyhow!("{e}"))?;

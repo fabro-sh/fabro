@@ -5,6 +5,8 @@ use tracing::{debug, info};
 
 use arc_github::{self as github_app, ssh_url_to_https, GitHubAppCredentials};
 
+use crate::retro::Retro;
+
 /// Record of a pull request created for a workflow run.
 #[derive(Debug, Clone, Serialize)]
 pub struct PullRequestRecord {
@@ -49,23 +51,256 @@ fn truncate_pr_body(body: &str) -> String {
     if body.len() <= MAX_BODY {
         return body.to_string();
     }
-    let cutoff = MAX_BODY - SUFFIX.len();
+    let cutoff = body.floor_char_boundary(MAX_BODY - SUFFIX.len());
     format!("{}{SUFFIX}", &body[..cutoff])
 }
 
-/// Generate a PR body from the diff and goal using an LLM.
-pub async fn generate_pr_body(diff: &str, goal: &str, model: &str) -> Result<String, String> {
-    let system = "Write a concise PR description summarizing the changes.".to_string();
+/// Format an optional cost as `$X.XX` or an en-dash when absent.
+fn format_cost(cost: Option<f64>) -> String {
+    cost.map(crate::cli::format_cost)
+        .unwrap_or_else(|| "\u{2013}".to_string())
+}
+
+/// Format a duration in milliseconds as a human-readable string.
+fn format_duration_ms(ms: u64) -> String {
+    let secs = ms / 1000;
+    if secs >= 60 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{}s", secs)
+    }
+}
+
+/// Format the Retro section of the PR body.
+///
+/// Renders stats, friction points, and open items. Omits sub-sections when empty.
+fn format_retro_section(retro: &Retro) -> String {
+    let mut parts = Vec::new();
+    parts.push("### Retro".to_string());
+    parts.push(String::new());
+
+    // Stats summary
+    parts.push(format!(
+        "*   {} stages completed, {} failed, {} retries",
+        retro.stats.stages_completed, retro.stats.stages_failed, retro.stats.total_retries
+    ));
+    parts.push(format!(
+        "*   {} files modified",
+        retro.stats.files_touched.len()
+    ));
+
+    // Friction points
+    if let Some(ref fps) = retro.friction_points {
+        if !fps.is_empty() {
+            parts.push(String::new());
+            parts.push("**Friction points:**".to_string());
+            parts.push(String::new());
+            for fp in fps {
+                parts.push(format!("*   {}", fp.description));
+            }
+        }
+    }
+
+    // Open items
+    if let Some(ref items) = retro.open_items {
+        if !items.is_empty() {
+            parts.push(String::new());
+            parts.push("**Open items:**".to_string());
+            parts.push(String::new());
+            for item in items {
+                parts.push(format!("*   {}", item.description));
+            }
+        }
+    }
+
+    parts.join("\n")
+}
+
+/// Format the Arc Details section of the PR body.
+///
+/// Renders a cost/duration table in a collapsible `<details>` block, and
+/// optionally a DOT graph in another `<details>` block.
+fn format_arc_details_section(retro: &Retro, dot_source: Option<&str>) -> String {
+    let mut parts = Vec::new();
+    parts.push("### Arc Details".to_string());
+    parts.push(String::new());
+
+    // Cost table
+    let total_duration = format_duration_ms(retro.stats.total_duration_ms);
+    let total_cost_str = format_cost(retro.stats.total_cost);
+    let stage_count = retro.stages.len();
+    parts.push(format!(
+        "<details>\n<summary>Ran {stage_count} stages in {total_duration} for {total_cost_str}</summary>"
+    ));
+    parts.push(String::new());
+
+    parts.push("| Stage | Duration | Cost | Retries |".to_string());
+    parts.push("|---|---|---|---|".to_string());
+    for stage in &retro.stages {
+        let dur = format_duration_ms(stage.duration_ms);
+        let cost = format_cost(stage.cost);
+        parts.push(format!(
+            "| {} | {} | {} | {} |",
+            stage.stage_label, dur, cost, stage.retries
+        ));
+    }
+    // Total row
+    let total_retries = retro.stats.total_retries;
+    parts.push(format!(
+        "| **Total** | **{total_duration}** | **{total_cost_str}** | **{total_retries}** |"
+    ));
+
+    parts.push(String::new());
+    parts.push("</details>".to_string());
+
+    // DOT graph
+    if let Some(dot) = dot_source {
+        parts.push(String::new());
+
+        // Extract graph name and count nodes/edges for the summary
+        let (graph_name, node_count, edge_count) = parse_dot_summary(dot);
+
+        parts.push(format!(
+            "<details>\n<summary>Ran <code>{graph_name}</code> ({node_count} nodes and {edge_count} edges)</summary>"
+        ));
+        parts.push(String::new());
+        parts.push("```dot".to_string());
+        parts.push(dot.to_string());
+        parts.push("```".to_string());
+        parts.push(String::new());
+        parts.push("</details>".to_string());
+    }
+
+    parts.join("\n")
+}
+
+/// Parse a DOT source string to extract graph name, node count, and edge count.
+fn parse_dot_summary(dot: &str) -> (String, usize, usize) {
+    match crate::parser::parse(dot) {
+        Ok(graph) => (
+            format!("{}.dot", graph.name),
+            graph.nodes.len(),
+            graph.edges.len(),
+        ),
+        Err(_) => ("workflow.dot".to_string(), 0, 0),
+    }
+}
+
+/// Read the DOT graph source from `logs_dir/graph.dot`.
+fn read_dot_source(logs_dir: &Path) -> Option<String> {
+    let path = logs_dir.join("graph.dot");
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            debug!(path = %path.display(), "Read DOT graph for PR body");
+            Some(content)
+        }
+        Err(_) => None,
+    }
+}
+
+/// Read plan text from the first `nodes/plan*/response.md` found in logs_dir.
+///
+/// Entries are sorted alphabetically so `plan` is preferred over `planning`.
+fn read_plan_text(logs_dir: &Path) -> Option<String> {
+    let nodes_dir = logs_dir.join("nodes");
+    let mut entries: Vec<_> = std::fs::read_dir(&nodes_dir)
+        .ok()?
+        .flatten()
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let dir_name = entry.file_name();
+        let dir_name_str = dir_name.to_string_lossy();
+        if dir_name_str.starts_with("plan")
+            && entry.file_type().is_ok_and(|ft| ft.is_dir())
+        {
+            let response_path = entry.path().join("response.md");
+            if let Ok(content) = std::fs::read_to_string(&response_path) {
+                debug!(node_dir = %dir_name_str, "Found plan node response for PR body");
+                return Some(content);
+            }
+        }
+    }
+    None
+}
+
+/// Assemble the full PR body from LLM output and programmatic sections.
+fn assemble_pr_body(
+    llm_output: &str,
+    plan_text: Option<&str>,
+    retro_section: &str,
+    arc_details_section: &str,
+) -> String {
+    let mut parts = Vec::new();
+
+    parts.push(llm_output.to_string());
+
+    if let Some(plan) = plan_text {
+        parts.push(String::new());
+        parts.push("<details>".to_string());
+        parts.push("<summary>Full plan</summary>".to_string());
+        parts.push(String::new());
+        parts.push("```md".to_string());
+        parts.push(plan.to_string());
+        parts.push("```".to_string());
+        parts.push(String::new());
+        parts.push("</details>".to_string());
+    }
+
+    if !retro_section.is_empty() {
+        parts.push(String::new());
+        parts.push(retro_section.to_string());
+    }
+
+    if !arc_details_section.is_empty() {
+        parts.push(String::new());
+        parts.push(arc_details_section.to_string());
+    }
+
+    parts.join("\n")
+}
+
+/// Build a complete PR body by combining LLM-generated narrative with
+/// programmatic sections (plan, retro, arc details).
+pub async fn build_pr_body(
+    diff: &str,
+    goal: &str,
+    model: &str,
+    logs_dir: &Path,
+) -> Result<String, String> {
+    debug!("Building PR body");
+
+    let plan_text = read_plan_text(logs_dir);
+    let retro = Retro::load(logs_dir).ok();
+    let dot_source = read_dot_source(logs_dir);
+
+    // Build LLM prompt
+    let system = if plan_text.is_some() {
+        "Write a PR description with: (1) 2-3 concise paragraphs explaining the change, then (2) a '### Plan Summary' section with bullet points summarizing the plan. Do not include a title. Do not include the full plan.".to_string()
+    } else {
+        "Write a concise PR description in 2-3 paragraphs explaining the change. Do not include a title.".to_string()
+    };
 
     // Truncate diff to fit context windows (~50k chars)
     let max_diff_len = 50_000;
     let truncated_diff = if diff.len() > max_diff_len {
-        &diff[..max_diff_len]
+        &diff[..diff.floor_char_boundary(max_diff_len)]
     } else {
         diff
     };
 
-    let prompt = format!("Goal: {goal}\n\nDiff:\n```\n{truncated_diff}\n```");
+    let prompt = if let Some(ref plan) = plan_text {
+        // Truncate plan for LLM context (~20k chars)
+        let max_plan_len = 20_000;
+        let truncated_plan = if plan.len() > max_plan_len {
+            &plan[..plan.floor_char_boundary(max_plan_len)]
+        } else {
+            plan.as_str()
+        };
+        format!("Goal: {goal}\n\nPlan:\n```\n{truncated_plan}\n```\n\nDiff:\n```\n{truncated_diff}\n```")
+    } else {
+        format!("Goal: {goal}\n\nDiff:\n```\n{truncated_diff}\n```")
+    };
 
     let params = arc_llm::generate::GenerateParams::new(model)
         .system(system)
@@ -75,7 +310,24 @@ pub async fn generate_pr_body(diff: &str, goal: &str, model: &str) -> Result<Str
         .await
         .map_err(|e| format!("LLM generation failed: {e}"))?;
 
-    Ok(result.response.text())
+    let llm_output = result.response.text();
+
+    let retro_section = retro.as_ref().map(format_retro_section).unwrap_or_default();
+    let arc_details_section = retro
+        .as_ref()
+        .map(|r| format_arc_details_section(r, dot_source.as_deref()))
+        .unwrap_or_default();
+
+    let body = assemble_pr_body(
+        &llm_output,
+        plan_text.as_deref(),
+        &retro_section,
+        &arc_details_section,
+    );
+
+    info!("PR body generated");
+
+    Ok(body)
 }
 
 /// Optionally open a pull request after a successful workflow run.
@@ -92,6 +344,7 @@ pub async fn maybe_open_pull_request(
     diff: &str,
     model: &str,
     draft: bool,
+    logs_dir: &Path,
 ) -> Result<Option<PullRequestRecord>, String> {
     if diff.is_empty() {
         debug!("Empty diff, skipping pull request creation");
@@ -101,7 +354,7 @@ pub async fn maybe_open_pull_request(
     let https_url = ssh_url_to_https(origin_url);
     let (owner, repo) = github_app::parse_github_owner_repo(&https_url)?;
 
-    let body = generate_pr_body(diff, goal, model).await?;
+    let body = build_pr_body(diff, goal, model, logs_dir).await?;
     let body = truncate_pr_body(&body);
 
     let title = pr_title_from_goal(goal);
@@ -134,6 +387,334 @@ pub async fn maybe_open_pull_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::retro::{
+        AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,
+    };
+    use chrono::Utc;
+
+    fn make_test_retro() -> Retro {
+        Retro {
+            run_id: "test-run".to_string(),
+            workflow_name: "implement".to_string(),
+            goal: "Fix the bug".to_string(),
+            timestamp: Utc::now(),
+            smoothness: None,
+            stages: vec![
+                StageRetro {
+                    stage_id: "plan".to_string(),
+                    stage_label: "plan".to_string(),
+                    status: "success".to_string(),
+                    duration_ms: 45_000,
+                    retries: 0,
+                    cost: Some(0.12),
+                    notes: None,
+                    failure_reason: None,
+                    files_touched: vec![],
+                },
+                StageRetro {
+                    stage_id: "implement".to_string(),
+                    stage_label: "implement".to_string(),
+                    status: "success".to_string(),
+                    duration_ms: 90_000,
+                    retries: 0,
+                    cost: Some(0.25),
+                    notes: None,
+                    failure_reason: None,
+                    files_touched: vec!["src/main.rs".to_string(), "src/lib.rs".to_string()],
+                },
+                StageRetro {
+                    stage_id: "simplify".to_string(),
+                    stage_label: "simplify".to_string(),
+                    status: "success".to_string(),
+                    duration_ms: 15_000,
+                    retries: 0,
+                    cost: Some(0.05),
+                    notes: None,
+                    failure_reason: None,
+                    files_touched: vec![],
+                },
+            ],
+            stats: AggregateStats {
+                total_duration_ms: 150_000,
+                total_cost: Some(0.42),
+                total_retries: 0,
+                files_touched: vec!["src/lib.rs".to_string(), "src/main.rs".to_string()],
+                stages_completed: 3,
+                stages_failed: 0,
+            },
+            intent: None,
+            outcome: None,
+            learnings: None,
+            friction_points: Some(vec![
+                FrictionPoint {
+                    kind: FrictionKind::ToolFailure,
+                    description: "Daytona sandbox didn't have cargo on PATH".to_string(),
+                    stage_id: None,
+                },
+                FrictionPoint {
+                    kind: FrictionKind::Timeout,
+                    description: "Proxy timeouts during cold compilations".to_string(),
+                    stage_id: None,
+                },
+            ]),
+            open_items: Some(vec![OpenItem {
+                kind: OpenItemKind::TechDebt,
+                description: "`ToolApprovalFn` type alias still exists".to_string(),
+            }]),
+        }
+    }
+
+    // ── format_retro_section tests ──────────────────────────────────────
+
+    #[test]
+    fn format_retro_section_full() {
+        let retro = make_test_retro();
+        let section = format_retro_section(&retro);
+
+        assert!(section.contains("### Retro"));
+        assert!(section.contains("3 stages completed, 0 failed, 0 retries"));
+        assert!(section.contains("2 files modified"));
+        assert!(section.contains("**Friction points:**"));
+        assert!(section.contains("Daytona sandbox didn't have cargo on PATH"));
+        assert!(section.contains("Proxy timeouts during cold compilations"));
+        assert!(section.contains("**Open items:**"));
+        assert!(section.contains("`ToolApprovalFn` type alias still exists"));
+    }
+
+    #[test]
+    fn format_retro_section_no_friction_no_open() {
+        let mut retro = make_test_retro();
+        retro.friction_points = None;
+        retro.open_items = None;
+        let section = format_retro_section(&retro);
+
+        assert!(section.contains("### Retro"));
+        assert!(section.contains("3 stages completed"));
+        assert!(!section.contains("**Friction points:**"));
+        assert!(!section.contains("**Open items:**"));
+    }
+
+    #[test]
+    fn format_retro_section_empty_stats() {
+        let retro = Retro {
+            run_id: "test".to_string(),
+            workflow_name: "test".to_string(),
+            goal: "test".to_string(),
+            timestamp: Utc::now(),
+            smoothness: None,
+            stages: vec![],
+            stats: AggregateStats {
+                total_duration_ms: 0,
+                total_cost: None,
+                total_retries: 0,
+                files_touched: vec![],
+                stages_completed: 0,
+                stages_failed: 0,
+            },
+            intent: None,
+            outcome: None,
+            learnings: None,
+            friction_points: None,
+            open_items: None,
+        };
+        let section = format_retro_section(&retro);
+
+        assert!(section.contains("0 stages completed, 0 failed, 0 retries"));
+        assert!(section.contains("0 files modified"));
+    }
+
+    // ── format_arc_details_section tests ────────────────────────────────
+
+    #[test]
+    fn format_arc_details_cost_table() {
+        let retro = make_test_retro();
+        let section = format_arc_details_section(&retro, None);
+
+        assert!(section.contains("### Arc Details"));
+        assert!(section.contains("Ran 3 stages in 2m 30s for $0.42"));
+        assert!(section.contains("| plan | 45s | $0.12 | 0 |"));
+        assert!(section.contains("| implement | 1m 30s | $0.25 | 0 |"));
+        assert!(section.contains("| simplify | 15s | $0.05 | 0 |"));
+        assert!(section.contains("| **Total** | **2m 30s** | **$0.42** | **0** |"));
+    }
+
+    #[test]
+    fn format_arc_details_no_cost() {
+        let mut retro = make_test_retro();
+        for stage in &mut retro.stages {
+            stage.cost = None;
+        }
+        retro.stats.total_cost = None;
+        let section = format_arc_details_section(&retro, None);
+
+        // En-dash for missing costs
+        assert!(section.contains("| plan | 45s | \u{2013} | 0 |"));
+        assert!(section.contains("for \u{2013}"));
+    }
+
+    #[test]
+    fn format_arc_details_with_dot_graph() {
+        let retro = make_test_retro();
+        let dot = "digraph implement {\n  plan [type=\"agent\"]\n  code [type=\"agent\"]\n  plan -> code\n}\n";
+        let section = format_arc_details_section(&retro, Some(dot));
+
+        assert!(section.contains("<code>implement.dot</code>"));
+        assert!(section.contains("2 nodes and 1 edges"));
+        assert!(section.contains("```dot"));
+        assert!(section.contains("digraph implement"));
+    }
+
+    // ── read_plan_text tests ────────────────────────────────────────────
+
+    #[test]
+    fn read_plan_text_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plan_dir = tmp.path().join("nodes").join("plan");
+        std::fs::create_dir_all(&plan_dir).unwrap();
+        std::fs::write(plan_dir.join("response.md"), "This is the plan").unwrap();
+
+        let result = read_plan_text(tmp.path());
+        assert_eq!(result, Some("This is the plan".to_string()));
+    }
+
+    #[test]
+    fn read_plan_text_prefix_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plan_dir = tmp.path().join("nodes").join("planning");
+        std::fs::create_dir_all(&plan_dir).unwrap();
+        std::fs::write(plan_dir.join("response.md"), "Planning content").unwrap();
+
+        let result = read_plan_text(tmp.path());
+        assert_eq!(result, Some("Planning content".to_string()));
+    }
+
+    #[test]
+    fn read_plan_text_not_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nodes_dir = tmp.path().join("nodes").join("implement");
+        std::fs::create_dir_all(nodes_dir).unwrap();
+
+        let result = read_plan_text(tmp.path());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn read_plan_text_no_nodes_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = read_plan_text(tmp.path());
+        assert_eq!(result, None);
+    }
+
+    // ── assemble_pr_body tests ──────────────────────────────────────────
+
+    #[test]
+    fn assemble_all_sections() {
+        let body = assemble_pr_body(
+            "This is the narrative.\n\n### Plan Summary\n\n* Step 1\n* Step 2",
+            Some("Full plan text here"),
+            "### Retro\n\n* 3 stages completed",
+            "### Arc Details\n\n<details>...</details>",
+        );
+
+        assert!(body.contains("This is the narrative."));
+        assert!(body.contains("### Plan Summary"));
+        assert!(body.contains("<details>\n<summary>Full plan</summary>"));
+        assert!(body.contains("```md\nFull plan text here\n```"));
+        assert!(body.contains("### Retro"));
+        assert!(body.contains("### Arc Details"));
+    }
+
+    #[test]
+    fn assemble_no_plan() {
+        let body = assemble_pr_body(
+            "Narrative only.",
+            None,
+            "### Retro\n\n* stats",
+            "### Arc Details\n\n<details>...</details>",
+        );
+
+        assert!(body.contains("Narrative only."));
+        assert!(!body.contains("Full plan"));
+        assert!(body.contains("### Retro"));
+        assert!(body.contains("### Arc Details"));
+    }
+
+    #[test]
+    fn assemble_no_retro() {
+        let body = assemble_pr_body("Narrative only.", Some("Plan"), "", "");
+
+        assert!(body.contains("Narrative only."));
+        assert!(body.contains("Full plan"));
+        // Empty sections should not produce extra headers
+        assert!(!body.contains("### Retro"));
+        assert!(!body.contains("### Arc Details"));
+    }
+
+    #[test]
+    fn assemble_narrative_only() {
+        let body = assemble_pr_body("Just the narrative.", None, "", "");
+
+        assert_eq!(body, "Just the narrative.");
+    }
+
+    // ── parse_dot_summary tests ─────────────────────────────────────────
+
+    #[test]
+    fn parse_dot_summary_basic() {
+        let dot = r#"digraph my_workflow {
+  plan [type="agent"]
+  code [type="agent"]
+  plan -> code
+}"#;
+        let (name, nodes, edges) = parse_dot_summary(dot);
+        assert_eq!(name, "my_workflow.dot");
+        assert_eq!(nodes, 2);
+        assert_eq!(edges, 1);
+    }
+
+    #[test]
+    fn parse_dot_summary_empty() {
+        let (name, nodes, edges) = parse_dot_summary("");
+        assert_eq!(name, "workflow.dot");
+        assert_eq!(nodes, 0);
+        assert_eq!(edges, 0);
+    }
+
+    // ── format_duration_ms tests ────────────────────────────────────────
+
+    #[test]
+    fn format_duration_seconds() {
+        assert_eq!(format_duration_ms(45_000), "45s");
+    }
+
+    #[test]
+    fn format_duration_minutes() {
+        assert_eq!(format_duration_ms(150_000), "2m 30s");
+    }
+
+    #[test]
+    fn format_duration_zero() {
+        assert_eq!(format_duration_ms(0), "0s");
+    }
+
+    // ── read_dot_source tests ───────────────────────────────────────────
+
+    #[test]
+    fn read_dot_source_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("graph.dot"), "digraph test {}").unwrap();
+        let result = read_dot_source(tmp.path());
+        assert_eq!(result, Some("digraph test {}".to_string()));
+    }
+
+    #[test]
+    fn read_dot_source_not_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = read_dot_source(tmp.path());
+        assert_eq!(result, None);
+    }
+
+    // ── Existing tests ─────────────────────────────────────────────────
 
     #[test]
     fn pr_title_uses_first_line() {
@@ -220,6 +801,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_diff_returns_none() {
+        let tmp = tempfile::tempdir().unwrap();
         let creds = GitHubAppCredentials {
             app_id: "123".to_string(),
             private_key_pem: "unused".to_string(),
@@ -233,6 +815,7 @@ mod tests {
             "",
             "claude-sonnet-4-20250514",
             false,
+            tmp.path(),
         )
         .await;
         assert!(result.is_ok());

@@ -1100,6 +1100,7 @@ pub async fn run_command(
                         &diff,
                         &model,
                         config.pull_request_draft,
+                        &logs_dir,
                     )
                     .await
                     {
