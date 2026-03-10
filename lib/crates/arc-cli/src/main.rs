@@ -64,6 +64,9 @@ enum Command {
     Preview(arc_workflows::cli::preview::PreviewArgs),
     /// SSH into a run's Daytona sandbox
     Ssh(arc_workflows::cli::ssh::SshArgs),
+    /// Show the diff of changes from a workflow run
+    #[command(hide = true)]
+    Diff(arc_workflows::cli::diff::DiffArgs),
     /// List and test LLM models
     Model {
         #[command(subcommand)]
@@ -183,6 +186,7 @@ async fn main_inner() -> Result<()> {
         Command::Cp(_) => "cp",
         Command::Preview(_) => "preview",
         Command::Ssh(_) => "ssh",
+        Command::Diff(_) => "diff",
         Command::Model { .. } => "model",
         #[cfg(feature = "server")]
         Command::Serve(_) => "serve",
@@ -360,6 +364,9 @@ async fn main_inner() -> Result<()> {
         }
         Command::Ssh(args) => {
             arc_workflows::cli::ssh::ssh_command(args).await?;
+        }
+        Command::Diff(args) => {
+            arc_workflows::cli::diff::diff_command(args).await?;
         }
         Command::Model { command } => {
             let cli_config = cli_config::load_cli_config(None)?;
