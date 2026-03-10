@@ -12,6 +12,7 @@ path = "src/main.rs"
 [features]
 default = []
 server = ["dep:arc-api"]
+exedev = ["arc-config/exedev", "arc-workflows/exedev"]
 
 [dependencies]
 arc-config = { path = "../arc-config" }

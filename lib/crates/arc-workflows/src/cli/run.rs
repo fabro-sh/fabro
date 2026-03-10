@@ -195,6 +195,7 @@ fn resolve_daytona_config(
         })
 }
 
+#[cfg(feature = "exedev")]
 /// Resolve exe.dev config: TOML config > run defaults.
 fn resolve_exe_config(
     run_cfg: Option<&WorkflowRunConfig>,
@@ -206,6 +207,7 @@ fn resolve_exe_config(
         .or_else(|| run_defaults.sandbox.as_ref().and_then(|s| s.exe.clone()))
 }
 
+#[cfg(feature = "exedev")]
 /// Resolve exe.dev git clone parameters from the current repo.
 ///
 /// Returns `None` if no git repo is detected. Credential resolution is
@@ -601,6 +603,7 @@ pub async fn run_command(
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let daytona_config = resolve_daytona_config(run_cfg.as_ref(), &run_defaults);
+    #[cfg(feature = "exedev")]
     let exe_config = resolve_exe_config(run_cfg.as_ref(), &run_defaults);
 
     // Wrap emitter in Arc now so we can share it with exec env callbacks
@@ -637,6 +640,7 @@ pub async fn run_command(
             }));
             Arc::new(env)
         }
+        #[cfg(feature = "exedev")]
         SandboxProvider::Exe => {
             let clone_params = resolve_exe_clone_params(&original_cwd);
 
@@ -708,6 +712,7 @@ pub async fn run_command(
                 container_mount_point: None,
                 data_host: None,
             },
+            #[cfg(feature = "exedev")]
             SandboxProvider::Exe => {
                 // Extract data_host from the ssh access command ("ssh <host>")
                 let data_host = sandbox
@@ -1422,6 +1427,7 @@ async fn run_from_branch(
             worktree_path = Some(wt);
             Arc::new(env)
         }
+        #[cfg(feature = "exedev")]
         SandboxProvider::Exe => {
             let exe_config = resolve_exe_config(None, &run_defaults);
             let clone_params = resolve_exe_clone_params(&original_cwd);
@@ -1702,6 +1708,7 @@ async fn run_preflight(
     // 2. Sandbox boot check
     let original_cwd = std::env::current_dir()?;
     let daytona_config = resolve_daytona_config(run_cfg.as_ref(), run_defaults);
+    #[cfg(feature = "exedev")]
     let exe_config = resolve_exe_config(run_cfg.as_ref(), run_defaults);
 
     let sandbox_result: Result<Arc<dyn Sandbox>, String> = match sandbox_provider {
@@ -1727,6 +1734,7 @@ async fn run_preflight(
             }
             Err(e) => Err(format!("Daytona client creation failed: {e}")),
         },
+        #[cfg(feature = "exedev")]
         SandboxProvider::Exe => match arc_exe::OpensshRunner::connect_raw("exe.dev").await {
             Ok(mgmt_ssh) => {
                 let config = exe_config.unwrap_or_default();

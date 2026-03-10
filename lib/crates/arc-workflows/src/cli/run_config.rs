@@ -89,6 +89,7 @@ pub struct SandboxConfig {
     pub preserve: Option<bool>,
     pub local: Option<LocalSandboxConfig>,
     pub daytona: Option<DaytonaConfig>,
+    #[cfg(feature = "exedev")]
     pub exe: Option<arc_exe::ExeConfig>,
     pub env: Option<HashMap<String, String>>,
 }
@@ -178,6 +179,7 @@ impl WorkflowRunConfig {
                     (None, Some(_)) => task.daytona = default.daytona.clone(),
                     _ => {}
                 }
+                #[cfg(feature = "exedev")]
                 match (&mut task.exe, &default.exe) {
                     (Some(task_e), Some(default_e)) => {
                         if task_e.image.is_none() {

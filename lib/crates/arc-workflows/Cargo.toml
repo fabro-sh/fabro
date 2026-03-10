@@ -12,12 +12,16 @@ readme = "README.md"
 [lib]
 doctest = false
 
+[features]
+default = []
+exedev = ["dep:arc-exe"]
+
 [dependencies]
 clap.workspace = true
 anyhow.workspace = true
 dotenvy.workspace = true
 arc-agent = { path = "../arc-agent" }
-arc-exe = { path = "../arc-exe" }
+arc-exe = { path = "../arc-exe", optional = true }
 arc-github = { path = "../arc-github" }
 arc-util = { path = "../arc-util" }
 arc-git-storage = { path = "../arc-git-storage" }

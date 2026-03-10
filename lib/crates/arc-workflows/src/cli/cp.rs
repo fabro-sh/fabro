@@ -134,6 +134,7 @@ pub async fn reconnect(record: &SandboxRecord) -> Result<Box<dyn arc_agent::sand
                 crate::daytona_sandbox::DaytonaSandbox::from_existing(client, sdk_sandbox);
             Ok(Box::new(sandbox))
         }
+        #[cfg(feature = "exedev")]
         "exe" => {
             let data_host = record
                 .data_host

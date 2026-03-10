@@ -8,6 +8,10 @@ description = "Centralized configuration types for Arc"
 [lib]
 doctest = false
 
+[features]
+default = []
+exedev = ["arc-workflows/exedev"]
+
 [dependencies]
 anyhow.workspace = true
 arc-agent = { path = "../arc-agent" }
