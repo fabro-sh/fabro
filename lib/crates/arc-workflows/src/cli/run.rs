@@ -12,7 +12,7 @@ use tracing::debug;
 
 use super::tilde_path;
 use crate::checkpoint::Checkpoint;
-use crate::engine::{GitCheckpointMode, RunConfig, WorkflowRunEngine};
+use crate::engine::{RunConfig, WorkflowRunEngine};
 use crate::event::EventEmitter;
 use crate::handler::default_registry;
 use crate::interviewer::auto_approve::AutoApproveInterviewer;
@@ -977,13 +977,12 @@ pub async fn run_command(
         cancel_token: None,
         dry_run: dry_run_mode,
         run_id: run_id.clone(),
-        git_checkpoint: if sandbox.is_remote() {
-            remote_base_sha
-                .as_ref()
-                .map(|_| GitCheckpointMode::Remote(original_cwd.clone()))
+        git_checkpoint_enabled: if sandbox.is_remote() {
+            remote_base_sha.is_some()
         } else {
-            worktree_work_dir.map(GitCheckpointMode::Host)
+            worktree_work_dir.is_some()
         },
+        host_repo_path: Some(original_cwd.clone()),
         base_sha: worktree_base_sha.or(remote_base_sha),
         run_branch: worktree_branch.or(remote_branch),
         meta_branch,
@@ -1129,42 +1128,10 @@ pub async fn run_command(
                     &github_app,
                     &origin_url,
                 ) {
-                    // For local worktree runs, push the run branch to origin
-                    // before creating the PR. Remote sandbox runs already push
-                    // during checkpoint; skip for non-git modes.
-                    if let Some(GitCheckpointMode::Host(_)) = &config.git_checkpoint {
-                        let https_url = arc_github::ssh_url_to_https(origin);
-                        match arc_github::resolve_authenticated_url(creds, &https_url).await {
-                            Ok(push_url) => {
-                                let refspec = format!("refs/heads/{run_branch}");
-                                let repo_path = original_cwd.clone();
-                                let result =
-                                    crate::git::blocking_push_with_timeout(60, move || {
-                                        crate::git::push_ref(&repo_path, &push_url, &refspec)
-                                    })
-                                    .await;
-                                match result {
-                                    Ok(()) => {
-                                        tracing::info!(run_branch, "Pushed run branch to origin");
-                                        pushed_branch = Some(run_branch.clone());
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!(error = %e, "Failed to push run branch");
-                                        eprintln!(
-                                            "{} Failed to push run branch: {e}",
-                                            styles.yellow.apply_to("Warning:")
-                                        );
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!(error = %e, "Failed to get token for run branch push");
-                                eprintln!(
-                                    "{} Failed to push run branch: {e}",
-                                    styles.yellow.apply_to("Warning:")
-                                );
-                            }
-                        }
+                    // Run branch was pushed during checkpoint commits;
+                    // just record it for the PR creation.
+                    if config.git_checkpoint_enabled {
+                        pushed_branch = Some(run_branch.clone());
                     }
 
                     match crate::pull_request::maybe_open_pull_request(
@@ -1601,13 +1568,12 @@ async fn run_from_branch(
         cancel_token: None,
         dry_run: dry_run_mode,
         run_id: run_id.clone(),
-        git_checkpoint: if sandbox.is_remote() {
-            Some(GitCheckpointMode::Remote(original_cwd.clone()))
+        git_checkpoint_enabled: if sandbox.is_remote() {
+            true
         } else {
-            worktree_path
-                .as_ref()
-                .map(|wt| GitCheckpointMode::Host(wt.clone()))
+            worktree_path.is_some()
         },
+        host_repo_path: Some(original_cwd.clone()),
         base_sha,
         run_branch: Some(run_branch.to_string()),
         meta_branch,

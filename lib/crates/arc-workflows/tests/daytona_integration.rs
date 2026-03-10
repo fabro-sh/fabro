@@ -393,7 +393,8 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint: None,
+        git_checkpoint_enabled: false,
+        host_repo_path: None,
         base_sha: None,
         run_branch: None,
         meta_branch: None,
@@ -448,10 +449,8 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
 // CLI Backend on Daytona — real CLI tools via exec_command
 // ---------------------------------------------------------------------------
 
-use arc_workflows::engine::GitCheckpointMode;
-
 // ---------------------------------------------------------------------------
-// Git checkpoint E2E on Daytona (Remote mode)
+// Git checkpoint E2E on Daytona
 // ---------------------------------------------------------------------------
 
 /// Handler that writes a file via exec_command so git has something to commit.
@@ -591,7 +590,8 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         cancel_token: None,
         dry_run: false,
         run_id,
-        git_checkpoint: Some(GitCheckpointMode::Remote(dir.path().to_path_buf())),
+        git_checkpoint_enabled: true,
+        host_repo_path: Some(dir.path().to_path_buf()),
         base_sha: Some(base_sha),
         run_branch: Some(branch_name),
         meta_branch: None,
@@ -667,7 +667,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
 }
 
 // ---------------------------------------------------------------------------
-// Parallel git branching on Daytona (Remote mode)
+// Parallel git branching on Daytona
 // ---------------------------------------------------------------------------
 
 use arc_workflows::handler::fan_in::FanInHandler;
@@ -778,7 +778,8 @@ async fn daytona_parallel_git_branching_e2e() {
         cancel_token: None,
         dry_run: false,
         run_id: run_id.clone(),
-        git_checkpoint: Some(GitCheckpointMode::Remote(run_tmp.path().to_path_buf())),
+        git_checkpoint_enabled: true,
+        host_repo_path: Some(run_tmp.path().to_path_buf()),
         base_sha: Some(base_sha),
         run_branch: Some(branch_name),
         meta_branch: None,
@@ -1051,12 +1052,12 @@ async fn daytona_cli_gemini() {
 }
 
 // ---------------------------------------------------------------------------
-// Daytona shadow commit E2E — Remote mode with MetadataStore
+// Daytona shadow commit E2E with MetadataStore
 // ---------------------------------------------------------------------------
 
 use arc_workflows::git::MetadataStore;
 
-/// End-to-end test: pipeline with `GitCheckpointMode::Remote(host_repo_path)` + `meta_branch`
+/// End-to-end test: pipeline with git checkpointing enabled + `meta_branch`
 /// writes shadow branch on the host repo and includes `Arc-Checkpoint` trailer in sandbox commits.
 #[tokio::test]
 #[ignore]
@@ -1156,7 +1157,8 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         cancel_token: None,
         dry_run: false,
         run_id: run_id.clone(),
-        git_checkpoint: Some(GitCheckpointMode::Remote(host_repo.path().to_path_buf())),
+        git_checkpoint_enabled: true,
+        host_repo_path: Some(host_repo.path().to_path_buf()),
         base_sha: Some(base_sha),
         run_branch: Some(branch_name),
         meta_branch: Some(meta_branch),
@@ -1297,7 +1299,8 @@ async fn daytona_asset_collection() {
         cancel_token: None,
         dry_run: false,
         run_id: "asset-test-daytona".into(),
-        git_checkpoint: None,
+        git_checkpoint_enabled: false,
+        host_repo_path: None,
         base_sha: None,
         run_branch: None,
         meta_branch: None,
@@ -1474,7 +1477,7 @@ async fn daytona_iat_not_installed_gives_clear_error() {
 }
 
 // ---------------------------------------------------------------------------
-// Push run branch to origin after each checkpoint (Remote mode + GitHub App)
+// Push run branch to origin after each checkpoint (GitHub App)
 // ---------------------------------------------------------------------------
 
 /// E2E: After each remote checkpoint, the run branch is pushed to origin.
@@ -1553,7 +1556,8 @@ async fn daytona_git_push_run_branch_to_origin() {
         cancel_token: None,
         dry_run: false,
         run_id: run_id.clone(),
-        git_checkpoint: Some(GitCheckpointMode::Remote(dir.path().to_path_buf())),
+        git_checkpoint_enabled: true,
+        host_repo_path: Some(dir.path().to_path_buf()),
         base_sha: Some(base_sha),
         run_branch: Some(branch_name.clone()),
         meta_branch: None,

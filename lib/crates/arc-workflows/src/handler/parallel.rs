@@ -8,12 +8,12 @@ use tokio::sync::Semaphore;
 
 use crate::context::keys;
 use crate::context::Context;
-use crate::engine::GitCheckpointMode;
 use crate::error::ArcError;
 use crate::event::WorkflowRunEvent;
 use crate::graph::{Graph, Node};
 use crate::millis_u64;
 use crate::outcome::{Outcome, StageStatus};
+use arc_agent::LocalSandbox;
 
 use super::{EngineServices, Handler};
 
@@ -249,37 +249,17 @@ impl Handler for ParallelHandler {
 
         // --- Git isolation: checkpoint "parallel base" before fan-out ---
         let base_sha: Option<String> = if let Some(ref gs) = git_state {
-            let result = match &gs.mode {
-                GitCheckpointMode::Host(work_dir) => {
-                    let wd = work_dir.clone();
-                    let rid = gs.run_id.clone();
-                    let nid = node.id.clone();
-                    crate::engine::git_checkpoint_host(
-                        wd,
-                        rid,
-                        nid,
-                        "parallel_base".into(),
-                        0,
-                        None,
-                        gs.checkpoint_exclude_globs.clone(),
-                        gs.git_author.clone(),
-                    )
-                    .await
-                }
-                GitCheckpointMode::Remote(_) => {
-                    crate::engine::git_checkpoint_remote(
-                        &*services.sandbox,
-                        &gs.run_id,
-                        &node.id,
-                        "parallel_base",
-                        0,
-                        None,
-                        &gs.checkpoint_exclude_globs,
-                        &gs.git_author,
-                    )
-                    .await
-                }
-            };
+            let result = crate::engine::git_checkpoint(
+                &*services.sandbox,
+                &gs.run_id,
+                &node.id,
+                "parallel_base",
+                0,
+                None,
+                &gs.checkpoint_exclude_globs,
+                &gs.git_author,
+            )
+            .await;
             match result {
                 Ok(sha) => Some(sha),
                 Err(e) => {
@@ -321,86 +301,69 @@ impl Handler for ParallelHandler {
                     crate::git::sanitize_ref_component(branch_key),
                 );
 
-                match &gs.mode {
-                    GitCheckpointMode::Host(work_dir) => {
-                        let wt_path = run_dir
-                            .join("parallel")
-                            .join(&node.id)
-                            .join(branch_key)
-                            .join("worktree");
-                        tracing::debug!(branch = %branch_name, path = %wt_path.display(), "Creating worktree for parallel branch");
-                        let wd = work_dir.clone();
-                        let bn = branch_name.clone();
-                        let bs = bsha.clone();
-                        let wtp = wt_path.clone();
-                        tokio::task::spawn_blocking(move || {
-                            crate::git::create_branch_at(&wd, &bn, &bs)?;
-                            crate::git::replace_worktree(&wd, &wtp, &bn)?;
-                            crate::git::reset_hard(&wtp, &bs)
-                        })
-                        .await
-                        .map_err(|e| {
-                            ArcError::handler(format!("worktree setup join error: {e}"))
-                        })??;
-                        branch_context.set(
-                            keys::INTERNAL_WORK_DIR,
-                            serde_json::json!(wt_path.to_string_lossy().as_ref()),
-                        );
-                        let env: Arc<dyn Sandbox> =
-                            Arc::new(arc_agent::LocalSandbox::new(wt_path.clone()));
-                        (env, Some(wt_path))
-                    }
-                    GitCheckpointMode::Remote(_) => {
-                        let wt_path_str = format!(
-                            "{}/.arc/runs/{}/parallel/{}/{}",
-                            services.sandbox.working_directory(),
-                            gs.run_id,
-                            node.id,
-                            branch_key
-                        );
-                        let ok = crate::engine::git_create_branch_at_remote(
-                            &*services.sandbox,
-                            &branch_name,
-                            bsha,
-                        )
-                        .await;
-                        if !ok {
-                            return Err(ArcError::handler(format!(
-                                "failed to create remote branch {branch_name}"
-                            )));
-                        }
-                        let ok = crate::engine::git_replace_worktree_remote(
-                            &*services.sandbox,
-                            &wt_path_str,
-                            &branch_name,
-                        )
-                        .await;
-                        if !ok {
-                            return Err(ArcError::handler(format!(
-                                "failed to add remote worktree {wt_path_str}"
-                            )));
-                        }
-                        // Reset worktree to the base SHA for a clean start
-                        let reset_cmd =
-                            format!("{} reset --hard {bsha}", crate::engine::GIT_REMOTE);
-                        let reset_result = services
-                            .sandbox
-                            .exec_command(&reset_cmd, 30_000, Some(&wt_path_str), None, None)
-                            .await;
-                        if !matches!(reset_result, Ok(ref r) if r.exit_code == 0) {
-                            return Err(ArcError::handler(format!(
-                                "failed to reset remote worktree {wt_path_str}"
-                            )));
-                        }
-                        branch_context
-                            .set(keys::INTERNAL_WORK_DIR, serde_json::json!(&wt_path_str));
-                        let env: Arc<dyn Sandbox> = Arc::new(WorktreeSandbox {
-                            inner: Arc::clone(&services.sandbox),
-                            worktree_dir: wt_path_str.clone(),
-                        });
-                        (env, Some(PathBuf::from(wt_path_str)))
-                    }
+                // Compute worktree path
+                let wt_path_str = if services.sandbox.is_remote() {
+                    format!(
+                        "{}/.arc/runs/{}/parallel/{}/{}",
+                        services.sandbox.working_directory(),
+                        gs.run_id,
+                        node.id,
+                        branch_key
+                    )
+                } else {
+                    run_dir
+                        .join("parallel")
+                        .join(&node.id)
+                        .join(branch_key)
+                        .join("worktree")
+                        .to_string_lossy()
+                        .to_string()
+                };
+                tracing::debug!(branch = %branch_name, path = %wt_path_str, "Creating worktree for parallel branch");
+
+                // Create branch + worktree + reset via sandbox
+                if !crate::engine::git_create_branch_at(&*services.sandbox, &branch_name, bsha)
+                    .await
+                {
+                    return Err(ArcError::handler(format!(
+                        "failed to create branch {branch_name}"
+                    )));
                 }
+                if !crate::engine::git_replace_worktree(
+                    &*services.sandbox,
+                    &wt_path_str,
+                    &branch_name,
+                )
+                .await
+                {
+                    return Err(ArcError::handler(format!(
+                        "failed to add worktree {wt_path_str}"
+                    )));
+                }
+                let reset_cmd = format!("{} reset --hard {bsha}", crate::engine::GIT_REMOTE);
+                let reset_result = services
+                    .sandbox
+                    .exec_command(&reset_cmd, 30_000, Some(&wt_path_str), None, None)
+                    .await;
+                if !matches!(reset_result, Ok(ref r) if r.exit_code == 0) {
+                    return Err(ArcError::handler(format!(
+                        "failed to reset worktree {wt_path_str}"
+                    )));
+                }
+
+                branch_context.set(keys::INTERNAL_WORK_DIR, serde_json::json!(&wt_path_str));
+
+                // Create appropriate sandbox wrapper
+                let wt_path = PathBuf::from(&wt_path_str);
+                let env: Arc<dyn Sandbox> = if services.sandbox.is_remote() {
+                    Arc::new(WorktreeSandbox {
+                        inner: Arc::clone(&services.sandbox),
+                        worktree_dir: wt_path_str,
+                    })
+                } else {
+                    Arc::new(LocalSandbox::new(wt_path.clone()))
+                };
+                (env, Some(wt_path))
             } else {
                 (Arc::clone(&services.sandbox), None)
             };
@@ -600,25 +563,12 @@ impl Handler for ParallelHandler {
         }
 
         // --- Git isolation: clean up worktrees, then ff-merge winner ---
-        if let Some(ref gs) = git_state {
+        if git_state.is_some() {
             // Clean up worktrees first
             for result in &results {
                 if let Some(ref wt_path) = result.worktree_path {
-                    match &gs.mode {
-                        GitCheckpointMode::Host(work_dir) => {
-                            let wd = work_dir.clone();
-                            let wtp = wt_path.clone();
-                            let _ = tokio::task::spawn_blocking(move || {
-                                crate::git::remove_worktree(&wd, &wtp)
-                            })
-                            .await;
-                        }
-                        GitCheckpointMode::Remote(_) => {
-                            let wt_str = wt_path.to_string_lossy().to_string();
-                            crate::engine::git_remove_worktree_remote(&*services.sandbox, &wt_str)
-                                .await;
-                        }
-                    }
+                    let wt_str = wt_path.to_string_lossy().to_string();
+                    crate::engine::git_remove_worktree(&*services.sandbox, &wt_str).await;
                 }
             }
 
@@ -632,18 +582,7 @@ impl Handler for ParallelHandler {
             successful.sort_by(|a, b| a.id.cmp(&b.id));
             if let Some(winner) = successful.first() {
                 let sha = winner.head_sha.as_ref().unwrap();
-                match &gs.mode {
-                    GitCheckpointMode::Host(work_dir) => {
-                        let wd = work_dir.clone();
-                        let s = sha.clone();
-                        let _ =
-                            tokio::task::spawn_blocking(move || crate::git::merge_ff_only(&wd, &s))
-                                .await;
-                    }
-                    GitCheckpointMode::Remote(_) => {
-                        crate::engine::git_merge_ff_only_remote(&*services.sandbox, sha).await;
-                    }
-                }
+                crate::engine::git_merge_ff_only(&*services.sandbox, sha).await;
             }
         }
 

@@ -516,7 +516,6 @@ fn node_script(node: &Node) -> Option<String> {
 /// Captured git state for a workflow run, shared with handlers.
 #[derive(Debug, Clone)]
 pub struct GitState {
-    pub mode: GitCheckpointMode,
     pub run_id: String,
     pub base_sha: String,
     pub run_branch: Option<String>,
@@ -525,61 +524,11 @@ pub struct GitState {
     pub git_author: crate::git::GitAuthor,
 }
 
-/// How git checkpointing should be performed for a workflow run.
-#[derive(Debug, Clone)]
-pub enum GitCheckpointMode {
-    /// Run git commands on the host filesystem (local & Docker bind-mount).
-    Host(PathBuf),
-    /// Run git commands inside the remote sandbox via `exec_command`.
-    /// The `PathBuf` is the host repo path used for `MetadataStore` (shadow commits).
-    Remote(PathBuf),
-}
-
-/// Run a git checkpoint commit on the host filesystem (local/Docker bind-mount).
-#[allow(clippy::too_many_arguments)]
-pub async fn git_checkpoint_host(
-    work_dir: PathBuf,
-    run_id: String,
-    node_id: String,
-    status: String,
-    completed_count: usize,
-    shadow_sha: Option<String>,
-    exclude_globs: Vec<String>,
-    author: crate::git::GitAuthor,
-) -> std::result::Result<String, String> {
-    match tokio::task::spawn_blocking(move || {
-        crate::git::checkpoint_commit(
-            &work_dir,
-            &run_id,
-            &node_id,
-            &status,
-            completed_count,
-            shadow_sha.as_deref(),
-            &exclude_globs,
-            &author,
-        )
-    })
-    .await
-    {
-        Ok(Ok(sha)) => Ok(sha),
-        Ok(Err(e)) => Err(format!("git checkpoint commit failed: {e}")),
-        Err(e) => Err(format!("git checkpoint task panicked: {e}")),
-    }
-}
-
-/// Run a git diff on the host filesystem.
-async fn git_diff_host(work_dir: PathBuf, base: String) -> Option<String> {
-    match tokio::task::spawn_blocking(move || crate::git::diff_against(&work_dir, &base)).await {
-        Ok(Ok(patch)) => Some(patch),
-        Ok(Err(_)) | Err(_) => None,
-    }
-}
-
 pub const GIT_REMOTE: &str = "git -c maintenance.auto=0 -c gc.auto=0";
 
-/// Run a git checkpoint commit inside a remote sandbox.
+/// Run a git checkpoint commit via the sandbox.
 #[allow(clippy::too_many_arguments)]
-pub async fn git_checkpoint_remote(
+pub async fn git_checkpoint(
     sandbox: &dyn Sandbox,
     run_id: &str,
     node_id: &str,
@@ -724,6 +673,49 @@ async fn git_push_meta_host(
     }
 }
 
+/// Push the run branch from the host repo to origin (best-effort).
+///
+/// Authenticates via a GitHub App installation token.
+async fn git_push_run_host(
+    repo_path: &Path,
+    branch: &str,
+    github_app: &Option<arc_github::GitHubAppCredentials>,
+) {
+    let (origin_url, _) = match crate::daytona_sandbox::detect_repo_info(repo_path) {
+        Ok(info) => info,
+        Err(e) => {
+            tracing::warn!(error = %e, "Cannot detect origin for run branch push");
+            return;
+        }
+    };
+
+    let https_url = arc_github::ssh_url_to_https(&origin_url);
+    let push_url = match github_app {
+        Some(creds) => match arc_github::resolve_authenticated_url(creds, &https_url).await {
+            Ok(url) => url,
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to get token for run branch push");
+                return;
+            }
+        },
+        None => {
+            tracing::warn!("No GitHub App credentials for run branch push");
+            return;
+        }
+    };
+
+    let refspec = format!("refs/heads/{branch}");
+    let rp = repo_path.to_path_buf();
+    let result = crate::git::blocking_push_with_timeout(60, move || {
+        crate::git::push_ref(&rp, &push_url, &refspec)
+    })
+    .await;
+    match result {
+        Ok(()) => tracing::info!(branch, "Pushed run branch to origin"),
+        Err(e) => tracing::warn!(error = %e, "Failed to push run branch"),
+    }
+}
+
 /// Push the run branch to origin inside a remote sandbox (best-effort).
 async fn git_push_remote(sandbox: &dyn Sandbox, branch: &str) {
     if let Err(e) = sandbox.refresh_push_credentials().await {
@@ -743,8 +735,8 @@ async fn git_push_remote(sandbox: &dyn Sandbox, branch: &str) {
     }
 }
 
-/// Run a git diff inside a remote sandbox.
-async fn git_diff_remote(sandbox: &dyn Sandbox, base: &str) -> Option<String> {
+/// Run a git diff via the sandbox.
+async fn git_diff(sandbox: &dyn Sandbox, base: &str) -> Option<String> {
     let cmd = format!("{GIT_REMOTE} diff {base} HEAD");
     match sandbox.exec_command(&cmd, 30_000, None, None, None).await {
         Ok(r) if r.exit_code == 0 => Some(r.stdout),
@@ -752,10 +744,10 @@ async fn git_diff_remote(sandbox: &dyn Sandbox, base: &str) -> Option<String> {
     }
 }
 
-// --- Remote worktree helpers (for Daytona / sandbox environments) ---
+// --- Sandbox git helpers ---
 
-/// Create a branch at a specific SHA inside a remote sandbox.
-pub async fn git_create_branch_at_remote(sandbox: &dyn Sandbox, name: &str, sha: &str) -> bool {
+/// Create a branch at a specific SHA via the sandbox.
+pub async fn git_create_branch_at(sandbox: &dyn Sandbox, name: &str, sha: &str) -> bool {
     let cmd = format!("{GIT_REMOTE} branch --force {name} {sha}");
     matches!(
         sandbox.exec_command(&cmd, 30_000, None, None, None).await,
@@ -763,8 +755,8 @@ pub async fn git_create_branch_at_remote(sandbox: &dyn Sandbox, name: &str, sha:
     )
 }
 
-/// Add a git worktree inside a remote sandbox.
-pub async fn git_add_worktree_remote(sandbox: &dyn Sandbox, path: &str, branch: &str) -> bool {
+/// Add a git worktree via the sandbox.
+pub async fn git_add_worktree(sandbox: &dyn Sandbox, path: &str, branch: &str) -> bool {
     let cmd = format!("{GIT_REMOTE} worktree add {path} {branch}");
     matches!(
         sandbox.exec_command(&cmd, 30_000, None, None, None).await,
@@ -772,8 +764,8 @@ pub async fn git_add_worktree_remote(sandbox: &dyn Sandbox, path: &str, branch: 
     )
 }
 
-/// Remove a git worktree inside a remote sandbox.
-pub async fn git_remove_worktree_remote(sandbox: &dyn Sandbox, path: &str) -> bool {
+/// Remove a git worktree via the sandbox.
+pub async fn git_remove_worktree(sandbox: &dyn Sandbox, path: &str) -> bool {
     let cmd = format!("{GIT_REMOTE} worktree remove --force {path}");
     matches!(
         sandbox.exec_command(&cmd, 30_000, None, None, None).await,
@@ -781,8 +773,8 @@ pub async fn git_remove_worktree_remote(sandbox: &dyn Sandbox, path: &str) -> bo
     )
 }
 
-/// Fast-forward merge to a given SHA inside a remote sandbox.
-pub async fn git_merge_ff_only_remote(sandbox: &dyn Sandbox, sha: &str) -> bool {
+/// Fast-forward merge to a given SHA via the sandbox.
+pub async fn git_merge_ff_only(sandbox: &dyn Sandbox, sha: &str) -> bool {
     let cmd = format!("{GIT_REMOTE} merge --ff-only {sha}");
     matches!(
         sandbox.exec_command(&cmd, 30_000, None, None, None).await,
@@ -790,7 +782,7 @@ pub async fn git_merge_ff_only_remote(sandbox: &dyn Sandbox, sha: &str) -> bool 
     )
 }
 
-/// Get the current HEAD SHA from a remote sandbox.
+/// Get the current HEAD SHA via the sandbox.
 pub async fn git_head_sha_remote(sandbox: &dyn Sandbox) -> Option<String> {
     let cmd = format!("{GIT_REMOTE} rev-parse HEAD");
     match sandbox.exec_command(&cmd, 10_000, None, None, None).await {
@@ -800,9 +792,9 @@ pub async fn git_head_sha_remote(sandbox: &dyn Sandbox) -> Option<String> {
 }
 
 /// Remove any stale worktree at `path` (best-effort), then add a fresh one.
-pub async fn git_replace_worktree_remote(sandbox: &dyn Sandbox, path: &str, branch: &str) -> bool {
-    let _ = git_remove_worktree_remote(sandbox, path).await;
-    git_add_worktree_remote(sandbox, path, branch).await
+pub async fn git_replace_worktree(sandbox: &dyn Sandbox, path: &str, branch: &str) -> bool {
+    let _ = git_remove_worktree(sandbox, path).await;
+    git_add_worktree(sandbox, path, branch).await
 }
 
 /// Configuration for a workflow run.
@@ -812,8 +804,10 @@ pub struct RunConfig {
     pub dry_run: bool,
     /// Unique identifier for this workflow run.
     pub run_id: String,
-    /// Git checkpoint mode (None = no checkpointing).
-    pub git_checkpoint: Option<GitCheckpointMode>,
+    /// Whether git checkpointing is enabled.
+    pub git_checkpoint_enabled: bool,
+    /// Host repo path for MetadataStore (shadow commits) and host-side pushes.
+    pub host_repo_path: Option<PathBuf>,
     /// SHA of the commit the worktree branched from.
     pub base_sha: Option<String>,
     /// Git branch name for the run (e.g. `arc/run/{run_id}`).
@@ -1204,17 +1198,19 @@ impl WorkflowRunEngine {
         let artifact_store = ArtifactStore::new(Some(config.run_dir.clone()));
 
         // Populate git_state for handlers (parallel, fan_in) when checkpointing is active
-        let git_state = match (&config.git_checkpoint, &config.base_sha) {
-            (Some(mode), Some(base_sha)) => Some(Arc::new(GitState {
-                mode: mode.clone(),
-                run_id: run_id.clone(),
-                base_sha: base_sha.clone(),
-                run_branch: config.run_branch.clone(),
-                meta_branch: config.meta_branch.clone(),
-                checkpoint_exclude_globs: config.checkpoint_exclude_globs.clone(),
-                git_author: config.git_author.clone(),
-            })),
-            _ => None,
+        let git_state = if config.git_checkpoint_enabled {
+            config.base_sha.as_ref().map(|base_sha| {
+                Arc::new(GitState {
+                    run_id: run_id.clone(),
+                    base_sha: base_sha.clone(),
+                    run_branch: config.run_branch.clone(),
+                    meta_branch: config.meta_branch.clone(),
+                    checkpoint_exclude_globs: config.checkpoint_exclude_globs.clone(),
+                    git_author: config.git_author.clone(),
+                })
+            })
+        } else {
+            None
         };
         self.services.set_git_state(git_state);
 
@@ -1225,17 +1221,21 @@ impl WorkflowRunEngine {
                 run_id: run_id.clone(),
                 base_sha: config.base_sha.clone(),
                 run_branch: config.run_branch.clone(),
-                worktree_dir: match config.git_checkpoint {
-                    Some(GitCheckpointMode::Host(ref p)) => Some(p.display().to_string()),
-                    _ => None,
+                worktree_dir: if !self.services.sandbox.is_remote() && config.git_checkpoint_enabled
+                {
+                    Some(self.services.sandbox.working_directory().to_string())
+                } else {
+                    None
                 },
             });
 
         // Resolve work_dir from config for hooks
-        let hook_work_dir: Option<PathBuf> = match config.git_checkpoint {
-            Some(GitCheckpointMode::Host(ref p)) => Some(p.clone()),
-            _ => None,
-        };
+        let hook_work_dir: Option<PathBuf> =
+            if !self.services.sandbox.is_remote() && config.git_checkpoint_enabled {
+                Some(PathBuf::from(self.services.sandbox.working_directory()))
+            } else {
+                None
+            };
 
         // RunStart hook (blocking — can prevent run)
         {
@@ -1252,21 +1252,12 @@ impl WorkflowRunEngine {
         let manifest = write_manifest(&config.run_dir, graph, config);
 
         // Initialize metadata branch for git-native checkpoint storage (best-effort)
-        if config.meta_branch.is_some() {
-            let store_path = match config.git_checkpoint {
-                Some(GitCheckpointMode::Host(ref p)) | Some(GitCheckpointMode::Remote(ref p)) => {
-                    Some(p)
-                }
-                None => None,
-            };
-            if let Some(repo_path) = store_path {
-                let store = crate::git::MetadataStore::new(repo_path, &config.git_author);
-                let manifest_bytes = serde_json::to_vec_pretty(&manifest).unwrap_or_default();
-                let dot_source =
-                    std::fs::read(config.run_dir.join("graph.dot")).unwrap_or_default();
-                if let Err(e) = store.init_run(&config.run_id, &manifest_bytes, &dot_source) {
-                    tracing::warn!(run_id = %config.run_id, error = %e, "Metadata branch init failed");
-                }
+        if let (Some(_), Some(ref repo_path)) = (&config.meta_branch, &config.host_repo_path) {
+            let store = crate::git::MetadataStore::new(repo_path, &config.git_author);
+            let manifest_bytes = serde_json::to_vec_pretty(&manifest).unwrap_or_default();
+            let dot_source = std::fs::read(config.run_dir.join("graph.dot")).unwrap_or_default();
+            if let Err(e) = store.init_run(&config.run_id, &manifest_bytes, &dot_source) {
+                tracing::warn!(run_id = %config.run_id, error = %e, "Metadata branch init failed");
             }
         }
 
@@ -1354,10 +1345,10 @@ impl WorkflowRunEngine {
 
         // Store run_id and work_dir in context for handlers
         context.set(context::keys::INTERNAL_RUN_ID, serde_json::json!(run_id));
-        if let Some(GitCheckpointMode::Host(ref wd)) = config.git_checkpoint {
+        if config.git_checkpoint_enabled && !self.services.sandbox.is_remote() {
             context.set(
                 context::keys::INTERNAL_WORK_DIR,
-                serde_json::json!(wd.to_string_lossy().as_ref()),
+                serde_json::json!(self.services.sandbox.working_directory()),
             );
         }
 
@@ -1889,158 +1880,127 @@ impl WorkflowRunEngine {
 
             // Step 6b: Write shadow branch first, then run branch commit with trailer
             // Skip git checkpoint for the start node — it's a no-op, so the commit is always empty.
-            if start_node_id.as_deref() != Some(&*node.id) {
-                if let Some(ref mode) = config.git_checkpoint {
-                    // Shadow commit (best-effort): extract repo path from either variant
-                    let shadow_sha: Option<String> = if config.meta_branch.is_some() {
-                        let repo_path = match mode {
-                            GitCheckpointMode::Host(ref p) | GitCheckpointMode::Remote(ref p) => p,
-                        };
-                        let store = crate::git::MetadataStore::new(repo_path, &config.git_author);
-                        serde_json::to_vec_pretty(&checkpoint)
-                            .ok()
-                            .and_then(|cp_json| {
-                                let artifact_entries: Vec<(String, Vec<u8>)> = artifact_store
-                                    .list()
-                                    .iter()
-                                    .filter_map(|info| {
-                                        info.file_path.as_ref().and_then(|path| {
-                                            std::fs::read(path).ok().map(|data| {
-                                                (format!("artifacts/{}.json", info.id), data)
-                                            })
+            if start_node_id.as_deref() != Some(&*node.id) && config.git_checkpoint_enabled {
+                // Shadow commit (best-effort)
+                let shadow_sha: Option<String> = if let (Some(_), Some(ref repo_path)) =
+                    (&config.meta_branch, &config.host_repo_path)
+                {
+                    let store = crate::git::MetadataStore::new(repo_path, &config.git_author);
+                    serde_json::to_vec_pretty(&checkpoint)
+                        .ok()
+                        .and_then(|cp_json| {
+                            let artifact_entries: Vec<(String, Vec<u8>)> = artifact_store
+                                .list()
+                                .iter()
+                                .filter_map(|info| {
+                                    info.file_path.as_ref().and_then(|path| {
+                                        std::fs::read(path).ok().map(|data| {
+                                            (format!("artifacts/{}.json", info.id), data)
                                         })
                                     })
-                                    .collect();
-                                let artifact_refs: Vec<(&str, &[u8])> = artifact_entries
-                                    .iter()
-                                    .map(|(k, v)| (k.as_str(), v.as_slice()))
-                                    .collect();
-                                match store.write_checkpoint(
-                                    &config.run_id,
-                                    &cp_json,
-                                    &artifact_refs,
-                                ) {
-                                    Ok(sha) => Some(sha),
-                                    Err(e) => {
-                                        context.append_log(format!(
-                                            "metadata checkpoint write failed: {e}"
-                                        ));
-                                        None
-                                    }
-                                }
-                            })
-                    } else {
-                        None
-                    };
-
-                    // Run branch commit with Arc-Meta trailer pointing to shadow commit
-                    let rid = run_id.clone();
-                    let nid = node.id.clone();
-                    let status_str = outcome.status.to_string();
-                    let completed_count = completed_nodes.len();
-
-                    let commit_result = match mode {
-                        GitCheckpointMode::Host(work_dir) => {
-                            git_checkpoint_host(
-                                work_dir.clone(),
-                                rid,
-                                nid,
-                                status_str,
-                                completed_count,
-                                shadow_sha,
-                                config.checkpoint_exclude_globs.clone(),
-                                config.git_author.clone(),
-                            )
-                            .await
-                        }
-                        GitCheckpointMode::Remote(_) => {
-                            git_checkpoint_remote(
-                                &*self.services.sandbox,
-                                &run_id,
-                                &node.id,
-                                &outcome.status.to_string(),
-                                completed_count,
-                                shadow_sha,
-                                &config.checkpoint_exclude_globs,
-                                &config.git_author,
-                            )
-                            .await
-                        }
-                    };
-
-                    match commit_result {
-                        Ok(sha) => {
-                            checkpoint.git_commit_sha = Some(sha.clone());
-                            if let Err(e) = checkpoint.save(&checkpoint_path) {
-                                context
-                                    .append_log(format!("checkpoint re-save with SHA failed: {e}"));
-                            }
-                            self.services
-                                .emitter
-                                .emit(&WorkflowRunEvent::GitCheckpoint {
-                                    run_id: run_id.clone(),
-                                    node_id: node.id.clone(),
-                                    status: outcome.status.to_string(),
-                                    git_commit_sha: sha.clone(),
-                                });
-
-                            // Push run branch and metadata branch to origin after remote checkpoint
-                            if let GitCheckpointMode::Remote(ref host_repo) = mode {
-                                if let Some(ref branch) = config.run_branch {
-                                    git_push_remote(&*self.services.sandbox, branch).await;
-                                }
-                                if let Some(ref meta_branch) = config.meta_branch {
-                                    git_push_meta_host(
-                                        host_repo.clone(),
-                                        meta_branch.clone(),
-                                        config.github_app.clone(),
-                                    )
-                                    .await;
+                                })
+                                .collect();
+                            let artifact_refs: Vec<(&str, &[u8])> = artifact_entries
+                                .iter()
+                                .map(|(k, v)| (k.as_str(), v.as_slice()))
+                                .collect();
+                            match store.write_checkpoint(&config.run_id, &cp_json, &artifact_refs) {
+                                Ok(sha) => Some(sha),
+                                Err(e) => {
+                                    context.append_log(format!(
+                                        "metadata checkpoint write failed: {e}"
+                                    ));
+                                    None
                                 }
                             }
+                        })
+                } else {
+                    None
+                };
 
-                            // Save diff.patch for this stage
-                            let prev = last_git_sha
-                                .as_deref()
-                                .or(config.base_sha.as_deref())
-                                .unwrap_or(&sha);
-                            let diff_base = prev.to_string();
-                            let diff_dest =
-                                node_dir(&config.run_dir, &node.id, visit).join("diff.patch");
+                // Run branch commit via sandbox
+                let completed_count = completed_nodes.len();
+                let commit_result = git_checkpoint(
+                    &*self.services.sandbox,
+                    &run_id,
+                    &node.id,
+                    &outcome.status.to_string(),
+                    completed_count,
+                    shadow_sha,
+                    &config.checkpoint_exclude_globs,
+                    &config.git_author,
+                )
+                .await;
 
-                            let diff_result = match mode {
-                                GitCheckpointMode::Host(work_dir) => {
-                                    git_diff_host(work_dir.clone(), diff_base).await
-                                }
-                                GitCheckpointMode::Remote(_) => {
-                                    git_diff_remote(&*self.services.sandbox, &diff_base).await
-                                }
-                            };
-                            if let Some(patch) = diff_result {
-                                if !patch.is_empty() {
-                                    let _ = std::fs::write(&diff_dest, patch);
-                                }
-                            } else {
-                                context.append_log("git diff failed".to_string());
-                            }
-
-                            last_git_sha = Some(sha);
+                match commit_result {
+                    Ok(sha) => {
+                        checkpoint.git_commit_sha = Some(sha.clone());
+                        if let Err(e) = checkpoint.save(&checkpoint_path) {
+                            context.append_log(format!("checkpoint re-save with SHA failed: {e}"));
                         }
-                        Err(e) => {
-                            self.services
-                                .emitter
-                                .emit(&WorkflowRunEvent::GitCheckpointFailed {
-                                    node_id: node.id.clone(),
-                                    error: e.clone(),
-                                });
-                            return Err(ArcError::Engine {
-                                message: format!(
-                                    "git checkpoint commit failed for node '{}': {e}",
-                                    node.id
-                                ),
-                                failure_class: FailureClass::Deterministic,
+                        self.services
+                            .emitter
+                            .emit(&WorkflowRunEvent::GitCheckpoint {
+                                run_id: run_id.clone(),
+                                node_id: node.id.clone(),
+                                status: outcome.status.to_string(),
+                                git_commit_sha: sha.clone(),
                             });
+
+                        // Push run branch
+                        if let Some(ref branch) = config.run_branch {
+                            if self.services.sandbox.is_remote() {
+                                git_push_remote(&*self.services.sandbox, branch).await;
+                            } else if let Some(ref repo_path) = config.host_repo_path {
+                                git_push_run_host(repo_path, branch, &config.github_app).await;
+                            }
                         }
+                        // Push metadata branch (always from host)
+                        if let (Some(ref meta_branch), Some(ref repo_path)) =
+                            (&config.meta_branch, &config.host_repo_path)
+                        {
+                            git_push_meta_host(
+                                repo_path.clone(),
+                                meta_branch.clone(),
+                                config.github_app.clone(),
+                            )
+                            .await;
+                        }
+
+                        // Save diff.patch for this stage
+                        let prev = last_git_sha
+                            .as_deref()
+                            .or(config.base_sha.as_deref())
+                            .unwrap_or(&sha);
+                        let diff_base = prev.to_string();
+                        let diff_dest =
+                            node_dir(&config.run_dir, &node.id, visit).join("diff.patch");
+
+                        let diff_result = git_diff(&*self.services.sandbox, &diff_base).await;
+                        if let Some(patch) = diff_result {
+                            if !patch.is_empty() {
+                                let _ = std::fs::write(&diff_dest, patch);
+                            }
+                        } else {
+                            context.append_log("git diff failed".to_string());
+                        }
+
+                        last_git_sha = Some(sha);
+                    }
+                    Err(e) => {
+                        self.services
+                            .emitter
+                            .emit(&WorkflowRunEvent::GitCheckpointFailed {
+                                node_id: node.id.clone(),
+                                error: e.clone(),
+                            });
+                        return Err(ArcError::Engine {
+                            message: format!(
+                                "git checkpoint commit failed for node '{}': {e}",
+                                node.id
+                            ),
+                            failure_class: FailureClass::Deterministic,
+                        });
                     }
                 }
             }
@@ -2167,18 +2127,13 @@ impl WorkflowRunEngine {
         }
 
         // Write final.patch: comprehensive diff from base_sha to HEAD
-        if let (Some(ref mode), Some(ref base)) = (&config.git_checkpoint, &config.base_sha) {
-            let patch = match mode {
-                GitCheckpointMode::Host(work_dir) => {
-                    git_diff_host(work_dir.clone(), base.clone()).await
-                }
-                GitCheckpointMode::Remote(_) => {
-                    git_diff_remote(&*self.services.sandbox, base).await
-                }
-            };
-            if let Some(patch) = patch {
-                if !patch.is_empty() {
-                    let _ = std::fs::write(config.run_dir.join("final.patch"), patch);
+        if config.git_checkpoint_enabled {
+            if let Some(ref base) = config.base_sha {
+                let patch = git_diff(&*self.services.sandbox, base).await;
+                if let Some(patch) = patch {
+                    if !patch.is_empty() {
+                        let _ = std::fs::write(config.run_dir.join("final.patch"), patch);
+                    }
                 }
             }
         }
@@ -2844,7 +2799,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -2872,7 +2828,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -2908,7 +2865,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -2940,7 +2898,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -2968,7 +2927,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3009,7 +2969,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3074,7 +3035,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3166,7 +3128,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3201,7 +3164,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "labels-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3231,7 +3195,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "no-labels-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3261,7 +3226,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3295,7 +3261,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3457,7 +3424,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3502,7 +3470,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3565,7 +3534,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3631,7 +3601,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3701,7 +3672,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3760,7 +3732,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3820,7 +3793,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3855,7 +3829,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3886,7 +3861,8 @@ mod tests {
             cancel_token: Some(cancel_token),
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3916,7 +3892,8 @@ mod tests {
             cancel_token: Some(cancel_token),
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -3959,7 +3936,8 @@ mod tests {
             cancel_token: Some(cancel_token),
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4039,7 +4017,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4072,7 +4051,8 @@ mod tests {
             cancel_token: None,
             dry_run: true,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4107,7 +4087,8 @@ mod tests {
             cancel_token: None,
             dry_run: true,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4147,7 +4128,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4185,7 +4167,8 @@ mod tests {
             cancel_token: None,
             dry_run: true,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4220,7 +4203,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4316,7 +4300,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4527,7 +4512,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4565,7 +4551,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4610,7 +4597,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4695,7 +4683,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4791,7 +4780,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4864,7 +4854,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4924,7 +4915,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -4985,7 +4977,8 @@ mod tests {
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint: None,
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
             base_sha: None,
             run_branch: None,
             meta_branch: None,
@@ -5016,7 +5009,7 @@ mod tests {
 
     #[tokio::test]
     async fn git_checkpoint_skipped_for_start_node() {
-        // Set up a real git repo so GitCheckpointMode::Host works
+        // Set up a real git repo for checkpoint testing
         let repo_dir = tempfile::tempdir().unwrap();
         let repo = repo_dir.path();
         std::process::Command::new("git")
@@ -5067,13 +5060,16 @@ mod tests {
             events_clone.lock().unwrap().push(event.clone());
         });
 
-        let engine = WorkflowRunEngine::new(make_registry(), Arc::new(emitter), local_env());
+        // Use a LocalSandbox pointing at the repo so sandbox.exec_command() runs git there
+        let sandbox: Arc<dyn Sandbox> = Arc::new(arc_agent::LocalSandbox::new(repo.to_path_buf()));
+        let engine = WorkflowRunEngine::new(make_registry(), Arc::new(emitter), sandbox);
         let config = RunConfig {
             run_dir: run_tmp.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
             run_id: "git-cp-test".into(),
-            git_checkpoint: Some(GitCheckpointMode::Host(repo.to_path_buf())),
+            git_checkpoint_enabled: true,
+            host_repo_path: Some(repo.to_path_buf()),
             base_sha: Some(base_sha),
             run_branch: None,
             meta_branch: None,

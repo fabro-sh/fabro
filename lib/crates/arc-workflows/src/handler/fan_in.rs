@@ -84,18 +84,8 @@ impl Handler for FanInHandler {
                 .and_then(|v| v.get("head_sha").and_then(|v| v.as_str()).map(String::from))
         };
 
-        if let (Some(ref sha), Some(ref gs)) = (&best_head_sha, services.git_state()) {
-            match &gs.mode {
-                crate::engine::GitCheckpointMode::Host(work_dir) => {
-                    let wd = work_dir.clone();
-                    let s = sha.clone();
-                    let _ = tokio::task::spawn_blocking(move || crate::git::merge_ff_only(&wd, &s))
-                        .await;
-                }
-                crate::engine::GitCheckpointMode::Remote(_) => {
-                    crate::engine::git_merge_ff_only_remote(&*services.sandbox, sha).await;
-                }
-            }
+        if let (Some(ref sha), Some(_)) = (&best_head_sha, services.git_state()) {
+            crate::engine::git_merge_ff_only(&*services.sandbox, sha).await;
         }
 
         let mut outcome = Outcome::success();
