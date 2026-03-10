@@ -216,17 +216,15 @@ pub fn check_llm_providers(
     statuses: &[(Provider, bool)],
     live_results: Option<&[(Provider, Result<(), String>)]>,
 ) -> CheckResult {
-    let configured: Vec<_> = statuses.iter().filter(|(_, set)| *set).collect();
-    let total = statuses.len();
-    let count = configured.len();
+    let count = statuses.iter().filter(|(_, set)| *set).count();
 
     let mut details: Vec<CheckDetail> = statuses
         .iter()
-        .map(|(provider, set)| {
+        .filter(|(_, set)| *set)
+        .map(|(provider, _)| {
             let env_vars = provider.api_key_env_vars().join(" or ");
-            let status_text = if *set { "set" } else { "not set" };
             CheckDetail {
-                text: format!("{provider} ({env_vars}): {status_text}"),
+                text: format!("{provider} ({env_vars}): set"),
             }
         })
         .collect();
@@ -252,7 +250,7 @@ pub fn check_llm_providers(
         CheckResult {
             name: "LLM providers".to_string(),
             status: CheckStatus::Error,
-            summary: format!("{count} of {total} configured"),
+            summary: "none configured".to_string(),
             details,
             remediation: Some("Set at least one provider API key".to_string()),
         }
@@ -261,7 +259,7 @@ pub fn check_llm_providers(
         CheckResult {
             name: "LLM providers".to_string(),
             status: CheckStatus::Warning,
-            summary: format!("{count} of {total} configured (connectivity issues)"),
+            summary: format!("{count} configured (connectivity issues)"),
             details,
             remediation: Some(format!("Connectivity issues with: {}", names.join(", "))),
         }
@@ -269,7 +267,7 @@ pub fn check_llm_providers(
         CheckResult {
             name: "LLM providers".to_string(),
             status: CheckStatus::Pass,
-            summary: format!("{count} of {total} configured"),
+            summary: format!("{count} configured"),
             details,
             remediation: None,
         }
@@ -1243,7 +1241,7 @@ mod tests {
         let statuses: Vec<(Provider, bool)> = Provider::ALL.iter().map(|p| (*p, true)).collect();
         let result = check_llm_providers(&statuses, None);
         assert_eq!(result.status, CheckStatus::Pass);
-        assert!(result.summary.contains("7 of 7"));
+        assert!(result.summary.contains("7 configured"));
     }
 
     #[test]
@@ -1257,7 +1255,7 @@ mod tests {
         statuses[4].1 = true; // Zai
         let result = check_llm_providers(&statuses, None);
         assert_eq!(result.status, CheckStatus::Pass);
-        assert!(result.summary.contains("5 of 7"));
+        assert!(result.summary.contains("5 configured"));
     }
 
     #[test]
@@ -1265,7 +1263,7 @@ mod tests {
         let statuses: Vec<(Provider, bool)> = Provider::ALL.iter().map(|p| (*p, false)).collect();
         let result = check_llm_providers(&statuses, None);
         assert_eq!(result.status, CheckStatus::Error);
-        assert!(result.summary.contains("0 of 7"));
+        assert!(result.summary.contains("none configured"));
     }
 
     #[test]
