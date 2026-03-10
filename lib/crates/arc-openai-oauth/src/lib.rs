@@ -306,7 +306,7 @@ pub async fn poll_device_flow(
     device: &DeviceAuthResponse,
 ) -> Result<TokenResponse, String> {
     let poll_url = format!("{issuer}/api/accounts/deviceauth/token");
-    let redirect_uri = format!("http://127.0.0.1:{OAUTH_PORT}/callback");
+    let redirect_uri = format!("http://localhost:{OAUTH_PORT}/auth/callback");
     let mut attempt = 0u32;
 
     loop {
@@ -365,7 +365,7 @@ pub async fn start_callback_server(
     port: u16,
     expected_state: String,
 ) -> Result<(u16, tokio::sync::oneshot::Receiver<String>), String> {
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}"))
+    let listener = tokio::net::TcpListener::bind(format!("localhost:{port}"))
         .await
         .map_err(|e| format!("Failed to bind callback server: {e}"))?;
     let actual_port = listener
@@ -381,7 +381,7 @@ pub async fn start_callback_server(
     let expected_state = std::sync::Arc::new(expected_state);
 
     let app = axum::Router::new().route(
-        "/callback",
+        "/auth/callback",
         axum::routing::get(
             move |axum::extract::Query(params): axum::extract::Query<CallbackParams>| async move {
                 if params.state != *expected_state {
@@ -433,7 +433,7 @@ pub async fn start_callback_server(
 pub async fn run_browser_flow(issuer: &str, client_id: &str) -> Result<TokenResponse, String> {
     let pkce = generate_pkce();
     let state = generate_state();
-    let redirect_uri = format!("http://127.0.0.1:{OAUTH_PORT}/callback");
+    let redirect_uri = format!("http://localhost:{OAUTH_PORT}/auth/callback");
 
     let (_port, code_rx) = start_callback_server(OAUTH_PORT, state.clone()).await?;
     let auth_url = build_authorize_url(issuer, client_id, &redirect_uri, &pkce, &state);
@@ -982,7 +982,7 @@ mod tests {
         let client = reqwest::Client::new();
         client
             .get(format!(
-                "http://127.0.0.1:{port}/callback?code=abc&state=test-state"
+                "http://localhost:{port}/auth/callback?code=abc&state=test-state"
             ))
             .send()
             .await
@@ -1001,7 +1001,7 @@ mod tests {
         let client = reqwest::Client::new();
         let resp = client
             .get(format!(
-                "http://127.0.0.1:{port}/callback?code=abc&state=wrong-state"
+                "http://localhost:{port}/auth/callback?code=abc&state=wrong-state"
             ))
             .send()
             .await
@@ -1019,7 +1019,7 @@ mod tests {
         let client = reqwest::Client::new();
         let resp = client
             .get(format!(
-                "http://127.0.0.1:{port}/callback?code=abc&state=test-state"
+                "http://localhost:{port}/auth/callback?code=abc&state=test-state"
             ))
             .send()
             .await
