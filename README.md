@@ -13,18 +13,30 @@ AI coding agents are powerful but unpredictable. You either babysit every step o
 
 ## Key Features
 
-- 🔀 **Deterministic workflow graphs** -- Define pipelines in Graphviz DOT with branching, loops, parallelism, and human gates. Diffable, reviewable, version-controlled.
-- 🙋 **Human-in-the-loop** -- Approval gates pause for human decisions. Steer running agents mid-turn. Interview steps collect structured input. You stay in control without babysitting.
-- 🎨 **Multi-model routing** -- Route each node to the right model and provider with CSS-like stylesheets. Cheap models for boilerplate, frontier models for hard reasoning, with automatic provider fallback.
-- ☁️ **Cloud sandboxes** -- Run agents in isolated Daytona cloud VMs with snapshot-based setup, network controls, and automatic cleanup.
-- 🔌 **SSH access and preview links** -- Shell into running sandboxes with `arc ssh` and expose ports with `arc preview` for live debugging while workflows run.
-- 🌲 **Git checkpointing** -- Every stage commits code changes and execution metadata to Git branches. Inspect diffs, revert mistakes, resume interrupted runs, or trace exactly how and why each change was made.
-- 📊 **Automatic retros** -- Each run generates a retrospective with cost, duration, files touched, and an LLM-written narrative rating smoothness and flagging friction points.
-- ⚡ **Comprehensive API** -- `arc serve` exposes a full REST API with SSE event streaming and a React web UI. Run workflows programmatically, build integrations, or operate Arc as a service.
-- 🦀 **Single binary, no runtime** -- One compiled Rust executable with zero dependencies. No Python, no Node, no Docker required to get started.
-- ⚖️ **Open source (MIT)** -- Full source code, no vendor lock-in. Self-host, fork, or extend to fit your workflow.
+|     | Feature                        | Description                                                                                           |
+| --- | ------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| 🔀  | Deterministic workflow graphs  | Define pipelines in Graphviz DOT with branching, loops, parallelism, and human gates. Diffable, reviewable, version-controlled |
+| 🙋  | Human-in-the-loop              | Approval gates pause for human decisions. Steer running agents mid-turn. Interview steps collect structured input |
+| 🎨  | Multi-model routing            | CSS-like stylesheets route each node to the right model and provider, with automatic fallback chains  |
+| ☁️  | Cloud sandboxes                | Run agents in isolated Daytona cloud VMs with snapshot-based setup, network controls, and automatic cleanup |
+| 🔌  | SSH access and preview links   | Shell into running sandboxes with `arc ssh` and expose ports with `arc preview` for live debugging    |
+| 🌲  | Git checkpointing              | Every stage commits code changes and execution metadata to Git branches. Resume, revert, or trace any change |
+| 📊  | Automatic retros               | Each run generates a retrospective with cost, duration, files touched, and an LLM-written narrative   |
+| ⚡  | Comprehensive API              | REST API with SSE event streaming and a React web UI. Run workflows programmatically or as a service  |
+| 🦀  | Single binary, no runtime      | One compiled Rust executable with zero dependencies. No Python, no Node, no Docker required           |
+| ⚖️  | Open source (MIT)              | Full source code, no vendor lock-in. Self-host, fork, or extend to fit your workflow                  |
 
-Read the full [documentation](https://arc.dev) for details.
+## 📖 Documentation
+
+Arc ships with [comprehensive documentation](https://arc.dev) covering every feature in depth:
+
+- [**Getting Started**](https://arc.dev/getting-started/introduction) -- Installation, first workflow, and why Arc exists
+- [**Defining Workflows**](https://arc.dev/workflows/stages-and-nodes) -- Node types, transitions, variables, stylesheets, and human gates
+- [**Executing Workflows**](https://arc.dev/execution/run-configuration) -- Run configuration, sandboxes, checkpoints, retros, and failure handling
+- [**Agents**](https://arc.dev/agents/tools) -- Tools, prompts, skills, MCP integration, subagents, and permissions
+- [**Tutorials**](https://arc.dev/tutorials/hello-world) -- Step-by-step guides from hello world to parallel multi-model ensembles
+- [**API Reference**](https://arc.dev/api-reference/overview) -- Full OpenAPI spec with authentication, SSE events, and client SDKs
+- [**CLI Reference**](https://arc.dev/reference/cli) -- Every command and flag documented
 
 ---
 
@@ -116,7 +128,6 @@ Agents run as multi-turn LLM sessions with tool access. Human gates (`hexagon`) 
 
 ## Help or Feedback
 
-- Read the [documentation](https://arc.dev)
 - [Bug reports](https://github.com/brynary/arc/issues) via GitHub Issues
 - [Feature requests](https://github.com/brynary/arc/issues) via GitHub Issues
 - Email [bryan@qlty.sh](mailto:bryan@qlty.sh) for questions
