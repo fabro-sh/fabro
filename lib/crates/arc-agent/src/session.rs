@@ -272,10 +272,17 @@ impl Session {
             ));
         }
 
-        // Get the preview URL for the port
-        sandbox.get_preview_url(port).await?.ok_or_else(|| {
-            "Sandbox does not support preview URLs (not a remote sandbox?)".to_string()
-        })
+        // Get the preview URL for the port, or fall back to localhost for local sandboxes
+        match sandbox.get_preview_url(port).await? {
+            Some(url_and_headers) => Ok(url_and_headers),
+            None => {
+                info!(port, "No preview URL available, using localhost");
+                Ok((
+                    format!("http://localhost:{port}"),
+                    std::collections::HashMap::new(),
+                ))
+            }
+        }
     }
 
     async fn build_env_context(&self) -> EnvContext {
