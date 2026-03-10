@@ -60,48 +60,69 @@ Read the full [documentation](https://arc.dev) for details.
 > [!WARNING]
 > Arc is in private research preview. Contact [bryan@qlty.sh](mailto:bryan@qlty.sh) if you're interested in trying it.
 
-### Prerequisites
+### Install
 
-- [Rust](https://rustup.rs/) (latest stable)
-- At least one LLM API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`)
-
-### Clone and build
+Download the latest release for your platform:
 
 ```bash
-git clone https://github.com/qltysh/arc.git
+# macOS (Apple Silicon)
+curl -fsSL https://github.com/brynary/arc/releases/latest/download/arc-aarch64-apple-darwin.tar.gz | tar xz
+sudo mv arc /usr/local/bin/
+
+# Linux (x86_64)
+curl -fsSL https://github.com/brynary/arc/releases/latest/download/arc-x86_64-unknown-linux-gnu.tar.gz | tar xz
+sudo mv arc /usr/local/bin/
+```
+
+Or download directly from [GitHub Releases](https://github.com/brynary/arc/releases).
+
+<details>
+<summary>Build from source</summary>
+
+Requires [Rust](https://rustup.rs/) (latest stable):
+
+```bash
+git clone https://github.com/brynary/arc.git
 cd arc
 cargo build --release
+# Binary is at ./target/release/arc
 ```
+
+</details>
 
 ### Configure API keys
 
+Set at least one LLM provider key:
+
 ```bash
-cp .env.example .env
-# Edit .env and add at least one provider key
+export ANTHROPIC_API_KEY=sk-ant-...
+# and/or
+export OPENAI_API_KEY=sk-...
+export GEMINI_API_KEY=AI...
 ```
 
 ### Run the setup wizard
 
 ```bash
-./target/release/arc install
+arc install
 ```
 
 ### Verify your installation
 
 ```bash
-./target/release/arc doctor --live
+arc doctor --live
 ```
 
 ### Run your first workflow
 
 ```bash
-./target/release/arc run docs-internal/demo/01-hello.dot
+arc run docs-internal/demo/01-hello.dot
 ```
 
 Or try a multi-step workflow with a human approval gate:
 
 ```bash
-./target/release/arc run docs-internal/demo/10-plan-implement.dot
+arc run docs-internal/demo/10-plan-implement.dot
 ```
 
 ---
@@ -182,19 +203,19 @@ Run `arc model list` for the full catalog. Provider fallback chains are configur
 
 ## System Requirements
 
-- **macOS or Linux** (x86_64 or ARM)
-- **Rust** (latest stable) for building from source
+- **macOS** (Apple Silicon) or **Linux** (x86_64)
 - **At least one LLM provider API key** (Anthropic, OpenAI, or Gemini)
 - **Git** (for checkpoint and resume)
 - **Docker** (optional, for Docker sandbox mode)
+- **Rust** (only if building from source)
 
 ---
 
 ## Help or Feedback
 
 - Read the [documentation](https://arc.dev)
-- [Bug reports](https://github.com/qltysh/arc/issues) via GitHub Issues
-- [Feature requests](https://github.com/qltysh/arc/issues) via GitHub Issues
+- [Bug reports](https://github.com/brynary/arc/issues) via GitHub Issues
+- [Feature requests](https://github.com/brynary/arc/issues) via GitHub Issues
 - Email [bryan@qlty.sh](mailto:bryan@qlty.sh) for access or questions
 
 ---
