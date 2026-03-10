@@ -4,10 +4,12 @@
 
 ## The open source software factory for expert engineers
 
-AI coding agents are powerful but unpredictable. You either babysit every step or review a 50-file diff you don't trust. Arc gives you a middle path: define the process as a graph, let agents execute it, and intervene only where it matters.
+AI coding agents are powerful but unpredictable. You either babysit every step or review a 50-file diff you don't trust. Arc gives you a middle path: define the process as a graph, let agents execute it, and intervene only where it matters. [Why Arc?](https://arc.dev/getting-started/why-arc)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE.md)
 [![docs](https://img.shields.io/badge/docs-arc.dev-357F9E)](https://arc.dev)
+
+<img src="docs/images/runs-board.png" alt="Arc Runs board showing workflows across Working, Pending, Verify, and Merge stages" />
 
 ---
 
