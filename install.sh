@@ -144,7 +144,7 @@ fi
 echo "" >&2
 
 # --- Prompt to run setup wizard ---
-if [ -t 0 ] && [ -t 2 ]; then
+if [ -t 2 ] && [ -e /dev/tty ]; then
   printf "  ${BOLD}Run ${BOLD_CYAN}arc install${RESET}${BOLD} now to complete setup? [Y/n]${RESET} " >&2
   read -r answer </dev/tty
   case "$answer" in
