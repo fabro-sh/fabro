@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::LazyLock;
 
+#[cfg(feature = "server")]
 use arc_config::server::{ApiAuthStrategy, AuthProvider};
 use arc_llm::provider::Provider;
 pub use arc_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckStatus};
@@ -412,6 +413,7 @@ pub fn check_sandbox(status: &SandboxStatus) -> CheckResult {
     }
 }
 
+#[cfg(feature = "server")]
 pub struct GithubAppStatus {
     pub app_id: bool,
     pub client_id: bool,
@@ -420,6 +422,7 @@ pub struct GithubAppStatus {
     pub private_key: bool,
 }
 
+#[cfg(feature = "server")]
 impl GithubAppStatus {
     fn all_set(&self) -> bool {
         self.app_id
@@ -438,6 +441,7 @@ impl GithubAppStatus {
     }
 }
 
+#[cfg(feature = "server")]
 pub fn check_github_app(status: &GithubAppStatus) -> CheckResult {
     let fields = [
         ("git.app_id", status.app_id),
@@ -489,11 +493,13 @@ pub fn check_github_app(status: &GithubAppStatus) -> CheckResult {
     }
 }
 
+#[cfg(feature = "server")]
 pub struct ApiStatus {
     pub base_url: String,
     pub authentication_strategies: Vec<ApiAuthStrategy>,
 }
 
+#[cfg(feature = "server")]
 fn format_auth_strategies(strategies: &[ApiAuthStrategy]) -> String {
     strategies
         .iter()
@@ -505,6 +511,7 @@ fn format_auth_strategies(strategies: &[ApiAuthStrategy]) -> String {
         .join(", ")
 }
 
+#[cfg(feature = "server")]
 pub fn check_api(status: &ApiStatus, live_result: Option<&Result<(), String>>) -> CheckResult {
     let mut details = vec![
         CheckDetail {
@@ -533,12 +540,14 @@ pub fn check_api(status: &ApiStatus, live_result: Option<&Result<(), String>>) -
     }
 }
 
+#[cfg(feature = "server")]
 pub struct WebStatus {
     pub url: String,
     pub auth_provider: AuthProvider,
     pub allowed_usernames_count: usize,
 }
 
+#[cfg(feature = "server")]
 fn format_auth_provider(provider: &AuthProvider) -> &'static str {
     match provider {
         AuthProvider::Github => "github",
@@ -546,6 +555,7 @@ fn format_auth_provider(provider: &AuthProvider) -> &'static str {
     }
 }
 
+#[cfg(feature = "server")]
 pub fn check_web(status: &WebStatus, live_result: Option<&Result<(), String>>) -> CheckResult {
     let mut details = vec![
         CheckDetail {
@@ -581,12 +591,14 @@ pub fn check_web(status: &WebStatus, live_result: Option<&Result<(), String>>) -
 // Cryptographic key validation
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "server")]
 pub struct TlsCheckInput {
     pub cert_pem: String,
     pub key_pem: String,
     pub ca_pem: String,
 }
 
+#[cfg(feature = "server")]
 pub struct CryptoInput {
     pub auth_strategies: Vec<ApiAuthStrategy>,
     pub tls_files: Option<Result<TlsCheckInput, String>>,
@@ -596,6 +608,7 @@ pub struct CryptoInput {
     pub now_epoch: i64,
 }
 
+#[cfg(feature = "server")]
 fn decode_pem_value(name: &str, value: &str) -> Result<String, String> {
     if value.starts_with("-----") {
         return Ok(value.to_string());
@@ -605,6 +618,7 @@ fn decode_pem_value(name: &str, value: &str) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|e| format!("{name} base64 decoded to invalid UTF-8: {e}"))
 }
 
+#[cfg(feature = "server")]
 fn validate_tls_cert(pem: &str, now_epoch: i64) -> Result<String, String> {
     let mut reader = std::io::Cursor::new(pem.as_bytes());
     let certs: Vec<_> = rustls_pemfile::certs(&mut reader)
@@ -628,6 +642,7 @@ fn validate_tls_cert(pem: &str, now_epoch: i64) -> Result<String, String> {
     Ok(format!("CN={cn}, valid"))
 }
 
+#[cfg(feature = "server")]
 fn validate_tls_private_key(pem: &str) -> Result<(), String> {
     let mut reader = std::io::Cursor::new(pem.as_bytes());
     rustls_pemfile::private_key(&mut reader)
@@ -636,6 +651,7 @@ fn validate_tls_private_key(pem: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "server")]
 fn validate_tls_ca(pem: &str) -> Result<(), String> {
     let mut reader = std::io::Cursor::new(pem.as_bytes());
     let certs: Vec<_> = rustls_pemfile::certs(&mut reader)
@@ -647,6 +663,7 @@ fn validate_tls_ca(pem: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "server")]
 fn validate_session_secret(value: &str) -> Result<(), String> {
     if value.len() < 64 {
         return Err(format!(
@@ -660,12 +677,14 @@ fn validate_session_secret(value: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "server")]
 struct CryptoCheckState {
     details: Vec<CheckDetail>,
     errors: Vec<String>,
     worst: CheckStatus,
 }
 
+#[cfg(feature = "server")]
 impl CryptoCheckState {
     fn new() -> Self {
         Self {
@@ -702,6 +721,7 @@ impl CryptoCheckState {
     }
 }
 
+#[cfg(feature = "server")]
 pub fn check_crypto(input: &CryptoInput) -> CheckResult {
     let has_jwt = input.auth_strategies.contains(&ApiAuthStrategy::Jwt);
     let has_mtls = input.auth_strategies.contains(&ApiAuthStrategy::Mtls);
@@ -868,6 +888,7 @@ async fn probe_brave_search(http: &reqwest::Client) -> Result<(), String> {
     }
 }
 
+#[cfg(feature = "server")]
 async fn probe_url(http: &reqwest::Client, url: &str) -> Result<(), String> {
     http.get(url)
         .send()
@@ -890,19 +911,25 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
 
     let brave_key_set = std::env::var("BRAVE_SEARCH_API_KEY").is_ok();
 
+    let daytona_configured = std::env::var("DAYTONA_API_KEY").is_ok();
+
+    #[cfg(feature = "server")]
     let server_config = arc_config::server::load_server_config(None).unwrap_or_default();
 
+    #[cfg(feature = "server")]
     let api_status = ApiStatus {
         base_url: server_config.api.base_url.clone(),
         authentication_strategies: server_config.api.authentication_strategies.clone(),
     };
 
+    #[cfg(feature = "server")]
     let web_status = WebStatus {
         url: server_config.web.url.clone(),
         auth_provider: server_config.web.auth.provider.clone(),
         allowed_usernames_count: server_config.web.auth.allowed_usernames.len(),
     };
 
+    #[cfg(feature = "server")]
     let github_status = GithubAppStatus {
         app_id: server_config.git.app_id.is_some(),
         client_id: server_config.git.client_id.is_some(),
@@ -911,36 +938,36 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
         private_key: std::env::var("GITHUB_APP_PRIVATE_KEY").is_ok(),
     };
 
-    let daytona_configured = std::env::var("DAYTONA_API_KEY").is_ok();
-
-    // Gather crypto inputs
-    let has_mtls = server_config
-        .api
-        .authentication_strategies
-        .contains(&ApiAuthStrategy::Mtls);
-    let tls_files = if has_mtls {
-        server_config.api.tls.as_ref().map(|tls| {
-            let read = |p: &std::path::Path| -> Result<String, String> {
-                let expanded = arc_config::expand_tilde(p);
-                std::fs::read_to_string(&expanded)
-                    .map_err(|e| format!("{}: {e}", expanded.display()))
-            };
-            Ok(TlsCheckInput {
-                cert_pem: read(&tls.cert)?,
-                key_pem: read(&tls.key)?,
-                ca_pem: read(&tls.ca)?,
+    #[cfg(feature = "server")]
+    let crypto_input = {
+        let has_mtls = server_config
+            .api
+            .authentication_strategies
+            .contains(&ApiAuthStrategy::Mtls);
+        let tls_files = if has_mtls {
+            server_config.api.tls.as_ref().map(|tls| {
+                let read = |p: &std::path::Path| -> Result<String, String> {
+                    let expanded = arc_config::expand_tilde(p);
+                    std::fs::read_to_string(&expanded)
+                        .map_err(|e| format!("{}: {e}", expanded.display()))
+                };
+                Ok(TlsCheckInput {
+                    cert_pem: read(&tls.cert)?,
+                    key_pem: read(&tls.key)?,
+                    ca_pem: read(&tls.ca)?,
+                })
             })
-        })
-    } else {
-        None
-    };
-    let crypto_input = CryptoInput {
-        auth_strategies: server_config.api.authentication_strategies.clone(),
-        tls_files,
-        jwt_public_key: std::env::var("ARC_JWT_PUBLIC_KEY").ok(),
-        jwt_private_key: std::env::var("ARC_JWT_PRIVATE_KEY").ok(),
-        session_secret: std::env::var("SESSION_SECRET").ok(),
-        now_epoch: chrono::Utc::now().timestamp(),
+        } else {
+            None
+        };
+        CryptoInput {
+            auth_strategies: server_config.api.authentication_strategies.clone(),
+            tls_files,
+            jwt_public_key: std::env::var("ARC_JWT_PUBLIC_KEY").ok(),
+            jwt_private_key: std::env::var("ARC_JWT_PRIVATE_KEY").ok(),
+            session_secret: std::env::var("SESSION_SECRET").ok(),
+            now_epoch: chrono::Utc::now().timestamp(),
+        }
     };
 
     let dep_results = probe_system_deps();
@@ -949,7 +976,9 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
     let sandbox_status;
     let llm_live_results: Option<Vec<(Provider, Result<(), String>)>>;
     let brave_live_result: Option<Result<(), String>>;
+    #[cfg(feature = "server")]
     let api_live_result: Option<Result<(), String>>;
+    #[cfg(feature = "server")]
     let web_live_result: Option<Result<(), String>>;
 
     if live {
@@ -985,18 +1014,31 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
             }
         };
         let brave_fut = probe_brave_search(&http);
-        let api_url = format!("{}/runs", server_config.api.base_url);
-        let api_fut = probe_url(&http, &api_url);
-        let web_fut = probe_url(&http, &server_config.web.url);
 
-        let (sandbox, llm, brave, api, web) =
-            tokio::join!(sandbox_fut, llm_fut, brave_fut, api_fut, web_fut);
+        #[cfg(feature = "server")]
+        {
+            let api_url = format!("{}/runs", server_config.api.base_url);
+            let api_fut = probe_url(&http, &api_url);
+            let web_fut = probe_url(&http, &server_config.web.url);
 
-        sandbox_status = sandbox;
-        llm_live_results = llm;
-        brave_live_result = Some(brave);
-        api_live_result = Some(api);
-        web_live_result = Some(web);
+            let (sandbox, llm, brave, api, web) =
+                tokio::join!(sandbox_fut, llm_fut, brave_fut, api_fut, web_fut);
+
+            sandbox_status = sandbox;
+            llm_live_results = llm;
+            brave_live_result = Some(brave);
+            api_live_result = Some(api);
+            web_live_result = Some(web);
+        }
+
+        #[cfg(not(feature = "server"))]
+        {
+            let (sandbox, llm, brave) = tokio::join!(sandbox_fut, llm_fut, brave_fut);
+
+            sandbox_status = sandbox;
+            llm_live_results = llm;
+            brave_live_result = Some(brave);
+        }
     } else {
         sandbox_status = SandboxStatus {
             daytona_configured,
@@ -1005,24 +1047,34 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
         };
         llm_live_results = None;
         brave_live_result = None;
-        api_live_result = None;
-        web_live_result = None;
+        #[cfg(feature = "server")]
+        {
+            api_live_result = None;
+            web_live_result = None;
+        }
     }
 
     // Run pure checks
+    #[allow(unused_mut)]
+    let mut checks = vec![
+        check_config(if config_exists { config_path } else { None }),
+        check_system_deps(DEP_SPECS, &dep_results),
+        check_llm_providers(&llm_statuses, llm_live_results.as_deref()),
+        check_brave_search(brave_key_set, brave_live_result.as_ref()),
+        check_sandbox(&sandbox_status),
+    ];
+
+    #[cfg(feature = "server")]
+    {
+        checks.push(check_api(&api_status, api_live_result.as_ref()));
+        checks.push(check_web(&web_status, web_live_result.as_ref()));
+        checks.push(check_github_app(&github_status));
+        checks.push(check_crypto(&crypto_input));
+    }
+
     let report = CheckReport {
         title: "Arc Doctor".into(),
-        checks: vec![
-            check_config(if config_exists { config_path } else { None }),
-            check_system_deps(DEP_SPECS, &dep_results),
-            check_api(&api_status, api_live_result.as_ref()),
-            check_web(&web_status, web_live_result.as_ref()),
-            check_llm_providers(&llm_statuses, llm_live_results.as_deref()),
-            check_brave_search(brave_key_set, brave_live_result.as_ref()),
-            check_sandbox(&sandbox_status),
-            check_github_app(&github_status),
-            check_crypto(&crypto_input),
-        ],
+        checks,
     };
 
     let footer = if !live {
@@ -1221,172 +1273,177 @@ mod tests {
         assert_eq!(result.status, CheckStatus::Error);
     }
 
-    // -- check_github_app --
+    // -- Server-only checks (check_github_app, check_api, check_web, check_crypto) --
 
-    #[test]
-    fn check_github_all_set() {
-        let status = GithubAppStatus {
-            app_id: true,
-            client_id: true,
-            client_secret: true,
-            webhook_secret: true,
-            private_key: true,
-        };
-        let result = check_github_app(&status);
-        assert_eq!(result.status, CheckStatus::Pass);
-    }
+    #[cfg(feature = "server")]
+    mod server_tests {
+        use super::*;
 
-    #[test]
-    fn check_github_none_set() {
-        let status = GithubAppStatus {
-            app_id: false,
-            client_id: false,
-            client_secret: false,
-            webhook_secret: false,
-            private_key: false,
-        };
-        let result = check_github_app(&status);
-        assert_eq!(result.status, CheckStatus::Warning);
-    }
+        #[test]
+        fn check_github_all_set() {
+            let status = GithubAppStatus {
+                app_id: true,
+                client_id: true,
+                client_secret: true,
+                webhook_secret: true,
+                private_key: true,
+            };
+            let result = check_github_app(&status);
+            assert_eq!(result.status, CheckStatus::Pass);
+        }
 
-    #[test]
-    fn check_github_partial() {
-        let status = GithubAppStatus {
-            app_id: true,
-            client_id: true,
-            client_secret: false,
-            webhook_secret: false,
-            private_key: false,
-        };
-        let result = check_github_app(&status);
-        assert_eq!(result.status, CheckStatus::Error);
-        let rem = result.remediation.unwrap();
-        assert!(rem.contains("GITHUB_APP_CLIENT_SECRET"));
-        assert!(rem.contains("GITHUB_APP_WEBHOOK_SECRET"));
-        assert!(rem.contains("GITHUB_APP_PRIVATE_KEY"));
-    }
+        #[test]
+        fn check_github_none_set() {
+            let status = GithubAppStatus {
+                app_id: false,
+                client_id: false,
+                client_secret: false,
+                webhook_secret: false,
+                private_key: false,
+            };
+            let result = check_github_app(&status);
+            assert_eq!(result.status, CheckStatus::Warning);
+        }
 
-    // -- check_api --
+        #[test]
+        fn check_github_partial() {
+            let status = GithubAppStatus {
+                app_id: true,
+                client_id: true,
+                client_secret: false,
+                webhook_secret: false,
+                private_key: false,
+            };
+            let result = check_github_app(&status);
+            assert_eq!(result.status, CheckStatus::Error);
+            let rem = result.remediation.unwrap();
+            assert!(rem.contains("GITHUB_APP_CLIENT_SECRET"));
+            assert!(rem.contains("GITHUB_APP_WEBHOOK_SECRET"));
+            assert!(rem.contains("GITHUB_APP_PRIVATE_KEY"));
+        }
 
-    #[test]
-    fn check_api_shows_base_url() {
-        let status = ApiStatus {
-            base_url: "http://localhost:3000".to_string(),
-            authentication_strategies: vec![ApiAuthStrategy::Jwt],
-        };
-        let result = check_api(&status, None);
-        assert_eq!(result.status, CheckStatus::Pass);
-        assert_eq!(result.summary, "http://localhost:3000");
-    }
+        // -- check_api --
 
-    #[test]
-    fn check_api_details_show_auth_strategy() {
-        let status = ApiStatus {
-            base_url: "https://api.example.com".to_string(),
-            authentication_strategies: vec![ApiAuthStrategy::Jwt],
-        };
-        let result = check_api(&status, None);
-        assert!(result.details.iter().any(|d| d.text.contains("jwt")));
-        assert!(result
-            .details
-            .iter()
-            .any(|d| d.text.contains("https://api.example.com")));
-    }
+        #[test]
+        fn check_api_shows_base_url() {
+            let status = ApiStatus {
+                base_url: "http://localhost:3000".to_string(),
+                authentication_strategies: vec![ApiAuthStrategy::Jwt],
+            };
+            let result = check_api(&status, None);
+            assert_eq!(result.status, CheckStatus::Pass);
+            assert_eq!(result.summary, "http://localhost:3000");
+        }
 
-    #[test]
-    fn check_api_live_ok() {
-        let status = ApiStatus {
-            base_url: "http://localhost:3000".to_string(),
-            authentication_strategies: vec![ApiAuthStrategy::Jwt],
-        };
-        let live = Ok(());
-        let result = check_api(&status, Some(&live));
-        assert_eq!(result.status, CheckStatus::Pass);
-        assert!(result
-            .details
-            .iter()
-            .any(|d| d.text.contains("Connectivity: OK")));
-    }
+        #[test]
+        fn check_api_details_show_auth_strategy() {
+            let status = ApiStatus {
+                base_url: "https://api.example.com".to_string(),
+                authentication_strategies: vec![ApiAuthStrategy::Jwt],
+            };
+            let result = check_api(&status, None);
+            assert!(result.details.iter().any(|d| d.text.contains("jwt")));
+            assert!(result
+                .details
+                .iter()
+                .any(|d| d.text.contains("https://api.example.com")));
+        }
 
-    #[test]
-    fn check_api_live_error() {
-        let status = ApiStatus {
-            base_url: "http://localhost:3000".to_string(),
-            authentication_strategies: vec![ApiAuthStrategy::Jwt],
-        };
-        let live = Err("connection refused".to_string());
-        let result = check_api(&status, Some(&live));
-        assert_eq!(result.status, CheckStatus::Warning);
-        assert!(result
-            .details
-            .iter()
-            .any(|d| d.text.contains("connection refused")));
-    }
+        #[test]
+        fn check_api_live_ok() {
+            let status = ApiStatus {
+                base_url: "http://localhost:3000".to_string(),
+                authentication_strategies: vec![ApiAuthStrategy::Jwt],
+            };
+            let live = Ok(());
+            let result = check_api(&status, Some(&live));
+            assert_eq!(result.status, CheckStatus::Pass);
+            assert!(result
+                .details
+                .iter()
+                .any(|d| d.text.contains("Connectivity: OK")));
+        }
 
-    // -- check_web --
+        #[test]
+        fn check_api_live_error() {
+            let status = ApiStatus {
+                base_url: "http://localhost:3000".to_string(),
+                authentication_strategies: vec![ApiAuthStrategy::Jwt],
+            };
+            let live = Err("connection refused".to_string());
+            let result = check_api(&status, Some(&live));
+            assert_eq!(result.status, CheckStatus::Warning);
+            assert!(result
+                .details
+                .iter()
+                .any(|d| d.text.contains("connection refused")));
+        }
 
-    #[test]
-    fn check_web_shows_url() {
-        let status = WebStatus {
-            url: "http://localhost:5173".to_string(),
-            auth_provider: AuthProvider::Github,
-            allowed_usernames_count: 0,
-        };
-        let result = check_web(&status, None);
-        assert_eq!(result.status, CheckStatus::Pass);
-        assert_eq!(result.summary, "http://localhost:5173");
-    }
+        // -- check_web --
 
-    #[test]
-    fn check_web_details_show_auth() {
-        let status = WebStatus {
-            url: "https://arc.example.com".to_string(),
-            auth_provider: AuthProvider::Github,
-            allowed_usernames_count: 3,
-        };
-        let result = check_web(&status, None);
-        assert!(result.details.iter().any(|d| d.text.contains("github")));
-        assert!(result
-            .details
-            .iter()
-            .any(|d| d.text.contains("https://arc.example.com")));
-        assert!(result
-            .details
-            .iter()
-            .any(|d| d.text.contains("Allowed usernames: 3")));
-    }
+        #[test]
+        fn check_web_shows_url() {
+            let status = WebStatus {
+                url: "http://localhost:5173".to_string(),
+                auth_provider: AuthProvider::Github,
+                allowed_usernames_count: 0,
+            };
+            let result = check_web(&status, None);
+            assert_eq!(result.status, CheckStatus::Pass);
+            assert_eq!(result.summary, "http://localhost:5173");
+        }
 
-    #[test]
-    fn check_web_live_ok() {
-        let status = WebStatus {
-            url: "http://localhost:5173".to_string(),
-            auth_provider: AuthProvider::Github,
-            allowed_usernames_count: 0,
-        };
-        let live = Ok(());
-        let result = check_web(&status, Some(&live));
-        assert_eq!(result.status, CheckStatus::Pass);
-        assert!(result
-            .details
-            .iter()
-            .any(|d| d.text.contains("Connectivity: OK")));
-    }
+        #[test]
+        fn check_web_details_show_auth() {
+            let status = WebStatus {
+                url: "https://arc.example.com".to_string(),
+                auth_provider: AuthProvider::Github,
+                allowed_usernames_count: 3,
+            };
+            let result = check_web(&status, None);
+            assert!(result.details.iter().any(|d| d.text.contains("github")));
+            assert!(result
+                .details
+                .iter()
+                .any(|d| d.text.contains("https://arc.example.com")));
+            assert!(result
+                .details
+                .iter()
+                .any(|d| d.text.contains("Allowed usernames: 3")));
+        }
 
-    #[test]
-    fn check_web_live_error() {
-        let status = WebStatus {
-            url: "http://localhost:5173".to_string(),
-            auth_provider: AuthProvider::Github,
-            allowed_usernames_count: 0,
-        };
-        let live = Err("connection refused".to_string());
-        let result = check_web(&status, Some(&live));
-        assert_eq!(result.status, CheckStatus::Warning);
-        assert!(result
-            .details
-            .iter()
-            .any(|d| d.text.contains("connection refused")));
-    }
+        #[test]
+        fn check_web_live_ok() {
+            let status = WebStatus {
+                url: "http://localhost:5173".to_string(),
+                auth_provider: AuthProvider::Github,
+                allowed_usernames_count: 0,
+            };
+            let live = Ok(());
+            let result = check_web(&status, Some(&live));
+            assert_eq!(result.status, CheckStatus::Pass);
+            assert!(result
+                .details
+                .iter()
+                .any(|d| d.text.contains("Connectivity: OK")));
+        }
+
+        #[test]
+        fn check_web_live_error() {
+            let status = WebStatus {
+                url: "http://localhost:5173".to_string(),
+                auth_provider: AuthProvider::Github,
+                allowed_usernames_count: 0,
+            };
+            let live = Err("connection refused".to_string());
+            let result = check_web(&status, Some(&live));
+            assert_eq!(result.status, CheckStatus::Warning);
+            assert!(result
+                .details
+                .iter()
+                .any(|d| d.text.contains("connection refused")));
+        }
+    } // mod server_tests (check_github_app, check_api, check_web)
 
     // -- parse_version --
 
@@ -1555,245 +1612,250 @@ mod tests {
 
     // -- check_crypto --
 
-    /// Generate a self-signed cert + private key PEM for TLS tests.
-    fn generate_test_tls_cert() -> (String, String) {
-        let output = std::process::Command::new("openssl")
-            .args([
-                "req",
-                "-x509",
-                "-newkey",
-                "ec",
-                "-pkeyopt",
-                "ec_paramgen_curve:prime256v1",
-                "-keyout",
-                "/dev/stdout",
-                "-out",
-                "/dev/stdout",
-                "-days",
-                "3650",
-                "-nodes",
-                "-subj",
-                "/CN=test-server",
-            ])
-            .output()
-            .expect("openssl must be available for tests");
-        let combined = String::from_utf8(output.stdout).unwrap();
-        let key_start = combined.find("-----BEGIN PRIVATE KEY-----").unwrap();
-        let key_end =
-            combined.find("-----END PRIVATE KEY-----").unwrap() + "-----END PRIVATE KEY-----".len();
-        let cert_start = combined.find("-----BEGIN CERTIFICATE-----").unwrap();
-        let cert_end =
-            combined.find("-----END CERTIFICATE-----").unwrap() + "-----END CERTIFICATE-----".len();
-        let key_pem = combined[key_start..key_end].to_string();
-        let cert_pem = combined[cert_start..cert_end].to_string();
-        (cert_pem, key_pem)
-    }
+    #[cfg(feature = "server")]
+    mod server_crypto_tests {
+        use super::*;
 
-    fn generate_test_ed25519_keypair() -> (String, String) {
-        let output = std::process::Command::new("openssl")
-            .args(["genpkey", "-algorithm", "Ed25519"])
-            .output()
-            .expect("openssl must be available for tests");
-        let private_pem = String::from_utf8(output.stdout).unwrap();
-        let output = std::process::Command::new("openssl")
-            .args(["pkey", "-pubout"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .and_then(|mut child| {
-                use std::io::Write;
-                child
-                    .stdin
-                    .take()
-                    .unwrap()
-                    .write_all(private_pem.as_bytes())
-                    .unwrap();
-                child.wait_with_output()
-            })
-            .expect("openssl pkey failed");
-        let public_pem = String::from_utf8(output.stdout).unwrap();
-        (public_pem, private_pem)
-    }
-
-    fn crypto_input(auth_strategies: Vec<ApiAuthStrategy>) -> CryptoInput {
-        CryptoInput {
-            auth_strategies,
-            tls_files: None,
-            jwt_public_key: None,
-            jwt_private_key: None,
-            session_secret: None,
-            now_epoch: chrono::Utc::now().timestamp(),
+        /// Generate a self-signed cert + private key PEM for TLS tests.
+        fn generate_test_tls_cert() -> (String, String) {
+            let output = std::process::Command::new("openssl")
+                .args([
+                    "req",
+                    "-x509",
+                    "-newkey",
+                    "ec",
+                    "-pkeyopt",
+                    "ec_paramgen_curve:prime256v1",
+                    "-keyout",
+                    "/dev/stdout",
+                    "-out",
+                    "/dev/stdout",
+                    "-days",
+                    "3650",
+                    "-nodes",
+                    "-subj",
+                    "/CN=test-server",
+                ])
+                .output()
+                .expect("openssl must be available for tests");
+            let combined = String::from_utf8(output.stdout).unwrap();
+            let key_start = combined.find("-----BEGIN PRIVATE KEY-----").unwrap();
+            let key_end = combined.find("-----END PRIVATE KEY-----").unwrap()
+                + "-----END PRIVATE KEY-----".len();
+            let cert_start = combined.find("-----BEGIN CERTIFICATE-----").unwrap();
+            let cert_end = combined.find("-----END CERTIFICATE-----").unwrap()
+                + "-----END CERTIFICATE-----".len();
+            let key_pem = combined[key_start..key_end].to_string();
+            let cert_pem = combined[cert_start..cert_end].to_string();
+            (cert_pem, key_pem)
         }
-    }
 
-    #[test]
-    fn crypto_all_keys_valid() {
-        let (cert_pem, key_pem) = generate_test_tls_cert();
-        let (public_pem, private_pem) = generate_test_ed25519_keypair();
-        let input = CryptoInput {
-            tls_files: Some(Ok(TlsCheckInput {
-                cert_pem: cert_pem.clone(),
-                key_pem,
-                ca_pem: cert_pem,
-            })),
-            jwt_public_key: Some(public_pem),
-            jwt_private_key: Some(private_pem),
-            session_secret: Some("a".repeat(64)),
-            ..crypto_input(vec![ApiAuthStrategy::Jwt, ApiAuthStrategy::Mtls])
-        };
-        let result = check_crypto(&input);
-        assert_eq!(result.status, CheckStatus::Pass);
-        assert_eq!(result.summary, "all keys valid");
-    }
+        fn generate_test_ed25519_keypair() -> (String, String) {
+            let output = std::process::Command::new("openssl")
+                .args(["genpkey", "-algorithm", "Ed25519"])
+                .output()
+                .expect("openssl must be available for tests");
+            let private_pem = String::from_utf8(output.stdout).unwrap();
+            let output = std::process::Command::new("openssl")
+                .args(["pkey", "-pubout"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .and_then(|mut child| {
+                    use std::io::Write;
+                    child
+                        .stdin
+                        .take()
+                        .unwrap()
+                        .write_all(private_pem.as_bytes())
+                        .unwrap();
+                    child.wait_with_output()
+                })
+                .expect("openssl pkey failed");
+            let public_pem = String::from_utf8(output.stdout).unwrap();
+            (public_pem, private_pem)
+        }
 
-    #[test]
-    fn crypto_invalid_cert_pem() {
-        let (public_pem, private_pem) = generate_test_ed25519_keypair();
-        let input = CryptoInput {
-            tls_files: Some(Ok(TlsCheckInput {
-                cert_pem: "not a pem".to_string(),
-                key_pem: "not a pem".to_string(),
-                ca_pem: "not a pem".to_string(),
-            })),
-            jwt_public_key: Some(public_pem),
-            jwt_private_key: Some(private_pem),
-            ..crypto_input(vec![ApiAuthStrategy::Jwt, ApiAuthStrategy::Mtls])
-        };
-        let result = check_crypto(&input);
-        assert_eq!(result.status, CheckStatus::Error);
-        assert!(result.details.iter().any(|d| d.text.contains("TLS cert")));
-    }
+        fn crypto_input(auth_strategies: Vec<ApiAuthStrategy>) -> CryptoInput {
+            CryptoInput {
+                auth_strategies,
+                tls_files: None,
+                jwt_public_key: None,
+                jwt_private_key: None,
+                session_secret: None,
+                now_epoch: chrono::Utc::now().timestamp(),
+            }
+        }
 
-    #[test]
-    fn crypto_expired_cert() {
-        let (cert_pem, _) = generate_test_tls_cert();
-        let far_future = i64::MAX / 2;
-        let result = validate_tls_cert(&cert_pem, far_future);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("expired"));
-    }
+        #[test]
+        fn crypto_all_keys_valid() {
+            let (cert_pem, key_pem) = generate_test_tls_cert();
+            let (public_pem, private_pem) = generate_test_ed25519_keypair();
+            let input = CryptoInput {
+                tls_files: Some(Ok(TlsCheckInput {
+                    cert_pem: cert_pem.clone(),
+                    key_pem,
+                    ca_pem: cert_pem,
+                })),
+                jwt_public_key: Some(public_pem),
+                jwt_private_key: Some(private_pem),
+                session_secret: Some("a".repeat(64)),
+                ..crypto_input(vec![ApiAuthStrategy::Jwt, ApiAuthStrategy::Mtls])
+            };
+            let result = check_crypto(&input);
+            assert_eq!(result.status, CheckStatus::Pass);
+            assert_eq!(result.summary, "all keys valid");
+        }
 
-    #[test]
-    fn crypto_session_secret_too_short() {
-        let input = CryptoInput {
-            session_secret: Some("abcdef".to_string()),
-            ..crypto_input(vec![])
-        };
-        let result = check_crypto(&input);
-        assert_eq!(result.status, CheckStatus::Error);
-        assert!(result.details.iter().any(|d| d.text.contains("too short")));
-    }
+        #[test]
+        fn crypto_invalid_cert_pem() {
+            let (public_pem, private_pem) = generate_test_ed25519_keypair();
+            let input = CryptoInput {
+                tls_files: Some(Ok(TlsCheckInput {
+                    cert_pem: "not a pem".to_string(),
+                    key_pem: "not a pem".to_string(),
+                    ca_pem: "not a pem".to_string(),
+                })),
+                jwt_public_key: Some(public_pem),
+                jwt_private_key: Some(private_pem),
+                ..crypto_input(vec![ApiAuthStrategy::Jwt, ApiAuthStrategy::Mtls])
+            };
+            let result = check_crypto(&input);
+            assert_eq!(result.status, CheckStatus::Error);
+            assert!(result.details.iter().any(|d| d.text.contains("TLS cert")));
+        }
 
-    #[test]
-    fn crypto_session_secret_non_hex() {
-        let input = CryptoInput {
-            session_secret: Some("z".repeat(64)),
-            ..crypto_input(vec![])
-        };
-        let result = check_crypto(&input);
-        assert_eq!(result.status, CheckStatus::Error);
-        assert!(result.details.iter().any(|d| d.text.contains("non-hex")));
-    }
+        #[test]
+        fn crypto_expired_cert() {
+            let (cert_pem, _) = generate_test_tls_cert();
+            let far_future = i64::MAX / 2;
+            let result = validate_tls_cert(&cert_pem, far_future);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("expired"));
+        }
 
-    #[test]
-    fn crypto_no_auth_configured() {
-        let result = check_crypto(&crypto_input(vec![]));
-        assert_eq!(result.status, CheckStatus::Warning);
-        assert!(result.summary.contains("no authentication configured"));
-    }
+        #[test]
+        fn crypto_session_secret_too_short() {
+            let input = CryptoInput {
+                session_secret: Some("abcdef".to_string()),
+                ..crypto_input(vec![])
+            };
+            let result = check_crypto(&input);
+            assert_eq!(result.status, CheckStatus::Error);
+            assert!(result.details.iter().any(|d| d.text.contains("too short")));
+        }
 
-    #[test]
-    fn crypto_jwt_configured_but_key_missing() {
-        let result = check_crypto(&crypto_input(vec![ApiAuthStrategy::Jwt]));
-        assert_eq!(result.status, CheckStatus::Error);
-        assert!(result
-            .details
-            .iter()
-            .any(|d| d.text.contains("ARC_JWT_PUBLIC_KEY not set")));
-    }
+        #[test]
+        fn crypto_session_secret_non_hex() {
+            let input = CryptoInput {
+                session_secret: Some("z".repeat(64)),
+                ..crypto_input(vec![])
+            };
+            let result = check_crypto(&input);
+            assert_eq!(result.status, CheckStatus::Error);
+            assert!(result.details.iter().any(|d| d.text.contains("non-hex")));
+        }
 
-    #[test]
-    fn crypto_mtls_configured_but_tls_not_set() {
-        let result = check_crypto(&crypto_input(vec![ApiAuthStrategy::Mtls]));
-        assert_eq!(result.status, CheckStatus::Error);
-        assert!(result
-            .details
-            .iter()
-            .any(|d| d.text.contains("[api.tls] not set")));
-    }
+        #[test]
+        fn crypto_no_auth_configured() {
+            let result = check_crypto(&crypto_input(vec![]));
+            assert_eq!(result.status, CheckStatus::Warning);
+            assert!(result.summary.contains("no authentication configured"));
+        }
 
-    #[test]
-    fn crypto_mtls_configured_but_files_unreadable() {
-        let input = CryptoInput {
-            tls_files: Some(Err("Permission denied: /path/to/cert.pem".to_string())),
-            ..crypto_input(vec![ApiAuthStrategy::Mtls])
-        };
-        let result = check_crypto(&input);
-        assert_eq!(result.status, CheckStatus::Error);
-        assert!(result
-            .details
-            .iter()
-            .any(|d| d.text.contains("Permission denied")));
-    }
+        #[test]
+        fn crypto_jwt_configured_but_key_missing() {
+            let result = check_crypto(&crypto_input(vec![ApiAuthStrategy::Jwt]));
+            assert_eq!(result.status, CheckStatus::Error);
+            assert!(result
+                .details
+                .iter()
+                .any(|d| d.text.contains("ARC_JWT_PUBLIC_KEY not set")));
+        }
 
-    #[test]
-    fn crypto_invalid_jwt_public_key() {
-        let input = CryptoInput {
-            jwt_public_key: Some(
-                "-----BEGIN PUBLIC KEY-----\nINVALID\n-----END PUBLIC KEY-----".to_string(),
-            ),
-            ..crypto_input(vec![ApiAuthStrategy::Jwt])
-        };
-        let result = check_crypto(&input);
-        assert_eq!(result.status, CheckStatus::Error);
-        assert!(result
-            .details
-            .iter()
-            .any(|d| d.text.contains("JWT public key: invalid")));
-    }
+        #[test]
+        fn crypto_mtls_configured_but_tls_not_set() {
+            let result = check_crypto(&crypto_input(vec![ApiAuthStrategy::Mtls]));
+            assert_eq!(result.status, CheckStatus::Error);
+            assert!(result
+                .details
+                .iter()
+                .any(|d| d.text.contains("[api.tls] not set")));
+        }
 
-    #[test]
-    fn crypto_invalid_jwt_private_key() {
-        let input = CryptoInput {
-            jwt_private_key: Some(
-                "-----BEGIN PRIVATE KEY-----\nINVALID\n-----END PRIVATE KEY-----".to_string(),
-            ),
-            ..crypto_input(vec![])
-        };
-        let result = check_crypto(&input);
-        assert_eq!(result.status, CheckStatus::Error);
-        assert!(result
-            .details
-            .iter()
-            .any(|d| d.text.contains("JWT private key: invalid")));
-    }
+        #[test]
+        fn crypto_mtls_configured_but_files_unreadable() {
+            let input = CryptoInput {
+                tls_files: Some(Err("Permission denied: /path/to/cert.pem".to_string())),
+                ..crypto_input(vec![ApiAuthStrategy::Mtls])
+            };
+            let result = check_crypto(&input);
+            assert_eq!(result.status, CheckStatus::Error);
+            assert!(result
+                .details
+                .iter()
+                .any(|d| d.text.contains("Permission denied")));
+        }
 
-    #[test]
-    fn crypto_base64_encoded_jwt_key() {
-        let (public_pem, _) = generate_test_ed25519_keypair();
-        let encoded = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            public_pem.as_bytes(),
-        );
-        let input = CryptoInput {
-            jwt_public_key: Some(encoded),
-            ..crypto_input(vec![ApiAuthStrategy::Jwt])
-        };
-        let result = check_crypto(&input);
-        assert_eq!(result.status, CheckStatus::Pass);
-        assert!(result
-            .details
-            .iter()
-            .any(|d| d.text.contains("JWT public key: valid")));
-    }
+        #[test]
+        fn crypto_invalid_jwt_public_key() {
+            let input = CryptoInput {
+                jwt_public_key: Some(
+                    "-----BEGIN PUBLIC KEY-----\nINVALID\n-----END PUBLIC KEY-----".to_string(),
+                ),
+                ..crypto_input(vec![ApiAuthStrategy::Jwt])
+            };
+            let result = check_crypto(&input);
+            assert_eq!(result.status, CheckStatus::Error);
+            assert!(result
+                .details
+                .iter()
+                .any(|d| d.text.contains("JWT public key: invalid")));
+        }
 
-    #[test]
-    fn crypto_valid_session_secret() {
-        let input = CryptoInput {
-            session_secret: Some("a1b2c3d4e5f6".repeat(6)),
-            ..crypto_input(vec![])
-        };
-        let result = check_crypto(&input);
-        assert_eq!(result.status, CheckStatus::Pass);
-    }
+        #[test]
+        fn crypto_invalid_jwt_private_key() {
+            let input = CryptoInput {
+                jwt_private_key: Some(
+                    "-----BEGIN PRIVATE KEY-----\nINVALID\n-----END PRIVATE KEY-----".to_string(),
+                ),
+                ..crypto_input(vec![])
+            };
+            let result = check_crypto(&input);
+            assert_eq!(result.status, CheckStatus::Error);
+            assert!(result
+                .details
+                .iter()
+                .any(|d| d.text.contains("JWT private key: invalid")));
+        }
+
+        #[test]
+        fn crypto_base64_encoded_jwt_key() {
+            let (public_pem, _) = generate_test_ed25519_keypair();
+            let encoded = base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                public_pem.as_bytes(),
+            );
+            let input = CryptoInput {
+                jwt_public_key: Some(encoded),
+                ..crypto_input(vec![ApiAuthStrategy::Jwt])
+            };
+            let result = check_crypto(&input);
+            assert_eq!(result.status, CheckStatus::Pass);
+            assert!(result
+                .details
+                .iter()
+                .any(|d| d.text.contains("JWT public key: valid")));
+        }
+
+        #[test]
+        fn crypto_valid_session_secret() {
+            let input = CryptoInput {
+                session_secret: Some("a1b2c3d4e5f6".repeat(6)),
+                ..crypto_input(vec![])
+            };
+            let result = check_crypto(&input);
+            assert_eq!(result.status, CheckStatus::Pass);
+        }
+    } // mod server_crypto_tests
 }
