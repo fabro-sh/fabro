@@ -324,14 +324,11 @@ async fn main_inner() -> Result<()> {
                 Box::leak(Box::new(arc_util::terminal::Styles::detect_stderr()));
             let cli_config = cli_config::load_cli_config(None)?;
             args.verbose = args.verbose || cli_config.verbose;
-            let github_app = build_github_app_credentials(
-                cli_config.git.as_ref().and_then(|g| g.app_id.as_deref()),
-            );
+            let github_app = build_github_app_credentials(cli_config.app_id());
 
-            let cli_author = cli_config.git.as_ref().map(|g| &g.author);
             let git_author = arc_workflows::git::GitAuthor::from_options(
-                cli_author.and_then(|a| a.name.clone()),
-                cli_author.and_then(|a| a.email.clone()),
+                cli_config.git_author().and_then(|a| a.name.clone()),
+                cli_config.git_author().and_then(|a| a.email.clone()),
             );
 
             arc_workflows::cli::run::run_command(
@@ -402,9 +399,7 @@ async fn main_inner() -> Result<()> {
         Command::Pr { command } => match command {
             PrCommand::Create(args) => {
                 let cli_config = cli_config::load_cli_config(None)?;
-                let github_app = build_github_app_credentials(
-                    cli_config.git.as_ref().and_then(|g| g.app_id.as_deref()),
-                );
+                let github_app = build_github_app_credentials(cli_config.app_id());
                 arc_workflows::cli::pr::pr_create_command(args, github_app).await?;
             }
         },

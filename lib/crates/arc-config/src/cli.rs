@@ -81,6 +81,20 @@ pub struct CliConfig {
     pub mcp_servers: HashMap<String, McpServerEntry>,
 }
 
+impl CliConfig {
+    pub fn app_id(&self) -> Option<&str> {
+        self.git.as_ref().and_then(|g| g.app_id.as_deref())
+    }
+
+    pub fn slug(&self) -> Option<&str> {
+        self.git.as_ref().and_then(|g| g.slug.as_deref())
+    }
+
+    pub fn git_author(&self) -> Option<&crate::server::GitAuthorConfig> {
+        self.git.as_ref().map(|g| &g.author)
+    }
+}
+
 /// Load CLI config from an explicit path or `~/.arc/cli.toml`, returning defaults if the
 /// default file doesn't exist. An explicit path that doesn't exist is an error.
 pub fn load_cli_config(path: Option<&Path>) -> anyhow::Result<CliConfig> {

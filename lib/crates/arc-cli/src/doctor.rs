@@ -1019,7 +1019,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
         allowed_usernames_count: server_config.web.auth.allowed_usernames.len(),
     };
 
-    let git_app_id = cli_config.git.as_ref().and_then(|g| g.app_id.clone());
+    let git_app_id = cli_config.app_id().map(str::to_owned);
     let private_key_raw = std::env::var("GITHUB_APP_PRIVATE_KEY").ok();
     let sign_result = match (&git_app_id, &private_key_raw) {
         (Some(app_id), Some(raw)) => {
@@ -1046,7 +1046,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
     };
     let github_status = GithubAppStatus {
         app_id: git_app_id,
-        slug: cli_config.git.as_ref().and_then(|g| g.slug.clone()),
+        slug: cli_config.slug().map(str::to_owned),
         private_key_set: private_key_raw.is_some(),
         sign_result,
         #[cfg(feature = "server")]
