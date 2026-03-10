@@ -90,17 +90,6 @@ cargo build --release
 
 </details>
 
-### Configure API keys
-
-Set at least one LLM provider key:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-# and/or
-export OPENAI_API_KEY=sk-...
-export GEMINI_API_KEY=AI...
-```
-
 ### Run the setup wizard
 
 ```bash
