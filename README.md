@@ -19,7 +19,6 @@ Define workflows in Graphviz DOT, route tasks to the right model with CSS-like s
 - [Quick Start](#quick-start)
 - [Example Workflow](#example-workflow)
 - [Supported Models](#supported-models)
-- [Architecture](#architecture)
 - [System Requirements](#system-requirements)
 - [Help or Feedback](#help-or-feedback)
 - [Contributing](#contributing)
@@ -181,41 +180,6 @@ Run `arc model list` for the full catalog. Provider fallback chains are configur
 
 ---
 
-## Architecture
-
-Arc provides two interfaces backed by the same workflow engine:
-
-| Feature              | CLI mode (`arc run`)             | API mode (`arc serve`)             |
-| -------------------- | -------------------------------- | ---------------------------------- |
-| Execution            | Synchronous, single run          | Async, queued with scheduler       |
-| Human-in-the-loop    | Terminal prompts                 | HTTP endpoints + web UI            |
-| Events               | Printed to stderr                | SSE stream                         |
-| Concurrency          | One run per process              | Configurable (default 5)           |
-| Best for             | Development, one-off runs        | Production, integrations           |
-
-### Rust crates
-
-| Crate            | Purpose                                                           |
-| ---------------- | ----------------------------------------------------------------- |
-| `arc-cli`        | CLI entry point (`run`, `exec`, `serve`, `doctor`, `install`)     |
-| `arc-workflows`  | Core workflow engine -- DOT parsing, stage execution, checkpoints |
-| `arc-agent`      | AI coding agent with tool use (Bash, Read, Write, Edit, Grep)     |
-| `arc-api`        | Axum HTTP server with SSE event streaming                         |
-| `arc-llm`        | Unified LLM client -- Anthropic, OpenAI, Gemini, and more         |
-| `arc-types`      | Auto-generated types from OpenAPI spec                            |
-| `arc-github`     | GitHub App auth, PR creation, checkpoint pushing                  |
-| `arc-db`         | SQLite with WAL mode and schema migrations                        |
-| `arc-mcp`        | Model Context Protocol client/server                              |
-
-### TypeScript
-
-| Package              | Purpose                                              |
-| -------------------- | ---------------------------------------------------- |
-| `apps/arc-web`       | React 19 + React Router + Vite + Tailwind frontend   |
-| `arc-api-client`     | Auto-generated TypeScript client from OpenAPI spec    |
-
----
-
 ## System Requirements
 
 - **macOS or Linux** (x86_64 or ARM)
@@ -237,35 +201,7 @@ Arc provides two interfaces backed by the same workflow engine:
 
 ## Contributing
 
-### Developing the CLI
-
-Arc requires a working [Rust toolchain](https://rustup.rs/):
-
-```bash
-git clone https://github.com/qltysh/arc.git
-cd arc
-cargo build --workspace
-cargo test --workspace
-```
-
-### Developing the web UI
-
-```bash
-cd apps/arc-web
-bun install
-bun run dev
-```
-
-### Useful commands
-
-| Command                                       | Description                           |
-| --------------------------------------------- | ------------------------------------- |
-| `cargo build --workspace`                     | Build all crates                      |
-| `cargo test --workspace`                      | Run all tests                         |
-| `cargo test -p arc-api`                       | Test a single crate                   |
-| `cargo fmt --check --all`                     | Check formatting                      |
-| `cargo clippy --workspace -- -D warnings`     | Lint                                  |
-| `cd apps/arc-web && bun run typecheck`        | Type check the frontend               |
+See [CLAUDE.md](CLAUDE.md) for build commands, architecture overview, and development conventions.
 
 ---
 
