@@ -1,9 +1,0 @@
-version = 1
-goal = "A cute robot painting a landscape"
-graph = "imagegen.dot"
-
-[sandbox]
-provider = "daytona"
-
-[sandbox.env]
-GEMINI_API_KEY = "${env.GEMINI_API_KEY}"

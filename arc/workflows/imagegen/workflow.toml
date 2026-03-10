@@ -1,6 +1,5 @@
 version = 1
-goal = "A cute robot painting a landscape"
-graph = "imagegen-api.dot"
+graph = "workflow.dot"
 
 [sandbox]
 provider = "daytona"
@@ -8,8 +7,11 @@ provider = "daytona"
 [sandbox.env]
 GEMINI_API_KEY = "${env.GEMINI_API_KEY}"
 
+[assets]
+include = ["output/**"]
+
 [sandbox.daytona.snapshot]
-name = "imagegen-tools-v3"
+name = "imagegen-tools-v4"
 cpu = 4
 memory = 8
 disk = 10
