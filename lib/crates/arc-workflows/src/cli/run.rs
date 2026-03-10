@@ -1422,48 +1422,47 @@ async fn run_from_branch(
     };
 
     let emitter = Arc::new(EventEmitter::new());
-    let mut worktree_path: Option<PathBuf> = None;
-
-    let sandbox: Arc<dyn arc_agent::Sandbox> = match sandbox_provider {
-        SandboxProvider::Local | SandboxProvider::Docker => {
-            // Re-attach worktree to the existing run branch
-            let wt = logs_dir.join("worktree");
-            crate::git::replace_worktree(&original_cwd, &wt, run_branch)
-                .map_err(|e| anyhow::anyhow!("failed to attach worktree to {run_branch}: {e}"))?;
-            std::env::set_current_dir(&wt)?;
-            let mut env = arc_agent::LocalSandbox::new(wt.clone());
-            let emitter_cb = Arc::clone(&emitter);
-            env.set_event_callback(Arc::new(move |event| {
-                emitter_cb.emit(&crate::event::WorkflowRunEvent::Sandbox { event });
-            }));
-            worktree_path = Some(wt);
-            Arc::new(env)
-        }
-        #[cfg(feature = "exedev")]
-        SandboxProvider::Exe => {
-            let exe_config = resolve_exe_config(None, &run_defaults);
-            let clone_params = resolve_exe_clone_params(&original_cwd);
-            let mgmt_ssh = arc_exe::OpensshRunner::connect_raw("exe.dev")
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to connect to exe.dev: {e}"))?;
-            let config = exe_config.unwrap_or_default();
-            let mut env = arc_exe::ExeSandbox::new(
-                Box::new(mgmt_ssh),
-                config,
-                clone_params,
-                Some(run_id.clone()),
-                github_app.clone(),
-            );
-            let emitter_cb = Arc::clone(&emitter);
-            env.set_event_callback(Arc::new(move |event| {
-                emitter_cb.emit(&crate::event::WorkflowRunEvent::Sandbox { event });
-            }));
-            Arc::new(env)
-        }
-        SandboxProvider::Daytona => {
-            bail!("--run-branch resume is not yet supported with --sandbox daytona");
-        }
-    };
+    let (sandbox, worktree_path): (Arc<dyn arc_agent::Sandbox>, Option<PathBuf>) =
+        match sandbox_provider {
+            SandboxProvider::Local | SandboxProvider::Docker => {
+                // Re-attach worktree to the existing run branch
+                let wt = logs_dir.join("worktree");
+                crate::git::replace_worktree(&original_cwd, &wt, run_branch).map_err(|e| {
+                    anyhow::anyhow!("failed to attach worktree to {run_branch}: {e}")
+                })?;
+                std::env::set_current_dir(&wt)?;
+                let mut env = arc_agent::LocalSandbox::new(wt.clone());
+                let emitter_cb = Arc::clone(&emitter);
+                env.set_event_callback(Arc::new(move |event| {
+                    emitter_cb.emit(&crate::event::WorkflowRunEvent::Sandbox { event });
+                }));
+                (Arc::new(env), Some(wt))
+            }
+            #[cfg(feature = "exedev")]
+            SandboxProvider::Exe => {
+                let exe_config = resolve_exe_config(None, &run_defaults);
+                let clone_params = resolve_exe_clone_params(&original_cwd);
+                let mgmt_ssh = arc_exe::OpensshRunner::connect_raw("exe.dev")
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to connect to exe.dev: {e}"))?;
+                let config = exe_config.unwrap_or_default();
+                let mut env = arc_exe::ExeSandbox::new(
+                    Box::new(mgmt_ssh),
+                    config,
+                    clone_params,
+                    Some(run_id.clone()),
+                    github_app.clone(),
+                );
+                let emitter_cb = Arc::clone(&emitter);
+                env.set_event_callback(Arc::new(move |event| {
+                    emitter_cb.emit(&crate::event::WorkflowRunEvent::Sandbox { event });
+                }));
+                (Arc::new(env), None)
+            }
+            SandboxProvider::Daytona => {
+                bail!("--run-branch resume is not yet supported with --sandbox daytona");
+            }
+        };
 
     // Initialize remote sandboxes and checkout the run branch
     if sandbox.is_remote() {
