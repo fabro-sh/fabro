@@ -62,6 +62,8 @@ enum Command {
     Cp(arc_workflows::cli::cp::CpArgs),
     /// Get a preview URL for a port on a run's sandbox
     Preview(arc_workflows::cli::preview::PreviewArgs),
+    /// SSH into a run's Daytona sandbox
+    Ssh(arc_workflows::cli::ssh::SshArgs),
     /// List and test LLM models
     Model {
         #[command(subcommand)]
@@ -180,6 +182,7 @@ async fn main_inner() -> Result<()> {
         Command::Parse(_) => "parse",
         Command::Cp(_) => "cp",
         Command::Preview(_) => "preview",
+        Command::Ssh(_) => "ssh",
         Command::Model { .. } => "model",
         #[cfg(feature = "server")]
         Command::Serve(_) => "serve",
@@ -354,6 +357,9 @@ async fn main_inner() -> Result<()> {
         }
         Command::Preview(args) => {
             arc_workflows::cli::preview::preview_command(args).await?;
+        }
+        Command::Ssh(args) => {
+            arc_workflows::cli::ssh::ssh_command(args).await?;
         }
         Command::Model { command } => {
             let cli_config = cli_config::load_cli_config(None)?;

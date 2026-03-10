@@ -9,6 +9,7 @@ pub mod project_config;
 pub mod run;
 pub mod run_config;
 pub mod runs;
+pub mod ssh;
 pub mod validate;
 
 use std::path::Path;

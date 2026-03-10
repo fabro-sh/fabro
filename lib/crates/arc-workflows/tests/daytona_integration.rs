@@ -1345,7 +1345,7 @@ async fn daytona_ssh_access() {
     let env = create_env().await;
     env.initialize().await.unwrap();
 
-    let ssh_command = env.create_ssh_access().await.unwrap();
+    let ssh_command = env.create_ssh_access(Some(60.0)).await.unwrap();
     assert!(!ssh_command.is_empty(), "ssh_command should not be empty");
     assert!(
         ssh_command.contains("ssh"),
@@ -1360,7 +1360,7 @@ async fn daytona_ssh_access() {
 async fn daytona_ssh_access_before_init_fails() {
     let env = create_env().await;
 
-    let result = env.create_ssh_access().await;
+    let result = env.create_ssh_access(Some(60.0)).await;
     assert!(result.is_err(), "should fail before initialize()");
     assert!(
         result.unwrap_err().contains("not initialized"),

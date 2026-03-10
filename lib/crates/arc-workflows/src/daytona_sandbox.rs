@@ -216,10 +216,10 @@ impl DaytonaSandbox {
     }
 
     /// Create SSH access and return the connection command string.
-    pub async fn create_ssh_access(&self) -> Result<String, String> {
+    pub async fn create_ssh_access(&self, ttl_minutes: Option<f64>) -> Result<String, String> {
         let sandbox = self.sandbox()?;
         let dto = sandbox
-            .create_ssh_access(Some(60.0))
+            .create_ssh_access(ttl_minutes)
             .await
             .map_err(|e| format!("Failed to create SSH access: {e}"))?;
         Ok(dto.ssh_command)
@@ -800,7 +800,7 @@ impl Sandbox for DaytonaSandbox {
     }
 
     async fn ssh_access_command(&self) -> Result<Option<String>, String> {
-        self.create_ssh_access().await.map(Some)
+        self.create_ssh_access(Some(60.0)).await.map(Some)
     }
 
     fn origin_url(&self) -> Option<&str> {
