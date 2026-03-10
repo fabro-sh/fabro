@@ -2,6 +2,8 @@
 // mTLS end-to-end tests
 // ===========================================================================
 
+// Skip on macOS: LibreSSL generates certs with extensions rustls rejects
+#[cfg(target_os = "linux")]
 mod mtls_e2e {
     use std::path::Path;
     use std::process::{Command, Stdio};
