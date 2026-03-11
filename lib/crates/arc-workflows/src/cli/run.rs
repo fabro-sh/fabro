@@ -490,25 +490,7 @@ pub async fn run_command(
             if let crate::event::WorkflowRunEvent::WorkflowRunStarted { run_id, .. } = event {
                 *run_id_clone.lock().unwrap() = run_id.clone();
             }
-            let (event_name, event_fields) = crate::event::flatten_event(event);
-            let mut envelope = serde_json::Map::new();
-            envelope.insert(
-                "ts".to_string(),
-                serde_json::Value::String(
-                    Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-                ),
-            );
-            envelope.insert(
-                "run_id".to_string(),
-                serde_json::Value::String(run_id_clone.lock().unwrap().clone()),
-            );
-            envelope.insert("event".to_string(), serde_json::Value::String(event_name));
-            for (k, v) in event_fields {
-                if k != "ts" && k != "run_id" && k != "event" {
-                    envelope.insert(k, v);
-                }
-            }
-            let envelope = serde_json::Value::Object(envelope);
+            let envelope = build_event_envelope(event, &run_id_clone.lock().unwrap());
             // Append to progress.jsonl
             if let Ok(line) = serde_json::to_string(&envelope) {
                 let line = arc_util::redact::redact_jsonl_line(&line);
@@ -2351,6 +2333,26 @@ async fn generate_retro(
     }
 }
 
+fn build_event_envelope(event: &crate::event::WorkflowRunEvent, run_id: &str) -> serde_json::Value {
+    let (event_name, event_fields) = crate::event::flatten_event(event);
+    let mut envelope = serde_json::Map::new();
+    envelope.insert(
+        "ts".to_string(),
+        serde_json::Value::String(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+    );
+    envelope.insert(
+        "run_id".to_string(),
+        serde_json::Value::String(run_id.to_string()),
+    );
+    envelope.insert("event".to_string(), serde_json::Value::String(event_name));
+    for (k, v) in event_fields {
+        if k != "ts" && k != "run_id" && k != "event" {
+            envelope.insert(k, v);
+        }
+    }
+    serde_json::Value::Object(envelope)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2824,5 +2826,39 @@ mod tests {
 
         let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
         assert_eq!(parsed["run_id"], "def-456");
+    }
+
+    #[test]
+    fn envelope_field_order_starts_with_ts_run_id_event() {
+        let event = crate::event::WorkflowRunEvent::StageStarted {
+            node_id: "plan".to_string(),
+            name: "Plan".to_string(),
+            index: 0,
+            handler_type: Some("agent".to_string()),
+            script: None,
+            attempt: 1,
+            max_attempts: 3,
+        };
+        let envelope = build_event_envelope(&event, "run-123");
+        let json = serde_json::to_string(&envelope).unwrap();
+        // Parse the raw JSON to get field order
+        let fields: Vec<String> = json
+            .trim_start_matches('{')
+            .trim_end_matches('}')
+            .split(',')
+            .filter_map(|pair| {
+                let key = pair.split(':').next()?;
+                Some(key.trim().trim_matches('"').to_string())
+            })
+            .collect();
+        assert_eq!(&fields[0], "ts", "first field must be ts, got: {fields:?}");
+        assert_eq!(
+            &fields[1], "run_id",
+            "second field must be run_id, got: {fields:?}"
+        );
+        assert_eq!(
+            &fields[2], "event",
+            "third field must be event, got: {fields:?}"
+        );
     }
 }
