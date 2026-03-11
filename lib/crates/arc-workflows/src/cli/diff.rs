@@ -6,6 +6,7 @@ use clap::Args;
 use tracing::{debug, info};
 
 use crate::cli::runs::{default_runs_base, find_run_by_prefix};
+use crate::engine::GIT_REMOTE;
 use crate::manifest::Manifest;
 use crate::sandbox_record::SandboxRecord;
 
@@ -19,6 +20,9 @@ pub struct DiffArgs {
     /// Show diffstat instead of full patch (live diffs only)
     #[arg(long)]
     pub stat: bool,
+    /// Show only files-changed/insertions/deletions summary (live diffs only)
+    #[arg(long)]
+    pub shortstat: bool,
 }
 
 pub async fn diff_command(args: DiffArgs) -> Result<()> {
@@ -83,7 +87,7 @@ async fn resolve_diff(run_dir: &Path, args: &DiffArgs) -> Result<String> {
     info!(provider = %record.provider, "Reconnecting to sandbox for live diff");
     let sandbox = crate::cli::cp::reconnect(&record).await?;
 
-    let cmd = build_live_diff_cmd(base_sha, args.stat);
+    let cmd = build_live_diff_cmd(base_sha, args.stat, args.shortstat);
     debug!(cmd, "Running git diff in sandbox");
 
     let result = sandbox
@@ -99,12 +103,21 @@ async fn resolve_diff(run_dir: &Path, args: &DiffArgs) -> Result<String> {
     Ok(result.stdout)
 }
 
-fn build_live_diff_cmd(base_sha: &str, stat: bool) -> String {
-    let stat_flag = if stat { " --stat" } else { "" };
-    format!(
-        "git -c maintenance.auto=0 -c gc.auto=0 diff{stat_flag} {}",
-        shlex::try_quote(base_sha).unwrap_or_else(|_| base_sha.into())
-    )
+fn build_live_diff_cmd(base_sha: &str, stat: bool, shortstat: bool) -> String {
+    let mut flags = String::new();
+    if stat {
+        flags.push_str(" --stat");
+    }
+    if shortstat {
+        flags.push_str(" --shortstat");
+    }
+    let quoted_sha = shlex::try_quote(base_sha).map_or_else(
+        |_| format!("'{}'", base_sha.replace('\'', "'\\''")),
+        |q| q.to_string(),
+    );
+    // `git add -N .` marks untracked files as intent-to-add so they appear in the diff.
+    // Without this, files created by write_file (which doesn't git-add) are invisible.
+    format!("{GIT_REMOTE} add -N . && {GIT_REMOTE} diff{flags} {quoted_sha}")
 }
 
 fn colorize_diff_line(line: &str) -> String {
@@ -171,6 +184,7 @@ mod tests {
             run: String::new(),
             node: None,
             stat: false,
+            shortstat: false,
         };
         let result = resolve_diff(dir.path(), &args).await.unwrap();
         assert_eq!(result, patch_content);
@@ -189,6 +203,7 @@ mod tests {
             run: String::new(),
             node: Some("work".to_string()),
             stat: false,
+            shortstat: false,
         };
         let result = resolve_diff(dir.path(), &args).await.unwrap();
         assert_eq!(result, patch_content);
@@ -203,6 +218,7 @@ mod tests {
             run: String::new(),
             node: None,
             stat: false,
+            shortstat: false,
         };
         let err = resolve_diff(dir.path(), &args).await.unwrap_err();
         assert!(
@@ -221,6 +237,7 @@ mod tests {
             run: String::new(),
             node: None,
             stat: false,
+            shortstat: false,
         };
         let err = resolve_diff(dir.path(), &args).await.unwrap_err();
         assert!(err.to_string().contains("no final.patch"), "got: {err}");
@@ -234,6 +251,7 @@ mod tests {
             run: String::new(),
             node: Some("nonexistent".to_string()),
             stat: false,
+            shortstat: false,
         };
         let err = resolve_diff(dir.path(), &args).await.unwrap_err();
         assert!(err.to_string().contains("nonexistent"), "got: {err}");
@@ -282,16 +300,28 @@ mod tests {
 
     #[test]
     fn build_live_diff_cmd_includes_working_tree() {
-        let cmd = build_live_diff_cmd("abc123", false);
-        assert_eq!(cmd, "git -c maintenance.auto=0 -c gc.auto=0 diff abc123");
+        let cmd = build_live_diff_cmd("abc123", false, false);
+        assert_eq!(
+            cmd,
+            "git -c maintenance.auto=0 -c gc.auto=0 add -N . && git -c maintenance.auto=0 -c gc.auto=0 diff abc123"
+        );
     }
 
     #[test]
     fn build_live_diff_cmd_stat() {
-        let cmd = build_live_diff_cmd("abc123", true);
+        let cmd = build_live_diff_cmd("abc123", true, false);
         assert_eq!(
             cmd,
-            "git -c maintenance.auto=0 -c gc.auto=0 diff --stat abc123"
+            "git -c maintenance.auto=0 -c gc.auto=0 add -N . && git -c maintenance.auto=0 -c gc.auto=0 diff --stat abc123"
+        );
+    }
+
+    #[test]
+    fn build_live_diff_cmd_shortstat() {
+        let cmd = build_live_diff_cmd("abc123", false, true);
+        assert_eq!(
+            cmd,
+            "git -c maintenance.auto=0 -c gc.auto=0 add -N . && git -c maintenance.auto=0 -c gc.auto=0 diff --shortstat abc123"
         );
     }
 }
