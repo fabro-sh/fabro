@@ -58,6 +58,8 @@ enum Command {
     Run(arc_workflows::cli::RunArgs),
     /// Validate a workflow
     Validate(arc_workflows::cli::ValidateArgs),
+    /// Render a workflow graph as SVG or PNG
+    Graph(arc_workflows::cli::graph::GraphArgs),
     /// Parse a DOT file and print its AST
     #[command(hide = true)]
     Parse(arc_workflows::cli::ParseArgs),
@@ -265,6 +267,7 @@ async fn main_inner() -> (String, Result<()>) {
         Command::Exec(_) => "exec",
         Command::Run(_) => "run",
         Command::Validate(_) => "validate",
+        Command::Graph(_) => "graph",
         Command::Parse(_) => "parse",
         Command::Cp(_) => "cp",
         Command::Preview(_) => "preview",
@@ -490,6 +493,10 @@ async fn main_inner() -> (String, Result<()>) {
             Command::Validate(args) => {
                 let styles = arc_util::terminal::Styles::detect_stderr();
                 arc_workflows::cli::validate::validate_command(&args, &styles)?;
+            }
+            Command::Graph(args) => {
+                let styles = arc_util::terminal::Styles::detect_stderr();
+                arc_workflows::cli::graph::graph_command(&args, &styles)?;
             }
             Command::Parse(args) => {
                 arc_workflows::cli::parse::parse_command(&args)?;

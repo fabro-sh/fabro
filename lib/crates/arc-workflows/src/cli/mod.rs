@@ -2,6 +2,7 @@ pub mod backend;
 pub mod cli_backend;
 pub mod cp;
 pub mod diff;
+pub mod graph;
 pub mod parse;
 pub mod pr;
 pub mod preview;
