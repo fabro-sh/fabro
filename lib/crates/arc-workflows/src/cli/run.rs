@@ -1227,6 +1227,9 @@ pub async fn run_command(
         .await;
     }
 
+    // Write finalize commit with retro.json + final node files (captures last diff.patch)
+    write_finalize_commit(&config, &run_dir).await;
+
     // Auto-create PR on successful completion
     let mut pushed_branch: Option<String> = None;
     let mut pr_url: Option<String> = None;
@@ -1753,6 +1756,9 @@ async fn run_from_branch(
         .await;
     }
 
+    // Write finalize commit with retro.json + final node files (captures last diff.patch)
+    write_finalize_commit(&config, &run_dir).await;
+
     let outcome = engine_result?;
 
     eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="),);
@@ -2074,6 +2080,38 @@ async fn run_preflight(
     } else {
         std::process::exit(1);
     }
+}
+
+/// Write a finalize commit to the shadow branch with retro.json and final node files.
+///
+/// This captures the last diff.patch (written after the final checkpoint) and retro.json.
+/// Best-effort: errors are logged as warnings.
+async fn write_finalize_commit(config: &RunConfig, run_dir: &std::path::Path) {
+    let (Some(ref meta_branch), Some(ref repo_path)) =
+        (&config.meta_branch, &config.host_repo_path)
+    else {
+        return;
+    };
+
+    let store = crate::git::MetadataStore::new(repo_path, &config.git_author);
+    let mut entries = crate::git::scan_node_files(run_dir);
+    if let Ok(retro_bytes) = std::fs::read(run_dir.join("retro.json")) {
+        entries.push(("retro.json".to_string(), retro_bytes));
+    }
+    let refs: Vec<(&str, &[u8])> = entries
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_slice()))
+        .collect();
+    if let Err(e) = store.write_files(&config.run_id, &refs, "finalize run") {
+        tracing::warn!(error = %e, "Failed to write finalize commit to metadata branch");
+        return;
+    }
+
+    // Push the finalize commit
+    let run_id_part = meta_branch.strip_prefix("refs/arc/").unwrap_or(meta_branch);
+    let refspec = format!("{meta_branch}:refs/heads/arc/meta/{run_id_part}");
+    crate::engine::git_push_host(repo_path, &refspec, &config.github_app, "finalize metadata")
+        .await;
 }
 
 /// Generate a retro report for a completed workflow run.

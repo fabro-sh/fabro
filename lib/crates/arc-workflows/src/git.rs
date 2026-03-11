@@ -270,6 +270,54 @@ pub fn sanitize_ref_component(s: &str) -> String {
     result.trim_matches('-').to_string()
 }
 
+/// Filenames allowed in per-node directories on the shadow branch.
+const NODE_FILE_ALLOWLIST: &[&str] = &[
+    "prompt.md",
+    "response.md",
+    "status.json",
+    "provider_used.json",
+    "diff.patch",
+    "script_invocation.json",
+    "script_timing.json",
+    "parallel_results.json",
+];
+
+/// Maximum size (bytes) for a single node file. Files larger than this are skipped.
+const MAX_NODE_FILE_SIZE: u64 = 512 * 1024;
+
+/// Scan `{run_dir}/nodes/` for allowlisted files and return them as
+/// `("nodes/{subdir}/{filename}", bytes)` entries suitable for the shadow tree.
+pub fn scan_node_files(run_dir: &Path) -> Vec<(String, Vec<u8>)> {
+    let nodes_dir = run_dir.join("nodes");
+    let entries = match std::fs::read_dir(&nodes_dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut result = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let subdir_name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        for filename in NODE_FILE_ALLOWLIST {
+            let file_path = path.join(filename);
+            match std::fs::metadata(&file_path) {
+                Ok(meta) if meta.is_file() && meta.len() <= MAX_NODE_FILE_SIZE => {}
+                _ => continue,
+            }
+            if let Ok(data) = std::fs::read(&file_path) {
+                result.push((format!("nodes/{subdir_name}/{filename}"), data));
+            }
+        }
+    }
+    result
+}
+
 /// Git-native metadata storage for pipeline runs.
 ///
 /// Stores checkpoint data, manifests, and graph DOT on an orphan branch
@@ -301,18 +349,39 @@ impl MetadataStore {
         Ok((store, sig))
     }
 
-    /// Initialize a run's metadata branch with manifest and graph DOT.
-    pub fn init_run(&self, run_id: &str, manifest_json: &[u8], graph_dot: &[u8]) -> Result<()> {
+    /// Initialize a run's metadata branch with manifest, graph DOT, and optional extra files.
+    pub fn init_run(
+        &self,
+        run_id: &str,
+        manifest_json: &[u8],
+        graph_dot: &[u8],
+        extra_files: &[(&str, &[u8])],
+    ) -> Result<()> {
         let (store, sig) = self.open_store()?;
         let branch = Self::branch_name(run_id);
         let bs = BranchStore::new(&store, &branch, &sig);
         bs.ensure_branch()
             .map_err(|e| git_error(format!("ensure_branch failed: {e}")))?;
-        bs.write_entries(
-            &[("manifest.json", manifest_json), ("graph.dot", graph_dot)],
-            "init run",
-        )
-        .map_err(|e| git_error(format!("write_entries failed: {e}")))?;
+        let mut entries: Vec<(&str, &[u8])> =
+            vec![("manifest.json", manifest_json), ("graph.dot", graph_dot)];
+        entries.extend_from_slice(extra_files);
+        bs.write_entries(&entries, "init run")
+            .map_err(|e| git_error(format!("write_entries failed: {e}")))?;
+        Ok(())
+    }
+
+    /// Write arbitrary files to the metadata branch without overwriting checkpoint.json.
+    pub fn write_files(
+        &self,
+        run_id: &str,
+        entries: &[(&str, &[u8])],
+        message: &str,
+    ) -> Result<()> {
+        let (store, sig) = self.open_store()?;
+        let branch = Self::branch_name(run_id);
+        let bs = BranchStore::new(&store, &branch, &sig);
+        bs.write_entries(entries, message)
+            .map_err(|e| git_error(format!("write_entries failed: {e}")))?;
         Ok(())
     }
 
@@ -490,7 +559,7 @@ mod tests {
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
         let manifest = br#"{"run_id":"RUN1","workflow_name":"test","goal":"g","start_time":"2025-01-01T00:00:00Z","node_count":2,"edge_count":1}"#;
         let dot = b"digraph { start -> end }";
-        store.init_run("RUN1", manifest, dot).unwrap();
+        store.init_run("RUN1", manifest, dot, &[]).unwrap();
 
         let read_manifest = MetadataStore::read_manifest(dir.path(), "RUN1")
             .unwrap()
@@ -510,7 +579,7 @@ mod tests {
         init_repo(dir.path());
 
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        store.init_run("RUN2", b"{}", b"digraph {}").unwrap();
+        store.init_run("RUN2", b"{}", b"digraph {}", &[]).unwrap();
 
         let ctx = crate::context::Context::new();
         ctx.set("goal", serde_json::json!("test"));
@@ -546,7 +615,7 @@ mod tests {
         init_repo(dir.path());
 
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        store.init_run("RUN3", b"{}", b"digraph {}").unwrap();
+        store.init_run("RUN3", b"{}", b"digraph {}", &[]).unwrap();
 
         let ctx = crate::context::Context::new();
         let cp1 = crate::checkpoint::Checkpoint::from_context(
@@ -599,7 +668,7 @@ mod tests {
         init_repo(dir.path());
 
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        store.init_run("RUN4", b"{}", b"digraph {}").unwrap();
+        store.init_run("RUN4", b"{}", b"digraph {}", &[]).unwrap();
 
         let artifact_data = br#"{"large_output":"some data"}"#;
         let cp_json = b"{}"; // minimal checkpoint for the test
@@ -615,6 +684,106 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(read_back, artifact_data);
+    }
+
+    #[test]
+    fn scan_node_files_picks_up_allowlisted() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_dir = dir.path();
+        let node_dir = run_dir.join("nodes").join("work");
+        fs::create_dir_all(&node_dir).unwrap();
+        fs::write(node_dir.join("prompt.md"), "hello").unwrap();
+        fs::write(node_dir.join("response.md"), "world").unwrap();
+        fs::write(node_dir.join("not_allowed.txt"), "skip me").unwrap();
+
+        let files = scan_node_files(run_dir);
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert!(paths.contains(&"nodes/work/prompt.md"));
+        assert!(paths.contains(&"nodes/work/response.md"));
+        assert!(!paths.iter().any(|p| p.contains("not_allowed")));
+    }
+
+    #[test]
+    fn scan_node_files_skips_oversized() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_dir = dir.path();
+        let node_dir = run_dir.join("nodes").join("big");
+        fs::create_dir_all(&node_dir).unwrap();
+        // Write a file just over the 512KB limit
+        let big_data = vec![0u8; 512 * 1024 + 1];
+        fs::write(node_dir.join("prompt.md"), &big_data).unwrap();
+
+        let files = scan_node_files(run_dir);
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn scan_node_files_handles_visit_suffixes() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_dir = dir.path();
+        let node_dir = run_dir.join("nodes").join("work-visit_2");
+        fs::create_dir_all(&node_dir).unwrap();
+        fs::write(node_dir.join("status.json"), "{}").unwrap();
+
+        let files = scan_node_files(run_dir);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].0, "nodes/work-visit_2/status.json");
+    }
+
+    #[test]
+    fn scan_node_files_empty_when_no_nodes_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = scan_node_files(dir.path());
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn metadata_store_write_files() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+
+        let store = MetadataStore::new(dir.path(), &GitAuthor::default());
+        store.init_run("RUN5", b"{}", b"digraph {}", &[]).unwrap();
+
+        store
+            .write_files(
+                "RUN5",
+                &[("retro.json", b"{\"status\":\"ok\"}")],
+                "finalize",
+            )
+            .unwrap();
+
+        let data = MetadataStore::read_file(dir.path(), "RUN5", "retro.json")
+            .unwrap()
+            .unwrap();
+        assert_eq!(data, b"{\"status\":\"ok\"}");
+
+        // Original files still present
+        let dot = MetadataStore::read_graph_dot(dir.path(), "RUN5")
+            .unwrap()
+            .unwrap();
+        assert_eq!(dot, "digraph {}");
+    }
+
+    #[test]
+    fn metadata_store_init_run_with_extra_files() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+
+        let store = MetadataStore::new(dir.path(), &GitAuthor::default());
+        store
+            .init_run(
+                "RUN6",
+                b"{}",
+                b"digraph {}",
+                &[("sandbox.json", b"{\"type\":\"local\"}")],
+            )
+            .unwrap();
+
+        let data = MetadataStore::read_file(dir.path(), "RUN6", "sandbox.json")
+            .unwrap()
+            .unwrap();
+        assert_eq!(data, b"{\"type\":\"local\"}");
     }
 
     #[test]

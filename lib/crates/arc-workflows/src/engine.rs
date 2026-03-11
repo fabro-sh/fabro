@@ -637,7 +637,7 @@ pub async fn git_checkpoint(
 ///
 /// Authenticates via a GitHub App installation token so we don't depend
 /// on the host's ambient git credentials.
-async fn git_push_host(
+pub(crate) async fn git_push_host(
     repo_path: &Path,
     refspec: &str,
     github_app: &Option<arc_github::GitHubAppCredentials>,
@@ -1211,7 +1211,14 @@ impl WorkflowRunEngine {
             let store = crate::git::MetadataStore::new(repo_path, &config.git_author);
             let manifest_bytes = serde_json::to_vec_pretty(&manifest).unwrap_or_default();
             let dot_source = std::fs::read(config.run_dir.join("graph.dot")).unwrap_or_default();
-            if let Err(e) = store.init_run(&config.run_id, &manifest_bytes, &dot_source) {
+            let sandbox_json = std::fs::read(config.run_dir.join("sandbox.json")).ok();
+            let mut extra_files: Vec<(&str, &[u8])> = Vec::new();
+            if let Some(ref data) = sandbox_json {
+                extra_files.push(("sandbox.json", data));
+            }
+            if let Err(e) =
+                store.init_run(&config.run_id, &manifest_bytes, &dot_source, &extra_files)
+            {
                 tracing::warn!(run_id = %config.run_id, error = %e, "Metadata branch init failed");
             }
         }
@@ -1844,7 +1851,7 @@ impl WorkflowRunEngine {
                     serde_json::to_vec_pretty(&checkpoint)
                         .ok()
                         .and_then(|cp_json| {
-                            let artifact_entries: Vec<(String, Vec<u8>)> = artifact_store
+                            let mut extra_entries: Vec<(String, Vec<u8>)> = artifact_store
                                 .list()
                                 .iter()
                                 .filter_map(|info| {
@@ -1855,11 +1862,12 @@ impl WorkflowRunEngine {
                                     })
                                 })
                                 .collect();
-                            let artifact_refs: Vec<(&str, &[u8])> = artifact_entries
+                            extra_entries.extend(crate::git::scan_node_files(&config.run_dir));
+                            let extra_refs: Vec<(&str, &[u8])> = extra_entries
                                 .iter()
                                 .map(|(k, v)| (k.as_str(), v.as_slice()))
                                 .collect();
-                            match store.write_checkpoint(&config.run_id, &cp_json, &artifact_refs) {
+                            match store.write_checkpoint(&config.run_id, &cp_json, &extra_refs) {
                                 Ok(sha) => Some(sha),
                                 Err(e) => {
                                     context.append_log(format!(
