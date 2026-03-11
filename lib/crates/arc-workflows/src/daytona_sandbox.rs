@@ -1002,6 +1002,8 @@ impl Sandbox for DaytonaSandbox {
         env_vars: Option<&HashMap<String, String>>,
         cancel_token: Option<tokio_util::sync::CancellationToken>,
     ) -> Result<ExecResult, String> {
+        tracing::info!(command, timeout_ms, "exec_command: entered");
+
         let sandbox = self.sandbox()?;
         let start = Instant::now();
 
@@ -1013,6 +1015,11 @@ impl Sandbox for DaytonaSandbox {
             .process()
             .await
             .map_err(|e| format!("Failed to get process service: {e}"))?;
+
+        tracing::info!(
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            "exec_command: process service acquired, starting select"
+        );
 
         let options = daytona_sdk::ExecuteCommandOptions {
             cwd: Some(cwd),
@@ -1048,9 +1055,19 @@ impl Sandbox for DaytonaSandbox {
 
         let result = tokio::select! {
             res = exec_future => {
+                tracing::info!(
+                    elapsed_ms = start.elapsed().as_millis() as u64,
+                    ok = res.is_ok(),
+                    "exec_command: HTTP response received"
+                );
                 res.map_err(|e| format!("Failed to execute command: {e}"))?
             }
             () = tokio::time::sleep(timeout_duration) => {
+                tracing::info!(
+                    elapsed_ms = start.elapsed().as_millis() as u64,
+                    timeout_ms,
+                    "exec_command: client-side timeout fired"
+                );
                 return Ok(ExecResult {
                     stdout: String::new(),
                     stderr: "Command timed out locally".to_string(),
@@ -1060,6 +1077,10 @@ impl Sandbox for DaytonaSandbox {
                 });
             }
             () = token.cancelled() => {
+                tracing::info!(
+                    elapsed_ms = start.elapsed().as_millis() as u64,
+                    "exec_command: cancelled via token"
+                );
                 return Ok(ExecResult {
                     stdout: String::new(),
                     stderr: "Command cancelled".to_string(),
