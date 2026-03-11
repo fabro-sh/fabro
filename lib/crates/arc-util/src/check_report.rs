@@ -213,9 +213,13 @@ mod tests {
     fn render_all_pass_no_color() {
         let r = report(vec![pass_check("Test")]);
         let out = r.render(&Styles::new(false), false, None, None);
-        assert!(out.contains("[✓]"));
-        assert!(out.contains("All checks passed."));
-        assert!(out.contains("Test Report"));
+        insta::assert_snapshot!(out, @r"
+        Test Report
+
+          [✓] Test (all good)
+
+        All checks passed.
+        ");
     }
 
     // -- render: warning footer --
@@ -224,10 +228,16 @@ mod tests {
     fn render_warning_footer() {
         let r = report(vec![warning_check("Optional")]);
         let out = r.render(&Styles::new(false), false, None, None);
-        assert!(out.contains("[!]"));
-        assert!(out.contains("Found issues in 1 category."));
-        assert!(out.contains("Warnings:"));
-        assert!(out.contains("fix it"));
+        insta::assert_snapshot!(out, @r"
+        Test Report
+
+          [!] Optional (not configured)
+
+        Found issues in 1 category.
+
+        Warnings:
+          • Optional — fix it
+        ");
     }
 
     // -- render: error footer --
@@ -236,9 +246,16 @@ mod tests {
     fn render_error_footer() {
         let r = report(vec![error_check("Broken")]);
         let out = r.render(&Styles::new(false), false, None, None);
-        assert!(out.contains("[✗]"));
-        assert!(out.contains("Errors:"));
-        assert!(out.contains("repair it"));
+        insta::assert_snapshot!(out, @r"
+        Test Report
+
+          [✗] Broken (broken)
+
+        Found issues in 1 category.
+
+        Errors:
+          • Broken — repair it
+        ");
     }
 
     // -- render: verbose mode --
@@ -247,8 +264,14 @@ mod tests {
     fn render_verbose_shows_details() {
         let r = report(vec![pass_check("Verbose")]);
         let out = r.render(&Styles::new(false), true, None, None);
-        assert!(out.contains("•"));
-        assert!(out.contains("everything is fine"));
+        insta::assert_snapshot!(out, @r"
+        Test Report
+
+          [✓] Verbose (all good)
+              • everything is fine
+
+        All checks passed.
+        ");
     }
 
     #[test]
@@ -311,7 +334,20 @@ mod tests {
     fn render_multiple_issues_pluralizes() {
         let r = report(vec![warning_check("A"), error_check("B")]);
         let out = r.render(&Styles::new(false), false, None, None);
-        assert!(out.contains("2 categories"));
+        insta::assert_snapshot!(out, @r"
+        Test Report
+
+          [!] A (not configured)
+          [✗] B (broken)
+
+        Found issues in 2 categories.
+
+        Errors:
+          • B — repair it
+
+        Warnings:
+          • A — fix it
+        ");
     }
 
     // -- render: footer text --
@@ -325,7 +361,15 @@ mod tests {
             Some("Run with --live to probe."),
             None,
         );
-        assert!(out.contains("Run with --live to probe."));
+        insta::assert_snapshot!(out, @r"
+        Test Report
+
+          [✓] Test (all good)
+
+        All checks passed.
+
+        Run with --live to probe.
+        ");
     }
 
     #[test]
@@ -344,7 +388,13 @@ mod tests {
             checks: vec![pass_check("Test")],
         };
         let out = r.render(&Styles::new(false), false, None, None);
-        assert!(out.contains("My Custom Title"));
+        insta::assert_snapshot!(out, @r"
+        My Custom Title
+
+          [✓] Test (all good)
+
+        All checks passed.
+        ");
     }
 
     // -- render: truncation --
@@ -362,8 +412,14 @@ mod tests {
         }]);
         // max_width=40, prefix "      • " = 8 chars, so 31 chars for text + "…"
         let out = r.render(&Styles::new(false), true, None, Some(40));
-        assert!(out.contains('…'));
-        assert!(!out.contains("for test"));
+        insta::assert_snapshot!(out, @r"
+        Test Report
+
+          [✓] Test (ok)
+              • This is a very long detail line…
+
+        All checks passed.
+        ");
     }
 
     #[test]
