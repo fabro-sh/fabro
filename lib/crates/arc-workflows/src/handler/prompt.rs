@@ -97,6 +97,7 @@ impl Handler for PromptHandler {
                         text,
                         usage,
                         files_touched,
+                        ..
                     }) => (text, usage, files_touched),
                     Err(e) if e.is_retryable() => {
                         return Err(e);
@@ -227,6 +228,7 @@ mod tests {
                     text: "one-shot response".to_string(),
                     usage: None,
                     files_touched: Vec::new(),
+                    last_file_touched: None,
                 })
             }
         }
@@ -291,6 +293,7 @@ mod tests {
                 text: "classified".to_string(),
                 usage: None,
                 files_touched: Vec::new(),
+                last_file_touched: None,
             })
         }
     }

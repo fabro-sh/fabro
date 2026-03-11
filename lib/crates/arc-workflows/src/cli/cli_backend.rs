@@ -669,6 +669,27 @@ impl CodergenBackend for AgentCliBackend {
             .filter(|f| !files_before.contains(f))
             .collect();
 
+        // Find the most recently modified file by mtime
+        let last_file_touched = if !files_touched.is_empty() {
+            let quoted_files: Vec<String> = files_touched
+                .iter()
+                .filter_map(|f| shlex::try_quote(f).ok().map(|q| q.into_owned()))
+                .collect();
+            let cmd = format!("ls -t {} | head -1", quoted_files.join(" "));
+            if let Ok(result) = sandbox.exec_command(&cmd, 5_000, None, None, None).await {
+                let trimmed = result.stdout.trim().to_string();
+                if result.exit_code == 0 && !trimmed.is_empty() {
+                    Some(trimmed)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let mut stage_usage = StageUsage {
             model: model.to_string(),
             input_tokens: parsed.input_tokens,
@@ -684,6 +705,7 @@ impl CodergenBackend for AgentCliBackend {
             text: parsed.text,
             usage: Some(stage_usage),
             files_touched,
+            last_file_touched,
         })
     }
 }
@@ -1171,6 +1193,7 @@ mod tests {
                 text: "stub".to_string(),
                 usage: None,
                 files_touched: Vec::new(),
+                last_file_touched: None,
             })
         }
     }

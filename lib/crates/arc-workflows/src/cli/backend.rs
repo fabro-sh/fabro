@@ -39,6 +39,7 @@ fn spawn_event_forwarder(
     emitter: Arc<crate::event::EventEmitter>,
     pending_tool_calls: Arc<Mutex<HashMap<String, String>>>,
     files_touched: Arc<Mutex<HashSet<String>>>,
+    last_file_touched: Arc<Mutex<Option<String>>>,
 ) {
     let mut rx = session.subscribe();
     tokio::spawn(async move {
@@ -70,7 +71,8 @@ fn spawn_event_forwarder(
                     if !*is_error {
                         if let Some(path) = pending_tool_calls.lock().unwrap().remove(tool_call_id)
                         {
-                            files_touched.lock().unwrap().insert(path);
+                            files_touched.lock().unwrap().insert(path.clone());
+                            *last_file_touched.lock().unwrap() = Some(path);
                         }
                     } else {
                         pending_tool_calls.lock().unwrap().remove(tool_call_id);
@@ -380,6 +382,7 @@ impl CodergenBackend for AgentApiBackend {
             text: response.text(),
             usage: Some(stage_usage),
             files_touched: Vec::new(),
+            last_file_touched: None,
         })
     }
 
@@ -432,6 +435,7 @@ impl CodergenBackend for AgentApiBackend {
         let pending_tool_calls: Arc<Mutex<HashMap<String, String>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let files_touched: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        let last_file_touched: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
         // Subscribe to session events: forward to pipeline emitter + track files.
         spawn_event_forwarder(
@@ -440,6 +444,7 @@ impl CodergenBackend for AgentApiBackend {
             Arc::clone(emitter),
             Arc::clone(&pending_tool_calls),
             Arc::clone(&files_touched),
+            Arc::clone(&last_file_touched),
         );
 
         // Emit Prompt event before processing
@@ -511,6 +516,7 @@ impl CodergenBackend for AgentApiBackend {
                         Arc::clone(emitter),
                         Arc::clone(&pending_tool_calls),
                         Arc::clone(&files_touched),
+                        Arc::clone(&last_file_touched),
                     );
 
                     session.initialize().await;
@@ -603,10 +609,13 @@ impl CodergenBackend for AgentApiBackend {
             self.sessions.lock().unwrap().insert(key, session);
         }
 
+        let last_file_touched = last_file_touched.lock().unwrap().clone();
+
         Ok(CodergenResult::Text {
             text: response,
             usage: Some(stage_usage),
             files_touched,
+            last_file_touched,
         })
     }
 }

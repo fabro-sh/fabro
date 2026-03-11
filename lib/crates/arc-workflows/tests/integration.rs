@@ -1211,6 +1211,7 @@ impl CodergenBackend for MockCodergenBackend {
             ),
             usage: None,
             files_touched: Vec::new(),
+            last_file_touched: None,
         })
     }
 }
@@ -6071,6 +6072,7 @@ mod real_llm {
                 text: response.text(),
                 usage: None,
                 files_touched: Vec::new(),
+                last_file_touched: None,
             })
         }
     }
@@ -9611,6 +9613,7 @@ async fn cli_backend_run_writes_prompt_and_calls_exec() {
             text,
             usage,
             files_touched,
+            ..
         } => {
             assert_eq!(text, "I fixed the bug.");
             let usage = usage.expect("should have usage");

@@ -433,6 +433,7 @@ mod tests {
                     text: "The best candidate is branch_b".to_string(),
                     usage: None,
                     files_touched: Vec::new(),
+                    last_file_touched: None,
                 })
             }
         }

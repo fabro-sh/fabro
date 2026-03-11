@@ -20,6 +20,7 @@ pub enum CodergenResult {
         text: String,
         usage: Option<StageUsage>,
         files_touched: Vec<String>,
+        last_file_touched: Option<String>,
     },
     Full(Outcome),
 }
@@ -237,7 +238,7 @@ impl Handler for AgentHandler {
                     node_id: node.id.clone(),
                 }) as Arc<dyn arc_agent::ToolHookCallback>
             });
-        let (response_text, stage_usage, backend_files_touched) =
+        let (response_text, stage_usage, backend_files_touched, last_file_touched) =
             if let Some(backend) = &self.backend {
                 let result = backend
                     .run(
@@ -262,7 +263,8 @@ impl Handler for AgentHandler {
                         text,
                         usage,
                         files_touched,
-                    }) => (text, usage, files_touched),
+                        last_file_touched,
+                    }) => (text, usage, files_touched, last_file_touched),
                     Err(e) if e.is_retryable() => {
                         return Err(e);
                     }
@@ -275,6 +277,7 @@ impl Handler for AgentHandler {
                     format!("[Simulated] Response for stage: {}", node.id),
                     None,
                     Vec::new(),
+                    None,
                 )
             };
 
@@ -297,16 +300,33 @@ impl Handler for AgentHandler {
         );
 
         // 7b. Parse routing directives from response text, falling back to
-        //     status.json written by the agent into the sandbox CWD
+        //     status.json written by the agent into the sandbox CWD, then to
+        //     the last file the agent wrote.
         let found_in_response = extract_status_fields(&response_text, &mut outcome);
         if !found_in_response {
+            let mut found_in_status_json = false;
             if let Ok(result) = services
                 .sandbox
                 .exec_command("cat status.json", 5_000, None, None, None)
                 .await
             {
                 if result.exit_code == 0 {
-                    extract_status_fields(&result.stdout, &mut outcome);
+                    found_in_status_json = extract_status_fields(&result.stdout, &mut outcome);
+                }
+            }
+            if !found_in_status_json {
+                if let Some(ref path) = last_file_touched {
+                    let quoted = shlex::try_quote(path).unwrap_or_else(|_| path.into());
+                    let cmd = format!("cat {quoted}");
+                    if let Ok(result) = services
+                        .sandbox
+                        .exec_command(&cmd, 5_000, None, None, None)
+                        .await
+                    {
+                        if result.exit_code == 0 {
+                            extract_status_fields(&result.stdout, &mut outcome);
+                        }
+                    }
                 }
             }
         }
@@ -514,6 +534,7 @@ mod tests {
                         .to_string(),
                     usage: None,
                     files_touched: Vec::new(),
+                    last_file_touched: None,
                 })
             }
         }
@@ -550,6 +571,73 @@ mod tests {
         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
         assert_eq!(outcome.preferred_label.as_deref(), Some("approve"));
         assert!(outcome.failure.is_none());
+    }
+
+    #[tokio::test]
+    async fn codergen_handler_extracts_status_from_last_file_touched() {
+        use std::sync::Arc;
+
+        struct LastFileBackend;
+
+        #[async_trait]
+        impl CodergenBackend for LastFileBackend {
+            async fn run(
+                &self,
+                _node: &Node,
+                _prompt: &str,
+                _context: &Context,
+                _thread_id: Option<&str>,
+                _emitter: &Arc<EventEmitter>,
+                _stage_dir: &Path,
+                _sandbox: &Arc<dyn arc_agent::Sandbox>,
+                _tool_hooks: Option<Arc<dyn arc_agent::ToolHookCallback>>,
+            ) -> Result<CodergenResult, ArcError> {
+                Ok(CodergenResult::Text {
+                    text: "Done writing results.".to_string(),
+                    usage: None,
+                    files_touched: vec!["results.md".to_string()],
+                    last_file_touched: Some("results.md".to_string()),
+                })
+            }
+        }
+
+        let sandbox_dir = TempDir::new().unwrap();
+        // Write status fields into the file the agent "touched" — no status.json
+        std::fs::write(
+            sandbox_dir.path().join("results.md"),
+            r#"# Results
+{"context_updates": {"verified": "true"}}
+"#,
+        )
+        .unwrap();
+
+        let handler = AgentHandler::new(Some(Box::new(LastFileBackend)));
+        let node = Node::new("step");
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        let services = EngineServices {
+            registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
+            emitter: std::sync::Arc::new(EventEmitter::new()),
+            sandbox: std::sync::Arc::new(arc_agent::LocalSandbox::new(
+                sandbox_dir.path().to_path_buf(),
+            )),
+            git_state: std::sync::RwLock::new(None),
+            hook_runner: None,
+            env: HashMap::new(),
+        };
+
+        let outcome = handler
+            .execute(&node, &context, &graph, tmp.path(), &services)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert_eq!(
+            outcome.context_updates.get("verified"),
+            Some(&serde_json::json!("true")),
+        );
     }
 
     #[test]
@@ -624,6 +712,7 @@ mod tests {
                     text: "ok".to_string(),
                     usage: None,
                     files_touched: Vec::new(),
+                    last_file_touched: None,
                 })
             }
         }
@@ -676,6 +765,7 @@ mod tests {
                     text: "ok".to_string(),
                     usage: None,
                     files_touched: Vec::new(),
+                    last_file_touched: None,
                 })
             }
         }
@@ -906,6 +996,7 @@ Some text in between.
                     text: "ok".to_string(),
                     usage: None,
                     files_touched: Vec::new(),
+                    last_file_touched: None,
                 })
             }
         }
@@ -975,6 +1066,7 @@ Some text in between.
                     text: "ok".to_string(),
                     usage: None,
                     files_touched: Vec::new(),
+                    last_file_touched: None,
                 })
             }
         }
