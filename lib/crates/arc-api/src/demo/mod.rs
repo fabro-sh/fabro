@@ -2415,7 +2415,7 @@ mod verifications {
                     detail_description: "Ensures that all third-party dependencies comply with the organization's intellectual property policy. License violations can have severe legal consequences.",
                     checks: &["No GPL-licensed dependencies in proprietary code", "License file present for new dependencies", "Supply chain attestation where required"],
                     pass_example: "New dependency uses MIT license; added to approved dependency list.",
-                    fail_example: "AGPL-licensed library added to a closed-source commercial product.",
+                    fail_example: "GPL-licensed library added to a closed-source commercial product.",
                     recent_results: None,
                 },
             ],
