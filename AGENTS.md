@@ -21,6 +21,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Dev servers
 1. `arc serve` — starts the Rust API server (demo mode is per-request via `X-Arc-Demo: 1` header)
 2. `cd apps/arc-web && bun run dev` — starts the React dev server
+3. Mintlify docs dev server (requires Docker — `mintlify dev` needs Node LTS which may not match the host):
+   ```
+   docker run --rm -d -p 3333:3333 -v $(pwd)/docs:/docs -w /docs --name mintlify-dev node:22-slim \
+     bash -c "npx mintlify dev --host 0.0.0.0 --port 3333"
+   ```
+   Then open http://localhost:3333. Stop with `docker stop mintlify-dev`.
 
 ## API workflow
 
