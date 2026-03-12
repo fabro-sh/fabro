@@ -121,4 +121,22 @@ Or from a [run config TOML](/execution/run-configuration) for repeatable, parame
 arc run run.toml
 ```
 
+In the web UI, the Workflows page lists all available workflows. Click into a workflow to view its DOT definition, rendered graph diagram, and run history.
+
+<Frame caption="The Workflows page lists all available workflows with their trigger type and last run time.">
+  <img src="/images/web/workflows-list.png" alt="Arc web UI Workflows list showing Fix Build, Implement Feature, Sync Drift, and Expand Product workflows" />
+</Frame>
+
+<Frame caption="The workflow detail view shows the DOT definition with syntax highlighting.">
+  <img src="/images/web/workflow-detail.png" alt="Arc web UI workflow detail showing the DOT source for Fix Build" />
+</Frame>
+
+<Frame caption="The Diagram tab renders the workflow graph visually, showing nodes, edges, and conditions.">
+  <img src="/images/web/workflow-diagram.png" alt="Arc web UI workflow diagram showing the Fix Build workflow graph" />
+</Frame>
+
+<Frame caption="The Runs tab shows all runs for this workflow, filterable by status.">
+  <img src="/images/web/workflow-runs.png" alt="Arc web UI workflow runs tab showing run history for Fix Build" />
+</Frame>
+
 See the [Quick Start](/getting-started/quick-start) to try it out, or browse the [example workflows](/examples/implement-feature) for real-world patterns.

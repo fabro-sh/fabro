@@ -7,6 +7,10 @@ After every workflow run, Arc generates a **retro** — a structured retrospecti
 
 The goal is continuous improvement. Retros give you a searchable history of how your workflows perform over time, surface friction patterns that would otherwise go unnoticed, and identify follow-up work before it falls through the cracks.
 
+<Frame caption="The Retros page shows all retrospectives with smoothness ratings, duration, and friction counts.">
+  <img src="/images/web/retros-list.png" alt="Arc web UI Retros list showing runs with Smooth, Bumpy, Effortless, and Struggled ratings" />
+</Frame>
+
 ## What's in a retro
 
 A retro has two layers: **quantitative stats** derived cheaply from checkpoint data, and an **agent-generated narrative** that interprets the run holistically.
@@ -96,6 +100,10 @@ Retro generation happens in two phases after a run completes:
 2. **Narrate** — An LLM agent session analyzes the run data. The agent has read access to `progress.jsonl`, `checkpoint.json`, and `manifest.json`. It uses grep and read tools to find interesting signals — failures, retries, errors, approach changes — then calls a `submit_retro` tool with its structured analysis. The narrative fields are merged into the existing retro and saved.
 
 Both phases run automatically at the end of every CLI run. The API server derives the quantitative layer but does not currently run the narrative agent.
+
+<Frame caption="A run's Retro tab shows the smoothness rating, stats, learnings, and open items.">
+  <img src="/images/web/run-retro.png" alt="Arc web UI run retro showing Smooth rating, duration, cost, learnings, and follow-up items" />
+</Frame>
 
 ## Accessing retros
 

@@ -14,28 +14,24 @@ Arc has two modes:
 - **Server mode** — A REST API server with a web frontend for launching and managing workflow runs. See [Server Deployment](/administration/deploy-server) for details.
 </Note>
 
-## Prerequisites
-
-- [Rust](https://rustup.rs/) (latest stable)
-- At least one LLM API key (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`)
-
-## Clone and build
+## Install
 
 ```bash
-git clone https://github.com/qltysh/arc.git
-cd arc
-cargo build --release
+curl -fsSL https://fabro.sh/install.sh | bash
 ```
+
+## Initialize your project
+
+```bash
+cd my-repo/
+arc init
+```
+
+This creates a default workflow and configuration in your project directory.
 
 ## Configure API keys
 
-Copy the example environment file and fill in your API keys:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and add at least one LLM provider key:
+Add at least one LLM provider key:
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
@@ -47,34 +43,10 @@ GEMINI_API_KEY=AI...
 You only need one provider key to get started. Add more to enable multi-model workflows.
 </Note>
 
-## Run the setup wizard
-
-The interactive setup wizard validates your environment and walks you through configuration:
+## Run your first workflow
 
 ```bash
-./target/release/arc install
-```
-
-## Verify your installation
-
-```bash
-./target/release/arc doctor --live
-```
-
-This checks that your API keys, tools, and environment are working correctly.
-
-## Run a workflow from the CLI
-
-Try the hello world workflow:
-
-```bash
-./target/release/arc run docs-internal/demo/01-hello.dot
-```
-
-Or a multi-step plan-approve-implement workflow with a human approval gate:
-
-```bash
-./target/release/arc run docs-internal/demo/10-plan-implement.dot
+arc run hello
 ```
 
 ## Next steps

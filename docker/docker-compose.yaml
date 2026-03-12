@@ -21,6 +21,7 @@ services:
       - ARC_DEMO=1
     volumes:
       - ./demo-server.toml:/root/.arc/server.toml:ro
+      - ../apps/arc-web/public:/app/apps/arc-web/public
     depends_on:
       - api
 

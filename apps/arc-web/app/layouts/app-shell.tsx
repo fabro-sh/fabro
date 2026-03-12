@@ -64,13 +64,11 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 const navigation = [
-  { name: "Start", href: "/start", icon: SparklesIcon },
   { name: "Workflows", href: "/workflows", icon: RectangleStackIcon },
   { name: "Runs", href: "/runs", icon: PlayIcon },
   { name: "Verification", href: "/verification/criteria", icon: CheckBadgeIcon },
   { name: "Retros", href: "/retros", icon: LightBulbIcon },
   { name: "Insights", href: "/insights", icon: ChartBarIcon },
-  { name: "Settings", href: "/settings", icon: Cog6ToothIcon },
 ];
 
 function classNames(...classes: Array<string | false | null | undefined>) {

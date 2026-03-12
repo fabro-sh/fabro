@@ -24,6 +24,10 @@ Arc has two interfaces, both backed by the same workflow engine:
 
 In CLI mode, you run a single workflow directly in your terminal. In API mode, `arc serve` starts an HTTP server that accepts runs via `POST /runs`, queues them, and streams events to the web UI or any HTTP client. Both modes parse the same DOT files, use the same execution engine, and support the same sandbox providers.
 
+<Frame caption="The Runs board in the web UI shows all active runs organized by status.">
+  <img src="/images/web/runs-board.png" alt="Arc web UI Runs board with Working, Pending, Verify, and Merge columns" />
+</Frame>
+
 See [Architecture](/reference/architecture) for the full details.
 
 ## Author time
@@ -54,6 +58,10 @@ The engine walks the graph starting from the start node. For each node it:
 5. **Checkpoints** — After each stage, Arc writes a checkpoint so the run can be resumed if interrupted.
 
 This loop repeats until execution reaches the exit node or an unrecoverable error occurs.
+
+<Frame caption="The run detail view shows stage progress alongside the workflow graph.">
+  <img src="/images/web/run-overview.png" alt="Arc web UI run detail showing stages and workflow graph" />
+</Frame>
 
 ## Retries and error handling
 
