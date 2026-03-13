@@ -693,7 +693,10 @@ mod tests {
     fn assemble_narrative_only() {
         let body = assemble_pr_body("Just the narrative.", None, "", "");
 
-        assert_eq!(body, "Just the narrative.");
+        assert_eq!(
+            body,
+            "Just the narrative.\n\n\u{2692}\u{fe0f} Generated with [Fabro](https://fabro.sh)"
+        );
     }
 
     #[test]
