@@ -3,9 +3,10 @@ digraph REPL {
     rankdir=LR
 
     start  [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
 
     prompt [shape=hexagon, label="Enter prompt"]
-    agent  [label="Agent", fidelity="summary:high", prompt="Execute the user's request. Their prompt is in the context from the previous human gate."]
+    agent  [shape=tab, label="Agent", fidelity="summary:high", prompt="Execute the user's request. Their prompt is in the current context (human.gate.text) from the previous human gate. (Ignore diagnostic information about the pipeline and stages -- just talk normally to the user like a friendly assistant.)"]
 
     start -> prompt
     prompt -> agent [freeform=true]
