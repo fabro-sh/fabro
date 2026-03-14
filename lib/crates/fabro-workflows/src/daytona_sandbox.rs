@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use fabro_github::GitHubAppCredentials;
 
 const WORKING_DIRECTORY: &str = "/home/daytona/workspace";
-const DEFAULT_IMAGE: &str = "ubuntu:22.04";
+const DEFAULT_SNAPSHOT: &str = "daytona-medium";
 
 /// Configuration for a Daytona cloud sandbox.
 ///
@@ -543,10 +543,9 @@ impl Sandbox for DaytonaSandbox {
                 snapshot: snap_cfg.name.clone(),
             })
         } else {
-            daytona_sdk::CreateParams::Image(daytona_sdk::ImageParams {
+            daytona_sdk::CreateParams::Snapshot(daytona_sdk::SnapshotParams {
                 base: self.base_params(),
-                image: daytona_sdk::ImageSource::Name(DEFAULT_IMAGE.to_string()),
-                resources: None,
+                snapshot: DEFAULT_SNAPSHOT.to_string(),
             })
         };
 
