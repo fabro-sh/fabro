@@ -1,23 +1,29 @@
 {
-  "timestamp": "2026-03-14T21:04:12.620783Z",
-  "current_node": "fork",
+  "timestamp": "2026-03-14T21:04:14.467802Z",
+  "current_node": "merge",
   "completed_nodes": [
     "start",
-    "fork"
+    "fork",
+    "merge"
   ],
   "node_retries": {
     "start": 1,
+    "merge": 1,
     "fork": 1
   },
   "context_values": {
-    "current.preamble": "Goal: Test parallel and fan-in execution\n",
-    "internal.thread_id": "start",
+    "parallel.fan_in.best_id": "branch1",
+    "current.preamble": "Goal: Test parallel and fan-in execution\n\n## Completed stages\n- **fork**: success\n\n## Context\n- parallel.branch_count: 2\n- parallel.results: [{\"id\":\"branch1\",\"status\":\"success\",\"head_sha\":\"c5648b40c9bd07a901bc9c6c7e9b5cb7264713eb\"},{\"id\":\"branch2\",\"status\":\"success\",\"head_sha\":\"fa0f142a4d71f6d3f94580b18289c39e8c9e0b2a\"}]\n",
+    "internal.thread_id": "fork",
     "internal.node_visit_count": 1,
     "failure_signature": "",
     "internal.fidelity": "compact",
     "failure_class": "",
+    "internal.retry_count.merge": 1,
     "internal.work_dir": "/Users/bhelmkamp/.fabro/runs/20260314-01KKQ2KT7BS1KVPN21GY9K0733/worktree",
     "graph.goal": "Test parallel and fan-in execution",
+    "parallel.fan_in.best_head_sha": "c5648b40c9bd07a901bc9c6c7e9b5cb7264713eb",
+    "parallel.fan_in.best_outcome": "success",
     "parallel.results": [
       {
         "id": "branch1",
@@ -32,8 +38,9 @@
     ],
     "internal.retry_count.start": 1,
     "internal.retry_count.fork": 1,
-    "current_node": "fork",
+    "current_node": "merge",
     "parallel.branch_count": 2,
+    "thread.fork.current_node": "merge",
     "outcome": "success",
     "thread.start.current_node": "fork",
     "internal.run_id": "01KKQ2KT7BS1KVPN21GY9K0733"
@@ -49,11 +56,22 @@
       "notes": "Parallel node dispatched 2 branches (2 succeeded, 0 failed)",
       "jump_to_node": "merge",
       "duration_ms": 1754
+    },
+    "merge": {
+      "status": "success",
+      "context_updates": {
+        "parallel.fan_in.best_id": "branch1",
+        "parallel.fan_in.best_outcome": "success",
+        "parallel.fan_in.best_head_sha": "c5648b40c9bd07a901bc9c6c7e9b5cb7264713eb"
+      },
+      "notes": "Selected best candidate: branch1",
+      "duration_ms": 27
     }
   },
-  "next_node_id": "merge",
+  "next_node_id": "review",
   "node_visits": {
     "fork": 1,
+    "merge": 1,
     "start": 1
   }
 }
