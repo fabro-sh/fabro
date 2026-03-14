@@ -94,7 +94,7 @@ dockerfile = "FROM node:20-slim\nRUN apt-get update && apt-get install -y git"
 When a run starts with a snapshot configured, Fabro looks up the snapshot by name. If it doesn't exist and a `dockerfile` is provided, Fabro creates it automatically and polls until it reaches `Active` state (up to 10 minutes). If the snapshot already exists, it's reused immediately.
 
 <Note>
-If the snapshot doesn't exist and no `dockerfile` is provided, the run fails immediately. Without a snapshot, sandboxes are created from the default `ubuntu:22.04` image.
+If a snapshot is configured by name but doesn't exist and no `dockerfile` is provided, the run fails immediately. If no snapshot is configured at all, sandboxes are created from the `daytona-medium` snapshot which includes standard dev tools (git, etc.).
 </Note>
 
 ## Private repositories

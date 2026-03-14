@@ -341,6 +341,7 @@ Fabro validates workflows at parse time and reports diagnostics. Key rules:
 - Conditional nodes have multiple outgoing edges with conditions
 - Retry targets reference existing nodes
 - Goal gates have retry configuration
+- `thread_id` requires `fidelity="full"` (session reuse depends on full fidelity)
 - Known handler types only
 
 ## Complete example

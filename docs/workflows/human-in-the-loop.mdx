@@ -17,7 +17,7 @@ approve -> plan      [label="[R] Revise"]
 approve -> skip      [label="[S] Skip"]
 ```
 
-When execution reaches the gate, the user sees the node's label ("Approve Plan") and the available options. In the CLI, this appears as an interactive menu. In the web UI, it appears as a set of buttons.
+When execution reaches the gate, the user sees the previous stage's output followed by the node's label ("Approve Plan") and the available options. In the CLI, this appears as an interactive menu. In the web UI, it appears as a set of buttons.
 
 ### Keyboard accelerators
 
@@ -44,6 +44,8 @@ review -> custom    [freeform=true]
 ```
 
 If the user types something that doesn't match any fixed option, their input routes to the freeform edge. The text is available to downstream nodes as `human.gate.text` in the run context.
+
+When a gate has only a freeform edge and no fixed choices, the user goes directly to a text input prompt — skipping the multiple-choice menu entirely. This is useful for conversational loops like REPL workflows where the user provides open-ended instructions each iteration.
 
 ### Default choice on timeout
 

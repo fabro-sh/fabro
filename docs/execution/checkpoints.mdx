@@ -154,6 +154,23 @@ git show refs/fabro/01JKXYZ...:checkpoint.json | jq .current_node
 git show origin/fabro/meta/01JKXYZ...:checkpoint.json | jq .current_node
 ```
 
+## Rewinding to an earlier checkpoint
+
+If a later stage goes off-track, you can rewind a run to an earlier checkpoint and resume from there instead of restarting the entire workflow:
+
+```bash
+# List the checkpoint timeline
+fabro rewind <RUN_ID> --list
+
+# Rewind to a specific checkpoint
+fabro rewind <RUN_ID> plan@2
+
+# Resume from the rewound point
+fabro run --run-branch fabro/run/<RUN_ID>
+```
+
+See [`fabro rewind`](/reference/cli#fabro-rewind) for the full command reference.
+
 ## When checkpointing is active
 
 Git checkpointing activates automatically when:

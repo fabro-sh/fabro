@@ -8,7 +8,7 @@ date: "2026-03-14"
 You can now rewind a workflow run to an earlier checkpoint and resume from there. This is useful when a later stage goes off-track and you want to try again from a known-good point without restarting the entire workflow.
 
 ```bash
-fabro rewind --run-branch fabro/runs/my-run --target plan@2
+fabro rewind my-run plan@2
 ```
 
 Target a specific node by name, `node@visit` for a particular visit count, or `@ordinal` for a checkpoint index. The command rewinds both the metadata and run branch refs, and optionally pushes to the remote.

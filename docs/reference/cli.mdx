@@ -46,7 +46,7 @@ fabro run --run-branch fabro/run/abc123
 
 | Argument / Flag | Description |
 |---|---|
-| `<WORKFLOW>` | Path to a `.fabro` workflow file or `.toml` task config. Not required when using `--run-branch`. |
+| `<WORKFLOW>` | Path to a `.fabro` workflow file, `.toml` task config, or workflow name (resolved from `fabro/workflows/` in the project, then `~/.fabro/workflows/`). Not required when using `--run-branch`. |
 | `--run-dir <DIR>` | Run output directory |
 | `--dry-run` | Execute with a simulated LLM backend |
 | `--preflight` | Validate run configuration without executing |
@@ -371,6 +371,48 @@ fabro skill install --for user --dir claude
 | `--for <SCOPE>` | `user` (default) — installs to `~/<dir>/skills/`. `project` — installs to `./<dir>/skills/`. |
 | `--dir <DIR>` | Directory convention: `claude` (`.claude/skills/`) or `agents` (`.agents/skills/`). Required. |
 | `--force` | Overwrite an existing installation without prompting. |
+
+## `fabro rewind`
+
+Rewind a workflow run to an earlier checkpoint. This resets both the run branch and metadata branch refs so that `fabro run --run-branch` resumes from the target checkpoint.
+
+```bash
+fabro rewind <RUN_ID> [TARGET]
+fabro rewind <RUN_ID> --list
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<RUN_ID>` | Run ID or unambiguous prefix (required) |
+| `[TARGET]` | Checkpoint to rewind to: node name, `node@visit`, or `@ordinal` (1-based). Omit to show the timeline. |
+| `--list` | Show the checkpoint timeline instead of rewinding |
+| `--no-push` | Skip force-pushing rewound refs to the remote |
+
+Target formats:
+
+| Format | Example | Meaning |
+|---|---|---|
+| `node` | `plan` | Most recent visit of the named node |
+| `node@N` | `plan@2` | The 2nd visit of the named node |
+| `@N` | `@3` | The 3rd checkpoint in sequence |
+
+After rewinding, resume from the earlier point:
+
+```bash
+fabro run --run-branch fabro/run/<RUN_ID>
+```
+
+See [Checkpoints](/execution/checkpoints#rewinding-to-an-earlier-checkpoint) for background on how checkpointing works.
+
+## `fabro workflow list`
+
+List all available workflows in the current project. Shows workflows from both the project directory and user-level `~/.fabro/workflows/`, grouped by source with descriptions pulled from each workflow's goal.
+
+```bash
+fabro workflow list
+```
+
+---
 
 ## `fabro validate`
 
