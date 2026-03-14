@@ -15,16 +15,20 @@
 
 
 /**
- * A file and line location in the codebase.
+ * SSH sandbox configuration for user-provided hosts.
  */
-export interface CodeLocation {
+export interface SshConfiguration {
     /**
-     * File path.
+     * SSH destination (e.g. user@host or an SSH alias).
      */
-    'file': string;
+    'destination': string;
     /**
-     * Line number in the file.
+     * Remote working directory.
      */
-    'line'?: number;
+    'working_directory': string;
+    /**
+     * Optional path to a custom SSH config file.
+     */
+    'config_file'?: string;
 }
 

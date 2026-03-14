@@ -1,8 +1,8 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Arc Run API
- * HTTP API for managing Arc workflow run executions.
+ * Fabro Run API
+ * HTTP API for managing Fabro workflow run executions.
  *
  * The version of the OpenAPI document: 0.1.0
  * 
@@ -22,6 +22,9 @@ import type { ExeConfiguration } from './exe-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { LocalSandboxConfiguration } from './local-sandbox-configuration';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SshConfiguration } from './ssh-configuration';
 
 /**
  * Sandbox execution environment settings.
@@ -35,8 +38,13 @@ export interface SandboxConfiguration {
      * Whether to preserve the sandbox after the run.
      */
     'preserve'?: boolean;
+    /**
+     * Whether to use a devcontainer for the sandbox.
+     */
+    'devcontainer'?: boolean;
     'daytona'?: DaytonaConfiguration;
     'exe'?: ExeConfiguration;
+    'ssh'?: SshConfiguration;
     'local'?: LocalSandboxConfiguration;
     /**
      * Environment variables injected into the sandbox.
