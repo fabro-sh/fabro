@@ -116,6 +116,8 @@ enum Command {
         #[command(subcommand)]
         command: SkillCommand,
     },
+    /// Rewind a workflow run to an earlier checkpoint
+    Rewind(fabro_workflows::cli::rewind::RewindArgs),
     /// Workflow operations
     Workflow {
         #[command(subcommand)]
@@ -311,6 +313,7 @@ async fn main_inner() -> (String, Result<()>) {
             PrCommand::Merge(_) => "pr merge",
             PrCommand::Close(_) => "pr close",
         },
+        Command::Rewind(_) => "rewind",
         Command::Workflow { command } => match command {
             WorkflowCommand::List(_) => "workflow list",
         },
@@ -606,6 +609,10 @@ async fn main_inner() -> (String, Result<()>) {
                         fabro_workflows::cli::pr::pr_close_command(args, github_app).await?;
                     }
                 }
+            }
+            Command::Rewind(args) => {
+                let styles = fabro_util::terminal::Styles::detect_stderr();
+                fabro_workflows::cli::rewind::rewind_command(&args, &styles)?;
             }
             Command::Workflow { command } => match command {
                 WorkflowCommand::List(args) => {

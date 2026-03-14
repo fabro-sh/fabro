@@ -8,6 +8,7 @@ pub mod pr;
 pub mod preview;
 pub mod progress;
 pub mod project_config;
+pub mod rewind;
 pub mod run;
 pub mod run_config;
 pub mod runs;

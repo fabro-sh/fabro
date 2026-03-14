@@ -182,6 +182,20 @@ impl Store {
         }
     }
 
+    /// Read a blob from the tree of a specific commit. Returns `None` if the path doesn't exist.
+    pub fn read_blob_at(&self, commit_oid: Oid, path: &str) -> Result<Option<Vec<u8>>> {
+        let commit = self.repo.find_commit(commit_oid)?;
+        let tree = commit.tree()?;
+        match tree.get_path(std::path::Path::new(path)) {
+            Ok(entry) => {
+                let blob = self.repo.find_blob(entry.id())?;
+                Ok(Some(blob.content().to_vec()))
+            }
+            Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Delete a branch reference. No-op if branch doesn't exist.
     pub fn delete_ref(&self, branch: &str) -> Result<()> {
         let refname = format!("refs/heads/{branch}");
@@ -536,5 +550,37 @@ mod tests {
     fn delete_ref_nonexistent_is_noop() {
         let (_dir, store) = temp_repo();
         store.delete_ref("nonexistent").unwrap();
+    }
+
+    // -- read_blob_at --
+
+    #[test]
+    fn read_blob_at_returns_content() {
+        let (_dir, store) = temp_repo();
+        let sig = Signature::now("Test", "test@example.com").unwrap();
+        let bs = crate::branchstore::BranchStore::new(&store, "test/data", &sig);
+        bs.ensure_branch().unwrap();
+        bs.write_entry("hello.txt", b"world", "add hello").unwrap();
+
+        let log = bs.log(1).unwrap();
+        let commit_oid = log[0].oid;
+
+        let content = store.read_blob_at(commit_oid, "hello.txt").unwrap();
+        assert_eq!(content.unwrap(), b"world");
+    }
+
+    #[test]
+    fn read_blob_at_returns_none_for_missing_path() {
+        let (_dir, store) = temp_repo();
+        let sig = Signature::now("Test", "test@example.com").unwrap();
+        let bs = crate::branchstore::BranchStore::new(&store, "test/data", &sig);
+        bs.ensure_branch().unwrap();
+        bs.write_entry("hello.txt", b"world", "add hello").unwrap();
+
+        let log = bs.log(1).unwrap();
+        let commit_oid = log[0].oid;
+
+        let content = store.read_blob_at(commit_oid, "nonexistent.txt").unwrap();
+        assert!(content.is_none());
     }
 }
