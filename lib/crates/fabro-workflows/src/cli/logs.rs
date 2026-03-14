@@ -287,13 +287,15 @@ pub fn format_event_pretty(line: &str, styles: &fabro_util::terminal::Styles) ->
             let model = str_field(&envelope, "model").unwrap_or("?");
             let text = str_field(&envelope, "text").unwrap_or("");
             let header = format!(
-                "{} {} {} [{}]",
+                "{} {} {} {}{}{}",
                 styles.dim.apply_to(&ts),
                 "\u{1f4ac}",
                 styles.bold.apply_to(stage),
+                styles.dim.apply_to("["),
                 styles.dim.apply_to(model),
+                styles.dim.apply_to("]"),
             );
-            let indent = "           ";
+            let indent = "            ";
             let term_width = fabro_util::terminal::Styles::terminal_width();
             let wrap_width = term_width.saturating_sub(indent.len());
             let rendered = styles.render_markdown_width(text, wrap_width);
@@ -313,7 +315,7 @@ pub fn format_event_pretty(line: &str, styles: &fabro_util::terminal::Styles) ->
                 None => tool.to_string(),
             };
             Some(format!(
-                "{}   {} {}",
+                "{}    {} {}",
                 styles.dim.apply_to(&ts),
                 styles.dim.apply_to("\u{2699}"),
                 styles.dim.apply_to(&display),
@@ -334,7 +336,7 @@ pub fn format_event_pretty(line: &str, styles: &fabro_util::terminal::Styles) ->
             let glyph = if is_error { "\u{2717}" } else { "\u{2713}" };
             let style = if is_error { &styles.red } else { &styles.green };
             Some(format!(
-                "{}   {} {}",
+                "{}    {} {}",
                 styles.dim.apply_to(&ts),
                 style.apply_to(glyph),
                 display,
