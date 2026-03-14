@@ -58,8 +58,8 @@ root = \"fabro/\"
     std::fs::create_dir_all(&workflow_dir)
         .with_context(|| format!("failed to create {}", workflow_dir.display()))?;
 
-    // Create workflow.dot
-    let dot_path = workflow_dir.join("workflow.dot");
+    // Create workflow.fabro
+    let dot_path = workflow_dir.join("workflow.fabro");
     std::fs::write(
         &dot_path,
         r#"digraph Hello {
@@ -79,14 +79,14 @@ root = \"fabro/\"
     eprintln!(
         "  {} {}",
         green.apply_to("✔"),
-        dim.apply_to("arc/workflows/hello/workflow.dot")
+        dim.apply_to("arc/workflows/hello/workflow.fabro")
     );
 
     // Create workflow.toml
     let toml_path = workflow_dir.join("workflow.toml");
     std::fs::write(
         &toml_path,
-        "version = 1\ngraph = \"workflow.dot\"\n\n[sandbox]\nprovider = \"local\"\n",
+        "version = 1\ngraph = \"workflow.fabro\"\n\n[sandbox]\nprovider = \"local\"\n",
     )
     .with_context(|| format!("failed to write {}", toml_path.display()))?;
     eprintln!(

@@ -334,7 +334,7 @@ mod tests {
         assert!(outcome
             .failure_reason()
             .unwrap()
-            .contains("No child DOT source"));
+            .contains("No child workflow source"));
     }
 
     #[tokio::test]

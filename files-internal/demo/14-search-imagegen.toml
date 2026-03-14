@@ -1,6 +1,6 @@
 version = 1
 goal = "Search the web for a famous landmark, then generate an image of it"
-graph = "14-search-imagegen.dot"
+graph = "14-search-imagegen.fabro"
 
 [sandbox]
 provider = "daytona"

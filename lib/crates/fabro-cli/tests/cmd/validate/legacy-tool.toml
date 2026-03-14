@@ -1,5 +1,5 @@
 bin.name = "fabro"
-args = ["validate", "../../../test/legacy_tool.dot"]
+args = ["validate", "../../../test/legacy_tool.fabro"]
 
 [fs]
 sandbox = false

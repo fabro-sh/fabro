@@ -35,7 +35,7 @@ run_one() {
 
     # Check for companion run.toml (run-<stem>.toml in same dir)
     local stem
-    stem="$(basename "${dot%.dot}")"
+    stem="$(basename "${dot%.fabro}")"
     local toml
     toml="${dot_dir}/run-${stem}.toml"
 
@@ -101,7 +101,7 @@ echo ""
 dots=()
 while IFS= read -r dot; do
     dots+=("$dot")
-done < <(find "$SCRIPT_DIR" -name '*.dot' | sort)
+done < <(find "$SCRIPT_DIR" -name '*.fabro' | sort)
 
 # Run with parallelism
 active=0

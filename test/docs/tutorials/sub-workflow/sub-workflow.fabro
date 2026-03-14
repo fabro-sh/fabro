@@ -6,7 +6,7 @@ digraph SubWorkflow {
     exit  [shape=Msquare, label="Exit"]
 
     plan   [label="Plan", prompt="Analyze the goal. List the functions needed, their signatures, and edge cases. Write the plan to plan.md."]
-    impl   [label="Implement & Test", shape=house, stack.child_dotfile="implement-and-test.dot", manager.max_cycles=50]
+    impl   [label="Implement & Test", shape=house, stack.child_workflow="implement-and-test.fabro", manager.max_cycles=50]
     review [label="Review", prompt="Read every file the child workflow created. Run the tests yourself with 'python3 -m pytest -v'. Verify the implementation matches plan.md and all tests pass. Write a short verdict to review.md."]
 
     start -> plan -> impl -> review -> exit

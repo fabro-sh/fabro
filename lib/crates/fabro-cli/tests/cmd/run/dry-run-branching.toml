@@ -1,5 +1,5 @@
 bin.name = "fabro"
-args = ["run", "--dry-run", "--auto-approve", "../../../test/branching.dot"]
+args = ["run", "--dry-run", "--auto-approve", "../../../test/branching.fabro"]
 
 [fs]
 sandbox = false

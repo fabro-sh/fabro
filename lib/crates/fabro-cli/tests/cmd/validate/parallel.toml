@@ -1,5 +1,5 @@
 bin.name = "fabro"
-args = ["validate", "../../../test/parallel.dot"]
+args = ["validate", "../../../test/parallel.fabro"]
 
 [fs]
 sandbox = false

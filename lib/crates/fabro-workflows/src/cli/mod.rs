@@ -87,7 +87,7 @@ impl FromStr for SandboxProvider {
 #[command(
     name = "fabro-workflows",
     version,
-    about = "DOT-based workflow runner for AI workflows"
+    about = "Workflow runner for AI workflows"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -96,7 +96,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Launch a workflow from a .dot or .toml task file
+    /// Launch a workflow from a .fabro or .toml task file
     Run(RunArgs),
     /// Parse and validate a workflow without executing
     Validate(ValidateArgs),
@@ -104,7 +104,7 @@ pub enum Command {
 
 #[derive(Args)]
 pub struct RunArgs {
-    /// Path to a .dot workflow file or .toml task config (not required with --run-branch)
+    /// Path to a .fabro workflow file or .toml task config (not required with --run-branch)
     #[arg(required_unless_present = "run_branch")]
     pub workflow: Option<PathBuf>,
 
@@ -175,22 +175,22 @@ pub struct RunArgs {
 
 #[derive(Args)]
 pub struct ValidateArgs {
-    /// Path to the .dot workflow file
+    /// Path to the .fabro workflow file
     pub workflow: PathBuf,
 }
 
 #[derive(Args)]
 pub struct ParseArgs {
-    /// Path to the .dot workflow file
+    /// Path to the .fabro workflow file
     pub workflow: PathBuf,
 }
 
-/// Read a .dot file from disk.
+/// Read a workflow file from disk.
 ///
 /// # Errors
 ///
 /// Returns an error if the file cannot be read.
-pub fn read_dot_file(path: &Path) -> anyhow::Result<String> {
+pub fn read_workflow_file(path: &Path) -> anyhow::Result<String> {
     std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("Failed to read {}: {e}", path.display()))
 }

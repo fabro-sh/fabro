@@ -1,6 +1,6 @@
 version = 1
 goal = "Run cargo check in a Daytona cloud sandbox"
-graph = "check.dot"
+graph = "check.fabro"
 
 [llm]
 model = "claude-sonnet"

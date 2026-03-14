@@ -1303,7 +1303,7 @@ mod runs {
         serde_json::to_value(fabro_workflows::cli::run_config::WorkflowRunConfig {
             version: 1,
             goal: Some("Add rate limiting to auth endpoints".into()),
-            graph: "implement.dot".into(),
+            graph: "implement.fabro".into(),
             directory: Some("/workspace/api-server".into()),
             llm: Some(fabro_workflows::cli::run_config::LlmConfig {
                 model: Some("claude-opus-4-6".into()),
@@ -1415,7 +1415,7 @@ mod workflows {
             WorkflowListItem {
                 name: "Fix Build".into(),
                 slug: "fix_build".into(),
-                filename: "fix_build.dot".into(),
+                filename: "fix_build.fabro".into(),
                 last_run: Some(WorkflowLastRun {
                     ran_at: ts("2025-09-15T12:00:00Z"),
                 }),
@@ -1424,7 +1424,7 @@ mod workflows {
             WorkflowListItem {
                 name: "Implement Feature".into(),
                 slug: "implement".into(),
-                filename: "implement.dot".into(),
+                filename: "implement.fabro".into(),
                 last_run: Some(WorkflowLastRun {
                     ran_at: ts("2025-09-11T10:00:00Z"),
                 }),
@@ -1433,7 +1433,7 @@ mod workflows {
             WorkflowListItem {
                 name: "Sync Drift".into(),
                 slug: "sync_drift".into(),
-                filename: "sync_drift.dot".into(),
+                filename: "sync_drift.fabro".into(),
                 last_run: Some(WorkflowLastRun {
                     ran_at: ts("2025-09-14T14:00:00Z"),
                 }),
@@ -1442,7 +1442,7 @@ mod workflows {
             WorkflowListItem {
                 name: "Expand Product".into(),
                 slug: "expand".into(),
-                filename: "expand.dot".into(),
+                filename: "expand.fabro".into(),
                 last_run: Some(WorkflowLastRun {
                     ran_at: ts("2025-09-01T08:00:00Z"),
                 }),
@@ -1475,12 +1475,12 @@ mod workflows {
     pub fn detail(name: &str) -> Option<WorkflowDetail> {
         let items = [
             WorkflowDetail {
-                name: "Fix Build".into(), slug: "fix_build".into(), filename: "fix_build.dot".into(),
+                name: "Fix Build".into(), slug: "fix_build".into(), filename: "fix_build.fabro".into(),
                 description: "Automatically diagnoses and fixes CI build failures by analyzing error logs, identifying root causes, and applying targeted code changes.".into(),
                 config: run_config_to_api(fabro_workflows::cli::run_config::WorkflowRunConfig {
                     version: 1,
                     goal: Some("Diagnose and fix CI build failures".into()),
-                    graph: "fix_build.dot".into(),
+                    graph: "fix_build.fabro".into(),
                     directory: None,
                     llm: Some(fabro_workflows::cli::run_config::LlmConfig {
                         model: Some("claude-sonnet".into()),
@@ -1543,12 +1543,12 @@ mod workflows {
 "#.into(),
             },
             WorkflowDetail {
-                name: "Implement Feature".into(), slug: "implement".into(), filename: "implement.dot".into(),
+                name: "Implement Feature".into(), slug: "implement".into(), filename: "implement.fabro".into(),
                 description: "Generates production-ready code from a technical blueprint, including tests, documentation, and a pull request ready for review.".into(),
                 config: run_config_to_api(fabro_workflows::cli::run_config::WorkflowRunConfig {
                     version: 1,
                     goal: Some("Implement feature from technical blueprint".into()),
-                    graph: "implement.dot".into(),
+                    graph: "implement.fabro".into(),
                     directory: None,
                     llm: Some(fabro_workflows::cli::run_config::LlmConfig {
                         model: Some("claude-sonnet".into()),
@@ -1629,12 +1629,12 @@ mod workflows {
 "#.into(),
             },
             WorkflowDetail {
-                name: "Sync Drift".into(), slug: "sync_drift".into(), filename: "sync_drift.dot".into(),
+                name: "Sync Drift".into(), slug: "sync_drift".into(), filename: "sync_drift.fabro".into(),
                 description: "Detects configuration and code drift between environments, then generates reconciliation patches to bring everything back in sync.".into(),
                 config: run_config_to_api(fabro_workflows::cli::run_config::WorkflowRunConfig {
                     version: 1,
                     goal: Some("Detect and reconcile configuration drift across environments".into()),
-                    graph: "sync_drift.dot".into(),
+                    graph: "sync_drift.fabro".into(),
                     directory: None,
                     llm: Some(fabro_workflows::cli::run_config::LlmConfig {
                         model: Some("claude-sonnet".into()),
@@ -1703,12 +1703,12 @@ mod workflows {
 "#.into(),
             },
             WorkflowDetail {
-                name: "Expand Product".into(), slug: "expand".into(), filename: "expand.dot".into(),
+                name: "Expand Product".into(), slug: "expand".into(), filename: "expand.fabro".into(),
                 description: "Evolves the product by analyzing usage patterns and specifications to propose and implement incremental improvements.".into(),
                 config: run_config_to_api(fabro_workflows::cli::run_config::WorkflowRunConfig {
                     version: 1,
                     goal: Some("Propose and implement incremental product improvements".into()),
-                    graph: "expand.dot".into(),
+                    graph: "expand.fabro".into(),
                     directory: None,
                     llm: Some(fabro_workflows::cli::run_config::LlmConfig {
                         model: Some("claude-sonnet".into()),

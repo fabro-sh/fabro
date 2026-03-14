@@ -80,7 +80,7 @@ pub fn discover_project_config(start: &Path) -> anyhow::Result<Option<(PathBuf, 
 
 /// Resolve a workflow argument to a path.
 ///
-/// - If the arg has a file extension (`.toml`, `.dot`, etc.), return it as-is.
+/// - If the arg has a file extension (`.toml`, `.fabro`, etc.), return it as-is.
 /// - If no extension, attempt project-based resolution: find `fabro.toml`, resolve
 ///   `{fabro_root}/workflows/{name}/workflow.toml`. Returns an error with suggestions
 ///   if an `fabro.toml` exists but the workflow wasn't found.
@@ -345,10 +345,10 @@ mod tests {
     }
 
     #[test]
-    fn resolve_workflow_arg_dot_extension_returned_as_is() {
+    fn resolve_workflow_arg_fabro_extension_returned_as_is() {
         let tmp = TempDir::new().unwrap();
-        let result = resolve_workflow_arg_from(Path::new("my-workflow.dot"), tmp.path()).unwrap();
-        assert_eq!(result, Path::new("my-workflow.dot"));
+        let result = resolve_workflow_arg_from(Path::new("my-workflow.fabro"), tmp.path()).unwrap();
+        assert_eq!(result, Path::new("my-workflow.fabro"));
     }
 
     #[test]
@@ -366,7 +366,7 @@ mod tests {
         fs::create_dir_all(&wf_dir).unwrap();
         fs::write(
             wf_dir.join("workflow.toml"),
-            "version = 1\ngraph = \"workflow.dot\"\n",
+            "version = 1\ngraph = \"workflow.fabro\"\n",
         )
         .unwrap();
 
@@ -382,7 +382,7 @@ mod tests {
         fs::create_dir_all(&wf_dir).unwrap();
         fs::write(
             wf_dir.join("workflow.toml"),
-            "version = 1\ngraph = \"w.dot\"\n",
+            "version = 1\ngraph = \"w.fabro\"\n",
         )
         .unwrap();
 
@@ -400,7 +400,7 @@ mod tests {
         fs::create_dir_all(&wf_dir).unwrap();
         fs::write(
             wf_dir.join("workflow.toml"),
-            "version = 1\ngraph = \"w.dot\"\n",
+            "version = 1\ngraph = \"w.fabro\"\n",
         )
         .unwrap();
 
@@ -433,7 +433,7 @@ mod tests {
         fs::create_dir_all(&wf_dir).unwrap();
         fs::write(
             wf_dir.join("workflow.toml"),
-            "version = 1\ngraph = \"workflow.dot\"\n",
+            "version = 1\ngraph = \"workflow.fabro\"\n",
         )
         .unwrap();
 
@@ -441,7 +441,7 @@ mod tests {
         assert_eq!(result, wf_dir.join("workflow.toml"));
     }
 
-    /// Helper: create a temp dir with fabro.toml + workflows/{name}/{workflow.toml, workflow.dot}
+    /// Helper: create a temp dir with fabro.toml + workflows/{name}/{workflow.toml, workflow.fabro}
     /// and chdir into it so `resolve_workflow` (which uses cwd) can find the config.
     fn setup_workflow_project(name: &str) -> (TempDir, PathBuf) {
         let tmp = TempDir::new().unwrap();
@@ -450,15 +450,15 @@ mod tests {
         fs::create_dir_all(&wf_dir).unwrap();
         fs::write(
             wf_dir.join("workflow.toml"),
-            "version = 1\ngraph = \"workflow.dot\"\n",
+            "version = 1\ngraph = \"workflow.fabro\"\n",
         )
         .unwrap();
         fs::write(
-            wf_dir.join("workflow.dot"),
+            wf_dir.join("workflow.fabro"),
             "digraph G { start [shape=Mdiamond]; exit [shape=Msquare]; start -> exit }",
         )
         .unwrap();
-        let dot_path = wf_dir.join("workflow.dot");
+        let dot_path = wf_dir.join("workflow.fabro");
         (tmp, dot_path)
     }
 
@@ -483,10 +483,10 @@ mod tests {
     }
 
     #[test]
-    fn resolve_workflow_dot_path() {
+    fn resolve_workflow_fabro_path() {
         let (tmp, expected_dot) = setup_workflow_project("hello");
         let (dot_path, cfg) = resolve_workflow_from(&expected_dot, tmp.path()).unwrap();
         assert_eq!(dot_path, expected_dot);
-        assert!(cfg.is_none(), "expected None for .dot path");
+        assert!(cfg.is_none(), "expected None for .fabro path");
     }
 }

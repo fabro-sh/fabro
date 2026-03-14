@@ -1,5 +1,5 @@
 bin.name = "fabro"
-args = ["validate", "../../../test/invalid.dot"]
+args = ["validate", "../../../test/invalid.fabro"]
 status = "failed"
 
 [fs]

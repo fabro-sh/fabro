@@ -1,6 +1,6 @@
 version = 1
 goal = "Browse the web with Playwright while user watches via VNC"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [llm]
 model = "claude-sonnet-4-6"

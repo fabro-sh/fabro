@@ -997,7 +997,7 @@ impl LintRule for UnresolvedFileRefRule {
                         ),
                         node_id: Some(node.id.clone()),
                         edge: None,
-                        fix: Some("Check that the path is relative to the .dot file's directory and the file exists".to_string()),
+                        fix: Some("Check that the path is relative to the workflow file's directory and the file exists".to_string()),
                     });
                 }
             }
@@ -1011,7 +1011,7 @@ impl LintRule for UnresolvedFileRefRule {
                     message: format!("Graph goal has unresolved file reference: {goal}"),
                     node_id: None,
                     edge: None,
-                    fix: Some("Check that the path is relative to the .dot file's directory and the file exists".to_string()),
+                    fix: Some("Check that the path is relative to the workflow file's directory and the file exists".to_string()),
                 });
             }
         }

@@ -11,7 +11,7 @@ use tracing::debug;
 use crate::validation::Severity;
 use crate::workflow::prepare_from_file;
 
-use super::{print_diagnostics, read_dot_file, relative_path};
+use super::{print_diagnostics, read_workflow_file, relative_path};
 
 /// Output format for graph rendering.
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -34,7 +34,7 @@ impl fmt::Display for GraphFormat {
 
 #[derive(Args)]
 pub struct GraphArgs {
-    /// Path to the .dot workflow file, .toml task config, or project workflow name
+    /// Path to the .fabro workflow file, .toml task config, or project workflow name
     pub workflow: PathBuf,
 
     /// Output format
@@ -58,7 +58,7 @@ pub fn graph_command(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
         bail!("Validation failed");
     }
 
-    let source = read_dot_file(&dot_path)?;
+    let source = read_workflow_file(&dot_path)?;
     let rendered = render_dot(&source, args.format)?;
 
     if let Some(ref output_path) = args.output {
@@ -140,7 +140,7 @@ mod tests {
     #[test]
     fn graph_missing_file() {
         let args = GraphArgs {
-            workflow: PathBuf::from("/tmp/nonexistent_workflow_99999.dot"),
+            workflow: PathBuf::from("/tmp/nonexistent_workflow_99999.fabro"),
             format: GraphFormat::Svg,
             output: None,
         };
@@ -151,7 +151,10 @@ mod tests {
 
     #[test]
     fn graph_invalid_syntax() {
-        let mut tmp = tempfile::Builder::new().suffix(".dot").tempfile().unwrap();
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".fabro")
+            .tempfile()
+            .unwrap();
         write!(tmp, "not a valid dot file").unwrap();
 
         let args = GraphArgs {
@@ -171,7 +174,10 @@ mod tests {
             return;
         }
 
-        let mut tmp = tempfile::Builder::new().suffix(".dot").tempfile().unwrap();
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".fabro")
+            .tempfile()
+            .unwrap();
         write!(tmp, "{VALID_DOT}").unwrap();
 
         let output_dir = tempfile::tempdir().unwrap();
@@ -197,7 +203,10 @@ mod tests {
             return;
         }
 
-        let mut tmp = tempfile::Builder::new().suffix(".dot").tempfile().unwrap();
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".fabro")
+            .tempfile()
+            .unwrap();
         write!(tmp, "{VALID_DOT}").unwrap();
 
         let output_dir = tempfile::tempdir().unwrap();
@@ -227,7 +236,10 @@ mod tests {
             return;
         }
 
-        let mut tmp = tempfile::Builder::new().suffix(".dot").tempfile().unwrap();
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".fabro")
+            .tempfile()
+            .unwrap();
         write!(tmp, "{VALID_DOT}").unwrap();
 
         let output_dir = tempfile::tempdir().unwrap();
@@ -258,10 +270,10 @@ mod tests {
         std::fs::create_dir_all(&wf_dir).unwrap();
         std::fs::write(
             wf_dir.join("workflow.toml"),
-            "version = 1\ngraph = \"workflow.dot\"\n",
+            "version = 1\ngraph = \"workflow.fabro\"\n",
         )
         .unwrap();
-        std::fs::write(wf_dir.join("workflow.dot"), VALID_DOT).unwrap();
+        std::fs::write(wf_dir.join("workflow.fabro"), VALID_DOT).unwrap();
 
         let output_dir = tempfile::tempdir().unwrap();
         let output_path = output_dir.path().join("out.svg");

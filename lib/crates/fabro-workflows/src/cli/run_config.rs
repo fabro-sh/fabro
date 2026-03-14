@@ -441,7 +441,7 @@ mod tests {
         let toml = r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [vars]
 repo_url = "https://github.com/org/repo"
@@ -522,7 +522,7 @@ language = "python"
         let toml = r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [sandbox]
 provider = "daytona"
@@ -538,7 +538,7 @@ devcontainer = true
         let toml = r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [sandbox]
 provider = "daytona"
@@ -553,7 +553,7 @@ provider = "daytona"
         let toml = r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [sandbox]
 provider = "daytona"
@@ -569,7 +569,7 @@ provider = "daytona"
         let toml = r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [sandbox]
 provider = "daytona"
@@ -614,7 +614,7 @@ dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update"
         let toml = r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [sandbox]
 provider = "daytona"
@@ -633,12 +633,12 @@ auto_stop_interval = 30
         let toml = r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 "#;
         let config = parse_run_config(toml).unwrap();
         assert_eq!(config.version, 1);
         assert_eq!(config.goal.as_deref(), Some("Run tests"));
-        assert_eq!(config.graph, "workflow.dot");
+        assert_eq!(config.graph, "workflow.fabro");
         assert!(config.directory.is_none());
         assert!(config.llm.is_none());
         assert!(config.setup.is_none());
@@ -648,7 +648,7 @@ graph = "workflow.dot"
     fn parse_toml_without_goal() {
         let toml = r#"
 version = 1
-graph = "workflow.dot"
+graph = "workflow.fabro"
 "#;
         let config = parse_run_config(toml).unwrap();
         assert!(config.goal.is_none());
@@ -659,7 +659,7 @@ graph = "workflow.dot"
         let toml = r#"
 version = 1
 goal = "Full workflow"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 directory = "/tmp/repo"
 
 [llm]
@@ -688,7 +688,7 @@ timeout_ms = 60000
         let toml = r#"
 version = 2
 goal = "x"
-graph = "p.dot"
+graph = "p.fabro"
 "#;
         let err = parse_run_config(toml).unwrap_err();
         assert!(
@@ -700,22 +700,22 @@ graph = "p.dot"
     #[test]
     fn graph_path_resolved_relative_to_toml() {
         let toml_path = Path::new("/tmp/sub/task.toml");
-        let resolved = resolve_graph_path(toml_path, "p.dot");
-        assert_eq!(resolved, PathBuf::from("/tmp/sub/p.dot"));
+        let resolved = resolve_graph_path(toml_path, "p.fabro");
+        assert_eq!(resolved, PathBuf::from("/tmp/sub/p.fabro"));
     }
 
     #[test]
     fn graph_path_absolute_unchanged() {
         let toml_path = Path::new("/tmp/sub/task.toml");
-        let resolved = resolve_graph_path(toml_path, "/other/workflow.dot");
-        assert_eq!(resolved, PathBuf::from("/other/workflow.dot"));
+        let resolved = resolve_graph_path(toml_path, "/other/workflow.fabro");
+        assert_eq!(resolved, PathBuf::from("/other/workflow.fabro"));
     }
 
     #[test]
     fn goal_is_optional() {
         let no_goal = r#"
 version = 1
-graph = "p.dot"
+graph = "p.fabro"
 "#;
         let config = parse_run_config(no_goal).unwrap();
         assert!(config.goal.is_none());
@@ -735,7 +735,7 @@ goal = "x"
         let toml = r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [sandbox.daytona.snapshot]
 name = "my-snapshot"
@@ -767,7 +767,7 @@ dockerfile = { path = "./Dockerfile" }
             r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [sandbox.daytona.snapshot]
 name = "my-snapshot"
@@ -795,7 +795,7 @@ dockerfile = { path = "Dockerfile" }
             r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [sandbox.daytona.snapshot]
 name = "my-snapshot"
@@ -867,7 +867,7 @@ key = "value"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 "#,
         )
         .unwrap();
@@ -890,7 +890,7 @@ graph = "w.dot"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [llm]
 model = "task-model"
@@ -916,7 +916,7 @@ model = "task-model"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [vars]
 task_key = "task_val"
@@ -945,7 +945,7 @@ shared = "from_task"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 "#,
         )
         .unwrap();
@@ -964,7 +964,7 @@ graph = "w.dot"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [llm]
 model = "haiku"
@@ -991,7 +991,7 @@ model = "haiku"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [setup]
 commands = ["make test"]
@@ -1016,7 +1016,7 @@ commands = ["make test"]
         let toml = r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [sandbox]
 provider = "docker"
@@ -1032,7 +1032,7 @@ preserve = true
         let toml = r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [sandbox]
 provider = "docker"
@@ -1047,7 +1047,7 @@ provider = "docker"
         let toml = r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox.local]
 worktree_mode = "always"
@@ -1062,7 +1062,7 @@ worktree_mode = "always"
         let toml = r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox]
 provider = "local"
@@ -1077,7 +1077,7 @@ provider = "local"
         let toml = r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox.local]
 "#;
@@ -1092,7 +1092,7 @@ graph = "w.dot"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox]
 preserve = true
@@ -1123,7 +1123,7 @@ preserve = true
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox]
 provider = "docker"
@@ -1154,7 +1154,7 @@ provider = "docker"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox]
 provider = "daytona"
@@ -1191,7 +1191,7 @@ provider = "daytona"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox]
 provider = "daytona"
@@ -1231,7 +1231,7 @@ auto_stop_interval = 60
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox.daytona.labels]
 project = "fabro"
@@ -1272,7 +1272,7 @@ env = "from_task"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox.daytona.snapshot]
 name = "task-snap"
@@ -1316,7 +1316,7 @@ cpu = 2
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox.daytona]
 auto_stop_interval = 60
@@ -1358,7 +1358,7 @@ auto_stop_interval = 60
         let toml = r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [llm]
 model = "claude-opus-4-6"
@@ -1380,7 +1380,7 @@ gemini = ["anthropic", "openai"]
         let toml = r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [llm]
 model = "claude-opus-4-6"
@@ -1397,7 +1397,7 @@ provider = "anthropic"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [llm]
 model = "opus"
@@ -1426,7 +1426,7 @@ anthropic = ["gemini"]
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [llm]
 model = "opus"
@@ -1489,7 +1489,7 @@ model = "opus"
         let toml = r#"
 version = 1
 goal = "Test hooks"
-graph = "test.dot"
+graph = "test.fabro"
 
 [[hooks]]
 event = "stage_start"
@@ -1518,7 +1518,7 @@ command = "echo done"
         let toml = r#"
 version = 1
 goal = "No hooks"
-graph = "test.dot"
+graph = "test.fabro"
 "#;
         let cfg: WorkflowRunConfig = toml::from_str(toml).unwrap();
         assert!(cfg.hooks.is_empty());
@@ -1529,7 +1529,7 @@ graph = "test.dot"
         let toml = r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox.daytona]
 network = "block"
@@ -1548,7 +1548,7 @@ network = "block"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox.daytona]
 network = "block"
@@ -1585,7 +1585,7 @@ network = "block"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox.daytona]
 auto_stop_interval = 60
@@ -1625,7 +1625,7 @@ auto_stop_interval = 60
         let toml = r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [checkpoint]
 exclude_globs = ["**/node_modules/**", "**/.cache/**"]
@@ -1642,7 +1642,7 @@ exclude_globs = ["**/node_modules/**", "**/.cache/**"]
         let toml = r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 "#;
         let config = parse_run_config(toml).unwrap();
         assert!(config.checkpoint.exclude_globs.is_empty());
@@ -1654,7 +1654,7 @@ graph = "w.dot"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [checkpoint]
 exclude_globs = ["**/dist/**", "**/.cache/**"]
@@ -1680,7 +1680,7 @@ exclude_globs = ["**/dist/**", "**/.cache/**"]
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 "#,
         )
         .unwrap();
@@ -1700,7 +1700,7 @@ graph = "w.dot"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [checkpoint]
 exclude_globs = ["**/dist/**"]
@@ -1730,7 +1730,7 @@ exclude_globs = ["**/node_modules/**"]
         let toml = r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox.env]
 FOO = "bar"
@@ -1748,7 +1748,7 @@ BAZ = "${env.HOME}"
         let toml = r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox]
 provider = "daytona"
@@ -1800,7 +1800,7 @@ provider = "daytona"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox.env]
 TASK_KEY = "task_val"
@@ -1838,7 +1838,7 @@ SHARED = "from_task"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox]
 provider = "daytona"
@@ -1874,7 +1874,7 @@ provider = "daytona"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox.env]
 LITERAL = "hello"
@@ -1899,7 +1899,7 @@ FROM_HOST = "${env.FABRO_TEST_LOAD_ENV}"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [sandbox.env]
 MISSING = "${env.FABRO_TEST_DEFINITELY_NOT_SET_67890}"
@@ -1920,7 +1920,7 @@ MISSING = "${env.FABRO_TEST_DEFINITELY_NOT_SET_67890}"
         let toml = r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [pull_request]
 enabled = true
@@ -1935,7 +1935,7 @@ enabled = true
         let toml = r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 "#;
         let config = parse_run_config(toml).unwrap();
         assert!(config.pull_request.is_none());
@@ -1947,7 +1947,7 @@ graph = "w.dot"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [pull_request]
 enabled = true
@@ -1971,7 +1971,7 @@ enabled = true
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 "#,
         )
         .unwrap();
@@ -2001,7 +2001,7 @@ enabled = true
         let toml = r#"
 version = 1
 goal = "Run tests"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [assets]
 include = ["test-results/**", "playwright-report/**", "*.trace.zip"]
@@ -2018,7 +2018,7 @@ include = ["test-results/**", "playwright-report/**", "*.trace.zip"]
     fn parse_toml_without_assets() {
         let toml = r#"
 version = 1
-graph = "workflow.dot"
+graph = "workflow.fabro"
 "#;
         let config = parse_run_config(toml).unwrap();
         assert!(config.assets.is_none());
@@ -2030,7 +2030,7 @@ graph = "workflow.dot"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 "#,
         )
         .unwrap();
@@ -2051,7 +2051,7 @@ graph = "w.dot"
             r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [assets]
 include = ["playwright-report/**"]
@@ -2074,7 +2074,7 @@ include = ["playwright-report/**"]
         let toml = r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [pull_request]
 enabled = true
@@ -2091,7 +2091,7 @@ draft = true
         let toml = r#"
 version = 1
 goal = "test"
-graph = "w.dot"
+graph = "w.fabro"
 
 [pull_request]
 enabled = true
