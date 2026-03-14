@@ -1,0 +1,11 @@
+digraph LegacyTool {
+    graph [goal="Verify backwards compatibility with old tool naming"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    echo_task [label="Echo", shape=parallelogram, tool_command="echo hello"]
+
+    start -> echo_task -> exit
+}

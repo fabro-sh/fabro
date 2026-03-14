@@ -1,0 +1,12 @@
+{
+  "run_id": "01KKQ2KT7AHQEXE1JAZHQZ9EHF",
+  "workflow_name": "LegacyTool",
+  "goal": "Verify backwards compatibility with old tool naming",
+  "start_time": "2026-03-14T21:04:10.856212Z",
+  "node_count": 3,
+  "edge_count": 2,
+  "run_branch": "fabro/run/01KKQ2KT7AHQEXE1JAZHQZ9EHF",
+  "base_sha": "312bef9b877f49abf4a2f34679f564826061b0d9",
+  "base_branch": "main",
+  "workflow_slug": "test"
+}
