@@ -1,32 +1,49 @@
 {
-  "timestamp": "2026-03-14T21:04:10.869091Z",
-  "current_node": "decide",
+  "timestamp": "2026-03-14T21:04:12.951135Z",
+  "current_node": "path_b",
   "completed_nodes": [
     "start",
-    "decide"
+    "decide",
+    "path_b"
   ],
   "node_retries": {
     "start": 1,
+    "path_b": 1,
     "decide": 1
   },
   "context_values": {
     "internal.node_visit_count": 1,
     "failure_class": "",
     "internal.fidelity": "compact",
+    "last_response": "[Simulated] Response for stage: path_b",
     "outcome": "success",
+    "internal.retry_count.path_b": 1,
     "failure_signature": "",
+    "last_stage": "path_b",
     "internal.run_id": "01KKQ2KT79N7X7654TTGWHEE3X",
     "internal.retry_count.start": 1,
-    "internal.thread_id": "start",
-    "current.preamble": "Goal: Test condition evaluation with OR and parentheses\n",
+    "internal.thread_id": "decide",
+    "current.preamble": "Goal: Test condition evaluation with OR and parentheses\n\n## Completed stages\n- **decide**: success\n",
+    "response.path_b": "[Simulated] Response for stage: path_b",
     "thread.start.current_node": "decide",
     "internal.work_dir": "/Users/bhelmkamp/.fabro/runs/20260314-01KKQ2KT79N7X7654TTGWHEE3X/worktree",
     "internal.retry_count.decide": 1,
-    "current_node": "decide",
-    "graph.goal": "Test condition evaluation with OR and parentheses"
+    "current_node": "path_b",
+    "graph.goal": "Test condition evaluation with OR and parentheses",
+    "thread.decide.current_node": "path_b"
   },
   "logs": [],
   "node_outcomes": {
+    "path_b": {
+      "status": "success",
+      "context_updates": {
+        "response.path_b": "[Simulated] Response for stage: path_b",
+        "last_stage": "path_b",
+        "last_response": "[Simulated] Response for stage: path_b"
+      },
+      "notes": "Stage completed: path_b",
+      "duration_ms": 5
+    },
     "decide": {
       "status": "success",
       "notes": "Conditional node evaluated: decide",
@@ -37,8 +54,9 @@
       "duration_ms": 0
     }
   },
-  "next_node_id": "path_b",
+  "next_node_id": "exit",
   "node_visits": {
+    "path_b": 1,
     "start": 1,
     "decide": 1
   }

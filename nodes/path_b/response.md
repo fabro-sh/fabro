@@ -1,0 +1,1 @@
+[Simulated] Response for stage: path_b
