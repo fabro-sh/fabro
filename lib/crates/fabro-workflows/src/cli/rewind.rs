@@ -137,7 +137,7 @@ fn backfill_run_shas(store: &Store, run_id: &str, timeline: &mut [TimelineEntry]
         return;
     }
 
-    let run_branch = format!("arc/run/{run_id}");
+    let run_branch = format!("{}{run_id}", crate::git::RUN_BRANCH_PREFIX);
     let sig = match Signature::now("Fabro", "noreply@fabro.sh") {
         Ok(s) => s,
         Err(_) => return,
@@ -333,7 +333,7 @@ pub fn execute_rewind(
     );
 
     // Move run branch ref
-    let run_branch = format!("arc/run/{run_id}");
+    let run_branch = format!("{}{run_id}", crate::git::RUN_BRANCH_PREFIX);
     match &entry.run_commit_sha {
         Some(sha) => {
             let oid =
@@ -341,7 +341,11 @@ pub fn execute_rewind(
             store
                 .update_ref(&run_branch, oid)
                 .map_err(|e| anyhow::anyhow!("failed to update run branch ref: {e}"))?;
-            eprintln!("Rewound run branch arc/run/{run_id} to {}", &sha[..8]);
+            eprintln!(
+                "Rewound run branch {}{run_id} to {}",
+                crate::git::RUN_BRANCH_PREFIX,
+                &sha[..8]
+            );
         }
         None => {
             eprintln!(
@@ -442,7 +446,11 @@ pub fn rewind_command(args: &RewindArgs, styles: &Styles) -> Result<()> {
 
     execute_rewind(&store, &run_id, entry, !args.no_push)?;
 
-    eprintln!("\nTo resume: fabro run --run-branch arc/run/{}", run_id);
+    eprintln!(
+        "\nTo resume: fabro run --run-branch {}{}",
+        crate::git::RUN_BRANCH_PREFIX,
+        run_id
+    );
 
     Ok(())
 }
@@ -814,7 +822,7 @@ mod tests {
         let sig = test_sig();
 
         // Create a run branch with some commits
-        let run_branch = "arc/run/run-2";
+        let run_branch = "fabro/run/run-2";
         let empty_tree = store.write_empty_tree().unwrap();
         let run_c1 = store
             .write_commit(empty_tree, &[], "run commit 1", &sig)

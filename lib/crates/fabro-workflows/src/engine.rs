@@ -764,7 +764,7 @@ pub struct RunConfig {
     pub host_repo_path: Option<PathBuf>,
     /// SHA of the commit the worktree branched from.
     pub base_sha: Option<String>,
-    /// Git branch name for the run (e.g. `arc/run/{run_id}`).
+    /// Git branch name for the run (e.g. `fabro/run/{run_id}`).
     pub run_branch: Option<String>,
     /// Metadata branch name for git-native checkpoint storage (e.g. `refs/fabro/{run_id}`).
     pub meta_branch: Option<String>,

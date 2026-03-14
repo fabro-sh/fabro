@@ -54,7 +54,7 @@ root = \"fabro/\"
     eprintln!("  {} {}", green.apply_to("✔"), dim.apply_to("fabro.toml"));
 
     // Create hello workflow directory
-    let workflow_dir = repo_root.join("arc/workflows/hello");
+    let workflow_dir = repo_root.join("fabro/workflows/hello");
     std::fs::create_dir_all(&workflow_dir)
         .with_context(|| format!("failed to create {}", workflow_dir.display()))?;
 
@@ -79,7 +79,7 @@ root = \"fabro/\"
     eprintln!(
         "  {} {}",
         green.apply_to("✔"),
-        dim.apply_to("arc/workflows/hello/workflow.fabro")
+        dim.apply_to("fabro/workflows/hello/workflow.fabro")
     );
 
     // Create workflow.toml
@@ -92,7 +92,7 @@ root = \"fabro/\"
     eprintln!(
         "  {} {}",
         green.apply_to("✔"),
-        dim.apply_to("arc/workflows/hello/workflow.toml")
+        dim.apply_to("fabro/workflows/hello/workflow.toml")
     );
 
     eprintln!(

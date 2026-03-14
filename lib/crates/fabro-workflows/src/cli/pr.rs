@@ -449,7 +449,7 @@ mod tests {
             owner: "owner".to_string(),
             repo: "repo".to_string(),
             base_branch: "main".to_string(),
-            head_branch: "arc/run/abc".to_string(),
+            head_branch: "fabro/run/abc".to_string(),
             title: "Fix the thing".to_string(),
         };
         fs::write(
@@ -544,7 +544,7 @@ mod tests {
             owner: "owner".to_string(),
             repo: "repo".to_string(),
             base_branch: "main".to_string(),
-            head_branch: "arc/run/ccc".to_string(),
+            head_branch: "fabro/run/ccc".to_string(),
             title: "Another fix".to_string(),
         };
         fs::write(
@@ -690,7 +690,7 @@ mod tests {
                 "start_time": "2026-01-01T12:00:00Z",
                 "node_count": 1,
                 "edge_count": 0,
-                "run_branch": "arc/run/abc123"
+                "run_branch": "fabro/run/abc123"
             }),
             None,
             Some("diff content"),
@@ -718,7 +718,7 @@ mod tests {
                 "start_time": "2026-01-01T12:00:00Z",
                 "node_count": 1,
                 "edge_count": 0,
-                "run_branch": "arc/run/abc123"
+                "run_branch": "fabro/run/abc123"
             }),
             Some(serde_json::json!({
                 "timestamp": "2026-01-01T12:01:00Z",
@@ -781,7 +781,7 @@ mod tests {
                 "start_time": "2026-01-01T12:00:00Z",
                 "node_count": 1,
                 "edge_count": 0,
-                "run_branch": "arc/run/abc123"
+                "run_branch": "fabro/run/abc123"
             }),
             Some(serde_json::json!({
                 "timestamp": "2026-01-01T12:01:00Z",
@@ -813,7 +813,7 @@ mod tests {
                 "start_time": "2026-01-01T12:00:00Z",
                 "node_count": 1,
                 "edge_count": 0,
-                "run_branch": "arc/run/abc123"
+                "run_branch": "fabro/run/abc123"
             }),
             Some(serde_json::json!({
                 "timestamp": "2026-01-01T12:01:00Z",
@@ -845,7 +845,7 @@ mod tests {
                 "start_time": "2026-01-01T12:00:00Z",
                 "node_count": 1,
                 "edge_count": 0,
-                "run_branch": "arc/run/abc123"
+                "run_branch": "fabro/run/abc123"
             }),
             Some(serde_json::json!({
                 "timestamp": "2026-01-01T12:01:00Z",

@@ -162,7 +162,7 @@ pub struct DaytonaSandbox {
     run_id: Option<String>,
     /// Explicit branch to clone. When set, overrides the branch detected by
     /// `detect_repo_info` — avoids cloning a local-only worktree branch
-    /// (e.g. `arc/run/...`) that was never pushed to origin.
+    /// (e.g. `fabro/run/...`) that was never pushed to origin.
     clone_branch: Option<String>,
 }
 
@@ -570,7 +570,7 @@ impl Sandbox for DaytonaSandbox {
         match detect_repo_info(&cwd) {
             Ok((detected_url, detected_branch)) => {
                 // Use explicit clone_branch if provided (avoids cloning a local-only
-                // worktree branch like arc/run/... that hasn't been pushed).
+                // worktree branch like fabro/run/... that hasn't been pushed).
                 let branch = self.clone_branch.clone().or(detected_branch);
                 // Daytona clones over HTTPS with token auth, so rewrite SSH URLs.
                 let url = ssh_url_to_https(&detected_url);

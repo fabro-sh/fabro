@@ -8,6 +8,9 @@ use git2::{Repository, Signature};
 use crate::checkpoint::Checkpoint;
 use crate::error::{FabroError, Result};
 
+/// Branch prefix for workflow run branches (e.g. `fabro/run/{run_id}`).
+pub const RUN_BRANCH_PREFIX: &str = "fabro/run/";
+
 /// Resolved git author identity for checkpoint commits.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GitAuthor {
@@ -340,7 +343,7 @@ pub fn scan_node_files(run_dir: &Path) -> Vec<(String, Vec<u8>)> {
 /// Git-native metadata storage for pipeline runs.
 ///
 /// Stores checkpoint data, manifests, and graph DOT on an orphan branch
-/// (`arc/{run_id}`) so that runs can be resumed from git alone.
+/// (`fabro/{run_id}`) so that runs can be resumed from git alone.
 pub struct MetadataStore {
     repo_path: std::path::PathBuf,
     author: GitAuthor,

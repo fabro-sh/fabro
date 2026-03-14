@@ -82,5 +82,5 @@ When interpolating values into shell command strings (in `fabro-exe` and `fabro-
 
 ## Testing workflows
 
-- `fabro run <name>` — run a workflow by name (resolves `arc/workflows/<name>/workflow.toml`), e.g. `fabro run repl`
+- `fabro run <name>` — run a workflow by name (resolves `fabro/workflows/<name>/workflow.toml`), e.g. `fabro run repl`
 - Use `--no-retro` to skip the retro step and finish faster

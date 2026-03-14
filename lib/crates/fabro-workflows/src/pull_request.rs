@@ -861,7 +861,7 @@ mod tests {
             owner: "owner".to_string(),
             repo: "repo".to_string(),
             base_branch: "main".to_string(),
-            head_branch: "arc/run/abc".to_string(),
+            head_branch: "fabro/run/abc".to_string(),
             title: "Fix the thing".to_string(),
         };
         record.save(&path).unwrap();
@@ -873,7 +873,7 @@ mod tests {
         assert_eq!(content["owner"], "owner");
         assert_eq!(content["repo"], "repo");
         assert_eq!(content["base_branch"], "main");
-        assert_eq!(content["head_branch"], "arc/run/abc");
+        assert_eq!(content["head_branch"], "fabro/run/abc");
         assert_eq!(content["title"], "Fix the thing");
     }
 
@@ -888,7 +888,7 @@ mod tests {
             &creds,
             "https://github.com/owner/repo.git",
             "main",
-            "arc/run/123",
+            "fabro/run/123",
             "Fix bug",
             "",
             "claude-sonnet-4-20250514",

@@ -10632,7 +10632,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     };
     std::process::Command::new("git")
-        .args(["branch", "arc/run/test-docker", "HEAD"])
+        .args(["branch", "fabro/run/test-docker", "HEAD"])
         .current_dir(repo.path())
         .output()
         .unwrap();
@@ -10640,7 +10640,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
     std::process::Command::new("git")
         .args(["worktree", "add"])
         .arg(&worktree_path)
-        .arg("arc/run/test-docker")
+        .arg("fabro/run/test-docker")
         .current_dir(repo.path())
         .output()
         .unwrap();
@@ -10693,7 +10693,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         git_checkpoint_enabled: true,
         host_repo_path: Some(worktree_path.clone()),
         base_sha: Some(base_sha.clone()),
-        run_branch: Some("arc/run/test-docker".to_string()),
+        run_branch: Some("fabro/run/test-docker".to_string()),
         meta_branch: None,
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
@@ -10822,7 +10822,7 @@ async fn git_checkpoint_host_writes_shadow_branch() {
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     };
     std::process::Command::new("git")
-        .args(["branch", &format!("arc/run/{run_id}"), "HEAD"])
+        .args(["branch", &format!("fabro/run/{run_id}"), "HEAD"])
         .current_dir(repo.path())
         .output()
         .unwrap();
@@ -10830,7 +10830,7 @@ async fn git_checkpoint_host_writes_shadow_branch() {
     std::process::Command::new("git")
         .args(["worktree", "add"])
         .arg(&worktree_path)
-        .arg(format!("arc/run/{run_id}"))
+        .arg(format!("fabro/run/{run_id}"))
         .current_dir(repo.path())
         .output()
         .unwrap();
@@ -10885,7 +10885,7 @@ async fn git_checkpoint_host_writes_shadow_branch() {
         git_checkpoint_enabled: true,
         host_repo_path: Some(worktree_path.clone()),
         base_sha: Some(base_sha),
-        run_branch: Some(format!("arc/run/{run_id}")),
+        run_branch: Some(format!("fabro/run/{run_id}")),
         meta_branch: Some(meta_branch),
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
@@ -10995,7 +10995,7 @@ async fn parallel_git_branching_host_e2e() {
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     };
     let run_id = "par-git-test";
-    let run_branch = format!("arc/run/{run_id}");
+    let run_branch = format!("fabro/run/{run_id}");
     std::process::Command::new("git")
         .args(["branch", &run_branch, "HEAD"])
         .current_dir(repo.path())
@@ -11205,7 +11205,7 @@ async fn parallel_git_branching_host_e2e() {
     );
 
     // 10. Verify parallel branch refs still exist (for debugging)
-    let branch_ref_a = format!("arc/run/parallel/{run_id}/fan-out/pass1/branch-a");
+    let branch_ref_a = format!("fabro/run/parallel/{run_id}/fan-out/pass1/branch-a");
     let ref_check = std::process::Command::new("git")
         .args(["rev-parse", "--verify", &branch_ref_a])
         .current_dir(repo.path())
@@ -11292,7 +11292,7 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     };
     std::process::Command::new("git")
-        .args(["branch", "arc/run/empty-diff", "HEAD"])
+        .args(["branch", "fabro/run/empty-diff", "HEAD"])
         .current_dir(repo.path())
         .output()
         .unwrap();
@@ -11300,7 +11300,7 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
     std::process::Command::new("git")
         .args(["worktree", "add"])
         .arg(&worktree_path)
-        .arg("arc/run/empty-diff")
+        .arg("fabro/run/empty-diff")
         .current_dir(repo.path())
         .output()
         .unwrap();
@@ -11350,7 +11350,7 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
         git_checkpoint_enabled: true,
         host_repo_path: Some(worktree_path.clone()),
         base_sha: Some(base_sha.clone()),
-        run_branch: Some("arc/run/empty-diff".to_string()),
+        run_branch: Some("fabro/run/empty-diff".to_string()),
         meta_branch: None,
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),

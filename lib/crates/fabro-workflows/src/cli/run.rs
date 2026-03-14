@@ -1477,7 +1477,7 @@ fn setup_worktree(
     run_id: &str,
 ) -> anyhow::Result<(PathBuf, PathBuf, String, String)> {
     let base_sha = crate::git::head_sha(original_cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let branch_name = format!("arc/run/{run_id}");
+    let branch_name = format!("{}{run_id}", crate::git::RUN_BRANCH_PREFIX);
     crate::git::create_branch(original_cwd, &branch_name).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let worktree_path = run_dir.join("worktree");
@@ -1525,7 +1525,7 @@ async fn setup_remote_git(
     }
     let base_sha = sha_result.stdout.trim().to_string();
 
-    let branch_name = format!("arc/run/{run_id}");
+    let branch_name = format!("{}{run_id}", crate::git::RUN_BRANCH_PREFIX);
 
     // Create and checkout a run branch
     let checkout_cmd = format!("git checkout -b {branch_name}");
@@ -1557,12 +1557,13 @@ async fn run_from_branch(
     run_defaults: RunDefaults,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> anyhow::Result<()> {
-    // Extract run_id from branch name: "arc/run/{run_id}" -> "{run_id}"
+    // Extract run_id from branch name: "fabro/run/{run_id}" -> "{run_id}"
     let run_id = run_branch
-        .strip_prefix("arc/run/")
+        .strip_prefix(crate::git::RUN_BRANCH_PREFIX)
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "invalid run branch format: expected 'arc/run/<run_id>', got '{run_branch}'"
+                "invalid run branch format: expected '{}<run_id>', got '{run_branch}'",
+                crate::git::RUN_BRANCH_PREFIX,
             )
         })?
         .to_string();

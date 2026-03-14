@@ -492,7 +492,7 @@ async fn setup_daytona_git(sandbox: &dyn Sandbox) -> (String, String, String) {
     let base_sha = sha_result.stdout.trim().to_string();
 
     let run_id = ulid::Ulid::new().to_string();
-    let branch_name = format!("arc/run/{run_id}");
+    let branch_name = format!("fabro/run/{run_id}");
 
     let checkout_cmd = format!("git checkout -b {branch_name}");
     let checkout_result = sandbox

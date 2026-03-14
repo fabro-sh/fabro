@@ -294,7 +294,7 @@ impl Handler for ParallelHandler {
                 let branch_key = &target_id;
                 let visit = crate::engine::visit_from_context(&branch_context);
                 let branch_name = format!(
-                    "arc/run/parallel/{}/{}/pass{}/{}",
+                    "fabro/run/parallel/{}/{}/pass{}/{}",
                     gs.run_id,
                     crate::git::sanitize_ref_component(&node.id),
                     visit,
