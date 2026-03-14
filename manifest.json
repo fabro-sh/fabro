@@ -1,0 +1,12 @@
+{
+  "run_id": "01KKQ2KT7BS1KVPN21GY9K0733",
+  "workflow_name": "Parallel",
+  "goal": "Test parallel and fan-in execution",
+  "start_time": "2026-03-14T21:04:10.856614Z",
+  "node_count": 7,
+  "edge_count": 7,
+  "run_branch": "fabro/run/01KKQ2KT7BS1KVPN21GY9K0733",
+  "base_sha": "312bef9b877f49abf4a2f34679f564826061b0d9",
+  "base_branch": "main",
+  "workflow_slug": "test"
+}

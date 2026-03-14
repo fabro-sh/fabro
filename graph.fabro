@@ -1,0 +1,19 @@
+digraph Parallel {
+    graph [goal="Test parallel and fan-in execution"]
+
+    start   [shape=Mdiamond]
+    exit    [shape=Msquare]
+
+    fork    [label="Fork Work", shape=component, join_policy="wait_all", error_policy="continue"]
+    branch1 [label="Branch 1"]
+    branch2 [label="Branch 2"]
+    merge   [label="Merge Results", shape=tripleoctagon]
+    review  [label="Review"]
+
+    start -> fork
+    fork -> branch1
+    fork -> branch2
+    branch1 -> merge
+    branch2 -> merge
+    merge -> review -> exit
+}
