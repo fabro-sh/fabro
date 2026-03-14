@@ -5,7 +5,7 @@ use anyhow::{bail, Context, Result};
 use clap::Args;
 use tracing::{debug, info};
 
-use crate::cli::runs::{default_runs_base, find_run_by_prefix};
+use crate::cli::runs::{default_runs_base, resolve_run};
 use crate::engine::GIT_REMOTE;
 use crate::manifest::Manifest;
 use crate::sandbox_record::SandboxRecord;
@@ -28,7 +28,7 @@ pub struct DiffArgs {
 pub async fn diff_command(args: DiffArgs) -> Result<()> {
     info!(run_id = %args.run, "Showing diff");
     let base = default_runs_base();
-    let run_dir = find_run_by_prefix(&base, &args.run)?;
+    let run_dir = resolve_run(&base, &args.run)?.path;
 
     let patch = resolve_diff(&run_dir, &args).await?;
 

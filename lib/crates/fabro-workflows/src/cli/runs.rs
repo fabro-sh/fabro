@@ -275,6 +275,55 @@ pub fn find_run_by_prefix(base: &Path, prefix: &str) -> Result<PathBuf> {
     }
 }
 
+/// Resolve a user-supplied identifier to a `RunInfo`.
+///
+/// Resolution order:
+/// 1. Run ID prefix match (like `find_run_by_prefix`)
+/// 2. Workflow name substring match, returning the most recent run
+///
+/// Errors if no match is found, or if a run ID prefix is ambiguous.
+pub fn resolve_run(base: &Path, identifier: &str) -> Result<RunInfo> {
+    let runs = scan_runs(base).context("Failed to scan runs")?;
+
+    // Step 1: try run ID prefix match
+    let id_matches: Vec<_> = runs
+        .iter()
+        .filter(|r| r.run_id.starts_with(identifier))
+        .collect();
+
+    match id_matches.len() {
+        1 => {
+            debug!(identifier, matched = %id_matches[0].run_id, "Resolved run by ID prefix");
+            return Ok(id_matches[0].clone());
+        }
+        n if n > 1 => {
+            let ids: Vec<&str> = id_matches.iter().map(|r| r.run_id.as_str()).collect();
+            bail!(
+                "Ambiguous prefix '{identifier}': {n} runs match: {}",
+                ids.join(", ")
+            )
+        }
+        _ => {}
+    }
+
+    // Step 2: try workflow name substring match, return most recent (runs are sorted newest-first)
+    let wf_match = runs
+        .iter()
+        .filter(|r| !r.is_orphan)
+        .find(|r| r.workflow_name.contains(identifier));
+
+    match wf_match {
+        Some(run) => {
+            debug!(identifier, matched = %run.run_id, workflow = %run.workflow_name, "Resolved run by workflow name");
+            Ok(run.clone())
+        }
+        None => {
+            warn!(identifier, "No matching run found");
+            bail!("No run found matching '{identifier}' (tried run ID prefix and workflow name)")
+        }
+    }
+}
+
 pub fn list_command(args: &RunsListArgs) -> Result<()> {
     let base = default_runs_base();
     let runs = scan_runs(&base)?;
@@ -1191,6 +1240,155 @@ mod tests {
         }
 
         let result = find_run_by_prefix(dir.path(), "abc");
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().to_string().contains("Ambiguous"),
+            "Should mention ambiguity"
+        );
+    }
+
+    // === resolve_run tests ===
+
+    #[test]
+    fn resolve_run_by_run_id_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        make_run_dir(
+            dir.path(),
+            "20260101-ABC123",
+            Some(serde_json::json!({
+                "run_id": "abc123-full-id",
+                "workflow_name": "deploy",
+                "goal": "",
+                "start_time": "2026-01-01T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
+            })),
+            None,
+            false,
+        );
+
+        let info = resolve_run(dir.path(), "abc123").unwrap();
+        assert_eq!(info.run_id, "abc123-full-id");
+    }
+
+    #[test]
+    fn resolve_run_falls_back_to_workflow_name() {
+        let dir = tempfile::tempdir().unwrap();
+        make_run_dir(
+            dir.path(),
+            "20260101-AAA111",
+            Some(serde_json::json!({
+                "run_id": "aaa111-old",
+                "workflow_name": "deploy",
+                "goal": "",
+                "start_time": "2026-01-01T11:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
+            })),
+            None,
+            false,
+        );
+        make_run_dir(
+            dir.path(),
+            "20260102-BBB222",
+            Some(serde_json::json!({
+                "run_id": "bbb222-new",
+                "workflow_name": "deploy",
+                "goal": "",
+                "start_time": "2026-01-02T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
+            })),
+            None,
+            false,
+        );
+
+        // "deploy" doesn't match any run ID prefix, so falls back to workflow name
+        let info = resolve_run(dir.path(), "deploy").unwrap();
+        // Should return the most recent one
+        assert_eq!(info.run_id, "bbb222-new");
+    }
+
+    #[test]
+    fn resolve_run_id_prefix_takes_priority_over_workflow_name() {
+        let dir = tempfile::tempdir().unwrap();
+        // run_id starts with "deploy" AND workflow is "deploy"
+        make_run_dir(
+            dir.path(),
+            "20260101-DEPLOY",
+            Some(serde_json::json!({
+                "run_id": "deploy-run-1",
+                "workflow_name": "other-workflow",
+                "goal": "",
+                "start_time": "2026-01-01T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
+            })),
+            None,
+            false,
+        );
+        make_run_dir(
+            dir.path(),
+            "20260102-ZZZ999",
+            Some(serde_json::json!({
+                "run_id": "zzz999-newer",
+                "workflow_name": "deploy",
+                "goal": "",
+                "start_time": "2026-01-02T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
+            })),
+            None,
+            false,
+        );
+
+        // "deploy" matches run_id prefix of first run — should prefer that over workflow name match
+        let info = resolve_run(dir.path(), "deploy").unwrap();
+        assert_eq!(info.run_id, "deploy-run-1");
+    }
+
+    #[test]
+    fn resolve_run_errors_on_no_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = resolve_run(dir.path(), "nonexistent");
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("No run found"), "got: {msg}");
+    }
+
+    #[test]
+    fn resolve_run_errors_on_ambiguous_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        make_run_dir(
+            dir.path(),
+            "20260101-D1",
+            Some(serde_json::json!({
+                "run_id": "abc-111",
+                "workflow_name": "test",
+                "goal": "",
+                "start_time": "2026-01-01T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
+            })),
+            None,
+            false,
+        );
+        make_run_dir(
+            dir.path(),
+            "20260101-D2",
+            Some(serde_json::json!({
+                "run_id": "abc-222",
+                "workflow_name": "test",
+                "goal": "",
+                "start_time": "2026-01-01T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
+            })),
+            None,
+            false,
+        );
+
+        let result = resolve_run(dir.path(), "abc");
         assert!(result.is_err());
         assert!(
             result.unwrap_err().to_string().contains("Ambiguous"),

@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use clap::Args;
 use tracing::{debug, info};
 
-use crate::cli::runs::{default_runs_base, find_run_by_prefix};
+use crate::cli::runs::{default_runs_base, resolve_run};
 use crate::sandbox_record::SandboxRecord;
 
 #[derive(Args)]
@@ -180,7 +180,7 @@ async fn load_sandbox(
     base: &Path,
     run_prefix: &str,
 ) -> Result<Box<dyn fabro_agent::sandbox::Sandbox>> {
-    let run_dir = find_run_by_prefix(base, run_prefix)?;
+    let run_dir = resolve_run(base, run_prefix)?.path;
     let sandbox_json = run_dir.join("sandbox.json");
     debug!(path = %sandbox_json.display(), "Loading sandbox record");
     let record = SandboxRecord::load(&sandbox_json).context(

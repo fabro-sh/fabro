@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use clap::Args;
 use tracing::info;
 
-use crate::cli::runs::{default_runs_base, find_run_by_prefix};
+use crate::cli::runs::{default_runs_base, resolve_run};
 use crate::sandbox_record::SandboxRecord;
 
 #[derive(Args)]
@@ -52,7 +52,7 @@ fn format_signed_output(url: &str) -> String {
 
 pub async fn preview_command(args: PreviewArgs) -> Result<()> {
     let base = default_runs_base();
-    let run_dir = find_run_by_prefix(&base, &args.run)?;
+    let run_dir = resolve_run(&base, &args.run)?.path;
     let sandbox_json = run_dir.join("sandbox.json");
     let record = SandboxRecord::load(&sandbox_json).context(
         "Failed to load sandbox.json — was this run started with a recent version of arc?",

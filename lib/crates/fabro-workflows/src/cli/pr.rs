@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use clap::Args;
 use tracing::info;
 
-use crate::cli::runs::{default_runs_base, find_run_by_prefix, scan_runs};
+use crate::cli::runs::{default_runs_base, resolve_run, scan_runs};
 use crate::conclusion::Conclusion;
 use crate::manifest::Manifest;
 use crate::outcome::StageStatus;
@@ -48,7 +48,7 @@ pub struct PrCloseArgs {
 }
 
 fn load_pr_record(base: &Path, run_id: &str) -> Result<(PullRequestRecord, PathBuf)> {
-    let run_dir = find_run_by_prefix(base, run_id)?;
+    let run_dir = resolve_run(base, run_id)?.path;
     let pr_path = run_dir.join("pull_request.json");
     let content = std::fs::read_to_string(&pr_path).with_context(|| {
         format!(
@@ -325,7 +325,7 @@ async fn pr_create_from(
     args: PrCreateArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {
-    let run_dir = find_run_by_prefix(base, &args.run_id)?;
+    let run_dir = resolve_run(base, &args.run_id)?.path;
 
     let manifest =
         Manifest::load(&run_dir.join("manifest.json")).context("Failed to load manifest.json")?;
