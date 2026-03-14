@@ -1,6 +1,6 @@
 version = 1
 goal = "Create a hyperrealistic interactive 3D Golden Gate Bridge flight experience"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [llm]
 model = "gpt-5.4"

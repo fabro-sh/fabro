@@ -1,6 +1,6 @@
 version = 1
 goal = "Browse Hacker News with Playwright MCP and capture screenshots"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [llm]
 model = "claude-sonnet-4-6"

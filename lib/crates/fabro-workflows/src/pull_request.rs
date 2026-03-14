@@ -602,7 +602,7 @@ mod tests {
         let dot = "digraph implement {\n  plan [type=\"agent\"]\n  code [type=\"agent\"]\n  plan -> code\n}\n";
         let section = format_arc_details_section(&conclusion, Some(dot));
 
-        assert!(section.contains("<code>implement.dot</code>"));
+        assert!(section.contains("<code>implement.fabro</code>"));
         assert!(section.contains("2 nodes and 1 edge"));
         assert!(section.contains("```dot"));
         assert!(section.contains("digraph implement"));
@@ -737,7 +737,7 @@ mod tests {
   plan -> code
 }"#;
         let (name, nodes, edges) = parse_dot_summary(dot);
-        assert_eq!(name, "my_workflow.dot");
+        assert_eq!(name, "my_workflow.fabro");
         assert_eq!(nodes, 2);
         assert_eq!(edges, 1);
     }
@@ -745,7 +745,7 @@ mod tests {
     #[test]
     fn parse_dot_summary_empty() {
         let (name, nodes, edges) = parse_dot_summary("");
-        assert_eq!(name, "workflow.dot");
+        assert_eq!(name, "workflow.fabro");
         assert_eq!(nodes, 0);
         assert_eq!(edges, 0);
     }

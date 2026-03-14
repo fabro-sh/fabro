@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use super::{read_dot_file, ParseArgs};
+use super::{read_workflow_file, ParseArgs};
 
 /// Parse a DOT file and print its raw AST as JSON.
 ///
@@ -14,7 +14,7 @@ pub fn parse_command(args: &ParseArgs) -> anyhow::Result<()> {
 
 fn parse_command_to(args: &ParseArgs, mut out: impl Write) -> anyhow::Result<()> {
     let (dot_path, _cfg) = super::project_config::resolve_workflow(&args.workflow)?;
-    let source = read_dot_file(&dot_path)?;
+    let source = read_workflow_file(&dot_path)?;
     let ast = crate::parser::parse_ast(&source)?;
     serde_json::to_writer_pretty(&mut out, &ast)?;
     writeln!(out)?;
@@ -30,7 +30,10 @@ mod tests {
 
     #[test]
     fn parse_command_outputs_json_ast() {
-        let mut tmp = tempfile::Builder::new().suffix(".dot").tempfile().unwrap();
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".fabro")
+            .tempfile()
+            .unwrap();
         write!(
             tmp,
             r#"digraph Hello {{
@@ -54,7 +57,10 @@ mod tests {
 
     #[test]
     fn parse_command_rejects_invalid_dot() {
-        let mut tmp = tempfile::Builder::new().suffix(".dot").tempfile().unwrap();
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".fabro")
+            .tempfile()
+            .unwrap();
         write!(tmp, "not a valid dot file").unwrap();
 
         let args = ParseArgs {
@@ -71,11 +77,11 @@ mod tests {
         std::fs::create_dir_all(&wf_dir).unwrap();
         std::fs::write(
             wf_dir.join("workflow.toml"),
-            "version = 1\ngraph = \"workflow.dot\"\n",
+            "version = 1\ngraph = \"workflow.fabro\"\n",
         )
         .unwrap();
         std::fs::write(
-            wf_dir.join("workflow.dot"),
+            wf_dir.join("workflow.fabro"),
             r#"digraph Hello {
     start [shape=Mdiamond]
     exit [shape=Msquare]
@@ -97,7 +103,7 @@ mod tests {
     #[test]
     fn parse_command_rejects_missing_file() {
         let args = ParseArgs {
-            workflow: PathBuf::from("/tmp/nonexistent_parse_test_12345.dot"),
+            workflow: PathBuf::from("/tmp/nonexistent_parse_test_12345.fabro"),
         };
         let result = parse_command_to(&args, Vec::new());
         assert!(result.is_err(), "expected Err for missing file");

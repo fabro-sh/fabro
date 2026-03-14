@@ -34,7 +34,7 @@ use indicatif::HumanDuration;
 use std::time::Duration;
 
 use super::{
-    compute_stage_cost, format_cost, format_tokens_human, print_diagnostics, read_dot_file,
+    compute_stage_cost, format_cost, format_tokens_human, print_diagnostics, read_workflow_file,
     RunArgs, SandboxProvider,
 };
 
@@ -349,7 +349,7 @@ pub async fn run_command(
         .unwrap_or_default();
 
     // 1. Parse and validate workflow
-    let source = read_dot_file(&dot_path)?;
+    let source = read_workflow_file(&dot_path)?;
     let vars = run_cfg
         .as_ref()
         .and_then(|c| c.vars.as_ref())
@@ -2524,7 +2524,7 @@ mod tests {
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
             goal: Some("test".to_string()),
-            graph: "test.dot".to_string(),
+            graph: "test.fabro".to_string(),
             directory: None,
             llm: Some(run_config::LlmConfig {
                 model: Some("toml-model".to_string()),
@@ -2568,7 +2568,7 @@ mod tests {
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
             goal: Some("test".to_string()),
-            graph: "test.dot".to_string(),
+            graph: "test.fabro".to_string(),
             directory: None,
             llm: Some(run_config::LlmConfig {
                 model: Some("toml-model".to_string()),
@@ -2647,7 +2647,7 @@ mod tests {
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
             goal: Some("test".to_string()),
-            graph: "test.dot".to_string(),
+            graph: "test.fabro".to_string(),
             directory: None,
             llm: Some(run_config::LlmConfig {
                 model: Some("toml-model".to_string()),
@@ -2673,7 +2673,7 @@ mod tests {
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
             goal: Some("test".to_string()),
-            graph: "w.dot".into(),
+            graph: "w.fabro".into(),
             directory: None,
             llm: None,
             setup: None,
@@ -2704,7 +2704,7 @@ mod tests {
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
             goal: Some("test".to_string()),
-            graph: "w.dot".into(),
+            graph: "w.fabro".into(),
             directory: None,
             llm: None,
             setup: None,
@@ -2782,7 +2782,7 @@ mod tests {
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
             goal: Some("test".into()),
-            graph: "w.dot".into(),
+            graph: "w.fabro".into(),
             directory: None,
             llm: None,
             setup: None,
@@ -2842,7 +2842,7 @@ mod tests {
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
             goal: Some("test".into()),
-            graph: "w.dot".into(),
+            graph: "w.fabro".into(),
             directory: None,
             llm: None,
             setup: None,

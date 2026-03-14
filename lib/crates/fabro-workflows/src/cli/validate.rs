@@ -46,7 +46,10 @@ mod tests {
 
     #[test]
     fn validate_valid_workflow() {
-        let mut tmp = tempfile::Builder::new().suffix(".dot").tempfile().unwrap();
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".fabro")
+            .tempfile()
+            .unwrap();
         write!(
             tmp,
             r#"digraph Simple {{
@@ -74,7 +77,10 @@ mod tests {
 
     #[test]
     fn validate_invalid_syntax() {
-        let mut tmp = tempfile::Builder::new().suffix(".dot").tempfile().unwrap();
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".fabro")
+            .tempfile()
+            .unwrap();
         write!(tmp, "not a valid dot file").unwrap();
 
         let args = ValidateArgs {
@@ -101,8 +107,8 @@ mod tests {
         std::fs::create_dir_all(&prompts_dir).unwrap();
         std::fs::write(prompts_dir.join("plan.md"), "Plan the work carefully.").unwrap();
 
-        // Write a .dot file that uses @prompts/plan.md
-        let dot_path = dir.path().join("workflow.dot");
+        // Write a .fabro file that uses @prompts/plan.md
+        let dot_path = dir.path().join("workflow.fabro");
         std::fs::write(
             &dot_path,
             r#"digraph FileRef {
@@ -128,11 +134,11 @@ mod tests {
         std::fs::create_dir_all(&wf_dir).unwrap();
         std::fs::write(
             wf_dir.join("workflow.toml"),
-            "version = 1\ngraph = \"workflow.dot\"\n",
+            "version = 1\ngraph = \"workflow.fabro\"\n",
         )
         .unwrap();
         std::fs::write(
-            wf_dir.join("workflow.dot"),
+            wf_dir.join("workflow.fabro"),
             r#"digraph Hello {
     graph [goal="Test"]
     start [shape=Mdiamond]
@@ -154,7 +160,7 @@ mod tests {
     #[test]
     fn validate_missing_file() {
         let args = ValidateArgs {
-            workflow: PathBuf::from("/tmp/nonexistent_workflow_12345.dot"),
+            workflow: PathBuf::from("/tmp/nonexistent_workflow_12345.fabro"),
         };
         let styles = Styles::new(false);
         let result = validate_command(&args, &styles);

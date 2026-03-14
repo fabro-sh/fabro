@@ -373,7 +373,7 @@ fn dry_run_writes_jsonl_and_live_json() {
             "--auto-approve",
             "--run-dir",
             run_dir.to_str().unwrap(),
-            "../../../test/simple.dot",
+            "../../../test/simple.fabro",
         ])
         .assert()
         .success();

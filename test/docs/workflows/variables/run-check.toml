@@ -1,6 +1,6 @@
 version = 1
 goal = "Run tests for $repo_name"
-graph = "check.dot"
+graph = "check.fabro"
 
 [vars]
 language = "test-language"

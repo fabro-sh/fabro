@@ -1,6 +1,6 @@
 version = 1
 goal = "Verify the develop-web-game skill is properly set up with its asset files"
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [llm]
 model = "claude-sonnet-4-6"
