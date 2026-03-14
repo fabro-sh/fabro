@@ -1,0 +1,12 @@
+digraph RewindTest {
+    graph [goal="Create a hello.txt file, then verify it exists"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    create [label="Create File", prompt="Create a file called hello.txt in the current directory with the content 'Hello from Fabro'. Use the Write tool."]
+    verify [label="Verify File", shape=parallelogram, script="cat hello.txt 2>&1"]
+
+    start -> create -> verify -> exit
+}

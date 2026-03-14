@@ -1,0 +1,11 @@
+{
+  "run_id": "01KKPHR5BRDJFSPTGW05SCH88D",
+  "workflow_name": "RewindTest",
+  "goal": "Create a hello.txt file, then verify it exists",
+  "start_time": "2026-03-14T16:09:31.517315Z",
+  "node_count": 4,
+  "edge_count": 3,
+  "run_branch": "arc/run/01KKPHR5BRDJFSPTGW05SCH88D",
+  "base_sha": "0347d5bf0d747c25b43d4a5c68b077b1c7a9930e",
+  "base_branch": "main"
+}
