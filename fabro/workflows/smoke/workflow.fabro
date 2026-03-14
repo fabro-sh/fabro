@@ -1,0 +1,11 @@
+digraph Smoke {
+    graph [goal="Verify the sandbox is working"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    main [label="Smoke Test", prompt="Run these commands and report the results:\n1. echo 'Hello from Daytona'\n2. uname -a\n3. which git && git --version\n4. which rustc && rustc --version || echo 'no rustc'\n5. which bun && bun --version || echo 'no bun'\n\nReport what you found."]
+
+    start -> main -> exit
+}

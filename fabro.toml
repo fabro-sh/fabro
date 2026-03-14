@@ -3,3 +3,35 @@ version = 1
 [fabro]
 root = "fabro/"
 retro = false
+
+[sandbox]
+provider = "daytona"
+
+[sandbox.daytona]
+auto_stop_interval = 30
+
+[sandbox.daytona.labels]
+repo = "fabro-sh/fabro"
+
+[sandbox.daytona.snapshot]
+name = "fabro-v2"
+cpu = 4
+memory = 8
+disk = 20
+dockerfile = """
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl git ca-certificates build-essential pkg-config libssl-dev unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Bun
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
+
+WORKDIR /root
+"""
