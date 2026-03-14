@@ -139,6 +139,7 @@ models/sibling-control.ts
 models/signoff-status.ts
 models/signoff.ts
 models/smoothness-rating.ts
+models/ssh-configuration.ts
 models/stage-retro.ts
 models/stage-status.ts
 models/stage-turn.ts

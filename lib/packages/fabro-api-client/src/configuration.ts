@@ -1,7 +1,7 @@
 /* tslint:disable */
 /**
- * Arc Run API
- * HTTP API for managing Arc workflow run executions.
+ * Fabro Run API
+ * HTTP API for managing Fabro workflow run executions.
  *
  * The version of the OpenAPI document: 0.1.0
  * 

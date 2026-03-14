@@ -119,6 +119,7 @@ export * from './sibling-control';
 export * from './signoff';
 export * from './signoff-status';
 export * from './smoothness-rating';
+export * from './ssh-configuration';
 export * from './stage-retro';
 export * from './stage-status';
 export * from './stage-turn';
