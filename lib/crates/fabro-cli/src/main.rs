@@ -81,6 +81,8 @@ enum Command {
     /// Show the diff of changes from a workflow run
     #[command(hide = true)]
     Diff(fabro_workflows::cli::diff::DiffArgs),
+    /// View the event log of a workflow run
+    Logs(fabro_workflows::cli::logs::LogsArgs),
     /// List and test LLM models
     Model {
         #[command(subcommand)]
@@ -297,6 +299,7 @@ async fn main_inner() -> (String, Result<()>) {
         Command::Preview(_) => "preview",
         Command::Ssh(_) => "ssh",
         Command::Diff(_) => "diff",
+        Command::Logs(_) => "logs",
         Command::Model { command } => match command {
             Some(fabro_llm::cli::ModelsCommand::List { .. }) => "model list",
             Some(fabro_llm::cli::ModelsCommand::Test { .. }) => "model test",
@@ -542,6 +545,10 @@ async fn main_inner() -> (String, Result<()>) {
             }
             Command::Diff(args) => {
                 fabro_workflows::cli::diff::diff_command(args).await?;
+            }
+            Command::Logs(args) => {
+                let styles = fabro_util::terminal::Styles::detect_stdout();
+                fabro_workflows::cli::logs::logs_command(args, &styles)?;
             }
             Command::Model { command } => {
                 let server = {

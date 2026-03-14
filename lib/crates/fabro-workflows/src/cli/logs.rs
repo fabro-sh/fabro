@@ -1,0 +1,754 @@
+use std::io::{self, BufRead, IsTerminal, Write};
+use std::path::Path;
+
+use anyhow::{bail, Context, Result};
+use chrono::{DateTime, Utc};
+use clap::Args;
+use tracing::{debug, info};
+
+use crate::cli::runs::{default_runs_base, resolve_run};
+
+#[derive(Args)]
+pub struct LogsArgs {
+    /// Run ID prefix or workflow name (most recent run)
+    pub run: String,
+    /// Follow log output
+    #[arg(short, long)]
+    pub follow: bool,
+    /// Logs since timestamp or relative (e.g. "42m", "2h", "2026-01-02T13:00:00Z")
+    #[arg(long)]
+    pub since: Option<String>,
+    /// Lines from end (default: all)
+    #[arg(short = 'n', long)]
+    pub tail: Option<usize>,
+    /// Formatted colored output with rendered assistant text
+    #[arg(long)]
+    pub pretty: bool,
+}
+
+pub fn logs_command(args: LogsArgs, styles: &fabro_util::terminal::Styles) -> Result<()> {
+    let base = default_runs_base();
+    let run = resolve_run(&base, &args.run)?;
+
+    info!(run_id = %run.run_id, "Showing logs");
+
+    let progress_path = run.path.join("progress.jsonl");
+    if !progress_path.exists() {
+        bail!("No progress.jsonl found for run '{}'", run.run_id);
+    }
+
+    let since_cutoff = match &args.since {
+        Some(s) => Some(parse_since(s)?),
+        None => None,
+    };
+
+    // Read all lines, apply --since and --tail filters
+    let all_lines = read_lines(&progress_path)?;
+    let filtered = apply_filters(&all_lines, since_cutoff.as_ref(), args.tail);
+
+    let stdout = io::stdout();
+    let is_tty = stdout.is_terminal();
+    let mut out = stdout.lock();
+
+    for line in &filtered {
+        if args.pretty {
+            if let Some(formatted) = format_event_pretty(line, styles) {
+                writeln!(out, "{formatted}")?;
+            }
+        } else {
+            writeln!(out, "{line}")?;
+        }
+    }
+
+    if args.follow {
+        follow_logs(
+            &progress_path,
+            &run.path,
+            all_lines.len(),
+            args.pretty,
+            styles,
+            is_tty,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn read_lines(path: &Path) -> Result<Vec<String>> {
+    let file = std::fs::File::open(path).context("Failed to open progress.jsonl")?;
+    let reader = io::BufReader::new(file);
+    let mut lines = Vec::new();
+    for line in reader.lines() {
+        let line = line?;
+        if !line.trim().is_empty() {
+            lines.push(line);
+        }
+    }
+    Ok(lines)
+}
+
+fn apply_filters(
+    lines: &[String],
+    since: Option<&DateTime<Utc>>,
+    tail: Option<usize>,
+) -> Vec<String> {
+    let filtered: Vec<String> = match since {
+        Some(cutoff) => lines
+            .iter()
+            .filter(|line| {
+                extract_timestamp(line)
+                    .map(|ts| ts >= *cutoff)
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect(),
+        None => lines.to_vec(),
+    };
+
+    match tail {
+        Some(n) if n < filtered.len() => filtered[filtered.len() - n..].to_vec(),
+        _ => filtered,
+    }
+}
+
+fn extract_timestamp(line: &str) -> Option<DateTime<Utc>> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let ts_str = value.get("ts")?.as_str()?;
+    ts_str.parse::<DateTime<Utc>>().ok()
+}
+
+/// Parse a `--since` value: relative duration (e.g. "42m", "2h", "7d") or ISO 8601 timestamp.
+pub fn parse_since(s: &str) -> Result<DateTime<Utc>> {
+    let s = s.trim();
+    if s.is_empty() {
+        bail!("empty --since value");
+    }
+
+    // Try relative duration first
+    if let Some(dur) = try_parse_relative_duration(s) {
+        return Ok(Utc::now() - dur);
+    }
+
+    // Try ISO 8601
+    if let Ok(ts) = s.parse::<DateTime<Utc>>() {
+        return Ok(ts);
+    }
+
+    bail!("invalid --since value '{s}' (expected relative like '42m', '2h', '7d' or ISO 8601 timestamp)")
+}
+
+fn try_parse_relative_duration(s: &str) -> Option<chrono::Duration> {
+    if s.len() < 2 {
+        return None;
+    }
+    let (num_str, unit) = s.split_at(s.len() - 1);
+    let num: u64 = num_str.parse().ok()?;
+    match unit {
+        "s" => Some(chrono::Duration::seconds(num as i64)),
+        "m" => Some(chrono::Duration::minutes(num as i64)),
+        "h" => Some(chrono::Duration::hours(num as i64)),
+        "d" => Some(chrono::Duration::days(num as i64)),
+        _ => None,
+    }
+}
+
+fn follow_logs(
+    progress_path: &Path,
+    run_dir: &Path,
+    mut lines_seen: usize,
+    pretty: bool,
+    styles: &fabro_util::terminal::Styles,
+    _is_tty: bool,
+) -> Result<()> {
+    let conclusion_path = run_dir.join("conclusion.json");
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        let all_lines = read_lines(progress_path)?;
+        if all_lines.len() > lines_seen {
+            for line in &all_lines[lines_seen..] {
+                if pretty {
+                    if let Some(formatted) = format_event_pretty(line, styles) {
+                        writeln!(out, "{formatted}")?;
+                    }
+                } else {
+                    writeln!(out, "{line}")?;
+                }
+            }
+            out.flush()?;
+            lines_seen = all_lines.len();
+        }
+
+        // Stop following when the run has concluded and there are no more new lines
+        if conclusion_path.exists() && all_lines.len() <= lines_seen {
+            debug!("Run concluded, stopping follow");
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+// ── Pretty formatter ──────────────────────────────────────────────────
+
+pub fn format_event_pretty(line: &str, styles: &fabro_util::terminal::Styles) -> Option<String> {
+    let envelope: serde_json::Value = serde_json::from_str(line).ok()?;
+    let event = envelope.get("event")?.as_str()?;
+    let ts = format_timestamp(envelope.get("ts")?.as_str()?);
+
+    match event {
+        "WorkflowRunStarted" => {
+            let name = str_field(&envelope, "workflow_name").unwrap_or("?");
+            let run_id = str_field(&envelope, "run_id").unwrap_or("?");
+            Some(format!(
+                "{} {} {}  {}",
+                styles.dim.apply_to(&ts),
+                styles.bold_cyan.apply_to("\u{25b6}"),
+                styles.bold.apply_to(name),
+                styles.dim.apply_to(run_id),
+            ))
+        }
+
+        "WorkflowRunCompleted" => {
+            let duration = format_duration_ms(envelope.get("duration_ms"));
+            let cost = format_cost(envelope.get("total_cost"));
+            Some(format!(
+                "{} {} {}  {}  {}",
+                styles.dim.apply_to(&ts),
+                styles.bold_green.apply_to("\u{2713} Completed"),
+                styles.bold.apply_to(&duration),
+                styles.dim.apply_to(&cost),
+                "",
+            ))
+        }
+
+        "WorkflowRunFailed" => {
+            let error = str_field(&envelope, "error").unwrap_or("unknown error");
+            Some(format!(
+                "{} {} {}",
+                styles.dim.apply_to(&ts),
+                styles.bold_red.apply_to("\u{2717} Failed"),
+                styles.red.apply_to(error),
+            ))
+        }
+
+        "StageStarted" => {
+            let label = str_field(&envelope, "node_label").unwrap_or("?");
+            Some(format!(
+                "{} {} {}",
+                styles.dim.apply_to(&ts),
+                styles.bold_cyan.apply_to("\u{25b6}"),
+                styles.bold.apply_to(label),
+            ))
+        }
+
+        "StageCompleted" => {
+            let label = str_field(&envelope, "node_label").unwrap_or("?");
+            let duration = format_duration_ms(envelope.get("duration_ms"));
+            let cost = format_cost(envelope.get("cost"));
+            let turns = envelope.get("turns").and_then(|v| v.as_u64()).unwrap_or(0);
+            let tools = envelope
+                .get("tool_calls")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let tokens = envelope
+                .get("total_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let stats = format!("({turns} turns, {tools} tools, {})", format_tokens(tokens));
+            Some(format!(
+                "{} {} {}  {}  {}  {}",
+                styles.dim.apply_to(&ts),
+                styles.green.apply_to("\u{2713}"),
+                styles.bold.apply_to(label),
+                cost,
+                duration,
+                styles.dim.apply_to(&stats),
+            ))
+        }
+
+        "StageFailed" => {
+            let label = str_field(&envelope, "node_label").unwrap_or("?");
+            let error = str_field(&envelope, "error").unwrap_or("unknown error");
+            Some(format!(
+                "{} {} {}  {}",
+                styles.dim.apply_to(&ts),
+                styles.red.apply_to("\u{2717}"),
+                styles.bold.apply_to(label),
+                styles.red.apply_to(error),
+            ))
+        }
+
+        "Agent.AssistantMessage" => {
+            let stage = str_field(&envelope, "node_id").unwrap_or("?");
+            let model = str_field(&envelope, "model").unwrap_or("?");
+            let text = str_field(&envelope, "text").unwrap_or("");
+            let header = format!(
+                "{} {} {} [{}]",
+                styles.dim.apply_to(&ts),
+                "\u{1f4ac}",
+                styles.bold.apply_to(stage),
+                styles.dim.apply_to(model),
+            );
+            let indent = "           ";
+            let rendered = styles.render_markdown(text);
+            let body: String = rendered
+                .lines()
+                .map(|l| format!("{indent}{l}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            Some(format!("{header}\n{body}\n"))
+        }
+
+        "Agent.ToolCallStarted" => {
+            let tool = str_field(&envelope, "tool_name").unwrap_or("?");
+            let detail = tool_detail(&envelope);
+            let display = match detail {
+                Some(d) => format!("{tool}({d})"),
+                None => tool.to_string(),
+            };
+            Some(format!(
+                "{}   {} {}",
+                styles.dim.apply_to(&ts),
+                styles.dim.apply_to("\u{2699}"),
+                styles.dim.apply_to(&display),
+            ))
+        }
+
+        "Agent.ToolCallCompleted" => {
+            let tool = str_field(&envelope, "tool_name").unwrap_or("?");
+            let is_error = envelope
+                .get("is_error")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let detail = tool_detail(&envelope);
+            let display = match detail {
+                Some(d) => format!("{tool}({d})"),
+                None => tool.to_string(),
+            };
+            let glyph = if is_error { "\u{2717}" } else { "\u{2713}" };
+            let style = if is_error { &styles.red } else { &styles.green };
+            Some(format!(
+                "{}   {} {}",
+                styles.dim.apply_to(&ts),
+                style.apply_to(glyph),
+                display,
+            ))
+        }
+
+        "EdgeSelected" => {
+            let to = str_field(&envelope, "to_node_id").unwrap_or("?");
+            let condition = str_field(&envelope, "condition");
+            let suffix = match condition {
+                Some(c) => format!("  [{c}]"),
+                None => String::new(),
+            };
+            Some(format!(
+                "{}   {} {}{}",
+                styles.dim.apply_to(&ts),
+                styles.dim.apply_to("\u{2192}"),
+                to,
+                styles.dim.apply_to(&suffix),
+            ))
+        }
+
+        "Sandbox.Ready" => {
+            let provider = str_field(&envelope, "sandbox_provider").unwrap_or("?");
+            let duration = format_duration_ms(envelope.get("duration_ms"));
+            Some(format!(
+                "{}   Sandbox: {}  {}",
+                styles.dim.apply_to(&ts),
+                provider,
+                styles.dim.apply_to(&duration),
+            ))
+        }
+
+        "SetupCompleted" => {
+            let count = envelope
+                .get("command_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let duration = format_duration_ms(envelope.get("duration_ms"));
+            Some(format!(
+                "{}   Setup: {} commands  {}",
+                styles.dim.apply_to(&ts),
+                count,
+                styles.dim.apply_to(&duration),
+            ))
+        }
+
+        "Agent.CompactionCompleted" => {
+            let orig = envelope
+                .get("original_turn_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let preserved = envelope
+                .get("preserved_turn_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            Some(format!(
+                "{}   {}",
+                styles.dim.apply_to(&ts),
+                styles
+                    .dim
+                    .apply_to(format!("compaction: {orig}\u{2192}{preserved} turns")),
+            ))
+        }
+
+        "ParallelStarted" => {
+            let count = envelope
+                .get("branch_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            Some(format!(
+                "{} {} Parallel  {} branches",
+                styles.dim.apply_to(&ts),
+                styles.bold_cyan.apply_to("\u{25b6}"),
+                count,
+            ))
+        }
+
+        "ParallelBranchStarted" => {
+            let label = str_field(&envelope, "node_label").unwrap_or("?");
+            Some(format!(
+                "{}     {} {}",
+                styles.dim.apply_to(&ts),
+                styles.cyan.apply_to("\u{25b6}"),
+                label,
+            ))
+        }
+
+        "ParallelBranchCompleted" => {
+            let label = str_field(&envelope, "node_label").unwrap_or("?");
+            Some(format!(
+                "{}     {} {}",
+                styles.dim.apply_to(&ts),
+                styles.green.apply_to("\u{2713}"),
+                label,
+            ))
+        }
+
+        "ParallelCompleted" => {
+            let duration = format_duration_ms(envelope.get("duration_ms"));
+            Some(format!(
+                "{} {} Parallel  {}",
+                styles.dim.apply_to(&ts),
+                styles.green.apply_to("\u{2713}"),
+                duration,
+            ))
+        }
+
+        // Noise events — skip
+        "Agent.SessionStarted"
+        | "Agent.SessionEnded"
+        | "Agent.AssistantTextStart"
+        | "Agent.TextDelta"
+        | "Agent.ReasoningDelta"
+        | "Agent.ToolCallOutputDelta"
+        | "Sandbox.Initializing"
+        | "Sandbox.Pulling"
+        | "Sandbox.Creating"
+        | "SetupStarted"
+        | "SetupCommandStarted"
+        | "SetupCommandCompleted"
+        | "CheckpointSaved"
+        | "GitCheckpoint"
+        | "AssetsCaptured" => None,
+
+        _ => None,
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
+
+fn str_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    value.get(key)?.as_str()
+}
+
+fn format_timestamp(ts: &str) -> String {
+    // Parse ISO 8601 and show HH:MM:SS
+    ts.parse::<DateTime<Utc>>()
+        .map(|dt| dt.format("%H:%M:%S").to_string())
+        .unwrap_or_else(|_| ts.to_string())
+}
+
+fn format_duration_ms(value: Option<&serde_json::Value>) -> String {
+    let ms = value.and_then(|v| v.as_u64()).unwrap_or(0);
+    if ms < 1000 {
+        format!("{ms}ms")
+    } else {
+        let secs = ms as f64 / 1000.0;
+        if secs < 60.0 {
+            format!("{secs:.0}s")
+        } else {
+            let mins = secs / 60.0;
+            format!("{mins:.1}m")
+        }
+    }
+}
+
+fn format_cost(value: Option<&serde_json::Value>) -> String {
+    let cost = value.and_then(|v| v.as_f64()).unwrap_or(0.0);
+    if cost > 0.0 {
+        format!("${cost:.2}")
+    } else {
+        String::new()
+    }
+}
+
+fn format_tokens(tokens: u64) -> String {
+    if tokens >= 1000 {
+        format!("{:.1}k toks", tokens as f64 / 1000.0)
+    } else {
+        format!("{tokens} toks")
+    }
+}
+
+fn tool_detail(envelope: &serde_json::Value) -> Option<String> {
+    let tool_name = str_field(envelope, "tool_name")?;
+    let arguments = envelope.get("arguments")?;
+    let arg = |key: &str| arguments.get(key).and_then(|v| v.as_str());
+
+    match tool_name {
+        "bash" | "shell" | "execute_command" => arg("command").map(|c| truncate(c, 60)),
+        "glob" => arg("pattern").map(String::from),
+        "grep" | "ripgrep" => arg("pattern").map(|p| truncate(p, 40)),
+        "read_file" | "read" => arg("path")
+            .or_else(|| arg("file_path"))
+            .map(|p| truncate(p, 60)),
+        "write_file" | "write" | "create_file" => arg("path")
+            .or_else(|| arg("file_path"))
+            .map(|p| truncate(p, 60)),
+        "edit_file" | "edit" => arg("path")
+            .or_else(|| arg("file_path"))
+            .map(|p| truncate(p, 60)),
+        "web_search" => arg("query").map(|q| truncate(q, 60)),
+        "web_fetch" => arg("url").map(|u| truncate(u, 60)),
+        _ => None,
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        let boundary = s.floor_char_boundary(max.saturating_sub(1));
+        format!("{}\u{2026}", &s[..boundary])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // === parse_since tests ===
+
+    #[test]
+    fn parse_since_relative_minutes() {
+        let before = Utc::now();
+        let result = parse_since("42m").unwrap();
+        let after = Utc::now();
+        // Should be roughly 42 minutes ago
+        let expected_lower = after - chrono::Duration::minutes(42) - chrono::Duration::seconds(1);
+        let expected_upper = before - chrono::Duration::minutes(42) + chrono::Duration::seconds(1);
+        assert!(result >= expected_lower && result <= expected_upper);
+    }
+
+    #[test]
+    fn parse_since_relative_hours() {
+        let before = Utc::now();
+        let result = parse_since("2h").unwrap();
+        let expected = before - chrono::Duration::hours(2);
+        assert!((result - expected).num_seconds().abs() < 2);
+    }
+
+    #[test]
+    fn parse_since_relative_days() {
+        let before = Utc::now();
+        let result = parse_since("7d").unwrap();
+        let expected = before - chrono::Duration::days(7);
+        assert!((result - expected).num_seconds().abs() < 2);
+    }
+
+    #[test]
+    fn parse_since_iso8601() {
+        let result = parse_since("2026-01-01T12:00:00Z").unwrap();
+        assert_eq!(result.to_rfc3339(), "2026-01-01T12:00:00+00:00");
+    }
+
+    #[test]
+    fn parse_since_invalid() {
+        assert!(parse_since("").is_err());
+        assert!(parse_since("abc").is_err());
+        assert!(parse_since("notadate").is_err());
+    }
+
+    // === apply_filters tests ===
+
+    #[test]
+    fn tail_returns_last_n_lines() {
+        let lines: Vec<String> = (0..10).map(|i| format!("line {i}")).collect();
+        let result = apply_filters(&lines, None, Some(3));
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], "line 7");
+        assert_eq!(result[2], "line 9");
+    }
+
+    #[test]
+    fn tail_all_when_n_exceeds_total() {
+        let lines: Vec<String> = (0..3).map(|i| format!("line {i}")).collect();
+        let result = apply_filters(&lines, None, Some(100));
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn since_filters_by_timestamp() {
+        let cutoff = "2026-01-01T12:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let lines = vec![
+            r#"{"ts":"2026-01-01T11:00:00Z","event":"StageStarted"}"#.to_string(),
+            r#"{"ts":"2026-01-01T12:30:00Z","event":"StageCompleted"}"#.to_string(),
+            r#"{"ts":"2026-01-01T13:00:00Z","event":"WorkflowRunCompleted"}"#.to_string(),
+        ];
+        let result = apply_filters(&lines, Some(&cutoff), None);
+        assert_eq!(result.len(), 2);
+    }
+
+    // === raw mode test ===
+
+    #[test]
+    fn raw_lines_pass_through_verbatim() {
+        let lines = vec![
+            r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_label":"plan"}"#
+                .to_string(),
+        ];
+        let result = apply_filters(&lines, None, None);
+        assert_eq!(result, lines);
+    }
+
+    // === pretty formatter tests ===
+
+    fn no_color_styles() -> fabro_util::terminal::Styles {
+        fabro_util::terminal::Styles::new(false)
+    }
+
+    #[test]
+    fn pretty_stage_started() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:23:09Z","event":"StageStarted","node_label":"plan","node_id":"plan","stage_index":0}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("plan"), "got: {result}");
+        assert!(result.contains("\u{25b6}"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_stage_completed() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:23:15Z","event":"StageCompleted","node_label":"plan","cost":0.12,"duration_ms":8000,"turns":3,"tool_calls":2,"total_tokens":15200}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("plan"), "got: {result}");
+        assert!(result.contains("$0.12"), "got: {result}");
+        assert!(result.contains("8s"), "got: {result}");
+        assert!(result.contains("3 turns"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_assistant_message() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:23:12Z","event":"Agent.AssistantMessage","node_id":"plan","model":"claude-opus-4-6","text":"I'll start by reading the code.","usage":{"input_tokens":100,"output_tokens":50},"tool_call_count":0}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("plan"), "got: {result}");
+        assert!(result.contains("claude-opus-4-6"), "got: {result}");
+        assert!(result.contains("reading the code"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_tool_call_started() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:23:12Z","event":"Agent.ToolCallStarted","tool_name":"read_file","tool_call_id":"tc_1","arguments":{"path":"src/main.rs"}}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("read_file"), "got: {result}");
+        assert!(result.contains("src/main.rs"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_skips_noise_events() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:23:12Z","event":"Agent.TextDelta","delta":"hello"}"#;
+        assert!(format_event_pretty(line, &styles).is_none());
+    }
+
+    #[test]
+    fn pretty_unknown_events_return_none() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:23:12Z","event":"SomeFutureEvent","data":123}"#;
+        assert!(format_event_pretty(line, &styles).is_none());
+    }
+
+    #[test]
+    fn pretty_workflow_run_started() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:23:01Z","run_id":"abc123","event":"WorkflowRunStarted","workflow_name":"smoke"}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("smoke"), "got: {result}");
+        assert!(result.contains("abc123"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_workflow_run_completed() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"WorkflowRunCompleted","duration_ms":25000,"total_cost":0.57}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("Completed"), "got: {result}");
+        assert!(result.contains("25s"), "got: {result}");
+        assert!(result.contains("$0.57"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_workflow_run_failed() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"WorkflowRunFailed","error":"sandbox timeout"}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("Failed"), "got: {result}");
+        assert!(result.contains("sandbox timeout"), "got: {result}");
+    }
+
+    #[test]
+    fn format_duration_ms_subsecond() {
+        assert_eq!(format_duration_ms(Some(&serde_json::json!(500))), "500ms");
+    }
+
+    #[test]
+    fn format_duration_ms_seconds() {
+        assert_eq!(format_duration_ms(Some(&serde_json::json!(8000))), "8s");
+    }
+
+    #[test]
+    fn format_duration_ms_minutes() {
+        assert_eq!(format_duration_ms(Some(&serde_json::json!(90000))), "1.5m");
+    }
+
+    #[test]
+    fn format_tokens_small() {
+        assert_eq!(format_tokens(500), "500 toks");
+    }
+
+    #[test]
+    fn format_tokens_thousands() {
+        assert_eq!(format_tokens(15200), "15.2k toks");
+    }
+
+    #[test]
+    fn truncate_short_string() {
+        assert_eq!(truncate("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_long_string() {
+        let result = truncate("a very long command string here", 15);
+        assert!(result.chars().count() <= 15, "got: {result}");
+        assert!(result.ends_with('\u{2026}'));
+    }
+}
