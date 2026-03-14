@@ -367,7 +367,8 @@ pub async fn run_command(
 
     // Inline @file references in the (possibly overridden) goal
     if let Some(crate::graph::types::AttrValue::String(goal)) = graph.attrs.get("goal") {
-        let resolved = crate::transform::resolve_file_ref(goal, dot_dir);
+        let fallback = dirs::home_dir().map(|h| h.join(".fabro"));
+        let resolved = crate::transform::resolve_file_ref(goal, dot_dir, fallback.as_deref());
         if resolved != *goal {
             graph.attrs.insert(
                 "goal".to_string(),

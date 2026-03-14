@@ -65,7 +65,8 @@ impl WorkflowBuilder {
 
         // File inlining when base_dir is provided
         if let Some(dir) = base_dir {
-            FileInliningTransform::new(dir.to_path_buf()).apply(&mut graph);
+            let fallback = dirs::home_dir().map(|h| h.join(".fabro"));
+            FileInliningTransform::new(dir.to_path_buf(), fallback).apply(&mut graph);
         }
 
         // Custom transforms
