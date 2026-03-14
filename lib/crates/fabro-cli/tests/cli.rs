@@ -418,3 +418,112 @@ fn dry_run_writes_jsonl_and_live_json() {
     assert!(live_content.get("run_id").is_some());
     assert!(live_content.get("event").is_some());
 }
+
+// == --run-id passthrough =====================================================
+
+#[test]
+fn run_id_passthrough_uses_provided_ulid() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run_dir = tmp.path().join("run");
+    let my_ulid = "01JTEST1234567890ABCDE";
+
+    arc()
+        .args([
+            "run",
+            "--dry-run",
+            "--auto-approve",
+            "--run-id",
+            my_ulid,
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "../../../test/simple.fabro",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(my_ulid));
+}
+
+// == --detach flag =============================================================
+
+#[test]
+fn detach_flag_appears_in_help() {
+    arc()
+        .args(["run", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--detach"));
+}
+
+#[test]
+fn detach_prints_ulid_and_exits() {
+    let output = arc()
+        .args([
+            "run",
+            "--detach",
+            "--dry-run",
+            "--auto-approve",
+            "../../../test/simple.fabro",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8(output).unwrap();
+    let ulid = stdout.trim();
+    // ULID is 26 uppercase alphanumeric chars
+    assert_eq!(ulid.len(), 26, "expected 26-char ULID, got: {ulid:?}");
+    assert!(
+        ulid.chars().all(|c| c.is_ascii_alphanumeric()),
+        "expected alphanumeric ULID, got: {ulid:?}"
+    );
+}
+
+#[test]
+fn detach_creates_run_dir_with_detach_log() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run_dir = tmp.path().join("detached-run");
+
+    let output = arc()
+        .args([
+            "run",
+            "--detach",
+            "--dry-run",
+            "--auto-approve",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "../../../test/simple.fabro",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let ulid = String::from_utf8(output).unwrap();
+    let ulid = ulid.trim();
+    assert!(!ulid.is_empty(), "should print a ULID");
+
+    // Run dir should have been created with detach.log
+    assert!(run_dir.exists(), "run dir should exist");
+    assert!(
+        run_dir.join("detach.log").exists(),
+        "detach.log should exist in run dir"
+    );
+}
+
+#[test]
+fn detach_conflicts_with_resume() {
+    arc()
+        .args([
+            "run",
+            "--detach",
+            "--resume",
+            "/tmp/fake-checkpoint.json",
+            "../../../test/simple.fabro",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}

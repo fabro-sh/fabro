@@ -98,6 +98,7 @@ pub struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum Command {
     /// Launch a workflow from a .fabro or .toml task file
     Run(RunArgs),
@@ -174,6 +175,14 @@ pub struct RunArgs {
     /// Keep the sandbox alive after the run finishes (for debugging)
     #[arg(long)]
     pub preserve_sandbox: bool,
+
+    /// Run the workflow in the background and print the run ID
+    #[arg(short = 'd', long, conflicts_with_all = ["resume", "run_branch", "preflight"])]
+    pub detach: bool,
+
+    /// Pre-generated run ID (used internally by --detach)
+    #[arg(long, hide = true)]
+    pub run_id: Option<String>,
 }
 
 #[derive(Args)]

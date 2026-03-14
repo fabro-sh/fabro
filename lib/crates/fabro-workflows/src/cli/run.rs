@@ -453,7 +453,7 @@ pub async fn run_command(
     }
 
     // 3. Create logs directory
-    let run_id = ulid::Ulid::new().to_string();
+    let run_id = args.run_id.unwrap_or_else(|| ulid::Ulid::new().to_string());
     let run_dir = args.run_dir.unwrap_or_else(|| {
         let base = dirs::home_dir()
             .expect("could not determine home directory")

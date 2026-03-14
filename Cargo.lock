@@ -1247,6 +1247,7 @@ dependencies = [
  "indicatif",
  "insta",
  "jsonwebtoken",
+ "libc",
  "open",
  "predicates",
  "rand 0.8.5",
@@ -1264,6 +1265,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "trycmd",
+ "ulid",
  "x509-parser",
 ]
 

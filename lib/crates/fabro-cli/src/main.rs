@@ -200,6 +200,83 @@ pub(crate) fn build_github_app_credentials(
     })
 }
 
+/// Fork the workflow as a background process, print the run ID, and exit.
+fn detach_run(args: fabro_workflows::cli::RunArgs) -> Result<()> {
+    let run_id = ulid::Ulid::new().to_string();
+
+    let run_dir = args.run_dir.clone().unwrap_or_else(|| {
+        let base = dirs::home_dir()
+            .expect("could not determine home directory")
+            .join(".fabro")
+            .join("runs");
+        base.join(format!(
+            "{}-{}",
+            chrono::Local::now().format("%Y%m%d"),
+            run_id
+        ))
+    });
+    std::fs::create_dir_all(&run_dir)?;
+
+    let log_file = std::fs::File::create(run_dir.join("detach.log"))?;
+
+    // Rebuild argv: current exe + original args, stripping --detach/-d, injecting --run-id and --run-dir
+    let exe = std::env::current_exe()?;
+    let mut child_args: Vec<String> = Vec::new();
+    child_args.push("run".to_string());
+
+    let raw_args: Vec<String> = std::env::args().collect();
+    // Skip argv[0] (binary) and argv[1] ("run"), then filter out --detach / -d
+    let mut iter = raw_args.iter().skip(2).peekable();
+    while let Some(arg) = iter.next() {
+        if arg == "--detach" || arg == "-d" {
+            continue;
+        }
+        // Skip --run-dir and its value (we'll override it)
+        if arg == "--run-dir" {
+            iter.next(); // consume the value
+            continue;
+        }
+        if arg.starts_with("--run-dir=") {
+            continue;
+        }
+        // Skip --run-id and its value (we'll override it)
+        if arg == "--run-id" {
+            iter.next();
+            continue;
+        }
+        if arg.starts_with("--run-id=") {
+            continue;
+        }
+        child_args.push(arg.clone());
+    }
+    child_args.push("--run-id".to_string());
+    child_args.push(run_id.clone());
+    child_args.push("--run-dir".to_string());
+    child_args.push(run_dir.to_string_lossy().to_string());
+
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.args(&child_args)
+        .stdout(log_file.try_clone()?)
+        .stderr(log_file)
+        .stdin(std::process::Stdio::null());
+
+    // Detach from the controlling terminal on unix
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+    }
+
+    cmd.spawn()?;
+    println!("{run_id}");
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
     let start = std::time::Instant::now();
@@ -503,6 +580,10 @@ async fn main_inner() -> (String, Result<()>) {
                 }
             }
             Command::Run(mut args) => {
+                if args.detach {
+                    return detach_run(args);
+                }
+
                 let styles: &'static fabro_util::terminal::Styles =
                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
                 let cli_config = cli_config::load_cli_config(None)?;
