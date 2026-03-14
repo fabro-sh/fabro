@@ -1,0 +1,36 @@
+---
+title: ".fabro file extension, human gate improvements, and user workflows"
+date: "2026-03-13"
+---
+
+## .fabro file extension
+
+Workflow files now use the `.fabro` extension instead of `.dot`. This gives workflows a distinct identity and avoids conflicts with Graphviz `.dot` files. Existing `.dot` files still work as a fallback — the engine checks for `graph.fabro` first, then falls back to `graph.dot`.
+
+```toml
+[workflow]
+graph = "workflow.fabro"
+```
+
+<Warning>
+**Breaking change.** Workflow files have been renamed from `.dot` to `.fabro`. Existing `.dot` files continue to work as a fallback, but new projects should use `.fabro`.
+</Warning>
+
+## Smarter human gates
+
+Human-in-the-loop gates now show the previous stage's output before prompting, so you can see what the agent produced before deciding what to do next. Gates with only a freeform edge also skip the multiple-choice menu and go straight to a text input, making conversational loops like REPL workflows feel more natural.
+
+## More
+
+<Accordion title="CLI">
+- Added user-level workflow lookup in `~/.fabro/workflows/` — personal workflows are now available across all projects
+</Accordion>
+
+<Accordion title="Workflows">
+- New `thread_id_requires_fidelity_full` lint rule warns when `thread_id` is set without `fidelity=full`
+- Added example REPL workflow for interactive agent loops
+</Accordion>
+
+<Accordion title="Improvements">
+- Branding now appears in generated commits and PR descriptions
+</Accordion>

@@ -1,0 +1,35 @@
+---
+title: "fabro rewind, workflow list, and Dark Factory"
+date: "2026-03-14"
+---
+
+## Rewind workflow runs
+
+You can now rewind a workflow run to an earlier checkpoint and resume from there. This is useful when a later stage goes off-track and you want to try again from a known-good point without restarting the entire workflow.
+
+```bash
+fabro rewind --run-branch fabro/runs/my-run --target plan@2
+```
+
+Target a specific node by name, `node@visit` for a particular visit count, or `@ordinal` for a checkpoint index. The command rewinds both the metadata and run branch refs, and optionally pushes to the remote.
+
+## fabro workflow list
+
+A new `fabro workflow list` command shows all available workflows in your project. Workflows are grouped by source (project vs. user-level), with descriptions pulled from each workflow's goal.
+
+```bash
+fabro workflow list
+```
+
+## More
+
+<Accordion title="Improvements">
+- Default Daytona sandbox now uses the `daytona-medium` snapshot with standard dev tools pre-installed
+- Workflow list output shows grouped sections with aligned columns and truncated descriptions
+- Added Dark Factory documentation page
+- Added workflow diagram to README
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed missing `git_commit_sha` in run branch commit messages
+</Accordion>
