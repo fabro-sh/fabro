@@ -110,6 +110,8 @@ enum Command {
     /// List workflow runs
     #[command(hide = true)]
     Ps(fabro_workflows::cli::runs::RunsListArgs),
+    /// Remove one or more workflow runs
+    Rm(fabro_workflows::cli::runs::RunsRemoveArgs),
     /// Pull request operations
     Pr {
         #[command(subcommand)]
@@ -398,6 +400,7 @@ async fn main_inner() -> (String, Result<()>) {
         Command::Init => "init",
         Command::Install => "install",
         Command::Ps(_) => "ps",
+        Command::Rm(_) => "rm",
         Command::Pr { command } => match command {
             PrCommand::Create(_) => "pr create",
             PrCommand::List(_) => "pr list",
@@ -694,6 +697,9 @@ async fn main_inner() -> (String, Result<()>) {
             Command::Ps(args) => {
                 let styles = fabro_util::terminal::Styles::detect_stdout();
                 fabro_workflows::cli::runs::list_command(&args, &styles)?;
+            }
+            Command::Rm(args) => {
+                fabro_workflows::cli::runs::remove_command(&args).await?;
             }
             Command::Pr { command } => {
                 let cli_config = cli_config::load_cli_config(None)?;

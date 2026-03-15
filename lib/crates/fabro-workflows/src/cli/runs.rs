@@ -59,6 +59,17 @@ pub struct RunsPruneArgs {
     pub yes: bool,
 }
 
+#[derive(Args)]
+pub struct RunsRemoveArgs {
+    /// Run IDs or workflow names to remove
+    #[arg(required = true)]
+    pub runs: Vec<String>,
+
+    /// Force removal of active runs
+    #[arg(short, long)]
+    pub force: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RunInfo {
     pub run_id: String,
@@ -854,6 +865,66 @@ pub fn prune_from(args: &RunsPruneArgs, base: &Path) -> Result<()> {
             filtered.len(),
             format_size(total_bytes)
         );
+    }
+    Ok(())
+}
+
+pub async fn remove_command(args: &RunsRemoveArgs) -> Result<()> {
+    let base = default_runs_base();
+    remove_from(args, &base).await
+}
+
+pub async fn remove_from(args: &RunsRemoveArgs, base: &Path) -> Result<()> {
+    let mut had_errors = false;
+
+    for identifier in &args.runs {
+        let run = match resolve_run(base, identifier) {
+            Ok(run) => run,
+            Err(e) => {
+                eprintln!("error: {identifier}: {e}");
+                had_errors = true;
+                continue;
+            }
+        };
+
+        if run.status.is_active() && !args.force {
+            eprintln!(
+                "cannot remove active run {} (status: {}, use -f to force)",
+                short_run_id(&run.run_id),
+                run.status
+            );
+            had_errors = true;
+            continue;
+        }
+
+        // Transition status to Removing (best-effort)
+        write_run_status(&run.path, RunStatus::Removing, None);
+
+        // Best-effort sandbox cleanup
+        let sandbox_path = run.path.join("sandbox.json");
+        if let Ok(record) = crate::sandbox_record::SandboxRecord::load(&sandbox_path) {
+            if record.provider != "local" {
+                match super::cp::reconnect(&record).await {
+                    Ok(sandbox) => {
+                        if let Err(e) = sandbox.cleanup().await {
+                            warn!(run_id = %run.run_id, error = %e, "sandbox cleanup failed");
+                        }
+                    }
+                    Err(e) => {
+                        warn!(run_id = %run.run_id, error = %e, "sandbox reconnect failed");
+                    }
+                }
+            }
+        }
+
+        // Delete the run directory
+        std::fs::remove_dir_all(&run.path)
+            .with_context(|| format!("failed to delete {}", run.path.display()))?;
+        eprintln!("{}", short_run_id(&run.run_id));
+    }
+
+    if had_errors {
+        bail!("some runs could not be removed");
     }
     Ok(())
 }
@@ -2270,5 +2341,119 @@ mod tests {
         let result = truncate_goal(emoji_str, 15);
         assert_eq!(result.chars().count(), 15);
         assert!(result.ends_with("..."));
+    }
+
+    fn make_succeeded_run(base: &Path, run_id: &str) -> PathBuf {
+        make_run_dir(
+            base,
+            &format!("20260101-{run_id}"),
+            Some(serde_json::json!({
+                "run_id": run_id,
+                "workflow_name": "test-wf",
+                "goal": "test",
+                "start_time": "2026-01-01T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0,
+                "labels": {}
+            })),
+            None,
+            Some((RunStatus::Succeeded, Some(StatusReason::Completed))),
+        )
+    }
+
+    fn make_running_run(base: &Path, run_id: &str) -> PathBuf {
+        make_run_dir(
+            base,
+            &format!("20260101-{run_id}"),
+            Some(serde_json::json!({
+                "run_id": run_id,
+                "workflow_name": "test-wf",
+                "goal": "test",
+                "start_time": "2026-01-01T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0,
+                "labels": {}
+            })),
+            None,
+            Some((RunStatus::Running, None)),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_remove_succeeded_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let dir = make_succeeded_run(base, "RUN1");
+        assert!(dir.exists());
+
+        let args = RunsRemoveArgs {
+            runs: vec!["RUN1".to_string()],
+            force: false,
+        };
+        remove_from(&args, base).await.unwrap();
+        assert!(!dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_remove_active_run_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let dir = make_running_run(base, "ACTIVE1");
+        assert!(dir.exists());
+
+        let args = RunsRemoveArgs {
+            runs: vec!["ACTIVE1".to_string()],
+            force: false,
+        };
+        let result = remove_from(&args, base).await;
+        assert!(result.is_err());
+        assert!(dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_remove_active_run_forced() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let dir = make_running_run(base, "ACTIVE2");
+        assert!(dir.exists());
+
+        let args = RunsRemoveArgs {
+            runs: vec!["ACTIVE2".to_string()],
+            force: true,
+        };
+        remove_from(&args, base).await.unwrap();
+        assert!(!dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_remove_unknown_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        fs::create_dir_all(base).unwrap();
+
+        let args = RunsRemoveArgs {
+            runs: vec!["NONEXISTENT".to_string()],
+            force: false,
+        };
+        let result = remove_from(&args, base).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_remove_multiple_runs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let dir1 = make_succeeded_run(base, "MULTI1");
+        let dir2 = make_succeeded_run(base, "MULTI2");
+        assert!(dir1.exists());
+        assert!(dir2.exists());
+
+        let args = RunsRemoveArgs {
+            runs: vec!["MULTI1".to_string(), "MULTI2".to_string()],
+            force: false,
+        };
+        remove_from(&args, base).await.unwrap();
+        assert!(!dir1.exists());
+        assert!(!dir2.exists());
     }
 }
