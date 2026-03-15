@@ -194,6 +194,21 @@ fn follow_logs(
 
 // ── Pretty formatter ──────────────────────────────────────────────────
 
+/// Indentation to align body text under the header (past the timestamp column).
+const BODY_INDENT: &str = "            ";
+
+/// Render markdown `text` wrapped to terminal width and indented for log body lines.
+fn render_indented_body(styles: &fabro_util::terminal::Styles, text: &str) -> String {
+    let wrap_width =
+        fabro_util::terminal::Styles::terminal_width().saturating_sub(BODY_INDENT.len());
+    let rendered = styles.render_markdown_width(text, wrap_width);
+    rendered
+        .lines()
+        .map(|l| format!("{BODY_INDENT}{l}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn format_event_pretty(line: &str, styles: &fabro_util::terminal::Styles) -> Option<String> {
     let envelope: serde_json::Value = serde_json::from_str(line).ok()?;
     let event = envelope.get("event")?.as_str()?;
@@ -212,15 +227,7 @@ pub fn format_event_pretty(line: &str, styles: &fabro_util::terminal::Styles) ->
             );
             match str_field(&envelope, "goal") {
                 Some(goal) if !goal.is_empty() => {
-                    let indent = "            ";
-                    let term_width = fabro_util::terminal::Styles::terminal_width();
-                    let wrap_width = term_width.saturating_sub(indent.len());
-                    let rendered = styles.render_markdown_width(goal, wrap_width);
-                    let body: String = rendered
-                        .lines()
-                        .map(|l| format!("{indent}{l}"))
-                        .collect::<Vec<_>>()
-                        .join("\n");
+                    let body = render_indented_body(styles, goal);
                     Some(format!("{header}\n{body}\n"))
                 }
                 _ => Some(header),
@@ -310,15 +317,7 @@ pub fn format_event_pretty(line: &str, styles: &fabro_util::terminal::Styles) ->
                 styles.dim.apply_to(model),
                 styles.dim.apply_to("]"),
             );
-            let indent = "            ";
-            let term_width = fabro_util::terminal::Styles::terminal_width();
-            let wrap_width = term_width.saturating_sub(indent.len());
-            let rendered = styles.render_markdown_width(text, wrap_width);
-            let body: String = rendered
-                .lines()
-                .map(|l| format!("{indent}{l}"))
-                .collect::<Vec<_>>()
-                .join("\n");
+            let body = render_indented_body(styles, text);
             Some(format!("{header}\n{body}\n"))
         }
 
