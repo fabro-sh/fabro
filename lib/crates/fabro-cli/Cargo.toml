@@ -13,6 +13,7 @@ path = "src/main.rs"
 default = []
 server = ["dep:fabro-api"]
 exedev = ["fabro-config/exedev", "fabro-workflows/exedev"]
+sleep_inhibitor = ["dep:fabro-beastie", "fabro-workflows/sleep_inhibitor"]
 
 [dependencies]
 fabro-config = { path = "../fabro-config" }
@@ -23,6 +24,7 @@ fabro-agent = { path = "../fabro-agent" }
 fabro-mcp = { path = "../fabro-mcp" }
 fabro-workflows = { path = "../fabro-workflows" }
 fabro-api = { path = "../fabro-api", optional = true }
+fabro-beastie = { path = "../fabro-beastie", optional = true }
 fabro-util = { path = "../fabro-util" }
 clap.workspace = true
 console.workspace = true

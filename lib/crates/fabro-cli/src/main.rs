@@ -522,6 +522,8 @@ async fn main_inner() -> (String, Result<()>) {
             }
             Command::Exec(mut args) => {
                 let cli_config = cli_config::load_cli_config(None)?;
+                #[cfg(feature = "sleep_inhibitor")]
+                let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep);
                 let exec_defaults = cli_config.exec.as_ref();
                 args.apply_cli_defaults(
                     exec_defaults.and_then(|a| a.provider.as_deref()),
@@ -604,6 +606,7 @@ async fn main_inner() -> (String, Result<()>) {
                     styles,
                     github_app,
                     git_author,
+                    cli_config.prevent_idle_sleep,
                 )
                 .await?;
             }

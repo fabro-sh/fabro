@@ -294,7 +294,12 @@ pub async fn run_command(
     styles: &'static Styles,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     git_author: crate::git::GitAuthor,
+    prevent_idle_sleep: bool,
 ) -> anyhow::Result<()> {
+    #[cfg(feature = "sleep_inhibitor")]
+    let _sleep_guard = fabro_beastie::guard(prevent_idle_sleep);
+    #[cfg(not(feature = "sleep_inhibitor"))]
+    let _ = prevent_idle_sleep;
     // Handle --run-branch resume: read everything from git metadata
     if let Some(branch) = args.run_branch.clone() {
         return run_from_branch(args, &branch, styles, git_author, run_defaults, github_app).await;

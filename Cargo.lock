@@ -1219,6 +1219,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-beastie"
+version = "0.4.0"
+dependencies = [
+ "core-foundation 0.9.4",
+ "libc",
+ "tracing",
+]
+
+[[package]]
 name = "fabro-cli"
 version = "0.4.0"
 dependencies = [
@@ -1235,6 +1244,7 @@ dependencies = [
  "dotenvy",
  "fabro-agent",
  "fabro-api",
+ "fabro-beastie",
  "fabro-config",
  "fabro-github",
  "fabro-llm",
@@ -1550,6 +1560,7 @@ dependencies = [
  "dirs",
  "dotenvy",
  "fabro-agent",
+ "fabro-beastie",
  "fabro-devcontainer",
  "fabro-exe",
  "fabro-git-storage",
