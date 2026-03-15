@@ -1251,7 +1251,11 @@ impl WorkflowRunEngine {
 
         // Write manifest.json (spec 5.6)
         let manifest = write_manifest(&config.run_dir, graph, config);
-        crate::cli::runs::write_status_file(&config.run_dir, "running");
+        crate::cli::runs::write_run_status(
+            &config.run_dir,
+            crate::run_status::RunStatus::Running,
+            None,
+        );
 
         // Initialize metadata branch for git-native checkpoint storage (best-effort)
         if let (Some(_), Some(ref repo_path)) = (&config.meta_branch, &config.host_repo_path) {

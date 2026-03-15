@@ -467,12 +467,20 @@ pub async fn run_command(
         .context("Failed to activate per-run log")?;
     tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
     tokio::fs::write(run_dir.join("run.pid"), std::process::id().to_string()).await?;
-    super::runs::write_status_file(&run_dir, "starting");
+    super::runs::write_run_status(
+        &run_dir,
+        crate::run_status::RunStatus::Starting,
+        Some(crate::run_status::StatusReason::SandboxInitializing),
+    );
 
-    // Safety net: mark as concluded if we exit before engine.run() (e.g. sandbox init failure)
+    // Safety net: mark as failed if we exit before engine.run() (e.g. sandbox init failure)
     let status_run_dir = run_dir.clone();
     let status_guard = scopeguard::guard((), move |()| {
-        super::runs::write_status_file(&status_run_dir, "concluded");
+        super::runs::write_run_status(
+            &status_run_dir,
+            crate::run_status::RunStatus::Failed,
+            Some(crate::run_status::StatusReason::SandboxInitFailed),
+        );
     });
 
     if workflow_path.extension().is_some_and(|ext| ext == "toml") {
@@ -1233,6 +1241,32 @@ pub async fn run_command(
             Err(e) => (crate::outcome::StageStatus::Fail, Some(e.to_string())),
         };
 
+        // Map engine result to RunStatus + StatusReason
+        let (run_status, status_reason) = match &engine_result {
+            Ok(o) => match o.status {
+                StageStatus::Success | StageStatus::Skipped => (
+                    crate::run_status::RunStatus::Succeeded,
+                    Some(crate::run_status::StatusReason::Completed),
+                ),
+                StageStatus::PartialSuccess => (
+                    crate::run_status::RunStatus::Succeeded,
+                    Some(crate::run_status::StatusReason::PartialSuccess),
+                ),
+                StageStatus::Fail | StageStatus::Retry => (
+                    crate::run_status::RunStatus::Failed,
+                    Some(crate::run_status::StatusReason::WorkflowError),
+                ),
+            },
+            Err(crate::error::FabroError::Cancelled) => (
+                crate::run_status::RunStatus::Failed,
+                Some(crate::run_status::StatusReason::Cancelled),
+            ),
+            Err(_) => (
+                crate::run_status::RunStatus::Failed,
+                Some(crate::run_status::StatusReason::WorkflowError),
+            ),
+        };
+
         // Load checkpoint and stage durations to populate per-stage data
         let checkpoint = Checkpoint::load(&run_dir.join("checkpoint.json")).ok();
         let stage_durations = crate::retro::extract_stage_durations(&run_dir);
@@ -1281,7 +1315,7 @@ pub async fn run_command(
             total_retries,
         };
         let _ = conclusion.save(&run_dir.join("conclusion.json"));
-        super::runs::write_status_file(&run_dir, "concluded");
+        super::runs::write_run_status(&run_dir, run_status, status_reason);
     }
 
     // Auto-derive retro (always, cheap) and optionally run retro agent

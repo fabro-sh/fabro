@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -11,40 +10,7 @@ use fabro_util::terminal::Styles;
 use serde::Serialize;
 use tracing::{debug, info, warn};
 
-use crate::outcome::StageStatus;
-
-/// Status of a run directory — either concluded with a `StageStatus`, actively running, or unknown.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RunStatus {
-    Concluded(StageStatus),
-    Running,
-    Unknown,
-}
-
-impl Serialize for RunStatus {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl RunStatus {
-    pub fn is_running(&self) -> bool {
-        matches!(self, RunStatus::Running)
-    }
-}
-
-impl fmt::Display for RunStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RunStatus::Concluded(s) => write!(f, "{s}"),
-            RunStatus::Running => write!(f, "running"),
-            RunStatus::Unknown => write!(f, "unknown"),
-        }
-    }
-}
+pub use crate::run_status::{RunStatus, RunStatusRecord, StatusReason};
 
 #[derive(Args)]
 pub struct RunFilterArgs {
@@ -101,6 +67,8 @@ pub struct RunInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_slug: Option<String>,
     pub status: RunStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_reason: Option<StatusReason>,
     pub start_time: String,
     pub labels: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -161,6 +129,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 workflow_name,
                 workflow_slug,
                 status: si.status,
+                status_reason: si.reason,
                 start_time,
                 labels,
                 duration_ms: si.duration_ms,
@@ -173,7 +142,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 is_orphan: false,
             });
         } else {
-            // No manifest.json — check for status.txt (starting run) vs true orphan
+            // No manifest.json — check for status.json (starting run) vs true orphan
             let mtime_dt = entry
                 .metadata()
                 .ok()
@@ -186,14 +155,15 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 .unwrap_or_else(|_| dir_name.clone());
 
             let si = read_status(&path);
-            if matches!(si.status, RunStatus::Unknown) {
-                // True orphan — no manifest, no status.txt
+            if matches!(si.status, RunStatus::Dead) {
+                // True orphan — no manifest, no status.json
                 runs.push(RunInfo {
                     run_id,
                     dir_name,
                     workflow_name: "[no manifest]".to_string(),
                     workflow_slug: None,
                     status: si.status,
+                    status_reason: si.reason,
                     start_time: mtime,
                     labels: HashMap::new(),
                     duration_ms: None,
@@ -206,13 +176,14 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                     is_orphan: true,
                 });
             } else {
-                // Has status.txt → run is initializing, not an orphan
+                // Has status.json → run is initializing, not an orphan
                 runs.push(RunInfo {
                     run_id,
                     dir_name,
                     workflow_name: "[starting]".to_string(),
                     workflow_slug: None,
                     status: si.status,
+                    status_reason: si.reason,
                     start_time: mtime,
                     labels: HashMap::new(),
                     duration_ms: si.duration_ms,
@@ -235,6 +206,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
 
 struct StatusInfo {
     status: RunStatus,
+    reason: Option<StatusReason>,
     end_time: Option<DateTime<Utc>>,
     duration_ms: Option<u64>,
     total_cost: Option<f64>,
@@ -244,6 +216,7 @@ impl StatusInfo {
     fn simple(status: RunStatus) -> Self {
         Self {
             status,
+            reason: None,
             end_time: None,
             duration_ms: None,
             total_cost: None,
@@ -251,44 +224,39 @@ impl StatusInfo {
     }
 }
 
-/// Write the run lifecycle status to `status.txt` (best-effort).
-pub fn write_status_file(run_dir: &Path, status: &str) {
-    let _ = std::fs::write(run_dir.join("status.txt"), status);
-}
-
-fn read_status_file(run_dir: &Path) -> Option<String> {
-    std::fs::read_to_string(run_dir.join("status.txt"))
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+/// Write the run status to `status.json` (best-effort).
+pub fn write_run_status(run_dir: &Path, status: RunStatus, reason: Option<StatusReason>) {
+    let record = RunStatusRecord::new(status, reason);
+    let _ = record.save(&run_dir.join("status.json"));
 }
 
 fn read_status(run_dir: &Path) -> StatusInfo {
-    // 1. conclusion.json is authoritative for concluded runs
-    if let Ok(conclusion) = crate::conclusion::Conclusion::load(&run_dir.join("conclusion.json")) {
-        return StatusInfo {
-            status: RunStatus::Concluded(conclusion.status),
-            end_time: Some(conclusion.timestamp),
-            duration_ms: Some(conclusion.duration_ms),
-            total_cost: conclusion.total_cost,
-        };
-    }
-    // 2. status.txt — explicit lifecycle tracking
-    if let Some(status_str) = read_status_file(run_dir) {
-        return match status_str.as_str() {
-            "starting" | "running" => StatusInfo::simple(RunStatus::Running),
-            // concluded without conclusion.json → treat as failed
-            "concluded" => {
-                StatusInfo::simple(RunStatus::Concluded(crate::outcome::StageStatus::Fail))
+    // 1. status.json is authoritative
+    if let Ok(record) = RunStatusRecord::load(&run_dir.join("status.json")) {
+        // For terminal statuses, pull duration/cost from conclusion.json if available
+        if record.status.is_terminal() {
+            if let Ok(conclusion) =
+                crate::conclusion::Conclusion::load(&run_dir.join("conclusion.json"))
+            {
+                return StatusInfo {
+                    status: record.status,
+                    reason: record.reason,
+                    end_time: Some(conclusion.timestamp),
+                    duration_ms: Some(conclusion.duration_ms),
+                    total_cost: conclusion.total_cost,
+                };
             }
-            _ => StatusInfo::simple(RunStatus::Unknown),
+        }
+        return StatusInfo {
+            status: record.status,
+            reason: record.reason,
+            end_time: None,
+            duration_ms: None,
+            total_cost: None,
         };
     }
-    // 3. Legacy fallback: run.pid exists → Running
-    if run_dir.join("run.pid").exists() {
-        return StatusInfo::simple(RunStatus::Running);
-    }
-    StatusInfo::simple(RunStatus::Unknown)
+    // No status.json → Dead (orphan)
+    StatusInfo::simple(RunStatus::Dead)
 }
 
 /// Which run statuses to include in filtered results.
@@ -311,7 +279,7 @@ pub fn filter_runs(
 ) -> Vec<RunInfo> {
     runs.iter()
         .filter(|r| {
-            if status_filter == StatusFilter::RunningOnly && !r.status.is_running() {
+            if status_filter == StatusFilter::RunningOnly && !r.status.is_active() {
                 return false;
             }
             if r.is_orphan && !include_orphans {
@@ -483,23 +451,17 @@ fn color_if(use_color: bool, color: Color) -> Option<Color> {
 
 fn status_cell(status: &RunStatus, use_color: bool) -> CellStruct {
     let text = status.to_string();
-    match status {
-        RunStatus::Concluded(StageStatus::Success | StageStatus::PartialSuccess) => text
-            .cell()
-            .bold(use_color)
-            .foreground_color(color_if(use_color, Color::Green)),
-        RunStatus::Concluded(StageStatus::Fail) => text
-            .cell()
-            .bold(use_color)
-            .foreground_color(color_if(use_color, Color::Red)),
-        RunStatus::Running => text
-            .cell()
-            .bold(use_color)
-            .foreground_color(color_if(use_color, Color::Cyan)),
-        _ => text
-            .cell()
-            .foreground_color(color_if(use_color, Color::Ansi256(8))),
-    }
+    let color = match status {
+        RunStatus::Succeeded => Some(Color::Green),
+        RunStatus::Failed => Some(Color::Red),
+        RunStatus::Running | RunStatus::Starting | RunStatus::Submitted => Some(Color::Cyan),
+        RunStatus::Removing => Some(Color::Yellow),
+        RunStatus::Paused => Some(Color::Magenta),
+        RunStatus::Dead => Some(Color::Ansi256(8)),
+    };
+    text.cell()
+        .bold(use_color && color != Some(Color::Ansi256(8)))
+        .foreground_color(color_if(use_color, color.unwrap_or(Color::Ansi256(8))))
 }
 
 fn abbreviate_home(path: &str) -> String {
@@ -664,7 +626,7 @@ pub fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Pat
     for run in &runs {
         let size = dir_size(&run.path);
         total_run_size += size;
-        let is_active = run.status.is_running();
+        let is_active = run.status.is_active();
         if is_active {
             active_count += 1;
         } else {
@@ -674,7 +636,7 @@ pub fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Pat
             run_details.push(RunSizeInfo {
                 run_id: run.run_id.clone(),
                 workflow_name: run.workflow_name.clone(),
-                status: run.status.clone(),
+                status: run.status,
                 start_time_dt: run.start_time_dt,
                 size,
             });
@@ -801,7 +763,7 @@ pub fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Pat
                 } else {
                     "-".to_string()
                 };
-                let size_display = if !detail.status.is_running() {
+                let size_display = if !detail.status.is_active() {
                     format!("{} *", format_size(detail.size))
                 } else {
                     format_size(detail.size)
@@ -880,8 +842,8 @@ pub fn prune_from(args: &RunsPruneArgs, base: &Path) -> Result<()> {
         let now = Utc::now();
         let cutoff = now - threshold;
         filtered.retain(|run| {
-            // Exclude running runs
-            if run.status.is_running() {
+            // Exclude active runs
+            if run.status.is_active() {
                 return false;
             }
             // Use end_time if available, fall back to start_time
@@ -936,7 +898,7 @@ mod tests {
         dir_name: &str,
         manifest: Option<serde_json::Value>,
         conclusion_json: Option<serde_json::Value>,
-        pid_file: bool,
+        status: Option<(RunStatus, Option<StatusReason>)>,
     ) -> PathBuf {
         let dir = base.join(dir_name);
         fs::create_dir_all(&dir).unwrap();
@@ -954,8 +916,8 @@ mod tests {
             )
             .unwrap();
         }
-        if pid_file {
-            fs::write(dir.join("run.pid"), "12345").unwrap();
+        if let Some((s, r)) = status {
+            write_run_status(&dir, s, r);
         }
         dir
     }
@@ -980,26 +942,23 @@ mod tests {
             Some(
                 serde_json::json!({ "timestamp": "2026-01-01T12:01:00Z", "status": "success", "duration_ms": 60000 }),
             ),
-            false,
+            Some((RunStatus::Succeeded, Some(StatusReason::Completed))),
         );
 
-        make_run_dir(base, "fabro-run-orphan", None, None, false);
+        make_run_dir(base, "fabro-run-orphan", None, None, None);
 
         let runs = scan_runs(base).unwrap();
         assert_eq!(runs.len(), 2);
 
         let completed = runs.iter().find(|r| r.run_id == "abc123").unwrap();
         assert_eq!(completed.workflow_name, "my-pipeline");
-        assert_eq!(
-            completed.status,
-            RunStatus::Concluded(crate::outcome::StageStatus::Success)
-        );
+        assert_eq!(completed.status, RunStatus::Succeeded);
         assert_eq!(completed.labels.get("env").unwrap(), "prod");
         assert!(!completed.is_orphan);
 
         let orphan = runs.iter().find(|r| r.is_orphan).unwrap();
         assert_eq!(orphan.workflow_name, "[no manifest]");
-        assert_eq!(orphan.status, RunStatus::Unknown);
+        assert_eq!(orphan.status, RunStatus::Dead);
     }
 
     #[test]
@@ -1019,7 +978,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            true,
+            Some((RunStatus::Running, None)),
         );
 
         let runs = scan_runs(base).unwrap();
@@ -1048,7 +1007,8 @@ mod tests {
                 dir_name: "d1".into(),
                 workflow_name: "p".into(),
                 workflow_slug: None,
-                status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
+                status: RunStatus::Succeeded,
+                status_reason: None,
                 start_time: "2025-06-01T00:00:00Z".into(),
                 labels: HashMap::new(),
                 duration_ms: None,
@@ -1065,7 +1025,8 @@ mod tests {
                 dir_name: "d2".into(),
                 workflow_name: "p".into(),
                 workflow_slug: None,
-                status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
+                status: RunStatus::Succeeded,
+                status_reason: None,
                 start_time: "2026-03-01T00:00:00Z".into(),
                 labels: HashMap::new(),
                 duration_ms: None,
@@ -1098,7 +1059,8 @@ mod tests {
                 dir_name: "d1".into(),
                 workflow_name: "deploy-prod".into(),
                 workflow_slug: None,
-                status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
+                status: RunStatus::Succeeded,
+                status_reason: None,
                 start_time: "2026-01-01T00:00:00Z".into(),
                 labels: HashMap::new(),
                 duration_ms: None,
@@ -1115,7 +1077,8 @@ mod tests {
                 dir_name: "d2".into(),
                 workflow_name: "test-suite".into(),
                 workflow_slug: None,
-                status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
+                status: RunStatus::Succeeded,
+                status_reason: None,
                 start_time: "2026-01-01T00:00:00Z".into(),
                 labels: HashMap::new(),
                 duration_ms: None,
@@ -1141,7 +1104,8 @@ mod tests {
                 dir_name: "d1".into(),
                 workflow_name: "p".into(),
                 workflow_slug: None,
-                status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
+                status: RunStatus::Succeeded,
+                status_reason: None,
                 start_time: "2026-01-01T00:00:00Z".into(),
                 labels: HashMap::from([("env".into(), "prod".into())]),
                 duration_ms: None,
@@ -1158,7 +1122,8 @@ mod tests {
                 dir_name: "d2".into(),
                 workflow_name: "p".into(),
                 workflow_slug: None,
-                status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
+                status: RunStatus::Succeeded,
+                status_reason: None,
                 start_time: "2026-01-01T00:00:00Z".into(),
                 labels: HashMap::from([("env".into(), "staging".into())]),
                 duration_ms: None,
@@ -1190,7 +1155,8 @@ mod tests {
             dir_name: "d1".into(),
             workflow_name: "[no manifest]".into(),
             workflow_slug: None,
-            status: RunStatus::Unknown,
+            status: RunStatus::Dead,
+            status_reason: None,
             start_time: "".into(),
             labels: HashMap::new(),
             duration_ms: None,
@@ -1218,6 +1184,7 @@ mod tests {
                 workflow_name: "p".into(),
                 workflow_slug: None,
                 status: RunStatus::Running,
+                status_reason: None,
                 start_time: "2026-01-01T00:00:00Z".into(),
                 labels: HashMap::new(),
                 duration_ms: None,
@@ -1234,7 +1201,8 @@ mod tests {
                 dir_name: "d2".into(),
                 workflow_name: "p".into(),
                 workflow_slug: None,
-                status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
+                status: RunStatus::Succeeded,
+                status_reason: None,
                 start_time: "2026-01-01T00:00:00Z".into(),
                 labels: HashMap::new(),
                 duration_ms: None,
@@ -1274,7 +1242,7 @@ mod tests {
                 "host_repo_path": "/home/user/myproject"
             })),
             None,
-            true,
+            Some((RunStatus::Running, None)),
         );
 
         let runs = scan_runs(base).unwrap();
@@ -1304,7 +1272,7 @@ mod tests {
             Some(
                 serde_json::json!({ "timestamp": "2025-01-01T12:01:00Z", "status": "success", "duration_ms": 60000 }),
             ),
-            false,
+            None,
         );
 
         let args = RunsPruneArgs {
@@ -1341,7 +1309,7 @@ mod tests {
             Some(
                 serde_json::json!({ "timestamp": "2025-01-01T12:01:00Z", "status": "success", "duration_ms": 60000 }),
             ),
-            false,
+            None,
         );
 
         // Also add a run that should NOT be pruned (too new)
@@ -1359,7 +1327,7 @@ mod tests {
             Some(
                 serde_json::json!({ "timestamp": "2026-03-01T12:01:00Z", "status": "success", "duration_ms": 60000 }),
             ),
-            false,
+            None,
         );
 
         let args = RunsPruneArgs {
@@ -1386,7 +1354,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
 
-        let orphan_dir = make_run_dir(base, "orphan-dir", None, None, false);
+        let orphan_dir = make_run_dir(base, "orphan-dir", None, None, None);
 
         let args = RunsPruneArgs {
             filter: RunFilterArgs {
@@ -1476,7 +1444,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            true,
+            Some((RunStatus::Running, None)),
         );
         // Add a file to give it size
         fs::write(
@@ -1502,7 +1470,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 60000
             })),
-            false,
+            None,
         );
         fs::write(
             runs_base.join("20260307-DONE").join("data.bin"),
@@ -1625,7 +1593,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
 
         let info = resolve_run(dir.path(), "abc123").unwrap();
@@ -1647,7 +1615,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
         make_run_dir(
             dir.path(),
@@ -1661,7 +1629,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
 
         // "deploy" doesn't match any run ID prefix, so falls back to workflow name
@@ -1686,7 +1654,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
         make_run_dir(
             dir.path(),
@@ -1700,7 +1668,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
 
         // "deploy" matches run_id prefix of first run — should prefer that over workflow name match
@@ -1732,7 +1700,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
         make_run_dir(
             dir.path(),
@@ -1746,7 +1714,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
 
         let result = resolve_run(dir.path(), "abc");
@@ -1772,7 +1740,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
 
         // Slug-style input should match PascalCase workflow name
@@ -1795,7 +1763,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
 
         let info = resolve_run(dir.path(), "smoke").unwrap();
@@ -1819,7 +1787,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
 
         let info = resolve_run(dir.path(), "foo").unwrap();
@@ -1850,7 +1818,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 300000
             })),
-            false,
+            Some((RunStatus::Succeeded, Some(StatusReason::Completed))),
         );
 
         let runs = scan_runs(base).unwrap();
@@ -1880,7 +1848,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            true,
+            Some((RunStatus::Running, None)),
         );
 
         let runs = scan_runs(base).unwrap();
@@ -1915,7 +1883,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 1000
             })),
-            false,
+            None,
         );
 
         let args = RunsPruneArgs {
@@ -1951,7 +1919,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            true, // running
+            Some((RunStatus::Running, None)), // running
         );
 
         let args = RunsPruneArgs {
@@ -1991,7 +1959,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 1000
             })),
-            false,
+            None,
         );
 
         let args = RunsPruneArgs {
@@ -2036,7 +2004,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 1000
             })),
-            false,
+            None,
         );
 
         let args = RunsPruneArgs {
@@ -2084,18 +2052,20 @@ mod tests {
     }
 
     #[test]
-    fn run_status_serializes_as_flat_string() {
-        let concluded = RunStatus::Concluded(crate::outcome::StageStatus::Success);
-        assert_eq!(serde_json::to_string(&concluded).unwrap(), "\"success\"");
-
-        let running = RunStatus::Running;
-        assert_eq!(serde_json::to_string(&running).unwrap(), "\"running\"");
-
-        let unknown = RunStatus::Unknown;
-        assert_eq!(serde_json::to_string(&unknown).unwrap(), "\"unknown\"");
-
-        let fail = RunStatus::Concluded(crate::outcome::StageStatus::Fail);
-        assert_eq!(serde_json::to_string(&fail).unwrap(), "\"fail\"");
+    fn run_status_serializes_as_snake_case_string() {
+        assert_eq!(
+            serde_json::to_string(&RunStatus::Succeeded).unwrap(),
+            "\"succeeded\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RunStatus::Running).unwrap(),
+            "\"running\""
+        );
+        assert_eq!(serde_json::to_string(&RunStatus::Dead).unwrap(), "\"dead\"");
+        assert_eq!(
+            serde_json::to_string(&RunStatus::Failed).unwrap(),
+            "\"failed\""
+        );
     }
 
     // === Step 3: disk space reporting tests ===
@@ -2139,7 +2109,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 1000
             })),
-            false,
+            None,
         );
 
         // Run completed 1 day ago — should NOT be pruned with --older-than 2d
@@ -2160,7 +2130,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 1000
             })),
-            false,
+            None,
         );
 
         // Run completed 10 days ago — should be pruned with --older-than 7d
@@ -2181,7 +2151,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 1000
             })),
-            false,
+            None,
         );
 
         // With --older-than 7d, only the 10-day-old run should be pruned
@@ -2211,43 +2181,22 @@ mod tests {
         );
     }
 
-    // === status.txt tests ===
+    // === status.json tests ===
 
     #[test]
-    fn read_status_starting_maps_to_running() {
+    fn read_status_from_status_json() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
-        fs::write(dir.join("status.txt"), "starting").unwrap();
+        write_run_status(dir, RunStatus::Running, None);
         let si = read_status(dir);
         assert_eq!(si.status, RunStatus::Running);
     }
 
     #[test]
-    fn read_status_running_maps_to_running() {
+    fn read_status_succeeded_with_conclusion_has_duration() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
-        fs::write(dir.join("status.txt"), "running").unwrap();
-        let si = read_status(dir);
-        assert_eq!(si.status, RunStatus::Running);
-    }
-
-    #[test]
-    fn read_status_concluded_without_conclusion_json_maps_to_fail() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        fs::write(dir.join("status.txt"), "concluded").unwrap();
-        let si = read_status(dir);
-        assert_eq!(
-            si.status,
-            RunStatus::Concluded(crate::outcome::StageStatus::Fail)
-        );
-    }
-
-    #[test]
-    fn read_status_conclusion_json_takes_priority_over_status_txt() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        fs::write(dir.join("status.txt"), "running").unwrap();
+        write_run_status(dir, RunStatus::Succeeded, Some(StatusReason::Completed));
         fs::write(
             dir.join("conclusion.json"),
             serde_json::to_string_pretty(&serde_json::json!({
@@ -2259,31 +2208,40 @@ mod tests {
         )
         .unwrap();
         let si = read_status(dir);
-        assert_eq!(
-            si.status,
-            RunStatus::Concluded(crate::outcome::StageStatus::Success)
-        );
+        assert_eq!(si.status, RunStatus::Succeeded);
+        assert_eq!(si.duration_ms, Some(60000));
     }
 
     #[test]
-    fn scan_runs_status_txt_without_manifest_is_not_orphan() {
+    fn read_status_no_status_json_is_dead() {
+        let tmp = tempfile::tempdir().unwrap();
+        let si = read_status(tmp.path());
+        assert_eq!(si.status, RunStatus::Dead);
+    }
+
+    #[test]
+    fn scan_runs_status_json_without_manifest_is_not_orphan() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
 
         let dir = base.join("20260301-STARTING");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("id.txt"), "starting-run-id").unwrap();
-        fs::write(dir.join("status.txt"), "starting").unwrap();
+        write_run_status(
+            &dir,
+            RunStatus::Starting,
+            Some(StatusReason::SandboxInitializing),
+        );
 
         let runs = scan_runs(base).unwrap();
         assert_eq!(runs.len(), 1);
         assert!(!runs[0].is_orphan);
-        assert_eq!(runs[0].status, RunStatus::Running);
+        assert_eq!(runs[0].status, RunStatus::Starting);
         assert_eq!(runs[0].workflow_name, "[starting]");
     }
 
     #[test]
-    fn scan_runs_no_status_txt_no_manifest_is_orphan() {
+    fn scan_runs_no_status_json_no_manifest_is_orphan() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
 
@@ -2293,7 +2251,7 @@ mod tests {
         let runs = scan_runs(base).unwrap();
         assert_eq!(runs.len(), 1);
         assert!(runs[0].is_orphan);
-        assert_eq!(runs[0].status, RunStatus::Unknown);
+        assert_eq!(runs[0].status, RunStatus::Dead);
     }
 
     #[test]
@@ -2303,7 +2261,8 @@ mod tests {
             dir_name: "d1".into(),
             workflow_name: "[starting]".into(),
             workflow_slug: None,
-            status: RunStatus::Running,
+            status: RunStatus::Starting,
+            status_reason: Some(StatusReason::SandboxInitializing),
             start_time: "2026-01-01T00:00:00Z".into(),
             labels: HashMap::new(),
             duration_ms: None,
