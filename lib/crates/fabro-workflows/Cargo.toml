@@ -15,7 +15,6 @@ doctest = false
 [features]
 default = []
 exedev = ["dep:fabro-exe"]
-sleep_inhibitor = ["dep:fabro-beastie"]
 
 [dependencies]
 clap.workspace = true
@@ -23,7 +22,6 @@ anyhow.workspace = true
 dotenvy.workspace = true
 fabro-agent = { path = "../fabro-agent" }
 fabro-devcontainer = { path = "../fabro-devcontainer" }
-fabro-beastie = { path = "../fabro-beastie", optional = true }
 fabro-exe = { path = "../fabro-exe", optional = true }
 fabro-ssh = { path = "../fabro-ssh" }
 fabro-mcp = { path = "../fabro-mcp" }

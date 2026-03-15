@@ -600,13 +600,15 @@ async fn main_inner() -> (String, Result<()>) {
                     cli_config.git_author().and_then(|a| a.email.clone()),
                 );
 
+                #[cfg(feature = "sleep_inhibitor")]
+                let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep);
+
                 fabro_workflows::cli::run::run_command(
                     args,
                     cli_config.run_defaults,
                     styles,
                     github_app,
                     git_author,
-                    cli_config.prevent_idle_sleep,
                 )
                 .await?;
             }

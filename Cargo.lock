@@ -1560,7 +1560,6 @@ dependencies = [
  "dirs",
  "dotenvy",
  "fabro-agent",
- "fabro-beastie",
  "fabro-devcontainer",
  "fabro-exe",
  "fabro-git-storage",

@@ -13,7 +13,7 @@ path = "src/main.rs"
 default = []
 server = ["dep:fabro-api"]
 exedev = ["fabro-config/exedev", "fabro-workflows/exedev"]
-sleep_inhibitor = ["dep:fabro-beastie", "fabro-workflows/sleep_inhibitor"]
+sleep_inhibitor = ["dep:fabro-beastie"]
 
 [dependencies]
 fabro-config = { path = "../fabro-config" }

@@ -1,6 +1,5 @@
 #![allow(non_upper_case_globals, dead_code)]
 
-use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
 
 // IOKit power management assertion types
