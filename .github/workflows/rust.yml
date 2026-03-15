@@ -29,54 +29,44 @@ permissions:
   contents: read
 
 env:
-  CARGO_TERM_COLOR: always # trigger CI
+  CARGO_TERM_COLOR: always
 
 jobs:
   fmt:
     name: Format
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
-      - name: Add cargo bin to PATH
-        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
-          clean: false
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
       - run: cargo fmt --check --all
 
   clippy:
     name: Clippy
-    runs-on: self-hosted
-    env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_DIR: /home/bhelmkamp/.cache/sccache
+    runs-on: ubuntu-latest
     steps:
-      - name: Add cargo bin to PATH
-        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
-          clean: false
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          cache-on-failure: true
       - run: cargo clippy --workspace -- -D warnings
-      - name: Show sccache stats
-        run: sccache --show-stats
 
   test:
     name: Test (Linux)
-    runs-on: self-hosted
-    env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_DIR: /home/bhelmkamp/.cache/sccache
+    runs-on: ubuntu-latest
     steps:
-      - name: Add cargo bin to PATH
-        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
-          clean: false
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          cache-on-failure: true
       - run: cargo test --workspace
-      - name: Show sccache stats
-        run: sccache --show-stats
 
   test-macos:
     name: Test (macOS)
