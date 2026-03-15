@@ -472,7 +472,7 @@ pub fn rewind_command(args: &RewindArgs, styles: &Styles) -> Result<()> {
 }
 
 /// Load the graph from the metadata branch and build the parallel interior map.
-fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String> {
+pub fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String> {
     let branch = MetadataStore::branch_name(run_id);
     let sig = match Signature::now("Fabro", "noreply@fabro.sh") {
         Ok(s) => s,

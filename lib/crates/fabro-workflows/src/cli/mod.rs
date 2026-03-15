@@ -2,6 +2,7 @@ pub mod backend;
 pub mod cli_backend;
 pub mod cp;
 pub mod diff;
+pub mod fork;
 pub mod graph;
 pub mod inspect;
 pub mod logs;

@@ -124,6 +124,8 @@ enum Command {
     },
     /// Rewind a workflow run to an earlier checkpoint
     Rewind(fabro_workflows::cli::rewind::RewindArgs),
+    /// Fork a workflow run from an earlier checkpoint into a new run
+    Fork(fabro_workflows::cli::fork::ForkArgs),
     /// Workflow operations
     Workflow {
         #[command(subcommand)]
@@ -409,6 +411,7 @@ async fn main_inner() -> (String, Result<()>) {
             PrCommand::Close(_) => "pr close",
         },
         Command::Rewind(_) => "rewind",
+        Command::Fork(_) => "fork",
         Command::Workflow { command } => match command {
             WorkflowCommand::List(_) => "workflow list",
             WorkflowCommand::Create(_) => "workflow create",
@@ -730,6 +733,10 @@ async fn main_inner() -> (String, Result<()>) {
             Command::Rewind(args) => {
                 let styles = fabro_util::terminal::Styles::detect_stderr();
                 fabro_workflows::cli::rewind::rewind_command(&args, &styles)?;
+            }
+            Command::Fork(args) => {
+                let styles = fabro_util::terminal::Styles::detect_stderr();
+                fabro_workflows::cli::fork::fork_command(&args, &styles)?;
             }
             Command::Workflow { command } => match command {
                 WorkflowCommand::List(args) => {
