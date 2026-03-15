@@ -203,13 +203,28 @@ pub fn format_event_pretty(line: &str, styles: &fabro_util::terminal::Styles) ->
         "WorkflowRunStarted" => {
             let name = str_field(&envelope, "workflow_name").unwrap_or("?");
             let run_id = str_field(&envelope, "run_id").unwrap_or("?");
-            Some(format!(
+            let header = format!(
                 "{} {} {}  {}",
                 styles.dim.apply_to(&ts),
                 styles.bold_cyan.apply_to("\u{25b6}"),
                 styles.bold.apply_to(name),
                 styles.dim.apply_to(run_id),
-            ))
+            );
+            match str_field(&envelope, "goal") {
+                Some(goal) if !goal.is_empty() => {
+                    let indent = "            ";
+                    let term_width = fabro_util::terminal::Styles::terminal_width();
+                    let wrap_width = term_width.saturating_sub(indent.len());
+                    let rendered = styles.render_markdown_width(goal, wrap_width);
+                    let body: String = rendered
+                        .lines()
+                        .map(|l| format!("{indent}{l}"))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    Some(format!("{header}\n{body}\n"))
+                }
+                _ => Some(header),
+            }
         }
 
         "WorkflowRunCompleted" => {
@@ -700,6 +715,27 @@ mod tests {
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("smoke"), "got: {result}");
         assert!(result.contains("abc123"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_workflow_run_started_with_goal() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:23:01Z","run_id":"abc123","event":"WorkflowRunStarted","workflow_name":"smoke","goal":"Fix the bug"}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("smoke"), "got: {result}");
+        assert!(result.contains("abc123"), "got: {result}");
+        assert!(result.contains("Fix the bug"), "got: {result}");
+        // Should be multi-line (header + body)
+        assert!(result.contains('\n'), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_workflow_run_started_without_goal_no_extra_lines() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:23:01Z","run_id":"abc123","event":"WorkflowRunStarted","workflow_name":"smoke"}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        // Without goal, should be a single line (no newlines)
+        assert!(!result.contains('\n'), "got: {result}");
     }
 
     #[test]
