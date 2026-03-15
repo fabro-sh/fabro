@@ -110,6 +110,8 @@ enum Command {
     /// List workflow runs
     #[command(hide = true)]
     Ps(fabro_workflows::cli::runs::RunsListArgs),
+    /// Remove one or more workflow runs
+    Rm(fabro_workflows::cli::runs::RunsRemoveArgs),
     /// Pull request operations
     Pr {
         #[command(subcommand)]
@@ -218,6 +220,13 @@ fn detach_run(args: fabro_workflows::cli::RunArgs) -> Result<()> {
         ))
     });
     std::fs::create_dir_all(&run_dir)?;
+    std::fs::write(run_dir.join("id.txt"), &run_id)?;
+    fabro_workflows::cli::runs::write_run_status(
+        &run_dir,
+        fabro_workflows::run_status::RunStatus::Submitted,
+        None,
+    );
+    std::fs::File::create(run_dir.join("progress.jsonl"))?;
 
     let log_file = std::fs::File::create(run_dir.join("detach.log"))?;
 
@@ -391,6 +400,7 @@ async fn main_inner() -> (String, Result<()>) {
         Command::Init => "init",
         Command::Install => "install",
         Command::Ps(_) => "ps",
+        Command::Rm(_) => "rm",
         Command::Pr { command } => match command {
             PrCommand::Create(_) => "pr create",
             PrCommand::List(_) => "pr list",
@@ -685,7 +695,11 @@ async fn main_inner() -> (String, Result<()>) {
                 install::run_install().await?;
             }
             Command::Ps(args) => {
-                fabro_workflows::cli::runs::list_command(&args)?;
+                let styles = fabro_util::terminal::Styles::detect_stdout();
+                fabro_workflows::cli::runs::list_command(&args, &styles)?;
+            }
+            Command::Rm(args) => {
+                fabro_workflows::cli::runs::remove_command(&args).await?;
             }
             Command::Pr { command } => {
                 let cli_config = cli_config::load_cli_config(None)?;

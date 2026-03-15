@@ -301,6 +301,10 @@ fn write_manifest(run_dir: &Path, graph: &Graph, config: &RunConfig) -> crate::m
         labels: config.labels.clone(),
         base_branch: config.base_branch.clone(),
         workflow_slug: config.workflow_slug.clone(),
+        host_repo_path: config
+            .host_repo_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string()),
     };
     let _ = std::fs::create_dir_all(run_dir);
     let _ = manifest.save(&run_dir.join("manifest.json"));
@@ -665,12 +669,12 @@ pub(crate) async fn git_push_host(
     refspec: &str,
     github_app: &Option<fabro_github::GitHubAppCredentials>,
     label: &str,
-) {
+) -> bool {
     let (origin_url, _) = match crate::daytona_sandbox::detect_repo_info(repo_path) {
         Ok(info) => info,
         Err(e) => {
             tracing::warn!(error = %e, label, "Cannot detect origin for push");
-            return;
+            return false;
         }
     };
 
@@ -680,12 +684,12 @@ pub(crate) async fn git_push_host(
             Ok(url) => url,
             Err(e) => {
                 tracing::warn!(error = %e, label, "Failed to get token for push");
-                return;
+                return false;
             }
         },
         None => {
             tracing::warn!(label, "No GitHub App credentials for push");
-            return;
+            return false;
         }
     };
 
@@ -696,13 +700,19 @@ pub(crate) async fn git_push_host(
     })
     .await;
     match result {
-        Ok(()) => tracing::info!(label, "Pushed to origin"),
-        Err(e) => tracing::warn!(error = %e, label, "Failed to push"),
+        Ok(()) => {
+            tracing::info!(label, "Pushed to origin");
+            true
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, label, "Failed to push");
+            false
+        }
     }
 }
 
 /// Push the run branch to origin inside a remote sandbox (best-effort).
-async fn git_push_remote(sandbox: &dyn Sandbox, branch: &str) {
+async fn git_push_remote(sandbox: &dyn Sandbox, branch: &str) -> bool {
     if let Err(e) = sandbox.refresh_push_credentials().await {
         tracing::warn!(error = %e, "Failed to refresh push credentials");
     }
@@ -710,12 +720,15 @@ async fn git_push_remote(sandbox: &dyn Sandbox, branch: &str) {
     match sandbox.exec_command(&cmd, 60_000, None, None, None).await {
         Ok(r) if r.exit_code == 0 => {
             tracing::info!(branch, "Pushed run branch to origin");
+            true
         }
         Ok(r) => {
             tracing::warn!(branch, exit_code = r.exit_code, "Failed to push run branch");
+            false
         }
         Err(e) => {
             tracing::warn!(branch, error = %e, "Failed to push run branch");
+            false
         }
     }
 }
@@ -1238,6 +1251,11 @@ impl WorkflowRunEngine {
 
         // Write manifest.json (spec 5.6)
         let manifest = write_manifest(&config.run_dir, graph, config);
+        crate::cli::runs::write_run_status(
+            &config.run_dir,
+            crate::run_status::RunStatus::Running,
+            None,
+        );
 
         // Initialize metadata branch for git-native checkpoint storage (best-effort)
         if let (Some(_), Some(ref repo_path)) = (&config.meta_branch, &config.host_repo_path) {
@@ -1867,23 +1885,6 @@ impl WorkflowRunEngine {
             let checkpoint_path = config.run_dir.join("checkpoint.json");
             if let Err(e) = checkpoint.save(&checkpoint_path) {
                 context.append_log(format!("checkpoint save failed: {e}"));
-            } else {
-                self.services
-                    .emitter
-                    .emit(&WorkflowRunEvent::CheckpointSaved {
-                        node_id: node.id.clone(),
-                    });
-
-                // CheckpointSaved hook (non-blocking)
-                {
-                    let mut hook_ctx = HookContext::new(
-                        HookEvent::CheckpointSaved,
-                        run_id.clone(),
-                        graph.name.clone(),
-                    );
-                    hook_ctx.node_id = Some(node.id.clone());
-                    let _ = self.run_hooks(&hook_ctx, hook_work_dir.as_deref()).await;
-                }
             }
 
             // Step 6b: Write shadow branch first, then run branch commit with trailer
@@ -1949,18 +1950,22 @@ impl WorkflowRunEngine {
                         }
                         self.services
                             .emitter
-                            .emit(&WorkflowRunEvent::GitCheckpoint {
-                                run_id: run_id.clone(),
+                            .emit(&WorkflowRunEvent::CheckpointCompleted {
                                 node_id: node.id.clone(),
                                 status: outcome.status.to_string(),
-                                git_commit_sha: sha.clone(),
+                                git_commit_sha: Some(sha.clone()),
                             });
+
+                        self.services.emitter.emit(&WorkflowRunEvent::GitCommit {
+                            node_id: Some(node.id.clone()),
+                            sha: sha.clone(),
+                        });
 
                         // Push run branch (skip in dry-run mode)
                         if !config.dry_run {
                             if let Some(ref branch) = config.run_branch {
-                                if self.services.sandbox.is_remote() {
-                                    git_push_remote(&*self.services.sandbox, branch).await;
+                                let push_ok = if self.services.sandbox.is_remote() {
+                                    git_push_remote(&*self.services.sandbox, branch).await
                                 } else if let Some(ref repo_path) = config.host_repo_path {
                                     let refspec = format!("refs/heads/{branch}");
                                     git_push_host(
@@ -1969,21 +1974,31 @@ impl WorkflowRunEngine {
                                         &config.github_app,
                                         "run branch",
                                     )
-                                    .await;
-                                }
+                                    .await
+                                } else {
+                                    false
+                                };
+                                self.services.emitter.emit(&WorkflowRunEvent::GitPush {
+                                    branch: branch.clone(),
+                                    success: push_ok,
+                                });
                             }
                             // Push metadata branch (always from host)
                             if let (Some(ref meta_branch), Some(ref repo_path)) =
                                 (&config.meta_branch, &config.host_repo_path)
                             {
                                 let refspec = format!("refs/heads/{meta_branch}");
-                                git_push_host(
+                                let meta_push_ok = git_push_host(
                                     repo_path,
                                     &refspec,
                                     &config.github_app,
                                     "metadata branch",
                                 )
                                 .await;
+                                self.services.emitter.emit(&WorkflowRunEvent::GitPush {
+                                    branch: meta_branch.clone(),
+                                    success: meta_push_ok,
+                                });
                             }
                         }
 
@@ -2010,7 +2025,7 @@ impl WorkflowRunEngine {
                     Err(e) => {
                         self.services
                             .emitter
-                            .emit(&WorkflowRunEvent::GitCheckpointFailed {
+                            .emit(&WorkflowRunEvent::CheckpointFailed {
                                 node_id: node.id.clone(),
                                 error: e.clone(),
                             });
@@ -2023,6 +2038,27 @@ impl WorkflowRunEngine {
                         });
                     }
                 }
+            } else {
+                // Non-git checkpoint path (start node or git disabled)
+                self.services
+                    .emitter
+                    .emit(&WorkflowRunEvent::CheckpointCompleted {
+                        node_id: node.id.clone(),
+                        status: outcome.status.to_string(),
+                        git_commit_sha: None,
+                    });
+            }
+
+            // CheckpointSaved hook (non-blocking) — fires for both git and non-git paths.
+            // The Err arm above returns early, so this only runs on success.
+            {
+                let mut hook_ctx = HookContext::new(
+                    HookEvent::CheckpointSaved,
+                    run_id.clone(),
+                    graph.name.clone(),
+                );
+                hook_ctx.node_id = Some(node.id.clone());
+                let _ = self.run_hooks(&hook_ctx, hook_work_dir.as_deref()).await;
             }
 
             // Step 7: Follow selected edge (or direct jump)
@@ -2130,13 +2166,26 @@ impl WorkflowRunEngine {
                 None
             }
         };
+
+        let last_outcome = node_outcomes
+            .get(completed_nodes.last().unwrap_or(&String::new()))
+            .cloned()
+            .unwrap_or_else(Outcome::success);
+
+        let run_usage: Option<fabro_llm::types::Usage> = node_outcomes
+            .values()
+            .filter_map(|o| o.usage.as_ref().map(fabro_llm::types::Usage::from))
+            .reduce(|a, b| a + b);
+
         self.services
             .emitter
             .emit(&WorkflowRunEvent::WorkflowRunCompleted {
                 duration_ms,
                 artifact_count: artifact_store.list().len(),
+                status: last_outcome.status.to_string(),
                 total_cost,
                 final_git_commit_sha: last_git_sha.clone(),
+                usage: run_usage,
             });
 
         // RunComplete hook (non-blocking)
@@ -2158,11 +2207,6 @@ impl WorkflowRunEngine {
             }
         }
 
-        // Return last outcome, or success if no outcomes recorded
-        let last_outcome = node_outcomes
-            .get(completed_nodes.last().unwrap_or(&String::new()))
-            .cloned()
-            .unwrap_or_else(Outcome::success);
         Ok((last_outcome, context))
     }
 }
@@ -2913,7 +2957,7 @@ mod tests {
 
         let collected = events.lock().unwrap();
         // Should have: RunStarted, StageStarted (start), StageCompleted (start),
-        // CheckpointSaved, RunCompleted
+        // CheckpointCompleted, RunCompleted
         assert!(collected.len() >= 4);
     }
 
@@ -5155,7 +5199,11 @@ mod tests {
         let git_checkpoint_node_ids: Vec<&str> = collected
             .iter()
             .filter_map(|e| match e {
-                WorkflowRunEvent::GitCheckpoint { node_id, .. } => Some(node_id.as_str()),
+                WorkflowRunEvent::CheckpointCompleted {
+                    node_id,
+                    git_commit_sha: Some(_),
+                    ..
+                } => Some(node_id.as_str()),
                 _ => None,
             })
             .collect();
