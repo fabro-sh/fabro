@@ -43,7 +43,7 @@ echo "Updated $CARGO_TOML"
 
 git add "$CARGO_TOML"
 git commit -m "Bump version to $new_version"
-git tag "$tag"
+git tag -a "$tag" -m "$tag"
 git push origin main "$tag"
 
 echo ""
