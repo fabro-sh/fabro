@@ -788,7 +788,7 @@ pub struct RunConfig {
     pub base_sha: Option<String>,
     /// Git branch name for the run (e.g. `fabro/run/{run_id}`).
     pub run_branch: Option<String>,
-    /// Metadata branch name for git-native checkpoint storage (e.g. `refs/fabro/{run_id}`).
+    /// Metadata branch name for git-native checkpoint storage (e.g. `fabro/meta/{run_id}`).
     pub meta_branch: Option<String>,
     /// User-defined key-value labels for this run.
     pub labels: HashMap<String, String>,
