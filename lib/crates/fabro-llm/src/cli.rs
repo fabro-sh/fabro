@@ -6,6 +6,8 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use clap::{Args, Subcommand};
+use cli_table::format::{Border, Justify, Separator};
+use cli_table::{print_stdout, Cell, CellStruct, Color, Style, Table};
 use futures::StreamExt;
 use serde::Deserialize;
 
@@ -107,28 +109,62 @@ fn format_speed(tps: Option<f64>) -> String {
     }
 }
 
-fn print_models_table(models: &[crate::types::ModelInfo], s: &Styles) {
-    println!(
-        "{}",
-        s.bold_dim.apply_to(format!(
-            "{:<30} {:<12} {:<24} {:>10}  {:>7} {:>7}   {:>10}",
-            "MODEL", "PROVIDER", "ALIASES", "CONTEXT", "COST", "", "SPEED",
-        )),
-    );
-    for model in models {
-        let aliases = model.aliases.join(", ");
-        println!(
-            "{} {} {} {:>10}  {:>7} / {:<7}  {}",
-            s.bold.apply_to(format!("{:<30}", model.id)),
-            s.dim.apply_to(format!("{:<12}", model.provider)),
-            s.dim.apply_to(format!("{:<24}", aliases)),
-            format_context_window(model.limits.context_window),
-            format_cost(model.costs.input_cost_per_mtok),
-            format_cost(model.costs.output_cost_per_mtok),
-            s.cyan
-                .apply_to(format!("{:>10}", format_speed(model.estimated_output_tps))),
-        );
+fn color_if(use_color: bool, color: Color) -> Option<Color> {
+    if use_color {
+        Some(color)
+    } else {
+        None
     }
+}
+
+fn model_row(model: &crate::types::ModelInfo, use_color: bool) -> Vec<CellStruct> {
+    let aliases = model.aliases.join(", ");
+    let cost = format!(
+        "{} / {}",
+        format_cost(model.costs.input_cost_per_mtok),
+        format_cost(model.costs.output_cost_per_mtok),
+    );
+    vec![
+        model.id.clone().cell().bold(use_color),
+        model
+            .provider
+            .clone()
+            .cell()
+            .foreground_color(color_if(use_color, Color::Ansi256(8))),
+        aliases
+            .cell()
+            .foreground_color(color_if(use_color, Color::Ansi256(8))),
+        format_context_window(model.limits.context_window)
+            .cell()
+            .justify(Justify::Right),
+        cost.cell().justify(Justify::Right),
+        format_speed(model.estimated_output_tps)
+            .cell()
+            .justify(Justify::Right)
+            .foreground_color(color_if(use_color, Color::Cyan)),
+    ]
+}
+
+fn models_title() -> Vec<CellStruct> {
+    vec![
+        "MODEL".cell().bold(true),
+        "PROVIDER".cell().bold(true),
+        "ALIASES".cell().bold(true),
+        "CONTEXT".cell().bold(true).justify(Justify::Right),
+        "COST".cell().bold(true).justify(Justify::Right),
+        "SPEED".cell().bold(true).justify(Justify::Right),
+    ]
+}
+
+fn print_models_table(models: &[crate::types::ModelInfo], s: &Styles) {
+    let use_color = s.use_color;
+    let rows: Vec<Vec<CellStruct>> = models.iter().map(|m| model_row(m, use_color)).collect();
+    let table = rows
+        .table()
+        .title(models_title())
+        .border(Border::builder().build())
+        .separator(Separator::builder().build());
+    let _ = print_stdout(table);
 }
 
 fn read_stdin_prompt() -> Option<String> {
@@ -812,45 +848,47 @@ async fn test_models_via_server(
         bail!("No models found");
     }
 
-    println!(
-        "{}",
-        s.bold_dim.apply_to(format!(
-            "{:<30} {:<12} {:>10}  {:>7}   {:>7}  {:>10}  RESULT",
-            "MODEL", "PROVIDER", "CONTEXT", "COST", "", "SPEED",
-        )),
-    );
+    let use_color = s.use_color;
+    let mut title = models_title();
+    title.push("RESULT".cell().bold(true));
 
+    let mut rows: Vec<Vec<CellStruct>> = Vec::new();
     let mut failures = 0u32;
     for info in &models_to_test {
+        eprint!("Testing {}...", info.id);
         let result = test_model_via_server(&server.client, &server.base_url, &info.id).await;
+        eprintln!(" done");
 
-        let (status_color, status) = match result {
-            Ok(resp) if resp.status == "ok" => (&s.green, "ok".to_string()),
+        let (result_color, status) = match result {
+            Ok(resp) if resp.status == "ok" => (Color::Green, "ok".to_string()),
             Ok(resp) => {
                 failures += 1;
                 let msg = resp
                     .error_message
                     .unwrap_or_else(|| "unknown error".to_string());
-                (&s.red, format!("error: {msg}"))
+                (Color::Red, format!("error: {msg}"))
             }
             Err(e) => {
                 failures += 1;
-                (&s.red, format!("error: {e}"))
+                (Color::Red, format!("error: {e}"))
             }
         };
 
-        println!(
-            "{} {} {:>10}  {:>7} / {:<7}  {}  {}",
-            s.bold.apply_to(format!("{:<30}", info.id)),
-            s.dim.apply_to(format!("{:<12}", info.provider)),
-            format_context_window(info.limits.context_window),
-            format_cost(info.costs.input_cost_per_mtok),
-            format_cost(info.costs.output_cost_per_mtok),
-            s.cyan
-                .apply_to(format!("{:>10}", format_speed(info.estimated_output_tps))),
-            status_color.apply_to(&status),
+        let mut row = model_row(info, use_color);
+        row.push(
+            status
+                .cell()
+                .foreground_color(color_if(use_color, result_color)),
         );
+        rows.push(row);
     }
+
+    let table = rows
+        .table()
+        .title(title)
+        .border(Border::builder().build())
+        .separator(Separator::builder().build());
+    print_stdout(table)?;
 
     if failures > 0 {
         bail!("{failures} model(s) failed");
@@ -919,16 +957,14 @@ async fn test_models(provider: Option<&str>, model: Option<&str>, s: &Styles) ->
         bail!("No models found");
     }
 
-    println!(
-        "{}",
-        s.bold_dim.apply_to(format!(
-            "{:<30} {:<12} {:>10}  {:>7}   {:>7}  {:>10}  RESULT",
-            "MODEL", "PROVIDER", "CONTEXT", "COST", "", "SPEED",
-        )),
-    );
+    let use_color = s.use_color;
+    let mut title = models_title();
+    title.push("RESULT".cell().bold(true));
 
+    let mut rows: Vec<Vec<CellStruct>> = Vec::new();
     let mut failures = 0u32;
     for info in &models_to_test {
+        eprint!("Testing {}...", info.id);
         let params = GenerateParams::new(&info.id)
             .provider(&info.provider)
             .prompt("Say OK")
@@ -936,31 +972,35 @@ async fn test_models(provider: Option<&str>, model: Option<&str>, s: &Styles) ->
 
         let result =
             tokio::time::timeout(Duration::from_secs(30), generate::generate(params)).await;
+        eprintln!(" done");
 
-        let (status_color, status) = match result {
-            Ok(Ok(_)) => (&s.green, "ok".to_string()),
+        let (result_color, status) = match result {
+            Ok(Ok(_)) => (Color::Green, "ok".to_string()),
             Ok(Err(e)) => {
                 failures += 1;
-                (&s.red, format!("error: {e}"))
+                (Color::Red, format!("error: {e}"))
             }
             Err(_) => {
                 failures += 1;
-                (&s.red, "error: timeout (30s)".to_string())
+                (Color::Red, "error: timeout (30s)".to_string())
             }
         };
 
-        println!(
-            "{} {} {:>10}  {:>7} / {:<7}  {}  {}",
-            s.bold.apply_to(format!("{:<30}", info.id)),
-            s.dim.apply_to(format!("{:<12}", info.provider)),
-            format_context_window(info.limits.context_window),
-            format_cost(info.costs.input_cost_per_mtok),
-            format_cost(info.costs.output_cost_per_mtok),
-            s.cyan
-                .apply_to(format!("{:>10}", format_speed(info.estimated_output_tps))),
-            status_color.apply_to(&status),
+        let mut row = model_row(info, use_color);
+        row.push(
+            status
+                .cell()
+                .foreground_color(color_if(use_color, result_color)),
         );
+        rows.push(row);
     }
+
+    let table = rows
+        .table()
+        .title(title)
+        .border(Border::builder().build())
+        .separator(Separator::builder().build());
+    print_stdout(table)?;
 
     if failures > 0 {
         bail!("{failures} model(s) failed");

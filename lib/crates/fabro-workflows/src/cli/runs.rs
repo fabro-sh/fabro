@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use clap::Args;
+use cli_table::format::{Border, Justify, Separator};
+use cli_table::{print_stdout, Cell, CellStruct, Color, Style, Table};
 use fabro_util::terminal::Styles;
 use serde::Serialize;
 use tracing::{debug, info, warn};
@@ -408,18 +410,42 @@ fn short_run_id(id: &str) -> &str {
     }
 }
 
-fn style_status(status: &RunStatus, styles: &Styles) -> String {
+fn color_if(use_color: bool, color: Color) -> Option<Color> {
+    if use_color {
+        Some(color)
+    } else {
+        None
+    }
+}
+
+fn status_cell(status: &RunStatus, use_color: bool) -> CellStruct {
     let text = status.to_string();
     match status {
-        RunStatus::Concluded(StageStatus::Success | StageStatus::PartialSuccess) => {
-            format!("{}", styles.bold_green.apply_to(&text))
-        }
-        RunStatus::Concluded(StageStatus::Fail) => {
-            format!("{}", styles.bold_red.apply_to(&text))
-        }
-        RunStatus::Running => format!("{}", styles.bold_cyan.apply_to(&text)),
-        _ => format!("{}", styles.dim.apply_to(&text)),
+        RunStatus::Concluded(StageStatus::Success | StageStatus::PartialSuccess) => text
+            .cell()
+            .bold(use_color)
+            .foreground_color(color_if(use_color, Color::Green)),
+        RunStatus::Concluded(StageStatus::Fail) => text
+            .cell()
+            .bold(use_color)
+            .foreground_color(color_if(use_color, Color::Red)),
+        RunStatus::Running => text
+            .cell()
+            .bold(use_color)
+            .foreground_color(color_if(use_color, Color::Cyan)),
+        _ => text
+            .cell()
+            .foreground_color(color_if(use_color, Color::Ansi256(8))),
     }
+}
+
+fn abbreviate_home(path: &str) -> String {
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(rel) = Path::new(path).strip_prefix(&home) {
+            return format!("~/{}", rel.display());
+        }
+    }
+    path.to_string()
 }
 
 pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
@@ -457,36 +483,55 @@ pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
     let mut display_runs = filtered;
     display_runs.reverse();
 
-    // Print table header
-    let header = format!(
-        "{:<17} {:<25} {:<17} {:<20} {:<10}",
-        "RUN ID", "WORKFLOW", "STATUS", "DIRECTORY", "DURATION"
-    );
-    println!("{}", styles.bold.apply_to(&header));
-    println!("{}", styles.dim.apply_to("-".repeat(header.len())));
+    let use_color = styles.use_color;
+    let title = vec![
+        "RUN ID".cell().bold(true),
+        "WORKFLOW".cell().bold(true),
+        "STATUS".cell().bold(true),
+        "DIRECTORY".cell().bold(true),
+        "DURATION".cell().bold(true),
+    ];
 
-    for run in &display_runs {
-        let run_id_display = short_run_id(&run.run_id);
-        let duration_display = run
-            .duration_ms
-            .map(super::progress::format_duration_ms)
-            .unwrap_or_else(|| "-".to_string());
-        let dir_display = run
-            .host_repo_path
-            .as_deref()
-            .and_then(|p| Path::new(p).file_name())
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "-".to_string());
-        let status_display = style_status(&run.status, styles);
-        println!(
-            "{:<17} {:<25} {:<17} {:<20} {:<10}",
-            styles.dim.apply_to(&run_id_display),
-            run.workflow_name,
-            status_display,
-            dir_display,
-            duration_display,
-        );
-    }
+    let rows: Vec<Vec<CellStruct>> =
+        display_runs
+            .iter()
+            .map(|run| {
+                let run_id_display = short_run_id(&run.run_id);
+                let duration_display = match run.duration_ms {
+                    Some(ms) => super::progress::format_duration_ms(ms),
+                    None => match run.start_time_dt {
+                        Some(start) => {
+                            let elapsed = Utc::now().signed_duration_since(start);
+                            super::progress::format_duration_ms(
+                                elapsed.num_milliseconds().max(0) as u64
+                            )
+                        }
+                        None => "-".to_string(),
+                    },
+                };
+                let dir_display = run
+                    .host_repo_path
+                    .as_deref()
+                    .map(abbreviate_home)
+                    .unwrap_or_else(|| "-".to_string());
+                vec![
+                    run_id_display
+                        .cell()
+                        .foreground_color(color_if(use_color, Color::Ansi256(8))),
+                    run.workflow_name.clone().cell(),
+                    status_cell(&run.status, use_color),
+                    dir_display.cell(),
+                    duration_display.cell(),
+                ]
+            })
+            .collect();
+
+    let table = rows
+        .table()
+        .title(title)
+        .border(Border::builder().build())
+        .separator(Separator::builder().build());
+    print_stdout(table)?;
 
     eprintln!("\n{} run(s) listed.", display_runs.len());
     Ok(())
@@ -614,34 +659,48 @@ pub fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Pat
     };
     let log_reclaim_pct = if total_log_size > 0 { 100 } else { 0 };
 
-    println!(
-        "{:<14}{:>5}{:>11}{:>12}{:>16}",
-        "TYPE", "COUNT", "ACTIVE", "SIZE", "RECLAIMABLE"
-    );
-    println!(
-        "{:<14}{:>5}{:>11}{:>12}{:>12} ({run_reclaim_pct}%)",
-        "Runs",
-        runs.len(),
-        active_count,
-        format_size(total_run_size),
-        format_size(reclaimable_run_size),
-    );
-    println!(
-        "{:<14}{:>5}{:>11}{:>12}{:>12} ({log_reclaim_pct}%)",
-        "Logs",
-        log_count,
-        "-",
-        format_size(total_log_size),
-        format_size(total_log_size),
-    );
-    println!(
-        "{:<14}{:>5}{:>11}{:>12}{:>12} (0%)",
-        "Databases",
-        db_count,
-        "-",
-        format_size(total_db_size),
-        format_size(0),
-    );
+    let df_title = vec![
+        "TYPE".cell().bold(true),
+        "COUNT".cell().bold(true).justify(Justify::Right),
+        "ACTIVE".cell().bold(true).justify(Justify::Right),
+        "SIZE".cell().bold(true).justify(Justify::Right),
+        "RECLAIMABLE".cell().bold(true).justify(Justify::Right),
+    ];
+    let df_rows: Vec<Vec<CellStruct>> = vec![
+        vec![
+            "Runs".cell(),
+            runs.len().cell().justify(Justify::Right),
+            active_count.cell().justify(Justify::Right),
+            format_size(total_run_size).cell().justify(Justify::Right),
+            format!("{} ({run_reclaim_pct}%)", format_size(reclaimable_run_size))
+                .cell()
+                .justify(Justify::Right),
+        ],
+        vec![
+            "Logs".cell(),
+            log_count.cell().justify(Justify::Right),
+            "-".cell().justify(Justify::Right),
+            format_size(total_log_size).cell().justify(Justify::Right),
+            format!("{} ({log_reclaim_pct}%)", format_size(total_log_size))
+                .cell()
+                .justify(Justify::Right),
+        ],
+        vec![
+            "Databases".cell(),
+            db_count.cell().justify(Justify::Right),
+            "-".cell().justify(Justify::Right),
+            format_size(total_db_size).cell().justify(Justify::Right),
+            format!("{} (0%)", format_size(0))
+                .cell()
+                .justify(Justify::Right),
+        ],
+    ];
+    let df_table = df_rows
+        .table()
+        .title(df_title)
+        .border(Border::builder().build())
+        .separator(Separator::builder().build());
+    print_stdout(df_table)?;
 
     println!();
     println!("Data directory: {}", data_dir.display());
@@ -649,46 +708,57 @@ pub fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Pat
     // --- Verbose per-run breakdown ---
     if args.verbose {
         println!();
-        println!(
-            "{:<30} {:<18} {:<10} {:>5} {:>12}",
-            "RUN ID", "WORKFLOW", "STATUS", "AGE", "SIZE"
-        );
+        let verbose_title = vec![
+            "RUN ID".cell().bold(true),
+            "WORKFLOW".cell().bold(true),
+            "STATUS".cell().bold(true),
+            "AGE".cell().bold(true).justify(Justify::Right),
+            "SIZE".cell().bold(true).justify(Justify::Right),
+        ];
 
         let now = chrono::Utc::now();
-        for detail in &run_details {
-            let run_id_display = short_run_id(&detail.run_id);
-            let workflow_display = if detail.workflow_name.len() > 16 {
-                format!("{}...", &detail.workflow_name[..13])
-            } else {
-                detail.workflow_name.clone()
-            };
-            let age = if let Some(dt) = detail.start_time_dt {
-                let dur = now.signed_duration_since(dt);
-                if dur.num_days() > 0 {
-                    format!("{}d", dur.num_days())
-                } else if dur.num_hours() > 0 {
-                    format!("{}h", dur.num_hours())
+        let verbose_rows: Vec<Vec<CellStruct>> = run_details
+            .iter()
+            .map(|detail| {
+                let run_id_display = short_run_id(&detail.run_id);
+                let workflow_display = if detail.workflow_name.len() > 16 {
+                    format!("{}...", &detail.workflow_name[..13])
                 } else {
-                    format!("{}m", dur.num_minutes().max(1))
-                }
-            } else {
-                "-".to_string()
-            };
-            let reclaimable_marker = if !detail.status.is_running() {
-                " *"
-            } else {
-                ""
-            };
-            println!(
-                "{:<30} {:<18} {:<10} {:>5} {:>10}{}",
-                run_id_display,
-                workflow_display,
-                detail.status,
-                age,
-                format_size(detail.size),
-                reclaimable_marker,
-            );
-        }
+                    detail.workflow_name.clone()
+                };
+                let age = if let Some(dt) = detail.start_time_dt {
+                    let dur = now.signed_duration_since(dt);
+                    if dur.num_days() > 0 {
+                        format!("{}d", dur.num_days())
+                    } else if dur.num_hours() > 0 {
+                        format!("{}h", dur.num_hours())
+                    } else {
+                        format!("{}m", dur.num_minutes().max(1))
+                    }
+                } else {
+                    "-".to_string()
+                };
+                let size_display = if !detail.status.is_running() {
+                    format!("{} *", format_size(detail.size))
+                } else {
+                    format_size(detail.size)
+                };
+                vec![
+                    run_id_display.cell(),
+                    workflow_display.cell(),
+                    detail.status.to_string().cell(),
+                    age.cell().justify(Justify::Right),
+                    size_display.cell().justify(Justify::Right),
+                ]
+            })
+            .collect();
+
+        let verbose_table = verbose_rows
+            .table()
+            .title(verbose_title)
+            .border(Border::builder().build())
+            .separator(Separator::builder().build());
+        print_stdout(verbose_table)?;
         println!();
         println!("* = reclaimable");
     }

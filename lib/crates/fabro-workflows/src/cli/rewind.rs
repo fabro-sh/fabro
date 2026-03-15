@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use anyhow::{bail, Context, Result};
 use clap::Args;
+use cli_table::format::{Border, Separator};
+use cli_table::{print_stderr, Cell, CellStruct, Color, Style, Table};
 use fabro_git_storage::branchstore::{BranchStore, CommitInfo};
 use fabro_git_storage::gitobj::Store;
 use fabro_util::terminal::Styles;
@@ -280,39 +282,52 @@ pub fn print_timeline(
         return;
     }
 
-    eprintln!(
-        "  {}  {}  {}",
-        styles.bold_dim.apply_to(format!("{:<6}", "@")),
-        styles.bold_dim.apply_to(format!("{:<30}", "Node")),
-        styles.bold_dim.apply_to("Details"),
-    );
+    let use_color = styles.use_color;
+    let color_if = |color| if use_color { Some(color) } else { None };
 
-    for entry in timeline {
-        let ordinal_str = format!("@{}", entry.ordinal);
-        let mut details = Vec::new();
-        if entry.visit > 1 {
-            details.push(format!("visit {}, loop", entry.visit));
-        }
-        if parallel_map.contains_key(&entry.node_name) {
-            details.push("parallel interior".to_string());
-        }
-        if entry.run_commit_sha.is_none() {
-            details.push("no run commit".to_string());
-        }
+    let title = vec![
+        "@".cell().bold(true),
+        "Node".cell().bold(true),
+        "Details".cell().bold(true),
+    ];
 
-        let detail_str = if details.is_empty() {
-            String::new()
-        } else {
-            format!("({})", details.join(", "))
-        };
+    let rows: Vec<Vec<CellStruct>> = timeline
+        .iter()
+        .map(|entry| {
+            let ordinal_str = format!("@{}", entry.ordinal);
+            let mut details = Vec::new();
+            if entry.visit > 1 {
+                details.push(format!("visit {}, loop", entry.visit));
+            }
+            if parallel_map.contains_key(&entry.node_name) {
+                details.push("parallel interior".to_string());
+            }
+            if entry.run_commit_sha.is_none() {
+                details.push("no run commit".to_string());
+            }
 
-        eprintln!(
-            "  {}  {:<30}  {}",
-            styles.cyan.apply_to(format!("{ordinal_str:<6}")),
-            entry.node_name,
-            styles.dim.apply_to(detail_str),
-        );
-    }
+            let detail_str = if details.is_empty() {
+                String::new()
+            } else {
+                format!("({})", details.join(", "))
+            };
+
+            vec![
+                ordinal_str.cell().foreground_color(color_if(Color::Cyan)),
+                entry.node_name.clone().cell(),
+                detail_str
+                    .cell()
+                    .foreground_color(color_if(Color::Ansi256(8))),
+            ]
+        })
+        .collect();
+
+    let table = rows
+        .table()
+        .title(title)
+        .border(Border::builder().build())
+        .separator(Separator::builder().build());
+    let _ = print_stderr(table);
 }
 
 /// Move both refs backward to the target checkpoint.
