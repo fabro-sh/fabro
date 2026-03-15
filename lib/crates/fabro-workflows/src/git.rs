@@ -362,7 +362,7 @@ impl MetadataStore {
 
     /// Returns the branch name for a run: `fabro/meta/{run_id}`.
     pub fn branch_name(run_id: &str) -> String {
-        format!("fabro/meta/{run_id}")
+        format!("{META_BRANCH_PREFIX}{run_id}")
     }
 
     /// Format a commit message with the standard Fabro footer appended.
