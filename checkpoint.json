@@ -1,0 +1,52 @@
+{
+  "timestamp": "2026-03-15T22:54:50.875548Z",
+  "current_node": "toolchain",
+  "completed_nodes": [
+    "start",
+    "toolchain"
+  ],
+  "node_retries": {
+    "start": 1,
+    "toolchain": 1
+  },
+  "context_values": {
+    "graph.model_stylesheet": "\n            * { backend: api; model: claude-opus-4-6;}\n        ",
+    "internal.fidelity": "compact",
+    "current.preamble": "Goal: # Unified dry-run via Handler::simulate()\n\n## Context\n\nDry-run mode is implemented inconsistently: `CommandHandler` checks `services.dry_run`, `AgentHandler`/`PromptHandler`/`FanInHandler` rely on backend being `None`, and `WaitHandler`/`HumanHandler` have no dry-run handling at all (sleeping for real / blocking on input). This makes adding dry-run to new handlers error-prone and the existing code confusing.\n\n**Goal:** Single mechanism where the engine routes to `simulate()` or `execute()` based on `services.dry_run`. Each handler optionally overrides `simulate()` for custom behavior.\n\n## Design\n\n### New abstractions\n\n1. **`Outcome::simulated(node_id)`** — factory returning `Success` with `notes: \"[Simulated] {node_id}\"`\n2. **`Handler::simulate()`** — trait method with default returning `Outcome::simulated(&node.id)`\n3. **`dispatch_handler()`** — free function in `handler/mod.rs` that calls `simulate()` or `execute()` based on `services.dry_run`\n\n### Dispatch change\n\nReplace direct `handler.execute()` calls with `dispatch_handler()` at two sites:\n- `engine.rs:964` — in `execute_with_retry()`\n- `parallel.rs:439` — child handler dispatch in spawned tasks\n\n### Handler simulate() overrides\n\n| Handler | Override? | Behavior |\n|---|---|---|\n| Start, Exit, Conditional | No | Default: generic `[Simulated]` success |\n| **WaitHandler** | No | Default: instant success, **no sleep** |\n| **CommandHandler** | Yes | Empty `command.output`/`command.stderr` context updates + note with script text |\n| **AgentHandler** | Yes | `last_stage`, `last_response`, `response.{id}` context updates with simulated text |\n| **PromptHandler** | Yes | Same as Agent — simulated response context updates |\n| **FanInHandler** | Yes | Call `heuristic_select()` directly (no LLM, no git merge) |\n| **HumanHandler** | Yes | Auto-select first choice, set `human.gate.selected`/`human.gate.label` + `suggested_next_ids` |\n| **ParallelHandler** | Yes | Find join node → set `jump_to_node`, set `parallel.branch_count`, dispatch children via `dispatch_handler()`, skip all git worktree ops |\n| SubWorkflowHandler | No | Default. Already propagates `dry_run` to child engine's `RunConfig`; child engine will use `dispatch_handler()` automatically |\n\n### Cleanup from execute()\n\n- **CommandHandler**: remove `if services.dry_run { ... }` block (move logic to `simulate()`)\n- **AgentHandler/PromptHandler/FanInHandler**: leave `backend=None` paths as-is for now (they become unreachable during dry-run but serve as error fallback). Making backend non-optional is a separate follow-up.\n\n## Files to modify\n\n1. `lib/crates/fabro-workflows/src/outcome.rs` — add `Outcome::simulated()`\n2. `lib/crates/fabro-workflows/src/handler/mod.rs` — add `simulate()` to trait, add `dispatch_handler()`\n3. `lib/crates/fabro-workflows/src/engine.rs` — use `dispatch_handler()` in `execute_with_retry()` (~line 964)\n4. `lib/crates/fabro-workflows/src/handler/command.rs` — move dry-run block to `simulate()`, remove from `execute()`\n5. `lib/crates/fabro-workflows/src/handler/agent.rs` — add `simulate()` override\n6. `lib/crates/fabro-workflows/src/handler/prompt.rs` — add `simulate()` override\n7. `lib/crates/fabro-workflows/src/handler/fan_in.rs` — add `simulate()` override\n8. `lib/crates/fabro-workflows/src/handler/human.rs` — add `simulate()` override\n9. `lib/crates/fabro-workflows/src/handler/parallel.rs` — add `simulate()` override, use `dispatch_handler()` for child dispatch\n\n## Tests\n\n- Test `dispatch_handler()` routes to `simulate()` when `dry_run=true`, `execute()` when `false`\n- Test each handler's `simulate()` returns expected context updates\n- Update existing `dry_run_skips_execution` test in command.rs to test `simulate()` directly\n- Update `codergen_handler_simulation_mode` in agent.rs\n- Update `prompt_handler_simulation_mode` in prompt.rs\n\n## Verification\n\n```bash\ncargo test -p fabro-workflows    # all tests pass\ncargo clippy -p fabro-workflows --tests -- -D warnings  # no new warnings\nfabro run <workflow> --dry-run   # workflow completes instantly, no real execution\n```\n\n",
+    "internal.thread_id": "start",
+    "outcome": "success",
+    "internal.retry_count.start": 1,
+    "thread.start.current_node": "toolchain",
+    "internal.retry_count.toolchain": 1,
+    "command.stderr": "",
+    "current_node": "toolchain",
+    "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n",
+    "graph.goal": "# Unified dry-run via Handler::simulate()\n\n## Context\n\nDry-run mode is implemented inconsistently: `CommandHandler` checks `services.dry_run`, `AgentHandler`/`PromptHandler`/`FanInHandler` rely on backend being `None`, and `WaitHandler`/`HumanHandler` have no dry-run handling at all (sleeping for real / blocking on input). This makes adding dry-run to new handlers error-prone and the existing code confusing.\n\n**Goal:** Single mechanism where the engine routes to `simulate()` or `execute()` based on `services.dry_run`. Each handler optionally overrides `simulate()` for custom behavior.\n\n## Design\n\n### New abstractions\n\n1. **`Outcome::simulated(node_id)`** — factory returning `Success` with `notes: \"[Simulated] {node_id}\"`\n2. **`Handler::simulate()`** — trait method with default returning `Outcome::simulated(&node.id)`\n3. **`dispatch_handler()`** — free function in `handler/mod.rs` that calls `simulate()` or `execute()` based on `services.dry_run`\n\n### Dispatch change\n\nReplace direct `handler.execute()` calls with `dispatch_handler()` at two sites:\n- `engine.rs:964` — in `execute_with_retry()`\n- `parallel.rs:439` — child handler dispatch in spawned tasks\n\n### Handler simulate() overrides\n\n| Handler | Override? | Behavior |\n|---|---|---|\n| Start, Exit, Conditional | No | Default: generic `[Simulated]` success |\n| **WaitHandler** | No | Default: instant success, **no sleep** |\n| **CommandHandler** | Yes | Empty `command.output`/`command.stderr` context updates + note with script text |\n| **AgentHandler** | Yes | `last_stage`, `last_response`, `response.{id}` context updates with simulated text |\n| **PromptHandler** | Yes | Same as Agent — simulated response context updates |\n| **FanInHandler** | Yes | Call `heuristic_select()` directly (no LLM, no git merge) |\n| **HumanHandler** | Yes | Auto-select first choice, set `human.gate.selected`/`human.gate.label` + `suggested_next_ids` |\n| **ParallelHandler** | Yes | Find join node → set `jump_to_node`, set `parallel.branch_count`, dispatch children via `dispatch_handler()`, skip all git worktree ops |\n| SubWorkflowHandler | No | Default. Already propagates `dry_run` to child engine's `RunConfig`; child engine will use `dispatch_handler()` automatically |\n\n### Cleanup from execute()\n\n- **CommandHandler**: remove `if services.dry_run { ... }` block (move logic to `simulate()`)\n- **AgentHandler/PromptHandler/FanInHandler**: leave `backend=None` paths as-is for now (they become unreachable during dry-run but serve as error fallback). Making backend non-optional is a separate follow-up.\n\n## Files to modify\n\n1. `lib/crates/fabro-workflows/src/outcome.rs` — add `Outcome::simulated()`\n2. `lib/crates/fabro-workflows/src/handler/mod.rs` — add `simulate()` to trait, add `dispatch_handler()`\n3. `lib/crates/fabro-workflows/src/engine.rs` — use `dispatch_handler()` in `execute_with_retry()` (~line 964)\n4. `lib/crates/fabro-workflows/src/handler/command.rs` — move dry-run block to `simulate()`, remove from `execute()`\n5. `lib/crates/fabro-workflows/src/handler/agent.rs` — add `simulate()` override\n6. `lib/crates/fabro-workflows/src/handler/prompt.rs` — add `simulate()` override\n7. `lib/crates/fabro-workflows/src/handler/fan_in.rs` — add `simulate()` override\n8. `lib/crates/fabro-workflows/src/handler/human.rs` — add `simulate()` override\n9. `lib/crates/fabro-workflows/src/handler/parallel.rs` — add `simulate()` override, use `dispatch_handler()` for child dispatch\n\n## Tests\n\n- Test `dispatch_handler()` routes to `simulate()` when `dry_run=true`, `execute()` when `false`\n- Test each handler's `simulate()` returns expected context updates\n- Update existing `dry_run_skips_execution` test in command.rs to test `simulate()` directly\n- Update `codergen_handler_simulation_mode` in agent.rs\n- Update `prompt_handler_simulation_mode` in prompt.rs\n\n## Verification\n\n```bash\ncargo test -p fabro-workflows    # all tests pass\ncargo clippy -p fabro-workflows --tests -- -D warnings  # no new warnings\nfabro run <workflow> --dry-run   # workflow completes instantly, no real execution\n```\n",
+    "internal.run_id": "01KKSVAY977SSM6WHTAM7P1TNG",
+    "failure_class": "",
+    "internal.node_visit_count": 1,
+    "failure_signature": "",
+    "graph.rankdir": "LR"
+  },
+  "logs": [],
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
+    "toolchain": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n"
+      },
+      "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+      "duration_ms": 234
+    }
+  },
+  "next_node_id": "preflight_compile",
+  "node_visits": {
+    "start": 1,
+    "toolchain": 1
+  }
+}
