@@ -26,9 +26,18 @@ pub struct UpgradeArgs {
 
 // ── Download backend abstraction ───────────────────────────────────────────
 
+const GITHUB_REPO: &str = "fabro-sh/fabro";
+
 enum Backend {
     Gh,
-    Http,
+    Http(reqwest::Client),
+}
+
+fn http_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent("fabro-cli")
+        .build()
+        .context("failed to build HTTP client")
 }
 
 impl Backend {
@@ -40,7 +49,7 @@ impl Backend {
                         "release",
                         "view",
                         "--repo",
-                        "fabro-sh/fabro",
+                        GITHUB_REPO,
                         "--json",
                         "tagName",
                         "-q",
@@ -55,10 +64,10 @@ impl Backend {
                 }
                 Ok(String::from_utf8(output.stdout)?.trim().to_string())
             }
-            Backend::Http => {
-                let client = reqwest::Client::builder().user_agent("fabro-cli").build()?;
+            Backend::Http(client) => {
+                let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
                 let resp = client
-                    .get("https://api.github.com/repos/fabro-sh/fabro/releases/latest")
+                    .get(&url)
                     .send()
                     .await
                     .context("failed to fetch latest release from GitHub API")?;
@@ -87,7 +96,7 @@ impl Backend {
                         "download",
                         tag,
                         "--repo",
-                        "fabro-sh/fabro",
+                        GITHUB_REPO,
                         "--pattern",
                         asset,
                         "--dir",
@@ -101,10 +110,9 @@ impl Backend {
                     bail!("gh release download failed with exit code {status}");
                 }
             }
-            Backend::Http => {
+            Backend::Http(client) => {
                 let url =
-                    format!("https://github.com/fabro-sh/fabro/releases/download/{tag}/{asset}");
-                let client = reqwest::Client::builder().user_agent("fabro-cli").build()?;
+                    format!("https://github.com/{GITHUB_REPO}/releases/download/{tag}/{asset}");
                 let resp = client
                     .get(&url)
                     .send()
@@ -122,22 +130,26 @@ impl Backend {
     }
 }
 
-fn select_backend() -> Backend {
+async fn select_backend() -> Backend {
     // Check if gh is available
-    let gh_version = std::process::Command::new("gh").arg("--version").output();
+    let gh_version = tokio::process::Command::new("gh")
+        .arg("--version")
+        .output()
+        .await;
     let Ok(output) = gh_version else {
         debug!("gh CLI not found, using HTTP backend");
-        return Backend::Http;
+        return Backend::Http(http_client().expect("failed to build HTTP client"));
     };
     if !output.status.success() {
         debug!("gh --version failed, using HTTP backend");
-        return Backend::Http;
+        return Backend::Http(http_client().expect("failed to build HTTP client"));
     }
 
     // Check if gh is authenticated
-    let auth_status = std::process::Command::new("gh")
+    let auth_status = tokio::process::Command::new("gh")
         .args(["auth", "status"])
-        .output();
+        .output()
+        .await;
     match auth_status {
         Ok(o) if o.status.success() => {
             debug!("gh CLI available and authenticated, using Gh backend");
@@ -145,7 +157,7 @@ fn select_backend() -> Backend {
         }
         _ => {
             debug!("gh not authenticated, using HTTP backend");
-            Backend::Http
+            Backend::Http(http_client().expect("failed to build HTTP client"))
         }
     }
 }
@@ -167,30 +179,14 @@ fn parse_version_from_tag(tag: &str) -> Result<Version> {
     Version::parse(stripped).with_context(|| format!("invalid version: {tag}"))
 }
 
-#[derive(Debug, PartialEq)]
-enum VersionComparison {
-    /// A newer version is available
-    Newer,
-    /// Already on the target version
-    AlreadyCurrent,
-    /// Target is older than current (downgrade)
-    Downgrade,
-}
-
-fn compare_versions(current: &Version, target: &Version) -> VersionComparison {
-    use std::cmp::Ordering;
-    match target.cmp(current) {
-        Ordering::Greater => VersionComparison::Newer,
-        Ordering::Equal => VersionComparison::AlreadyCurrent,
-        Ordering::Less => VersionComparison::Downgrade,
-    }
-}
-
 // ── SHA256 verification ────────────────────────────────────────────────────
 
-fn verify_checksum(data: &[u8], expected_hex: &str) -> Result<()> {
+fn verify_checksum(path: &Path, expected_hex: &str) -> Result<()> {
     let mut hasher = Sha256::new();
-    hasher.update(data);
+    let mut file = std::io::BufReader::new(
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?,
+    );
+    std::io::copy(&mut file, &mut hasher)?;
     let computed = format!("{:x}", hasher.finalize());
     // The .sha256 file may contain "hash  filename" or just "hash"
     let expected = expected_hex
@@ -242,7 +238,7 @@ impl UpgradeCheckState {
 // ── Main upgrade command ───────────────────────────────────────────────────
 
 pub async fn run_upgrade(args: UpgradeArgs) -> Result<()> {
-    let backend = select_backend();
+    let backend = select_backend().await;
 
     let current =
         Version::parse(env!("CARGO_PKG_VERSION")).context("failed to parse current version")?;
@@ -259,8 +255,8 @@ pub async fn run_upgrade(args: UpgradeArgs) -> Result<()> {
     };
 
     // Downgrade protection
-    match compare_versions(&current, &target) {
-        VersionComparison::Downgrade => {
+    match target.cmp(&current) {
+        std::cmp::Ordering::Less => {
             if args.version.is_none() {
                 bail!(
                     "latest release ({target}) is older than installed version ({current}), skipping"
@@ -280,7 +276,7 @@ pub async fn run_upgrade(args: UpgradeArgs) -> Result<()> {
                 bail!("downgrade requires interactive confirmation (stdin is not a tty)");
             }
         }
-        VersionComparison::AlreadyCurrent if !args.force => {
+        std::cmp::Ordering::Equal if !args.force => {
             eprintln!("Already on version {current}");
             return Ok(());
         }
@@ -307,19 +303,16 @@ pub async fn run_upgrade(args: UpgradeArgs) -> Result<()> {
         .or_else(|_| tempfile::tempdir())
         .context("failed to create temp directory")?;
 
-    // Download tarball and checksum
+    // Download tarball and checksum in parallel
     eprintln!("Downloading fabro {target}...");
-    let tarball_path = backend
-        .download_release(&tag, &tarball_name, tmp_dir.path())
-        .await?;
-    let checksum_path = backend
-        .download_release(&tag, &checksum_name, tmp_dir.path())
-        .await?;
+    let (tarball_path, checksum_path) = tokio::try_join!(
+        backend.download_release(&tag, &tarball_name, tmp_dir.path()),
+        backend.download_release(&tag, &checksum_name, tmp_dir.path()),
+    )?;
 
-    // Verify SHA256
-    let tarball_data = fs::read(&tarball_path)?;
+    // Verify SHA256 using streaming hash
     let checksum_content = fs::read_to_string(&checksum_path)?;
-    verify_checksum(&tarball_data, &checksum_content)?;
+    verify_checksum(&tarball_path, &checksum_content)?;
     debug!("SHA256 checksum verified");
 
     // Extract tarball
@@ -336,13 +329,8 @@ pub async fn run_upgrade(args: UpgradeArgs) -> Result<()> {
         bail!("tar extraction failed");
     }
 
-    // Find extracted binary
-    let extracted_binary = tmp_dir.path().join("fabro");
-    if !extracted_binary.exists() {
-        bail!("extracted archive does not contain 'fabro' binary");
-    }
-
     // Atomic binary replacement
+    let extracted_binary = tmp_dir.path().join("fabro");
     let backup = exe_dir.join(".fabro-upgrade-backup");
     fs::rename(&current_exe, &backup).context("failed to move current binary to backup")?;
     if let Err(e) = fs::rename(&extracted_binary, &current_exe) {
@@ -369,22 +357,24 @@ pub async fn run_upgrade(args: UpgradeArgs) -> Result<()> {
 
 // ── Auto version check ────────────────────────────────────────────────────
 
-pub async fn maybe_print_upgrade_notice(no_upgrade_check: bool) {
-    if no_upgrade_check {
-        return;
+/// Spawn a background task that checks for a newer version and prints a notice
+/// to stderr after the main command completes. Returns a handle that should be
+/// awaited at the end of `main_inner`.
+pub fn spawn_upgrade_check(
+    no_upgrade_check: bool,
+    upgrade_check_enabled: bool,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if no_upgrade_check || !upgrade_check_enabled {
+        return None;
     }
-
-    if let Err(e) = check_and_print_notice().await {
-        debug!(%e, "Upgrade check failed (silently swallowed)");
-    }
+    Some(tokio::spawn(async {
+        if let Err(e) = check_and_print_notice().await {
+            debug!(%e, "Upgrade check failed (silently swallowed)");
+        }
+    }))
 }
 
 async fn check_and_print_notice() -> Result<()> {
-    let cli_config = fabro_config::cli::load_cli_config(None)?;
-    if !cli_config.upgrade_check {
-        return Ok(());
-    }
-
     let Some(home) = dirs::home_dir() else {
         return Ok(());
     };
@@ -405,7 +395,7 @@ async fn check_and_print_notice() -> Result<()> {
     }
 
     // Fetch latest version
-    let backend = select_backend();
+    let backend = select_backend().await;
     let tag = backend.fetch_latest_release_tag().await?;
     let latest = parse_version_from_tag(&tag)?;
 
@@ -471,57 +461,34 @@ mod tests {
         assert!(parse_version_from_tag("not-a-version").is_err());
     }
 
-    // -- Version comparison --
-
-    #[test]
-    fn compare_newer() {
-        let current = Version::new(0, 4, 0);
-        let target = Version::new(0, 5, 0);
-        assert_eq!(
-            compare_versions(&current, &target),
-            VersionComparison::Newer
-        );
-    }
-
-    #[test]
-    fn compare_already_current() {
-        let v = Version::new(0, 5, 0);
-        assert_eq!(compare_versions(&v, &v), VersionComparison::AlreadyCurrent);
-    }
-
-    #[test]
-    fn compare_downgrade() {
-        let current = Version::new(0, 5, 0);
-        let target = Version::new(0, 4, 0);
-        assert_eq!(
-            compare_versions(&current, &target),
-            VersionComparison::Downgrade
-        );
-    }
-
     // -- SHA256 verification --
 
     #[test]
     fn verify_checksum_valid() {
-        let data = b"hello world";
-        // sha256 of "hello world"
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.bin");
+        fs::write(&path, b"hello world").unwrap();
         let expected = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
-        assert!(verify_checksum(data, expected).is_ok());
+        assert!(verify_checksum(&path, expected).is_ok());
     }
 
     #[test]
     fn verify_checksum_with_filename_suffix() {
-        let data = b"hello world";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.bin");
+        fs::write(&path, b"hello world").unwrap();
         let expected =
             "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9  fabro.tar.gz";
-        assert!(verify_checksum(data, expected).is_ok());
+        assert!(verify_checksum(&path, expected).is_ok());
     }
 
     #[test]
     fn verify_checksum_mismatch() {
-        let data = b"hello world";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.bin");
+        fs::write(&path, b"hello world").unwrap();
         let wrong = "0000000000000000000000000000000000000000000000000000000000000000";
-        assert!(verify_checksum(data, wrong).is_err());
+        assert!(verify_checksum(&path, wrong).is_err());
     }
 
     // -- Upgrade check state --
@@ -576,9 +543,9 @@ mod tests {
 
     // -- Backend selection --
 
-    #[test]
-    fn select_backend_returns_a_variant() {
+    #[tokio::test]
+    async fn select_backend_returns_a_variant() {
         // Just ensure it doesn't panic; actual variant depends on environment
-        let _backend = select_backend();
+        let _backend = select_backend().await;
     }
 }
