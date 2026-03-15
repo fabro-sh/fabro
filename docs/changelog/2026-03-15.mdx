@@ -1,0 +1,42 @@
+---
+title: "fabro ps overhaul, fabro rm, and GitHub token injection"
+date: "2026-03-15"
+---
+
+## Docker-style process listing with fabro ps
+
+`fabro ps` has been rebuilt to behave like `docker ps`. It now shows a table with run ID, status, workflow name, goal, and timing — making it easy to see what's running at a glance. The GOAL column shows the first line of each run's goal, so you can distinguish between multiple runs of the same workflow.
+
+```bash
+fabro ps        # active runs
+fabro ps -a     # all runs including completed
+```
+
+Run status is now tracked via a proper state machine, so status transitions are reliable and `fabro ps` always reflects the current state.
+
+## GitHub token injection for sandboxes
+
+When a GitHub App is configured, Fabro now automatically injects an installation access token into sandboxes as `GITHUB_TOKEN`. Agents running inside sandboxes can use this token to clone private repos, push branches, and create pull requests without any manual credential setup.
+
+## More
+
+<Accordion title="CLI">
+- Added `fabro rm` command to remove runs by ID with sandbox cleanup
+- Added `-p` short alias for `--pretty` in `fabro logs`
+- Added progress spinner during `run --preflight`
+</Accordion>
+
+<Accordion title="Workflows">
+- Metadata branch renamed from `refs/fabro/{run_id}` to `fabro/meta/{run_id}` for cleaner ref namespace
+- Added granular git checkpoint events and retro lifecycle events (`RetroStarted`, `RetroCompleted`, `RetroFailed`)
+- `goal` field now included in `WorkflowRunStarted` event and rendered in `fabro logs --pretty`
+- Run completion events now include final status and usage totals
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed `--dry-run` executing command/script nodes instead of simulating them
+- Fixed `--dry-run` pushing branches to remote
+- Fixed `--goal-file` not expanding `~` to the home directory
+- Fixed race condition between `fabro run --detach` and `fabro logs -f`
+- Fixed dry-run runs cluttering `fabro ps -a` output (now uses temp directory)
+</Accordion>
