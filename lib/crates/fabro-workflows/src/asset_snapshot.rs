@@ -21,8 +21,8 @@ pub struct AssetCollectionSummary {
     pub copied_paths: Vec<String>,
 }
 
-/// Directories to exclude from the find search.
-const EXCLUDE_DIRS: &[&str] = &[
+/// Directories to exclude from the find search and checkpoint commits.
+pub const EXCLUDE_DIRS: &[&str] = &[
     ".git",
     "node_modules",
     ".pnpm-store",
@@ -30,7 +30,17 @@ const EXCLUDE_DIRS: &[&str] = &[
     "target",
     ".next",
     "__pycache__",
+    ".venv",
+    "venv",
+    ".cache",
+    ".tox",
+    ".pytest_cache",
+    ".mypy_cache",
+    "dist",
 ];
+
+/// Maximum number of files to collect.
+const MAX_FILE_COUNT: usize = 100;
 
 /// Maximum size for a single file (10 MB).
 const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
@@ -189,10 +199,13 @@ pub fn select_files_to_collect(
     // Sort by size ascending (smallest first)
     candidates.sort_by_key(|f| f.size);
 
-    // Enforce total budget
+    // Enforce total budget and count limit
     let mut total: u64 = 0;
     let mut selected = Vec::new();
     for f in candidates {
+        if selected.len() >= MAX_FILE_COUNT {
+            break;
+        }
         if total + f.size > MAX_TOTAL_SIZE {
             break;
         }
@@ -741,5 +754,38 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let paths = collect_asset_paths(tmp.path());
         assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn select_files_enforces_count_limit() {
+        // Create 150 small, recent files — should be capped at MAX_FILE_COUNT (100)
+        let discovered: Vec<DiscoveredFile> = (0..150)
+            .map(|i| DiscoveredFile {
+                relative_path: format!("file{i}.txt"),
+                size: 100, // tiny files, well within total budget
+                mtime_epoch_secs: 2000.0,
+            })
+            .collect();
+        let selected = select_files_to_collect(&discovered, 1000.0);
+        assert_eq!(selected.len(), MAX_FILE_COUNT);
+    }
+
+    #[test]
+    fn build_find_command_excludes_venv() {
+        let globs = vec!["*.xml".to_string()];
+        let cmd = build_find_command("/workspace", "linux", &globs);
+        assert!(cmd.contains(".venv"), "expected .venv in prune clause");
+        assert!(cmd.contains("venv"), "expected venv in prune clause");
+        assert!(cmd.contains(".cache"), "expected .cache in prune clause");
+        assert!(cmd.contains(".tox"), "expected .tox in prune clause");
+        assert!(
+            cmd.contains(".pytest_cache"),
+            "expected .pytest_cache in prune clause"
+        );
+        assert!(
+            cmd.contains(".mypy_cache"),
+            "expected .mypy_cache in prune clause"
+        );
+        assert!(cmd.contains("dist"), "expected dist in prune clause");
     }
 }
