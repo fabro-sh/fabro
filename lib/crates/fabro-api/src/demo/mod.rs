@@ -1350,6 +1350,7 @@ mod runs {
             pull_request: None,
             assets: None,
             mcp_servers: Default::default(),
+            github: None,
         })
         .unwrap()
     }
@@ -1520,6 +1521,7 @@ mod workflows {
                     pull_request: None,
                     assets: None,
                     mcp_servers: Default::default(),
+                    github: None,
                 }),
                 graph: r#"digraph fix_build {
     graph [
@@ -1592,6 +1594,7 @@ mod workflows {
                     pull_request: None,
                     assets: None,
                     mcp_servers: Default::default(),
+                    github: None,
                 }),
                 graph: r#"digraph implement {
     graph [
@@ -1676,6 +1679,7 @@ mod workflows {
                     pull_request: None,
                     assets: None,
                     mcp_servers: Default::default(),
+                    github: None,
                 }),
                 graph: r#"digraph sync {
     graph [
@@ -1749,6 +1753,7 @@ mod workflows {
                     pull_request: None,
                     assets: None,
                     mcp_servers: Default::default(),
+                    github: None,
                 }),
                 graph: r#"digraph expand {
     graph [
@@ -3310,6 +3315,7 @@ mod settings {
                 assets: None,
                 hooks: vec![],
                 mcp_servers: Default::default(),
+                github: None,
             },
         })
         .unwrap()

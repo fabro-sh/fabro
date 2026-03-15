@@ -111,7 +111,7 @@ pub fn sign_app_jwt(app_id: &str, private_key_pem: &str) -> Result<String, Strin
 ///
 /// Uses the App JWT to find the installation for `owner/repo`, then requests
 /// a token scoped to the given `permissions` on that single repository.
-async fn create_installation_access_token_with_permissions(
+pub async fn create_installation_access_token_with_permissions(
     client: &reqwest::Client,
     jwt: &str,
     owner: &str,

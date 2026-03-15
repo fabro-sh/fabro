@@ -375,6 +375,7 @@ fn fully_populated_server_config() -> ServerConfig {
                 },
             ],
             mcp_servers: Default::default(),
+            github: None,
         },
     }
 }

@@ -40,6 +40,12 @@ pub struct AssetsConfig {
     pub include: Vec<String>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct GitHubConfig {
+    #[serde(default)]
+    pub permissions: HashMap<String, String>,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowRunConfig {
@@ -61,6 +67,7 @@ pub struct WorkflowRunConfig {
     pub assets: Option<AssetsConfig>,
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerEntry>,
+    pub github: Option<GitHubConfig>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -147,6 +154,7 @@ pub struct RunDefaults {
     pub hooks: Vec<crate::hook::HookDefinition>,
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerEntry>,
+    pub github: Option<GitHubConfig>,
 }
 
 impl WorkflowRunConfig {
@@ -285,6 +293,10 @@ impl WorkflowRunConfig {
             merged.extend(std::mem::take(&mut self.mcp_servers));
             self.mcp_servers = merged;
         }
+
+        if self.github.is_none() {
+            self.github = defaults.github.clone();
+        }
     }
 }
 
@@ -415,6 +427,10 @@ impl RunDefaults {
             let mut merged = std::mem::take(&mut self.mcp_servers);
             merged.extend(overlay.mcp_servers);
             self.mcp_servers = merged;
+        }
+
+        if overlay.github.is_some() {
+            self.github = overlay.github;
         }
     }
 }
@@ -2425,5 +2441,111 @@ command = "echo from-workflow"
         let toml = "version = 1\n";
         let config = parse_run_config(toml).unwrap();
         assert_eq!(config.graph, "workflow.fabro");
+    }
+
+    #[test]
+    fn parse_toml_with_github_permissions() {
+        let toml = r#"
+version = 1
+goal = "test"
+graph = "w.fabro"
+
+[github]
+permissions = { contents = "write", pull_requests = "read" }
+"#;
+        let config = parse_run_config(toml).unwrap();
+        let github = config.github.unwrap();
+        assert_eq!(github.permissions["contents"], "write");
+        assert_eq!(github.permissions["pull_requests"], "read");
+    }
+
+    #[test]
+    fn parse_toml_without_github_defaults_none() {
+        let toml = r#"
+version = 1
+goal = "test"
+graph = "w.fabro"
+"#;
+        let config = parse_run_config(toml).unwrap();
+        assert!(config.github.is_none());
+    }
+
+    #[test]
+    fn apply_defaults_github_inherited() {
+        let mut cfg = parse_run_config(
+            r#"
+version = 1
+goal = "test"
+graph = "w.fabro"
+"#,
+        )
+        .unwrap();
+        let defaults = RunDefaults {
+            github: Some(GitHubConfig {
+                permissions: HashMap::from([("contents".into(), "read".into())]),
+            }),
+            ..RunDefaults::default()
+        };
+        cfg.apply_defaults(&defaults);
+        let github = cfg.github.unwrap();
+        assert_eq!(github.permissions["contents"], "read");
+    }
+
+    #[test]
+    fn apply_defaults_github_task_wins() {
+        let mut cfg = parse_run_config(
+            r#"
+version = 1
+goal = "test"
+graph = "w.fabro"
+
+[github]
+permissions = { contents = "write" }
+"#,
+        )
+        .unwrap();
+        let defaults = RunDefaults {
+            github: Some(GitHubConfig {
+                permissions: HashMap::from([("contents".into(), "read".into())]),
+            }),
+            ..RunDefaults::default()
+        };
+        cfg.apply_defaults(&defaults);
+        let github = cfg.github.unwrap();
+        assert_eq!(github.permissions["contents"], "write");
+    }
+
+    #[test]
+    fn merge_overlay_github_replaces() {
+        let mut base = RunDefaults {
+            github: Some(GitHubConfig {
+                permissions: HashMap::from([("contents".into(), "read".into())]),
+            }),
+            ..RunDefaults::default()
+        };
+        let overlay = RunDefaults {
+            github: Some(GitHubConfig {
+                permissions: HashMap::from([("issues".into(), "write".into())]),
+            }),
+            ..RunDefaults::default()
+        };
+        base.merge_overlay(overlay);
+        let github = base.github.unwrap();
+        assert!(!github.permissions.contains_key("contents"));
+        assert_eq!(github.permissions["issues"], "write");
+    }
+
+    #[test]
+    fn merge_overlay_github_none_keeps_base() {
+        let mut base = RunDefaults {
+            github: Some(GitHubConfig {
+                permissions: HashMap::from([("contents".into(), "read".into())]),
+            }),
+            ..RunDefaults::default()
+        };
+        let overlay = RunDefaults::default();
+        base.merge_overlay(overlay);
+        let github = base.github.unwrap();
+        assert_eq!(github.permissions["contents"], "read");
     }
 }
