@@ -1,0 +1,531 @@
+diff --git a/docs/api-reference/fabro-api.yaml b/docs/api-reference/fabro-api.yaml
+index f97dd2a..37baea0 100644
+--- a/docs/api-reference/fabro-api.yaml
++++ b/docs/api-reference/fabro-api.yaml
+@@ -4306,6 +4306,18 @@ components:
+           additionalProperties:
+             $ref: "#/components/schemas/McpServerEntry"
+           description: Default MCP server configurations.
++        github:
++          $ref: "#/components/schemas/GitHubConfiguration"
++
++    GitHubConfiguration:
++      description: GitHub App token injection configuration.
++      type: object
++      properties:
++        permissions:
++          type: object
++          additionalProperties:
++            type: string
++          description: GitHub API permissions to request (e.g. contents = write).
+ 
+     McpServerEntry:
+       description: MCP server connection entry.
+diff --git a/lib/crates/fabro-api/src/demo/mod.rs b/lib/crates/fabro-api/src/demo/mod.rs
+index 445c220..295b338 100644
+--- a/lib/crates/fabro-api/src/demo/mod.rs
++++ b/lib/crates/fabro-api/src/demo/mod.rs
+@@ -1350,6 +1350,7 @@ mod runs {
+             pull_request: None,
+             assets: None,
+             mcp_servers: Default::default(),
++            github: None,
+         })
+         .unwrap()
+     }
+@@ -1520,6 +1521,7 @@ mod workflows {
+                     pull_request: None,
+                     assets: None,
+                     mcp_servers: Default::default(),
++                    github: None,
+                 }),
+                 graph: r#"digraph fix_build {
+     graph [
+@@ -1592,6 +1594,7 @@ mod workflows {
+                     pull_request: None,
+                     assets: None,
+                     mcp_servers: Default::default(),
++                    github: None,
+                 }),
+                 graph: r#"digraph implement {
+     graph [
+@@ -1676,6 +1679,7 @@ mod workflows {
+                     pull_request: None,
+                     assets: None,
+                     mcp_servers: Default::default(),
++                    github: None,
+                 }),
+                 graph: r#"digraph sync {
+     graph [
+@@ -1749,6 +1753,7 @@ mod workflows {
+                     pull_request: None,
+                     assets: None,
+                     mcp_servers: Default::default(),
++                    github: None,
+                 }),
+                 graph: r#"digraph expand {
+     graph [
+@@ -3310,6 +3315,7 @@ mod settings {
+                 assets: None,
+                 hooks: vec![],
+                 mcp_servers: Default::default(),
++                github: None,
+             },
+         })
+         .unwrap()
+diff --git a/lib/crates/fabro-api/tests/openapi_conformance.rs b/lib/crates/fabro-api/tests/openapi_conformance.rs
+index 548c929..3bd36e1 100644
+--- a/lib/crates/fabro-api/tests/openapi_conformance.rs
++++ b/lib/crates/fabro-api/tests/openapi_conformance.rs
+@@ -375,6 +375,7 @@ fn fully_populated_server_config() -> ServerConfig {
+                 },
+             ],
+             mcp_servers: Default::default(),
++            github: None,
+         },
+     }
+ }
+diff --git a/lib/crates/fabro-github/src/lib.rs b/lib/crates/fabro-github/src/lib.rs
+index af6481a..dc15c5a 100644
+--- a/lib/crates/fabro-github/src/lib.rs
++++ b/lib/crates/fabro-github/src/lib.rs
+@@ -111,7 +111,7 @@ pub fn sign_app_jwt(app_id: &str, private_key_pem: &str) -> Result<String, Strin
+ ///
+ /// Uses the App JWT to find the installation for `owner/repo`, then requests
+ /// a token scoped to the given `permissions` on that single repository.
+-async fn create_installation_access_token_with_permissions(
++pub async fn create_installation_access_token_with_permissions(
+     client: &reqwest::Client,
+     jwt: &str,
+     owner: &str,
+diff --git a/lib/crates/fabro-workflows/src/cli/project_config.rs b/lib/crates/fabro-workflows/src/cli/project_config.rs
+index bca5844..43c66e5 100644
+--- a/lib/crates/fabro-workflows/src/cli/project_config.rs
++++ b/lib/crates/fabro-workflows/src/cli/project_config.rs
+@@ -5,8 +5,8 @@ use anyhow::{bail, Context};
+ use serde::Deserialize;
+ 
+ use super::run_config::{
+-    AssetsConfig, CheckpointConfig, LlmConfig, McpServerEntry, PullRequestConfig, RunDefaults,
+-    SandboxConfig, SetupConfig,
++    AssetsConfig, CheckpointConfig, GitHubConfig, LlmConfig, McpServerEntry, PullRequestConfig,
++    RunDefaults, SandboxConfig, SetupConfig,
+ };
+ use crate::hook::HookDefinition;
+ 
+@@ -33,6 +33,7 @@ pub struct ProjectConfig {
+     pub hooks: Vec<HookDefinition>,
+     #[serde(default)]
+     pub mcp_servers: HashMap<String, McpServerEntry>,
++    pub github: Option<GitHubConfig>,
+ }
+ 
+ impl ProjectConfig {
+@@ -49,6 +50,7 @@ impl ProjectConfig {
+             assets: self.assets,
+             hooks: self.hooks,
+             mcp_servers: self.mcp_servers,
++            github: self.github,
+         }
+     }
+ }
+@@ -911,4 +913,32 @@ provider = "daytona"
+             None
+         );
+     }
++
++    #[test]
++    fn parse_project_config_with_github() {
++        let toml = r#"
++version = 1
++
++[github]
++permissions = { contents = "read" }
++"#;
++        let config = parse_project_config(toml).unwrap();
++        let github = config.github.unwrap();
++        assert_eq!(github.permissions["contents"], "read");
++    }
++
++    #[test]
++    fn into_run_defaults_preserves_github() {
++        let toml = r#"
++version = 1
++
++[github]
++permissions = { contents = "read", issues = "write" }
++"#;
++        let config = parse_project_config(toml).unwrap();
++        let defaults = config.into_run_defaults();
++        let github = defaults.github.unwrap();
++        assert_eq!(github.permissions["contents"], "read");
++        assert_eq!(github.permissions["issues"], "write");
++    }
+ }
+diff --git a/lib/crates/fabro-workflows/src/cli/run.rs b/lib/crates/fabro-workflows/src/cli/run.rs
+index 86ad2fa..57630d4 100644
+--- a/lib/crates/fabro-workflows/src/cli/run.rs
++++ b/lib/crates/fabro-workflows/src/cli/run.rs
+@@ -271,6 +271,35 @@ fn resolve_fallback_chain(
+     }
+ }
+ 
++/// Mint a GitHub App Installation Access Token with the given permissions.
++///
++/// Signs a JWT, resolves `owner/repo` from `origin_url`, and requests a
++/// scoped token. Returns the token string on success.
++async fn mint_github_token(
++    creds: &fabro_github::GitHubAppCredentials,
++    origin_url: &str,
++    permissions: &HashMap<String, String>,
++) -> anyhow::Result<String> {
++    let https_url = fabro_github::ssh_url_to_https(origin_url);
++    let (owner, repo) =
++        fabro_github::parse_github_owner_repo(&https_url).map_err(|e| anyhow::anyhow!("{e}"))?;
++    let jwt = fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem)
++        .map_err(|e| anyhow::anyhow!("{e}"))?;
++    let client = reqwest::Client::new();
++    let perms_json = serde_json::to_value(permissions)?;
++    let token = fabro_github::create_installation_access_token_with_permissions(
++        &client,
++        &jwt,
++        &owner,
++        &repo,
++        fabro_github::GITHUB_API_BASE_URL,
++        perms_json,
++    )
++    .await
++    .map_err(|e| anyhow::anyhow!("{e}"))?;
++    Ok(token)
++}
++
+ /// Accumulates token usage and cost across all workflow stages.
+ #[derive(Default)]
+ struct CostAccumulator {
+@@ -1095,6 +1124,34 @@ pub async fn run_command(
+         }
+         env
+     };
++
++    // Mint a GitHub App IAT and inject as GITHUB_TOKEN if [github] permissions are declared
++    let mut sandbox_env = sandbox_env;
++    let github_permissions = run_cfg
++        .as_ref()
++        .and_then(|c| c.github.as_ref())
++        .or(run_defaults.github.as_ref());
++    if let Some(gh_cfg) = github_permissions {
++        if !gh_cfg.permissions.is_empty() {
++            if let (Some(ref creds), Some(ref url)) = (&github_app, &origin_url) {
++                match mint_github_token(creds, url, &gh_cfg.permissions).await {
++                    Ok(token) => {
++                        debug!("Minted GitHub IAT for sandbox GITHUB_TOKEN");
++                        sandbox_env.insert("GITHUB_TOKEN".to_string(), token);
++                    }
++                    Err(e) => {
++                        eprintln!(
++                            "{} Failed to mint GitHub token: {e}",
++                            styles.yellow.apply_to("Warning:"),
++                        );
++                    }
++                }
++            } else {
++                debug!("Skipping GitHub token: no GitHub App credentials or origin URL");
++            }
++        }
++    }
++
+     let mcp_servers: Vec<fabro_mcp::config::McpServerConfig> = {
+         let servers = run_cfg
+             .as_ref()
+@@ -2020,6 +2077,7 @@ async fn run_preflight(
+     let exe_config = resolve_exe_config(run_cfg.as_ref(), run_defaults);
+     let ssh_config = resolve_ssh_config(run_cfg.as_ref(), run_defaults);
+ 
++    let github_app_for_preflight = github_app.clone();
+     let sandbox_result: Result<Arc<dyn Sandbox>, String> = match sandbox_provider {
+         SandboxProvider::Docker => {
+             let config = DockerSandboxConfig {
+@@ -2205,7 +2263,60 @@ async fn run_preflight(
+         }
+     };
+ 
+-    // 5. Render report
++    // 5. GitHub token preflight
++    let github_permissions = run_cfg
++        .as_ref()
++        .and_then(|c| c.github.as_ref())
++        .or(run_defaults.github.as_ref());
++    if let Some(gh_cfg) = github_permissions {
++        if !gh_cfg.permissions.is_empty() {
++            match (&github_app_for_preflight, origin_url) {
++                (Some(creds), Some(url)) => {
++                    match mint_github_token(creds, url, &gh_cfg.permissions).await {
++                        Ok(_) => {
++                            checks.push(CheckResult {
++                                name: "GitHub Token".into(),
++                                status: CheckStatus::Pass,
++                                summary: "minted".into(),
++                                details: gh_cfg
++                                    .permissions
++                                    .iter()
++                                    .map(|(k, v)| CheckDetail::new(format!("{k}: {v}")))
++                                    .collect(),
++                                remediation: None,
++                            });
++                        }
++                        Err(e) => {
++                            checks.push(CheckResult {
++                                name: "GitHub Token".into(),
++                                status: CheckStatus::Error,
++                                summary: "failed".into(),
++                                details: gh_cfg
++                                    .permissions
++                                    .iter()
++                                    .map(|(k, v)| CheckDetail::new(format!("{k}: {v}")))
++                                    .collect(),
++                                remediation: Some(format!("Failed to mint GitHub token: {e}")),
++                            });
++                        }
++                    }
++                }
++                _ => {
++                    checks.push(CheckResult {
++                        name: "GitHub Token".into(),
++                        status: CheckStatus::Warning,
++                        summary: "skipped".into(),
++                        details: vec![],
++                        remediation: Some(
++                            "No GitHub App credentials or origin URL available".to_string(),
++                        ),
++                    });
++                }
++            }
++        }
++    }
++
++    // 6. Render report
+     spinner.finish_and_clear();
+ 
+     let report = CheckReport {
+@@ -2571,6 +2682,7 @@ mod tests {
+             pull_request: None,
+             assets: None,
+             mcp_servers: Default::default(),
++            github: None,
+         };
+         let (model, provider) = resolve_model_provider(
+             Some("gpt-5.2"),
+@@ -2615,6 +2727,7 @@ mod tests {
+             pull_request: None,
+             assets: None,
+             mcp_servers: Default::default(),
++            github: None,
+         };
+         let (model, provider) = resolve_model_provider(None, None, Some(&cfg), &defaults, &graph);
+         assert_eq!(model, "toml-model");
+@@ -2694,6 +2807,7 @@ mod tests {
+             pull_request: None,
+             assets: None,
+             mcp_servers: Default::default(),
++            github: None,
+         };
+         let (model, provider) = resolve_model_provider(None, None, Some(&cfg), &defaults, &graph);
+         assert_eq!(model, "toml-model");
+@@ -2726,6 +2840,7 @@ mod tests {
+             pull_request: None,
+             assets: None,
+             mcp_servers: Default::default(),
++            github: None,
+         };
+         let defaults = RunDefaults::default();
+         assert!(resolve_preserve_sandbox(true, Some(&cfg), &defaults));
+@@ -2757,6 +2872,7 @@ mod tests {
+             pull_request: None,
+             assets: None,
+             mcp_servers: Default::default(),
++            github: None,
+         };
+         let defaults = RunDefaults {
+             sandbox: Some(run_config::SandboxConfig {
+@@ -2837,6 +2953,7 @@ mod tests {
+             pull_request: None,
+             assets: None,
+             mcp_servers: Default::default(),
++            github: None,
+         };
+         let defaults = RunDefaults::default();
+         assert_eq!(
+@@ -2897,6 +3014,7 @@ mod tests {
+             pull_request: None,
+             assets: None,
+             mcp_servers: Default::default(),
++            github: None,
+         };
+         let defaults = RunDefaults {
+             sandbox: Some(run_config::SandboxConfig {
+diff --git a/lib/crates/fabro-workflows/src/cli/run_config.rs b/lib/crates/fabro-workflows/src/cli/run_config.rs
+index 79375cd..9b9ddc1 100644
+--- a/lib/crates/fabro-workflows/src/cli/run_config.rs
++++ b/lib/crates/fabro-workflows/src/cli/run_config.rs
+@@ -40,6 +40,12 @@ pub struct AssetsConfig {
+     pub include: Vec<String>,
+ }
+ 
++#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
++pub struct GitHubConfig {
++    #[serde(default)]
++    pub permissions: HashMap<String, String>,
++}
++
+ #[derive(Debug, Deserialize, Serialize)]
+ #[serde(deny_unknown_fields)]
+ pub struct WorkflowRunConfig {
+@@ -61,6 +67,7 @@ pub struct WorkflowRunConfig {
+     pub assets: Option<AssetsConfig>,
+     #[serde(default)]
+     pub mcp_servers: HashMap<String, McpServerEntry>,
++    pub github: Option<GitHubConfig>,
+ }
+ 
+ #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+@@ -147,6 +154,7 @@ pub struct RunDefaults {
+     pub hooks: Vec<crate::hook::HookDefinition>,
+     #[serde(default)]
+     pub mcp_servers: HashMap<String, McpServerEntry>,
++    pub github: Option<GitHubConfig>,
+ }
+ 
+ impl WorkflowRunConfig {
+@@ -285,6 +293,10 @@ impl WorkflowRunConfig {
+             merged.extend(std::mem::take(&mut self.mcp_servers));
+             self.mcp_servers = merged;
+         }
++
++        if self.github.is_none() {
++            self.github = defaults.github.clone();
++        }
+     }
+ }
+ 
+@@ -416,6 +428,10 @@ impl RunDefaults {
+             merged.extend(overlay.mcp_servers);
+             self.mcp_servers = merged;
+         }
++
++        if overlay.github.is_some() {
++            self.github = overlay.github;
++        }
+     }
+ }
+ 
+@@ -2426,4 +2442,110 @@ command = "echo from-workflow"
+         let config = parse_run_config(toml).unwrap();
+         assert_eq!(config.graph, "workflow.fabro");
+     }
++
++    #[test]
++    fn parse_toml_with_github_permissions() {
++        let toml = r#"
++version = 1
++goal = "test"
++graph = "w.fabro"
++
++[github]
++permissions = { contents = "write", pull_requests = "read" }
++"#;
++        let config = parse_run_config(toml).unwrap();
++        let github = config.github.unwrap();
++        assert_eq!(github.permissions["contents"], "write");
++        assert_eq!(github.permissions["pull_requests"], "read");
++    }
++
++    #[test]
++    fn parse_toml_without_github_defaults_none() {
++        let toml = r#"
++version = 1
++goal = "test"
++graph = "w.fabro"
++"#;
++        let config = parse_run_config(toml).unwrap();
++        assert!(config.github.is_none());
++    }
++
++    #[test]
++    fn apply_defaults_github_inherited() {
++        let mut cfg = parse_run_config(
++            r#"
++version = 1
++goal = "test"
++graph = "w.fabro"
++"#,
++        )
++        .unwrap();
++        let defaults = RunDefaults {
++            github: Some(GitHubConfig {
++                permissions: HashMap::from([("contents".into(), "read".into())]),
++            }),
++            ..RunDefaults::default()
++        };
++        cfg.apply_defaults(&defaults);
++        let github = cfg.github.unwrap();
++        assert_eq!(github.permissions["contents"], "read");
++    }
++
++    #[test]
++    fn apply_defaults_github_task_wins() {
++        let mut cfg = parse_run_config(
++            r#"
++version = 1
++goal = "test"
++graph = "w.fabro"
++
++[github]
++permissions = { contents = "write" }
++"#,
++        )
++        .unwrap();
++        let defaults = RunDefaults {
++            github: Some(GitHubConfig {
++                permissions: HashMap::from([("contents".into(), "read".into())]),
++            }),
++            ..RunDefaults::default()
++        };
++        cfg.apply_defaults(&defaults);
++        let github = cfg.github.unwrap();
++        assert_eq!(github.permissions["contents"], "write");
++    }
++
++    #[test]
++    fn merge_overlay_github_replaces() {
++        let mut base = RunDefaults {
++            github: Some(GitHubConfig {
++                permissions: HashMap::from([("contents".into(), "read".into())]),
++            }),
++            ..RunDefaults::default()
++        };
++        let overlay = RunDefaults {
++            github: Some(GitHubConfig {
++                permissions: HashMap::from([("issues".into(), "write".into())]),
++            }),
++            ..RunDefaults::default()
++        };
++        base.merge_overlay(overlay);
++        let github = base.github.unwrap();
++        assert!(!github.permissions.contains_key("contents"));
++        assert_eq!(github.permissions["issues"], "write");
++    }
++
++    #[test]
++    fn merge_overlay_github_none_keeps_base() {
++        let mut base = RunDefaults {
++            github: Some(GitHubConfig {
++                permissions: HashMap::from([("contents".into(), "read".into())]),
++            }),
++            ..RunDefaults::default()
++        };
++        let overlay = RunDefaults::default();
++        base.merge_overlay(overlay);
++        let github = base.github.unwrap();
++        assert_eq!(github.permissions["contents"], "read");
++    }
+ }
