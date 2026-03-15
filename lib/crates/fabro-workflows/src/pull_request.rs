@@ -37,6 +37,10 @@ fn pr_title_from_goal(goal: &str) -> String {
         .strip_prefix("## ")
         .or_else(|| first_line.strip_prefix("# "))
         .unwrap_or(first_line);
+    let first_line = first_line
+        .strip_prefix("Plan:")
+        .map(|s| s.trim())
+        .unwrap_or(first_line);
     if first_line.chars().count() > 120 {
         let truncated: String = first_line.chars().take(119).collect();
         format!("{truncated}…")
@@ -812,6 +816,22 @@ mod tests {
     fn pr_title_strips_h2_prefix() {
         assert_eq!(
             pr_title_from_goal("## Add Draft PR Mode"),
+            "Add Draft PR Mode"
+        );
+    }
+
+    #[test]
+    fn pr_title_strips_plan_prefix() {
+        assert_eq!(
+            pr_title_from_goal("Plan: Add Draft PR Mode"),
+            "Add Draft PR Mode"
+        );
+    }
+
+    #[test]
+    fn pr_title_strips_heading_and_plan_prefix() {
+        assert_eq!(
+            pr_title_from_goal("## Plan: Add Draft PR Mode"),
             "Add Draft PR Mode"
         );
     }
