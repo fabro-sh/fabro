@@ -526,6 +526,34 @@ pub fn format_event_pretty(line: &str, styles: &fabro_util::terminal::Styles) ->
             ))
         }
 
+        "RetroCompleted" => {
+            let duration = format_duration_ms(envelope.get("duration_ms"));
+            Some(format!(
+                "{} {} Retro  {}",
+                styles.dim.apply_to(&ts),
+                styles.green.apply_to("\u{2713}"),
+                duration,
+            ))
+        }
+
+        "RetroFailed" => {
+            let error = str_field(&envelope, "error").unwrap_or("unknown error");
+            let duration = format_duration_ms(envelope.get("duration_ms"));
+            Some(format!(
+                "{} {} Retro  {}  {}",
+                styles.dim.apply_to(&ts),
+                styles.bold_red.apply_to("\u{2717}"),
+                duration,
+                styles.red.apply_to(error),
+            ))
+        }
+
+        "RetroStarted" => Some(format!(
+            "{} {} Retro",
+            styles.dim.apply_to(&ts),
+            styles.bold_cyan.apply_to("\u{25b6}"),
+        )),
+
         // Noise events — skip
         "Agent.SessionStarted"
         | "Agent.SessionEnded"

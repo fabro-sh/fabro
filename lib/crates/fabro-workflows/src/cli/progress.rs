@@ -598,6 +598,17 @@ impl ProgressUI {
                     }
                 }
             }
+            WorkflowRunEvent::RetroStarted => {
+                self.on_stage_started("retro", "Retro", None);
+            }
+            WorkflowRunEvent::RetroCompleted { duration_ms } => {
+                let dur = format_duration_ms(*duration_ms);
+                self.finish_stage("retro", "Retro", green_check(), &dur);
+            }
+            WorkflowRunEvent::RetroFailed { duration_ms, .. } => {
+                let dur = format_duration_ms(*duration_ms);
+                self.finish_stage("retro", "Retro", red_cross(), &dur);
+            }
             _ => {}
         }
     }

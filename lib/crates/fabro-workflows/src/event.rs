@@ -276,6 +276,14 @@ pub enum WorkflowRunEvent {
         exit_code: i32,
         stderr: String,
     },
+    RetroStarted,
+    RetroCompleted {
+        duration_ms: u64,
+    },
+    RetroFailed {
+        error: String,
+        duration_ms: u64,
+    },
 }
 
 impl WorkflowRunEvent {
@@ -663,6 +671,15 @@ impl WorkflowRunEvent {
                     phase,
                     command, index, exit_code, "Devcontainer lifecycle command failed"
                 );
+            }
+            Self::RetroStarted => {
+                info!("Retro started");
+            }
+            Self::RetroCompleted { duration_ms } => {
+                info!(duration_ms, "Retro completed");
+            }
+            Self::RetroFailed { error, duration_ms } => {
+                error!(error = %error, duration_ms, "Retro failed");
             }
         }
     }
@@ -2112,5 +2129,79 @@ mod tests {
         assert_eq!(name, "DevcontainerLifecycleFailed");
         assert_eq!(fields["command_index"], 1);
         assert!(!fields.contains_key("index"));
+    }
+
+    #[test]
+    fn retro_started_event_serialization() {
+        let event = WorkflowRunEvent::RetroStarted;
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("RetroStarted"));
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, WorkflowRunEvent::RetroStarted));
+    }
+
+    #[test]
+    fn retro_completed_event_serialization() {
+        let event = WorkflowRunEvent::RetroCompleted { duration_ms: 5000 };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"duration_ms\":5000"));
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            deserialized,
+            WorkflowRunEvent::RetroCompleted { duration_ms: 5000 }
+        ));
+    }
+
+    #[test]
+    fn retro_failed_event_serialization() {
+        let event = WorkflowRunEvent::RetroFailed {
+            error: "LLM timeout".to_string(),
+            duration_ms: 3000,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("LLM timeout"));
+        assert!(json.contains("\"duration_ms\":3000"));
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, WorkflowRunEvent::RetroFailed { .. }));
+    }
+
+    #[test]
+    fn flatten_retro_started() {
+        let event = WorkflowRunEvent::RetroStarted;
+        let (name, _fields) = flatten_event(&event);
+        assert_eq!(name, "RetroStarted");
+    }
+
+    #[test]
+    fn flatten_retro_failed() {
+        let event = WorkflowRunEvent::RetroFailed {
+            error: "timeout".to_string(),
+            duration_ms: 1000,
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "RetroFailed");
+        assert_eq!(fields["error"], "timeout");
+        assert_eq!(fields["duration_ms"], 1000);
+    }
+
+    #[test]
+    fn emitter_captures_retro_events() {
+        let mut emitter = EventEmitter::new();
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let r = Arc::clone(&received);
+        emitter.on_event(move |event| {
+            if let WorkflowRunEvent::RetroStarted = event {
+                r.lock().unwrap().push("started".to_string());
+            }
+            if let WorkflowRunEvent::RetroCompleted { .. } = event {
+                r.lock().unwrap().push("completed".to_string());
+            }
+        });
+        emitter.emit(&WorkflowRunEvent::RetroStarted);
+        emitter.emit(&WorkflowRunEvent::RetroCompleted { duration_ms: 100 });
+        let events = received.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], "started");
+        assert_eq!(events[1], "completed");
     }
 }
