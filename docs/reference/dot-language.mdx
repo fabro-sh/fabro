@@ -189,6 +189,7 @@ Start nodes can also be identified by ID (`start` or `Start`). Exit nodes can be
 | `retry_target` | String | Node ID to jump to on retry |
 | `goal_gate` | Boolean | When `true`, workflow fails if this node doesn't succeed |
 | `auto_status` | Boolean | Auto-generate status updates |
+| `selection` | String | Edge tiebreaking strategy: `deterministic` (default) or `random` (weighted-random). Cannot be combined with conditional edges. |
 
 ### Agent and prompt nodes
 

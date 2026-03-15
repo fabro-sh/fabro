@@ -390,6 +390,46 @@ fn best_by_weight_then_lexical<'a>(edges: &[&'a Edge]) -> Option<&'a Edge> {
     Some(best)
 }
 
+/// Pick a random edge using weighted-random selection.
+/// Edges with `weight <= 0` are treated as weight 1 for probability calculation.
+fn weighted_random<'a>(edges: &[&'a Edge]) -> Option<&'a Edge> {
+    if edges.is_empty() {
+        return None;
+    }
+    if edges.len() == 1 {
+        return Some(edges[0]);
+    }
+    let weights: Vec<f64> = edges
+        .iter()
+        .map(|e| {
+            let w = e.weight();
+            if w <= 0 {
+                1.0
+            } else {
+                w as f64
+            }
+        })
+        .collect();
+    let total: f64 = weights.iter().sum();
+    let mut rng = rand::thread_rng();
+    let mut roll: f64 = rng.gen_range(0.0..total);
+    for (i, &w) in weights.iter().enumerate() {
+        roll -= w;
+        if roll < 0.0 {
+            return Some(edges[i]);
+        }
+    }
+    Some(edges[edges.len() - 1])
+}
+
+/// Dispatch to the appropriate edge-picking strategy.
+fn pick_edge<'a>(edges: &[&'a Edge], selection: &str) -> Option<&'a Edge> {
+    match selection {
+        "random" => weighted_random(edges),
+        _ => best_by_weight_then_lexical(edges),
+    }
+}
+
 /// Select the next edge from a node's outgoing edges (spec Section 3.3).
 #[must_use]
 /// Result of edge selection: the chosen edge and the reason it was selected.
@@ -403,6 +443,7 @@ pub fn select_edge<'a>(
     outcome: &Outcome,
     context: &Context,
     graph: &'a Graph,
+    selection: &str,
 ) -> Option<EdgeSelection<'a>> {
     let edges = graph.outgoing_edges(node_id);
     if edges.is_empty() {
@@ -419,7 +460,7 @@ pub fn select_edge<'a>(
         .copied()
         .collect();
     if !condition_matched.is_empty() {
-        return best_by_weight_then_lexical(&condition_matched).map(|edge| EdgeSelection {
+        return pick_edge(&condition_matched, selection).map(|edge| EdgeSelection {
             edge,
             reason: "condition",
         });
@@ -459,14 +500,14 @@ pub fn select_edge<'a>(
         .copied()
         .collect();
     if !unconditional.is_empty() {
-        return best_by_weight_then_lexical(&unconditional).map(|edge| EdgeSelection {
+        return pick_edge(&unconditional, selection).map(|edge| EdgeSelection {
             edge,
             reason: "unconditional",
         });
     }
 
     // Fallback: any edge
-    best_by_weight_then_lexical(&edges).map(|edge| EdgeSelection {
+    pick_edge(&edges, selection).map(|edge| EdgeSelection {
         edge,
         reason: "fallback",
     })
@@ -1598,7 +1639,13 @@ impl WorkflowRunEngine {
                         previous_node_id = Some(node.id.clone());
                         stage_index += 1;
                         // Select next edge and continue
-                        let selection = select_edge(&node.id, &Outcome::skipped(), &context, graph);
+                        let selection = select_edge(
+                            &node.id,
+                            &Outcome::skipped(),
+                            &context,
+                            graph,
+                            node.selection(),
+                        );
                         if let Some(sel) = selection {
                             current_node_id = sel.edge.to.clone();
                             incoming_edge = Some(sel.edge);
@@ -1815,7 +1862,7 @@ impl WorkflowRunEngine {
                 });
                 (None, Some(target.clone()))
             } else {
-                let selection = select_edge(&node.id, &outcome, &context, graph);
+                let selection = select_edge(&node.id, &outcome, &context, graph, node.selection());
                 if let Some(sel) = &selection {
                     self.services.emitter.emit(&WorkflowRunEvent::EdgeSelected {
                         from_node: node.id.clone(),
@@ -2550,6 +2597,65 @@ mod tests {
         assert!(result.is_none());
     }
 
+    // --- weighted_random tests ---
+
+    #[test]
+    fn weighted_random_empty_returns_none() {
+        assert!(weighted_random(&[]).is_none());
+    }
+
+    #[test]
+    fn weighted_random_single_edge() {
+        let e = Edge::new("a", "b");
+        let result = weighted_random(&[&e]).unwrap();
+        assert_eq!(result.to, "b");
+    }
+
+    #[test]
+    fn weighted_random_zero_weight_all_selected() {
+        let e1 = Edge::new("a", "b");
+        let e2 = Edge::new("a", "c");
+        let edges = vec![&e1, &e2];
+        let mut seen_b = false;
+        let mut seen_c = false;
+        for _ in 0..200 {
+            let pick = weighted_random(&edges).unwrap();
+            if pick.to == "b" {
+                seen_b = true;
+            }
+            if pick.to == "c" {
+                seen_c = true;
+            }
+        }
+        assert!(seen_b, "expected target 'b' to be selected at least once");
+        assert!(seen_c, "expected target 'c' to be selected at least once");
+    }
+
+    #[test]
+    fn weighted_random_high_weight_dominates() {
+        let mut heavy = Edge::new("a", "heavy");
+        heavy
+            .attrs
+            .insert("weight".to_string(), AttrValue::Integer(100));
+        let mut light = Edge::new("a", "light");
+        light
+            .attrs
+            .insert("weight".to_string(), AttrValue::Integer(1));
+        let edges = vec![&heavy, &light];
+        let mut heavy_count = 0;
+        for _ in 0..500 {
+            let pick = weighted_random(&edges).unwrap();
+            if pick.to == "heavy" {
+                heavy_count += 1;
+            }
+        }
+        let ratio = heavy_count as f64 / 500.0;
+        assert!(
+            ratio > 0.90,
+            "expected heavy edge to win >90% of the time, got {ratio:.2}"
+        );
+    }
+
     // --- select_edge tests ---
 
     fn make_graph_with_edges(edges: Vec<Edge>) -> Graph {
@@ -2571,7 +2677,7 @@ mod tests {
         let g = Graph::new("test");
         let outcome = Outcome::success();
         let context = Context::new();
-        assert!(select_edge("a", &outcome, &context, &g).is_none());
+        assert!(select_edge("a", &outcome, &context, &g, "deterministic").is_none());
     }
 
     #[test]
@@ -2579,7 +2685,7 @@ mod tests {
         let g = make_graph_with_edges(vec![Edge::new("a", "b")]);
         let outcome = Outcome::success();
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g).unwrap();
+        let sel = select_edge("a", &outcome, &context, &g, "deterministic").unwrap();
         assert_eq!(sel.edge.to, "b");
         assert_eq!(sel.reason, "unconditional");
     }
@@ -2599,7 +2705,7 @@ mod tests {
         let g = make_graph_with_edges(vec![e1, e2]);
         let outcome = Outcome::success();
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g).unwrap();
+        let sel = select_edge("a", &outcome, &context, &g, "deterministic").unwrap();
         assert_eq!(sel.edge.to, "success_path");
         assert_eq!(sel.reason, "condition");
     }
@@ -2620,7 +2726,7 @@ mod tests {
         let mut outcome = Outcome::success();
         outcome.preferred_label = Some("Fix".to_string());
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g).unwrap();
+        let sel = select_edge("a", &outcome, &context, &g, "deterministic").unwrap();
         assert_eq!(sel.edge.to, "fix");
         assert_eq!(sel.reason, "preferred_label");
     }
@@ -2633,7 +2739,7 @@ mod tests {
         let mut outcome = Outcome::success();
         outcome.suggested_next_ids = vec!["path2".to_string()];
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g).unwrap();
+        let sel = select_edge("a", &outcome, &context, &g, "deterministic").unwrap();
         assert_eq!(sel.edge.to, "path2");
         assert_eq!(sel.reason, "suggested_next");
     }
@@ -2648,7 +2754,7 @@ mod tests {
         let g = make_graph_with_edges(vec![e1, e2]);
         let outcome = Outcome::success();
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g).unwrap();
+        let sel = select_edge("a", &outcome, &context, &g, "deterministic").unwrap();
         assert_eq!(sel.edge.to, "high");
         assert_eq!(sel.reason, "unconditional");
     }
@@ -2660,7 +2766,7 @@ mod tests {
         let g = make_graph_with_edges(vec![e1, e2]);
         let outcome = Outcome::success();
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g).unwrap();
+        let sel = select_edge("a", &outcome, &context, &g, "deterministic").unwrap();
         assert_eq!(sel.edge.to, "alpha");
         assert_eq!(sel.reason, "unconditional");
     }
@@ -2676,9 +2782,38 @@ mod tests {
         let g = make_graph_with_edges(vec![e_cond, e_uncond]);
         let outcome = Outcome::success();
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g).unwrap();
+        let sel = select_edge("a", &outcome, &context, &g, "deterministic").unwrap();
         assert_eq!(sel.edge.to, "cond_path");
         assert_eq!(sel.reason, "condition");
+    }
+
+    #[test]
+    fn select_edge_random_returns_some_edge() {
+        let e1 = Edge::new("a", "b");
+        let e2 = Edge::new("a", "c");
+        let g = make_graph_with_edges(vec![e1, e2]);
+        let outcome = Outcome::success();
+        let context = Context::new();
+        let sel = select_edge("a", &outcome, &context, &g, "random").unwrap();
+        assert!(sel.edge.to == "b" || sel.edge.to == "c");
+        assert_eq!(sel.reason, "unconditional");
+    }
+
+    #[test]
+    fn select_edge_random_preferred_label_still_wins() {
+        let mut e1 = Edge::new("a", "approve");
+        e1.attrs.insert(
+            "label".to_string(),
+            AttrValue::String("Approve".to_string()),
+        );
+        let e2 = Edge::new("a", "other");
+        let g = make_graph_with_edges(vec![e1, e2]);
+        let mut outcome = Outcome::success();
+        outcome.preferred_label = Some("Approve".to_string());
+        let context = Context::new();
+        let sel = select_edge("a", &outcome, &context, &g, "random").unwrap();
+        assert_eq!(sel.edge.to, "approve");
+        assert_eq!(sel.reason, "preferred_label");
     }
 
     // --- check_goal_gates tests ---

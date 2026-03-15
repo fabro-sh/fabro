@@ -235,6 +235,11 @@ impl Node {
         self.str_attr("backend")
     }
 
+    #[must_use]
+    pub fn selection(&self) -> &str {
+        self.str_attr("selection").unwrap_or("deterministic")
+    }
+
     /// Resolve the handler type for this node using explicit type or shape mapping.
     #[must_use]
     pub fn handler_type(&self) -> Option<&str> {

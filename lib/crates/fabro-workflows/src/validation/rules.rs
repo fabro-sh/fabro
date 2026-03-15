@@ -32,6 +32,8 @@ pub fn built_in_rules() -> Vec<Box<dyn LintRule>> {
         Box::new(StylesheetModelKnownRule),
         Box::new(UnresolvedFileRefRule),
         Box::new(ThreadIdRequiresFidelityFullRule),
+        Box::new(SelectionValidRule),
+        Box::new(RandomSelectionNoConditionsRule),
     ]
 }
 
@@ -1086,6 +1088,76 @@ impl LintRule for ThreadIdRequiresFidelityFullRule {
             });
         }
 
+        diagnostics
+    }
+}
+
+// --- Rule 23: selection_valid (WARNING) ---
+
+struct SelectionValidRule;
+
+const VALID_SELECTIONS: &[&str] = &["deterministic", "random"];
+
+impl LintRule for SelectionValidRule {
+    fn name(&self) -> &'static str {
+        "selection_valid"
+    }
+
+    fn apply(&self, graph: &Graph) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        for node in graph.nodes.values() {
+            if let Some(sel) = node.attrs.get("selection").and_then(AttrValue::as_str) {
+                if !VALID_SELECTIONS.contains(&sel) {
+                    diagnostics.push(Diagnostic {
+                        rule: self.name().to_string(),
+                        severity: Severity::Warning,
+                        message: format!("Node '{}' has invalid selection mode '{sel}'", node.id),
+                        node_id: Some(node.id.clone()),
+                        edge: None,
+                        fix: Some(format!("Use one of: {}", VALID_SELECTIONS.join(", "))),
+                    });
+                }
+            }
+        }
+        diagnostics
+    }
+}
+
+// --- Rule 24: random_selection_no_conditions (ERROR) ---
+
+struct RandomSelectionNoConditionsRule;
+
+impl LintRule for RandomSelectionNoConditionsRule {
+    fn name(&self) -> &'static str {
+        "random_selection_no_conditions"
+    }
+
+    fn apply(&self, graph: &Graph) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        for node in graph.nodes.values() {
+            if node.selection() != "random" {
+                continue;
+            }
+            let has_conditional = graph
+                .outgoing_edges(&node.id)
+                .iter()
+                .any(|e| e.condition().is_some_and(|c| !c.is_empty()));
+            if has_conditional {
+                diagnostics.push(Diagnostic {
+                    rule: self.name().to_string(),
+                    severity: Severity::Error,
+                    message: format!(
+                        "Node '{}' has selection=\"random\" but also has conditional edges; random selection and conditions cannot be combined",
+                        node.id
+                    ),
+                    node_id: Some(node.id.clone()),
+                    edge: None,
+                    fix: Some(
+                        "Remove the condition attributes from outgoing edges, or remove selection=\"random\" from the node".to_string(),
+                    ),
+                });
+            }
+        }
         diagnostics
     }
 }
@@ -3163,6 +3235,108 @@ mod tests {
         );
 
         let rule = ThreadIdRequiresFidelityFullRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- selection_valid rule tests ---
+
+    #[test]
+    fn selection_valid_known_values() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("pick");
+        node.attrs.insert(
+            "selection".to_string(),
+            AttrValue::String("random".to_string()),
+        );
+        g.nodes.insert("pick".to_string(), node);
+        let rule = SelectionValidRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn selection_valid_unknown_value_warns() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("pick");
+        node.attrs.insert(
+            "selection".to_string(),
+            AttrValue::String("randon".to_string()),
+        );
+        g.nodes.insert("pick".to_string(), node);
+        let rule = SelectionValidRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Warning);
+        assert_eq!(d[0].node_id.as_deref(), Some("pick"));
+    }
+
+    #[test]
+    fn selection_valid_no_attr_ok() {
+        let g = minimal_graph();
+        let rule = SelectionValidRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- random_selection_no_conditions rule tests ---
+
+    #[test]
+    fn random_selection_no_conditions_clean() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("pick");
+        node.attrs.insert(
+            "selection".to_string(),
+            AttrValue::String("random".to_string()),
+        );
+        g.nodes.insert("pick".to_string(), node);
+        g.edges.push(Edge::new("pick", "start"));
+        g.edges.push(Edge::new("pick", "exit"));
+        let rule = RandomSelectionNoConditionsRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn random_selection_with_conditions_errors() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("pick");
+        node.attrs.insert(
+            "selection".to_string(),
+            AttrValue::String("random".to_string()),
+        );
+        g.nodes.insert("pick".to_string(), node);
+        let mut e = Edge::new("pick", "exit");
+        e.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("outcome=success".to_string()),
+        );
+        g.edges.push(e);
+        g.edges.push(Edge::new("pick", "start"));
+        let rule = RandomSelectionNoConditionsRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
+        assert_eq!(d[0].node_id.as_deref(), Some("pick"));
+    }
+
+    #[test]
+    fn deterministic_selection_with_conditions_ok() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("gate");
+        node.attrs.insert(
+            "selection".to_string(),
+            AttrValue::String("deterministic".to_string()),
+        );
+        g.nodes.insert("gate".to_string(), node);
+        let mut e = Edge::new("gate", "exit");
+        e.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("outcome=success".to_string()),
+        );
+        g.edges.push(e);
+        g.edges.push(Edge::new("gate", "start"));
+        let rule = RandomSelectionNoConditionsRule;
         let d = rule.apply(&g);
         assert!(d.is_empty());
     }

@@ -3,7 +3,7 @@ title: "Transitions"
 description: "How Fabro decides which node to execute next"
 ---
 
-After each node finishes, Fabro must decide which edge to follow to the next node. This decision is fully deterministic — given the same outcome and context, Fabro always picks the same edge. Understanding the transition logic helps you design workflows that route reliably.
+After each node finishes, Fabro must decide which edge to follow to the next node. This decision is deterministic by default — given the same outcome and context, Fabro always picks the same edge. Nodes can opt into [random selection](#random-selection) for weighted-random tiebreaking instead. Understanding the transition logic helps you design workflows that route reliably.
 
 ## How transitions work
 
@@ -155,3 +155,20 @@ node -> fallback  [weight=1]
 ```
 
 If weights are equal, the edge with the lexicographically first target node ID is chosen. This makes the behavior fully deterministic.
+
+## Random selection
+
+By default, tiebreaking between candidate edges is deterministic (highest weight, then lexical node ID). Setting `selection="random"` on a node switches to weighted-random tiebreaking for its outgoing edges:
+
+```dot
+picker [label="Pick path", selection="random"]
+
+picker -> path_a [weight=3]
+picker -> path_b [weight=1]
+```
+
+In this example, `path_a` is chosen ~75% of the time and `path_b` ~25%. Edges with weight ≤ 0 are treated as weight 1. The cascade priority (conditions → preferred label → suggested next → unconditional → fallback) is unchanged — randomness only affects the pick-one-from-candidates step within each tier.
+
+<Note>
+`selection="random"` cannot be combined with conditional edges on the same node. Validation rejects this combination because condition evaluation order would conflict with random selection. Use unconditional edges with weights instead.
+</Note>
