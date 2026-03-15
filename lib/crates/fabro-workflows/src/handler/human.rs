@@ -117,10 +117,9 @@ impl Handler for HumanHandler {
                 keys::HUMAN_GATE_SELECTED.to_string(),
                 serde_json::json!(key),
             );
-            outcome.context_updates.insert(
-                keys::HUMAN_GATE_LABEL.to_string(),
-                serde_json::json!(label),
-            );
+            outcome
+                .context_updates
+                .insert(keys::HUMAN_GATE_LABEL.to_string(), serde_json::json!(label));
             Ok(outcome)
         } else if let Some(edge) = edges.first() {
             // Only freeform edges — pick the first one

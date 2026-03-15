@@ -181,7 +181,9 @@ mod tests {
         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
         assert_eq!(outcome.notes.as_deref(), Some("[Simulated] classify"));
         assert_eq!(
-            outcome.context_updates.get(crate::context::keys::LAST_STAGE),
+            outcome
+                .context_updates
+                .get(crate::context::keys::LAST_STAGE),
             Some(&serde_json::json!("classify"))
         );
         assert!(outcome

@@ -113,9 +113,13 @@ pub async fn dispatch_handler(
     services: &EngineServices,
 ) -> Result<Outcome, FabroError> {
     if services.dry_run {
-        handler.simulate(node, context, graph, run_dir, services).await
+        handler
+            .simulate(node, context, graph, run_dir, services)
+            .await
     } else {
-        handler.execute(node, context, graph, run_dir, services).await
+        handler
+            .execute(node, context, graph, run_dir, services)
+            .await
     }
 }
 
