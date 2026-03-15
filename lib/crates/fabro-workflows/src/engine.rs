@@ -578,18 +578,12 @@ pub async fn git_checkpoint(
         .map(|d| format!("**/{d}/**"))
         .collect();
     all_excludes.extend(exclude_globs.iter().cloned());
-    all_excludes.sort();
-    all_excludes.dedup();
 
-    let add_cmd = if all_excludes.is_empty() {
-        format!("{GIT_REMOTE} add -A")
-    } else {
-        let pathspecs: Vec<String> = all_excludes
-            .iter()
-            .map(|g| format!("':(glob,exclude){g}'"))
-            .collect();
-        format!("{GIT_REMOTE} add -A -- . {}", pathspecs.join(" "))
-    };
+    let pathspecs: Vec<String> = all_excludes
+        .iter()
+        .map(|g| format!("':(glob,exclude){g}'"))
+        .collect();
+    let add_cmd = format!("{GIT_REMOTE} add -A -- . {}", pathspecs.join(" "));
     let add_result = sandbox
         .exec_command(&add_cmd, 30_000, None, None, None)
         .await;
