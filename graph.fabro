@@ -1,0 +1,11 @@
+digraph GhAuthTest {
+    graph [goal="Verify GitHub CLI authentication works via GITHUB_TOKEN"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    check_auth [label="Check GH Auth", shape=parallelogram, script="echo '--- Checking gh auth status ---' && gh auth status && echo '--- Listing repo ---' && gh repo view fabro-sh/fabro --json name,owner -q '.owner.login + \"/\" + .name' && echo '--- Done ---'"]
+
+    start -> check_auth -> exit
+}

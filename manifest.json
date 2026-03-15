@@ -1,0 +1,12 @@
+{
+  "run_id": "01KKSQTN9WVY7YB8V1A1VQ9TAS",
+  "workflow_name": "GhAuthTest",
+  "goal": "Verify GitHub CLI authentication works via GITHUB_TOKEN",
+  "start_time": "2026-03-15T21:53:23.920580Z",
+  "node_count": 3,
+  "edge_count": 2,
+  "run_branch": "fabro/run/01KKSQTN9WVY7YB8V1A1VQ9TAS",
+  "base_sha": "55eff404bc927177a28c9f07cc30814d927344d1",
+  "base_branch": "fabro/run/01KKSDZQ2AHTFP2GQAQQW25MNP",
+  "workflow_slug": "fabro-gh-test"
+}
