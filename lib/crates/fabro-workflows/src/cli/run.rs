@@ -2077,7 +2077,6 @@ async fn run_preflight(
     let exe_config = resolve_exe_config(run_cfg.as_ref(), run_defaults);
     let ssh_config = resolve_ssh_config(run_cfg.as_ref(), run_defaults);
 
-    let github_app_for_preflight = github_app.clone();
     let sandbox_result: Result<Arc<dyn Sandbox>, String> = match sandbox_provider {
         SandboxProvider::Docker => {
             let config = DockerSandboxConfig {
@@ -2094,7 +2093,7 @@ async fn run_preflight(
                 let env = crate::daytona_sandbox::DaytonaSandbox::new(
                     daytona_client,
                     config,
-                    github_app,
+                    github_app.clone(),
                     None,
                     None,
                 );
@@ -2270,7 +2269,12 @@ async fn run_preflight(
         .or(run_defaults.github.as_ref());
     if let Some(gh_cfg) = github_permissions {
         if !gh_cfg.permissions.is_empty() {
-            match (&github_app_for_preflight, origin_url) {
+            let perm_details: Vec<CheckDetail> = gh_cfg
+                .permissions
+                .iter()
+                .map(|(k, v)| CheckDetail::new(format!("{k}: {v}")))
+                .collect();
+            match (&github_app, origin_url) {
                 (Some(creds), Some(url)) => {
                     match mint_github_token(creds, url, &gh_cfg.permissions).await {
                         Ok(_) => {
@@ -2278,11 +2282,7 @@ async fn run_preflight(
                                 name: "GitHub Token".into(),
                                 status: CheckStatus::Pass,
                                 summary: "minted".into(),
-                                details: gh_cfg
-                                    .permissions
-                                    .iter()
-                                    .map(|(k, v)| CheckDetail::new(format!("{k}: {v}")))
-                                    .collect(),
+                                details: perm_details,
                                 remediation: None,
                             });
                         }
@@ -2291,11 +2291,7 @@ async fn run_preflight(
                                 name: "GitHub Token".into(),
                                 status: CheckStatus::Error,
                                 summary: "failed".into(),
-                                details: gh_cfg
-                                    .permissions
-                                    .iter()
-                                    .map(|(k, v)| CheckDetail::new(format!("{k}: {v}")))
-                                    .collect(),
+                                details: perm_details,
                                 remediation: Some(format!("Failed to mint GitHub token: {e}")),
                             });
                         }
