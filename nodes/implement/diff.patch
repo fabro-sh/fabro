@@ -1,0 +1,216 @@
+diff --git a/docs/agents/outputs.mdx b/docs/agents/outputs.mdx
+index 9e7e7ae..978f2e9 100644
+--- a/docs/agents/outputs.mdx
++++ b/docs/agents/outputs.mdx
+@@ -182,7 +182,7 @@ This keeps preambles concise while still giving agents a path to read the full o
+ Artifact data is persisted on the Git [metadata branch](/execution/checkpoints#metadata-branch) alongside checkpoint data. Each time a checkpoint is written, any file-backed artifacts are included as additional entries:
+ 
+ ```
+-refs/fabro/{run_id}
++fabro/meta/{run_id}
+   manifest.json
+   graph.fabro
+   checkpoint.json
+@@ -291,4 +291,4 @@ Outputs and artifacts appear in several observability surfaces:
+ | `WorkflowRunCompleted` event | `artifact_count` -- total number of offloaded artifacts across the run |
+ | [Retros](/execution/retros) | Per-stage `files_touched` and aggregate `files_touched` across all stages |
+ | [Preambles](/execution/context#preamble-construction) | File list and artifact pointer references for completed stages |
+-| Stage logs | `status.json` in each stage's run directory contains the full outcome including `files_touched` |
++| Stage logs | `status.json` in each stage's run directory contains the full outcome including `files_touched` |
+\ No newline at end of file
+diff --git a/docs/execution/checkpoints.mdx b/docs/execution/checkpoints.mdx
+index 95811fb..a296853 100644
+--- a/docs/execution/checkpoints.mdx
++++ b/docs/execution/checkpoints.mdx
+@@ -12,7 +12,7 @@ Each run creates two Git branches that work in tandem:
+ | Branch | Ref format | Contains |
+ |---|---|---|
+ | **Run branch** | `fabro/run/{run_id}` | File changes made by agents and commands — the actual work product |
+-| **Metadata branch** | `refs/fabro/{run_id}` | Checkpoint JSON, the workflow graph, a run manifest, and offloaded artifacts |
++| **Metadata branch** | `fabro/meta/{run_id}` | Checkpoint JSON, the workflow graph, a run manifest, and offloaded artifacts |
+ 
+ The run branch is a regular Git branch that grows one commit per completed node. The metadata branch is an orphan branch (no shared history with your code) that stores structured data using Git's object database directly — no working tree needed.
+ 
+@@ -41,7 +41,7 @@ The `Fabro-Checkpoint` trailer links each run branch commit to its metadata bran
+ 
+ ### Metadata branch
+ 
+-The metadata branch (`refs/fabro/{run_id}`) is an orphan branch that stores structured run data using Git's object storage directly (via `git2`). It is initialized at run start with:
++The metadata branch (`fabro/meta/{run_id}`) is an orphan branch that stores structured run data using Git's object storage directly (via `git2`). It is initialized at run start with:
+ 
+ - **`manifest.json`** — Run metadata: run ID, graph name, node/edge counts, base SHA, and branch name
+ - **`graph.fabro`** — The workflow DOT source as it was parsed
+@@ -87,7 +87,7 @@ This means your original working directory stays untouched while the agent makes
+ If the working directory has uncommitted changes, Fabro skips worktree setup and runs in place, logging a warning. Git checkpointing is disabled in this case.
+ </Note>
+ 
+-For Daytona sandboxes, the worktree is created inside the remote sandbox instead. The metadata branch is still written to the host repository so that runs can be resumed locally. Both the run branch and the metadata branch are pushed to origin after each checkpoint — the run branch is pushed from the sandbox, while the metadata branch is pushed from the host using a GitHub App installation token. On the remote, the metadata branch appears at `fabro/meta/{run_id}` (rather than the local `refs/fabro/{run_id}` custom ref, since GitHub disallows branch names starting with `refs/`).
++For Daytona sandboxes, the worktree is created inside the remote sandbox instead. The metadata branch is still written to the host repository so that runs can be resumed locally. Both the run branch and the metadata branch are pushed to origin after each checkpoint — the run branch is pushed from the sandbox, while the metadata branch is pushed from the host using a GitHub App installation token.
+ 
+ ## Resuming a run
+ 
+@@ -111,7 +111,7 @@ Resume from the Git branches created during a previous run:
+ fabro run --run-branch fabro/run/01JKXYZ...
+ ```
+ 
+-This reads the checkpoint, manifest, and graph DOT from the metadata branch (`refs/fabro/01JKXYZ...`), re-attaches a worktree to the existing run branch, and resumes execution. No workflow file argument is needed — everything is recovered from Git.
++This reads the checkpoint, manifest, and graph DOT from the metadata branch (`fabro/meta/01JKXYZ...`), re-attaches a worktree to the existing run branch, and resumes execution. No workflow file argument is needed — everything is recovered from Git.
+ 
+ <Accordion title="What happens during resume">
+ 1. Fabro reads `checkpoint.json` from the metadata branch
+@@ -147,11 +147,8 @@ git show fabro/run/01JKXYZ...
+ # Diff the full run against the starting point
+ git diff main..fabro/run/01JKXYZ...
+ 
+-# Read checkpoint data from the metadata branch (local)
+-git show refs/fabro/01JKXYZ...:checkpoint.json | jq .current_node
+-
+-# Read checkpoint data from the remote (Daytona runs)
+-git show origin/fabro/meta/01JKXYZ...:checkpoint.json | jq .current_node
++# Read checkpoint data from the metadata branch
++git show fabro/meta/01JKXYZ...:checkpoint.json | jq .current_node
+ ```
+ 
+ ## Rewinding to an earlier checkpoint
+@@ -182,4 +179,4 @@ It is skipped when:
+ 
+ - The working directory has uncommitted changes
+ - The working directory is not a Git repository
+-- The run uses `--dry-run`
++- The run uses `--dry-run`
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflows/src/cli/rewind.rs b/lib/crates/fabro-workflows/src/cli/rewind.rs
+index 0904360..bc8a379 100644
+--- a/lib/crates/fabro-workflows/src/cli/rewind.rs
++++ b/lib/crates/fabro-workflows/src/cli/rewind.rs
+@@ -378,7 +378,7 @@ pub fn execute_rewind(
+             }
+ 
+             // Force-push metadata branch
+-            let meta_refspec = format!("+refs/heads/{meta_branch}:refs/heads/fabro/meta/{run_id}");
++            let meta_refspec = format!("+refs/heads/{meta_branch}:refs/heads/{meta_branch}");
+             crate::git::push_branch(repo_path, "origin", &meta_refspec)
+                 .map_err(|e| anyhow::anyhow!("failed to push metadata branch: {e}"))?;
+ 
+@@ -392,7 +392,7 @@ pub fn execute_rewind(
+ /// Find a run ID by exact match or unambiguous prefix.
+ pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<String> {
+     let refs = repo.references()?;
+-    let pattern = "refs/heads/refs/fabro/";
++    let pattern = "refs/heads/fabro/meta/";
+     let mut matches = Vec::new();
+ 
+     for reference in refs.flatten() {
+@@ -935,4 +935,16 @@ mod tests {
+         assert!(result.is_err());
+         assert!(result.unwrap_err().to_string().contains("no run found"));
+     }
++
++    #[test]
++    fn rewind_push_refspec_uses_same_name_on_both_sides() {
++        // The meta branch name should work directly as a refspec
++        // without needing strip_prefix translation
++        let meta_branch = MetadataStore::branch_name("run-1");
++        let refspec = format!("+refs/heads/{meta_branch}:refs/heads/{meta_branch}");
++        assert_eq!(
++            refspec,
++            "+refs/heads/fabro/meta/run-1:refs/heads/fabro/meta/run-1"
++        );
++    }
+ }
+diff --git a/lib/crates/fabro-workflows/src/cli/run.rs b/lib/crates/fabro-workflows/src/cli/run.rs
+index 86ad2fa..4317266 100644
+--- a/lib/crates/fabro-workflows/src/cli/run.rs
++++ b/lib/crates/fabro-workflows/src/cli/run.rs
+@@ -1563,7 +1563,7 @@ async fn setup_remote_git(
+ /// Resume a workflow run from a git run branch.
+ ///
+ /// Reads the checkpoint, manifest, and graph DOT from the metadata branch
+-/// (`refs/fabro/{run_id}`), re-attaches a worktree to the existing run branch,
++/// (`fabro/meta/{run_id}`), re-attaches a worktree to the existing run branch,
+ /// and resumes execution via `run_from_checkpoint()`.
+ async fn run_from_branch(
+     args: RunArgs,
+@@ -2252,10 +2252,7 @@ async fn write_finalize_commit(config: &RunConfig, run_dir: &std::path::Path) {
+     }
+ 
+     // Push the finalize commit
+-    let run_id_part = meta_branch
+-        .strip_prefix("refs/fabro/")
+-        .unwrap_or(meta_branch);
+-    let refspec = format!("{meta_branch}:refs/heads/fabro/meta/{run_id_part}");
++    let refspec = format!("refs/heads/{meta_branch}");
+     crate::engine::git_push_host(repo_path, &refspec, &config.github_app, "finalize metadata")
+         .await;
+ }
+diff --git a/lib/crates/fabro-workflows/src/engine.rs b/lib/crates/fabro-workflows/src/engine.rs
+index 278e31f..6ca4209 100644
+--- a/lib/crates/fabro-workflows/src/engine.rs
++++ b/lib/crates/fabro-workflows/src/engine.rs
+@@ -1976,15 +1976,7 @@ impl WorkflowRunEngine {
+                             if let (Some(ref meta_branch), Some(ref repo_path)) =
+                                 (&config.meta_branch, &config.host_repo_path)
+                             {
+-                                // The metadata branch is stored locally as a custom ref
+-                                // (e.g. refs/fabro/{run_id}). Push it to a normal branch on
+-                                // the remote since GitHub rejects branch names starting
+-                                // with "refs/".
+-                                let run_id_part = meta_branch
+-                                    .strip_prefix("refs/fabro/")
+-                                    .unwrap_or(meta_branch);
+-                                let refspec =
+-                                    format!("{meta_branch}:refs/heads/fabro/meta/{run_id_part}");
++                                let refspec = format!("refs/heads/{meta_branch}");
+                                 git_push_host(
+                                     repo_path,
+                                     &refspec,
+diff --git a/lib/crates/fabro-workflows/src/git.rs b/lib/crates/fabro-workflows/src/git.rs
+index 562e7b3..428a48a 100644
+--- a/lib/crates/fabro-workflows/src/git.rs
++++ b/lib/crates/fabro-workflows/src/git.rs
+@@ -11,6 +11,9 @@ use crate::error::{FabroError, Result};
+ /// Branch prefix for workflow run branches (e.g. `fabro/run/{run_id}`).
+ pub const RUN_BRANCH_PREFIX: &str = "fabro/run/";
+ 
++/// Branch prefix for metadata branches (e.g. `fabro/meta/{run_id}`).
++pub const META_BRANCH_PREFIX: &str = "fabro/meta/";
++
+ /// Resolved git author identity for checkpoint commits.
+ #[derive(Debug, Clone, PartialEq)]
+ pub struct GitAuthor {
+@@ -343,7 +346,7 @@ pub fn scan_node_files(run_dir: &Path) -> Vec<(String, Vec<u8>)> {
+ /// Git-native metadata storage for pipeline runs.
+ ///
+ /// Stores checkpoint data, manifests, and graph DOT on an orphan branch
+-/// (`fabro/{run_id}`) so that runs can be resumed from git alone.
++/// (`fabro/meta/{run_id}`) so that runs can be resumed from git alone.
+ pub struct MetadataStore {
+     repo_path: std::path::PathBuf,
+     author: GitAuthor,
+@@ -357,9 +360,9 @@ impl MetadataStore {
+         }
+     }
+ 
+-    /// Returns the branch ref name for a run: `refs/fabro/{run_id}`.
++    /// Returns the branch name for a run: `fabro/meta/{run_id}`.
+     pub fn branch_name(run_id: &str) -> String {
+-        format!("refs/fabro/{run_id}")
++        format!("fabro/meta/{run_id}")
+     }
+ 
+     /// Format a commit message with the standard Fabro footer appended.
+@@ -1218,4 +1221,14 @@ mod tests {
+         let err = ensure_clean_and_pushed(&repo_dir, "origin", None).unwrap_err();
+         assert!(err.to_string().contains("detached HEAD"));
+     }
++
++    #[test]
++    fn metadata_branch_name_uses_meta_prefix() {
++        assert_eq!(MetadataStore::branch_name("abc-123"), "fabro/meta/abc-123");
++    }
++
++    #[test]
++    fn meta_branch_prefix_constant() {
++        assert!(MetadataStore::branch_name("x").starts_with(META_BRANCH_PREFIX));
++    }
+ }
