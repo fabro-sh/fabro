@@ -182,7 +182,7 @@ This keeps preambles concise while still giving agents a path to read the full o
 Artifact data is persisted on the Git [metadata branch](/execution/checkpoints#metadata-branch) alongside checkpoint data. Each time a checkpoint is written, any file-backed artifacts are included as additional entries:
 
 ```
-refs/fabro/{run_id}
+fabro/meta/{run_id}
   manifest.json
   graph.fabro
   checkpoint.json

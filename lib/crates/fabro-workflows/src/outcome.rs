@@ -61,6 +61,20 @@ pub struct StageUsage {
     pub cost: Option<f64>,
 }
 
+impl From<&StageUsage> for fabro_llm::types::Usage {
+    fn from(u: &StageUsage) -> Self {
+        Self {
+            input_tokens: u.input_tokens,
+            output_tokens: u.output_tokens,
+            total_tokens: u.input_tokens + u.output_tokens,
+            cache_read_tokens: u.cache_read_tokens,
+            cache_write_tokens: u.cache_write_tokens,
+            reasoning_tokens: u.reasoning_tokens,
+            raw: None,
+        }
+    }
+}
+
 /// Structured failure information carried through the pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailureDetail {

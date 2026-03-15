@@ -184,9 +184,15 @@ WorkflowRunEvent::MyNewEvent { node_id, duration_ms, .. } => {
 
 | Event | JSONL fields |
 |---|---|
-| `CheckpointSaved` | `node_id`, `node_label` |
-| `GitCheckpoint` | `run_id`, `node_id`, `node_label`, `status`, `git_commit_sha` |
-| `GitCheckpointFailed` | `node_id`, `node_label`, `error` |
+| `CheckpointCompleted` | `node_id`, `node_label`, `status`, `git_commit_sha` (optional) |
+| `CheckpointFailed` | `node_id`, `node_label`, `error` |
+| `GitCommit` | `node_id` (optional), `node_label` (optional), `sha` |
+| `GitPush` | `branch`, `success` |
+| `GitBranch` | `branch`, `sha` |
+| `GitWorktreeAdd` | `path`, `branch` |
+| `GitWorktreeRemove` | `path` |
+| `GitFetch` | `branch`, `success` |
+| `GitReset` | `sha` |
 
 ### Human interaction
 
@@ -296,5 +302,5 @@ Error information is stored as plain strings. The `error` field contains the hum
 | `cli/run.rs` non-verbose listener | `name`, `duration_ms`, `status`, `usage` from `StageCompleted/Failed` | CLI progress output |
 | `cli/mod.rs` `format_event_summary()` | All events | `-v` verbose output |
 | `cli/run.rs` cost accumulator | `usage` from `StageCompleted` | Total cost tracking |
-| `cli/run.rs` git SHA tracker | `git_commit_sha` from `GitCheckpoint` | Final SHA for `conclusion.json` |
+| `cli/run.rs` git SHA tracker | `git_commit_sha` from `CheckpointCompleted` | Final SHA for `conclusion.json` |
 | External tooling | `progress.jsonl` | Live monitoring, dashboards |

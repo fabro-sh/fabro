@@ -1910,7 +1910,7 @@ async fn event_streaming_lifecycle() {
         .any(|e| matches!(e, WorkflowRunEvent::StageCompleted { name, .. } if name == "task")));
     assert!(collected
         .iter()
-        .any(|e| matches!(e, WorkflowRunEvent::CheckpointSaved { .. })));
+        .any(|e| matches!(e, WorkflowRunEvent::CheckpointCompleted { .. })));
     assert!(collected
         .iter()
         .any(|e| matches!(e, WorkflowRunEvent::WorkflowRunCompleted { .. })));
@@ -10679,7 +10679,7 @@ impl Handler for FileWriterHandler {
     }
 }
 
-/// End-to-end test: pipeline with git checkpointing enabled emits `GitCheckpoint`
+/// End-to-end test: pipeline with git checkpointing enabled emits `CheckpointCompleted`
 /// events with valid commit SHAs and writes `diff.patch` per stage.
 #[tokio::test]
 async fn git_checkpoint_host_emits_events_and_diff_patch() {
@@ -10796,18 +10796,18 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // 6. Assert GitCheckpoint events were emitted
+    // 6. Assert CheckpointCompleted events with git SHAs were emitted
     let events = events.lock().unwrap();
     let git_events: Vec<_> = events
         .iter()
         .filter_map(|e| {
-            if let WorkflowRunEvent::GitCheckpoint {
+            if let WorkflowRunEvent::CheckpointCompleted {
                 node_id,
-                git_commit_sha,
+                git_commit_sha: Some(sha),
                 ..
             } = e
             {
-                Some((node_id.clone(), git_commit_sha.clone()))
+                Some((node_id.clone(), sha.clone()))
             } else {
                 None
             }
@@ -10816,7 +10816,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
     // work node gets a checkpoint commit (start is skipped, exit is terminal)
     assert!(
         !git_events.is_empty(),
-        "expected at least 1 GitCheckpoint event, got {}",
+        "expected at least 1 CheckpointCompleted event with SHA, got {}",
         git_events.len()
     );
     assert!(

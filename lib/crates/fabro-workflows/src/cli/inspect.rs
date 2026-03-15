@@ -93,6 +93,7 @@ mod tests {
             labels: Default::default(),
             base_branch: None,
             workflow_slug: None,
+            host_repo_path: None,
         };
         manifest.save(&run_dir.join("manifest.json")).unwrap();
 
@@ -134,12 +135,7 @@ mod tests {
         };
         sandbox.save(&run_dir.join("sandbox.json")).unwrap();
 
-        let output = inspect_run_dir(
-            "test-run",
-            &run_dir,
-            RunStatus::Concluded(StageStatus::Success),
-        )
-        .unwrap();
+        let output = inspect_run_dir("test-run", &run_dir, RunStatus::Succeeded).unwrap();
 
         assert_eq!(output.run_id, "test-run");
         assert_eq!(output.run_dir, run_dir);
@@ -167,6 +163,7 @@ mod tests {
             labels: Default::default(),
             base_branch: None,
             workflow_slug: None,
+            host_repo_path: None,
         };
         manifest.save(&run_dir.join("manifest.json")).unwrap();
 
@@ -184,7 +181,7 @@ mod tests {
         let output = InspectOutput {
             run_id: "id-1".to_string(),
             run_dir: PathBuf::from("/tmp/run"),
-            status: RunStatus::Unknown,
+            status: RunStatus::Dead,
             manifest: None,
             conclusion: None,
             checkpoint: None,

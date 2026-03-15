@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use anyhow::{bail, Context, Result};
 use clap::Args;
+use cli_table::format::{Border, Separator};
+use cli_table::{print_stderr, Cell, CellStruct, Color, Style, Table};
 use fabro_git_storage::branchstore::{BranchStore, CommitInfo};
 use fabro_git_storage::gitobj::Store;
 use fabro_util::terminal::Styles;
@@ -280,39 +282,53 @@ pub fn print_timeline(
         return;
     }
 
-    eprintln!(
-        "  {}  {}  {}",
-        styles.bold_dim.apply_to(format!("{:<6}", "@")),
-        styles.bold_dim.apply_to(format!("{:<30}", "Node")),
-        styles.bold_dim.apply_to("Details"),
-    );
+    let use_color = styles.use_color;
 
-    for entry in timeline {
-        let ordinal_str = format!("@{}", entry.ordinal);
-        let mut details = Vec::new();
-        if entry.visit > 1 {
-            details.push(format!("visit {}, loop", entry.visit));
-        }
-        if parallel_map.contains_key(&entry.node_name) {
-            details.push("parallel interior".to_string());
-        }
-        if entry.run_commit_sha.is_none() {
-            details.push("no run commit".to_string());
-        }
+    let title = vec![
+        "@".cell().bold(true),
+        "Node".cell().bold(true),
+        "Details".cell().bold(true),
+    ];
 
-        let detail_str = if details.is_empty() {
-            String::new()
-        } else {
-            format!("({})", details.join(", "))
-        };
+    let rows: Vec<Vec<CellStruct>> = timeline
+        .iter()
+        .map(|entry| {
+            let ordinal_str = format!("@{}", entry.ordinal);
+            let mut details = Vec::new();
+            if entry.visit > 1 {
+                details.push(format!("visit {}, loop", entry.visit));
+            }
+            if parallel_map.contains_key(&entry.node_name) {
+                details.push("parallel interior".to_string());
+            }
+            if entry.run_commit_sha.is_none() {
+                details.push("no run commit".to_string());
+            }
 
-        eprintln!(
-            "  {}  {:<30}  {}",
-            styles.cyan.apply_to(format!("{ordinal_str:<6}")),
-            entry.node_name,
-            styles.dim.apply_to(detail_str),
-        );
-    }
+            let detail_str = if details.is_empty() {
+                String::new()
+            } else {
+                format!("({})", details.join(", "))
+            };
+
+            vec![
+                ordinal_str
+                    .cell()
+                    .foreground_color(super::color_if(use_color, Color::Cyan)),
+                entry.node_name.clone().cell(),
+                detail_str
+                    .cell()
+                    .foreground_color(super::color_if(use_color, Color::Ansi256(8))),
+            ]
+        })
+        .collect();
+
+    let table = rows
+        .table()
+        .title(title)
+        .border(Border::builder().build())
+        .separator(Separator::builder().build());
+    let _ = print_stderr(table);
 }
 
 /// Move both refs backward to the target checkpoint.
@@ -378,7 +394,7 @@ pub fn execute_rewind(
             }
 
             // Force-push metadata branch
-            let meta_refspec = format!("+refs/heads/{meta_branch}:refs/heads/fabro/meta/{run_id}");
+            let meta_refspec = format!("+refs/heads/{meta_branch}:refs/heads/{meta_branch}");
             crate::git::push_branch(repo_path, "origin", &meta_refspec)
                 .map_err(|e| anyhow::anyhow!("failed to push metadata branch: {e}"))?;
 
@@ -392,7 +408,7 @@ pub fn execute_rewind(
 /// Find a run ID by exact match or unambiguous prefix.
 pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<String> {
     let refs = repo.references()?;
-    let pattern = "refs/heads/refs/fabro/";
+    let pattern = "refs/heads/fabro/meta/";
     let mut matches = Vec::new();
 
     for reference in refs.flatten() {
@@ -934,5 +950,17 @@ mod tests {
         let result = find_run_id_by_prefix(store.repo(), "nonexistent");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("no run found"));
+    }
+
+    #[test]
+    fn rewind_push_refspec_uses_same_name_on_both_sides() {
+        // The meta branch name should work directly as a refspec
+        // without needing strip_prefix translation
+        let meta_branch = MetadataStore::branch_name("run-1");
+        let refspec = format!("+refs/heads/{meta_branch}:refs/heads/{meta_branch}");
+        assert_eq!(
+            refspec,
+            "+refs/heads/fabro/meta/run-1:refs/heads/fabro/meta/run-1"
+        );
     }
 }

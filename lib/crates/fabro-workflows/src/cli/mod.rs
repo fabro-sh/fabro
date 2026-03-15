@@ -279,6 +279,16 @@ pub fn relative_path(path: &Path) -> String {
     tilde_path(path)
 }
 
+/// Return `Some(color)` when color is enabled, `None` otherwise.
+/// Used with `cli_table`'s `.foreground_color()` which accepts `Option<Color>`.
+pub(crate) fn color_if(use_color: bool, color: cli_table::Color) -> Option<cli_table::Color> {
+    if use_color {
+        Some(color)
+    } else {
+        None
+    }
+}
+
 /// Shorten an absolute path by replacing the home directory prefix with `~`.
 pub fn tilde_path(path: &Path) -> String {
     if let Some(home) = dirs::home_dir() {

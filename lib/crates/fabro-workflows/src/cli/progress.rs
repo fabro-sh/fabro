@@ -73,7 +73,7 @@ pub(crate) fn format_duration_short(d: Duration) -> String {
     }
 }
 
-fn format_duration_ms(ms: u64) -> String {
+pub(crate) fn format_duration_ms(ms: u64) -> String {
     format_duration_short(Duration::from_millis(ms))
 }
 
@@ -597,6 +597,17 @@ impl ProgressUI {
                         eprintln!("      {msg}  {dur}");
                     }
                 }
+            }
+            WorkflowRunEvent::RetroStarted => {
+                self.on_stage_started("retro", "Retro", None);
+            }
+            WorkflowRunEvent::RetroCompleted { duration_ms } => {
+                let dur = format_duration_ms(*duration_ms);
+                self.finish_stage("retro", "Retro", green_check(), &dur);
+            }
+            WorkflowRunEvent::RetroFailed { duration_ms, .. } => {
+                let dur = format_duration_ms(*duration_ms);
+                self.finish_stage("retro", "Retro", red_cross(), &dur);
             }
             _ => {}
         }

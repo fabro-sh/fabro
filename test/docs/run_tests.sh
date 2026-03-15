@@ -12,7 +12,8 @@ PARALLEL="${PARALLEL:-1}"
 [[ "$VERBOSE" == "1" ]] && PARALLEL=1
 
 RESULTS_DIR="$(mktemp -d)"
-trap 'rm -rf "$RESULTS_DIR"' EXIT
+RUNS_DIR="$(mktemp -d)"
+trap 'rm -rf "$RESULTS_DIR" "$RUNS_DIR"' EXIT
 
 # Capture command output to log file; when VERBOSE=1, also stream to terminal.
 capture() {
@@ -77,6 +78,7 @@ run_one() {
             local flags=(--auto-approve)
             [[ "$PHASE" == "dry-run" ]] && flags+=(--dry-run)
             [[ "$PHASE" == "haiku" ]] && flags+=(--model claude-haiku-4-5)
+            [[ "$PHASE" != "dry-run" ]] && flags+=(--run-dir "$RUNS_DIR/$(echo "$rel" | tr '/' '_')")
 
             if (cd "$dot_dir" && capture "$result_file.log" "$ARC" run start "$target" "${flags[@]}"); then
                 echo "PASS" > "$result_file"

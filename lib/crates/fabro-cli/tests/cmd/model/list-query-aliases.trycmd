@@ -1,8 +1,8 @@
 ```console
 $ fabro model list --query codex
-MODEL                          PROVIDER     ALIASES                     CONTEXT     COST                SPEED
-gpt-5.2-codex                  openai                                        1m     $1.8 / $14.0     100 tok/s
-gpt-5.3-codex                  openai       codex                            1m     $1.8 / $14.0     100 tok/s
-gpt-5.3-codex-spark            openai       codex-spark                    131k        - / -        1000 tok/s
-
+[0m [0m[0m[0m[1mMODEL              [0m [0m[0m [0m[0m[0m[1mPROVIDER[0m [0m[0m [0m[0m[0m[1mALIASES    [0m [0m[0m [0m[0m[0m[1mCONTEXT[0m [0m[0m [0m[0m[0m[1m        COST[0m [0m[0m [0m[0m[0m[1m     SPEED[0m [0m
+[0m[0m [0m[0m[0mgpt-5.2-codex      [0m [0m[0m [0m[0m[0mopenai  [0m [0m[0m [0m[0m[0m           [0m [0m[0m [0m[0m[0m     1m[0m [0m[0m [0m[0m[0m$1.8 / $14.0[0m [0m[0m [0m[0m[0m 100 tok/s[0m [0m
+[0m[0m [0m[0m[0mgpt-5.3-codex      [0m [0m[0m [0m[0m[0mopenai  [0m [0m[0m [0m[0m[0mcodex      [0m [0m[0m [0m[0m[0m     1m[0m [0m[0m [0m[0m[0m$1.8 / $14.0[0m [0m[0m [0m[0m[0m 100 tok/s[0m [0m
+[0m[0m [0m[0m[0mgpt-5.3-codex-spark[0m [0m[0m [0m[0m[0mopenai  [0m [0m[0m [0m[0m[0mcodex-spark[0m [0m[0m [0m[0m[0m   131k[0m [0m[0m [0m[0m[0m       - / -[0m [0m[0m [0m[0m[0m1000 tok/s[0m [0m
+[0m
 ```

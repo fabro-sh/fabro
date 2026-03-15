@@ -11,6 +11,9 @@ use crate::error::{FabroError, Result};
 /// Branch prefix for workflow run branches (e.g. `fabro/run/{run_id}`).
 pub const RUN_BRANCH_PREFIX: &str = "fabro/run/";
 
+/// Branch prefix for metadata branches (e.g. `fabro/meta/{run_id}`).
+pub const META_BRANCH_PREFIX: &str = "fabro/meta/";
+
 /// Resolved git author identity for checkpoint commits.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GitAuthor {
@@ -343,7 +346,7 @@ pub fn scan_node_files(run_dir: &Path) -> Vec<(String, Vec<u8>)> {
 /// Git-native metadata storage for pipeline runs.
 ///
 /// Stores checkpoint data, manifests, and graph DOT on an orphan branch
-/// (`fabro/{run_id}`) so that runs can be resumed from git alone.
+/// (`fabro/meta/{run_id}`) so that runs can be resumed from git alone.
 pub struct MetadataStore {
     repo_path: std::path::PathBuf,
     author: GitAuthor,
@@ -357,9 +360,9 @@ impl MetadataStore {
         }
     }
 
-    /// Returns the branch ref name for a run: `refs/fabro/{run_id}`.
+    /// Returns the branch name for a run: `fabro/meta/{run_id}`.
     pub fn branch_name(run_id: &str) -> String {
-        format!("refs/fabro/{run_id}")
+        format!("{META_BRANCH_PREFIX}{run_id}")
     }
 
     /// Format a commit message with the standard Fabro footer appended.
@@ -1217,5 +1220,15 @@ mod tests {
         let (repo_dir, _) = init_repo_with_remote(dir.path());
         let err = ensure_clean_and_pushed(&repo_dir, "origin", None).unwrap_err();
         assert!(err.to_string().contains("detached HEAD"));
+    }
+
+    #[test]
+    fn metadata_branch_name_uses_meta_prefix() {
+        assert_eq!(MetadataStore::branch_name("abc-123"), "fabro/meta/abc-123");
+    }
+
+    #[test]
+    fn meta_branch_prefix_constant() {
+        assert!(MetadataStore::branch_name("x").starts_with(META_BRANCH_PREFIX));
     }
 }
