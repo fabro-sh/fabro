@@ -1,0 +1,52 @@
+{
+  "timestamp": "2026-03-15T16:50:36.013797Z",
+  "current_node": "toolchain",
+  "completed_nodes": [
+    "start",
+    "toolchain"
+  ],
+  "node_retries": {
+    "start": 1,
+    "toolchain": 1
+  },
+  "context_values": {
+    "current.preamble": "Goal: # Plan: Improve `fabro ps` output\n\n## Context\n\n`fabro ps` currently prints a plain-text table with no color, no row limit, and no duration/cost info. Other CLI commands (`logs`, `validate`, `graph`, `run`, `rewind`) already use `Styles` for colored output. The data to enrich the display (duration, cost) is already available in `conclusion.json` but isn't surfaced by `ps`.\n\n## Changes\n\n### 1. Add `--limit` / `--all` flags to `RunsListArgs`\n\n**File:** `lib/crates/fabro-workflows/src/cli/runs.rs` (~line 65)\n\n- Add `--limit N` arg (default 10) and `--all` flag\n- `--all` overrides limit to show everything\n- Apply limit via `.take(limit)` after filtering in `list_command`\n- Print footer like `\"Showing 10 of 42 run(s). Use --all to see all.\"`\n\n### 2. Add color to `list_command`\n\n**File:** `lib/crates/fabro-workflows/src/cli/runs.rs` (~line 337)\n\n- Change signature: `list_command(args, styles: &Styles)`\n- Color the STATUS column by status:\n  - `success` / `partial_success` -> `bold_green`\n  - `fail` -> `bold_red`\n  - `running` -> `bold_cyan`\n  - `unknown` -> `dim`\n- Bold the header row\n- Dim the separator line\n- Dim the labels column\n\n### 3. Wire `Styles` into `Ps` handler\n\n**File:** `lib/crates/fabro-cli/src/main.rs` (~line 600)\n\n- Create `Styles::detect_stdout()` (like `logs` command) and pass to `list_command`\n\n### 4. Add duration and cost columns\n\n**File:** `lib/crates/fabro-workflows/src/cli/runs.rs`\n\n- Add `duration_ms: Option<u64>` and `total_cost: Option<f64>` fields to `RunInfo`\n- Populate from `Conclusion` in `scan_runs()` (already loaded in `read_status`)\n  - Refactor `read_status` to return the full conclusion data (or a small struct with status, end_time, duration_ms, total_cost)\n- Add DURATION and COST columns to the table output\n- Use existing `progress::format_duration_short` for duration, `cli::format_cost` for cost\n- Show `\"-\"` when not available (running/unknown)\n\n### 5. Format start time as relative\n\n- Show `\"2m ago\"`, `\"3h ago\"`, `\"5d ago\"` instead of raw RFC 3339 timestamps\n- Keep full timestamp in `--json` output\n\n## Files to modify\n\n1. `lib/crates/fabro-workflows/src/cli/runs.rs` — bulk of changes\n2. `lib/crates/fabro-cli/src/main.rs` — pass `Styles` to `list_command`\n\n## Existing code to reuse\n\n- `fabro_util::terminal::Styles` (`lib/crates/fabro-util/src/terminal.rs`)\n- `progress::format_duration_short` (`lib/crates/fabro-workflows/src/cli/progress.rs:65`)\n- `cli::format_cost` (`lib/crates/fabro-workflows/src/cli/mod.rs:246`)\n\n## Verification\n\n- `cargo build -p fabro-cli`\n- `cargo test -p fabro-workflows`\n- `cargo clippy --workspace -- -D warnings`\n- Manual: `fabro ps`, `fabro ps --all`, `fabro ps --limit 5`, `fabro ps --json`\n\n",
+    "internal.fidelity": "compact",
+    "failure_signature": "",
+    "graph.model_stylesheet": "\n            * { backend: api; model: claude-opus-4-6;}\n        ",
+    "graph.rankdir": "LR",
+    "internal.thread_id": "start",
+    "current_node": "toolchain",
+    "internal.retry_count.toolchain": 1,
+    "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n",
+    "command.stderr": "",
+    "graph.goal": "# Plan: Improve `fabro ps` output\n\n## Context\n\n`fabro ps` currently prints a plain-text table with no color, no row limit, and no duration/cost info. Other CLI commands (`logs`, `validate`, `graph`, `run`, `rewind`) already use `Styles` for colored output. The data to enrich the display (duration, cost) is already available in `conclusion.json` but isn't surfaced by `ps`.\n\n## Changes\n\n### 1. Add `--limit` / `--all` flags to `RunsListArgs`\n\n**File:** `lib/crates/fabro-workflows/src/cli/runs.rs` (~line 65)\n\n- Add `--limit N` arg (default 10) and `--all` flag\n- `--all` overrides limit to show everything\n- Apply limit via `.take(limit)` after filtering in `list_command`\n- Print footer like `\"Showing 10 of 42 run(s). Use --all to see all.\"`\n\n### 2. Add color to `list_command`\n\n**File:** `lib/crates/fabro-workflows/src/cli/runs.rs` (~line 337)\n\n- Change signature: `list_command(args, styles: &Styles)`\n- Color the STATUS column by status:\n  - `success` / `partial_success` -> `bold_green`\n  - `fail` -> `bold_red`\n  - `running` -> `bold_cyan`\n  - `unknown` -> `dim`\n- Bold the header row\n- Dim the separator line\n- Dim the labels column\n\n### 3. Wire `Styles` into `Ps` handler\n\n**File:** `lib/crates/fabro-cli/src/main.rs` (~line 600)\n\n- Create `Styles::detect_stdout()` (like `logs` command) and pass to `list_command`\n\n### 4. Add duration and cost columns\n\n**File:** `lib/crates/fabro-workflows/src/cli/runs.rs`\n\n- Add `duration_ms: Option<u64>` and `total_cost: Option<f64>` fields to `RunInfo`\n- Populate from `Conclusion` in `scan_runs()` (already loaded in `read_status`)\n  - Refactor `read_status` to return the full conclusion data (or a small struct with status, end_time, duration_ms, total_cost)\n- Add DURATION and COST columns to the table output\n- Use existing `progress::format_duration_short` for duration, `cli::format_cost` for cost\n- Show `\"-\"` when not available (running/unknown)\n\n### 5. Format start time as relative\n\n- Show `\"2m ago\"`, `\"3h ago\"`, `\"5d ago\"` instead of raw RFC 3339 timestamps\n- Keep full timestamp in `--json` output\n\n## Files to modify\n\n1. `lib/crates/fabro-workflows/src/cli/runs.rs` — bulk of changes\n2. `lib/crates/fabro-cli/src/main.rs` — pass `Styles` to `list_command`\n\n## Existing code to reuse\n\n- `fabro_util::terminal::Styles` (`lib/crates/fabro-util/src/terminal.rs`)\n- `progress::format_duration_short` (`lib/crates/fabro-workflows/src/cli/progress.rs:65`)\n- `cli::format_cost` (`lib/crates/fabro-workflows/src/cli/mod.rs:246`)\n\n## Verification\n\n- `cargo build -p fabro-cli`\n- `cargo test -p fabro-workflows`\n- `cargo clippy --workspace -- -D warnings`\n- Manual: `fabro ps`, `fabro ps --all`, `fabro ps --limit 5`, `fabro ps --json`\n",
+    "internal.run_id": "01KKS6FZ8NX3ETDF525W0HRVA8",
+    "internal.node_visit_count": 1,
+    "internal.retry_count.start": 1,
+    "failure_class": "",
+    "outcome": "success",
+    "thread.start.current_node": "toolchain"
+  },
+  "logs": [],
+  "node_outcomes": {
+    "toolchain": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+      "duration_ms": 373
+    },
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    }
+  },
+  "next_node_id": "preflight_compile",
+  "node_visits": {
+    "start": 1,
+    "toolchain": 1
+  }
+}
