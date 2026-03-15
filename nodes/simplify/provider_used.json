@@ -1,0 +1,5 @@
+{
+  "mode": "agent",
+  "provider": "anthropic",
+  "model": "claude-opus-4-6"
+}
