@@ -1947,6 +1947,15 @@ async fn run_preflight(
         CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus,
     };
 
+    let spinner = indicatif::ProgressBar::new_spinner();
+    spinner.set_style(
+        indicatif::ProgressStyle::with_template("{spinner:.cyan} {msg}")
+            .expect("valid template")
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", ""]),
+    );
+    spinner.set_message("Running preflight checks…");
+    spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+
     let mut checks: Vec<CheckResult> = Vec::new();
 
     // 1. Repository metadata
@@ -2192,6 +2201,8 @@ async fn run_preflight(
     };
 
     // 5. Render report
+    spinner.finish_and_clear();
+
     let report = CheckReport {
         title: "Run Preflight".into(),
         sections: vec![CheckSection {
