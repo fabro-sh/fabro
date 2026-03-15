@@ -1,7 +1,27 @@
 ---
-title: "fabro rewind, workflow list, and Dark Factory"
+title: "fabro logs, background runs, and workflow scaffolding"
 date: "2026-03-14"
 ---
+
+## View run logs with fabro logs
+
+Previously, the only way to follow a workflow's progress was through the terminal that started it. The new `fabro logs` command lets you view event logs for any run — active or completed — from any terminal. With `--pretty`, agent conversations render with formatted messages and tool calls instead of raw JSON.
+
+```bash
+fabro logs my-workflow --pretty
+fabro logs -f abc123 -p
+```
+
+You can reference runs by name, ID prefix, or workflow slug. The `-f` flag follows live events as they happen.
+
+## Background workflows with --detach
+
+You can now fork a workflow into a background process with `fabro run --detach`, then reconnect later with `fabro logs -f`. This is useful for long-running workflows where you don't want to keep a terminal open.
+
+```bash
+fabro run my-workflow --detach
+fabro logs -f my-workflow
+```
 
 ## Rewind workflow runs
 
@@ -11,25 +31,28 @@ You can now rewind a workflow run to an earlier checkpoint and resume from there
 fabro rewind my-run plan@2
 ```
 
-Target a specific node by name, `node@visit` for a particular visit count, or `@ordinal` for a checkpoint index. The command rewinds both the metadata and run branch refs, and optionally pushes to the remote.
-
-## fabro workflow list
-
-A new `fabro workflow list` command shows all available workflows in your project. Workflows are grouped by source (project vs. user-level), with descriptions pulled from each workflow's goal.
-
-```bash
-fabro workflow list
-```
+Target a specific node by name, `node@visit` for a particular visit count, or `@ordinal` for a checkpoint index.
 
 ## More
 
+<Accordion title="CLI">
+- Added `fabro workflow create <name>` subcommand to scaffold new workflows from a template
+- Added `fabro workflow list` command showing all available workflows grouped by source
+- Added `fabro inspect` command to display detailed JSON data for a workflow run
+- Added project-level run defaults in `fabro.toml` (model, environment, sandbox image, etc.)
+- Added `~/.fabro/` fallback for `@` file references
+</Accordion>
+
 <Accordion title="Improvements">
 - Default Daytona sandbox now uses the `daytona-medium` snapshot with standard dev tools pre-installed
-- Workflow list output shows grouped sections with aligned columns and truncated descriptions
-- Added Dark Factory documentation page
-- Added workflow diagram to README
+- Run resolution now matches workflow slugs and display names, not just run IDs
+- Routing events now include context about why an edge was selected
 </Accordion>
 
 <Accordion title="Fixes">
+- Fixed `fabro logs --pretty` wrapping past terminal edge on long assistant messages
+- Fixed empty `run_id` on sandbox events in `progress.jsonl`
+- Fixed credential-embedded GitHub URLs not being parsed correctly
+- Fixed logo SVG viewBox clipping the right edge of the O
 - Fixed missing `git_commit_sha` in run branch commit messages
 </Accordion>
