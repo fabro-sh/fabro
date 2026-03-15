@@ -46,7 +46,8 @@ fn resolve_cli_goal(
     match (goal, goal_file) {
         (Some(g), _) => Ok(Some(g.clone())),
         (_, Some(path)) => {
-            let content = std::fs::read_to_string(path)
+            let path = fabro_util::path::expand_tilde(path);
+            let content = std::fs::read_to_string(&path)
                 .with_context(|| format!("failed to read goal file: {}", path.display()))?;
             debug!(path = %path.display(), "Goal loaded from file");
             Ok(Some(content))
@@ -455,17 +456,37 @@ pub async fn run_command(
     // 3. Create logs directory
     let run_id = args.run_id.unwrap_or_else(|| ulid::Ulid::new().to_string());
     let run_dir = args.run_dir.unwrap_or_else(|| {
-        let base = dirs::home_dir()
-            .expect("could not determine home directory")
-            .join(".fabro")
-            .join("runs");
-        base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
+        if args.dry_run {
+            std::env::temp_dir().join("fabro-dry-run").join(&run_id)
+        } else {
+            let base = dirs::home_dir()
+                .expect("could not determine home directory")
+                .join(".fabro")
+                .join("runs");
+            base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
+        }
     });
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
     tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
     tokio::fs::write(run_dir.join("run.pid"), std::process::id().to_string()).await?;
+    super::runs::write_run_status(
+        &run_dir,
+        crate::run_status::RunStatus::Starting,
+        Some(crate::run_status::StatusReason::SandboxInitializing),
+    );
+
+    // Safety net: mark as failed if we exit before engine.run() (e.g. sandbox init failure)
+    let status_run_dir = run_dir.clone();
+    let status_guard = scopeguard::guard((), move |()| {
+        super::runs::write_run_status(
+            &status_run_dir,
+            crate::run_status::RunStatus::Failed,
+            Some(crate::run_status::StatusReason::SandboxInitFailed),
+        );
+    });
+
     if workflow_path.extension().is_some_and(|ext| ext == "toml") {
         if let Ok(toml_contents) = tokio::fs::read(workflow_path).await {
             tokio::fs::write(run_dir.join("run.toml"), toml_contents).await?;
@@ -486,13 +507,17 @@ pub async fn run_command(
     // 3. Build event emitter
     let mut emitter = EventEmitter::new();
 
-    // Track the last git commit SHA from GitCheckpoint events
+    // Track the last git commit SHA from CheckpointCompleted events
     let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     {
         let sha_clone = Arc::clone(&last_git_sha);
         emitter.on_event(move |event| {
-            if let crate::event::WorkflowRunEvent::GitCheckpoint { git_commit_sha, .. } = event {
-                *sha_clone.lock().unwrap() = Some(git_commit_sha.clone());
+            if let crate::event::WorkflowRunEvent::CheckpointCompleted {
+                git_commit_sha: Some(sha),
+                ..
+            } = event
+            {
+                *sha_clone.lock().unwrap() = Some(sha.clone());
             }
         });
     }
@@ -1197,6 +1222,9 @@ pub async fn run_command(
         workflow_slug: workflow_slug.clone(),
     };
 
+    // Defuse the status guard — engine.run() will write "running" and conclusion handles "concluded"
+    scopeguard::ScopeGuard::into_inner(status_guard);
+
     let run_start = Instant::now();
     let engine_result = if let Some(ref checkpoint_path) = args.resume {
         let checkpoint = Checkpoint::load(checkpoint_path)?;
@@ -1215,6 +1243,32 @@ pub async fn run_command(
         let (status, failure_reason) = match &engine_result {
             Ok(o) => (o.status.clone(), o.failure_reason().map(String::from)),
             Err(e) => (crate::outcome::StageStatus::Fail, Some(e.to_string())),
+        };
+
+        // Map engine result to RunStatus + StatusReason
+        let (run_status, status_reason) = match &engine_result {
+            Ok(o) => match o.status {
+                StageStatus::Success | StageStatus::Skipped => (
+                    crate::run_status::RunStatus::Succeeded,
+                    Some(crate::run_status::StatusReason::Completed),
+                ),
+                StageStatus::PartialSuccess => (
+                    crate::run_status::RunStatus::Succeeded,
+                    Some(crate::run_status::StatusReason::PartialSuccess),
+                ),
+                StageStatus::Fail | StageStatus::Retry => (
+                    crate::run_status::RunStatus::Failed,
+                    Some(crate::run_status::StatusReason::WorkflowError),
+                ),
+            },
+            Err(crate::error::FabroError::Cancelled) => (
+                crate::run_status::RunStatus::Failed,
+                Some(crate::run_status::StatusReason::Cancelled),
+            ),
+            Err(_) => (
+                crate::run_status::RunStatus::Failed,
+                Some(crate::run_status::StatusReason::WorkflowError),
+            ),
         };
 
         // Load checkpoint and stage durations to populate per-stage data
@@ -1265,6 +1319,7 @@ pub async fn run_command(
             total_retries,
         };
         let _ = conclusion.save(&run_dir.join("conclusion.json"));
+        super::runs::write_run_status(&run_dir, run_status, status_reason);
     }
 
     // Auto-derive retro (always, cheap) and optionally run retro agent
@@ -1290,7 +1345,7 @@ pub async fn run_command(
             provider_enum,
             &model,
             styles,
-            Some(&progress_ui),
+            Some(Arc::clone(&emitter)),
         )
         .await;
     }
@@ -1563,7 +1618,7 @@ async fn setup_remote_git(
 /// Resume a workflow run from a git run branch.
 ///
 /// Reads the checkpoint, manifest, and graph DOT from the metadata branch
-/// (`refs/fabro/{run_id}`), re-attaches a worktree to the existing run branch,
+/// (`fabro/meta/{run_id}`), re-attaches a worktree to the existing run branch,
 /// and resumes execution via `run_from_checkpoint()`.
 async fn run_from_branch(
     args: RunArgs,
@@ -1625,15 +1680,19 @@ async fn run_from_branch(
 
     // Set up logs directory
     let run_dir = args.run_dir.unwrap_or_else(|| {
-        let base = dirs::home_dir()
-            .expect("could not determine home directory")
-            .join(".fabro")
-            .join("runs");
-        base.join(format!(
-            "{}-{}",
-            chrono::Local::now().format("%Y%m%d"),
-            run_id
-        ))
+        if args.dry_run {
+            std::env::temp_dir().join("fabro-dry-run").join(&run_id)
+        } else {
+            let base = dirs::home_dir()
+                .expect("could not determine home directory")
+                .join(".fabro")
+                .join("runs");
+            base.join(format!(
+                "{}-{}",
+                chrono::Local::now().format("%Y%m%d"),
+                run_id
+            ))
+        }
     });
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
@@ -1847,7 +1906,7 @@ async fn run_from_branch(
             provider_enum,
             &model,
             styles,
-            None,
+            Some(Arc::clone(&emitter)),
         )
         .await;
     }
@@ -2252,10 +2311,7 @@ async fn write_finalize_commit(config: &RunConfig, run_dir: &std::path::Path) {
     }
 
     // Push the finalize commit
-    let run_id_part = meta_branch
-        .strip_prefix("refs/fabro/")
-        .unwrap_or(meta_branch);
-    let refspec = format!("{meta_branch}:refs/heads/fabro/meta/{run_id_part}");
+    let refspec = format!("refs/heads/{meta_branch}");
     crate::engine::git_push_host(repo_path, &refspec, &config.github_app, "finalize metadata")
         .await;
 }
@@ -2279,7 +2335,7 @@ async fn generate_retro(
     provider_enum: Provider,
     model: &str,
     styles: &'static Styles,
-    progress_ui: Option<&Arc<Mutex<progress::ProgressUI>>>,
+    emitter: Option<Arc<EventEmitter>>,
 ) {
     let cp = match Checkpoint::load(&run_dir.join("checkpoint.json")) {
         Ok(cp) => cp,
@@ -2318,27 +2374,14 @@ async fn generate_retro(
     eprintln!("\n{}", styles.bold.apply_to("=== Retro ==="));
 
     let retro_start = std::time::Instant::now();
-    let emitter = if let Some(pui) = progress_ui {
-        let mut em = EventEmitter::new();
-        progress::ProgressUI::register(pui, &mut em);
-        let em = Arc::new(em);
-        em.emit(&crate::event::WorkflowRunEvent::StageStarted {
-            node_id: "retro".to_string(),
-            name: "Retro".to_string(),
-            index: 0,
-            handler_type: Some("agent".to_string()),
-            script: None,
-            attempt: 1,
-            max_attempts: 1,
-        });
-        Some(em)
+    if let Some(ref em) = emitter {
+        em.emit(&crate::event::WorkflowRunEvent::RetroStarted);
     } else {
         eprintln!(
             "{}",
             styles.dim.apply_to(format!("Running retro ({model})..."))
         );
-        None
-    };
+    }
 
     let narrative_result = if dry_run_mode {
         Ok(crate::retro_agent::dry_run_narrative())
@@ -2358,26 +2401,19 @@ async fn generate_retro(
     let retro_dur_elapsed = retro_start.elapsed();
 
     if let Some(ref em) = emitter {
-        let status = if narrative_result.is_ok() {
-            "success"
-        } else {
-            "fail"
-        };
-        em.emit(&crate::event::WorkflowRunEvent::StageCompleted {
-            node_id: "retro".to_string(),
-            name: "Retro".to_string(),
-            index: 0,
-            duration_ms: retro_dur_elapsed.as_millis() as u64,
-            status: status.to_string(),
-            preferred_label: None,
-            suggested_next_ids: vec![],
-            usage: None,
-            failure: None,
-            notes: None,
-            files_touched: vec![],
-            attempt: 1,
-            max_attempts: 1,
-        });
+        match &narrative_result {
+            Ok(_) => {
+                em.emit(&crate::event::WorkflowRunEvent::RetroCompleted {
+                    duration_ms: retro_dur_elapsed.as_millis() as u64,
+                });
+            }
+            Err(e) => {
+                em.emit(&crate::event::WorkflowRunEvent::RetroFailed {
+                    error: e.to_string(),
+                    duration_ms: retro_dur_elapsed.as_millis() as u64,
+                });
+            }
+        }
     }
 
     let retro_dur = progress::format_duration_short(retro_dur_elapsed);

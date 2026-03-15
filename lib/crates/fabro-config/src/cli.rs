@@ -50,6 +50,8 @@ pub struct CliConfig {
     pub exec: Option<ExecDefaults>,
     pub git: Option<CliGitConfig>,
     #[serde(default)]
+    pub prevent_idle_sleep: bool,
+    #[serde(default)]
     pub verbose: bool,
     #[serde(default)]
     pub log: crate::server::LogConfig,
@@ -244,6 +246,18 @@ email = "me@local"
     fn parse_git_author_absent() {
         let config: CliConfig = toml::from_str("").unwrap();
         assert_eq!(config.git, None);
+    }
+
+    #[test]
+    fn parse_prevent_idle_sleep_true() {
+        let config: CliConfig = toml::from_str("prevent_idle_sleep = true").unwrap();
+        assert!(config.prevent_idle_sleep);
+    }
+
+    #[test]
+    fn parse_prevent_idle_sleep_defaults_to_false() {
+        let config: CliConfig = toml::from_str("").unwrap();
+        assert!(!config.prevent_idle_sleep);
     }
 
     #[test]

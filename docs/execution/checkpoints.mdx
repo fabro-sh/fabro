@@ -12,7 +12,7 @@ Each run creates two Git branches that work in tandem:
 | Branch | Ref format | Contains |
 |---|---|---|
 | **Run branch** | `fabro/run/{run_id}` | File changes made by agents and commands — the actual work product |
-| **Metadata branch** | `refs/fabro/{run_id}` | Checkpoint JSON, the workflow graph, a run manifest, and offloaded artifacts |
+| **Metadata branch** | `fabro/meta/{run_id}` | Checkpoint JSON, the workflow graph, a run manifest, and offloaded artifacts |
 
 The run branch is a regular Git branch that grows one commit per completed node. The metadata branch is an orphan branch (no shared history with your code) that stores structured data using Git's object database directly — no working tree needed.
 
@@ -41,7 +41,7 @@ The `Fabro-Checkpoint` trailer links each run branch commit to its metadata bran
 
 ### Metadata branch
 
-The metadata branch (`refs/fabro/{run_id}`) is an orphan branch that stores structured run data using Git's object storage directly (via `git2`). It is initialized at run start with:
+The metadata branch (`fabro/meta/{run_id}`) is an orphan branch that stores structured run data using Git's object storage directly (via `git2`). It is initialized at run start with:
 
 - **`manifest.json`** — Run metadata: run ID, graph name, node/edge counts, base SHA, and branch name
 - **`graph.fabro`** — The workflow DOT source as it was parsed
@@ -87,7 +87,7 @@ This means your original working directory stays untouched while the agent makes
 If the working directory has uncommitted changes, Fabro skips worktree setup and runs in place, logging a warning. Git checkpointing is disabled in this case.
 </Note>
 
-For Daytona sandboxes, the worktree is created inside the remote sandbox instead. The metadata branch is still written to the host repository so that runs can be resumed locally. Both the run branch and the metadata branch are pushed to origin after each checkpoint — the run branch is pushed from the sandbox, while the metadata branch is pushed from the host using a GitHub App installation token. On the remote, the metadata branch appears at `fabro/meta/{run_id}` (rather than the local `refs/fabro/{run_id}` custom ref, since GitHub disallows branch names starting with `refs/`).
+For Daytona sandboxes, the worktree is created inside the remote sandbox instead. The metadata branch is still written to the host repository so that runs can be resumed locally. Both the run branch and the metadata branch are pushed to origin after each checkpoint — the run branch is pushed from the sandbox, while the metadata branch is pushed from the host using a GitHub App installation token.
 
 ## Resuming a run
 
@@ -111,7 +111,7 @@ Resume from the Git branches created during a previous run:
 fabro run --run-branch fabro/run/01JKXYZ...
 ```
 
-This reads the checkpoint, manifest, and graph DOT from the metadata branch (`refs/fabro/01JKXYZ...`), re-attaches a worktree to the existing run branch, and resumes execution. No workflow file argument is needed — everything is recovered from Git.
+This reads the checkpoint, manifest, and graph DOT from the metadata branch (`fabro/meta/01JKXYZ...`), re-attaches a worktree to the existing run branch, and resumes execution. No workflow file argument is needed — everything is recovered from Git.
 
 <Accordion title="What happens during resume">
 1. Fabro reads `checkpoint.json` from the metadata branch
@@ -147,11 +147,8 @@ git show fabro/run/01JKXYZ...
 # Diff the full run against the starting point
 git diff main..fabro/run/01JKXYZ...
 
-# Read checkpoint data from the metadata branch (local)
-git show refs/fabro/01JKXYZ...:checkpoint.json | jq .current_node
-
-# Read checkpoint data from the remote (Daytona runs)
-git show origin/fabro/meta/01JKXYZ...:checkpoint.json | jq .current_node
+# Read checkpoint data from the metadata branch
+git show fabro/meta/01JKXYZ...:checkpoint.json | jq .current_node
 ```
 
 ## Rewinding to an earlier checkpoint

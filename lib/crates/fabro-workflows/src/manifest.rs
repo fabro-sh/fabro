@@ -24,6 +24,8 @@ pub struct Manifest {
     pub base_branch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_slug: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_repo_path: Option<String>,
 }
 
 impl Manifest {
@@ -53,6 +55,7 @@ mod tests {
             labels: HashMap::from([("env".into(), "test".into())]),
             base_branch: None,
             workflow_slug: None,
+            host_repo_path: None,
         }
     }
 
@@ -121,5 +124,6 @@ mod tests {
         assert!(raw.get("run_branch").is_none());
         assert!(raw.get("base_sha").is_none());
         assert!(raw.get("workflow_slug").is_none());
+        assert!(raw.get("host_repo_path").is_none());
     }
 }

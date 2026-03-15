@@ -1,47 +1,16 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use clap::Args;
+use cli_table::format::{Border, Justify, Separator};
+use cli_table::{print_stdout, Cell, CellStruct, Color, Style, Table};
+use fabro_util::terminal::Styles;
 use serde::Serialize;
 use tracing::{debug, info, warn};
 
-use crate::outcome::StageStatus;
-
-/// Status of a run directory — either concluded with a `StageStatus`, actively running, or unknown.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RunStatus {
-    Concluded(StageStatus),
-    Running,
-    Unknown,
-}
-
-impl Serialize for RunStatus {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl RunStatus {
-    pub fn is_running(&self) -> bool {
-        matches!(self, RunStatus::Running)
-    }
-}
-
-impl fmt::Display for RunStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RunStatus::Concluded(s) => write!(f, "{s}"),
-            RunStatus::Running => write!(f, "running"),
-            RunStatus::Unknown => write!(f, "unknown"),
-        }
-    }
-}
+pub use crate::run_status::{RunStatus, RunStatusRecord, StatusReason};
 
 #[derive(Args)]
 pub struct RunFilterArgs {
@@ -70,6 +39,10 @@ pub struct RunsListArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+
+    /// Show all runs, not just running (like docker ps -a)
+    #[arg(short = 'a', long)]
+    pub all: bool,
 }
 
 #[derive(Args)]
@@ -86,6 +59,17 @@ pub struct RunsPruneArgs {
     pub yes: bool,
 }
 
+#[derive(Args)]
+pub struct RunsRemoveArgs {
+    /// Run IDs or workflow names to remove
+    #[arg(required = true)]
+    pub runs: Vec<String>,
+
+    /// Force removal of active runs
+    #[arg(short, long)]
+    pub force: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RunInfo {
     pub run_id: String,
@@ -94,8 +78,17 @@ pub struct RunInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_slug: Option<String>,
     pub status: RunStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_reason: Option<StatusReason>,
     pub start_time: String,
     pub labels: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_cost: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_repo_path: Option<String>,
+    pub goal: String,
     #[serde(skip)]
     pub start_time_dt: Option<DateTime<Utc>>,
     #[serde(skip)]
@@ -133,27 +126,34 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
             let run_id = manifest.run_id;
             let workflow_name = manifest.workflow_name;
             let workflow_slug = manifest.workflow_slug;
+            let host_repo_path = manifest.host_repo_path;
+            let goal = manifest.goal;
             let start_time_dt = manifest.start_time;
             let start_time = start_time_dt.to_rfc3339();
             let labels = manifest.labels;
 
-            let (status, end_time) = read_status(&path);
+            let si = read_status(&path);
 
             runs.push(RunInfo {
                 run_id,
                 dir_name,
                 workflow_name,
                 workflow_slug,
-                status,
+                status: si.status,
+                status_reason: si.reason,
                 start_time,
                 labels,
+                duration_ms: si.duration_ms,
+                total_cost: si.total_cost,
+                host_repo_path,
                 start_time_dt: Some(start_time_dt),
-                end_time,
+                end_time: si.end_time,
                 path,
+                goal,
                 is_orphan: false,
             });
         } else {
-            // Orphan directory — no manifest.json
+            // No manifest.json — check for status.json (starting run) vs true orphan
             let mtime_dt = entry
                 .metadata()
                 .ok()
@@ -161,18 +161,34 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 .map(|t| -> DateTime<Utc> { t.into() });
             let mtime = mtime_dt.map(|dt| dt.to_rfc3339()).unwrap_or_default();
 
+            let run_id = std::fs::read_to_string(path.join("id.txt"))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|_| dir_name.clone());
+
+            let si = read_status(&path);
+            let is_orphan = matches!(si.status, RunStatus::Dead);
             runs.push(RunInfo {
-                run_id: dir_name.clone(),
+                run_id,
                 dir_name,
-                workflow_name: "[no manifest]".to_string(),
+                workflow_name: if is_orphan {
+                    "[no manifest]"
+                } else {
+                    "[starting]"
+                }
+                .to_string(),
                 workflow_slug: None,
-                status: RunStatus::Unknown,
+                status: si.status,
+                status_reason: si.reason,
                 start_time: mtime,
                 labels: HashMap::new(),
+                duration_ms: si.duration_ms,
+                total_cost: si.total_cost,
+                host_repo_path: None,
                 start_time_dt: mtime_dt,
-                end_time: None,
+                end_time: si.end_time,
                 path,
-                is_orphan: true,
+                goal: String::new(),
+                is_orphan,
             });
         }
     }
@@ -182,17 +198,70 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
     Ok(runs)
 }
 
-fn read_status(run_dir: &Path) -> (RunStatus, Option<DateTime<Utc>>) {
-    if let Ok(conclusion) = crate::conclusion::Conclusion::load(&run_dir.join("conclusion.json")) {
-        return (
-            RunStatus::Concluded(conclusion.status),
-            Some(conclusion.timestamp),
-        );
+struct StatusInfo {
+    status: RunStatus,
+    reason: Option<StatusReason>,
+    end_time: Option<DateTime<Utc>>,
+    duration_ms: Option<u64>,
+    total_cost: Option<f64>,
+}
+
+impl StatusInfo {
+    fn simple(status: RunStatus) -> Self {
+        Self {
+            status,
+            reason: None,
+            end_time: None,
+            duration_ms: None,
+            total_cost: None,
+        }
     }
-    if run_dir.join("run.pid").exists() {
-        return (RunStatus::Running, None);
+}
+
+/// Write the run status to `status.json` (best-effort).
+pub fn write_run_status(run_dir: &Path, status: RunStatus, reason: Option<StatusReason>) {
+    let record = RunStatusRecord::new(status, reason);
+    if let Err(e) = record.save(&run_dir.join("status.json")) {
+        warn!("failed to write status.json for {}: {e}", run_dir.display());
     }
-    (RunStatus::Unknown, None)
+}
+
+fn read_status(run_dir: &Path) -> StatusInfo {
+    // 1. status.json is authoritative
+    if let Ok(record) = RunStatusRecord::load(&run_dir.join("status.json")) {
+        // For terminal statuses, pull duration/cost from conclusion.json if available
+        if record.status.is_terminal() {
+            if let Ok(conclusion) =
+                crate::conclusion::Conclusion::load(&run_dir.join("conclusion.json"))
+            {
+                return StatusInfo {
+                    status: record.status,
+                    reason: record.reason,
+                    end_time: Some(conclusion.timestamp),
+                    duration_ms: Some(conclusion.duration_ms),
+                    total_cost: conclusion.total_cost,
+                };
+            }
+        }
+        return StatusInfo {
+            status: record.status,
+            reason: record.reason,
+            end_time: None,
+            duration_ms: None,
+            total_cost: None,
+        };
+    }
+    // No status.json → Dead (orphan)
+    StatusInfo::simple(RunStatus::Dead)
+}
+
+/// Which run statuses to include in filtered results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusFilter {
+    /// Only include runs that are currently running.
+    RunningOnly,
+    /// Include runs of any status.
+    All,
 }
 
 /// Filter runs by criteria. Orphans are excluded unless `include_orphans` is true.
@@ -202,9 +271,13 @@ pub fn filter_runs(
     workflow: Option<&str>,
     labels: &[(String, String)],
     include_orphans: bool,
+    status_filter: StatusFilter,
 ) -> Vec<RunInfo> {
     runs.iter()
         .filter(|r| {
+            if status_filter == StatusFilter::RunningOnly && !r.status.is_active() {
+                return false;
+            }
             if r.is_orphan && !include_orphans {
                 return false;
             }
@@ -345,7 +418,43 @@ fn collapse_separators(s: &str) -> String {
     s.chars().filter(|c| *c != '-' && *c != '_').collect()
 }
 
-pub fn list_command(args: &RunsListArgs) -> Result<()> {
+/// Truncate a run ID to a short display form (12 characters).
+fn short_run_id(id: &str) -> &str {
+    if id.len() > 12 {
+        &id[..12]
+    } else {
+        id
+    }
+}
+
+fn truncate_goal(goal: &str, max_len: usize) -> String {
+    let line = goal.lines().next().unwrap_or("");
+    let chars: Vec<char> = line.chars().collect();
+    if chars.len() <= max_len {
+        return line.to_string();
+    }
+    let truncated: String = chars[..max_len - 3].iter().collect();
+    format!("{truncated}...")
+}
+
+use super::color_if;
+
+fn status_cell(status: &RunStatus, use_color: bool) -> CellStruct {
+    let text = status.to_string();
+    let color = match status {
+        RunStatus::Succeeded => Some(Color::Green),
+        RunStatus::Failed => Some(Color::Red),
+        RunStatus::Running | RunStatus::Starting | RunStatus::Submitted => Some(Color::Cyan),
+        RunStatus::Removing => Some(Color::Yellow),
+        RunStatus::Paused => Some(Color::Magenta),
+        RunStatus::Dead => Some(Color::Ansi256(8)),
+    };
+    text.cell()
+        .bold(use_color && color != Some(Color::Ansi256(8)))
+        .foreground_color(color_if(use_color, color.unwrap_or(Color::Ansi256(8))))
+}
+
+pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
     let base = default_runs_base();
     let runs = scan_runs(&base)?;
     let label_filters = parse_label_filters(&args.filter.label);
@@ -355,6 +464,11 @@ pub fn list_command(args: &RunsListArgs) -> Result<()> {
         args.filter.workflow.as_deref(),
         &label_filters,
         args.filter.orphans,
+        if args.all {
+            StatusFilter::All
+        } else {
+            StatusFilter::RunningOnly
+        },
     );
 
     if args.json {
@@ -363,41 +477,73 @@ pub fn list_command(args: &RunsListArgs) -> Result<()> {
     }
 
     if filtered.is_empty() {
-        eprintln!("No runs found.");
+        if args.all {
+            eprintln!("No runs found.");
+        } else {
+            eprintln!("No running processes found. Use -a to show all runs.");
+        }
         return Ok(());
     }
 
-    // Print table header
-    let header = format!(
-        "{:<30} {:<25} {:<10} {:<25} LABELS",
-        "RUN ID", "WORKFLOW", "STATUS", "STARTED"
-    );
-    println!("{header}");
-    println!("{}", "-".repeat(100));
+    // Reverse to oldest-first for display (scan_runs returns newest-first)
+    let mut display_runs = filtered;
+    display_runs.reverse();
 
-    for run in &filtered {
-        let labels_str = run
-            .labels
+    let use_color = styles.use_color;
+    let title = vec![
+        "RUN ID".cell().bold(true),
+        "WORKFLOW".cell().bold(true),
+        "STATUS".cell().bold(true),
+        "DIRECTORY".cell().bold(true),
+        "DURATION".cell().bold(true),
+        "GOAL".cell().bold(true),
+    ];
+
+    let rows: Vec<Vec<CellStruct>> =
+        display_runs
             .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let run_id_display = if run.run_id.len() > 28 {
-            format!("{}...", &run.run_id[..25])
-        } else {
-            run.run_id.clone()
-        };
-        let start_display = if run.start_time.len() > 23 {
-            run.start_time[..23].to_string()
-        } else {
-            run.start_time.clone()
-        };
-        println!(
-            "{:<30} {:<25} {:<10} {:<25} {}",
-            run_id_display, run.workflow_name, run.status, start_display, labels_str
-        );
-    }
-    eprintln!("\n{} run(s) listed.", filtered.len());
+            .map(|run| {
+                let run_id_display = short_run_id(&run.run_id);
+                let duration_display = match run.duration_ms {
+                    Some(ms) => super::progress::format_duration_ms(ms),
+                    None => match run.start_time_dt {
+                        Some(start) => {
+                            let elapsed = Utc::now().signed_duration_since(start);
+                            super::progress::format_duration_ms(
+                                elapsed.num_milliseconds().max(0) as u64
+                            )
+                        }
+                        None => "-".to_string(),
+                    },
+                };
+                let dir_display = run
+                    .host_repo_path
+                    .as_deref()
+                    .map(|p| super::tilde_path(Path::new(p)))
+                    .unwrap_or_else(|| "-".to_string());
+                vec![
+                    run_id_display
+                        .cell()
+                        .foreground_color(color_if(use_color, Color::Ansi256(8))),
+                    run.workflow_name.clone().cell(),
+                    status_cell(&run.status, use_color),
+                    dir_display.cell(),
+                    duration_display.cell(),
+                    truncate_goal(&run.goal, 50)
+                        .cell()
+                        .foreground_color(color_if(use_color, Color::Ansi256(8))),
+                ]
+            })
+            .collect();
+
+    let table = rows
+        .table()
+        .title(title)
+        .border(Border::builder().build())
+        .separator(Separator::builder().build());
+    print_stdout(table)?;
+
+    eprintln!("\n{} run(s) listed.", display_runs.len());
     Ok(())
 }
 
@@ -461,7 +607,7 @@ pub fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Pat
     for run in &runs {
         let size = dir_size(&run.path);
         total_run_size += size;
-        let is_active = run.status.is_running();
+        let is_active = run.status.is_active();
         if is_active {
             active_count += 1;
         } else {
@@ -471,7 +617,7 @@ pub fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Pat
             run_details.push(RunSizeInfo {
                 run_id: run.run_id.clone(),
                 workflow_name: run.workflow_name.clone(),
-                status: run.status.clone(),
+                status: run.status,
                 start_time_dt: run.start_time_dt,
                 size,
             });
@@ -523,34 +669,48 @@ pub fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Pat
     };
     let log_reclaim_pct = if total_log_size > 0 { 100 } else { 0 };
 
-    println!(
-        "{:<14}{:>5}{:>11}{:>12}{:>16}",
-        "TYPE", "COUNT", "ACTIVE", "SIZE", "RECLAIMABLE"
-    );
-    println!(
-        "{:<14}{:>5}{:>11}{:>12}{:>12} ({run_reclaim_pct}%)",
-        "Runs",
-        runs.len(),
-        active_count,
-        format_size(total_run_size),
-        format_size(reclaimable_run_size),
-    );
-    println!(
-        "{:<14}{:>5}{:>11}{:>12}{:>12} ({log_reclaim_pct}%)",
-        "Logs",
-        log_count,
-        "-",
-        format_size(total_log_size),
-        format_size(total_log_size),
-    );
-    println!(
-        "{:<14}{:>5}{:>11}{:>12}{:>12} (0%)",
-        "Databases",
-        db_count,
-        "-",
-        format_size(total_db_size),
-        format_size(0),
-    );
+    let df_title = vec![
+        "TYPE".cell().bold(true),
+        "COUNT".cell().bold(true).justify(Justify::Right),
+        "ACTIVE".cell().bold(true).justify(Justify::Right),
+        "SIZE".cell().bold(true).justify(Justify::Right),
+        "RECLAIMABLE".cell().bold(true).justify(Justify::Right),
+    ];
+    let df_rows: Vec<Vec<CellStruct>> = vec![
+        vec![
+            "Runs".cell(),
+            runs.len().cell().justify(Justify::Right),
+            active_count.cell().justify(Justify::Right),
+            format_size(total_run_size).cell().justify(Justify::Right),
+            format!("{} ({run_reclaim_pct}%)", format_size(reclaimable_run_size))
+                .cell()
+                .justify(Justify::Right),
+        ],
+        vec![
+            "Logs".cell(),
+            log_count.cell().justify(Justify::Right),
+            "-".cell().justify(Justify::Right),
+            format_size(total_log_size).cell().justify(Justify::Right),
+            format!("{} ({log_reclaim_pct}%)", format_size(total_log_size))
+                .cell()
+                .justify(Justify::Right),
+        ],
+        vec![
+            "Databases".cell(),
+            db_count.cell().justify(Justify::Right),
+            "-".cell().justify(Justify::Right),
+            format_size(total_db_size).cell().justify(Justify::Right),
+            format!("{} (0%)", format_size(0))
+                .cell()
+                .justify(Justify::Right),
+        ],
+    ];
+    let df_table = df_rows
+        .table()
+        .title(df_title)
+        .border(Border::builder().build())
+        .separator(Separator::builder().build());
+    print_stdout(df_table)?;
 
     println!();
     println!("Data directory: {}", data_dir.display());
@@ -558,50 +718,53 @@ pub fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Pat
     // --- Verbose per-run breakdown ---
     if args.verbose {
         println!();
-        println!(
-            "{:<30} {:<18} {:<10} {:>5} {:>12}",
-            "RUN ID", "WORKFLOW", "STATUS", "AGE", "SIZE"
-        );
+        let verbose_title = vec![
+            "RUN ID".cell().bold(true),
+            "WORKFLOW".cell().bold(true),
+            "STATUS".cell().bold(true),
+            "AGE".cell().bold(true).justify(Justify::Right),
+            "SIZE".cell().bold(true).justify(Justify::Right),
+        ];
 
         let now = chrono::Utc::now();
-        for detail in &run_details {
-            let run_id_display = if detail.run_id.len() > 28 {
-                format!("{}...", &detail.run_id[..25])
-            } else {
-                detail.run_id.clone()
-            };
-            let workflow_display = if detail.workflow_name.len() > 16 {
-                format!("{}...", &detail.workflow_name[..13])
-            } else {
-                detail.workflow_name.clone()
-            };
-            let age = if let Some(dt) = detail.start_time_dt {
-                let dur = now.signed_duration_since(dt);
-                if dur.num_days() > 0 {
-                    format!("{}d", dur.num_days())
-                } else if dur.num_hours() > 0 {
-                    format!("{}h", dur.num_hours())
+        let verbose_rows: Vec<Vec<CellStruct>> = run_details
+            .iter()
+            .map(|detail| {
+                let run_id_display = short_run_id(&detail.run_id);
+                let workflow_display = truncate_goal(&detail.workflow_name, 16);
+                let age = if let Some(dt) = detail.start_time_dt {
+                    let dur = now.signed_duration_since(dt);
+                    if dur.num_days() > 0 {
+                        format!("{}d", dur.num_days())
+                    } else if dur.num_hours() > 0 {
+                        format!("{}h", dur.num_hours())
+                    } else {
+                        format!("{}m", dur.num_minutes().max(1))
+                    }
                 } else {
-                    format!("{}m", dur.num_minutes().max(1))
-                }
-            } else {
-                "-".to_string()
-            };
-            let reclaimable_marker = if !detail.status.is_running() {
-                " *"
-            } else {
-                ""
-            };
-            println!(
-                "{:<30} {:<18} {:<10} {:>5} {:>10}{}",
-                run_id_display,
-                workflow_display,
-                detail.status,
-                age,
-                format_size(detail.size),
-                reclaimable_marker,
-            );
-        }
+                    "-".to_string()
+                };
+                let size_display = if !detail.status.is_active() {
+                    format!("{} *", format_size(detail.size))
+                } else {
+                    format_size(detail.size)
+                };
+                vec![
+                    run_id_display.cell(),
+                    workflow_display.cell(),
+                    detail.status.to_string().cell(),
+                    age.cell().justify(Justify::Right),
+                    size_display.cell().justify(Justify::Right),
+                ]
+            })
+            .collect();
+
+        let verbose_table = verbose_rows
+            .table()
+            .title(verbose_title)
+            .border(Border::builder().build())
+            .separator(Separator::builder().build());
+        print_stdout(verbose_table)?;
         println!();
         println!("* = reclaimable");
     }
@@ -640,6 +803,7 @@ pub fn prune_from(args: &RunsPruneArgs, base: &Path) -> Result<()> {
         args.filter.workflow.as_deref(),
         &label_filters,
         args.filter.orphans,
+        StatusFilter::All,
     );
 
     // Determine if the user passed any explicit filters
@@ -659,8 +823,8 @@ pub fn prune_from(args: &RunsPruneArgs, base: &Path) -> Result<()> {
         let now = Utc::now();
         let cutoff = now - threshold;
         filtered.retain(|run| {
-            // Exclude running runs
-            if run.status.is_running() {
+            // Exclude active runs
+            if run.status.is_active() {
                 return false;
             }
             // Use end_time if available, fall back to start_time
@@ -705,6 +869,66 @@ pub fn prune_from(args: &RunsPruneArgs, base: &Path) -> Result<()> {
     Ok(())
 }
 
+pub async fn remove_command(args: &RunsRemoveArgs) -> Result<()> {
+    let base = default_runs_base();
+    remove_from(args, &base).await
+}
+
+pub async fn remove_from(args: &RunsRemoveArgs, base: &Path) -> Result<()> {
+    let mut had_errors = false;
+
+    for identifier in &args.runs {
+        let run = match resolve_run(base, identifier) {
+            Ok(run) => run,
+            Err(e) => {
+                eprintln!("error: {identifier}: {e}");
+                had_errors = true;
+                continue;
+            }
+        };
+
+        if run.status.is_active() && !args.force {
+            eprintln!(
+                "cannot remove active run {} (status: {}, use -f to force)",
+                short_run_id(&run.run_id),
+                run.status
+            );
+            had_errors = true;
+            continue;
+        }
+
+        // Transition status to Removing (best-effort)
+        write_run_status(&run.path, RunStatus::Removing, None);
+
+        // Best-effort sandbox cleanup
+        let sandbox_path = run.path.join("sandbox.json");
+        if let Ok(record) = crate::sandbox_record::SandboxRecord::load(&sandbox_path) {
+            if record.provider != "local" {
+                match super::cp::reconnect(&record).await {
+                    Ok(sandbox) => {
+                        if let Err(e) = sandbox.cleanup().await {
+                            warn!(run_id = %run.run_id, error = %e, "sandbox cleanup failed");
+                        }
+                    }
+                    Err(e) => {
+                        warn!(run_id = %run.run_id, error = %e, "sandbox reconnect failed");
+                    }
+                }
+            }
+        }
+
+        // Delete the run directory
+        std::fs::remove_dir_all(&run.path)
+            .with_context(|| format!("failed to delete {}", run.path.display()))?;
+        eprintln!("{}", short_run_id(&run.run_id));
+    }
+
+    if had_errors {
+        bail!("some runs could not be removed");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -715,7 +939,7 @@ mod tests {
         dir_name: &str,
         manifest: Option<serde_json::Value>,
         conclusion_json: Option<serde_json::Value>,
-        pid_file: bool,
+        status: Option<(RunStatus, Option<StatusReason>)>,
     ) -> PathBuf {
         let dir = base.join(dir_name);
         fs::create_dir_all(&dir).unwrap();
@@ -733,8 +957,8 @@ mod tests {
             )
             .unwrap();
         }
-        if pid_file {
-            fs::write(dir.join("run.pid"), "12345").unwrap();
+        if let Some((s, r)) = status {
+            write_run_status(&dir, s, r);
         }
         dir
     }
@@ -759,26 +983,23 @@ mod tests {
             Some(
                 serde_json::json!({ "timestamp": "2026-01-01T12:01:00Z", "status": "success", "duration_ms": 60000 }),
             ),
-            false,
+            Some((RunStatus::Succeeded, Some(StatusReason::Completed))),
         );
 
-        make_run_dir(base, "fabro-run-orphan", None, None, false);
+        make_run_dir(base, "fabro-run-orphan", None, None, None);
 
         let runs = scan_runs(base).unwrap();
         assert_eq!(runs.len(), 2);
 
         let completed = runs.iter().find(|r| r.run_id == "abc123").unwrap();
         assert_eq!(completed.workflow_name, "my-pipeline");
-        assert_eq!(
-            completed.status,
-            RunStatus::Concluded(crate::outcome::StageStatus::Success)
-        );
+        assert_eq!(completed.status, RunStatus::Succeeded);
         assert_eq!(completed.labels.get("env").unwrap(), "prod");
         assert!(!completed.is_orphan);
 
         let orphan = runs.iter().find(|r| r.is_orphan).unwrap();
         assert_eq!(orphan.workflow_name, "[no manifest]");
-        assert_eq!(orphan.status, RunStatus::Unknown);
+        assert_eq!(orphan.status, RunStatus::Dead);
     }
 
     #[test]
@@ -798,7 +1019,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            true,
+            Some((RunStatus::Running, None)),
         );
 
         let runs = scan_runs(base).unwrap();
@@ -827,12 +1048,17 @@ mod tests {
                 dir_name: "d1".into(),
                 workflow_name: "p".into(),
                 workflow_slug: None,
-                status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
+                status: RunStatus::Succeeded,
+                status_reason: None,
                 start_time: "2025-06-01T00:00:00Z".into(),
                 labels: HashMap::new(),
+                duration_ms: None,
+                total_cost: None,
+                host_repo_path: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d1"),
+                goal: String::new(),
                 is_orphan: false,
             },
             RunInfo {
@@ -840,16 +1066,28 @@ mod tests {
                 dir_name: "d2".into(),
                 workflow_name: "p".into(),
                 workflow_slug: None,
-                status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
+                status: RunStatus::Succeeded,
+                status_reason: None,
                 start_time: "2026-03-01T00:00:00Z".into(),
                 labels: HashMap::new(),
+                duration_ms: None,
+                total_cost: None,
+                host_repo_path: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d2"),
+                goal: String::new(),
                 is_orphan: false,
             },
         ];
-        let filtered = filter_runs(&runs, Some("2026-01-01"), None, &[], false);
+        let filtered = filter_runs(
+            &runs,
+            Some("2026-01-01"),
+            None,
+            &[],
+            false,
+            StatusFilter::All,
+        );
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].run_id, "old");
     }
@@ -862,12 +1100,17 @@ mod tests {
                 dir_name: "d1".into(),
                 workflow_name: "deploy-prod".into(),
                 workflow_slug: None,
-                status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
+                status: RunStatus::Succeeded,
+                status_reason: None,
                 start_time: "2026-01-01T00:00:00Z".into(),
                 labels: HashMap::new(),
+                duration_ms: None,
+                total_cost: None,
+                host_repo_path: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d1"),
+                goal: String::new(),
                 is_orphan: false,
             },
             RunInfo {
@@ -875,16 +1118,21 @@ mod tests {
                 dir_name: "d2".into(),
                 workflow_name: "test-suite".into(),
                 workflow_slug: None,
-                status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
+                status: RunStatus::Succeeded,
+                status_reason: None,
                 start_time: "2026-01-01T00:00:00Z".into(),
                 labels: HashMap::new(),
+                duration_ms: None,
+                total_cost: None,
+                host_repo_path: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d2"),
+                goal: String::new(),
                 is_orphan: false,
             },
         ];
-        let filtered = filter_runs(&runs, None, Some("deploy"), &[], false);
+        let filtered = filter_runs(&runs, None, Some("deploy"), &[], false, StatusFilter::All);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].run_id, "a");
     }
@@ -897,12 +1145,17 @@ mod tests {
                 dir_name: "d1".into(),
                 workflow_name: "p".into(),
                 workflow_slug: None,
-                status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
+                status: RunStatus::Succeeded,
+                status_reason: None,
                 start_time: "2026-01-01T00:00:00Z".into(),
                 labels: HashMap::from([("env".into(), "prod".into())]),
+                duration_ms: None,
+                total_cost: None,
+                host_repo_path: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d1"),
+                goal: String::new(),
                 is_orphan: false,
             },
             RunInfo {
@@ -910,12 +1163,17 @@ mod tests {
                 dir_name: "d2".into(),
                 workflow_name: "p".into(),
                 workflow_slug: None,
-                status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
+                status: RunStatus::Succeeded,
+                status_reason: None,
                 start_time: "2026-01-01T00:00:00Z".into(),
                 labels: HashMap::from([("env".into(), "staging".into())]),
+                duration_ms: None,
+                total_cost: None,
+                host_repo_path: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d2"),
+                goal: String::new(),
                 is_orphan: false,
             },
         ];
@@ -925,6 +1183,7 @@ mod tests {
             None,
             &[("env".to_string(), "prod".to_string())],
             false,
+            StatusFilter::All,
         );
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].run_id, "a");
@@ -937,19 +1196,102 @@ mod tests {
             dir_name: "d1".into(),
             workflow_name: "[no manifest]".into(),
             workflow_slug: None,
-            status: RunStatus::Unknown,
+            status: RunStatus::Dead,
+            status_reason: None,
             start_time: "".into(),
             labels: HashMap::new(),
+            duration_ms: None,
+            total_cost: None,
+            host_repo_path: None,
             start_time_dt: None,
             end_time: None,
             path: PathBuf::from("/tmp/d1"),
+            goal: String::new(),
             is_orphan: true,
         }];
-        let filtered = filter_runs(&runs, None, None, &[], false);
+        let filtered = filter_runs(&runs, None, None, &[], false, StatusFilter::All);
         assert!(filtered.is_empty());
 
-        let filtered = filter_runs(&runs, None, None, &[], true);
+        let filtered = filter_runs(&runs, None, None, &[], true, StatusFilter::All);
         assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn filter_runs_running_only() {
+        let runs = vec![
+            RunInfo {
+                run_id: "running-1".into(),
+                dir_name: "d1".into(),
+                workflow_name: "p".into(),
+                workflow_slug: None,
+                status: RunStatus::Running,
+                status_reason: None,
+                start_time: "2026-01-01T00:00:00Z".into(),
+                labels: HashMap::new(),
+                duration_ms: None,
+                total_cost: None,
+                host_repo_path: None,
+                start_time_dt: None,
+                end_time: None,
+                path: PathBuf::from("/tmp/d1"),
+                goal: String::new(),
+                is_orphan: false,
+            },
+            RunInfo {
+                run_id: "done-1".into(),
+                dir_name: "d2".into(),
+                workflow_name: "p".into(),
+                workflow_slug: None,
+                status: RunStatus::Succeeded,
+                status_reason: None,
+                start_time: "2026-01-01T00:00:00Z".into(),
+                labels: HashMap::new(),
+                duration_ms: None,
+                total_cost: None,
+                host_repo_path: None,
+                start_time_dt: None,
+                end_time: None,
+                path: PathBuf::from("/tmp/d2"),
+                goal: String::new(),
+                is_orphan: false,
+            },
+        ];
+
+        let filtered = filter_runs(&runs, None, None, &[], false, StatusFilter::RunningOnly);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].run_id, "running-1");
+
+        let filtered = filter_runs(&runs, None, None, &[], false, StatusFilter::All);
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn scan_runs_extracts_host_repo_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+
+        make_run_dir(
+            base,
+            "20260101-ABC123",
+            Some(serde_json::json!({
+                "run_id": "abc123",
+                "workflow_name": "my-pipeline",
+                "goal": "test goal",
+                "start_time": "2026-01-01T12:00:00Z",
+                "node_count": 2,
+                "edge_count": 1,
+                "host_repo_path": "/home/user/myproject"
+            })),
+            None,
+            Some((RunStatus::Running, None)),
+        );
+
+        let runs = scan_runs(base).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(
+            runs[0].host_repo_path.as_deref(),
+            Some("/home/user/myproject")
+        );
     }
 
     #[test]
@@ -971,7 +1313,7 @@ mod tests {
             Some(
                 serde_json::json!({ "timestamp": "2025-01-01T12:01:00Z", "status": "success", "duration_ms": 60000 }),
             ),
-            false,
+            None,
         );
 
         let args = RunsPruneArgs {
@@ -1008,7 +1350,7 @@ mod tests {
             Some(
                 serde_json::json!({ "timestamp": "2025-01-01T12:01:00Z", "status": "success", "duration_ms": 60000 }),
             ),
-            false,
+            None,
         );
 
         // Also add a run that should NOT be pruned (too new)
@@ -1026,7 +1368,7 @@ mod tests {
             Some(
                 serde_json::json!({ "timestamp": "2026-03-01T12:01:00Z", "status": "success", "duration_ms": 60000 }),
             ),
-            false,
+            None,
         );
 
         let args = RunsPruneArgs {
@@ -1053,7 +1395,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
 
-        let orphan_dir = make_run_dir(base, "orphan-dir", None, None, false);
+        let orphan_dir = make_run_dir(base, "orphan-dir", None, None, None);
 
         let args = RunsPruneArgs {
             filter: RunFilterArgs {
@@ -1143,7 +1485,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            true,
+            Some((RunStatus::Running, None)),
         );
         // Add a file to give it size
         fs::write(
@@ -1169,7 +1511,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 60000
             })),
-            false,
+            None,
         );
         fs::write(
             runs_base.join("20260307-DONE").join("data.bin"),
@@ -1292,7 +1634,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
 
         let info = resolve_run(dir.path(), "abc123").unwrap();
@@ -1314,7 +1656,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
         make_run_dir(
             dir.path(),
@@ -1328,7 +1670,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
 
         // "deploy" doesn't match any run ID prefix, so falls back to workflow name
@@ -1353,7 +1695,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
         make_run_dir(
             dir.path(),
@@ -1367,7 +1709,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
 
         // "deploy" matches run_id prefix of first run — should prefer that over workflow name match
@@ -1399,7 +1741,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
         make_run_dir(
             dir.path(),
@@ -1413,7 +1755,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
 
         let result = resolve_run(dir.path(), "abc");
@@ -1439,7 +1781,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
 
         // Slug-style input should match PascalCase workflow name
@@ -1462,7 +1804,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
 
         let info = resolve_run(dir.path(), "smoke").unwrap();
@@ -1486,7 +1828,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            false,
+            None,
         );
 
         let info = resolve_run(dir.path(), "foo").unwrap();
@@ -1517,7 +1859,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 300000
             })),
-            false,
+            Some((RunStatus::Succeeded, Some(StatusReason::Completed))),
         );
 
         let runs = scan_runs(base).unwrap();
@@ -1547,7 +1889,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            true,
+            Some((RunStatus::Running, None)),
         );
 
         let runs = scan_runs(base).unwrap();
@@ -1582,7 +1924,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 1000
             })),
-            false,
+            None,
         );
 
         let args = RunsPruneArgs {
@@ -1618,7 +1960,7 @@ mod tests {
                 "edge_count": 0
             })),
             None,
-            true, // running
+            Some((RunStatus::Running, None)), // running
         );
 
         let args = RunsPruneArgs {
@@ -1658,7 +2000,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 1000
             })),
-            false,
+            None,
         );
 
         let args = RunsPruneArgs {
@@ -1703,7 +2045,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 1000
             })),
-            false,
+            None,
         );
 
         let args = RunsPruneArgs {
@@ -1751,18 +2093,20 @@ mod tests {
     }
 
     #[test]
-    fn run_status_serializes_as_flat_string() {
-        let concluded = RunStatus::Concluded(crate::outcome::StageStatus::Success);
-        assert_eq!(serde_json::to_string(&concluded).unwrap(), "\"success\"");
-
-        let running = RunStatus::Running;
-        assert_eq!(serde_json::to_string(&running).unwrap(), "\"running\"");
-
-        let unknown = RunStatus::Unknown;
-        assert_eq!(serde_json::to_string(&unknown).unwrap(), "\"unknown\"");
-
-        let fail = RunStatus::Concluded(crate::outcome::StageStatus::Fail);
-        assert_eq!(serde_json::to_string(&fail).unwrap(), "\"fail\"");
+    fn run_status_serializes_as_snake_case_string() {
+        assert_eq!(
+            serde_json::to_string(&RunStatus::Succeeded).unwrap(),
+            "\"succeeded\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RunStatus::Running).unwrap(),
+            "\"running\""
+        );
+        assert_eq!(serde_json::to_string(&RunStatus::Dead).unwrap(), "\"dead\"");
+        assert_eq!(
+            serde_json::to_string(&RunStatus::Failed).unwrap(),
+            "\"failed\""
+        );
     }
 
     // === Step 3: disk space reporting tests ===
@@ -1806,7 +2150,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 1000
             })),
-            false,
+            None,
         );
 
         // Run completed 1 day ago — should NOT be pruned with --older-than 2d
@@ -1827,7 +2171,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 1000
             })),
-            false,
+            None,
         );
 
         // Run completed 10 days ago — should be pruned with --older-than 7d
@@ -1848,7 +2192,7 @@ mod tests {
                 "status": "success",
                 "duration_ms": 1000
             })),
-            false,
+            None,
         );
 
         // With --older-than 7d, only the 10-day-old run should be pruned
@@ -1876,5 +2220,240 @@ mod tests {
             !dir_very_old.exists(),
             "10-day-old run should be pruned with 7d threshold"
         );
+    }
+
+    // === status.json tests ===
+
+    #[test]
+    fn read_status_from_status_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        write_run_status(dir, RunStatus::Running, None);
+        let si = read_status(dir);
+        assert_eq!(si.status, RunStatus::Running);
+    }
+
+    #[test]
+    fn read_status_succeeded_with_conclusion_has_duration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        write_run_status(dir, RunStatus::Succeeded, Some(StatusReason::Completed));
+        fs::write(
+            dir.join("conclusion.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "timestamp": "2026-01-01T12:01:00Z",
+                "status": "success",
+                "duration_ms": 60000
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let si = read_status(dir);
+        assert_eq!(si.status, RunStatus::Succeeded);
+        assert_eq!(si.duration_ms, Some(60000));
+    }
+
+    #[test]
+    fn read_status_no_status_json_is_dead() {
+        let tmp = tempfile::tempdir().unwrap();
+        let si = read_status(tmp.path());
+        assert_eq!(si.status, RunStatus::Dead);
+    }
+
+    #[test]
+    fn scan_runs_status_json_without_manifest_is_not_orphan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+
+        let dir = base.join("20260301-STARTING");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("id.txt"), "starting-run-id").unwrap();
+        write_run_status(
+            &dir,
+            RunStatus::Starting,
+            Some(StatusReason::SandboxInitializing),
+        );
+
+        let runs = scan_runs(base).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert!(!runs[0].is_orphan);
+        assert_eq!(runs[0].status, RunStatus::Starting);
+        assert_eq!(runs[0].workflow_name, "[starting]");
+    }
+
+    #[test]
+    fn scan_runs_no_status_json_no_manifest_is_orphan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+
+        let dir = base.join("20260301-ORPHAN");
+        fs::create_dir_all(&dir).unwrap();
+
+        let runs = scan_runs(base).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert!(runs[0].is_orphan);
+        assert_eq!(runs[0].status, RunStatus::Dead);
+    }
+
+    #[test]
+    fn filter_runs_running_only_includes_starting_runs() {
+        let runs = vec![RunInfo {
+            run_id: "starting-1".into(),
+            dir_name: "d1".into(),
+            workflow_name: "[starting]".into(),
+            workflow_slug: None,
+            status: RunStatus::Starting,
+            status_reason: Some(StatusReason::SandboxInitializing),
+            start_time: "2026-01-01T00:00:00Z".into(),
+            labels: HashMap::new(),
+            duration_ms: None,
+            total_cost: None,
+            host_repo_path: None,
+            start_time_dt: None,
+            end_time: None,
+            path: PathBuf::from("/tmp/d1"),
+            goal: String::new(),
+            is_orphan: false,
+        }];
+
+        let filtered = filter_runs(&runs, None, None, &[], false, StatusFilter::RunningOnly);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].run_id, "starting-1");
+    }
+
+    #[test]
+    fn truncate_goal_short_string_unchanged() {
+        assert_eq!(truncate_goal("short", 50), "short");
+    }
+
+    #[test]
+    fn truncate_goal_long_string_truncated() {
+        let long = "a]".repeat(30); // 60 chars
+        let result = truncate_goal(&long, 50);
+        assert_eq!(result.chars().count(), 50);
+        assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn truncate_goal_multibyte_safe() {
+        let emoji_str = "Hello \u{1F600} world \u{1F600} test \u{1F600} more text here padding";
+        // Should not panic
+        let result = truncate_goal(emoji_str, 15);
+        assert_eq!(result.chars().count(), 15);
+        assert!(result.ends_with("..."));
+    }
+
+    fn make_succeeded_run(base: &Path, run_id: &str) -> PathBuf {
+        make_run_dir(
+            base,
+            &format!("20260101-{run_id}"),
+            Some(serde_json::json!({
+                "run_id": run_id,
+                "workflow_name": "test-wf",
+                "goal": "test",
+                "start_time": "2026-01-01T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0,
+                "labels": {}
+            })),
+            None,
+            Some((RunStatus::Succeeded, Some(StatusReason::Completed))),
+        )
+    }
+
+    fn make_running_run(base: &Path, run_id: &str) -> PathBuf {
+        make_run_dir(
+            base,
+            &format!("20260101-{run_id}"),
+            Some(serde_json::json!({
+                "run_id": run_id,
+                "workflow_name": "test-wf",
+                "goal": "test",
+                "start_time": "2026-01-01T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0,
+                "labels": {}
+            })),
+            None,
+            Some((RunStatus::Running, None)),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_remove_succeeded_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let dir = make_succeeded_run(base, "RUN1");
+        assert!(dir.exists());
+
+        let args = RunsRemoveArgs {
+            runs: vec!["RUN1".to_string()],
+            force: false,
+        };
+        remove_from(&args, base).await.unwrap();
+        assert!(!dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_remove_active_run_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let dir = make_running_run(base, "ACTIVE1");
+        assert!(dir.exists());
+
+        let args = RunsRemoveArgs {
+            runs: vec!["ACTIVE1".to_string()],
+            force: false,
+        };
+        let result = remove_from(&args, base).await;
+        assert!(result.is_err());
+        assert!(dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_remove_active_run_forced() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let dir = make_running_run(base, "ACTIVE2");
+        assert!(dir.exists());
+
+        let args = RunsRemoveArgs {
+            runs: vec!["ACTIVE2".to_string()],
+            force: true,
+        };
+        remove_from(&args, base).await.unwrap();
+        assert!(!dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_remove_unknown_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        fs::create_dir_all(base).unwrap();
+
+        let args = RunsRemoveArgs {
+            runs: vec!["NONEXISTENT".to_string()],
+            force: false,
+        };
+        let result = remove_from(&args, base).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_remove_multiple_runs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let dir1 = make_succeeded_run(base, "MULTI1");
+        let dir2 = make_succeeded_run(base, "MULTI2");
+        assert!(dir1.exists());
+        assert!(dir2.exists());
+
+        let args = RunsRemoveArgs {
+            runs: vec!["MULTI1".to_string(), "MULTI2".to_string()],
+            force: false,
+        };
+        remove_from(&args, base).await.unwrap();
+        assert!(!dir1.exists());
+        assert!(!dir2.exists());
     }
 }

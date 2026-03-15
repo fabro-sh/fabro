@@ -53,6 +53,7 @@ sha2 = { workspace = true }
 shlex = "1"
 strsim = "0.11"
 git2.workspace = true
+cli-table.workspace = true
 console.workspace = true
 indicatif.workspace = true
 tokio-util.workspace = true

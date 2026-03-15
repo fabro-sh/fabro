@@ -1,9 +1,9 @@
 ```console
 $ fabro model list --provider anthropic
-MODEL                          PROVIDER     ALIASES                     CONTEXT     COST                SPEED
-claude-opus-4-6                anthropic    opus, claude-opus                1m    $15.0 / $75.0      25 tok/s
-claude-sonnet-4-5              anthropic                                   200k     $3.0 / $15.0      50 tok/s
-claude-sonnet-4-6              anthropic    sonnet, claude-sonnet          200k     $3.0 / $15.0      50 tok/s
-claude-haiku-4-5               anthropic    haiku, claude-haiku            200k     $0.8 / $4.0      100 tok/s
-
+[0m [0m[0m[0m[1mMODEL            [0m [0m[0m [0m[0m[0m[1mPROVIDER [0m [0m[0m [0m[0m[0m[1mALIASES              [0m [0m[0m [0m[0m[0m[1mCONTEXT[0m [0m[0m [0m[0m[0m[1m         COST[0m [0m[0m [0m[0m[0m[1m    SPEED[0m [0m
+[0m[0m [0m[0m[0mclaude-opus-4-6  [0m [0m[0m [0m[0m[0manthropic[0m [0m[0m [0m[0m[0mopus, claude-opus    [0m [0m[0m [0m[0m[0m     1m[0m [0m[0m [0m[0m[0m$15.0 / $75.0[0m [0m[0m [0m[0m[0m 25 tok/s[0m [0m
+[0m[0m [0m[0m[0mclaude-sonnet-4-5[0m [0m[0m [0m[0m[0manthropic[0m [0m[0m [0m[0m[0m                     [0m [0m[0m [0m[0m[0m   200k[0m [0m[0m [0m[0m[0m $3.0 / $15.0[0m [0m[0m [0m[0m[0m 50 tok/s[0m [0m
+[0m[0m [0m[0m[0mclaude-sonnet-4-6[0m [0m[0m [0m[0m[0manthropic[0m [0m[0m [0m[0m[0msonnet, claude-sonnet[0m [0m[0m [0m[0m[0m   200k[0m [0m[0m [0m[0m[0m $3.0 / $15.0[0m [0m[0m [0m[0m[0m 50 tok/s[0m [0m
+[0m[0m [0m[0m[0mclaude-haiku-4-5 [0m [0m[0m [0m[0m[0manthropic[0m [0m[0m [0m[0m[0mhaiku, claude-haiku  [0m [0m[0m [0m[0m[0m   200k[0m [0m[0m [0m[0m[0m  $0.8 / $4.0[0m [0m[0m [0m[0m[0m100 tok/s[0m [0m
+[0m
 ```

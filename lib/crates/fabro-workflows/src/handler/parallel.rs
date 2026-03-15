@@ -329,6 +329,10 @@ impl Handler for ParallelHandler {
                         "failed to create branch {branch_name}"
                     )));
                 }
+                services.emitter.emit(&WorkflowRunEvent::GitBranch {
+                    branch: branch_name.clone(),
+                    sha: bsha.clone(),
+                });
                 if !crate::engine::git_replace_worktree(
                     &*services.sandbox,
                     &wt_path_str,
@@ -340,6 +344,10 @@ impl Handler for ParallelHandler {
                         "failed to add worktree {wt_path_str}"
                     )));
                 }
+                services.emitter.emit(&WorkflowRunEvent::GitWorktreeAdd {
+                    path: wt_path_str.clone(),
+                    branch: branch_name.clone(),
+                });
                 let reset_cmd = format!("{} reset --hard {bsha}", crate::engine::GIT_REMOTE);
                 let reset_result = services
                     .sandbox
@@ -350,6 +358,9 @@ impl Handler for ParallelHandler {
                         "failed to reset worktree {wt_path_str}"
                     )));
                 }
+                services
+                    .emitter
+                    .emit(&WorkflowRunEvent::GitReset { sha: bsha.clone() });
 
                 branch_context.set(keys::INTERNAL_WORK_DIR, serde_json::json!(&wt_path_str));
 
@@ -476,7 +487,14 @@ impl Handler for ParallelHandler {
                         .exec_command(&sha_cmd, 10_000, None, None, None)
                         .await;
                     match sha_result {
-                        Ok(r) if r.exit_code == 0 => Some(r.stdout.trim().to_string()),
+                        Ok(r) if r.exit_code == 0 => {
+                            let sha = r.stdout.trim().to_string();
+                            emitter.emit(&WorkflowRunEvent::GitCommit {
+                                node_id: Some(setup.target_id.clone()),
+                                sha: sha.clone(),
+                            });
+                            Some(sha)
+                        }
                         _ => None,
                     }
                 } else {
@@ -571,6 +589,9 @@ impl Handler for ParallelHandler {
                 if let Some(ref wt_path) = result.worktree_path {
                     let wt_str = wt_path.to_string_lossy().to_string();
                     crate::engine::git_remove_worktree(&*services.sandbox, &wt_str).await;
+                    services
+                        .emitter
+                        .emit(&WorkflowRunEvent::GitWorktreeRemove { path: wt_str });
                 }
             }
 
