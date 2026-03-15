@@ -161,8 +161,12 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 .map(|t| -> DateTime<Utc> { t.into() });
             let mtime = mtime_dt.map(|dt| dt.to_rfc3339()).unwrap_or_default();
 
+            let run_id = std::fs::read_to_string(path.join("id.txt"))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|_| dir_name.clone());
+
             runs.push(RunInfo {
-                run_id: dir_name.clone(),
+                run_id,
                 dir_name,
                 workflow_name: "[no manifest]".to_string(),
                 workflow_slug: None,
