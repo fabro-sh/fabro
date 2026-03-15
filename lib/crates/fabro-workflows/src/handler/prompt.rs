@@ -37,20 +37,7 @@ impl Handler for PromptHandler {
         _run_dir: &Path,
         _services: &EngineServices,
     ) -> Result<Outcome, FabroError> {
-        let simulated_text = format!("[Simulated] Response for stage: {}", node.id);
-        let mut outcome = Outcome::simulated(&node.id);
-        outcome
-            .context_updates
-            .insert(keys::LAST_STAGE.to_string(), serde_json::json!(node.id));
-        outcome.context_updates.insert(
-            keys::LAST_RESPONSE.to_string(),
-            serde_json::json!(super::agent::truncate(&simulated_text, 200)),
-        );
-        outcome.context_updates.insert(
-            keys::response_key(&node.id),
-            serde_json::json!(&simulated_text),
-        );
-        Ok(outcome)
+        Ok(super::agent::simulate_llm_handler(node))
     }
 
     async fn execute(

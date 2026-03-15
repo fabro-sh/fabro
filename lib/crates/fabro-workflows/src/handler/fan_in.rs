@@ -54,6 +54,7 @@ impl Handler for FanInHandler {
             keys::PARALLEL_FAN_IN_BEST_OUTCOME.to_string(),
             serde_json::json!(best.status),
         );
+        // Override the generic simulated notes with handler-specific detail.
         outcome.notes = Some(format!("[Simulated] Selected best candidate: {}", best.id));
         Ok(outcome)
     }

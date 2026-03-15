@@ -42,7 +42,7 @@ impl Handler for CommandHandler {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        let mut outcome = Outcome::success();
+        let mut outcome = Outcome::simulated(&node.id);
         outcome.notes = Some(format!("[Simulated] Command skipped: {script}"));
         outcome
             .context_updates
