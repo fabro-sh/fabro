@@ -1,0 +1,187 @@
+diff --git a/lib/crates/fabro-workflows/src/asset_snapshot.rs b/lib/crates/fabro-workflows/src/asset_snapshot.rs
+index 805199a..057ef3f 100644
+--- a/lib/crates/fabro-workflows/src/asset_snapshot.rs
++++ b/lib/crates/fabro-workflows/src/asset_snapshot.rs
+@@ -21,8 +21,8 @@ pub struct AssetCollectionSummary {
+     pub copied_paths: Vec<String>,
+ }
+ 
+-/// Directories to exclude from the find search.
+-const EXCLUDE_DIRS: &[&str] = &[
++/// Directories to exclude from the find search and checkpoint commits.
++pub const EXCLUDE_DIRS: &[&str] = &[
+     ".git",
+     "node_modules",
+     ".pnpm-store",
+@@ -30,8 +30,18 @@ const EXCLUDE_DIRS: &[&str] = &[
+     "target",
+     ".next",
+     "__pycache__",
++    ".venv",
++    "venv",
++    ".cache",
++    ".tox",
++    ".pytest_cache",
++    ".mypy_cache",
++    "dist",
+ ];
+ 
++/// Maximum number of files to collect.
++const MAX_FILE_COUNT: usize = 100;
++
+ /// Maximum size for a single file (10 MB).
+ const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
+ 
+@@ -189,10 +199,13 @@ pub fn select_files_to_collect(
+     // Sort by size ascending (smallest first)
+     candidates.sort_by_key(|f| f.size);
+ 
+-    // Enforce total budget
++    // Enforce total budget and count limit
+     let mut total: u64 = 0;
+     let mut selected = Vec::new();
+     for f in candidates {
++        if selected.len() >= MAX_FILE_COUNT {
++            break;
++        }
+         if total + f.size > MAX_TOTAL_SIZE {
+             break;
+         }
+@@ -742,4 +755,37 @@ mod tests {
+         let paths = collect_asset_paths(tmp.path());
+         assert!(paths.is_empty());
+     }
++
++    #[test]
++    fn select_files_enforces_count_limit() {
++        // Create 150 small, recent files — should be capped at MAX_FILE_COUNT (100)
++        let discovered: Vec<DiscoveredFile> = (0..150)
++            .map(|i| DiscoveredFile {
++                relative_path: format!("file{i}.txt"),
++                size: 100, // tiny files, well within total budget
++                mtime_epoch_secs: 2000.0,
++            })
++            .collect();
++        let selected = select_files_to_collect(&discovered, 1000.0);
++        assert_eq!(selected.len(), MAX_FILE_COUNT);
++    }
++
++    #[test]
++    fn build_find_command_excludes_venv() {
++        let globs = vec!["*.xml".to_string()];
++        let cmd = build_find_command("/workspace", "linux", &globs);
++        assert!(cmd.contains(".venv"), "expected .venv in prune clause");
++        assert!(cmd.contains("venv"), "expected venv in prune clause");
++        assert!(cmd.contains(".cache"), "expected .cache in prune clause");
++        assert!(cmd.contains(".tox"), "expected .tox in prune clause");
++        assert!(
++            cmd.contains(".pytest_cache"),
++            "expected .pytest_cache in prune clause"
++        );
++        assert!(
++            cmd.contains(".mypy_cache"),
++            "expected .mypy_cache in prune clause"
++        );
++        assert!(cmd.contains("dist"), "expected dist in prune clause");
++    }
+ }
+diff --git a/lib/crates/fabro-workflows/src/engine.rs b/lib/crates/fabro-workflows/src/engine.rs
+index d9a71b8..116748f 100644
+--- a/lib/crates/fabro-workflows/src/engine.rs
++++ b/lib/crates/fabro-workflows/src/engine.rs
+@@ -572,11 +572,19 @@ pub async fn git_checkpoint(
+     exclude_globs: &[String],
+     author: &crate::git::GitAuthor,
+ ) -> std::result::Result<String, String> {
+-    // Stage everything (with optional excludes)
+-    let add_cmd = if exclude_globs.is_empty() {
++    // Stage everything, always excluding EXCLUDE_DIRS plus any user-configured globs
++    let mut all_excludes: Vec<String> = asset_snapshot::EXCLUDE_DIRS
++        .iter()
++        .map(|d| format!("**/{d}/**"))
++        .collect();
++    all_excludes.extend(exclude_globs.iter().cloned());
++    all_excludes.sort();
++    all_excludes.dedup();
++
++    let add_cmd = if all_excludes.is_empty() {
+         format!("{GIT_REMOTE} add -A")
+     } else {
+-        let pathspecs: Vec<String> = exclude_globs
++        let pathspecs: Vec<String> = all_excludes
+             .iter()
+             .map(|g| format!("':(glob,exclude){g}'"))
+             .collect();
+@@ -5117,6 +5125,72 @@ mod tests {
+         );
+     }
+ 
++    #[tokio::test]
++    async fn git_checkpoint_includes_builtin_excludes() {
++        // Set up a real git repo
++        let repo_dir = tempfile::tempdir().unwrap();
++        let repo = repo_dir.path();
++        std::process::Command::new("git")
++            .args(["init"])
++            .current_dir(repo)
++            .output()
++            .unwrap();
++        std::process::Command::new("git")
++            .args([
++                "-c",
++                "user.name=Test",
++                "-c",
++                "user.email=test@test.com",
++                "commit",
++                "--allow-empty",
++                "-m",
++                "initial",
++            ])
++            .current_dir(repo)
++            .output()
++            .unwrap();
++
++        // Create files in both tracked and excluded directories
++        std::fs::write(repo.join("hello.txt"), "hello").unwrap();
++        std::fs::create_dir_all(repo.join("node_modules/pkg")).unwrap();
++        std::fs::write(repo.join("node_modules/pkg/index.js"), "module").unwrap();
++        std::fs::create_dir_all(repo.join(".venv/lib")).unwrap();
++        std::fs::write(repo.join(".venv/lib/site.py"), "venv").unwrap();
++
++        let sandbox = fabro_agent::LocalSandbox::new(repo.to_path_buf());
++        let author = crate::git::GitAuthor::default();
++
++        // Call git_checkpoint with empty user excludes — built-in excludes should still apply
++        let result =
++            git_checkpoint(&sandbox, "run1", "work", "success", 1, None, &[], &author).await;
++        assert!(result.is_ok(), "git_checkpoint failed: {:?}", result.err());
++
++        // Verify that excluded directories were NOT staged
++        let status = sandbox
++            .exec_command(
++                "git diff --cached --name-only HEAD~1",
++                10_000,
++                None,
++                None,
++                None,
++            )
++            .await
++            .unwrap();
++        let staged_files: Vec<&str> = status.stdout.lines().collect();
++        assert!(
++            staged_files.contains(&"hello.txt"),
++            "expected hello.txt to be staged, got: {staged_files:?}"
++        );
++        assert!(
++            !staged_files.iter().any(|f| f.contains("node_modules")),
++            "node_modules should be excluded from checkpoint, got: {staged_files:?}"
++        );
++        assert!(
++            !staged_files.iter().any(|f| f.contains(".venv")),
++            ".venv should be excluded from checkpoint, got: {staged_files:?}"
++        );
++    }
++
+     #[tokio::test]
+     async fn git_checkpoint_skipped_for_start_node() {
+         // Set up a real git repo for checkpoint testing
