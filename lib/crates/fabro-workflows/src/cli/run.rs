@@ -271,6 +271,35 @@ fn resolve_fallback_chain(
     }
 }
 
+/// Mint a GitHub App Installation Access Token with the given permissions.
+///
+/// Signs a JWT, resolves `owner/repo` from `origin_url`, and requests a
+/// scoped token. Returns the token string on success.
+async fn mint_github_token(
+    creds: &fabro_github::GitHubAppCredentials,
+    origin_url: &str,
+    permissions: &HashMap<String, String>,
+) -> anyhow::Result<String> {
+    let https_url = fabro_github::ssh_url_to_https(origin_url);
+    let (owner, repo) =
+        fabro_github::parse_github_owner_repo(&https_url).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let jwt = fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let client = reqwest::Client::new();
+    let perms_json = serde_json::to_value(permissions)?;
+    let token = fabro_github::create_installation_access_token_with_permissions(
+        &client,
+        &jwt,
+        &owner,
+        &repo,
+        fabro_github::GITHUB_API_BASE_URL,
+        perms_json,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(token)
+}
+
 /// Accumulates token usage and cost across all workflow stages.
 #[derive(Default)]
 struct CostAccumulator {
@@ -1095,6 +1124,34 @@ pub async fn run_command(
         }
         env
     };
+
+    // Mint a GitHub App IAT and inject as GITHUB_TOKEN if [github] permissions are declared
+    let mut sandbox_env = sandbox_env;
+    let github_permissions = run_cfg
+        .as_ref()
+        .and_then(|c| c.github.as_ref())
+        .or(run_defaults.github.as_ref());
+    if let Some(gh_cfg) = github_permissions {
+        if !gh_cfg.permissions.is_empty() {
+            if let (Some(ref creds), Some(ref url)) = (&github_app, &origin_url) {
+                match mint_github_token(creds, url, &gh_cfg.permissions).await {
+                    Ok(token) => {
+                        debug!("Minted GitHub IAT for sandbox GITHUB_TOKEN");
+                        sandbox_env.insert("GITHUB_TOKEN".to_string(), token);
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "{} Failed to mint GitHub token: {e}",
+                            styles.yellow.apply_to("Warning:"),
+                        );
+                    }
+                }
+            } else {
+                debug!("Skipping GitHub token: no GitHub App credentials or origin URL");
+            }
+        }
+    }
+
     let mcp_servers: Vec<fabro_mcp::config::McpServerConfig> = {
         let servers = run_cfg
             .as_ref()
@@ -2020,6 +2077,7 @@ async fn run_preflight(
     let exe_config = resolve_exe_config(run_cfg.as_ref(), run_defaults);
     let ssh_config = resolve_ssh_config(run_cfg.as_ref(), run_defaults);
 
+    let github_app_for_preflight = github_app.clone();
     let sandbox_result: Result<Arc<dyn Sandbox>, String> = match sandbox_provider {
         SandboxProvider::Docker => {
             let config = DockerSandboxConfig {
@@ -2205,7 +2263,60 @@ async fn run_preflight(
         }
     };
 
-    // 5. Render report
+    // 5. GitHub token preflight
+    let github_permissions = run_cfg
+        .as_ref()
+        .and_then(|c| c.github.as_ref())
+        .or(run_defaults.github.as_ref());
+    if let Some(gh_cfg) = github_permissions {
+        if !gh_cfg.permissions.is_empty() {
+            match (&github_app_for_preflight, origin_url) {
+                (Some(creds), Some(url)) => {
+                    match mint_github_token(creds, url, &gh_cfg.permissions).await {
+                        Ok(_) => {
+                            checks.push(CheckResult {
+                                name: "GitHub Token".into(),
+                                status: CheckStatus::Pass,
+                                summary: "minted".into(),
+                                details: gh_cfg
+                                    .permissions
+                                    .iter()
+                                    .map(|(k, v)| CheckDetail::new(format!("{k}: {v}")))
+                                    .collect(),
+                                remediation: None,
+                            });
+                        }
+                        Err(e) => {
+                            checks.push(CheckResult {
+                                name: "GitHub Token".into(),
+                                status: CheckStatus::Error,
+                                summary: "failed".into(),
+                                details: gh_cfg
+                                    .permissions
+                                    .iter()
+                                    .map(|(k, v)| CheckDetail::new(format!("{k}: {v}")))
+                                    .collect(),
+                                remediation: Some(format!("Failed to mint GitHub token: {e}")),
+                            });
+                        }
+                    }
+                }
+                _ => {
+                    checks.push(CheckResult {
+                        name: "GitHub Token".into(),
+                        status: CheckStatus::Warning,
+                        summary: "skipped".into(),
+                        details: vec![],
+                        remediation: Some(
+                            "No GitHub App credentials or origin URL available".to_string(),
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    // 6. Render report
     spinner.finish_and_clear();
 
     let report = CheckReport {
@@ -2571,6 +2682,7 @@ mod tests {
             pull_request: None,
             assets: None,
             mcp_servers: Default::default(),
+            github: None,
         };
         let (model, provider) = resolve_model_provider(
             Some("gpt-5.2"),
@@ -2615,6 +2727,7 @@ mod tests {
             pull_request: None,
             assets: None,
             mcp_servers: Default::default(),
+            github: None,
         };
         let (model, provider) = resolve_model_provider(None, None, Some(&cfg), &defaults, &graph);
         assert_eq!(model, "toml-model");
@@ -2694,6 +2807,7 @@ mod tests {
             pull_request: None,
             assets: None,
             mcp_servers: Default::default(),
+            github: None,
         };
         let (model, provider) = resolve_model_provider(None, None, Some(&cfg), &defaults, &graph);
         assert_eq!(model, "toml-model");
@@ -2726,6 +2840,7 @@ mod tests {
             pull_request: None,
             assets: None,
             mcp_servers: Default::default(),
+            github: None,
         };
         let defaults = RunDefaults::default();
         assert!(resolve_preserve_sandbox(true, Some(&cfg), &defaults));
@@ -2757,6 +2872,7 @@ mod tests {
             pull_request: None,
             assets: None,
             mcp_servers: Default::default(),
+            github: None,
         };
         let defaults = RunDefaults {
             sandbox: Some(run_config::SandboxConfig {
@@ -2837,6 +2953,7 @@ mod tests {
             pull_request: None,
             assets: None,
             mcp_servers: Default::default(),
+            github: None,
         };
         let defaults = RunDefaults::default();
         assert_eq!(
@@ -2897,6 +3014,7 @@ mod tests {
             pull_request: None,
             assets: None,
             mcp_servers: Default::default(),
+            github: None,
         };
         let defaults = RunDefaults {
             sandbox: Some(run_config::SandboxConfig {

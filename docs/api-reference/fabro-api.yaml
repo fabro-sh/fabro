@@ -4306,6 +4306,18 @@ components:
           additionalProperties:
             $ref: "#/components/schemas/McpServerEntry"
           description: Default MCP server configurations.
+        github:
+          $ref: "#/components/schemas/GitHubConfiguration"
+
+    GitHubConfiguration:
+      description: GitHub App token injection configuration.
+      type: object
+      properties:
+        permissions:
+          type: object
+          additionalProperties:
+            type: string
+          description: GitHub API permissions to request (e.g. contents = write).
 
     McpServerEntry:
       description: MCP server connection entry.

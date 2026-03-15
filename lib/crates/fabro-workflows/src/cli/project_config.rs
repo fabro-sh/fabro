@@ -5,8 +5,8 @@ use anyhow::{bail, Context};
 use serde::Deserialize;
 
 use super::run_config::{
-    AssetsConfig, CheckpointConfig, LlmConfig, McpServerEntry, PullRequestConfig, RunDefaults,
-    SandboxConfig, SetupConfig,
+    AssetsConfig, CheckpointConfig, GitHubConfig, LlmConfig, McpServerEntry, PullRequestConfig,
+    RunDefaults, SandboxConfig, SetupConfig,
 };
 use crate::hook::HookDefinition;
 
@@ -33,6 +33,7 @@ pub struct ProjectConfig {
     pub hooks: Vec<HookDefinition>,
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerEntry>,
+    pub github: Option<GitHubConfig>,
 }
 
 impl ProjectConfig {
@@ -49,6 +50,7 @@ impl ProjectConfig {
             assets: self.assets,
             hooks: self.hooks,
             mcp_servers: self.mcp_servers,
+            github: self.github,
         }
     }
 }
@@ -910,5 +912,33 @@ provider = "daytona"
             read_workflow_goal(Path::new("/nonexistent/workflow.toml")),
             None
         );
+    }
+
+    #[test]
+    fn parse_project_config_with_github() {
+        let toml = r#"
+version = 1
+
+[github]
+permissions = { contents = "read" }
+"#;
+        let config = parse_project_config(toml).unwrap();
+        let github = config.github.unwrap();
+        assert_eq!(github.permissions["contents"], "read");
+    }
+
+    #[test]
+    fn into_run_defaults_preserves_github() {
+        let toml = r#"
+version = 1
+
+[github]
+permissions = { contents = "read", issues = "write" }
+"#;
+        let config = parse_project_config(toml).unwrap();
+        let defaults = config.into_run_defaults();
+        let github = defaults.github.unwrap();
+        assert_eq!(github.permissions["contents"], "read");
+        assert_eq!(github.permissions["issues"], "write");
     }
 }
