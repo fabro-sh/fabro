@@ -32,6 +32,7 @@ pub fn built_in_rules() -> Vec<Box<dyn LintRule>> {
         Box::new(StylesheetModelKnownRule),
         Box::new(UnresolvedFileRefRule),
         Box::new(ThreadIdRequiresFidelityFullRule),
+        Box::new(SelectionValidRule),
         Box::new(RandomSelectionNoConditionsRule),
     ]
 }
@@ -1091,7 +1092,38 @@ impl LintRule for ThreadIdRequiresFidelityFullRule {
     }
 }
 
-// --- Rule 23: random_selection_no_conditions (ERROR) ---
+// --- Rule 23: selection_valid (WARNING) ---
+
+struct SelectionValidRule;
+
+const VALID_SELECTIONS: &[&str] = &["deterministic", "random"];
+
+impl LintRule for SelectionValidRule {
+    fn name(&self) -> &'static str {
+        "selection_valid"
+    }
+
+    fn apply(&self, graph: &Graph) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        for node in graph.nodes.values() {
+            if let Some(sel) = node.attrs.get("selection").and_then(AttrValue::as_str) {
+                if !VALID_SELECTIONS.contains(&sel) {
+                    diagnostics.push(Diagnostic {
+                        rule: self.name().to_string(),
+                        severity: Severity::Warning,
+                        message: format!("Node '{}' has invalid selection mode '{sel}'", node.id),
+                        node_id: Some(node.id.clone()),
+                        edge: None,
+                        fix: Some(format!("Use one of: {}", VALID_SELECTIONS.join(", "))),
+                    });
+                }
+            }
+        }
+        diagnostics
+    }
+}
+
+// --- Rule 24: random_selection_no_conditions (ERROR) ---
 
 struct RandomSelectionNoConditionsRule;
 
@@ -3203,6 +3235,46 @@ mod tests {
         );
 
         let rule = ThreadIdRequiresFidelityFullRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- selection_valid rule tests ---
+
+    #[test]
+    fn selection_valid_known_values() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("pick");
+        node.attrs.insert(
+            "selection".to_string(),
+            AttrValue::String("random".to_string()),
+        );
+        g.nodes.insert("pick".to_string(), node);
+        let rule = SelectionValidRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn selection_valid_unknown_value_warns() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("pick");
+        node.attrs.insert(
+            "selection".to_string(),
+            AttrValue::String("randon".to_string()),
+        );
+        g.nodes.insert("pick".to_string(), node);
+        let rule = SelectionValidRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Warning);
+        assert_eq!(d[0].node_id.as_deref(), Some("pick"));
+    }
+
+    #[test]
+    fn selection_valid_no_attr_ok() {
+        let g = minimal_graph();
+        let rule = SelectionValidRule;
         let d = rule.apply(&g);
         assert!(d.is_empty());
     }
