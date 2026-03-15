@@ -43,7 +43,11 @@ pub struct CliGitConfig {
     pub author: crate::server::GitAuthorConfig,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+fn default_upgrade_check() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct CliConfig {
     pub mode: Option<ExecutionMode>,
     pub server: Option<ServerDefaults>,
@@ -53,10 +57,28 @@ pub struct CliConfig {
     pub prevent_idle_sleep: bool,
     #[serde(default)]
     pub verbose: bool,
+    #[serde(default = "default_upgrade_check")]
+    pub upgrade_check: bool,
     #[serde(default)]
     pub log: crate::server::LogConfig,
     #[serde(flatten)]
     pub run_defaults: RunDefaults,
+}
+
+impl Default for CliConfig {
+    fn default() -> Self {
+        Self {
+            mode: Default::default(),
+            server: Default::default(),
+            exec: Default::default(),
+            git: Default::default(),
+            prevent_idle_sleep: false,
+            verbose: false,
+            upgrade_check: true,
+            log: Default::default(),
+            run_defaults: Default::default(),
+        }
+    }
 }
 
 impl CliConfig {
@@ -458,5 +480,17 @@ command = ["echo"]
         assert_eq!(config.name, "my-server");
         assert_eq!(config.startup_timeout_secs, 15);
         assert_eq!(config.tool_timeout_secs, 90);
+    }
+
+    #[test]
+    fn parse_upgrade_check_false() {
+        let config: CliConfig = toml::from_str("upgrade_check = false").unwrap();
+        assert!(!config.upgrade_check);
+    }
+
+    #[test]
+    fn parse_upgrade_check_default_true() {
+        let config: CliConfig = toml::from_str("").unwrap();
+        assert!(config.upgrade_check);
     }
 }

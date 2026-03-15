@@ -55,6 +55,8 @@ dialoguer.workspace = true
 axum = "0.8"
 open = "5"
 serde_json.workspace = true
+tempfile = "3"
+sha2.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -66,7 +68,6 @@ chrono = { workspace = true }
 assert_cmd = "2"
 insta = { workspace = true }
 predicates = "3"
-tempfile = "3"
 serde_json.workspace = true
 httpmock = "0.8"
 trycmd = "0.15"
