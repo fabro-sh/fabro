@@ -685,7 +685,8 @@ async fn main_inner() -> (String, Result<()>) {
                 install::run_install().await?;
             }
             Command::Ps(args) => {
-                fabro_workflows::cli::runs::list_command(&args)?;
+                let styles = fabro_util::terminal::Styles::detect_stdout();
+                fabro_workflows::cli::runs::list_command(&args, &styles)?;
             }
             Command::Pr { command } => {
                 let cli_config = cli_config::load_cli_config(None)?;

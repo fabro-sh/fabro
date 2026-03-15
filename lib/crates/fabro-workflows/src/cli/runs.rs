@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use clap::Args;
+use fabro_util::terminal::Styles;
 use serde::Serialize;
 use tracing::{debug, info, warn};
 
@@ -70,6 +72,14 @@ pub struct RunsListArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+
+    /// Maximum number of runs to display (default: 10)
+    #[arg(long, default_value = "10")]
+    pub limit: usize,
+
+    /// Show all runs (overrides --limit)
+    #[arg(long)]
+    pub all: bool,
 }
 
 #[derive(Args)]
@@ -96,6 +106,10 @@ pub struct RunInfo {
     pub status: RunStatus,
     pub start_time: String,
     pub labels: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_cost: Option<f64>,
     #[serde(skip)]
     pub start_time_dt: Option<DateTime<Utc>>,
     #[serde(skip)]
@@ -137,18 +151,20 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
             let start_time = start_time_dt.to_rfc3339();
             let labels = manifest.labels;
 
-            let (status, end_time) = read_status(&path);
+            let si = read_status(&path);
 
             runs.push(RunInfo {
                 run_id,
                 dir_name,
                 workflow_name,
                 workflow_slug,
-                status,
+                status: si.status,
                 start_time,
                 labels,
+                duration_ms: si.duration_ms,
+                total_cost: si.total_cost,
                 start_time_dt: Some(start_time_dt),
-                end_time,
+                end_time: si.end_time,
                 path,
                 is_orphan: false,
             });
@@ -169,6 +185,8 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 status: RunStatus::Unknown,
                 start_time: mtime,
                 labels: HashMap::new(),
+                duration_ms: None,
+                total_cost: None,
                 start_time_dt: mtime_dt,
                 end_time: None,
                 path,
@@ -182,17 +200,36 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
     Ok(runs)
 }
 
-fn read_status(run_dir: &Path) -> (RunStatus, Option<DateTime<Utc>>) {
+struct StatusInfo {
+    status: RunStatus,
+    end_time: Option<DateTime<Utc>>,
+    duration_ms: Option<u64>,
+    total_cost: Option<f64>,
+}
+
+fn read_status(run_dir: &Path) -> StatusInfo {
     if let Ok(conclusion) = crate::conclusion::Conclusion::load(&run_dir.join("conclusion.json")) {
-        return (
-            RunStatus::Concluded(conclusion.status),
-            Some(conclusion.timestamp),
-        );
+        return StatusInfo {
+            status: RunStatus::Concluded(conclusion.status),
+            end_time: Some(conclusion.timestamp),
+            duration_ms: Some(conclusion.duration_ms),
+            total_cost: conclusion.total_cost,
+        };
     }
     if run_dir.join("run.pid").exists() {
-        return (RunStatus::Running, None);
+        return StatusInfo {
+            status: RunStatus::Running,
+            end_time: None,
+            duration_ms: None,
+            total_cost: None,
+        };
     }
-    (RunStatus::Unknown, None)
+    StatusInfo {
+        status: RunStatus::Unknown,
+        end_time: None,
+        duration_ms: None,
+        total_cost: None,
+    }
 }
 
 /// Filter runs by criteria. Orphans are excluded unless `include_orphans` is true.
@@ -345,7 +382,44 @@ fn collapse_separators(s: &str) -> String {
     s.chars().filter(|c| *c != '-' && *c != '_').collect()
 }
 
-pub fn list_command(args: &RunsListArgs) -> Result<()> {
+/// Format a `DateTime<Utc>` as a human-friendly relative string like "2m ago", "3h ago", "5d ago".
+fn format_relative_time(dt: &DateTime<Utc>) -> String {
+    let now = Utc::now();
+    let dur = now.signed_duration_since(*dt);
+    let secs = dur.num_seconds();
+    if secs < 0 {
+        return "just now".to_string();
+    }
+    if secs < 60 {
+        return "just now".to_string();
+    }
+    let mins = dur.num_minutes();
+    if mins < 60 {
+        return format!("{mins}m ago");
+    }
+    let hours = dur.num_hours();
+    if hours < 24 {
+        return format!("{hours}h ago");
+    }
+    let days = dur.num_days();
+    format!("{days}d ago")
+}
+
+fn style_status<'a>(status: &'a RunStatus, styles: &'a Styles) -> String {
+    let text = status.to_string();
+    match status {
+        RunStatus::Concluded(StageStatus::Success | StageStatus::PartialSuccess) => {
+            format!("{}", styles.bold_green.apply_to(&text))
+        }
+        RunStatus::Concluded(StageStatus::Fail) => {
+            format!("{}", styles.bold_red.apply_to(&text))
+        }
+        RunStatus::Running => format!("{}", styles.bold_cyan.apply_to(&text)),
+        _ => format!("{}", styles.dim.apply_to(&text)),
+    }
+}
+
+pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
     let base = default_runs_base();
     let runs = scan_runs(&base)?;
     let label_filters = parse_label_filters(&args.filter.label);
@@ -367,15 +441,19 @@ pub fn list_command(args: &RunsListArgs) -> Result<()> {
         return Ok(());
     }
 
+    let total = filtered.len();
+    let limit = if args.all { total } else { args.limit };
+    let display_runs: Vec<_> = filtered.iter().take(limit).collect();
+
     // Print table header
     let header = format!(
-        "{:<30} {:<25} {:<10} {:<25} LABELS",
-        "RUN ID", "WORKFLOW", "STATUS", "STARTED"
+        "{:<30} {:<25} {:<17} {:<10} {:<10} {:<10} LABELS",
+        "RUN ID", "WORKFLOW", "STATUS", "STARTED", "DURATION", "COST"
     );
-    println!("{header}");
-    println!("{}", "-".repeat(100));
+    println!("{}", styles.bold.apply_to(&header));
+    println!("{}", styles.dim.apply_to("-".repeat(110)));
 
-    for run in &filtered {
+    for run in &display_runs {
         let labels_str = run
             .labels
             .iter()
@@ -387,17 +465,40 @@ pub fn list_command(args: &RunsListArgs) -> Result<()> {
         } else {
             run.run_id.clone()
         };
-        let start_display = if run.start_time.len() > 23 {
-            run.start_time[..23].to_string()
-        } else {
-            run.start_time.clone()
-        };
+        let start_display = run
+            .start_time_dt
+            .as_ref()
+            .map(format_relative_time)
+            .unwrap_or_else(|| "-".to_string());
+        let duration_display = run
+            .duration_ms
+            .map(|ms| super::progress::format_duration_short(Duration::from_millis(ms)))
+            .unwrap_or_else(|| "-".to_string());
+        let cost_display = run
+            .total_cost
+            .map(super::format_cost)
+            .unwrap_or_else(|| "-".to_string());
+        let status_display = style_status(&run.status, styles);
         println!(
-            "{:<30} {:<25} {:<10} {:<25} {}",
-            run_id_display, run.workflow_name, run.status, start_display, labels_str
+            "{:<30} {:<25} {:<17} {:<10} {:<10} {:<10} {}",
+            styles.dim.apply_to(&run_id_display),
+            run.workflow_name,
+            status_display,
+            start_display,
+            duration_display,
+            cost_display,
+            styles.dim.apply_to(&labels_str),
         );
     }
-    eprintln!("\n{} run(s) listed.", filtered.len());
+
+    if total > limit {
+        eprintln!(
+            "\nShowing {} of {} run(s). Use --all to see all.",
+            limit, total
+        );
+    } else {
+        eprintln!("\n{} run(s) listed.", total);
+    }
     Ok(())
 }
 
@@ -830,6 +931,8 @@ mod tests {
                 status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
                 start_time: "2025-06-01T00:00:00Z".into(),
                 labels: HashMap::new(),
+                duration_ms: None,
+                total_cost: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d1"),
@@ -843,6 +946,8 @@ mod tests {
                 status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
                 start_time: "2026-03-01T00:00:00Z".into(),
                 labels: HashMap::new(),
+                duration_ms: None,
+                total_cost: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d2"),
@@ -865,6 +970,8 @@ mod tests {
                 status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
                 start_time: "2026-01-01T00:00:00Z".into(),
                 labels: HashMap::new(),
+                duration_ms: None,
+                total_cost: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d1"),
@@ -878,6 +985,8 @@ mod tests {
                 status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
                 start_time: "2026-01-01T00:00:00Z".into(),
                 labels: HashMap::new(),
+                duration_ms: None,
+                total_cost: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d2"),
@@ -900,6 +1009,8 @@ mod tests {
                 status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
                 start_time: "2026-01-01T00:00:00Z".into(),
                 labels: HashMap::from([("env".into(), "prod".into())]),
+                duration_ms: None,
+                total_cost: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d1"),
@@ -913,6 +1024,8 @@ mod tests {
                 status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
                 start_time: "2026-01-01T00:00:00Z".into(),
                 labels: HashMap::from([("env".into(), "staging".into())]),
+                duration_ms: None,
+                total_cost: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d2"),
@@ -940,6 +1053,8 @@ mod tests {
             status: RunStatus::Unknown,
             start_time: "".into(),
             labels: HashMap::new(),
+            duration_ms: None,
+            total_cost: None,
             start_time_dt: None,
             end_time: None,
             path: PathBuf::from("/tmp/d1"),
