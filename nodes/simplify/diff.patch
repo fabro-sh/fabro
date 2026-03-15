@@ -1,0 +1,87 @@
+diff --git a/apps/fabro-web/app/layouts/app-shell.tsx b/apps/fabro-web/app/layouts/app-shell.tsx
+index ac00c13..f926bcc 100644
+--- a/apps/fabro-web/app/layouts/app-shell.tsx
++++ b/apps/fabro-web/app/layouts/app-shell.tsx
+@@ -299,4 +299,4 @@ export default function AppShell({ loaderData }: Route.ComponentProps) {
+       </main>
+     </div>
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/apps/fabro-web/app/lib/config.server.ts b/apps/fabro-web/app/lib/config.server.ts
+index 1624fe1..dc22d99 100644
+--- a/apps/fabro-web/app/lib/config.server.ts
++++ b/apps/fabro-web/app/lib/config.server.ts
+@@ -107,4 +107,4 @@ export function getAppConfig(): AppConfig {
+ 
+ export function reloadAppConfig(): void {
+   appConfig = loadAppConfig();
+-}
+\ No newline at end of file
++}
+diff --git a/apps/fabro-web/app/routes/start.tsx b/apps/fabro-web/app/routes/start.tsx
+index 1f01d35..9b0a336 100644
+--- a/apps/fabro-web/app/routes/start.tsx
++++ b/apps/fabro-web/app/routes/start.tsx
+@@ -345,4 +345,4 @@ function Picker<T extends { id: string; name: string }>({
+       </div>
+     </Listbox>
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/docker/demo-server.toml b/docker/demo-server.toml
+index 113332e..53a1446 100644
+--- a/docker/demo-server.toml
++++ b/docker/demo-server.toml
+@@ -16,4 +16,4 @@ exclude_globs = [
+   "**/.cargo_target*/**",
+   "**/.wasm-pack/**",
+   "**/.tmpbuild/**",
+-]
+\ No newline at end of file
++]
+diff --git a/lib/crates/fabro-api/src/demo/mod.rs b/lib/crates/fabro-api/src/demo/mod.rs
+index d43d78a..c64b32a 100644
+--- a/lib/crates/fabro-api/src/demo/mod.rs
++++ b/lib/crates/fabro-api/src/demo/mod.rs
+@@ -3320,4 +3320,4 @@ mod settings {
+         })
+         .unwrap()
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-api/tests/openapi_conformance.rs b/lib/crates/fabro-api/tests/openapi_conformance.rs
+index b00dfaf..2ffb44a 100644
+--- a/lib/crates/fabro-api/tests/openapi_conformance.rs
++++ b/lib/crates/fabro-api/tests/openapi_conformance.rs
+@@ -396,4 +396,4 @@ fn server_config_keys_match_openapi_spec() {
+             errors.join("\n  ")
+         );
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/lib/crates/fabro-config/src/server.rs b/lib/crates/fabro-config/src/server.rs
+index 40088d4..178ce8e 100644
+--- a/lib/crates/fabro-config/src/server.rs
++++ b/lib/crates/fabro-config/src/server.rs
+@@ -479,14 +479,14 @@ matcher = "agent_loop"
+     }
+ 
+     #[test]
+-    fn parse_feature_flags() {
++    fn parse_features() {
+         let toml = "[features]\nsession_sandboxes = true";
+         let config: ServerConfig = toml::from_str(toml).unwrap();
+         assert!(config.features.session_sandboxes);
+     }
+ 
+     #[test]
+-    fn parse_feature_flags_defaults() {
++    fn parse_features_defaults() {
+         let toml = "";
+         let config: ServerConfig = toml::from_str(toml).unwrap();
+         assert!(!config.features.session_sandboxes);
