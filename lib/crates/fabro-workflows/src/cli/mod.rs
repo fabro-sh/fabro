@@ -1,3 +1,4 @@
+pub mod asset;
 pub mod backend;
 pub mod cli_backend;
 pub mod cp;
