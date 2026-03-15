@@ -1,0 +1,774 @@
+diff --git a/lib/crates/fabro-workflows/src/engine.rs b/lib/crates/fabro-workflows/src/engine.rs
+index d9a71b8..a26b418 100644
+--- a/lib/crates/fabro-workflows/src/engine.rs
++++ b/lib/crates/fabro-workflows/src/engine.rs
+@@ -974,7 +974,7 @@ impl WorkflowRunEngine {
+ 
+             // Gap #11: Panic safety -- catch panics from handler execution
+             let result = {
+-                let future = handler.execute(node, context, graph, run_dir, &self.services);
++                let future = crate::handler::dispatch_handler(handler, node, context, graph, run_dir, &self.services);
+                 let panic_safe = AssertUnwindSafe(future).catch_unwind();
+                 // Gap #2: Timeout enforcement -- wrap with tokio::time::timeout
+                 let timed_result = if let Some(duration) = node_timeout {
+@@ -5218,4 +5218,4 @@ mod tests {
+             "work node should have a git checkpoint, but found: {git_checkpoint_node_ids:?}"
+         );
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflows/src/handler/agent.rs b/lib/crates/fabro-workflows/src/handler/agent.rs
+index cd49ced..7a54327 100644
+--- a/lib/crates/fabro-workflows/src/handler/agent.rs
++++ b/lib/crates/fabro-workflows/src/handler/agent.rs
+@@ -198,6 +198,30 @@ pub(crate) fn truncate(s: &str, max_chars: usize) -> &str {
+ 
+ #[async_trait]
+ impl Handler for AgentHandler {
++    async fn simulate(
++        &self,
++        node: &Node,
++        _context: &Context,
++        _graph: &Graph,
++        _run_dir: &Path,
++        _services: &EngineServices,
++    ) -> Result<Outcome, FabroError> {
++        let simulated_text = format!("[Simulated] Response for stage: {}", node.id);
++        let mut outcome = Outcome::simulated(&node.id);
++        outcome
++            .context_updates
++            .insert(keys::LAST_STAGE.to_string(), serde_json::json!(node.id));
++        outcome.context_updates.insert(
++            keys::LAST_RESPONSE.to_string(),
++            serde_json::json!(truncate(&simulated_text, 200)),
++        );
++        outcome.context_updates.insert(
++            keys::response_key(&node.id),
++            serde_json::json!(&simulated_text),
++        );
++        Ok(outcome)
++    }
++
+     async fn execute(
+         &self,
+         node: &Node,
+@@ -353,37 +377,28 @@ mod tests {
+     }
+ 
+     #[tokio::test]
+-    async fn codergen_handler_simulation_mode() {
++    async fn codergen_handler_simulate() {
+         let handler = AgentHandler::new(None);
+-        let mut node = Node::new("plan");
+-        node.attrs.insert(
+-            "prompt".to_string(),
+-            AttrValue::String("Plan the implementation".to_string()),
+-        );
++        let node = Node::new("plan");
+         let context = Context::new();
+         let graph = Graph::new("test");
+         let tmp = TempDir::new().unwrap();
+ 
+         let outcome = handler
+-            .execute(&node, &context, &graph, tmp.path(), &make_services())
++            .simulate(&node, &context, &graph, tmp.path(), &make_services())
+             .await
+             .unwrap();
+         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+-        assert_eq!(outcome.notes.as_deref(), Some("Stage completed: plan"));
+-
+-        // Check files were written
+-        let prompt_path = tmp.path().join("nodes").join("plan").join("prompt.md");
+-        assert!(prompt_path.exists());
+-        let prompt_content = std::fs::read_to_string(&prompt_path).unwrap();
+-        assert_eq!(prompt_content, "Plan the implementation");
+-
+-        let response_path = tmp.path().join("nodes").join("plan").join("response.md");
+-        assert!(response_path.exists());
+-        let response_content = std::fs::read_to_string(&response_path).unwrap();
+-        assert!(response_content.contains("[Simulated]"));
+-
+-        let status_path = tmp.path().join("nodes").join("plan").join("status.json");
+-        assert!(status_path.exists());
++        assert_eq!(outcome.notes.as_deref(), Some("[Simulated] plan"));
++        assert_eq!(
++            outcome.context_updates.get(keys::LAST_STAGE),
++            Some(&serde_json::json!("plan"))
++        );
++        assert!(outcome.context_updates.contains_key(keys::LAST_RESPONSE));
++        assert_eq!(
++            outcome.context_updates.get(&keys::response_key("plan")),
++            Some(&serde_json::json!("[Simulated] Response for stage: plan"))
++        );
+     }
+ 
+     #[tokio::test]
+@@ -1100,4 +1115,4 @@ Some text in between.
+             "prompt.md should contain original prompt"
+         );
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflows/src/handler/command.rs b/lib/crates/fabro-workflows/src/handler/command.rs
+index fc524ee..b54ddb2 100644
+--- a/lib/crates/fabro-workflows/src/handler/command.rs
++++ b/lib/crates/fabro-workflows/src/handler/command.rs
+@@ -27,6 +27,32 @@ pub struct CommandHandler;
+ 
+ #[async_trait]
+ impl Handler for CommandHandler {
++    async fn simulate(
++        &self,
++        node: &Node,
++        _context: &Context,
++        _graph: &Graph,
++        _run_dir: &Path,
++        _services: &EngineServices,
++    ) -> Result<Outcome, FabroError> {
++        let script = node
++            .attrs
++            .get("script")
++            .or_else(|| node.attrs.get("tool_command"))
++            .and_then(|v| v.as_str())
++            .unwrap_or("");
++
++        let mut outcome = Outcome::success();
++        outcome.notes = Some(format!("[Simulated] Command skipped: {script}"));
++        outcome
++            .context_updates
++            .insert(keys::COMMAND_OUTPUT.to_string(), serde_json::json!(""));
++        outcome
++            .context_updates
++            .insert(keys::COMMAND_STDERR.to_string(), serde_json::json!(""));
++        Ok(outcome)
++    }
++
+     async fn execute(
+         &self,
+         node: &Node,
+@@ -46,18 +72,6 @@ impl Handler for CommandHandler {
+             return Ok(Outcome::fail_classify("No script specified"));
+         }
+ 
+-        if services.dry_run {
+-            let mut outcome = Outcome::success();
+-            outcome.notes = Some(format!("[Simulated] Command skipped: {script}"));
+-            outcome
+-                .context_updates
+-                .insert(keys::COMMAND_OUTPUT.to_string(), serde_json::json!(""));
+-            outcome
+-                .context_updates
+-                .insert(keys::COMMAND_STDERR.to_string(), serde_json::json!(""));
+-            return Ok(outcome);
+-        }
+-
+         let language = node
+             .attrs
+             .get("language")
+@@ -188,7 +202,7 @@ mod tests {
+     }
+ 
+     #[tokio::test]
+-    async fn dry_run_skips_execution() {
++    async fn simulate_skips_execution() {
+         let handler = CommandHandler;
+         let mut node = Node::new("script_node");
+         node.attrs.insert(
+@@ -199,19 +213,50 @@ mod tests {
+         let graph = Graph::new("test");
+         let run_dir = tempfile::tempdir().unwrap();
+ 
+-        let mut services = make_services();
+-        services.dry_run = true;
+-
+         let outcome = handler
+-            .execute(&node, &context, &graph, run_dir.path(), &services)
++            .simulate(&node, &context, &graph, run_dir.path(), &make_services())
+             .await
+             .unwrap();
+         assert_eq!(outcome.status, StageStatus::Success);
+         assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
+         assert!(outcome.notes.as_deref().unwrap().contains("echo hello"));
+-        // No stdout/stderr logs should be written
+-        let stage_dir = run_dir.path().join("nodes").join("script_node");
+-        assert!(!stage_dir.join("stdout.log").exists());
++        assert_eq!(
++            outcome.context_updates.get(keys::COMMAND_OUTPUT),
++            Some(&serde_json::json!(""))
++        );
++        assert_eq!(
++            outcome.context_updates.get(keys::COMMAND_STDERR),
++            Some(&serde_json::json!(""))
++        );
++    }
++
++    #[tokio::test]
++    async fn dispatch_routes_to_simulate_in_dry_run() {
++        let handler = CommandHandler;
++        let mut node = Node::new("script_node");
++        node.attrs.insert(
++            "script".to_string(),
++            AttrValue::String("echo hello".to_string()),
++        );
++        let context = Context::new();
++        let graph = Graph::new("test");
++        let run_dir = tempfile::tempdir().unwrap();
++
++        let mut services = make_services();
++        services.dry_run = true;
++
++        let outcome = crate::handler::dispatch_handler(
++            &handler,
++            &node,
++            &context,
++            &graph,
++            run_dir.path(),
++            &services,
++        )
++        .await
++        .unwrap();
++        assert_eq!(outcome.status, StageStatus::Success);
++        assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
+     }
+ 
+     #[tokio::test]
+@@ -923,4 +968,4 @@ mod tests {
+             "command.output should contain stdout, got: {command_output:?}"
+         );
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflows/src/handler/fan_in.rs b/lib/crates/fabro-workflows/src/handler/fan_in.rs
+index 6c8d965..df4ffeb 100644
+--- a/lib/crates/fabro-workflows/src/handler/fan_in.rs
++++ b/lib/crates/fabro-workflows/src/handler/fan_in.rs
+@@ -28,6 +28,36 @@ impl FanInHandler {
+ 
+ #[async_trait]
+ impl Handler for FanInHandler {
++    async fn simulate(
++        &self,
++        node: &Node,
++        context: &Context,
++        _graph: &Graph,
++        _run_dir: &Path,
++        _services: &EngineServices,
++    ) -> Result<Outcome, FabroError> {
++        let results = context.get(keys::PARALLEL_RESULTS);
++        let Some(results) = results else {
++            return Ok(Outcome::fail_deterministic(
++                "No parallel results to evaluate",
++            ));
++        };
++
++        let best = heuristic_select(&results);
++
++        let mut outcome = Outcome::simulated(&node.id);
++        outcome.context_updates.insert(
++            keys::PARALLEL_FAN_IN_BEST_ID.to_string(),
++            serde_json::json!(best.id),
++        );
++        outcome.context_updates.insert(
++            keys::PARALLEL_FAN_IN_BEST_OUTCOME.to_string(),
++            serde_json::json!(best.status),
++        );
++        outcome.notes = Some(format!("[Simulated] Selected best candidate: {}", best.id));
++        Ok(outcome)
++    }
++
+     async fn execute(
+         &self,
+         node: &Node,
+@@ -520,4 +550,31 @@ mod tests {
+             Some(&serde_json::json!("branch_b"))
+         );
+     }
+-}
++
++    #[tokio::test]
++    async fn fan_in_simulate_uses_heuristic() {
++        let handler = FanInHandler::new(None);
++        let node = Node::new("fan_in");
++        let context = Context::new();
++        context.set(
++            keys::PARALLEL_RESULTS,
++            serde_json::json!([
++                {"id": "branch_a", "status": "fail"},
++                {"id": "branch_b", "status": "success"},
++            ]),
++        );
++        let graph = Graph::new("test");
++        let run_dir = Path::new("/tmp/test");
++
++        let outcome = handler
++            .simulate(&node, &context, &graph, run_dir, &make_services())
++            .await
++            .unwrap();
++        assert_eq!(outcome.status, StageStatus::Success);
++        assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
++        assert_eq!(
++            outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
++            Some(&serde_json::json!("branch_b"))
++        );
++    }
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflows/src/handler/human.rs b/lib/crates/fabro-workflows/src/handler/human.rs
+index 5ed79b7..0ebdfab 100644
+--- a/lib/crates/fabro-workflows/src/handler/human.rs
++++ b/lib/crates/fabro-workflows/src/handler/human.rs
+@@ -96,6 +96,50 @@ impl HumanHandler {
+ 
+ #[async_trait]
+ impl Handler for HumanHandler {
++    async fn simulate(
++        &self,
++        node: &Node,
++        _context: &Context,
++        graph: &Graph,
++        _run_dir: &Path,
++        _services: &EngineServices,
++    ) -> Result<Outcome, FabroError> {
++        let edges = graph.outgoing_edges(&node.id);
++        let first_choice = edges.iter().find(|e| !e.freeform());
++
++        if let Some(edge) = first_choice {
++            let label = edge.label().filter(|l| !l.is_empty()).unwrap_or(&edge.to);
++            let key = parse_accelerator_key(label);
++            let mut outcome = Outcome::simulated(&node.id);
++            outcome.preferred_label = Some(label.to_string());
++            outcome.suggested_next_ids = vec![edge.to.clone()];
++            outcome.context_updates.insert(
++                keys::HUMAN_GATE_SELECTED.to_string(),
++                serde_json::json!(key),
++            );
++            outcome.context_updates.insert(
++                keys::HUMAN_GATE_LABEL.to_string(),
++                serde_json::json!(label),
++            );
++            Ok(outcome)
++        } else if let Some(edge) = edges.first() {
++            // Only freeform edges — pick the first one
++            let mut outcome = Outcome::simulated(&node.id);
++            outcome.suggested_next_ids = vec![edge.to.clone()];
++            outcome.context_updates.insert(
++                keys::HUMAN_GATE_SELECTED.to_string(),
++                serde_json::json!("freeform"),
++            );
++            outcome.context_updates.insert(
++                keys::HUMAN_GATE_LABEL.to_string(),
++                serde_json::json!("[Simulated] auto-selected"),
++            );
++            Ok(outcome)
++        } else {
++            Ok(Outcome::simulated(&node.id))
++        }
++    }
++
+     async fn execute(
+         &self,
+         node: &Node,
+@@ -466,4 +510,26 @@ mod tests {
+         assert_eq!(recordings.len(), 1);
+         assert_eq!(recordings[0].0.question_type, QuestionType::Freeform);
+     }
+-}
++
++    #[tokio::test]
++    async fn simulate_selects_first_choice() {
++        let interviewer = Arc::new(AutoApproveInterviewer);
++        let handler = HumanHandler::new(interviewer);
++        let graph = build_graph_with_human_gate();
++        let node = graph.nodes.get("gate").unwrap();
++        let context = Context::new();
++        let run_dir = Path::new("/tmp/test");
++
++        let outcome = handler
++            .simulate(node, &context, &graph, run_dir, &make_services())
++            .await
++            .unwrap();
++        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
++        assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
++        assert_eq!(
++            outcome.context_updates.get(keys::HUMAN_GATE_SELECTED),
++            Some(&serde_json::json!("A"))
++        );
++        assert_eq!(outcome.suggested_next_ids, vec!["approve"]);
++    }
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflows/src/handler/mod.rs b/lib/crates/fabro-workflows/src/handler/mod.rs
+index a711506..2b1ee27 100644
+--- a/lib/crates/fabro-workflows/src/handler/mod.rs
++++ b/lib/crates/fabro-workflows/src/handler/mod.rs
+@@ -82,6 +82,19 @@ pub trait Handler: Send + Sync {
+         services: &EngineServices,
+     ) -> Result<Outcome, FabroError>;
+ 
++    /// Produce a simulated result for dry-run mode.
++    /// Override for handlers that need custom context updates.
++    async fn simulate(
++        &self,
++        node: &Node,
++        _context: &Context,
++        _graph: &Graph,
++        _run_dir: &Path,
++        _services: &EngineServices,
++    ) -> Result<Outcome, FabroError> {
++        Ok(Outcome::simulated(&node.id))
++    }
++
+     /// Determines whether an error should be retried.
+     /// Default implementation retries transient errors only.
+     fn should_retry(&self, err: &FabroError) -> bool {
+@@ -89,6 +102,23 @@ pub trait Handler: Send + Sync {
+     }
+ }
+ 
++/// Route to [`Handler::simulate`] when `services.dry_run` is true, otherwise
++/// [`Handler::execute`].
++pub async fn dispatch_handler(
++    handler: &dyn Handler,
++    node: &Node,
++    context: &Context,
++    graph: &Graph,
++    run_dir: &Path,
++    services: &EngineServices,
++) -> Result<Outcome, FabroError> {
++    if services.dry_run {
++        handler.simulate(node, context, graph, run_dir, services).await
++    } else {
++        handler.execute(node, context, graph, run_dir, services).await
++    }
++}
++
+ /// Maps handler type strings to handler implementations.
+ pub struct HandlerRegistry {
+     handlers: HashMap<String, Box<dyn Handler>>,
+@@ -313,4 +343,43 @@ mod tests {
+         let handler = registry.resolve(&node);
+         let _ = handler;
+     }
+-}
++
++    #[tokio::test]
++    async fn dispatch_handler_routes_to_simulate_when_dry_run() {
++        let handler = TestHandler {
++            _name: "test".to_string(),
++        };
++        let node = Node::new("my_node");
++        let context = Context::new();
++        let graph = Graph::new("test");
++        let run_dir = std::path::Path::new("/tmp/test");
++        let mut services = EngineServices::test_default();
++        services.dry_run = true;
++
++        let outcome = dispatch_handler(&handler, &node, &context, &graph, run_dir, &services)
++            .await
++            .unwrap();
++        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
++        assert_eq!(outcome.notes.as_deref(), Some("[Simulated] my_node"));
++    }
++
++    #[tokio::test]
++    async fn dispatch_handler_routes_to_execute_when_not_dry_run() {
++        let handler = TestHandler {
++            _name: "test".to_string(),
++        };
++        let node = Node::new("my_node");
++        let context = Context::new();
++        let graph = Graph::new("test");
++        let run_dir = std::path::Path::new("/tmp/test");
++        let mut services = EngineServices::test_default();
++        services.dry_run = false;
++
++        let outcome = dispatch_handler(&handler, &node, &context, &graph, run_dir, &services)
++            .await
++            .unwrap();
++        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
++        // execute() returns success with no notes
++        assert!(outcome.notes.is_none());
++    }
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflows/src/handler/parallel.rs b/lib/crates/fabro-workflows/src/handler/parallel.rs
+index 486978b..a636436 100644
+--- a/lib/crates/fabro-workflows/src/handler/parallel.rs
++++ b/lib/crates/fabro-workflows/src/handler/parallel.rs
+@@ -205,6 +205,68 @@ struct BranchResult {
+ 
+ #[async_trait]
+ impl Handler for ParallelHandler {
++    async fn simulate(
++        &self,
++        node: &Node,
++        context: &Context,
++        graph: &Graph,
++        run_dir: &Path,
++        services: &EngineServices,
++    ) -> Result<Outcome, FabroError> {
++        let branches = graph.outgoing_edges(&node.id);
++        if branches.is_empty() {
++            return Ok(Outcome::fail_classify("No branches for parallel node"));
++        }
++
++        // Dispatch each branch child via dispatch_handler (which will call simulate)
++        let mut branch_results: Vec<BranchResult> = Vec::new();
++        for edge in &branches {
++            let target_id = &edge.to;
++            if let Some(target_node) = graph.nodes.get(target_id) {
++                let handler = services.registry.resolve(target_node);
++                let branch_context = context.clone_context();
++                let outcome = super::dispatch_handler(
++                    handler,
++                    target_node,
++                    &branch_context,
++                    graph,
++                    run_dir,
++                    services,
++                )
++                .await?;
++                branch_results.push(BranchResult {
++                    id: target_id.clone(),
++                    outcome,
++                    head_sha: None,
++                    worktree_path: None,
++                });
++            }
++        }
++
++        let total = branch_results.len();
++        context.set(keys::PARALLEL_BRANCH_COUNT, serde_json::json!(total));
++
++        let results_json: Vec<serde_json::Value> = branch_results
++            .iter()
++            .map(|r| {
++                serde_json::json!({
++                    "id": r.id,
++                    "status": r.outcome.status.to_string(),
++                })
++            })
++            .collect();
++        context.set(keys::PARALLEL_RESULTS, serde_json::json!(results_json));
++
++        let join_node = find_join_node(&branch_results, graph);
++
++        let mut outcome = Outcome::simulated(&node.id);
++        outcome.notes = Some(format!(
++            "[Simulated] Parallel node dispatched {total} branches"
++        ));
++        outcome.jump_to_node = join_node;
++        Ok(outcome)
++    }
++
+     async fn execute(
+         &self,
+         node: &Node,
+@@ -447,15 +509,15 @@ impl Handler for ParallelHandler {
+                     dry_run,
+                 };
+                 let handler = registry.resolve(target_node);
+-                let outcome = handler
+-                    .execute(
+-                        target_node,
+-                        &setup.branch_context,
+-                        &graph,
+-                        &run_dir,
+-                        &branch_services,
+-                    )
+-                    .await?;
++                let outcome = super::dispatch_handler(
++                    handler,
++                    target_node,
++                    &setup.branch_context,
++                    &graph,
++                    &run_dir,
++                    &branch_services,
++                )
++                .await?;
+ 
+                 // Checkpoint commit after branch execution (capture head_sha)
+                 let head_sha = if has_git {
+@@ -922,4 +984,48 @@ mod tests {
+         assert_eq!(parse_error_policy("ignore"), ErrorPolicy::Ignore);
+         assert_eq!(parse_error_policy("unknown"), ErrorPolicy::Continue);
+     }
+-}
++
++    #[tokio::test]
++    async fn parallel_handler_simulate() {
++        let services = make_services();
++        let mut node = Node::new("par");
++        node.attrs.insert(
++            "shape".to_string(),
++            AttrValue::String("component".to_string()),
++        );
++        let context = Context::new();
++        let mut graph = Graph::new("test");
++        graph.nodes.insert("par".to_string(), node.clone());
++        graph
++            .nodes
++            .insert("branch_a".to_string(), Node::new("branch_a"));
++        graph
++            .nodes
++            .insert("branch_b".to_string(), Node::new("branch_b"));
++        // Add a fan_in node reachable from both branches
++        graph
++            .nodes
++            .insert("fan_in".to_string(), Node::new("fan_in"));
++        graph.edges.push(Edge::new("par", "branch_a"));
++        graph.edges.push(Edge::new("par", "branch_b"));
++        graph.edges.push(Edge::new("branch_a", "fan_in"));
++        graph.edges.push(Edge::new("branch_b", "fan_in"));
++
++        let run_dir = Path::new("/tmp/test");
++        let mut dry_services = services;
++        dry_services.dry_run = true;
++
++        let outcome = ParallelHandler
++            .simulate(&node, &context, &graph, run_dir, &dry_services)
++            .await
++            .unwrap();
++
++        assert_eq!(outcome.status, StageStatus::Success);
++        assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
++        assert!(outcome.notes.as_deref().unwrap().contains("2 branches"));
++        assert_eq!(outcome.jump_to_node, Some("fan_in".to_string()));
++
++        let branch_count = context.get(keys::PARALLEL_BRANCH_COUNT);
++        assert_eq!(branch_count, Some(serde_json::json!(2)));
++    }
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflows/src/handler/prompt.rs b/lib/crates/fabro-workflows/src/handler/prompt.rs
+index a0e5b7e..7ace01c 100644
+--- a/lib/crates/fabro-workflows/src/handler/prompt.rs
++++ b/lib/crates/fabro-workflows/src/handler/prompt.rs
+@@ -29,6 +29,30 @@ impl PromptHandler {
+ 
+ #[async_trait]
+ impl Handler for PromptHandler {
++    async fn simulate(
++        &self,
++        node: &Node,
++        _context: &Context,
++        _graph: &Graph,
++        _run_dir: &Path,
++        _services: &EngineServices,
++    ) -> Result<Outcome, FabroError> {
++        let simulated_text = format!("[Simulated] Response for stage: {}", node.id);
++        let mut outcome = Outcome::simulated(&node.id);
++        outcome
++            .context_updates
++            .insert(keys::LAST_STAGE.to_string(), serde_json::json!(node.id));
++        outcome.context_updates.insert(
++            keys::LAST_RESPONSE.to_string(),
++            serde_json::json!(super::agent::truncate(&simulated_text, 200)),
++        );
++        outcome.context_updates.insert(
++            keys::response_key(&node.id),
++            serde_json::json!(&simulated_text),
++        );
++        Ok(outcome)
++    }
++
+     async fn execute(
+         &self,
+         node: &Node,
+@@ -156,31 +180,34 @@ mod tests {
+     }
+ 
+     #[tokio::test]
+-    async fn prompt_handler_simulation_mode() {
++    async fn prompt_handler_simulate() {
+         let handler = PromptHandler::new(None);
+-        let mut node = Node::new("classify");
+-        node.attrs.insert(
+-            "prompt".to_string(),
+-            AttrValue::String("Classify this".to_string()),
+-        );
++        let node = Node::new("classify");
+         let context = Context::new();
+         let graph = Graph::new("test");
+         let tmp = TempDir::new().unwrap();
+ 
+         let outcome = handler
+-            .execute(&node, &context, &graph, tmp.path(), &make_services())
++            .simulate(&node, &context, &graph, tmp.path(), &make_services())
+             .await
+             .unwrap();
+         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+-
+-        let response_content = std::fs::read_to_string(
+-            tmp.path()
+-                .join("nodes")
+-                .join("classify")
+-                .join("response.md"),
+-        )
+-        .unwrap();
+-        assert!(response_content.contains("[Simulated]"));
++        assert_eq!(outcome.notes.as_deref(), Some("[Simulated] classify"));
++        assert_eq!(
++            outcome.context_updates.get(crate::context::keys::LAST_STAGE),
++            Some(&serde_json::json!("classify"))
++        );
++        assert!(outcome
++            .context_updates
++            .contains_key(crate::context::keys::LAST_RESPONSE));
++        assert_eq!(
++            outcome
++                .context_updates
++                .get(&crate::context::keys::response_key("classify")),
++            Some(&serde_json::json!(
++                "[Simulated] Response for stage: classify"
++            ))
++        );
+     }
+ 
+     #[tokio::test]
+@@ -389,4 +416,4 @@ mod tests {
+             "system_prompt should be None when project_memory=false"
+         );
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-workflows/src/outcome.rs b/lib/crates/fabro-workflows/src/outcome.rs
+index 7677fe8..16d935c 100644
+--- a/lib/crates/fabro-workflows/src/outcome.rs
++++ b/lib/crates/fabro-workflows/src/outcome.rs
+@@ -215,6 +215,15 @@ impl Outcome {
+         }
+     }
+ 
++    /// Create a simulated success outcome for dry-run mode.
++    #[must_use]
++    pub fn simulated(node_id: &str) -> Self {
++        Self {
++            notes: Some(format!("[Simulated] {node_id}")),
++            ..Self::success()
++        }
++    }
++
+     /// Get the failure reason message, if any.
+     pub fn failure_reason(&self) -> Option<&str> {
+         self.failure.as_ref().map(|f| f.message.as_str())
+@@ -440,4 +449,13 @@ mod tests {
+         let parsed: StageStatus = serde_json::from_str(&json).unwrap();
+         assert_eq!(parsed, StageStatus::PartialSuccess);
+     }
+-}
++
++    #[test]
++    fn outcome_simulated_factory() {
++        let o = Outcome::simulated("my_node");
++        assert_eq!(o.status, StageStatus::Success);
++        assert_eq!(o.notes.as_deref(), Some("[Simulated] my_node"));
++        assert!(o.failure.is_none());
++        assert!(o.context_updates.is_empty());
++    }
++}
+\ No newline at end of file
