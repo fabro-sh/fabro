@@ -4,6 +4,7 @@ use anyhow::{bail, Context, Result};
 use clap::Args;
 
 use crate::asset_snapshot::AssetCollectionSummary;
+use crate::cli::cp::split_run_path;
 use crate::cli::runs::{default_runs_base, format_size, resolve_run};
 
 /// An individual asset file discovered from a run's asset manifests.
@@ -113,10 +114,7 @@ pub struct AssetCpArgs {
 
 /// Parse `source` into (run_id, optional_asset_path) using the same colon-split logic as `cp`.
 fn parse_source(s: &str) -> (&str, Option<&str>) {
-    if s.starts_with('/') || s.starts_with("./") || s.starts_with("../") {
-        return (s, None);
-    }
-    match s.split_once(':') {
+    match split_run_path(s) {
         Some((run_id, path)) => (run_id, Some(path)),
         None => (s, None),
     }
@@ -241,16 +239,15 @@ pub fn cp_command(args: &AssetCpArgs) -> Result<()> {
                 })?;
             }
         } else {
-            // Flat mode: check for filename collisions
-            let mut seen: std::collections::HashMap<String, &AssetEntry> =
-                std::collections::HashMap::new();
+            // Flat mode: build filename map and check for collisions
+            let mut by_filename: Vec<(String, &AssetEntry)> = Vec::with_capacity(entries.len());
             for entry in &entries {
                 let filename = Path::new(&entry.relative_path)
                     .file_name()
                     .unwrap_or_else(|| std::ffi::OsStr::new(&entry.relative_path))
                     .to_string_lossy()
                     .into_owned();
-                if let Some(existing) = seen.get(&filename) {
+                if let Some((_, existing)) = by_filename.iter().find(|(f, _)| f == &filename) {
                     bail!(
                         "Filename collision: '{}' exists in both node '{}' and '{}'. \
                          Use --tree to preserve directory structure, or --node to filter.",
@@ -259,16 +256,11 @@ pub fn cp_command(args: &AssetCpArgs) -> Result<()> {
                         entry.node_slug
                     );
                 }
-                seen.insert(filename, entry);
+                by_filename.push((filename, entry));
             }
 
-            for entry in &entries {
-                let filename = Path::new(&entry.relative_path)
-                    .file_name()
-                    .unwrap_or_else(|| std::ffi::OsStr::new(&entry.relative_path))
-                    .to_string_lossy()
-                    .into_owned();
-                let dest_file = args.dest.join(&filename);
+            for (filename, entry) in &by_filename {
+                let dest_file = args.dest.join(filename);
                 if let Some(parent) = dest_file.parent() {
                     std::fs::create_dir_all(parent)?;
                 }

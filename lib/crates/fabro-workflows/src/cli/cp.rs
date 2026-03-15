@@ -66,7 +66,7 @@ fn parse_direction(src: &str, dst: &str) -> Result<CopyDirection> {
 /// We distinguish local paths from run references by checking:
 /// - Paths starting with `/`, `./`, or `../` are always local
 /// - Otherwise, split on the first colon
-fn split_run_path(s: &str) -> Option<(&str, &str)> {
+pub(crate) fn split_run_path(s: &str) -> Option<(&str, &str)> {
     if s.starts_with('/') || s.starts_with("./") || s.starts_with("../") {
         return None;
     }
