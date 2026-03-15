@@ -21,10 +21,14 @@ pub enum WorkflowRunEvent {
     WorkflowRunCompleted {
         duration_ms: u64,
         artifact_count: usize,
+        #[serde(default)]
+        status: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         total_cost: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         final_git_commit_sha: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<fabro_llm::types::Usage>,
     },
     WorkflowRunFailed {
         error: crate::error::FabroError,
@@ -284,9 +288,13 @@ impl WorkflowRunEvent {
             Self::WorkflowRunCompleted {
                 duration_ms,
                 artifact_count,
+                status,
                 ..
             } => {
-                info!(duration_ms, artifact_count, "Workflow run completed");
+                info!(
+                    duration_ms,
+                    artifact_count, status, "Workflow run completed"
+                );
             }
             Self::WorkflowRunFailed {
                 error, duration_ms, ..
@@ -1968,6 +1976,51 @@ mod tests {
         assert!(
             matches!(deserialized, WorkflowRunEvent::PullRequestFailed { error } if error == "auth failed")
         );
+    }
+
+    #[test]
+    fn workflow_run_completed_serialization_with_status_and_usage() {
+        let event = WorkflowRunEvent::WorkflowRunCompleted {
+            duration_ms: 30000,
+            artifact_count: 2,
+            status: "success".to_string(),
+            total_cost: Some(1.23),
+            final_git_commit_sha: Some("abc123".to_string()),
+            usage: Some(Usage {
+                input_tokens: 5000,
+                output_tokens: 2000,
+                total_tokens: 7000,
+                cache_read_tokens: Some(3000),
+                cache_write_tokens: Some(500),
+                reasoning_tokens: Some(800),
+                raw: None,
+            }),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"status\":\"success\""));
+        assert!(json.contains("\"total_tokens\":7000"));
+        assert!(json.contains("\"cache_read_tokens\":3000"));
+        assert!(json.contains("\"reasoning_tokens\":800"));
+
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            deserialized,
+            WorkflowRunEvent::WorkflowRunCompleted { status, usage: Some(u), .. }
+                if status == "success" && u.total_tokens == 7000
+        ));
+    }
+
+    #[test]
+    fn workflow_run_completed_backward_compat_without_new_fields() {
+        // Old JSONL without status/usage should deserialize with defaults
+        let json =
+            r#"{"WorkflowRunCompleted":{"duration_ms":5000,"artifact_count":1,"total_cost":0.25}}"#;
+        let deserialized: WorkflowRunEvent = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            deserialized,
+            WorkflowRunEvent::WorkflowRunCompleted { status, usage, .. }
+                if status.is_empty() && usage.is_none()
+        ));
     }
 
     #[test]

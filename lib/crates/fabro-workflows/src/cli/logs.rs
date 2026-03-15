@@ -214,15 +214,66 @@ pub fn format_event_pretty(line: &str, styles: &fabro_util::terminal::Styles) ->
 
         "WorkflowRunCompleted" => {
             let duration = format_duration_ms(envelope.get("duration_ms"));
+            let status_str = str_field(&envelope, "status").unwrap_or("success");
+            let status_upper = status_str.to_uppercase();
+            let status_style = match status_str {
+                "success" | "partial_success" => &styles.bold_green,
+                _ => &styles.bold_red,
+            };
             let cost = format_cost(envelope.get("total_cost"));
-            Some(format!(
-                "{} {} {}  {}  {}",
+
+            let mut lines = vec![format!(
+                "{} {} {}  {}",
                 styles.dim.apply_to(&ts),
-                styles.bold_green.apply_to("\u{2713} Completed"),
+                status_style.apply_to(format!("\u{2713} {status_upper}")),
                 styles.bold.apply_to(&duration),
                 styles.dim.apply_to(&cost),
-                "",
-            ))
+            )];
+
+            if let Some(usage) = envelope.get("usage") {
+                let total = usage
+                    .get("total_tokens")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let pad = " ".repeat(ts.len() + 1);
+                if total > 0 {
+                    lines.push(format!(
+                        "{}{}",
+                        pad,
+                        styles
+                            .dim
+                            .apply_to(format!("Tokens: {}", format_tokens(total as u64)))
+                    ));
+                }
+                if let Some(cr) = usage.get("cache_read_tokens").and_then(|v| v.as_i64()) {
+                    let cw = usage
+                        .get("cache_write_tokens")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
+                    lines.push(format!(
+                        "{}{}",
+                        pad,
+                        styles.dim.apply_to(format!(
+                            "Cache:  {} read, {} write",
+                            format_tokens(cr as u64),
+                            format_tokens(cw as u64)
+                        ))
+                    ));
+                }
+                if let Some(r) = usage.get("reasoning_tokens").and_then(|v| v.as_i64()) {
+                    if r > 0 {
+                        lines.push(format!(
+                            "{}{}",
+                            pad,
+                            styles
+                                .dim
+                                .apply_to(format!("Reasoning: {} tokens", format_tokens(r as u64)))
+                        ));
+                    }
+                }
+            }
+
+            Some(lines.join("\n"))
         }
 
         "WorkflowRunFailed" => {
@@ -444,6 +495,31 @@ pub fn format_event_pretty(line: &str, styles: &fabro_util::terminal::Styles) ->
                 styles.dim.apply_to(&ts),
                 styles.green.apply_to("\u{2713}"),
                 duration,
+            ))
+        }
+
+        "PullRequestCreated" => {
+            let url = str_field(&envelope, "pr_url").unwrap_or("?");
+            let draft = envelope
+                .get("draft")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let label = if draft { "Draft PR:" } else { "PR:" };
+            Some(format!(
+                "{} {} {}",
+                styles.dim.apply_to(&ts),
+                styles.bold.apply_to(label),
+                url,
+            ))
+        }
+
+        "PullRequestFailed" => {
+            let error = str_field(&envelope, "error").unwrap_or("unknown error");
+            Some(format!(
+                "{} {} {}",
+                styles.dim.apply_to(&ts),
+                styles.bold_red.apply_to("PR failed:"),
+                styles.red.apply_to(error),
             ))
         }
 
@@ -705,11 +781,65 @@ mod tests {
     #[test]
     fn pretty_workflow_run_completed() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"WorkflowRunCompleted","duration_ms":25000,"total_cost":0.57}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"WorkflowRunCompleted","duration_ms":25000,"status":"success","total_cost":0.57,"usage":{"input_tokens":5000,"output_tokens":2000,"total_tokens":7000,"cache_read_tokens":3000,"cache_write_tokens":500,"reasoning_tokens":800}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
-        assert!(result.contains("Completed"), "got: {result}");
+        assert!(result.contains("SUCCESS"), "got: {result}");
         assert!(result.contains("25s"), "got: {result}");
         assert!(result.contains("$0.57"), "got: {result}");
+        assert!(result.contains("7.0k toks"), "got: {result}");
+        assert!(result.contains("Cache:"), "got: {result}");
+        assert!(result.contains("3.0k toks read"), "got: {result}");
+        assert!(result.contains("Reasoning:"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_workflow_run_completed_backward_compat() {
+        let styles = no_color_styles();
+        // Old JSONL without status/usage still renders
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"WorkflowRunCompleted","duration_ms":25000,"total_cost":0.57}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("SUCCESS"), "got: {result}");
+        assert!(result.contains("25s"), "got: {result}");
+        assert!(result.contains("$0.57"), "got: {result}");
+        // No usage lines when usage is absent
+        assert!(!result.contains("Tokens:"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_workflow_run_completed_fail_status() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","event":"WorkflowRunCompleted","duration_ms":25000,"status":"fail"}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("FAIL"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_pull_request_created() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"PullRequestCreated","pr_url":"https://github.com/owner/repo/pull/42","pr_number":42,"draft":false}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("PR:"), "got: {result}");
+        assert!(
+            result.contains("https://github.com/owner/repo/pull/42"),
+            "got: {result}"
+        );
+    }
+
+    #[test]
+    fn pretty_pull_request_created_draft() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"PullRequestCreated","pr_url":"https://github.com/owner/repo/pull/42","pr_number":42,"draft":true}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("Draft PR:"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_pull_request_failed() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"PullRequestFailed","error":"auth token expired"}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("PR failed:"), "got: {result}");
+        assert!(result.contains("auth token expired"), "got: {result}");
     }
 
     #[test]
