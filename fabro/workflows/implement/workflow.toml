@@ -1,15 +1,1 @@
 version = 1
-graph = "workflow.fabro"
-
-[sandbox]
-provider = "local"
-# provider = "daytona"
-
-# [sandbox.env]
-# CARGO_INCREMENTAL = "0"
-
-# [sandbox.daytona.snapshot]
-# name = "daytona-large"
-
-[sandbox.local]
-worktree_mode = "always"
