@@ -3282,7 +3282,7 @@ mod settings {
                 author: Default::default(),
                 webhooks: None,
             },
-            feature_flags: FeatureFlags {
+            features: Features {
                 session_sandboxes: false,
             },
             log: Default::default(),

@@ -42,13 +42,13 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { provider } = config.web.auth;
   const demoMode = isDemoMode(request);
   if (provider === "insecure_disabled") {
-    return { user: DEMO_USER, demoMode, feature_flags: config.feature_flags };
+    return { user: DEMO_USER, demoMode, features: config.features };
   }
   if (provider === "github" && !isGitHubAppConfigured()) {
     throw redirect("/setup");
   }
   const user = await requireUser(request);
-  return { user, provider, demoMode, feature_flags: config.feature_flags };
+  return { user, provider, demoMode, features: config.features };
 }
 
 export async function action({ request }: Route.ActionArgs) {

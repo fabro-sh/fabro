@@ -24,10 +24,13 @@ import type { AssetsConfiguration } from './assets-configuration';
 import type { CheckpointConfiguration } from './checkpoint-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { FeatureFlags } from './feature-flags';
+import type { Features } from './features';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { GitConfiguration } from './git-configuration';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { GitHubConfiguration } from './git-hub-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { HookDefinition } from './hook-definition';
@@ -68,7 +71,7 @@ export interface ServerConfiguration {
     'web'?: WebConfiguration;
     'api'?: ApiConfiguration;
     'git'?: GitConfiguration;
-    'feature_flags'?: FeatureFlags;
+    'features'?: Features;
     'log'?: LogConfiguration;
     /**
      * Default working directory.
@@ -89,5 +92,6 @@ export interface ServerConfiguration {
      * Default MCP server configurations.
      */
     'mcp_servers'?: { [key: string]: McpServerEntry; };
+    'github'?: GitHubConfiguration;
 }
 

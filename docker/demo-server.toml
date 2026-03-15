@@ -1,7 +1,7 @@
 [api]
 base_url = "http://api:3000"
 
-[feature_flags]
+[features]
 session_sandboxes = false
 
 [checkpoint]

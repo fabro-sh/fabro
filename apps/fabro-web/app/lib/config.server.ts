@@ -20,7 +20,7 @@ interface GitConfig {
   slug: string | null;
 }
 
-interface FeatureFlags {
+interface Features {
   session_sandboxes: boolean;
 }
 
@@ -33,7 +33,7 @@ interface AppConfig {
   web: WebConfig;
   api: ApiConfig;
   git: GitConfig;
-  feature_flags: FeatureFlags;
+  features: Features;
 }
 
 const AUTH_DEFAULTS: AuthConfig = {
@@ -58,7 +58,7 @@ const GIT_DEFAULTS: GitConfig = {
   slug: null,
 };
 
-const FEATURE_FLAGS_DEFAULTS: FeatureFlags = {
+const FEATURES_DEFAULTS: Features = {
   session_sandboxes: false,
 };
 
@@ -78,7 +78,7 @@ function loadAppConfig(): AppConfig {
   const rawWebAuth = (rawWeb.auth ?? {}) as Partial<AuthConfig>;
   const rawApi = (raw.api ?? {}) as Partial<ApiConfig>;
   const rawGit = (raw.git ?? {}) as Partial<GitConfig>;
-  const rawFeatureFlags = (raw.feature_flags ?? {}) as Partial<FeatureFlags>;
+  const rawFeatures = (raw.features ?? {}) as Partial<Features>;
 
   const demo = process.env.FABRO_DEMO === "1";
 
@@ -94,7 +94,7 @@ function loadAppConfig(): AppConfig {
       ? { ...API_DEFAULTS, ...rawApi, authentication_strategy: "insecure_disabled" }
       : { ...API_DEFAULTS, ...rawApi },
     git: { ...GIT_DEFAULTS, ...rawGit },
-    feature_flags: { ...FEATURE_FLAGS_DEFAULTS, ...rawFeatureFlags },
+    features: { ...FEATURES_DEFAULTS, ...rawFeatures },
   };
 }
 

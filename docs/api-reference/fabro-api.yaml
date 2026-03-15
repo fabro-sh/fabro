@@ -4273,8 +4273,8 @@ components:
           $ref: "#/components/schemas/ApiConfiguration"
         git:
           $ref: "#/components/schemas/GitConfiguration"
-        feature_flags:
-          $ref: "#/components/schemas/FeatureFlags"
+        features:
+          $ref: "#/components/schemas/Features"
         log:
           $ref: "#/components/schemas/LogConfiguration"
         work_dir:
@@ -4498,7 +4498,7 @@ components:
           enum:
             - tailscale_funnel
 
-    FeatureFlags:
+    Features:
       description: Feature flags.
       type: object
       properties:

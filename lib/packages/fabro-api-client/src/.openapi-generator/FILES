@@ -58,13 +58,14 @@ models/exe-configuration.ts
 models/execute-query-request.ts
 models/execute-query-response-rows-inner-inner.ts
 models/execute-query-response.ts
-models/feature-flags.ts
+models/features.ts
 models/file-checkpoint.ts
 models/file-diff.ts
 models/friction-kind.ts
 models/friction-point.ts
 models/git-author-configuration.ts
 models/git-configuration.ts
+models/git-hub-configuration.ts
 models/health-response.ts
 models/history-entry.ts
 models/hook-definition.ts

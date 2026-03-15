@@ -270,7 +270,7 @@ fn fully_populated_server_config() -> ServerConfig {
                 strategy: WebhookStrategy::TailscaleFunnel,
             }),
         },
-        feature_flags: FeatureFlags {
+        features: Features {
             session_sandboxes: true,
         },
         log: LogConfig {

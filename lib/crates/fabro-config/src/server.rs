@@ -115,7 +115,7 @@ impl Default for WebConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
-pub struct FeatureFlags {
+pub struct Features {
     #[serde(default)]
     pub session_sandboxes: bool,
 }
@@ -136,7 +136,7 @@ pub struct ServerConfig {
     #[serde(default)]
     pub git: GitConfig,
     #[serde(default)]
-    pub feature_flags: FeatureFlags,
+    pub features: Features,
     #[serde(default)]
     pub log: LogConfig,
     #[serde(flatten)]
@@ -480,16 +480,16 @@ matcher = "agent_loop"
 
     #[test]
     fn parse_feature_flags() {
-        let toml = "[feature_flags]\nsession_sandboxes = true";
+        let toml = "[features]\nsession_sandboxes = true";
         let config: ServerConfig = toml::from_str(toml).unwrap();
-        assert!(config.feature_flags.session_sandboxes);
+        assert!(config.features.session_sandboxes);
     }
 
     #[test]
     fn parse_feature_flags_defaults() {
         let toml = "";
         let config: ServerConfig = toml::from_str(toml).unwrap();
-        assert!(!config.feature_flags.session_sandboxes);
+        assert!(!config.features.session_sandboxes);
     }
 
     #[test]

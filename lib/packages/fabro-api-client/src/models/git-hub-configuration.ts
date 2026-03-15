@@ -15,12 +15,12 @@
 
 
 /**
- * Feature flags.
+ * GitHub App token injection configuration.
  */
-export interface FeatureFlags {
+export interface GitHubConfiguration {
     /**
-     * Enable session sandboxes.
+     * GitHub API permissions to request (e.g. contents = write).
      */
-    'session_sandboxes'?: boolean;
+    'permissions'?: { [key: string]: string; };
 }
 

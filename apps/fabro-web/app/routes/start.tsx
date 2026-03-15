@@ -33,12 +33,12 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { feature_flags } = getAppConfig();
+  const { features } = getAppConfig();
   const { data: apiSessions } = await apiJson<PaginatedSessionList>("/sessions", { request });
   const sessionGroups = groupSessionsByDate(
     apiSessions.map((s) => ({ id: s.id, title: s.title, created_at: s.created_at }))
   );
-  return { sessionGroups, feature_flags };
+  return { sessionGroups, features };
 }
 
 const projects = [
@@ -99,7 +99,7 @@ function SessionSidebar({ groups }: { groups: { label: string; sessions: { id: s
 }
 
 export default function Start({ loaderData }: Route.ComponentProps) {
-  const { sessionGroups, feature_flags } = loaderData;
+  const { sessionGroups, features } = loaderData;
   const [prompt, setPrompt] = useState("");
   const [project, setProject] = useState(projects[0]);
   const [branch, setBranch] = useState(branches[0]);
@@ -158,7 +158,7 @@ export default function Start({ loaderData }: Route.ComponentProps) {
               />
 
               <div className="absolute bottom-3 inset-x-3 flex items-center justify-between">
-                {feature_flags.session_sandboxes && (
+                {features.session_sandboxes && (
                   <div className="flex items-center gap-1.5">
                     <Picker
                       value={project}
