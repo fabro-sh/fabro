@@ -111,11 +111,26 @@ pub fn execute_fork(
         .ensure_branch()
         .map_err(|e| anyhow::anyhow!("failed to create metadata branch: {e}"))?;
 
-    // Read manifest from source, update fields for new run
-    let manifest_bytes = source_bs
-        .read_entry("manifest.json")
-        .map_err(|e| anyhow::anyhow!("failed to read source manifest: {e}"))?
-        .ok_or_else(|| anyhow::anyhow!("source run has no manifest.json"))?;
+    // Read manifest, graph, and sandbox from source in a single tree lookup
+    let source_entries = source_bs
+        .read_entries(&["manifest.json", "graph.fabro", "sandbox.json"])
+        .map_err(|e| anyhow::anyhow!("failed to read source metadata: {e}"))?;
+
+    let mut manifest_bytes = None;
+    let mut graph_bytes = None;
+    let mut sandbox_bytes = None;
+    for (path, data) in source_entries {
+        match path {
+            "manifest.json" => manifest_bytes = Some(data),
+            "graph.fabro" => graph_bytes = Some(data),
+            "sandbox.json" => sandbox_bytes = Some(data),
+            _ => {}
+        }
+    }
+    let manifest_bytes =
+        manifest_bytes.ok_or_else(|| anyhow::anyhow!("source run has no manifest.json"))?;
+    let graph_bytes =
+        graph_bytes.ok_or_else(|| anyhow::anyhow!("source run has no graph.fabro"))?;
 
     let mut manifest: Manifest =
         serde_json::from_slice(&manifest_bytes).context("failed to parse source manifest.json")?;
@@ -124,12 +139,6 @@ pub fn execute_fork(
     manifest.start_time = chrono::Utc::now();
     let new_manifest_bytes =
         serde_json::to_vec_pretty(&manifest).context("failed to serialize new manifest")?;
-
-    // Read graph from source
-    let graph_bytes = source_bs
-        .read_entry("graph.fabro")
-        .map_err(|e| anyhow::anyhow!("failed to read source graph: {e}"))?
-        .ok_or_else(|| anyhow::anyhow!("source run has no graph.fabro"))?;
 
     // Read checkpoint from the target metadata commit (not branch tip)
     let checkpoint_bytes = store
@@ -141,11 +150,6 @@ pub fn execute_fork(
                 entry.metadata_commit_oid
             )
         })?;
-
-    // Read sandbox.json from source if present
-    let sandbox_bytes = source_bs
-        .read_entry("sandbox.json")
-        .map_err(|e| anyhow::anyhow!("failed to read source sandbox.json: {e}"))?;
 
     // Write all entries to the new metadata branch in a single commit
     let mut file_entries: Vec<(&str, &[u8])> = vec![
