@@ -214,7 +214,10 @@ pub fn format_event_pretty(line: &str, styles: &fabro_util::terminal::Styles) ->
 
         "WorkflowRunCompleted" => {
             let duration = format_duration_ms(envelope.get("duration_ms"));
-            let status_str = str_field(&envelope, "status").unwrap_or("success");
+            let status_str = match str_field(&envelope, "status") {
+                Some(s) if !s.is_empty() => s,
+                _ => "success",
+            };
             let status_upper = status_str.to_uppercase();
             let status_style = match status_str {
                 "success" | "partial_success" => &styles.bold_green,

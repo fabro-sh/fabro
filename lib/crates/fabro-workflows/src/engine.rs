@@ -2144,28 +2144,10 @@ impl WorkflowRunEngine {
             .cloned()
             .unwrap_or_else(Outcome::success);
 
-        let run_usage: Option<fabro_llm::types::Usage> = {
-            let usages: Vec<fabro_llm::types::Usage> = node_outcomes
-                .values()
-                .filter_map(|o| {
-                    let u = o.usage.as_ref()?;
-                    Some(fabro_llm::types::Usage {
-                        input_tokens: u.input_tokens,
-                        output_tokens: u.output_tokens,
-                        total_tokens: u.input_tokens + u.output_tokens,
-                        cache_read_tokens: u.cache_read_tokens,
-                        cache_write_tokens: u.cache_write_tokens,
-                        reasoning_tokens: u.reasoning_tokens,
-                        raw: None,
-                    })
-                })
-                .collect();
-            if usages.is_empty() {
-                None
-            } else {
-                Some(usages.into_iter().reduce(|a, b| a + b).unwrap())
-            }
-        };
+        let run_usage: Option<fabro_llm::types::Usage> = node_outcomes
+            .values()
+            .filter_map(|o| o.usage.as_ref().map(fabro_llm::types::Usage::from))
+            .reduce(|a, b| a + b);
 
         self.services
             .emitter
