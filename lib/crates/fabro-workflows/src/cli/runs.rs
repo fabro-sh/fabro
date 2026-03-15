@@ -170,7 +170,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 is_orphan: false,
             });
         } else {
-            // Orphan directory — no manifest.json
+            // No manifest.json — check for status.txt (starting run) vs true orphan
             let mtime_dt = entry
                 .metadata()
                 .ok()
@@ -182,22 +182,44 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 .map(|s| s.trim().to_string())
                 .unwrap_or_else(|_| dir_name.clone());
 
-            runs.push(RunInfo {
-                run_id,
-                dir_name,
-                workflow_name: "[no manifest]".to_string(),
-                workflow_slug: None,
-                status: RunStatus::Unknown,
-                start_time: mtime,
-                labels: HashMap::new(),
-                duration_ms: None,
-                total_cost: None,
-                host_repo_path: None,
-                start_time_dt: mtime_dt,
-                end_time: None,
-                path,
-                is_orphan: true,
-            });
+            if read_status_file(&path).is_some() {
+                // Has status.txt → run is initializing, not an orphan
+                let si = read_status(&path);
+                runs.push(RunInfo {
+                    run_id,
+                    dir_name,
+                    workflow_name: "[starting]".to_string(),
+                    workflow_slug: None,
+                    status: si.status,
+                    start_time: mtime,
+                    labels: HashMap::new(),
+                    duration_ms: si.duration_ms,
+                    total_cost: si.total_cost,
+                    host_repo_path: None,
+                    start_time_dt: mtime_dt,
+                    end_time: si.end_time,
+                    path,
+                    is_orphan: false,
+                });
+            } else {
+                // True orphan — no manifest, no status.txt
+                runs.push(RunInfo {
+                    run_id,
+                    dir_name,
+                    workflow_name: "[no manifest]".to_string(),
+                    workflow_slug: None,
+                    status: RunStatus::Unknown,
+                    start_time: mtime,
+                    labels: HashMap::new(),
+                    duration_ms: None,
+                    total_cost: None,
+                    host_repo_path: None,
+                    start_time_dt: mtime_dt,
+                    end_time: None,
+                    path,
+                    is_orphan: true,
+                });
+            }
         }
     }
 
@@ -213,7 +235,20 @@ struct StatusInfo {
     total_cost: Option<f64>,
 }
 
+/// Write the run lifecycle status to `status.txt` (best-effort).
+pub fn write_status_file(run_dir: &Path, status: &str) {
+    let _ = std::fs::write(run_dir.join("status.txt"), status);
+}
+
+fn read_status_file(run_dir: &Path) -> Option<String> {
+    std::fs::read_to_string(run_dir.join("status.txt"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 fn read_status(run_dir: &Path) -> StatusInfo {
+    // 1. conclusion.json is authoritative for concluded runs
     if let Ok(conclusion) = crate::conclusion::Conclusion::load(&run_dir.join("conclusion.json")) {
         return StatusInfo {
             status: RunStatus::Concluded(conclusion.status),
@@ -222,6 +257,31 @@ fn read_status(run_dir: &Path) -> StatusInfo {
             total_cost: conclusion.total_cost,
         };
     }
+    // 2. status.txt — explicit lifecycle tracking
+    if let Some(status_str) = read_status_file(run_dir) {
+        return match status_str.as_str() {
+            "starting" | "running" => StatusInfo {
+                status: RunStatus::Running,
+                end_time: None,
+                duration_ms: None,
+                total_cost: None,
+            },
+            // concluded without conclusion.json → treat as failed
+            "concluded" => StatusInfo {
+                status: RunStatus::Concluded(crate::outcome::StageStatus::Fail),
+                end_time: None,
+                duration_ms: None,
+                total_cost: None,
+            },
+            _ => StatusInfo {
+                status: RunStatus::Unknown,
+                end_time: None,
+                duration_ms: None,
+                total_cost: None,
+            },
+        };
+    }
+    // 3. Legacy fallback: run.pid exists → Running
     if run_dir.join("run.pid").exists() {
         return StatusInfo {
             status: RunStatus::Running,
@@ -2137,5 +2197,114 @@ mod tests {
             !dir_very_old.exists(),
             "10-day-old run should be pruned with 7d threshold"
         );
+    }
+
+    // === status.txt tests ===
+
+    #[test]
+    fn read_status_starting_maps_to_running() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        fs::write(dir.join("status.txt"), "starting").unwrap();
+        let si = read_status(dir);
+        assert_eq!(si.status, RunStatus::Running);
+    }
+
+    #[test]
+    fn read_status_running_maps_to_running() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        fs::write(dir.join("status.txt"), "running").unwrap();
+        let si = read_status(dir);
+        assert_eq!(si.status, RunStatus::Running);
+    }
+
+    #[test]
+    fn read_status_concluded_without_conclusion_json_maps_to_fail() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        fs::write(dir.join("status.txt"), "concluded").unwrap();
+        let si = read_status(dir);
+        assert_eq!(
+            si.status,
+            RunStatus::Concluded(crate::outcome::StageStatus::Fail)
+        );
+    }
+
+    #[test]
+    fn read_status_conclusion_json_takes_priority_over_status_txt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        fs::write(dir.join("status.txt"), "running").unwrap();
+        fs::write(
+            dir.join("conclusion.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "timestamp": "2026-01-01T12:01:00Z",
+                "status": "success",
+                "duration_ms": 60000
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let si = read_status(dir);
+        assert_eq!(
+            si.status,
+            RunStatus::Concluded(crate::outcome::StageStatus::Success)
+        );
+    }
+
+    #[test]
+    fn scan_runs_status_txt_without_manifest_is_not_orphan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+
+        let dir = base.join("20260301-STARTING");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("id.txt"), "starting-run-id").unwrap();
+        fs::write(dir.join("status.txt"), "starting").unwrap();
+
+        let runs = scan_runs(base).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert!(!runs[0].is_orphan);
+        assert_eq!(runs[0].status, RunStatus::Running);
+        assert_eq!(runs[0].workflow_name, "[starting]");
+    }
+
+    #[test]
+    fn scan_runs_no_status_txt_no_manifest_is_orphan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+
+        let dir = base.join("20260301-ORPHAN");
+        fs::create_dir_all(&dir).unwrap();
+
+        let runs = scan_runs(base).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert!(runs[0].is_orphan);
+        assert_eq!(runs[0].status, RunStatus::Unknown);
+    }
+
+    #[test]
+    fn filter_runs_running_only_includes_starting_runs() {
+        let runs = vec![RunInfo {
+            run_id: "starting-1".into(),
+            dir_name: "d1".into(),
+            workflow_name: "[starting]".into(),
+            workflow_slug: None,
+            status: RunStatus::Running,
+            start_time: "2026-01-01T00:00:00Z".into(),
+            labels: HashMap::new(),
+            duration_ms: None,
+            total_cost: None,
+            host_repo_path: None,
+            start_time_dt: None,
+            end_time: None,
+            path: PathBuf::from("/tmp/d1"),
+            is_orphan: false,
+        }];
+
+        let filtered = filter_runs(&runs, None, None, &[], false, StatusFilter::RunningOnly);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].run_id, "starting-1");
     }
 }

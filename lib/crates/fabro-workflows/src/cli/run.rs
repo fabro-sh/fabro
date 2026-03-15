@@ -467,6 +467,14 @@ pub async fn run_command(
         .context("Failed to activate per-run log")?;
     tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
     tokio::fs::write(run_dir.join("run.pid"), std::process::id().to_string()).await?;
+    super::runs::write_status_file(&run_dir, "starting");
+
+    // Safety net: mark as concluded if we exit before engine.run() (e.g. sandbox init failure)
+    let status_run_dir = run_dir.clone();
+    let status_guard = scopeguard::guard((), move |()| {
+        super::runs::write_status_file(&status_run_dir, "concluded");
+    });
+
     if workflow_path.extension().is_some_and(|ext| ext == "toml") {
         if let Ok(toml_contents) = tokio::fs::read(workflow_path).await {
             tokio::fs::write(run_dir.join("run.toml"), toml_contents).await?;
@@ -1202,6 +1210,9 @@ pub async fn run_command(
         workflow_slug: workflow_slug.clone(),
     };
 
+    // Defuse the status guard — engine.run() will write "running" and conclusion handles "concluded"
+    scopeguard::ScopeGuard::into_inner(status_guard);
+
     let run_start = Instant::now();
     let engine_result = if let Some(ref checkpoint_path) = args.resume {
         let checkpoint = Checkpoint::load(checkpoint_path)?;
@@ -1270,6 +1281,7 @@ pub async fn run_command(
             total_retries,
         };
         let _ = conclusion.save(&run_dir.join("conclusion.json"));
+        super::runs::write_status_file(&run_dir, "concluded");
     }
 
     // Auto-derive retro (always, cheap) and optionally run retro agent

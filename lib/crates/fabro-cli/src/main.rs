@@ -219,6 +219,7 @@ fn detach_run(args: fabro_workflows::cli::RunArgs) -> Result<()> {
     });
     std::fs::create_dir_all(&run_dir)?;
     std::fs::write(run_dir.join("id.txt"), &run_id)?;
+    fabro_workflows::cli::runs::write_status_file(&run_dir, "starting");
     std::fs::File::create(run_dir.join("progress.jsonl"))?;
 
     let log_file = std::fs::File::create(run_dir.join("detach.log"))?;
