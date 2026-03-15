@@ -27,6 +27,32 @@ pub struct CommandHandler;
 
 #[async_trait]
 impl Handler for CommandHandler {
+    async fn simulate(
+        &self,
+        node: &Node,
+        _context: &Context,
+        _graph: &Graph,
+        _run_dir: &Path,
+        _services: &EngineServices,
+    ) -> Result<Outcome, FabroError> {
+        let script = node
+            .attrs
+            .get("script")
+            .or_else(|| node.attrs.get("tool_command"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let mut outcome = Outcome::success();
+        outcome.notes = Some(format!("[Simulated] Command skipped: {script}"));
+        outcome
+            .context_updates
+            .insert(keys::COMMAND_OUTPUT.to_string(), serde_json::json!(""));
+        outcome
+            .context_updates
+            .insert(keys::COMMAND_STDERR.to_string(), serde_json::json!(""));
+        Ok(outcome)
+    }
+
     async fn execute(
         &self,
         node: &Node,
@@ -44,18 +70,6 @@ impl Handler for CommandHandler {
 
         if script.is_empty() {
             return Ok(Outcome::fail_classify("No script specified"));
-        }
-
-        if services.dry_run {
-            let mut outcome = Outcome::success();
-            outcome.notes = Some(format!("[Simulated] Command skipped: {script}"));
-            outcome
-                .context_updates
-                .insert(keys::COMMAND_OUTPUT.to_string(), serde_json::json!(""));
-            outcome
-                .context_updates
-                .insert(keys::COMMAND_STDERR.to_string(), serde_json::json!(""));
-            return Ok(outcome);
         }
 
         let language = node
@@ -188,7 +202,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dry_run_skips_execution() {
+    async fn simulate_skips_execution() {
+        let handler = CommandHandler;
+        let mut node = Node::new("script_node");
+        node.attrs.insert(
+            "script".to_string(),
+            AttrValue::String("echo hello".to_string()),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let run_dir = tempfile::tempdir().unwrap();
+
+        let outcome = handler
+            .simulate(&node, &context, &graph, run_dir.path(), &make_services())
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, StageStatus::Success);
+        assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
+        assert!(outcome.notes.as_deref().unwrap().contains("echo hello"));
+        assert_eq!(
+            outcome.context_updates.get(keys::COMMAND_OUTPUT),
+            Some(&serde_json::json!(""))
+        );
+        assert_eq!(
+            outcome.context_updates.get(keys::COMMAND_STDERR),
+            Some(&serde_json::json!(""))
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_routes_to_simulate_in_dry_run() {
         let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
@@ -202,16 +245,18 @@ mod tests {
         let mut services = make_services();
         services.dry_run = true;
 
-        let outcome = handler
-            .execute(&node, &context, &graph, run_dir.path(), &services)
-            .await
-            .unwrap();
+        let outcome = crate::handler::dispatch_handler(
+            &handler,
+            &node,
+            &context,
+            &graph,
+            run_dir.path(),
+            &services,
+        )
+        .await
+        .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
         assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
-        assert!(outcome.notes.as_deref().unwrap().contains("echo hello"));
-        // No stdout/stderr logs should be written
-        let stage_dir = run_dir.path().join("nodes").join("script_node");
-        assert!(!stage_dir.join("stdout.log").exists());
     }
 
     #[tokio::test]

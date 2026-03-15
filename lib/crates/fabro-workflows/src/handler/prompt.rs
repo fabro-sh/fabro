@@ -29,6 +29,30 @@ impl PromptHandler {
 
 #[async_trait]
 impl Handler for PromptHandler {
+    async fn simulate(
+        &self,
+        node: &Node,
+        _context: &Context,
+        _graph: &Graph,
+        _run_dir: &Path,
+        _services: &EngineServices,
+    ) -> Result<Outcome, FabroError> {
+        let simulated_text = format!("[Simulated] Response for stage: {}", node.id);
+        let mut outcome = Outcome::simulated(&node.id);
+        outcome
+            .context_updates
+            .insert(keys::LAST_STAGE.to_string(), serde_json::json!(node.id));
+        outcome.context_updates.insert(
+            keys::LAST_RESPONSE.to_string(),
+            serde_json::json!(super::agent::truncate(&simulated_text, 200)),
+        );
+        outcome.context_updates.insert(
+            keys::response_key(&node.id),
+            serde_json::json!(&simulated_text),
+        );
+        Ok(outcome)
+    }
+
     async fn execute(
         &self,
         node: &Node,
@@ -156,31 +180,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prompt_handler_simulation_mode() {
+    async fn prompt_handler_simulate() {
         let handler = PromptHandler::new(None);
-        let mut node = Node::new("classify");
-        node.attrs.insert(
-            "prompt".to_string(),
-            AttrValue::String("Classify this".to_string()),
-        );
+        let node = Node::new("classify");
         let context = Context::new();
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
         let outcome = handler
-            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .simulate(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
-
-        let response_content = std::fs::read_to_string(
-            tmp.path()
-                .join("nodes")
-                .join("classify")
-                .join("response.md"),
-        )
-        .unwrap();
-        assert!(response_content.contains("[Simulated]"));
+        assert_eq!(outcome.notes.as_deref(), Some("[Simulated] classify"));
+        assert_eq!(
+            outcome.context_updates.get(crate::context::keys::LAST_STAGE),
+            Some(&serde_json::json!("classify"))
+        );
+        assert!(outcome
+            .context_updates
+            .contains_key(crate::context::keys::LAST_RESPONSE));
+        assert_eq!(
+            outcome
+                .context_updates
+                .get(&crate::context::keys::response_key("classify")),
+            Some(&serde_json::json!(
+                "[Simulated] Response for stage: classify"
+            ))
+        );
     }
 
     #[tokio::test]

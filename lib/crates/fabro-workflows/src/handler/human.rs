@@ -96,6 +96,50 @@ impl HumanHandler {
 
 #[async_trait]
 impl Handler for HumanHandler {
+    async fn simulate(
+        &self,
+        node: &Node,
+        _context: &Context,
+        graph: &Graph,
+        _run_dir: &Path,
+        _services: &EngineServices,
+    ) -> Result<Outcome, FabroError> {
+        let edges = graph.outgoing_edges(&node.id);
+        let first_choice = edges.iter().find(|e| !e.freeform());
+
+        if let Some(edge) = first_choice {
+            let label = edge.label().filter(|l| !l.is_empty()).unwrap_or(&edge.to);
+            let key = parse_accelerator_key(label);
+            let mut outcome = Outcome::simulated(&node.id);
+            outcome.preferred_label = Some(label.to_string());
+            outcome.suggested_next_ids = vec![edge.to.clone()];
+            outcome.context_updates.insert(
+                keys::HUMAN_GATE_SELECTED.to_string(),
+                serde_json::json!(key),
+            );
+            outcome.context_updates.insert(
+                keys::HUMAN_GATE_LABEL.to_string(),
+                serde_json::json!(label),
+            );
+            Ok(outcome)
+        } else if let Some(edge) = edges.first() {
+            // Only freeform edges — pick the first one
+            let mut outcome = Outcome::simulated(&node.id);
+            outcome.suggested_next_ids = vec![edge.to.clone()];
+            outcome.context_updates.insert(
+                keys::HUMAN_GATE_SELECTED.to_string(),
+                serde_json::json!("freeform"),
+            );
+            outcome.context_updates.insert(
+                keys::HUMAN_GATE_LABEL.to_string(),
+                serde_json::json!("[Simulated] auto-selected"),
+            );
+            Ok(outcome)
+        } else {
+            Ok(Outcome::simulated(&node.id))
+        }
+    }
+
     async fn execute(
         &self,
         node: &Node,
@@ -465,5 +509,27 @@ mod tests {
         let recordings = recorder.recordings();
         assert_eq!(recordings.len(), 1);
         assert_eq!(recordings[0].0.question_type, QuestionType::Freeform);
+    }
+
+    #[tokio::test]
+    async fn simulate_selects_first_choice() {
+        let interviewer = Arc::new(AutoApproveInterviewer);
+        let handler = HumanHandler::new(interviewer);
+        let graph = build_graph_with_human_gate();
+        let node = graph.nodes.get("gate").unwrap();
+        let context = Context::new();
+        let run_dir = Path::new("/tmp/test");
+
+        let outcome = handler
+            .simulate(node, &context, &graph, run_dir, &make_services())
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
+        assert_eq!(
+            outcome.context_updates.get(keys::HUMAN_GATE_SELECTED),
+            Some(&serde_json::json!("A"))
+        );
+        assert_eq!(outcome.suggested_next_ids, vec!["approve"]);
     }
 }

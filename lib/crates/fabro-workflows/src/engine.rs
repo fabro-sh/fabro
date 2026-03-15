@@ -974,7 +974,7 @@ impl WorkflowRunEngine {
 
             // Gap #11: Panic safety -- catch panics from handler execution
             let result = {
-                let future = handler.execute(node, context, graph, run_dir, &self.services);
+                let future = crate::handler::dispatch_handler(handler, node, context, graph, run_dir, &self.services);
                 let panic_safe = AssertUnwindSafe(future).catch_unwind();
                 // Gap #2: Timeout enforcement -- wrap with tokio::time::timeout
                 let timed_result = if let Some(duration) = node_timeout {

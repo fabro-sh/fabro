@@ -215,6 +215,15 @@ impl Outcome {
         }
     }
 
+    /// Create a simulated success outcome for dry-run mode.
+    #[must_use]
+    pub fn simulated(node_id: &str) -> Self {
+        Self {
+            notes: Some(format!("[Simulated] {node_id}")),
+            ..Self::success()
+        }
+    }
+
     /// Get the failure reason message, if any.
     pub fn failure_reason(&self) -> Option<&str> {
         self.failure.as_ref().map(|f| f.message.as_str())
@@ -439,5 +448,14 @@ mod tests {
         assert_eq!(json, "\"partial_success\"");
         let parsed: StageStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, StageStatus::PartialSuccess);
+    }
+
+    #[test]
+    fn outcome_simulated_factory() {
+        let o = Outcome::simulated("my_node");
+        assert_eq!(o.status, StageStatus::Success);
+        assert_eq!(o.notes.as_deref(), Some("[Simulated] my_node"));
+        assert!(o.failure.is_none());
+        assert!(o.context_updates.is_empty());
     }
 }

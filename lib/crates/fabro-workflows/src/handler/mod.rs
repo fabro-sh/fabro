@@ -82,10 +82,40 @@ pub trait Handler: Send + Sync {
         services: &EngineServices,
     ) -> Result<Outcome, FabroError>;
 
+    /// Produce a simulated result for dry-run mode.
+    /// Override for handlers that need custom context updates.
+    async fn simulate(
+        &self,
+        node: &Node,
+        _context: &Context,
+        _graph: &Graph,
+        _run_dir: &Path,
+        _services: &EngineServices,
+    ) -> Result<Outcome, FabroError> {
+        Ok(Outcome::simulated(&node.id))
+    }
+
     /// Determines whether an error should be retried.
     /// Default implementation retries transient errors only.
     fn should_retry(&self, err: &FabroError) -> bool {
         err.is_retryable()
+    }
+}
+
+/// Route to [`Handler::simulate`] when `services.dry_run` is true, otherwise
+/// [`Handler::execute`].
+pub async fn dispatch_handler(
+    handler: &dyn Handler,
+    node: &Node,
+    context: &Context,
+    graph: &Graph,
+    run_dir: &Path,
+    services: &EngineServices,
+) -> Result<Outcome, FabroError> {
+    if services.dry_run {
+        handler.simulate(node, context, graph, run_dir, services).await
+    } else {
+        handler.execute(node, context, graph, run_dir, services).await
     }
 }
 
@@ -312,5 +342,44 @@ mod tests {
         );
         let handler = registry.resolve(&node);
         let _ = handler;
+    }
+
+    #[tokio::test]
+    async fn dispatch_handler_routes_to_simulate_when_dry_run() {
+        let handler = TestHandler {
+            _name: "test".to_string(),
+        };
+        let node = Node::new("my_node");
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let run_dir = std::path::Path::new("/tmp/test");
+        let mut services = EngineServices::test_default();
+        services.dry_run = true;
+
+        let outcome = dispatch_handler(&handler, &node, &context, &graph, run_dir, &services)
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        assert_eq!(outcome.notes.as_deref(), Some("[Simulated] my_node"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_handler_routes_to_execute_when_not_dry_run() {
+        let handler = TestHandler {
+            _name: "test".to_string(),
+        };
+        let node = Node::new("my_node");
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let run_dir = std::path::Path::new("/tmp/test");
+        let mut services = EngineServices::test_default();
+        services.dry_run = false;
+
+        let outcome = dispatch_handler(&handler, &node, &context, &graph, run_dir, &services)
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
+        // execute() returns success with no notes
+        assert!(outcome.notes.is_none());
     }
 }

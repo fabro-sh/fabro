@@ -205,6 +205,68 @@ struct BranchResult {
 
 #[async_trait]
 impl Handler for ParallelHandler {
+    async fn simulate(
+        &self,
+        node: &Node,
+        context: &Context,
+        graph: &Graph,
+        run_dir: &Path,
+        services: &EngineServices,
+    ) -> Result<Outcome, FabroError> {
+        let branches = graph.outgoing_edges(&node.id);
+        if branches.is_empty() {
+            return Ok(Outcome::fail_classify("No branches for parallel node"));
+        }
+
+        // Dispatch each branch child via dispatch_handler (which will call simulate)
+        let mut branch_results: Vec<BranchResult> = Vec::new();
+        for edge in &branches {
+            let target_id = &edge.to;
+            if let Some(target_node) = graph.nodes.get(target_id) {
+                let handler = services.registry.resolve(target_node);
+                let branch_context = context.clone_context();
+                let outcome = super::dispatch_handler(
+                    handler,
+                    target_node,
+                    &branch_context,
+                    graph,
+                    run_dir,
+                    services,
+                )
+                .await?;
+                branch_results.push(BranchResult {
+                    id: target_id.clone(),
+                    outcome,
+                    head_sha: None,
+                    worktree_path: None,
+                });
+            }
+        }
+
+        let total = branch_results.len();
+        context.set(keys::PARALLEL_BRANCH_COUNT, serde_json::json!(total));
+
+        let results_json: Vec<serde_json::Value> = branch_results
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "id": r.id,
+                    "status": r.outcome.status.to_string(),
+                })
+            })
+            .collect();
+        context.set(keys::PARALLEL_RESULTS, serde_json::json!(results_json));
+
+        let join_node = find_join_node(&branch_results, graph);
+
+        let mut outcome = Outcome::simulated(&node.id);
+        outcome.notes = Some(format!(
+            "[Simulated] Parallel node dispatched {total} branches"
+        ));
+        outcome.jump_to_node = join_node;
+        Ok(outcome)
+    }
+
     async fn execute(
         &self,
         node: &Node,
@@ -447,15 +509,15 @@ impl Handler for ParallelHandler {
                     dry_run,
                 };
                 let handler = registry.resolve(target_node);
-                let outcome = handler
-                    .execute(
-                        target_node,
-                        &setup.branch_context,
-                        &graph,
-                        &run_dir,
-                        &branch_services,
-                    )
-                    .await?;
+                let outcome = super::dispatch_handler(
+                    handler,
+                    target_node,
+                    &setup.branch_context,
+                    &graph,
+                    &run_dir,
+                    &branch_services,
+                )
+                .await?;
 
                 // Checkpoint commit after branch execution (capture head_sha)
                 let head_sha = if has_git {
@@ -921,5 +983,49 @@ mod tests {
         assert_eq!(parse_error_policy("fail_fast"), ErrorPolicy::FailFast);
         assert_eq!(parse_error_policy("ignore"), ErrorPolicy::Ignore);
         assert_eq!(parse_error_policy("unknown"), ErrorPolicy::Continue);
+    }
+
+    #[tokio::test]
+    async fn parallel_handler_simulate() {
+        let services = make_services();
+        let mut node = Node::new("par");
+        node.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("component".to_string()),
+        );
+        let context = Context::new();
+        let mut graph = Graph::new("test");
+        graph.nodes.insert("par".to_string(), node.clone());
+        graph
+            .nodes
+            .insert("branch_a".to_string(), Node::new("branch_a"));
+        graph
+            .nodes
+            .insert("branch_b".to_string(), Node::new("branch_b"));
+        // Add a fan_in node reachable from both branches
+        graph
+            .nodes
+            .insert("fan_in".to_string(), Node::new("fan_in"));
+        graph.edges.push(Edge::new("par", "branch_a"));
+        graph.edges.push(Edge::new("par", "branch_b"));
+        graph.edges.push(Edge::new("branch_a", "fan_in"));
+        graph.edges.push(Edge::new("branch_b", "fan_in"));
+
+        let run_dir = Path::new("/tmp/test");
+        let mut dry_services = services;
+        dry_services.dry_run = true;
+
+        let outcome = ParallelHandler
+            .simulate(&node, &context, &graph, run_dir, &dry_services)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.status, StageStatus::Success);
+        assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
+        assert!(outcome.notes.as_deref().unwrap().contains("2 branches"));
+        assert_eq!(outcome.jump_to_node, Some("fan_in".to_string()));
+
+        let branch_count = context.get(keys::PARALLEL_BRANCH_COUNT);
+        assert_eq!(branch_count, Some(serde_json::json!(2)));
     }
 }

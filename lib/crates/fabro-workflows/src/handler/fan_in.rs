@@ -28,6 +28,36 @@ impl FanInHandler {
 
 #[async_trait]
 impl Handler for FanInHandler {
+    async fn simulate(
+        &self,
+        node: &Node,
+        context: &Context,
+        _graph: &Graph,
+        _run_dir: &Path,
+        _services: &EngineServices,
+    ) -> Result<Outcome, FabroError> {
+        let results = context.get(keys::PARALLEL_RESULTS);
+        let Some(results) = results else {
+            return Ok(Outcome::fail_deterministic(
+                "No parallel results to evaluate",
+            ));
+        };
+
+        let best = heuristic_select(&results);
+
+        let mut outcome = Outcome::simulated(&node.id);
+        outcome.context_updates.insert(
+            keys::PARALLEL_FAN_IN_BEST_ID.to_string(),
+            serde_json::json!(best.id),
+        );
+        outcome.context_updates.insert(
+            keys::PARALLEL_FAN_IN_BEST_OUTCOME.to_string(),
+            serde_json::json!(best.status),
+        );
+        outcome.notes = Some(format!("[Simulated] Selected best candidate: {}", best.id));
+        Ok(outcome)
+    }
+
     async fn execute(
         &self,
         node: &Node,
@@ -515,6 +545,33 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
         // branch_b has highest score
+        assert_eq!(
+            outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
+            Some(&serde_json::json!("branch_b"))
+        );
+    }
+
+    #[tokio::test]
+    async fn fan_in_simulate_uses_heuristic() {
+        let handler = FanInHandler::new(None);
+        let node = Node::new("fan_in");
+        let context = Context::new();
+        context.set(
+            keys::PARALLEL_RESULTS,
+            serde_json::json!([
+                {"id": "branch_a", "status": "fail"},
+                {"id": "branch_b", "status": "success"},
+            ]),
+        );
+        let graph = Graph::new("test");
+        let run_dir = Path::new("/tmp/test");
+
+        let outcome = handler
+            .simulate(&node, &context, &graph, run_dir, &make_services())
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, StageStatus::Success);
+        assert!(outcome.notes.as_deref().unwrap().contains("[Simulated]"));
         assert_eq!(
             outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
             Some(&serde_json::json!("branch_b"))
