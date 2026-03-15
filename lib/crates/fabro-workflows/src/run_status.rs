@@ -29,7 +29,7 @@ impl RunStatus {
     pub fn is_active(self) -> bool {
         matches!(
             self,
-            Self::Submitted | Self::Starting | Self::Running | Self::Paused
+            Self::Submitted | Self::Starting | Self::Running | Self::Paused | Self::Removing
         )
     }
 
@@ -198,7 +198,7 @@ mod tests {
         assert!(RunStatus::Starting.is_active());
         assert!(RunStatus::Running.is_active());
         assert!(RunStatus::Paused.is_active());
-        assert!(!RunStatus::Removing.is_active());
+        assert!(RunStatus::Removing.is_active());
         assert!(!RunStatus::Succeeded.is_active());
         assert!(!RunStatus::Failed.is_active());
         assert!(!RunStatus::Dead.is_active());

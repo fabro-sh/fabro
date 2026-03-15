@@ -155,47 +155,30 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 .unwrap_or_else(|_| dir_name.clone());
 
             let si = read_status(&path);
-            if matches!(si.status, RunStatus::Dead) {
-                // True orphan — no manifest, no status.json
-                runs.push(RunInfo {
-                    run_id,
-                    dir_name,
-                    workflow_name: "[no manifest]".to_string(),
-                    workflow_slug: None,
-                    status: si.status,
-                    status_reason: si.reason,
-                    start_time: mtime,
-                    labels: HashMap::new(),
-                    duration_ms: None,
-                    total_cost: None,
-                    host_repo_path: None,
-                    start_time_dt: mtime_dt,
-                    end_time: None,
-                    path,
-                    goal: String::new(),
-                    is_orphan: true,
-                });
-            } else {
-                // Has status.json → run is initializing, not an orphan
-                runs.push(RunInfo {
-                    run_id,
-                    dir_name,
-                    workflow_name: "[starting]".to_string(),
-                    workflow_slug: None,
-                    status: si.status,
-                    status_reason: si.reason,
-                    start_time: mtime,
-                    labels: HashMap::new(),
-                    duration_ms: si.duration_ms,
-                    total_cost: si.total_cost,
-                    host_repo_path: None,
-                    start_time_dt: mtime_dt,
-                    end_time: si.end_time,
-                    path,
-                    goal: String::new(),
-                    is_orphan: false,
-                });
-            }
+            let is_orphan = matches!(si.status, RunStatus::Dead);
+            runs.push(RunInfo {
+                run_id,
+                dir_name,
+                workflow_name: if is_orphan {
+                    "[no manifest]"
+                } else {
+                    "[starting]"
+                }
+                .to_string(),
+                workflow_slug: None,
+                status: si.status,
+                status_reason: si.reason,
+                start_time: mtime,
+                labels: HashMap::new(),
+                duration_ms: si.duration_ms,
+                total_cost: si.total_cost,
+                host_repo_path: None,
+                start_time_dt: mtime_dt,
+                end_time: si.end_time,
+                path,
+                goal: String::new(),
+                is_orphan,
+            });
         }
     }
 
@@ -227,7 +210,9 @@ impl StatusInfo {
 /// Write the run status to `status.json` (best-effort).
 pub fn write_run_status(run_dir: &Path, status: RunStatus, reason: Option<StatusReason>) {
     let record = RunStatusRecord::new(status, reason);
-    let _ = record.save(&run_dir.join("status.json"));
+    if let Err(e) = record.save(&run_dir.join("status.json")) {
+        warn!("failed to write status.json for {}: {e}", run_dir.display());
+    }
 }
 
 fn read_status(run_dir: &Path) -> StatusInfo {
@@ -441,13 +426,7 @@ fn truncate_goal(goal: &str, max_len: usize) -> String {
     format!("{truncated}...")
 }
 
-fn color_if(use_color: bool, color: Color) -> Option<Color> {
-    if use_color {
-        Some(color)
-    } else {
-        None
-    }
-}
+use super::color_if;
 
 fn status_cell(status: &RunStatus, use_color: bool) -> CellStruct {
     let text = status.to_string();
@@ -462,15 +441,6 @@ fn status_cell(status: &RunStatus, use_color: bool) -> CellStruct {
     text.cell()
         .bold(use_color && color != Some(Color::Ansi256(8)))
         .foreground_color(color_if(use_color, color.unwrap_or(Color::Ansi256(8))))
-}
-
-fn abbreviate_home(path: &str) -> String {
-    if let Some(home) = dirs::home_dir() {
-        if let Ok(rel) = Path::new(path).strip_prefix(&home) {
-            return format!("~/{}", rel.display());
-        }
-    }
-    path.to_string()
 }
 
 pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
@@ -538,7 +508,7 @@ pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
                 let dir_display = run
                     .host_repo_path
                     .as_deref()
-                    .map(abbreviate_home)
+                    .map(|p| super::tilde_path(Path::new(p)))
                     .unwrap_or_else(|| "-".to_string());
                 vec![
                     run_id_display

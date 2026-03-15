@@ -283,7 +283,6 @@ pub fn print_timeline(
     }
 
     let use_color = styles.use_color;
-    let color_if = |color| if use_color { Some(color) } else { None };
 
     let title = vec![
         "@".cell().bold(true),
@@ -313,11 +312,13 @@ pub fn print_timeline(
             };
 
             vec![
-                ordinal_str.cell().foreground_color(color_if(Color::Cyan)),
+                ordinal_str
+                    .cell()
+                    .foreground_color(super::color_if(use_color, Color::Cyan)),
                 entry.node_name.clone().cell(),
                 detail_str
                     .cell()
-                    .foreground_color(color_if(Color::Ansi256(8))),
+                    .foreground_color(super::color_if(use_color, Color::Ansi256(8))),
             ]
         })
         .collect();
