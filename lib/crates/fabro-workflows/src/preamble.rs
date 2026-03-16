@@ -125,20 +125,23 @@ fn format_token_count(tokens: i64) -> String {
 }
 
 fn tail_lines(text: &str, max_lines: usize, indent: &str) -> String {
-    let all_lines: Vec<&str> = text.lines().collect();
-    if all_lines.len() <= max_lines {
-        return all_lines
-            .iter()
-            .map(|l| format!("{indent}{l}"))
-            .collect::<Vec<_>>()
-            .join("\n");
+    use std::fmt::Write;
+
+    let total = text.lines().count();
+    let omitted = total.saturating_sub(max_lines);
+
+    let mut out = String::new();
+    if omitted > 0 {
+        let _ = write!(out, "{indent}({omitted} lines omitted)");
     }
-    let omitted = all_lines.len() - max_lines;
-    let mut parts = vec![format!("{indent}({omitted} lines omitted)")];
-    for line in &all_lines[all_lines.len() - max_lines..] {
-        parts.push(format!("{indent}{line}"));
+    for line in text.lines().skip(omitted) {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(indent);
+        out.push_str(line);
     }
-    parts.join("\n")
+    out
 }
 
 /// Returns the set of context keys that are rendered inline under a stage's
@@ -2130,6 +2133,18 @@ mod tests {
         assert!(!result.contains("line1"));
         assert!(!result.contains("line2"));
         assert!(!result.contains("line3"));
+    }
+
+    #[test]
+    fn tail_lines_applies_indent_to_each_line() {
+        let result = tail_lines("a\nb\nc", 5, "  ");
+        assert_eq!(result, "  a\n  b\n  c");
+    }
+
+    #[test]
+    fn tail_lines_truncates_with_indent() {
+        let result = tail_lines("a\nb\nc\nd\ne", 2, ">> ");
+        assert_eq!(result, ">> (3 lines omitted)\n>> d\n>> e");
     }
 
     #[test]
