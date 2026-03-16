@@ -1,0 +1,317 @@
+---
+import Layout from "../layouts/Layout.astro";
+
+interface RoadmapItem {
+  title: string;
+  description: string;
+}
+
+interface RoadmapSection {
+  label: string;
+  status: "shipped" | "building" | "next";
+  items: RoadmapItem[];
+}
+
+const sections: RoadmapSection[] = [
+  {
+    label: "Shipped",
+    status: "shipped",
+    items: [
+      {
+        title: "Core workflow engine",
+        description:
+          "DOT graph parsing with branching, loops, parallel execution, and conditional routing. Deterministic, diffable, version-controlled.",
+      },
+      {
+        title: "Multi-model routing",
+        description:
+          "CSS-like model stylesheets assign providers per stage by ID, class, or shape. Automatic fallback chains across Anthropic, OpenAI, and Gemini.",
+      },
+      {
+        title: "Human-in-the-loop",
+        description:
+          "Hexagon-shaped approval gates pause for human decisions. Steer running agents mid-turn. Interview steps collect structured input.",
+      },
+      {
+        title: "Git checkpointing & resume",
+        description:
+          "Every stage commits to a Git branch with full metadata. Revert, resume from any checkpoint, or trace every change back to the stage that made it.",
+      },
+      {
+        title: "Cloud sandboxes",
+        description:
+          "Isolated VM execution environments with snapshot-based setup, network controls, and automatic cleanup. SSH in with fabro ssh.",
+      },
+      {
+        title: "API server & web UI",
+        description:
+          "REST API with SSE event streaming and a React dashboard. Queue runs, track progress, and manage workflows at scale.",
+      },
+      {
+        title: "Automatic retrospectives",
+        description:
+          "Each run generates a retro with cost, duration, files touched, and an LLM-written narrative. Workflows improve over time.",
+      },
+    ],
+  },
+  {
+    label: "Building",
+    status: "building",
+    items: [
+      {
+        title: "Workflow marketplace",
+        description:
+          "Browse, fork, and publish community workflows. One-command install with dependency resolution and version pinning.",
+      },
+      {
+        title: "Parallel execution scaling",
+        description:
+          "Dynamic fan-out with resource-aware scheduling. Run dozens of sandboxes concurrently with automatic load balancing and cost caps.",
+      },
+    ],
+  },
+  {
+    label: "Next",
+    status: "next",
+    items: [
+      {
+        title: "Team collaboration",
+        description:
+          "Shared workflow runs with role-based access. Assign reviewers, track ownership, and coordinate across teams.",
+      },
+      {
+        title: "Custom tool plugins",
+        description:
+          "Extend agent capabilities with your own tool definitions. Package, share, and version tools independently of workflows.",
+      },
+      {
+        title: "Metrics & cost dashboards",
+        description:
+          "Real-time cost tracking, success rates, and performance trends across all runs. Set budgets, alerts, and optimization targets.",
+      },
+      {
+        title: "Self-hosted cloud",
+        description:
+          "Deploy Fabro as a managed service in your own infrastructure. Kubernetes-native with horizontal scaling and multi-tenant isolation.",
+      },
+    ],
+  },
+];
+
+const statusConfig = {
+  shipped: {
+    dot: "bg-mint",
+    border: "via-mint/30",
+    label: "text-mint",
+    track: "bg-mint/20",
+    icon: "mint",
+  },
+  building: {
+    dot: "bg-amber",
+    border: "via-amber/30",
+    label: "text-amber",
+    track: "bg-amber/20",
+    icon: "amber",
+  },
+  next: {
+    dot: "bg-teal-500",
+    border: "via-teal-500/30",
+    label: "text-teal-500",
+    track: "bg-teal-500/20",
+    icon: "teal",
+  },
+};
+---
+
+<Layout title="Roadmap — Fabro">
+  <!-- Nav -->
+  <nav class="fixed top-0 z-50 w-full border-b border-navy-800/60 bg-navy-950/70 backdrop-blur-xl">
+    <div class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+      <div class="flex items-center gap-8">
+        <a href="/" class="flex items-center">
+          <img src="/logotype.svg" alt="Fabro" class="h-7" />
+        </a>
+        <a href="https://docs.fabro.sh" class="text-sm font-medium text-ice-100 hover:text-ice-50 transition-colors">Docs</a>
+        <a href="https://docs.fabro.sh/changelog" class="text-sm font-medium text-ice-100 hover:text-ice-50 transition-colors">Changelog</a>
+        <a href="/roadmap" class="text-sm font-medium text-ice-50 transition-colors">Roadmap</a>
+      </div>
+      <div class="flex items-center gap-5">
+        <a href="/discord" class="text-ice-300 hover:text-ice-50 transition-colors" aria-label="Discord">
+          <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+        </a>
+        <a href="https://github.com/fabro-sh/fabro" class="text-ice-300 hover:text-ice-50 transition-colors" aria-label="GitHub">
+          <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+        <a
+          href="https://docs.fabro.sh/getting-started/quick-start"
+          class="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-teal-500 hover:shadow-[0_0_20px_-4px_rgba(53,127,158,0.5)]"
+        >
+          Get started
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <!-- Hero -->
+    <section class="relative overflow-hidden pt-40 pb-20">
+      <div class="absolute inset-0 grid-overlay"></div>
+      <div class="absolute inset-0 noise-overlay"></div>
+      <div class="pointer-events-none absolute top-16 -left-40 h-[500px] w-[500px] rounded-full bg-teal-500/10 blur-[120px] animate-float"></div>
+      <div class="pointer-events-none absolute -top-10 -right-20 h-[300px] w-[300px] rounded-full bg-mint/8 blur-[100px] animate-float" style="animation-delay: -3s"></div>
+
+      <div class="relative mx-auto max-w-4xl px-6 text-center">
+        <div class="reveal">
+          <p class="mb-5 inline-block rounded-full border border-teal-700/40 bg-teal-700/10 px-4 py-1.5 text-sm font-medium text-teal-300">
+            Where we're headed
+          </p>
+        </div>
+        <h1 class="reveal reveal-d1 font-display text-5xl font-bold tracking-tight text-ice-50 sm:text-6xl leading-[1.1]">
+          Roadmap
+        </h1>
+        <p class="reveal reveal-d2 mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-ice-300">
+          What we've shipped, what we're building, and where Fabro is going next.
+        </p>
+      </div>
+    </section>
+
+    <!-- Roadmap timeline -->
+    <section class="relative pb-32">
+      <div class="mx-auto max-w-3xl px-6">
+        {sections.map((section, sectionIdx) => {
+          const config = statusConfig[section.status];
+          return (
+            <div class="relative">
+              {/* Section header */}
+              <div class={`reveal flex items-center gap-4 ${sectionIdx > 0 ? "mt-20" : ""}`}>
+                <div class={`flex items-center gap-3 rounded-full border border-navy-800 bg-navy-900/80 px-5 py-2`}>
+                  {section.status === "shipped" && (
+                    <svg class="h-4 w-4 text-mint" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                      <polyline points="20,6 9,17 4,12" />
+                    </svg>
+                  )}
+                  {section.status === "building" && (
+                    <div class="h-3 w-3 rounded-full bg-amber animate-pulse-glow" />
+                  )}
+                  {section.status === "next" && (
+                    <svg class="h-4 w-4 text-teal-500" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12,6 12,12 16,14" />
+                    </svg>
+                  )}
+                  <span class={`font-display text-sm font-semibold uppercase tracking-wider ${config.label}`}>
+                    {section.label}
+                  </span>
+                </div>
+                <div class="h-px flex-1 bg-gradient-to-r from-navy-800 to-transparent" />
+              </div>
+
+              {/* Timeline track */}
+              <div class="relative mt-8 ml-5">
+                {/* Vertical line */}
+                <div class={`absolute top-0 bottom-0 left-0 w-px ${config.track}`} />
+
+                <div class="space-y-0">
+                  {section.items.map((item, itemIdx) => (
+                    <div class={`reveal reveal-d${Math.min(itemIdx + 1, 5)} relative pl-10 pb-8 group`}>
+                      {/* Timeline dot */}
+                      <div class="absolute left-0 top-1.5 -translate-x-1/2 z-10">
+                        <div class={`h-2.5 w-2.5 rounded-full ${config.dot} ring-4 ring-navy-950 transition-all group-hover:scale-125`} />
+                      </div>
+
+                      {/* Card */}
+                      <div class="glow-card rounded-xl border border-navy-800 bg-navy-800/20 p-6 relative overflow-hidden">
+                        <div class={`absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent ${config.border} to-transparent`} />
+                        <h3 class="font-display text-base font-semibold text-ice-50">{item.title}</h3>
+                        <p class="mt-2 text-sm leading-relaxed text-ice-300">{item.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="relative overflow-hidden border-t border-navy-800 py-24">
+      <div class="absolute inset-0 grid-overlay"></div>
+      <div class="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[400px] w-[400px] rounded-full bg-teal-700/6 blur-[120px]"></div>
+      <div class="relative mx-auto max-w-2xl px-6 text-center">
+        <h2 class="reveal font-display text-3xl font-bold tracking-tight text-ice-50">
+          Shape what we build
+        </h2>
+        <p class="reveal reveal-d1 mt-4 text-lg leading-relaxed text-ice-300">
+          Have a feature request or want to influence priorities? Join the conversation.
+        </p>
+        <div class="reveal reveal-d2 mt-8 flex items-center justify-center gap-4">
+          <a
+            href="https://github.com/fabro-sh/fabro/discussions"
+            class="rounded-xl bg-teal-700 px-7 py-3.5 text-sm font-semibold text-white transition-all hover:bg-teal-500 hover:shadow-[0_0_24px_-4px_rgba(53,127,158,0.5)]"
+          >
+            Join Discussions
+          </a>
+          <a
+            href="/discord"
+            class="rounded-xl border border-navy-600 px-7 py-3.5 text-sm font-semibold text-ice-300 transition-all hover:border-teal-700/60 hover:text-ice-50"
+          >
+            Discord
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-navy-800/60 py-16">
+    <div class="mx-auto max-w-6xl px-6">
+      <div class="grid gap-10 sm:grid-cols-3">
+        <div>
+          <img src="/logotype.svg" alt="Fabro" class="h-6 mb-4" />
+          <p class="text-sm text-ice-300/60">The dark software factory for expert engineers.</p>
+          <p class="mt-2 text-xs text-ice-300/40">Open source, MIT-licensed</p>
+        </div>
+        <div>
+          <h3 class="font-display text-sm font-semibold uppercase tracking-wider text-ice-300/70 mb-4">Product</h3>
+          <ul class="space-y-2 text-sm">
+            <li><a href="https://docs.fabro.sh/getting-started/quick-start" class="text-ice-300 hover:text-ice-50 transition-colors">Quick Start</a></li>
+            <li><a href="https://docs.fabro.sh" class="text-ice-300 hover:text-ice-50 transition-colors">Docs</a></li>
+            <li><a href="https://docs.fabro.sh/changelog" class="text-ice-300 hover:text-ice-50 transition-colors">Changelog</a></li>
+            <li><a href="/roadmap" class="text-ice-300 hover:text-ice-50 transition-colors">Roadmap</a></li>
+            <li><a href="https://github.com/fabro-sh/fabro/releases" class="text-ice-300 hover:text-ice-50 transition-colors">Releases</a></li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="font-display text-sm font-semibold uppercase tracking-wider text-ice-300/70 mb-4">Community</h3>
+          <ul class="space-y-2 text-sm">
+            <li><a href="/discord" class="text-ice-300 hover:text-ice-50 transition-colors">Discord</a></li>
+            <li><a href="https://github.com/fabro-sh/fabro" class="text-ice-300 hover:text-ice-50 transition-colors">GitHub</a></li>
+            <li><a href="https://github.com/fabro-sh/fabro/issues" class="text-ice-300 hover:text-ice-50 transition-colors">Issues</a></li>
+            <li><a href="https://github.com/fabro-sh/fabro/discussions" class="text-ice-300 hover:text-ice-50 transition-colors">Discussions</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="mt-10 border-t border-navy-800/40 pt-6 text-center text-xs text-ice-300/40">
+        &copy; 2025 Qlty Software Inc. All rights reserved.
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Scroll reveal
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("revealed");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15, rootMargin: "0px 0px -40px 0px" }
+    );
+    document.querySelectorAll(".reveal, .reveal-left, .reveal-right, .reveal-scale").forEach((el) => observer.observe(el));
+  </script>
+</Layout>
