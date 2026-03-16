@@ -108,11 +108,8 @@ static RANKDIR_RE: LazyLock<regex::Regex> =
 fn apply_direction<'a>(source: &'a str, direction: Option<GraphDirection>) -> Cow<'a, str> {
     match direction {
         Some(dir) => {
-            let replacement = match dir {
-                GraphDirection::Lr => "rankdir=LR",
-                GraphDirection::Tb => "rankdir=TB",
-            };
-            RANKDIR_RE.replace_all(source, replacement)
+            let replacement = format!("rankdir={dir}");
+            RANKDIR_RE.replace(source, replacement.as_str())
         }
         None => Cow::Borrowed(source),
     }
