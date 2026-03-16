@@ -1,0 +1,78 @@
+═══════════════════════════════════════════════════════════════════════════════
+FILE: astropy/modeling/separable.py
+FUNCTION: _cstack(left, right)
+LINE: 245
+═══════════════════════════════════════════════════════════════════════════════
+
+CONTEXT (50 lines before and after the fix):
+
+219 | def _cstack(left, right):
+220 |     """
+221 |     Function corresponding to '&' operation.
+222 | 
+223 |     Parameters
+224 |     ----------
+225 |     left, right : `astropy.modeling.Model` or ndarray
+226 |         If input is of an array, it is the output of `coord_matrix`.
+227 | 
+228 |     Returns
+229 |     -------
+230 |     result : ndarray
+231 |         Result from this operation.
+232 |
+233 |     """
+234 |     noutp = _compute_n_outputs(left, right)
+235 |
+236 |     if isinstance(left, Model):
+237 |         cleft = _coord_matrix(left, 'left', noutp)
+238 |     else:
+239 |         cleft = np.zeros((noutp, left.shape[1]))
+240 |         cleft[: left.shape[0], : left.shape[1]] = left        ← LEFT: Correctly uses 'left'
+241 |     if isinstance(right, Model):
+242 |         cright = _coord_matrix(right, 'right', noutp)
+243 |     else:
+244 |         cright = np.zeros((noutp, right.shape[1]))
+245 |         cright[-right.shape[0]:, -right.shape[1]:] = 1        ← BUG: Uses constant '1'
+246 |                                                                  ✓ FIX: Use 'right' instead
+247 |     return np.hstack([cleft, cright])
+248 |
+249 |
+250 | def _cdot(left, right):
+251 |     """
+252 |     Function corresponding to "|" operation.
+253 |
+254 |     Parameters
+255 |     ----------
+256 |     left, right : `astropy.modeling.Model` or ndarray
+257 |         If input is of an array, it is the output of `coord_matrix`.
+258 |
+259 |     Returns
+260 |     -------
+261 |     result : ndarray
+262 |         Result from this operation.
+263 |     """
+264 |
+═══════════════════════════════════════════════════════════════════════════════
+
+THE FIX (Exact replacement):
+
+SEARCH FOR (line 245):
+    cright[-right.shape[0]:, -right.shape[1]:] = 1
+
+REPLACE WITH:
+    cright[-right.shape[0]:, -right.shape[1]:] = right
+
+═══════════════════════════════════════════════════════════════════════════════
+
+DIFF VIEW:
+
+@@ -241,7 +241,7 @@ def _cstack(left, right):
+         cright = _coord_matrix(right, 'right', noutp)
+     else:
+         cright = np.zeros((noutp, right.shape[1]))
+-        cright[-right.shape[0]:, -right.shape[1]:] = 1
++        cright[-right.shape[0]:, -right.shape[1]:] = right
+ 
+     return np.hstack([cleft, cright])
+
+═══════════════════════════════════════════════════════════════════════════════
