@@ -1,0 +1,13 @@
+{
+  "run_id": "01KKV8PE12P4TBHE8FQ4XVAS81",
+  "workflow_name": "SWEBench",
+  "goal": "HttpResponse doesn't handle memoryview objects\nDescription\n\t\nI am trying to write a BinaryField retrieved from the database into a HttpResponse. When the database is Sqlite this works correctly, but Postgresql returns the contents of the field as a memoryview object and it seems like current Django doesn't like this combination:\nfrom django.http import HttpResponse\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t \n# String content\nresponse = HttpResponse(\"My Content\")\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\nresponse.content\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t \n# Out: b'My Content'\n# This is correct\n# Bytes content\nresponse = HttpResponse(b\"My Content\")\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t \nresponse.content\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t \n# Out: b'My Content'\n# This is also correct\n# memoryview content\nresponse = HttpResponse(memoryview(b\"My Content\"))\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t \nresponse.content\n# Out: b'<memory at 0x7fcc47ab2648>'\n# This is not correct, I am expecting b'My Content'\n\n\n\n## Additional Context\n\nI guess HttpResponseBase.make_bytes ​could be adapted to deal with memoryview objects by casting them to bytes. In all cases simply wrapping the memoryview in bytes works as a workaround HttpResponse(bytes(model.binary_field)).\nThe fact make_bytes would still use force_bytes if da56e1bac6449daef9aeab8d076d2594d9fd5b44 didn't refactor it and that d680a3f4477056c69629b0421db4bb254b8c69d0 added memoryview support to force_bytes strengthen my assumption that make_bytes should be adjusted as well.\nI'll try to work on this.",
+  "start_time": "2026-03-16T12:07:31.048459Z",
+  "node_count": 5,
+  "edge_count": 4,
+  "run_branch": "fabro/run/01KKV8PE12P4TBHE8FQ4XVAS81",
+  "base_sha": "470fcfe1200b2102c0cdf91c73b0ed8d925f258a",
+  "base_branch": "main",
+  "workflow_slug": "django__django-11133",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/evals/swe-bench/results/opus-baseline/runs/django__django-11133"
+}
