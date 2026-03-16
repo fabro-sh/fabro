@@ -1,0 +1,17 @@
+--- a/django/utils/autoreload.py
++++ b/django/utils/autoreload.py
+@@ -80,6 +80,11 @@ def iter_modules_and_files(modules, include_packages=False):
+     """
+     Iterate over all modules and yield their filenames.
+     """
+     for module in modules:
++        # Special case for __main__ module (e.g., manage.py)
++        # It has __spec__ = None but we still want to track it
++        if module.__name__ == '__main__':
++            if hasattr(module, '__file__') and module.__file__:
++                yield module.__file__
++            continue
++        
+         spec = getattr(module, "__spec__", None)
+         if spec is None:
+             continue
