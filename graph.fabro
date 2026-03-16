@@ -1,0 +1,9 @@
+digraph SWEBench {
+    rankdir=LR
+    start [shape=Mdiamond]
+    exit  [shape=Msquare]
+    setup         [label="Setup", shape=parallelogram, script="git clone https://github.com/django/django.git . && git checkout 84633905273fc916e3d17883810d9969c03f73c2 && python -m pip install -e ."]
+    solve         [label="Solve", prompt="Fix this GitHub issue in the repository. Make the minimal code change needed."]
+    extract_patch [label="Extract Patch", shape=parallelogram, script="git diff"]
+    start -> setup -> solve -> extract_patch -> exit
+}
