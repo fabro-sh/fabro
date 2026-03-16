@@ -1458,7 +1458,7 @@ pub async fn run_command(
                         graph.goal(),
                         &diff,
                         &model,
-                        pr_cfg,
+                        pr_cfg.draft,
                         &run_dir,
                     )
                     .await

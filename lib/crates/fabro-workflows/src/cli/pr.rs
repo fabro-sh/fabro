@@ -388,10 +388,6 @@ async fn pr_create_from(
         .model
         .unwrap_or_else(|| fabro_llm::catalog::default_model().id.to_string());
 
-    let pr_config = crate::cli::run_config::PullRequestConfig {
-        enabled: true,
-        draft: true,
-    };
     let record = crate::pull_request::maybe_open_pull_request(
         &creds,
         &origin_url,
@@ -400,7 +396,7 @@ async fn pr_create_from(
         &manifest.goal,
         &diff,
         &model,
-        &pr_config,
+        true,
         &run_dir,
     )
     .await
