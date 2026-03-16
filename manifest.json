@@ -1,0 +1,13 @@
+{
+  "run_id": "01KKVGBQG9B4QRPZGA5GZ7A4C6",
+  "workflow_name": "ImplementAndSimplify",
+  "goal": "# Add `-q`/`--quiet` to `fabro ps`\n\n## Context\n`docker ps -q` outputs only container IDs (one per line). We want the same for `fabro ps` — output only run IDs.\n\n## Changes\n\n**File: `lib/crates/fabro-workflows/src/cli/runs.rs`**\n\n1. Add `quiet` field to `RunsListArgs` (after `all`, line ~45):\n   ```rust\n   /// Only display run IDs\n   #[arg(short = 'q', long)]\n   pub quiet: bool,\n   ```\n\n2. In `list_command()` (~line 474), add a quiet branch before the JSON branch:\n   ```rust\n   if args.quiet {\n       for run in &filtered {\n           println!(\"{}\", run.run_id);\n       }\n       return Ok(());\n   }\n   ```\n   - Prints full run IDs (not truncated), one per line, no header, no footer — matches `docker ps -q` behavior.\n   - Skips the \"no runs found\" messages (empty output = no runs, like docker).\n\n## Verification\n- `cargo test -p fabro-workflows`\n- `cargo clippy --workspace -- -D warnings`\n- Manual: `fabro ps -q`, `fabro ps -qa`, `fabro ps -q --json` (quiet takes precedence)\n",
+  "start_time": "2026-03-16T14:21:28.560429Z",
+  "node_count": 13,
+  "edge_count": 16,
+  "run_branch": "fabro/run/01KKVGBQG9B4QRPZGA5GZ7A4C6",
+  "base_sha": "b4ae9d856693480d1c48a94d8d4f6ad52de1648d",
+  "base_branch": "main",
+  "workflow_slug": "implement",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro"
+}
