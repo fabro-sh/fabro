@@ -1,12 +1,14 @@
 {
-  "timestamp": "2026-03-16T12:00:41.368225Z",
-  "current_node": "solve",
+  "timestamp": "2026-03-16T12:00:44.479969Z",
+  "current_node": "extract_patch",
   "completed_nodes": [
     "start",
     "setup",
-    "solve"
+    "solve",
+    "extract_patch"
   ],
   "node_retries": {
+    "extract_patch": 1,
     "solve": 4,
     "start": 1,
     "setup": 1
@@ -15,24 +17,37 @@
     "internal.retry_count.start": 1,
     "internal.node_visit_count": 1,
     "internal.retry_count.solve": 4,
+    "thread.solve.current_node": "extract_patch",
     "graph.goal": "Incorrect removal of order_by clause created as multiline RawSQL\nDescription\n\t\nHi.\nThe SQLCompiler is ripping off one of my \"order by\" clause, because he \"thinks\" the clause was already \"seen\" (in SQLCompiler.get_order_by()). I'm using expressions written as multiline RawSQLs, which are similar but not the same. \nThe bug is located in SQLCompiler.get_order_by(), somewhere around line computing part of SQL query without ordering:\nwithout_ordering = self.ordering_parts.search(sql).group(1)\nThe sql variable contains multiline sql. As a result, the self.ordering_parts regular expression is returning just a line containing ASC or DESC words. This line is added to seen set, and because my raw queries have identical last lines, only the first clasue is returing from SQLCompiler.get_order_by().\nAs a quick/temporal fix I can suggest making sql variable clean of newline characters, like this:\nsql_oneline = ' '.join(sql.split('\\n'))\nwithout_ordering = self.ordering_parts.search(sql_oneline).group(1)\nNote: beware of unicode (Py2.x u'') and EOL dragons (\\r).\nExample of my query:\n\treturn MyModel.objects.all().order_by(\n\t\tRawSQL('''\n\t\t\tcase when status in ('accepted', 'verification')\n\t\t\t\t then 2 else 1 end''', []).desc(),\n\t\tRawSQL('''\n\t\t\tcase when status in ('accepted', 'verification')\n\t\t\t\t then (accepted_datetime, preferred_datetime)\n\t\t\t\t else null end''', []).asc(),\n\t\tRawSQL('''\n\t\t\tcase when status not in ('accepted', 'verification')\n\t\t\t\t then (accepted_datetime, preferred_datetime, created_at)\n\t\t\t\t else null end''', []).desc())\nThe ordering_parts.search is returing accordingly:\n'\t\t\t\t then 2 else 1 end)'\n'\t\t\t\t else null end'\n'\t\t\t\t else null end'\nSecond RawSQL with a\t\t\t\t else null end part is removed from query.\nThe fun thing is that the issue can be solved by workaround by adding a space or any other char to the last line. \nSo in case of RawSQL I can just say, that current implementation of avoiding duplicates in order by clause works only for special/rare cases (or does not work in all cases). \nThe bug filed here is about wrong identification of duplicates (because it compares only last line of SQL passed to order by clause).\nHope my notes will help you fixing the issue. Sorry for my english.\n\n\n\n## Additional Context\n\nIs there a reason you can't use ​conditional expressions, e.g. something like: MyModel.objects.annotate( custom_order=Case( When(...), ) ).order_by('custom_order') I'm thinking that would avoid fiddly ordering_parts regular expression. If there's some shortcoming to that approach, it might be easier to address that. Allowing the ordering optimization stuff to handle arbitrary RawSQL may be difficult.\nIs there a reason you can't use ​conditional expressions No, but I didn't knew about the issue, and writing raw sqls is sometimes faster (not in this case ;) I'm really happy having possibility to mix raw sqls with object queries. Next time I'll use expressions, for sure. Allowing the ordering optimization stuff to handle arbitrary RawSQL may be difficult. Personally I'd like to skip RawSQL clauses in the block which is responsible for finding duplicates. If someone is using raw sqls, he knows the best what he is doing, IMO. And it is quite strange if Django removes silently part of your SQL. This is very confusing. And please note that printing a Query instance was generating incomplete sql, but while checking Query.order_by manually, the return value was containing all clauses. I thought that just printing was affected, but our QA dept told me the truth ;) I know there is no effective way to compare similarity of two raw clauses. This may be hard for expression objects, too, but you have a possibility to implement some __eq__ magic (instead of comparation of generated sqls). Unfortunately I don't know why duplicates detection was implemented, so it's hard to tell how to improve this part.\nPatches welcome, I suppose.\n​PR\nIs there a reason why you didn't add tests?\nI was waiting for confirmation, I've added a test. Is it enough?\nSome additional test coverage needed.",
-    "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n",
-    "outcome": "fail",
+    "command.output": "",
+    "outcome": "success",
     "graph.rankdir": "LR",
     "internal.retry_count.setup": 1,
-    "internal.thread_id": "setup",
+    "internal.thread_id": "solve",
     "command.stderr": "",
-    "failure_class": "transient_infra",
+    "internal.retry_count.extract_patch": 1,
+    "failure_class": "",
     "thread.start.current_node": "setup",
-    "current.preamble": "Goal: Incorrect removal of order_by clause created as multiline RawSQL\nDescription\n\t\nHi.\nThe SQLCompiler is ripping off one of my \"order by\" clause, because he \"thinks\" the clause was already \"seen\" (in SQLCompiler.get_order_by()). I'm using expressions written as multiline RawSQLs, which are similar but not the same. \nThe bug is located in SQLCompiler.get_order_by(), somewhere around line computing part of SQL query without ordering:\nwithout_ordering = self.ordering_parts.search(sql).group(1)\nThe sql variable contains multiline sql. As a result, the self.ordering_parts regular expression is returning just a line containing ASC or DESC words. This line is added to seen set, and because my raw queries have identical last lines, only the first clasue is returing from SQLCompiler.get_order_by().\nAs a quick/temporal fix I can suggest making sql variable clean of newline characters, like this:\nsql_oneline = ' '.join(sql.split('\\n'))\nwithout_ordering = self.ordering_parts.search(sql_oneline).group(1)\nNote: beware of unicode (Py2.x u'') and EOL dragons (\\r).\nExample of my query:\n\treturn MyModel.objects.all().order_by(\n\t\tRawSQL('''\n\t\t\tcase when status in ('accepted', 'verification')\n\t\t\t\t then 2 else 1 end''', []).desc(),\n\t\tRawSQL('''\n\t\t\tcase when status in ('accepted', 'verification')\n\t\t\t\t then (accepted_datetime, preferred_datetime)\n\t\t\t\t else null end''', []).asc(),\n\t\tRawSQL('''\n\t\t\tcase when status not in ('accepted', 'verification')\n\t\t\t\t then (accepted_datetime, preferred_datetime, created_at)\n\t\t\t\t else null end''', []).desc())\nThe ordering_parts.search is returing accordingly:\n'\t\t\t\t then 2 else 1 end)'\n'\t\t\t\t else null end'\n'\t\t\t\t else null end'\nSecond RawSQL with a\t\t\t\t else null end part is removed from query.\nThe fun thing is that the issue can be solved by workaround by adding a space or any other char to the last line. \nSo in case of RawSQL I can just say, that current implementation of avoiding duplicates in order by clause works only for special/rare cases (or does not work in all cases). \nThe bug filed here is about wrong identification of duplicates (because it compares only last line of SQL passed to order by clause).\nHope my notes will help you fixing the issue. Sorry for my english.\n\n\n\n## Additional Context\n\nIs there a reason you can't use ​conditional expressions, e.g. something like: MyModel.objects.annotate( custom_order=Case( When(...), ) ).order_by('custom_order') I'm thinking that would avoid fiddly ordering_parts regular expression. If there's some shortcoming to that approach, it might be easier to address that. Allowing the ordering optimization stuff to handle arbitrary RawSQL may be difficult.\nIs there a reason you can't use ​conditional expressions No, but I didn't knew about the issue, and writing raw sqls is sometimes faster (not in this case ;) I'm really happy having possibility to mix raw sqls with object queries. Next time I'll use expressions, for sure. Allowing the ordering optimization stuff to handle arbitrary RawSQL may be difficult. Personally I'd like to skip RawSQL clauses in the block which is responsible for finding duplicates. If someone is using raw sqls, he knows the best what he is doing, IMO. And it is quite strange if Django removes silently part of your SQL. This is very confusing. And please note that printing a Query instance was generating incomplete sql, but while checking Query.order_by manually, the return value was containing all clauses. I thought that just printing was affected, but our QA dept told me the truth ;) I know there is no effective way to compare similarity of two raw clauses. This may be hard for expression objects, too, but you have a possibility to implement some __eq__ magic (instead of comparation of generated sqls). Unfortunately I don't know why duplicates detection was implemented, so it's hard to tell how to improve this part.\nPatches welcome, I suppose.\n​PR\nIs there a reason why you didn't add tests?\nI was waiting for confirmation, I've added a test. Is it enough?\nSome additional test coverage needed.\n\n## Completed stages\n- **setup**: fail\n  - Script: `git clone https://github.com/django/django.git . && git checkout ef082ebb84f00e38af4e8880d04e8365c2766d34 && python -m pip install -e .`\n  - Stdout:\n    ```\n    fatal: destination path '.' already exists and is not an empty directory.\n    ```\n  - Stderr: (empty)\n\n## Context\n- failure_class: deterministic\n- failure_signature: setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.\n",
-    "failure_signature": "solve|transient_infra|api_transient|gemini|rate_limited",
-    "current_node": "solve",
+    "current.preamble": "Goal: Incorrect removal of order_by clause created as multiline RawSQL\nDescription\n\t\nHi.\nThe SQLCompiler is ripping off one of my \"order by\" clause, because he \"thinks\" the clause was already \"seen\" (in SQLCompiler.get_order_by()). I'm using expressions written as multiline RawSQLs, which are similar but not the same. \nThe bug is located in SQLCompiler.get_order_by(), somewhere around line computing part of SQL query without ordering:\nwithout_ordering = self.ordering_parts.search(sql).group(1)\nThe sql variable contains multiline sql. As a result, the self.ordering_parts regular expression is returning just a line containing ASC or DESC words. This line is added to seen set, and because my raw queries have identical last lines, only the first clasue is returing from SQLCompiler.get_order_by().\nAs a quick/temporal fix I can suggest making sql variable clean of newline characters, like this:\nsql_oneline = ' '.join(sql.split('\\n'))\nwithout_ordering = self.ordering_parts.search(sql_oneline).group(1)\nNote: beware of unicode (Py2.x u'') and EOL dragons (\\r).\nExample of my query:\n\treturn MyModel.objects.all().order_by(\n\t\tRawSQL('''\n\t\t\tcase when status in ('accepted', 'verification')\n\t\t\t\t then 2 else 1 end''', []).desc(),\n\t\tRawSQL('''\n\t\t\tcase when status in ('accepted', 'verification')\n\t\t\t\t then (accepted_datetime, preferred_datetime)\n\t\t\t\t else null end''', []).asc(),\n\t\tRawSQL('''\n\t\t\tcase when status not in ('accepted', 'verification')\n\t\t\t\t then (accepted_datetime, preferred_datetime, created_at)\n\t\t\t\t else null end''', []).desc())\nThe ordering_parts.search is returing accordingly:\n'\t\t\t\t then 2 else 1 end)'\n'\t\t\t\t else null end'\n'\t\t\t\t else null end'\nSecond RawSQL with a\t\t\t\t else null end part is removed from query.\nThe fun thing is that the issue can be solved by workaround by adding a space or any other char to the last line. \nSo in case of RawSQL I can just say, that current implementation of avoiding duplicates in order by clause works only for special/rare cases (or does not work in all cases). \nThe bug filed here is about wrong identification of duplicates (because it compares only last line of SQL passed to order by clause).\nHope my notes will help you fixing the issue. Sorry for my english.\n\n\n\n## Additional Context\n\nIs there a reason you can't use ​conditional expressions, e.g. something like: MyModel.objects.annotate( custom_order=Case( When(...), ) ).order_by('custom_order') I'm thinking that would avoid fiddly ordering_parts regular expression. If there's some shortcoming to that approach, it might be easier to address that. Allowing the ordering optimization stuff to handle arbitrary RawSQL may be difficult.\nIs there a reason you can't use ​conditional expressions No, but I didn't knew about the issue, and writing raw sqls is sometimes faster (not in this case ;) I'm really happy having possibility to mix raw sqls with object queries. Next time I'll use expressions, for sure. Allowing the ordering optimization stuff to handle arbitrary RawSQL may be difficult. Personally I'd like to skip RawSQL clauses in the block which is responsible for finding duplicates. If someone is using raw sqls, he knows the best what he is doing, IMO. And it is quite strange if Django removes silently part of your SQL. This is very confusing. And please note that printing a Query instance was generating incomplete sql, but while checking Query.order_by manually, the return value was containing all clauses. I thought that just printing was affected, but our QA dept told me the truth ;) I know there is no effective way to compare similarity of two raw clauses. This may be hard for expression objects, too, but you have a possibility to implement some __eq__ magic (instead of comparation of generated sqls). Unfortunately I don't know why duplicates detection was implemented, so it's hard to tell how to improve this part.\nPatches welcome, I suppose.\n​PR\nIs there a reason why you didn't add tests?\nI was waiting for confirmation, I've added a test. Is it enough?\nSome additional test coverage needed.\n\n## Completed stages\n- **setup**: fail\n  - Script: `git clone https://github.com/django/django.git . && git checkout ef082ebb84f00e38af4e8880d04e8365c2766d34 && python -m pip install -e .`\n  - Stdout:\n    ```\n    fatal: destination path '.' already exists and is not an empty directory.\n    ```\n  - Stderr: (empty)\n- **solve**: fail\n\n## Context\n- failure_class: transient_infra\n- failure_signature: solve|transient_infra|api_transient|gemini|rate_limited\n",
+    "failure_signature": "",
+    "current_node": "extract_patch",
     "internal.run_id": "01KKV8599GWHF3KFNK8JJFP9YG",
     "internal.fidelity": "compact",
     "thread.setup.current_node": "solve"
   },
-  "logs": [],
+  "logs": [
+    "git diff failed"
+  ],
   "node_outcomes": {
+    "extract_patch": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: git diff",
+      "duration_ms": 281
+    },
     "solve": {
       "status": "fail",
       "failure": {
@@ -41,10 +56,6 @@
         "failure_signature": "api_transient|gemini|rate_limited"
       },
       "duration_ms": 145884
-    },
-    "start": {
-      "status": "success",
-      "duration_ms": 0
     },
     "setup": {
       "status": "fail",
@@ -57,13 +68,18 @@
         "failure_class": "deterministic"
       },
       "duration_ms": 220
+    },
+    "start": {
+      "status": "success",
+      "duration_ms": 0
     }
   },
-  "next_node_id": "extract_patch",
+  "next_node_id": "exit",
   "loop_failure_signatures": {
     "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.": 1
   },
   "node_visits": {
+    "extract_patch": 1,
     "start": 1,
     "solve": 1,
     "setup": 1
