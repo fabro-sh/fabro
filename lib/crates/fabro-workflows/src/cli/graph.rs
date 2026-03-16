@@ -88,6 +88,13 @@ const DARK_MODE_STYLE: &str = r##"
   }
 </style>"##;
 
+/// DOT graph-level defaults injected after the first `{`.
+const DOT_STYLE_DEFAULTS: &str = r##"
+    bgcolor="transparent"
+    node [color="#357f9e", fontname="Helvetica", fontsize=12, fontcolor="#1a1a1a"]
+    edge [color="#666666", fontname="Helvetica", fontsize=10, fontcolor="#666666"]
+"##;
+
 /// Inject DOT graph-level style defaults (transparent background, teal nodes,
 /// gray edges, Helvetica font) right after the first `{` in the DOT source.
 /// Per-node/edge attributes override these defaults.
@@ -96,9 +103,7 @@ fn inject_dot_style_defaults(source: &str) -> String {
         return source.to_string();
     };
     let (before, after) = source.split_at(pos + 1);
-    format!(
-        "{before}\n    bgcolor=\"transparent\"\n    node [color=\"#357f9e\", fontname=\"Helvetica\", fontsize=12, fontcolor=\"#1a1a1a\"]\n    edge [color=\"#666666\", fontname=\"Helvetica\", fontsize=10, fontcolor=\"#666666\"]\n{after}"
-    )
+    format!("{before}{DOT_STYLE_DEFAULTS}{after}")
 }
 
 /// Post-process raw SVG output from Graphviz:
