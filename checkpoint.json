@@ -1,27 +1,31 @@
 {
-  "timestamp": "2026-03-16T14:21:28.748763Z",
-  "current_node": "toolchain",
+  "timestamp": "2026-03-16T14:22:40.392635Z",
+  "current_node": "preflight_compile",
   "completed_nodes": [
     "start",
-    "toolchain"
+    "toolchain",
+    "preflight_compile"
   ],
   "node_retries": {
     "start": 1,
-    "toolchain": 1
+    "toolchain": 1,
+    "preflight_compile": 1
   },
   "context_values": {
-    "internal.thread_id": "start",
+    "internal.thread_id": "toolchain",
+    "thread.toolchain.current_node": "preflight_compile",
     "internal.run_id": "01KKVGBQG9B4QRPZGA5GZ7A4C6",
-    "current_node": "toolchain",
+    "current_node": "preflight_compile",
     "outcome": "success",
     "failure_signature": "",
     "internal.fidelity": "compact",
     "internal.node_visit_count": 1,
     "internal.retry_count.toolchain": 1,
     "command.stderr": "",
+    "internal.retry_count.preflight_compile": 1,
     "failure_class": "",
-    "current.preamble": "Goal: # Add `-q`/`--quiet` to `fabro ps`\n\n## Context\n`docker ps -q` outputs only container IDs (one per line). We want the same for `fabro ps` — output only run IDs.\n\n## Changes\n\n**File: `lib/crates/fabro-workflows/src/cli/runs.rs`**\n\n1. Add `quiet` field to `RunsListArgs` (after `all`, line ~45):\n   ```rust\n   /// Only display run IDs\n   #[arg(short = 'q', long)]\n   pub quiet: bool,\n   ```\n\n2. In `list_command()` (~line 474), add a quiet branch before the JSON branch:\n   ```rust\n   if args.quiet {\n       for run in &filtered {\n           println!(\"{}\", run.run_id);\n       }\n       return Ok(());\n   }\n   ```\n   - Prints full run IDs (not truncated), one per line, no header, no footer — matches `docker ps -q` behavior.\n   - Skips the \"no runs found\" messages (empty output = no runs, like docker).\n\n## Verification\n- `cargo test -p fabro-workflows`\n- `cargo clippy --workspace -- -D warnings`\n- Manual: `fabro ps -q`, `fabro ps -qa`, `fabro ps -q --json` (quiet takes precedence)\n\n",
-    "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n",
+    "current.preamble": "Goal: # Add `-q`/`--quiet` to `fabro ps`\n\n## Context\n`docker ps -q` outputs only container IDs (one per line). We want the same for `fabro ps` — output only run IDs.\n\n## Changes\n\n**File: `lib/crates/fabro-workflows/src/cli/runs.rs`**\n\n1. Add `quiet` field to `RunsListArgs` (after `all`, line ~45):\n   ```rust\n   /// Only display run IDs\n   #[arg(short = 'q', long)]\n   pub quiet: bool,\n   ```\n\n2. In `list_command()` (~line 474), add a quiet branch before the JSON branch:\n   ```rust\n   if args.quiet {\n       for run in &filtered {\n           println!(\"{}\", run.run_id);\n       }\n       return Ok(());\n   }\n   ```\n   - Prints full run IDs (not truncated), one per line, no header, no footer — matches `docker ps -q` behavior.\n   - Skips the \"no runs found\" messages (empty output = no runs, like docker).\n\n## Verification\n- `cargo test -p fabro-workflows`\n- `cargo clippy --workspace -- -D warnings`\n- Manual: `fabro ps -q`, `fabro ps -qa`, `fabro ps -q --json` (quiet takes precedence)\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n",
+    "command.output": "",
     "internal.retry_count.start": 1,
     "graph.goal": "# Add `-q`/`--quiet` to `fabro ps`\n\n## Context\n`docker ps -q` outputs only container IDs (one per line). We want the same for `fabro ps` — output only run IDs.\n\n## Changes\n\n**File: `lib/crates/fabro-workflows/src/cli/runs.rs`**\n\n1. Add `quiet` field to `RunsListArgs` (after `all`, line ~45):\n   ```rust\n   /// Only display run IDs\n   #[arg(short = 'q', long)]\n   pub quiet: bool,\n   ```\n\n2. In `list_command()` (~line 474), add a quiet branch before the JSON branch:\n   ```rust\n   if args.quiet {\n       for run in &filtered {\n           println!(\"{}\", run.run_id);\n       }\n       return Ok(());\n   }\n   ```\n   - Prints full run IDs (not truncated), one per line, no header, no footer — matches `docker ps -q` behavior.\n   - Skips the \"no runs found\" messages (empty output = no runs, like docker).\n\n## Verification\n- `cargo test -p fabro-workflows`\n- `cargo clippy --workspace -- -D warnings`\n- Manual: `fabro ps -q`, `fabro ps -qa`, `fabro ps -q --json` (quiet takes precedence)\n",
     "graph.rankdir": "LR",
@@ -42,11 +46,21 @@
       },
       "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
       "duration_ms": 169
+    },
+    "preflight_compile": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: cargo check -q --workspace 2>&1",
+      "duration_ms": 68585
     }
   },
-  "next_node_id": "preflight_compile",
+  "next_node_id": "preflight_lint",
   "node_visits": {
     "start": 1,
-    "toolchain": 1
+    "toolchain": 1,
+    "preflight_compile": 1
   }
 }
