@@ -1,0 +1,40 @@
+diff --git a/lib/crates/fabro-exe/src/lib.rs b/lib/crates/fabro-exe/src/lib.rs
+index 74efc9c..9bb010d 100644
+--- a/lib/crates/fabro-exe/src/lib.rs
++++ b/lib/crates/fabro-exe/src/lib.rs
+@@ -278,7 +278,7 @@ impl ExeSandbox {
+             {
+                 let branch = params.branch.as_deref().unwrap_or("main");
+                 let fallback_script = format!(
+-                    "cd {WORKING_DIRECTORY} && git init && git remote add origin {} && git fetch origin && git checkout {}",
++                    "cd {WORKING_DIRECTORY} && rm -rf .git && git init && git remote add origin {} && git fetch origin && git checkout {}",
+                     shell_quote(&clone_url),
+                     shell_quote(branch),
+                 );
+@@ -1809,4 +1809,4 @@ mod tests {
+             "glob filter should be properly escaped, got: {inner}",
+         );
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-ssh/src/lib.rs b/lib/crates/fabro-ssh/src/lib.rs
+index d5c5bac..3eeb715 100644
+--- a/lib/crates/fabro-ssh/src/lib.rs
++++ b/lib/crates/fabro-ssh/src/lib.rs
+@@ -209,7 +209,7 @@ impl SshSandbox {
+             {
+                 let branch = params.branch.as_deref().unwrap_or("main");
+                 let fallback_script = format!(
+-                    "cd {} && git init && git remote add origin {} && git fetch origin && git checkout {}",
++                    "cd {} && rm -rf .git && git init && git remote add origin {} && git fetch origin && git checkout {}",
+                     shell_quote(working_dir),
+                     shell_quote(&clone_url),
+                     shell_quote(branch),
+@@ -1354,4 +1354,4 @@ mod tests {
+         let sandbox = sandbox_with_mock(MockSshRunner::new());
+         assert_eq!(sandbox.resolve_path("/tmp/file.txt"), "/tmp/file.txt");
+     }
+-}
++}
+\ No newline at end of file
