@@ -1,0 +1,55 @@
+--- a/astropy/nddata/mixins/ndarithmetic.py
++++ b/astropy/nddata/mixins/ndarithmetic.py
+@@ -520,7 +520,7 @@ class NDArithmeticMixin:
+         elif self.mask is None and operand is not None:
+             # Make a copy so there is no reference in the result.
+             return deepcopy(operand.mask)
+-        elif operand is None:
++        elif operand is None or operand.mask is None:
+             return deepcopy(self.mask)
+         else:
+             # Now lets calculate the resulting mask (operation enforces copy)
+
+--- a/astropy/nddata/mixins/tests/test_ndarithmetic.py
++++ b/astropy/nddata/mixins/tests/test_ndarithmetic.py
+@@ -1310,3 +1310,43 @@ def test_raise_method_not_supported():
+ 
+     # raise error for unsupported propagation operations:
+     with pytest.raises(ValueError):
+         ndd1.uncertainty.propagate(np.mod, ndd2, result, correlation)
++
++
++@pytest.mark.parametrize("meth", ["add", "subtract", "divide", "multiply"])
++def test_arithmetics_bitmask_one_operand_without_mask(meth):
++    """Test mask propagation when one operand does not have a mask.
++    
++    This is a regression test for:
++    https://github.com/astropy/astropy/issues/14961
++    
++    When one operand has a mask and the other does not (mask is None),
++    the result should have the mask from the operand that has one.
++    This should work even with custom mask handling functions like
++    np.bitwise_or.
++    """
++    array = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]])
++    mask = np.array([[0, 1, 64], [8, 0, 1], [2, 1, 0]])
++    
++    nref_nomask = NDDataArithmetic(array)
++    nref_mask = NDDataArithmetic(array, mask=mask)
++    
++    # Test 1: operand with mask, operand2 is scalar (no mask)
++    result1 = getattr(nref_mask, meth)(1., handle_mask=np.bitwise_or)
++    assert_array_equal(result1.mask, mask)
++    
++    # Test 2: operand with mask, operand2 is NDData without mask
++    result2 = getattr(nref_mask, meth)(nref_nomask, handle_mask=np.bitwise_or)
++    assert_array_equal(result2.mask, mask)
++    
++    # Test 3: operand without mask, operand2 is NDData with mask
++    result3 = getattr(nref_nomask, meth)(nref_mask, handle_mask=np.bitwise_or)
++    assert_array_equal(result3.mask, mask)
++    
++    # Test 4: both have masks
++    result4 = getattr(nref_mask, meth)(nref_mask, handle_mask=np.bitwise_or)
++    expected_mask = np.bitwise_or(mask, mask)
++    assert_array_equal(result4.mask, expected_mask)
