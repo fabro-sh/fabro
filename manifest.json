@@ -1,0 +1,13 @@
+{
+  "run_id": "01KKTC2TWVRW6ZCYYZYGRX0GD6",
+  "workflow_name": "ImplementAndSimplify",
+  "goal": "# Refactor: Collapse `pull_request_*` fields on `RunConfig` into `Option<PullRequestConfig>`\n\n## Context\n\n`RunConfig` has 4 flat `pull_request_*` fields that encode a natural tree structure. This refactor collapses them into a single `Option<PullRequestConfig>` field, reusing the existing TOML config struct directly.\n\n## Approach\n\nReplace on `RunConfig`:\n```rust\npub pull_request_enabled: bool,\npub pull_request_draft: bool,\npub pull_request_auto_merge: bool,\npub pull_request_merge_strategy: MergeStrategy,\n```\n\nWith:\n```rust\npub pull_request: Option<PullRequestConfig>,\n```\n\n- `None` = disabled (replaces `enabled: false`)\n- `Some(config)` = enabled, read `.draft`, `.auto_merge`, `.merge_strategy` directly\n- The `enabled` field on `PullRequestConfig` is still needed for TOML deserialization but is redundant at runtime\n\nDelete `AutoMergeConfig` from `pull_request.rs` — pass `Option<MergeStrategy>` directly instead (derived from `auto_merge` + `merge_strategy` on `PullRequestConfig`).\n\n## Files to modify\n\n1. **`engine.rs`** — replace 4 fields with `pull_request: Option<PullRequestConfig>`, update all test constructors (4 lines → 1: `pull_request: None`)\n2. **`run.rs`** — simplify construction: `pull_request: pr_cfg.filter(|p| p.enabled).cloned()` with draft override for auto_merge. Simplify read site: `if let Some(ref pr) = config.pull_request { ... }`\n3. **`pull_request.rs`** — change `maybe_open_pull_request` to take `&PullRequestConfig` instead of `draft: bool` + `auto_merge: Option<AutoMergeConfig>`. Delete `AutoMergeConfig`\n4. **`pr.rs`** — update call to `maybe_open_pull_request`\n5. **`server.rs`, `manager_loop.rs`** — `pull_request: None`\n6. **`tests/integration.rs`, `tests/daytona_integration.rs`** — `pull_request: None`\n\n## Verification\n\n- `cargo build --workspace`\n- `cargo clippy --workspace -- -D warnings`\n- `cargo test -p fabro-workflows -- pull_request run_config project_config`\n- `cargo fmt --check --all`\n",
+  "start_time": "2026-03-16T03:47:28.595637Z",
+  "node_count": 13,
+  "edge_count": 16,
+  "run_branch": "fabro/run/01KKTC2TWVRW6ZCYYZYGRX0GD6",
+  "base_sha": "470fcfe1200b2102c0cdf91c73b0ed8d925f258a",
+  "base_branch": "main",
+  "workflow_slug": "implement",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro"
+}
