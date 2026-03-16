@@ -30,14 +30,19 @@ fn build_profile(model: &str, provider: Provider) -> Box<dyn ProviderProfile> {
     }
 }
 
+/// Shared state for tracking file modifications from agent tool calls.
+struct FileTracking {
+    /// Maps tool_call_id → file_path for in-flight write/edit calls.
+    pending: HashMap<String, String>,
+    /// Set of all file paths successfully written/edited.
+    touched: HashSet<String>,
+    /// Most recently modified file path.
+    last: Option<String>,
+}
+
 /// Recursively extract file-tracking events from agent events, including
 /// those wrapped in one or more layers of `SubAgentEvent`.
-fn track_file_event(
-    event: &AgentEvent,
-    pending_tool_calls: &Arc<Mutex<HashMap<String, String>>>,
-    files_touched: &Arc<Mutex<HashSet<String>>>,
-    last_file_touched: &Arc<Mutex<Option<String>>>,
-) {
+fn track_file_event(event: &AgentEvent, state: &Arc<Mutex<FileTracking>>) {
     match event {
         AgentEvent::ToolCallStarted {
             tool_name,
@@ -46,9 +51,10 @@ fn track_file_event(
         } => {
             if tool_name == "write_file" || tool_name == "edit_file" {
                 if let Some(path) = arguments.get("file_path").and_then(|v| v.as_str()) {
-                    pending_tool_calls
+                    state
                         .lock()
                         .unwrap()
+                        .pending
                         .insert(tool_call_id.clone(), path.to_string());
                 }
             }
@@ -58,17 +64,18 @@ fn track_file_event(
             is_error,
             ..
         } => {
+            let mut s = state.lock().unwrap();
             if !*is_error {
-                if let Some(path) = pending_tool_calls.lock().unwrap().remove(tool_call_id) {
-                    files_touched.lock().unwrap().insert(path.clone());
-                    *last_file_touched.lock().unwrap() = Some(path);
+                if let Some(path) = s.pending.remove(tool_call_id) {
+                    s.touched.insert(path.clone());
+                    s.last = Some(path);
                 }
             } else {
-                pending_tool_calls.lock().unwrap().remove(tool_call_id);
+                s.pending.remove(tool_call_id);
             }
         }
         AgentEvent::SubAgentEvent { event: inner, .. } => {
-            track_file_event(inner, pending_tool_calls, files_touched, last_file_touched);
+            track_file_event(inner, state);
         }
         _ => {}
     }
@@ -81,9 +88,7 @@ fn spawn_event_forwarder(
     session: &Session,
     node_id: String,
     emitter: Arc<crate::event::EventEmitter>,
-    pending_tool_calls: Arc<Mutex<HashMap<String, String>>>,
-    files_touched: Arc<Mutex<HashSet<String>>>,
-    last_file_touched: Arc<Mutex<Option<String>>>,
+    file_tracking: Arc<Mutex<FileTracking>>,
 ) {
     let mut rx = session.subscribe();
     tokio::spawn(async move {
@@ -92,12 +97,7 @@ fn spawn_event_forwarder(
             emitter.touch();
 
             // Track file changes from tool calls (including sub-agent events)
-            track_file_event(
-                &event.event,
-                &pending_tool_calls,
-                &files_touched,
-                &last_file_touched,
-            );
+            track_file_event(&event.event, &file_tracking);
 
             // Forward non-streaming agent events to pipeline
             if !matches!(
@@ -450,19 +450,18 @@ impl CodergenBackend for AgentApiBackend {
         );
 
         // File change tracking: shared between spawned task and main fn.
-        let pending_tool_calls: Arc<Mutex<HashMap<String, String>>> =
-            Arc::new(Mutex::new(HashMap::new()));
-        let files_touched: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-        let last_file_touched: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let file_tracking = Arc::new(Mutex::new(FileTracking {
+            pending: HashMap::new(),
+            touched: HashSet::new(),
+            last: None,
+        }));
 
         // Subscribe to session events: forward to pipeline emitter + track files.
         spawn_event_forwarder(
             &session,
             node.id.clone(),
             Arc::clone(emitter),
-            Arc::clone(&pending_tool_calls),
-            Arc::clone(&files_touched),
-            Arc::clone(&last_file_touched),
+            Arc::clone(&file_tracking),
         );
 
         // Emit Prompt event before processing
@@ -532,9 +531,7 @@ impl CodergenBackend for AgentApiBackend {
                         &session,
                         node.id.clone(),
                         Arc::clone(emitter),
-                        Arc::clone(&pending_tool_calls),
-                        Arc::clone(&files_touched),
-                        Arc::clone(&last_file_touched),
+                        Arc::clone(&file_tracking),
                     );
 
                     session.initialize().await;
@@ -609,12 +606,12 @@ impl CodergenBackend for AgentApiBackend {
             })
             .unwrap_or_default();
 
-        // Collect files_touched from the shared set.
-        let files_touched: Vec<String> = {
-            let set = files_touched.lock().unwrap();
-            let mut v: Vec<String> = set.iter().cloned().collect();
+        // Collect files_touched from the shared tracking state.
+        let (files_touched, last_file_touched) = {
+            let s = file_tracking.lock().unwrap();
+            let mut v: Vec<String> = s.touched.iter().cloned().collect();
             v.sort();
-            v
+            (v, s.last.clone())
         };
 
         let provider_used = serde_json::json!({
@@ -630,8 +627,6 @@ impl CodergenBackend for AgentApiBackend {
         if let Some(key) = reuse_key {
             self.sessions.lock().unwrap().insert(key, session);
         }
-
-        let last_file_touched = last_file_touched.lock().unwrap().clone();
 
         Ok(CodergenResult::Text {
             text: response,
@@ -665,11 +660,17 @@ mod tests {
         assert!(backend.sessions.lock().unwrap().is_empty());
     }
 
+    fn new_file_tracking() -> Arc<Mutex<FileTracking>> {
+        Arc::new(Mutex::new(FileTracking {
+            pending: HashMap::new(),
+            touched: HashSet::new(),
+            last: None,
+        }))
+    }
+
     #[test]
     fn track_file_event_records_top_level_write() {
-        let pending = Arc::new(Mutex::new(HashMap::new()));
-        let touched = Arc::new(Mutex::new(HashSet::new()));
-        let last = Arc::new(Mutex::new(None));
+        let state = new_file_tracking();
 
         let mut args = serde_json::Map::new();
         args.insert(
@@ -683,11 +684,12 @@ mod tests {
                 tool_call_id: "tc1".to_string(),
                 arguments: serde_json::Value::Object(args),
             },
-            &pending,
-            &touched,
-            &last,
+            &state,
         );
-        assert_eq!(pending.lock().unwrap().get("tc1").unwrap(), "/tmp/foo.rs");
+        assert_eq!(
+            state.lock().unwrap().pending.get("tc1").unwrap(),
+            "/tmp/foo.rs"
+        );
 
         track_file_event(
             &AgentEvent::ToolCallCompleted {
@@ -696,19 +698,16 @@ mod tests {
                 is_error: false,
                 output: serde_json::Value::String("ok".to_string()),
             },
-            &pending,
-            &touched,
-            &last,
+            &state,
         );
-        assert!(touched.lock().unwrap().contains("/tmp/foo.rs"));
-        assert_eq!(last.lock().unwrap().as_deref(), Some("/tmp/foo.rs"));
+        let s = state.lock().unwrap();
+        assert!(s.touched.contains("/tmp/foo.rs"));
+        assert_eq!(s.last.as_deref(), Some("/tmp/foo.rs"));
     }
 
     #[test]
     fn track_file_event_unwraps_sub_agent_edit() {
-        let pending = Arc::new(Mutex::new(HashMap::new()));
-        let touched = Arc::new(Mutex::new(HashSet::new()));
-        let last = Arc::new(Mutex::new(None));
+        let state = new_file_tracking();
 
         let mut args = serde_json::Map::new();
         args.insert(
@@ -727,12 +726,10 @@ mod tests {
                     arguments: serde_json::Value::Object(args),
                 }),
             },
-            &pending,
-            &touched,
-            &last,
+            &state,
         );
         assert_eq!(
-            pending.lock().unwrap().get("tc-sub").unwrap(),
+            state.lock().unwrap().pending.get("tc-sub").unwrap(),
             "/src/lib.rs"
         );
 
@@ -748,19 +745,16 @@ mod tests {
                     output: serde_json::Value::String("ok".to_string()),
                 }),
             },
-            &pending,
-            &touched,
-            &last,
+            &state,
         );
-        assert!(touched.lock().unwrap().contains("/src/lib.rs"));
-        assert_eq!(last.lock().unwrap().as_deref(), Some("/src/lib.rs"));
+        let s = state.lock().unwrap();
+        assert!(s.touched.contains("/src/lib.rs"));
+        assert_eq!(s.last.as_deref(), Some("/src/lib.rs"));
     }
 
     #[test]
     fn track_file_event_unwraps_nested_sub_sub_agent() {
-        let pending = Arc::new(Mutex::new(HashMap::new()));
-        let touched = Arc::new(Mutex::new(HashSet::new()));
-        let last = Arc::new(Mutex::new(None));
+        let state = new_file_tracking();
 
         let mut args = serde_json::Map::new();
         args.insert(
@@ -783,11 +777,9 @@ mod tests {
                     }),
                 }),
             },
-            &pending,
-            &touched,
-            &last,
+            &state,
         );
-        assert!(pending.lock().unwrap().contains_key("tc-deep"));
+        assert!(state.lock().unwrap().pending.contains_key("tc-deep"));
 
         track_file_event(
             &AgentEvent::SubAgentEvent {
@@ -804,18 +796,14 @@ mod tests {
                     }),
                 }),
             },
-            &pending,
-            &touched,
-            &last,
+            &state,
         );
-        assert!(touched.lock().unwrap().contains("/deep/file.rs"));
+        assert!(state.lock().unwrap().touched.contains("/deep/file.rs"));
     }
 
     #[test]
     fn track_file_event_error_removes_pending() {
-        let pending = Arc::new(Mutex::new(HashMap::new()));
-        let touched = Arc::new(Mutex::new(HashSet::new()));
-        let last = Arc::new(Mutex::new(None));
+        let state = new_file_tracking();
 
         let mut args = serde_json::Map::new();
         args.insert(
@@ -833,9 +821,7 @@ mod tests {
                     arguments: serde_json::Value::Object(args),
                 }),
             },
-            &pending,
-            &touched,
-            &last,
+            &state,
         );
 
         track_file_event(
@@ -849,12 +835,11 @@ mod tests {
                     output: serde_json::Value::String("failed".to_string()),
                 }),
             },
-            &pending,
-            &touched,
-            &last,
+            &state,
         );
-        assert!(pending.lock().unwrap().is_empty());
-        assert!(!touched.lock().unwrap().contains("/err.rs"));
+        let s = state.lock().unwrap();
+        assert!(s.pending.is_empty());
+        assert!(!s.touched.contains("/err.rs"));
     }
 
     #[test]
