@@ -14,6 +14,9 @@ const { title } = Astro.props;
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Fabro is the open source dark software factory for expert engineers. Define your process as a workflow graph, let AI agents execute it, and intervene only where it matters." />
+    <meta name="application-name" content="Fabro" />
+    <meta name="apple-mobile-web-app-title" content="Fabro" />
+    <link rel="canonical" href={`https://fabro.sh${Astro.url.pathname}`} />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
@@ -22,7 +25,7 @@ const { title } = Astro.props;
     <meta property="og:image" content="https://fabro.sh/og-image.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:url" content="https://fabro.sh" />
+    <meta property="og:url" content={`https://fabro.sh${Astro.url.pathname}`} />
     <meta property="og:site_name" content="Fabro" />
 
     <!-- Twitter Card -->
@@ -30,6 +33,8 @@ const { title } = Astro.props;
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content="Fabro is the open source dark software factory for expert engineers. Define your process as a workflow graph, let AI agents execute it, and intervene only where it matters." />
     <meta name="twitter:image" content="https://fabro.sh/og-image.png" />
+    <meta name="twitter:image:width" content="1200" />
+    <meta name="twitter:image:height" content="630" />
 
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
