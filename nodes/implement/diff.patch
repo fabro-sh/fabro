@@ -1,0 +1,301 @@
+diff --git a/lib/crates/fabro-workflows/src/cli/backend.rs b/lib/crates/fabro-workflows/src/cli/backend.rs
+index 4f39300..e607928 100644
+--- a/lib/crates/fabro-workflows/src/cli/backend.rs
++++ b/lib/crates/fabro-workflows/src/cli/backend.rs
+@@ -30,6 +30,50 @@ fn build_profile(model: &str, provider: Provider) -> Box<dyn ProviderProfile> {
+     }
+ }
+ 
++/// Recursively extract file-tracking events from agent events, including
++/// those wrapped in one or more layers of `SubAgentEvent`.
++fn track_file_event(
++    event: &AgentEvent,
++    pending_tool_calls: &Arc<Mutex<HashMap<String, String>>>,
++    files_touched: &Arc<Mutex<HashSet<String>>>,
++    last_file_touched: &Arc<Mutex<Option<String>>>,
++) {
++    match event {
++        AgentEvent::ToolCallStarted {
++            tool_name,
++            tool_call_id,
++            arguments,
++        } => {
++            if tool_name == "write_file" || tool_name == "edit_file" {
++                if let Some(path) = arguments.get("file_path").and_then(|v| v.as_str()) {
++                    pending_tool_calls
++                        .lock()
++                        .unwrap()
++                        .insert(tool_call_id.clone(), path.to_string());
++                }
++            }
++        }
++        AgentEvent::ToolCallCompleted {
++            tool_call_id,
++            is_error,
++            ..
++        } => {
++            if !*is_error {
++                if let Some(path) = pending_tool_calls.lock().unwrap().remove(tool_call_id) {
++                    files_touched.lock().unwrap().insert(path.clone());
++                    *last_file_touched.lock().unwrap() = Some(path);
++                }
++            } else {
++                pending_tool_calls.lock().unwrap().remove(tool_call_id);
++            }
++        }
++        AgentEvent::SubAgentEvent { event: inner, .. } => {
++            track_file_event(inner, pending_tool_calls, files_touched, last_file_touched);
++        }
++        _ => {}
++    }
++}
++
+ /// Spawn a task that subscribes to session events and:
+ /// 1. Tracks file changes (write_file/edit_file tool calls) into shared state.
+ /// 2. Forwards non-streaming agent events to the pipeline emitter.
+@@ -47,39 +91,13 @@ fn spawn_event_forwarder(
+             // Reset watchdog on every event, including streaming deltas
+             emitter.touch();
+ 
+-            // Track file changes from tool calls
+-            match &event.event {
+-                AgentEvent::ToolCallStarted {
+-                    tool_name,
+-                    tool_call_id,
+-                    arguments,
+-                } => {
+-                    if tool_name == "write_file" || tool_name == "edit_file" {
+-                        if let Some(path) = arguments.get("file_path").and_then(|v| v.as_str()) {
+-                            pending_tool_calls
+-                                .lock()
+-                                .unwrap()
+-                                .insert(tool_call_id.clone(), path.to_string());
+-                        }
+-                    }
+-                }
+-                AgentEvent::ToolCallCompleted {
+-                    tool_call_id,
+-                    is_error,
+-                    ..
+-                } => {
+-                    if !*is_error {
+-                        if let Some(path) = pending_tool_calls.lock().unwrap().remove(tool_call_id)
+-                        {
+-                            files_touched.lock().unwrap().insert(path.clone());
+-                            *last_file_touched.lock().unwrap() = Some(path);
+-                        }
+-                    } else {
+-                        pending_tool_calls.lock().unwrap().remove(tool_call_id);
+-                    }
+-                }
+-                _ => {}
+-            }
++            // Track file changes from tool calls (including sub-agent events)
++            track_file_event(
++                &event.event,
++                &pending_tool_calls,
++                &files_touched,
++                &last_file_touched,
++            );
+ 
+             // Forward non-streaming agent events to pipeline
+             if !matches!(
+@@ -647,6 +665,198 @@ mod tests {
+         assert!(backend.sessions.lock().unwrap().is_empty());
+     }
+ 
++    #[test]
++    fn track_file_event_records_top_level_write() {
++        let pending = Arc::new(Mutex::new(HashMap::new()));
++        let touched = Arc::new(Mutex::new(HashSet::new()));
++        let last = Arc::new(Mutex::new(None));
++
++        let mut args = serde_json::Map::new();
++        args.insert(
++            "file_path".to_string(),
++            serde_json::Value::String("/tmp/foo.rs".to_string()),
++        );
++
++        track_file_event(
++            &AgentEvent::ToolCallStarted {
++                tool_name: "write_file".to_string(),
++                tool_call_id: "tc1".to_string(),
++                arguments: serde_json::Value::Object(args),
++            },
++            &pending,
++            &touched,
++            &last,
++        );
++        assert_eq!(pending.lock().unwrap().get("tc1").unwrap(), "/tmp/foo.rs");
++
++        track_file_event(
++            &AgentEvent::ToolCallCompleted {
++                tool_call_id: "tc1".to_string(),
++                tool_name: "write_file".to_string(),
++                is_error: false,
++                output: serde_json::Value::String("ok".to_string()),
++            },
++            &pending,
++            &touched,
++            &last,
++        );
++        assert!(touched.lock().unwrap().contains("/tmp/foo.rs"));
++        assert_eq!(last.lock().unwrap().as_deref(), Some("/tmp/foo.rs"));
++    }
++
++    #[test]
++    fn track_file_event_unwraps_sub_agent_edit() {
++        let pending = Arc::new(Mutex::new(HashMap::new()));
++        let touched = Arc::new(Mutex::new(HashSet::new()));
++        let last = Arc::new(Mutex::new(None));
++
++        let mut args = serde_json::Map::new();
++        args.insert(
++            "file_path".to_string(),
++            serde_json::Value::String("/src/lib.rs".to_string()),
++        );
++
++        // ToolCallStarted wrapped in SubAgentEvent
++        track_file_event(
++            &AgentEvent::SubAgentEvent {
++                agent_id: "sub-1".to_string(),
++                depth: 1,
++                event: Box::new(AgentEvent::ToolCallStarted {
++                    tool_name: "edit_file".to_string(),
++                    tool_call_id: "tc-sub".to_string(),
++                    arguments: serde_json::Value::Object(args),
++                }),
++            },
++            &pending,
++            &touched,
++            &last,
++        );
++        assert_eq!(
++            pending.lock().unwrap().get("tc-sub").unwrap(),
++            "/src/lib.rs"
++        );
++
++        // ToolCallCompleted wrapped in SubAgentEvent
++        track_file_event(
++            &AgentEvent::SubAgentEvent {
++                agent_id: "sub-1".to_string(),
++                depth: 1,
++                event: Box::new(AgentEvent::ToolCallCompleted {
++                    tool_call_id: "tc-sub".to_string(),
++                    tool_name: "edit_file".to_string(),
++                    is_error: false,
++                    output: serde_json::Value::String("ok".to_string()),
++                }),
++            },
++            &pending,
++            &touched,
++            &last,
++        );
++        assert!(touched.lock().unwrap().contains("/src/lib.rs"));
++        assert_eq!(last.lock().unwrap().as_deref(), Some("/src/lib.rs"));
++    }
++
++    #[test]
++    fn track_file_event_unwraps_nested_sub_sub_agent() {
++        let pending = Arc::new(Mutex::new(HashMap::new()));
++        let touched = Arc::new(Mutex::new(HashSet::new()));
++        let last = Arc::new(Mutex::new(None));
++
++        let mut args = serde_json::Map::new();
++        args.insert(
++            "file_path".to_string(),
++            serde_json::Value::String("/deep/file.rs".to_string()),
++        );
++
++        // Double-wrapped SubAgentEvent → SubAgentEvent → ToolCallStarted
++        track_file_event(
++            &AgentEvent::SubAgentEvent {
++                agent_id: "sub-outer".to_string(),
++                depth: 1,
++                event: Box::new(AgentEvent::SubAgentEvent {
++                    agent_id: "sub-inner".to_string(),
++                    depth: 2,
++                    event: Box::new(AgentEvent::ToolCallStarted {
++                        tool_name: "write_file".to_string(),
++                        tool_call_id: "tc-deep".to_string(),
++                        arguments: serde_json::Value::Object(args),
++                    }),
++                }),
++            },
++            &pending,
++            &touched,
++            &last,
++        );
++        assert!(pending.lock().unwrap().contains_key("tc-deep"));
++
++        track_file_event(
++            &AgentEvent::SubAgentEvent {
++                agent_id: "sub-outer".to_string(),
++                depth: 1,
++                event: Box::new(AgentEvent::SubAgentEvent {
++                    agent_id: "sub-inner".to_string(),
++                    depth: 2,
++                    event: Box::new(AgentEvent::ToolCallCompleted {
++                        tool_call_id: "tc-deep".to_string(),
++                        tool_name: "write_file".to_string(),
++                        is_error: false,
++                        output: serde_json::Value::String("ok".to_string()),
++                    }),
++                }),
++            },
++            &pending,
++            &touched,
++            &last,
++        );
++        assert!(touched.lock().unwrap().contains("/deep/file.rs"));
++    }
++
++    #[test]
++    fn track_file_event_error_removes_pending() {
++        let pending = Arc::new(Mutex::new(HashMap::new()));
++        let touched = Arc::new(Mutex::new(HashSet::new()));
++        let last = Arc::new(Mutex::new(None));
++
++        let mut args = serde_json::Map::new();
++        args.insert(
++            "file_path".to_string(),
++            serde_json::Value::String("/err.rs".to_string()),
++        );
++
++        track_file_event(
++            &AgentEvent::SubAgentEvent {
++                agent_id: "sub-1".to_string(),
++                depth: 1,
++                event: Box::new(AgentEvent::ToolCallStarted {
++                    tool_name: "edit_file".to_string(),
++                    tool_call_id: "tc-err".to_string(),
++                    arguments: serde_json::Value::Object(args),
++                }),
++            },
++            &pending,
++            &touched,
++            &last,
++        );
++
++        track_file_event(
++            &AgentEvent::SubAgentEvent {
++                agent_id: "sub-1".to_string(),
++                depth: 1,
++                event: Box::new(AgentEvent::ToolCallCompleted {
++                    tool_call_id: "tc-err".to_string(),
++                    tool_name: "edit_file".to_string(),
++                    is_error: true,
++                    output: serde_json::Value::String("failed".to_string()),
++                }),
++            },
++            &pending,
++            &touched,
++            &last,
++        );
++        assert!(pending.lock().unwrap().is_empty());
++        assert!(!touched.lock().unwrap().contains("/err.rs"));
++    }
++
+     #[test]
+     fn build_profile_can_register_subagent_tools() {
+         let mut profile = build_profile("claude-opus-4-6", Provider::Anthropic);
