@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-03-16T05:32:44.058111Z",
+  "current_node": "setup",
+  "completed_nodes": [
+    "start",
+    "setup"
+  ],
+  "node_retries": {
+    "start": 1,
+    "setup": 1
+  },
+  "context_values": {
+    "graph.goal": "Add support for item_comments to syndication framework\nDescription\n\t\nAdd comments argument to feed.add_item() in syndication.views so that item_comments can be defined directly without having to take the detour via item_extra_kwargs .\nAdditionally, comments is already explicitly mentioned in the feedparser, but not implemented in the view.\n",
+    "failure_signature": "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.",
+    "internal.run_id": "01KKTJ3GC3A0PCMM5XDHZWTSMV",
+    "internal.retry_count.setup": 1,
+    "outcome": "fail",
+    "internal.retry_count.start": 1,
+    "current.preamble": "Goal: Add support for item_comments to syndication framework\nDescription\n\t\nAdd comments argument to feed.add_item() in syndication.views so that item_comments can be defined directly without having to take the detour via item_extra_kwargs .\nAdditionally, comments is already explicitly mentioned in the feedparser, but not implemented in the view.\n\n",
+    "internal.thread_id": "start",
+    "failure_class": "deterministic",
+    "internal.fidelity": "compact",
+    "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n",
+    "current_node": "setup",
+    "graph.rankdir": "LR",
+    "thread.start.current_node": "setup",
+    "internal.node_visit_count": 1,
+    "command.stderr": ""
+  },
+  "logs": [],
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
+    "setup": {
+      "status": "fail",
+      "context_updates": {
+        "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n",
+        "command.stderr": ""
+      },
+      "failure": {
+        "message": "Script failed with exit code: 128\n\n## stdout\nfatal: destination path '.' already exists and is not an empty directory.\n",
+        "failure_class": "deterministic"
+      },
+      "duration_ms": 82
+    }
+  },
+  "next_node_id": "solve",
+  "loop_failure_signatures": {
+    "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.": 1
+  },
+  "node_visits": {
+    "start": 1,
+    "setup": 1
+  }
+}
