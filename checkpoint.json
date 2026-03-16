@@ -1,0 +1,52 @@
+{
+  "timestamp": "2026-03-16T01:58:53.054109Z",
+  "current_node": "toolchain",
+  "completed_nodes": [
+    "start",
+    "toolchain"
+  ],
+  "node_retries": {
+    "toolchain": 1,
+    "start": 1
+  },
+  "context_values": {
+    "graph.model_stylesheet": "\n            * { backend: api; model: claude-opus-4-6;}\n        ",
+    "internal.retry_count.start": 1,
+    "command.stderr": "",
+    "graph.rankdir": "LR",
+    "internal.fidelity": "compact",
+    "current.preamble": "Goal: # Limit command stdout/stderr to last N lines in preamble\n\n## Context\nCommand nodes (e.g., `cargo check`, `cargo clippy`) can produce 300+ lines of stdout/stderr. The preamble includes all of it inline, wasting tokens on build progress/download noise. The useful content (errors, summaries) is almost always at the tail. Limit to last N lines, varying by fidelity.\n\n## File to modify\n`/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-workflows/src/preamble.rs`\n\n## Changes\n\n### 1. Add constants (near top of file, after imports)\n```rust\nconst COMPACT_OUTPUT_MAX_LINES: usize = 25;\nconst SUMMARY_HIGH_OUTPUT_MAX_LINES: usize = 50;\n```\n\n### 2. Add `tail_lines` helper (after `format_token_count`, ~line 122)\n```rust\nfn tail_lines(text: &str, max_lines: usize) -> String {\n    let all_lines: Vec<&str> = text.lines().collect();\n    if all_lines.len() <= max_lines {\n        return text.to_string();\n    }\n    let omitted = all_lines.len() - max_lines;\n    let mut result = format!(\"({omitted} lines omitted)\\n\");\n    result.push_str(&all_lines[all_lines.len() - max_lines..].join(\"\\n\"));\n    result\n}\n```\nOmission format `(N lines omitted)` matches existing `(N earlier stage(s) omitted)` pattern at lines 470/517.\n\n### 3. Apply in `render_compact_stage_details` (affects compact + summary:medium)\nTwo changes — lines 167 and 178:\n- `stdout.trim()` -> `tail_lines(stdout.trim(), COMPACT_OUTPUT_MAX_LINES)`\n- `stderr.trim()` -> `tail_lines(stderr.trim(), COMPACT_OUTPUT_MAX_LINES)`\n\n### 4. Apply in `render_summary_high_stage_section` (affects summary:high)\nTwo changes — lines 240 and 255 (only in the non-artifact `else` branches):\n- `stdout.trim()` -> `tail_lines(stdout.trim(), SUMMARY_HIGH_OUTPUT_MAX_LINES)`\n- `stderr.trim()` -> `tail_lines(stderr.trim(), SUMMARY_HIGH_OUTPUT_MAX_LINES)`\n\nArtifact pointer branches (lines 231-232, 246-247) are untouched.\n\n### 5. Tests\nAdd to existing `#[cfg(test)] mod tests`:\n1. `tail_lines_returns_full_text_when_under_limit` — 3 lines, limit 5\n2. `tail_lines_returns_full_text_at_exact_limit` — 3 lines, limit 3\n3. `tail_lines_truncates_and_shows_omission` — 5 lines, limit 2, assert omission indicator + correct lines kept/dropped\n4. `compact_command_stage_truncates_long_stdout` — build_preamble with Compact fidelity, >25 line stdout, assert truncation\n5. `summary_high_command_stage_truncates_long_stdout` — same for SummaryHigh with >50 lines\n6. `summary_high_artifact_stdout_not_truncated` — artifact pointer value, assert no truncation\n\n## What's NOT changing\n- `summary:low` — already doesn't render stdout/stderr\n- `truncate` / `full` — no stage details rendered\n- LLM response text in summary:high — out of scope\n\n## Verification\n```sh\ncd /Users/bhelmkamp/p/fabro-sh/fabro\ncargo test -p fabro-workflows -- preamble\ncargo clippy -p fabro-workflows -- -D warnings\n```\n\n",
+    "internal.retry_count.toolchain": 1,
+    "internal.node_visit_count": 1,
+    "failure_signature": "",
+    "outcome": "success",
+    "graph.goal": "# Limit command stdout/stderr to last N lines in preamble\n\n## Context\nCommand nodes (e.g., `cargo check`, `cargo clippy`) can produce 300+ lines of stdout/stderr. The preamble includes all of it inline, wasting tokens on build progress/download noise. The useful content (errors, summaries) is almost always at the tail. Limit to last N lines, varying by fidelity.\n\n## File to modify\n`/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-workflows/src/preamble.rs`\n\n## Changes\n\n### 1. Add constants (near top of file, after imports)\n```rust\nconst COMPACT_OUTPUT_MAX_LINES: usize = 25;\nconst SUMMARY_HIGH_OUTPUT_MAX_LINES: usize = 50;\n```\n\n### 2. Add `tail_lines` helper (after `format_token_count`, ~line 122)\n```rust\nfn tail_lines(text: &str, max_lines: usize) -> String {\n    let all_lines: Vec<&str> = text.lines().collect();\n    if all_lines.len() <= max_lines {\n        return text.to_string();\n    }\n    let omitted = all_lines.len() - max_lines;\n    let mut result = format!(\"({omitted} lines omitted)\\n\");\n    result.push_str(&all_lines[all_lines.len() - max_lines..].join(\"\\n\"));\n    result\n}\n```\nOmission format `(N lines omitted)` matches existing `(N earlier stage(s) omitted)` pattern at lines 470/517.\n\n### 3. Apply in `render_compact_stage_details` (affects compact + summary:medium)\nTwo changes — lines 167 and 178:\n- `stdout.trim()` -> `tail_lines(stdout.trim(), COMPACT_OUTPUT_MAX_LINES)`\n- `stderr.trim()` -> `tail_lines(stderr.trim(), COMPACT_OUTPUT_MAX_LINES)`\n\n### 4. Apply in `render_summary_high_stage_section` (affects summary:high)\nTwo changes — lines 240 and 255 (only in the non-artifact `else` branches):\n- `stdout.trim()` -> `tail_lines(stdout.trim(), SUMMARY_HIGH_OUTPUT_MAX_LINES)`\n- `stderr.trim()` -> `tail_lines(stderr.trim(), SUMMARY_HIGH_OUTPUT_MAX_LINES)`\n\nArtifact pointer branches (lines 231-232, 246-247) are untouched.\n\n### 5. Tests\nAdd to existing `#[cfg(test)] mod tests`:\n1. `tail_lines_returns_full_text_when_under_limit` — 3 lines, limit 5\n2. `tail_lines_returns_full_text_at_exact_limit` — 3 lines, limit 3\n3. `tail_lines_truncates_and_shows_omission` — 5 lines, limit 2, assert omission indicator + correct lines kept/dropped\n4. `compact_command_stage_truncates_long_stdout` — build_preamble with Compact fidelity, >25 line stdout, assert truncation\n5. `summary_high_command_stage_truncates_long_stdout` — same for SummaryHigh with >50 lines\n6. `summary_high_artifact_stdout_not_truncated` — artifact pointer value, assert no truncation\n\n## What's NOT changing\n- `summary:low` — already doesn't render stdout/stderr\n- `truncate` / `full` — no stage details rendered\n- LLM response text in summary:high — out of scope\n\n## Verification\n```sh\ncd /Users/bhelmkamp/p/fabro-sh/fabro\ncargo test -p fabro-workflows -- preamble\ncargo clippy -p fabro-workflows -- -D warnings\n```\n",
+    "internal.thread_id": "start",
+    "thread.start.current_node": "toolchain",
+    "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n",
+    "failure_class": "",
+    "internal.run_id": "01KKT5W00MF5KQ06RA5Q0RM0YY",
+    "current_node": "toolchain"
+  },
+  "logs": [],
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
+    "toolchain": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+      "duration_ms": 41
+    }
+  },
+  "next_node_id": "preflight_compile",
+  "node_visits": {
+    "toolchain": 1,
+    "start": 1
+  }
+}
