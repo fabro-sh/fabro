@@ -42,7 +42,7 @@ struct FileTracking {
 
 /// Recursively extract file-tracking events from agent events, including
 /// those wrapped in one or more layers of `SubAgentEvent`.
-fn track_file_event(event: &AgentEvent, state: &Arc<Mutex<FileTracking>>) {
+fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
     match event {
         AgentEvent::ToolCallStarted {
             tool_name,
@@ -51,11 +51,7 @@ fn track_file_event(event: &AgentEvent, state: &Arc<Mutex<FileTracking>>) {
         } => {
             if tool_name == "write_file" || tool_name == "edit_file" {
                 if let Some(path) = arguments.get("file_path").and_then(|v| v.as_str()) {
-                    state
-                        .lock()
-                        .unwrap()
-                        .pending
-                        .insert(tool_call_id.clone(), path.to_string());
+                    state.pending.insert(tool_call_id.clone(), path.to_string());
                 }
             }
         }
@@ -64,14 +60,13 @@ fn track_file_event(event: &AgentEvent, state: &Arc<Mutex<FileTracking>>) {
             is_error,
             ..
         } => {
-            let mut s = state.lock().unwrap();
             if !*is_error {
-                if let Some(path) = s.pending.remove(tool_call_id) {
-                    s.touched.insert(path.clone());
-                    s.last = Some(path);
+                if let Some(path) = state.pending.remove(tool_call_id) {
+                    state.touched.insert(path.clone());
+                    state.last = Some(path);
                 }
             } else {
-                s.pending.remove(tool_call_id);
+                state.pending.remove(tool_call_id);
             }
         }
         AgentEvent::SubAgentEvent { event: inner, .. } => {
@@ -97,7 +92,7 @@ fn spawn_event_forwarder(
             emitter.touch();
 
             // Track file changes from tool calls (including sub-agent events)
-            track_file_event(&event.event, &file_tracking);
+            track_file_event(&event.event, &mut file_tracking.lock().unwrap());
 
             // Forward non-streaming agent events to pipeline
             if !matches!(
@@ -660,17 +655,17 @@ mod tests {
         assert!(backend.sessions.lock().unwrap().is_empty());
     }
 
-    fn new_file_tracking() -> Arc<Mutex<FileTracking>> {
-        Arc::new(Mutex::new(FileTracking {
+    fn new_file_tracking() -> FileTracking {
+        FileTracking {
             pending: HashMap::new(),
             touched: HashSet::new(),
             last: None,
-        }))
+        }
     }
 
     #[test]
     fn track_file_event_records_top_level_write() {
-        let state = new_file_tracking();
+        let mut state = new_file_tracking();
 
         let mut args = serde_json::Map::new();
         args.insert(
@@ -684,12 +679,9 @@ mod tests {
                 tool_call_id: "tc1".to_string(),
                 arguments: serde_json::Value::Object(args),
             },
-            &state,
+            &mut state,
         );
-        assert_eq!(
-            state.lock().unwrap().pending.get("tc1").unwrap(),
-            "/tmp/foo.rs"
-        );
+        assert_eq!(state.pending.get("tc1").unwrap(), "/tmp/foo.rs");
 
         track_file_event(
             &AgentEvent::ToolCallCompleted {
@@ -698,16 +690,15 @@ mod tests {
                 is_error: false,
                 output: serde_json::Value::String("ok".to_string()),
             },
-            &state,
+            &mut state,
         );
-        let s = state.lock().unwrap();
-        assert!(s.touched.contains("/tmp/foo.rs"));
-        assert_eq!(s.last.as_deref(), Some("/tmp/foo.rs"));
+        assert!(state.touched.contains("/tmp/foo.rs"));
+        assert_eq!(state.last.as_deref(), Some("/tmp/foo.rs"));
     }
 
     #[test]
     fn track_file_event_unwraps_sub_agent_edit() {
-        let state = new_file_tracking();
+        let mut state = new_file_tracking();
 
         let mut args = serde_json::Map::new();
         args.insert(
@@ -726,12 +717,9 @@ mod tests {
                     arguments: serde_json::Value::Object(args),
                 }),
             },
-            &state,
+            &mut state,
         );
-        assert_eq!(
-            state.lock().unwrap().pending.get("tc-sub").unwrap(),
-            "/src/lib.rs"
-        );
+        assert_eq!(state.pending.get("tc-sub").unwrap(), "/src/lib.rs");
 
         // ToolCallCompleted wrapped in SubAgentEvent
         track_file_event(
@@ -745,16 +733,15 @@ mod tests {
                     output: serde_json::Value::String("ok".to_string()),
                 }),
             },
-            &state,
+            &mut state,
         );
-        let s = state.lock().unwrap();
-        assert!(s.touched.contains("/src/lib.rs"));
-        assert_eq!(s.last.as_deref(), Some("/src/lib.rs"));
+        assert!(state.touched.contains("/src/lib.rs"));
+        assert_eq!(state.last.as_deref(), Some("/src/lib.rs"));
     }
 
     #[test]
     fn track_file_event_unwraps_nested_sub_sub_agent() {
-        let state = new_file_tracking();
+        let mut state = new_file_tracking();
 
         let mut args = serde_json::Map::new();
         args.insert(
@@ -777,9 +764,9 @@ mod tests {
                     }),
                 }),
             },
-            &state,
+            &mut state,
         );
-        assert!(state.lock().unwrap().pending.contains_key("tc-deep"));
+        assert!(state.pending.contains_key("tc-deep"));
 
         track_file_event(
             &AgentEvent::SubAgentEvent {
@@ -796,14 +783,14 @@ mod tests {
                     }),
                 }),
             },
-            &state,
+            &mut state,
         );
-        assert!(state.lock().unwrap().touched.contains("/deep/file.rs"));
+        assert!(state.touched.contains("/deep/file.rs"));
     }
 
     #[test]
     fn track_file_event_error_removes_pending() {
-        let state = new_file_tracking();
+        let mut state = new_file_tracking();
 
         let mut args = serde_json::Map::new();
         args.insert(
@@ -821,7 +808,7 @@ mod tests {
                     arguments: serde_json::Value::Object(args),
                 }),
             },
-            &state,
+            &mut state,
         );
 
         track_file_event(
@@ -835,11 +822,10 @@ mod tests {
                     output: serde_json::Value::String("failed".to_string()),
                 }),
             },
-            &state,
+            &mut state,
         );
-        let s = state.lock().unwrap();
-        assert!(s.pending.is_empty());
-        assert!(!s.touched.contains("/err.rs"));
+        assert!(state.pending.is_empty());
+        assert!(!state.touched.contains("/err.rs"));
     }
 
     #[test]
