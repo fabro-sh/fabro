@@ -1,0 +1,13 @@
+{
+  "run_id": "01KKTJ3AHWAPG21ZYYV3EG00CX",
+  "workflow_name": "SWEBench",
+  "goal": "Add support for item_comments to syndication framework\nDescription\n\t\nAdd comments argument to feed.add_item() in syndication.views so that item_comments can be defined directly without having to take the detour via item_extra_kwargs .\nAdditionally, comments is already explicitly mentioned in the feedparser, but not implemented in the view.\n",
+  "start_time": "2026-03-16T05:32:36.848293Z",
+  "node_count": 5,
+  "edge_count": 4,
+  "run_branch": "fabro/run/01KKTJ3AHWAPG21ZYYV3EG00CX",
+  "base_sha": "470fcfe1200b2102c0cdf91c73b0ed8d925f258a",
+  "base_branch": "main",
+  "workflow_slug": "django__django-13230",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/evals/swe-bench/results/opus-baseline/runs/django__django-13230"
+}
