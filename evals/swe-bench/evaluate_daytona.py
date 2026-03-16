@@ -498,7 +498,7 @@ def main():
         help="Output directory for eval results",
     )
     parser.add_argument(
-        "--max-workers", type=int, default=150,
+        "--max-workers", type=int, default=100,
         help="Max concurrent eval sandboxes (default 100)",
     )
     parser.add_argument(
@@ -516,7 +516,7 @@ def main():
     setup_logging(args.output_dir)
 
     # --- Preflight: check Daytona capacity --------------------------------
-    preflight_daytona(args.max_workers, sandbox_cpu=2)
+    preflight_daytona(args.max_workers, sandbox_cpu=4)
 
     log.info("=" * 64)
     log.info("SWE-bench Evaluation (Daytona)")
