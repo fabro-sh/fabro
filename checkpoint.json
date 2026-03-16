@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-03-16T12:09:06.314684Z",
+  "current_node": "setup",
+  "completed_nodes": [
+    "start",
+    "setup"
+  ],
+  "node_retries": {
+    "setup": 1,
+    "start": 1
+  },
+  "context_values": {
+    "failure_class": "deterministic",
+    "internal.fidelity": "compact",
+    "current.preamble": "Goal: django.utils.http.parse_http_date two digit year check is incorrect\nDescription\n\t \n\t\t(last modified by Ad Timmering)\n\t \nRFC 850 does not mention this, but in RFC 7231 (and there's something similar in RFC 2822), there's the following quote:\nRecipients of a timestamp value in rfc850-date format, which uses a\ntwo-digit year, MUST interpret a timestamp that appears to be more\nthan 50 years in the future as representing the most recent year in\nthe past that had the same last two digits.\nCurrent logic is hard coded to consider 0-69 to be in 2000-2069, and 70-99 to be 1970-1999, instead of comparing versus the current year.\n\n\n\n## Additional Context\n\nAccepted, however I don't think your patch is correct. The check should be relative to the current year, if I read the RFC quote correctly.\nCreated a pull request: Created a pull request: ​https://github.com/django/django/pull/9214\nStill some suggested edits on the PR.\nI added regression test that fails with old code (test_parsing_rfc850_year_69), updated commit message to hopefully follow the guidelines, and added additional comments about the change. Squashed commits as well. Could you review the pull request again?\nsent new pull request\nThis is awaiting for changes from Tim's feedback on PR. (Please uncheck \"Patch needs improvement\" again when that's done. 🙂)\nAs this issue hasn't received any updates in the last 8 months, may I work on this ticket?\nGo for it, I don't think I will have time to finish it.\nThanks, I'll pick up from where you left off in the PR and make the recommended changes on a new PR.\nTameesh Biswas Are you working on this ?\nYes, I am.\nI've just picked up from the previous PR and opened a new PR here: ​https://github.com/django/django/pull/10749 It adds regression tests in the first commit that pass without applying the fix and adds the fix with another test-case that only passes with the fix applied. Could you please review the changes?\nTameesh, I left a comment on the PR regarding the use of non-UTC today.\nAs an issue haven't received an update for 4 months, I'm taking it over (djangocon europe 2019 sprint day 1).\nCreated new PR: ​https://github.com/django/django/pull/11212\nI think an earlier comment by Simon Charette (about using a fixed year in the tests) still applies to the new PR; I've added it.\nTaking the liberty to reassign due to inactivity (6 months) and adding a pull request with revised code and addressing feedback on prior PRs. Please add give your comments for any concerns:) PR => ​https://github.com/django/django/pull/11848 Year is now checked in relation to current year, rolling over to the past if more than 50 years in the future Test now uses a patched version of datetime.datetime to pin to a specific year and have static test cases, addressing feedback from charettes@ on PR 10749 in Dec 2018.\n",
+    "thread.start.current_node": "setup",
+    "internal.retry_count.start": 1,
+    "internal.retry_count.setup": 1,
+    "command.stderr": "",
+    "outcome": "fail",
+    "internal.thread_id": "start",
+    "internal.run_id": "01KKV8SAV55TYYD27A1D32CWH0",
+    "failure_signature": "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.",
+    "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n",
+    "graph.goal": "django.utils.http.parse_http_date two digit year check is incorrect\nDescription\n\t \n\t\t(last modified by Ad Timmering)\n\t \nRFC 850 does not mention this, but in RFC 7231 (and there's something similar in RFC 2822), there's the following quote:\nRecipients of a timestamp value in rfc850-date format, which uses a\ntwo-digit year, MUST interpret a timestamp that appears to be more\nthan 50 years in the future as representing the most recent year in\nthe past that had the same last two digits.\nCurrent logic is hard coded to consider 0-69 to be in 2000-2069, and 70-99 to be 1970-1999, instead of comparing versus the current year.\n\n\n\n## Additional Context\n\nAccepted, however I don't think your patch is correct. The check should be relative to the current year, if I read the RFC quote correctly.\nCreated a pull request: Created a pull request: ​https://github.com/django/django/pull/9214\nStill some suggested edits on the PR.\nI added regression test that fails with old code (test_parsing_rfc850_year_69), updated commit message to hopefully follow the guidelines, and added additional comments about the change. Squashed commits as well. Could you review the pull request again?\nsent new pull request\nThis is awaiting for changes from Tim's feedback on PR. (Please uncheck \"Patch needs improvement\" again when that's done. 🙂)\nAs this issue hasn't received any updates in the last 8 months, may I work on this ticket?\nGo for it, I don't think I will have time to finish it.\nThanks, I'll pick up from where you left off in the PR and make the recommended changes on a new PR.\nTameesh Biswas Are you working on this ?\nYes, I am.\nI've just picked up from the previous PR and opened a new PR here: ​https://github.com/django/django/pull/10749 It adds regression tests in the first commit that pass without applying the fix and adds the fix with another test-case that only passes with the fix applied. Could you please review the changes?\nTameesh, I left a comment on the PR regarding the use of non-UTC today.\nAs an issue haven't received an update for 4 months, I'm taking it over (djangocon europe 2019 sprint day 1).\nCreated new PR: ​https://github.com/django/django/pull/11212\nI think an earlier comment by Simon Charette (about using a fixed year in the tests) still applies to the new PR; I've added it.\nTaking the liberty to reassign due to inactivity (6 months) and adding a pull request with revised code and addressing feedback on prior PRs. Please add give your comments for any concerns:) PR => ​https://github.com/django/django/pull/11848 Year is now checked in relation to current year, rolling over to the past if more than 50 years in the future Test now uses a patched version of datetime.datetime to pin to a specific year and have static test cases, addressing feedback from charettes@ on PR 10749 in Dec 2018.",
+    "current_node": "setup",
+    "internal.node_visit_count": 1,
+    "graph.rankdir": "LR"
+  },
+  "logs": [],
+  "node_outcomes": {
+    "setup": {
+      "status": "fail",
+      "context_updates": {
+        "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n",
+        "command.stderr": ""
+      },
+      "failure": {
+        "message": "Script failed with exit code: 128\n\n## stdout\nfatal: destination path '.' already exists and is not an empty directory.\n",
+        "failure_class": "deterministic"
+      },
+      "duration_ms": 23
+    },
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    }
+  },
+  "next_node_id": "solve",
+  "loop_failure_signatures": {
+    "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.": 1
+  },
+  "node_visits": {
+    "start": 1,
+    "setup": 1
+  }
+}
