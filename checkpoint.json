@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-03-16T05:32:43.754664Z",
+  "current_node": "setup",
+  "completed_nodes": [
+    "start",
+    "setup"
+  ],
+  "node_retries": {
+    "start": 1,
+    "setup": 1
+  },
+  "context_values": {
+    "internal.thread_id": "start",
+    "internal.node_visit_count": 1,
+    "command.stderr": "",
+    "graph.goal": "Allow ValidationErrors to equal each other when created identically\nDescription\n\t \n\t\t(last modified by kamni)\n\t \nCurrently ValidationErrors (django.core.exceptions.ValidationError) that have identical messages don't equal each other, which is counter-intuitive, and can make certain kinds of testing more complicated. Please add an __eq__ method that allows two ValidationErrors to be compared. \nIdeally, this would be more than just a simple self.messages == other.messages. It would be most helpful if the comparison were independent of the order in which errors were raised in a field or in non_field_errors.\n\n\n\n## Additional Context\n\nI probably wouldn't want to limit the comparison to an error's message but rather to its full set of attributes (message, code, params). While params is always pushed into message when iterating over the errors in an ValidationError, I believe it can be beneficial to know if the params that were put inside are the same.\n​PR",
+    "internal.retry_count.start": 1,
+    "graph.rankdir": "LR",
+    "internal.fidelity": "compact",
+    "failure_class": "deterministic",
+    "current_node": "setup",
+    "outcome": "fail",
+    "failure_signature": "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.",
+    "thread.start.current_node": "setup",
+    "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n",
+    "internal.run_id": "01KKTJ3GC2SSKK5WPADH59V3JX",
+    "current.preamble": "Goal: Allow ValidationErrors to equal each other when created identically\nDescription\n\t \n\t\t(last modified by kamni)\n\t \nCurrently ValidationErrors (django.core.exceptions.ValidationError) that have identical messages don't equal each other, which is counter-intuitive, and can make certain kinds of testing more complicated. Please add an __eq__ method that allows two ValidationErrors to be compared. \nIdeally, this would be more than just a simple self.messages == other.messages. It would be most helpful if the comparison were independent of the order in which errors were raised in a field or in non_field_errors.\n\n\n\n## Additional Context\n\nI probably wouldn't want to limit the comparison to an error's message but rather to its full set of attributes (message, code, params). While params is always pushed into message when iterating over the errors in an ValidationError, I believe it can be beneficial to know if the params that were put inside are the same.\n​PR\n",
+    "internal.retry_count.setup": 1
+  },
+  "logs": [],
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
+    "setup": {
+      "status": "fail",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n"
+      },
+      "failure": {
+        "message": "Script failed with exit code: 128\n\n## stdout\nfatal: destination path '.' already exists and is not an empty directory.\n",
+        "failure_class": "deterministic"
+      },
+      "duration_ms": 220
+    }
+  },
+  "next_node_id": "solve",
+  "loop_failure_signatures": {
+    "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.": 1
+  },
+  "node_visits": {
+    "setup": 1,
+    "start": 1
+  }
+}
