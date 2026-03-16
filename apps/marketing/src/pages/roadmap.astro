@@ -73,10 +73,15 @@ const statusConfig = {
 
         <div class="mt-6 space-y-0">
           {shippedVisible.map((item, i) => (
-            <div class={`reveal reveal-d${i + 1} flex items-baseline gap-4 py-3 border-b border-navy-800/40`}>
+            <div class={`reveal reveal-d${i + 1} flex items-center gap-4 py-3 border-b border-navy-800/40`}>
               <span class="shrink-0 w-20 text-xs font-mono text-mint/60">{item.data.date}</span>
               <span class="font-display text-sm font-semibold text-ice-50">{item.data.title}</span>
-              <span class="text-sm text-ice-300/60 hidden sm:inline">&mdash; {item.data.description}</span>
+              <span class="shipped-info relative ml-auto shrink-0">
+                <svg class="h-4 w-4 text-ice-300/30 hover:text-ice-300/60 transition-colors cursor-help" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
+                <span class="shipped-info-tip">{item.data.description}</span>
+              </span>
             </div>
           ))}
         </div>
@@ -112,10 +117,15 @@ const statusConfig = {
               <div class="min-h-0">
                 <div class="space-y-0">
                   {shippedHidden.map((item) => (
-                    <div class="flex items-baseline gap-4 py-3 border-b border-navy-800/40">
+                    <div class="flex items-center gap-4 py-3 border-b border-navy-800/40">
                       <span class="shrink-0 w-20 text-xs font-mono text-mint/60">{item.data.date}</span>
                       <span class="font-display text-sm font-semibold text-ice-50">{item.data.title}</span>
-                      <span class="text-sm text-ice-300/60 hidden sm:inline">&mdash; {item.data.description}</span>
+                      <span class="shipped-info relative ml-auto shrink-0">
+                        <svg class="h-4 w-4 text-ice-300/30 hover:text-ice-300/60 transition-colors cursor-help" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                          <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+                        </svg>
+                        <span class="shipped-info-tip">{item.data.description}</span>
+                      </span>
                     </div>
                   ))}
                 </div>

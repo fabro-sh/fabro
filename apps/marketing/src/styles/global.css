@@ -273,3 +273,26 @@
   border-color: var(--color-navy-800);
   margin: 2em 0;
 }
+
+/* Shipped feature info tooltip */
+.shipped-info-tip {
+  display: none;
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 280px;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-navy-800);
+  background: var(--color-navy-900);
+  color: var(--color-ice-300);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.5;
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+}
+.shipped-info:hover .shipped-info-tip {
+  display: block;
+}
