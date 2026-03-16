@@ -91,7 +91,7 @@ const DARK_MODE_STYLE: &str = r##"
 /// Inject DOT graph-level style defaults (transparent background, teal nodes,
 /// gray edges, Helvetica font) right after the first `{` in the DOT source.
 /// Per-node/edge attributes override these defaults.
-pub fn inject_dot_style_defaults(source: &str) -> String {
+fn inject_dot_style_defaults(source: &str) -> String {
     let Some(pos) = source.find('{') else {
         return source.to_string();
     };
@@ -104,7 +104,7 @@ pub fn inject_dot_style_defaults(source: &str) -> String {
 /// Post-process raw SVG output from Graphviz:
 /// 1. Remove the white background `<polygon>` element
 /// 2. Insert a dark-mode `<style>` block after the opening `<svg ...>` tag
-pub fn postprocess_svg(raw: Vec<u8>) -> Vec<u8> {
+fn postprocess_svg(raw: Vec<u8>) -> Vec<u8> {
     let mut svg = String::from_utf8(raw)
         .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
 
@@ -130,8 +130,11 @@ pub fn postprocess_svg(raw: Vec<u8>) -> Vec<u8> {
     svg.into_bytes()
 }
 
-/// Spawn the `dot` command to render DOT source into the given format.
-fn render_dot(source: &str, format: GraphFormat) -> anyhow::Result<Vec<u8>> {
+/// Render styled DOT source into the given format via the `dot` command.
+///
+/// Injects style defaults (colors, fonts, transparent background) into the DOT
+/// source, then post-processes SVG output with dark-mode CSS and background removal.
+pub fn render_dot(source: &str, format: GraphFormat) -> anyhow::Result<Vec<u8>> {
     let styled_source = inject_dot_style_defaults(source);
 
     let mut child = match Command::new("dot")

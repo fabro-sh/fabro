@@ -1432,45 +1432,17 @@ async fn get_retro(
     }
 }
 
-/// Render DOT source to a styled SVG via the `dot` subprocess (async).
+/// Render DOT source to a styled SVG via `render_dot` on a blocking thread.
 pub(crate) async fn render_dot_svg(dot_source: &str) -> Response {
-    let styled_source = fabro_workflows::cli::graph::inject_dot_style_defaults(dot_source);
+    use fabro_workflows::cli::graph::{render_dot, GraphFormat};
 
-    let mut child = match tokio::process::Command::new("dot")
-        .arg("-Tsvg")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(_) => {
-            return ApiError::new(
-                StatusCode::BAD_GATEWAY,
-                "Graphviz dot command not available.",
-            )
-            .into_response();
+    let source = dot_source.to_owned();
+    match tokio::task::spawn_blocking(move || render_dot(&source, GraphFormat::Svg)).await {
+        Ok(Ok(bytes)) => {
+            (StatusCode::OK, [("content-type", "image/svg+xml")], bytes).into_response()
         }
-    };
-
-    if let Some(mut stdin) = child.stdin.take() {
-        use tokio::io::AsyncWriteExt;
-        let _ = stdin.write_all(styled_source.as_bytes()).await;
-    }
-
-    match child.wait_with_output().await {
-        Ok(output) if output.status.success() => (
-            StatusCode::OK,
-            [("content-type", "image/svg+xml")],
-            fabro_workflows::cli::graph::postprocess_svg(output.stdout),
-        )
-            .into_response(),
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            ApiError::new(StatusCode::BAD_GATEWAY, format!("dot failed: {stderr}")).into_response()
-        }
-        Err(e) => ApiError::new(StatusCode::BAD_GATEWAY, format!("dot process error: {e}"))
-            .into_response(),
+        Ok(Err(e)) => ApiError::new(StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+        Err(e) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
