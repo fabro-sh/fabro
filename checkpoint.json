@@ -1,29 +1,33 @@
 {
-  "timestamp": "2026-03-16T12:02:25.699388Z",
-  "current_node": "setup",
+  "timestamp": "2026-03-16T12:07:31.544918Z",
+  "current_node": "solve",
   "completed_nodes": [
     "start",
-    "setup"
+    "setup",
+    "solve"
   ],
   "node_retries": {
     "setup": 1,
+    "solve": 4,
     "start": 1
   },
   "context_values": {
-    "current.preamble": "Goal: Modeling's `separability_matrix` does not compute separability correctly for nested CompoundModels\nConsider the following model:\r\n\r\n```python\r\nfrom astropy.modeling import models as m\r\nfrom astropy.modeling.separable import separability_matrix\r\n\r\ncm = m.Linear1D(10) & m.Linear1D(5)\r\n```\r\n\r\nIt's separability matrix as you might expect is a diagonal:\r\n\r\n```python\r\n>>> separability_matrix(cm)\r\narray([[ True, False],\r\n       [False,  True]])\r\n```\r\n\r\nIf I make the model more complex:\r\n```python\r\n>>> separability_matrix(m.Pix2Sky_TAN() & m.Linear1D(10) & m.Linear1D(5))\r\narray([[ True,  True, False, False],\r\n       [ True,  True, False, False],\r\n       [False, False,  True, False],\r\n       [False, False, False,  True]])\r\n```\r\n\r\nThe output matrix is again, as expected, the outputs and inputs to the linear models are separable and independent of each other.\r\n\r\nIf however, I nest these compound models:\r\n```python\r\n>>> separability_matrix(m.Pix2Sky_TAN() & cm)\r\narray([[ True,  True, False, False],\r\n       [ True,  True, False, False],\r\n       [False, False,  True,  True],\r\n       [False, False,  True,  True]])\r\n```\r\nSuddenly the inputs and outputs are no longer separable?\r\n\r\nThis feels like a bug to me, but I might be missing something?\n\n",
+    "current.preamble": "Goal: Modeling's `separability_matrix` does not compute separability correctly for nested CompoundModels\nConsider the following model:\r\n\r\n```python\r\nfrom astropy.modeling import models as m\r\nfrom astropy.modeling.separable import separability_matrix\r\n\r\ncm = m.Linear1D(10) & m.Linear1D(5)\r\n```\r\n\r\nIt's separability matrix as you might expect is a diagonal:\r\n\r\n```python\r\n>>> separability_matrix(cm)\r\narray([[ True, False],\r\n       [False,  True]])\r\n```\r\n\r\nIf I make the model more complex:\r\n```python\r\n>>> separability_matrix(m.Pix2Sky_TAN() & m.Linear1D(10) & m.Linear1D(5))\r\narray([[ True,  True, False, False],\r\n       [ True,  True, False, False],\r\n       [False, False,  True, False],\r\n       [False, False, False,  True]])\r\n```\r\n\r\nThe output matrix is again, as expected, the outputs and inputs to the linear models are separable and independent of each other.\r\n\r\nIf however, I nest these compound models:\r\n```python\r\n>>> separability_matrix(m.Pix2Sky_TAN() & cm)\r\narray([[ True,  True, False, False],\r\n       [ True,  True, False, False],\r\n       [False, False,  True,  True],\r\n       [False, False,  True,  True]])\r\n```\r\nSuddenly the inputs and outputs are no longer separable?\r\n\r\nThis feels like a bug to me, but I might be missing something?\n\n\n## Completed stages\n- **setup**: fail\n  - Script: `git clone https://github.com/astropy/astropy.git . && git checkout d16bfe05a744909de4b27f5875fe0d4ed41ce607 && sed -i 's/requires = \\[\"setuptools\",/requires = \\[\"setuptools==68.0.0\",/' pyproject.toml && python -m pip install -e .[test] --verbose`\n  - Stdout:\n    ```\n    fatal: destination path '.' already exists and is not an empty directory.\n    ```\n  - Stderr: (empty)\n\n## Context\n- failure_class: deterministic\n- failure_signature: setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.\n",
     "internal.retry_count.start": 1,
-    "failure_signature": "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.",
+    "failure_signature": "solve|transient_infra|api_transient|gemini|rate_limited",
     "internal.run_id": "01KKV8D40RAB7GG5Z4ZWVBBN1B",
     "internal.node_visit_count": 1,
+    "thread.setup.current_node": "solve",
     "command.stderr": "",
+    "internal.retry_count.solve": 4,
     "outcome": "fail",
     "internal.fidelity": "compact",
-    "current_node": "setup",
-    "internal.thread_id": "start",
+    "current_node": "solve",
+    "internal.thread_id": "setup",
     "internal.retry_count.setup": 1,
     "graph.goal": "Modeling's `separability_matrix` does not compute separability correctly for nested CompoundModels\nConsider the following model:\r\n\r\n```python\r\nfrom astropy.modeling import models as m\r\nfrom astropy.modeling.separable import separability_matrix\r\n\r\ncm = m.Linear1D(10) & m.Linear1D(5)\r\n```\r\n\r\nIt's separability matrix as you might expect is a diagonal:\r\n\r\n```python\r\n>>> separability_matrix(cm)\r\narray([[ True, False],\r\n       [False,  True]])\r\n```\r\n\r\nIf I make the model more complex:\r\n```python\r\n>>> separability_matrix(m.Pix2Sky_TAN() & m.Linear1D(10) & m.Linear1D(5))\r\narray([[ True,  True, False, False],\r\n       [ True,  True, False, False],\r\n       [False, False,  True, False],\r\n       [False, False, False,  True]])\r\n```\r\n\r\nThe output matrix is again, as expected, the outputs and inputs to the linear models are separable and independent of each other.\r\n\r\nIf however, I nest these compound models:\r\n```python\r\n>>> separability_matrix(m.Pix2Sky_TAN() & cm)\r\narray([[ True,  True, False, False],\r\n       [ True,  True, False, False],\r\n       [False, False,  True,  True],\r\n       [False, False,  True,  True]])\r\n```\r\nSuddenly the inputs and outputs are no longer separable?\r\n\r\nThis feels like a bug to me, but I might be missing something?\n",
     "graph.rankdir": "LR",
-    "failure_class": "deterministic",
+    "failure_class": "transient_infra",
     "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n",
     "thread.start.current_node": "setup"
   },
@@ -44,13 +48,23 @@
     "start": {
       "status": "success",
       "duration_ms": 0
+    },
+    "solve": {
+      "status": "fail",
+      "failure": {
+        "message": "LLM error: Rate limited by gemini: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_requests_per_model_per_day, limit: 250, model: gemini-3.1-pro\nPlease retry in 11h52m28.455438929s.",
+        "failure_class": "transient_infra",
+        "failure_signature": "api_transient|gemini|rate_limited"
+      },
+      "duration_ms": 303480
     }
   },
-  "next_node_id": "solve",
+  "next_node_id": "extract_patch",
   "loop_failure_signatures": {
     "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.": 1
   },
   "node_visits": {
+    "solve": 1,
     "start": 1,
     "setup": 1
   }
