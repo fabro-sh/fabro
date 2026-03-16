@@ -314,6 +314,7 @@ def main():
     )
     args = parser.parse_args()
 
+    args.output_dir = args.output_dir.resolve()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(args.output_dir)
 
