@@ -1,0 +1,94 @@
+{
+  "run_name": "haiku-baseline-20260316",
+  "timestamp": "2026-03-16T13:53:04.401784+00:00",
+  "model": "claude-haiku-4-5",
+  "provider": "anthropic",
+  "fabro_version": "fabro 0.5.0 (4c6ad4d 2026-03-16)",
+  "description": "Haiku 4.5 baseline, default prompt, 2 CPU / 4 GB, 10min timeout",
+  "notes": "",
+  "total_instances": 300,
+  "patched": 293,
+  "patch_pct": 97.7,
+  "resolved": 162,
+  "resolve_pct": 54.0,
+  "total_gen_cost_usd": 26.13,
+  "avg_gen_cost_usd": 0.0871,
+  "gen_wall_time_s": 3559.2,
+  "eval_wall_time_s": 625.2,
+  "avg_gen_duration_s": 224.3,
+  "avg_eval_duration_s": 41.5,
+  "per_repo": {
+    "astropy/astropy": {
+      "total": 6,
+      "patched": 6,
+      "resolved": 1,
+      "resolve_pct": 16.7
+    },
+    "django/django": {
+      "total": 114,
+      "patched": 113,
+      "resolved": 86,
+      "resolve_pct": 75.4
+    },
+    "matplotlib/matplotlib": {
+      "total": 23,
+      "patched": 23,
+      "resolved": 0,
+      "resolve_pct": 0.0
+    },
+    "mwaskom/seaborn": {
+      "total": 4,
+      "patched": 4,
+      "resolved": 1,
+      "resolve_pct": 25.0
+    },
+    "pallets/flask": {
+      "total": 3,
+      "patched": 3,
+      "resolved": 0,
+      "resolve_pct": 0.0
+    },
+    "psf/requests": {
+      "total": 6,
+      "patched": 6,
+      "resolved": 4,
+      "resolve_pct": 66.7
+    },
+    "pydata/xarray": {
+      "total": 5,
+      "patched": 5,
+      "resolved": 1,
+      "resolve_pct": 20.0
+    },
+    "pylint-dev/pylint": {
+      "total": 6,
+      "patched": 6,
+      "resolved": 0,
+      "resolve_pct": 0.0
+    },
+    "pytest-dev/pytest": {
+      "total": 17,
+      "patched": 17,
+      "resolved": 11,
+      "resolve_pct": 64.7
+    },
+    "scikit-learn/scikit-learn": {
+      "total": 23,
+      "patched": 18,
+      "resolved": 12,
+      "resolve_pct": 52.2
+    },
+    "sphinx-doc/sphinx": {
+      "total": 16,
+      "patched": 16,
+      "resolved": 0,
+      "resolve_pct": 0.0
+    },
+    "sympy/sympy": {
+      "total": 77,
+      "patched": 76,
+      "resolved": 46,
+      "resolve_pct": 59.7
+    }
+  }
+}

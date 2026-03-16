@@ -1,0 +1,15 @@
+[
+  {
+    "run_name": "haiku-baseline-20260316",
+    "date": "2026-03-16",
+    "model": "claude-haiku-4-5",
+    "provider": "anthropic",
+    "resolved": 162,
+    "total": 300,
+    "resolve_pct": 54.0,
+    "patched": 293,
+    "patch_pct": 97.7,
+    "total_cost_usd": 26.13,
+    "avg_cost_usd": 0.0871
+  }
+]
