@@ -397,6 +397,7 @@ async fn pr_create_from(
         &diff,
         &model,
         true,
+        None,
         &run_dir,
     )
     .await

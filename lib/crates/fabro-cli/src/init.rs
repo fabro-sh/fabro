@@ -44,6 +44,7 @@ root = \"fabro/\"
 [pull_request]
 enabled = true
 draft = true
+# auto_merge = true
 ",
     )
     .with_context(|| format!("failed to write {}", fabro_toml.display()))?;

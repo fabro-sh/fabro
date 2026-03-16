@@ -405,6 +405,8 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         base_branch: None,
         pull_request_enabled: false,
         pull_request_draft: false,
+        pull_request_auto_merge: false,
+        pull_request_merge_strategy: fabro_workflows::cli::run_config::MergeStrategy::Squash,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -603,6 +605,8 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         base_branch: None,
         pull_request_enabled: false,
         pull_request_draft: false,
+        pull_request_auto_merge: false,
+        pull_request_merge_strategy: fabro_workflows::cli::run_config::MergeStrategy::Squash,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -792,6 +796,8 @@ async fn daytona_parallel_git_branching_e2e() {
         base_branch: None,
         pull_request_enabled: false,
         pull_request_draft: false,
+        pull_request_auto_merge: false,
+        pull_request_merge_strategy: fabro_workflows::cli::run_config::MergeStrategy::Squash,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1172,6 +1178,8 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         base_branch: None,
         pull_request_enabled: false,
         pull_request_draft: false,
+        pull_request_auto_merge: false,
+        pull_request_merge_strategy: fabro_workflows::cli::run_config::MergeStrategy::Squash,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1315,6 +1323,8 @@ async fn daytona_asset_collection() {
         base_branch: None,
         pull_request_enabled: false,
         pull_request_draft: false,
+        pull_request_auto_merge: false,
+        pull_request_merge_strategy: fabro_workflows::cli::run_config::MergeStrategy::Squash,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1573,6 +1583,8 @@ async fn daytona_git_push_run_branch_to_origin() {
         base_branch: None,
         pull_request_enabled: false,
         pull_request_draft: false,
+        pull_request_auto_merge: false,
+        pull_request_merge_strategy: fabro_workflows::cli::run_config::MergeStrategy::Squash,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };

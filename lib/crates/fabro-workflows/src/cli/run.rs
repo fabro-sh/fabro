@@ -1270,7 +1270,9 @@ pub async fn run_command(
         git_author,
         base_branch: detected_base_branch.or(remote_base_branch),
         pull_request_enabled: pr_cfg.is_some_and(|p| p.enabled),
-        pull_request_draft: pr_cfg.is_none_or(|p| p.draft),
+        pull_request_draft: pr_cfg.is_none_or(|p| p.draft) && !pr_cfg.is_some_and(|p| p.auto_merge),
+        pull_request_auto_merge: pr_cfg.is_some_and(|p| p.auto_merge),
+        pull_request_merge_strategy: pr_cfg.map(|p| p.merge_strategy).unwrap_or_default(),
         asset_globs: run_cfg
             .as_ref()
             .and_then(|c| c.assets.as_ref())
@@ -1449,6 +1451,14 @@ pub async fn run_command(
                     pushed_branch = Some(run_branch.clone());
                 }
 
+                let auto_merge = if config.pull_request_auto_merge {
+                    Some(crate::pull_request::AutoMergeConfig {
+                        merge_strategy: config.pull_request_merge_strategy,
+                    })
+                } else {
+                    None
+                };
+
                 match crate::pull_request::maybe_open_pull_request(
                     creds,
                     origin,
@@ -1458,6 +1468,7 @@ pub async fn run_command(
                     &diff,
                     &model,
                     config.pull_request_draft,
+                    auto_merge,
                     &run_dir,
                 )
                 .await
@@ -1925,6 +1936,8 @@ async fn run_from_branch(
         base_branch: None,
         pull_request_enabled: false,
         pull_request_draft: false,
+        pull_request_auto_merge: false,
+        pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };

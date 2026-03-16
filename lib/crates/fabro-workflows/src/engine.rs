@@ -861,6 +861,10 @@ pub struct RunConfig {
     pub pull_request_enabled: bool,
     /// Whether to create the PR as a draft.
     pub pull_request_draft: bool,
+    /// Whether to enable GitHub auto-merge on the created PR.
+    pub pull_request_auto_merge: bool,
+    /// Merge strategy for auto-merge (squash, merge, rebase).
+    pub pull_request_merge_strategy: crate::cli::run_config::MergeStrategy,
     /// Glob patterns for asset collection. Empty = no asset collection.
     pub asset_globs: Vec<String>,
     /// Workflow directory slug (e.g. "smoke" from `fabro/workflows/smoke/`).
@@ -3027,6 +3031,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3057,6 +3063,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3095,6 +3103,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3129,6 +3139,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3159,6 +3171,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3202,6 +3216,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3269,6 +3285,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3363,6 +3381,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3400,6 +3420,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3432,6 +3454,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3464,6 +3488,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3500,6 +3526,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3664,6 +3692,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3711,6 +3741,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3776,6 +3808,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3844,6 +3878,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3916,6 +3952,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3977,6 +4015,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4039,6 +4079,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4076,6 +4118,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4109,6 +4153,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4141,6 +4187,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4186,6 +4234,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4268,6 +4318,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4303,6 +4355,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4340,6 +4394,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4382,6 +4438,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4422,6 +4480,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4459,6 +4519,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4557,6 +4619,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4770,6 +4834,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4810,6 +4876,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4857,6 +4925,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4944,6 +5014,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5042,6 +5114,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5117,6 +5191,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5179,6 +5255,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5242,6 +5320,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5401,6 +5481,8 @@ mod tests {
             base_branch: None,
             pull_request_enabled: false,
             pull_request_draft: false,
+            pull_request_auto_merge: false,
+            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };

@@ -4389,6 +4389,13 @@ components:
         draft:
           type: boolean
           description: Whether to create the pull request as a draft.
+        auto_merge:
+          type: boolean
+          description: Whether to enable GitHub auto-merge on the created PR. Implies draft = false.
+        merge_strategy:
+          type: string
+          enum: [squash, merge, rebase]
+          description: Merge strategy for auto-merge.
 
     WebConfiguration:
       description: Web UI configuration.
