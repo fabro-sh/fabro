@@ -1,0 +1,13 @@
+{
+  "run_id": "01KKTC2ZKDGYS61ZXPV4ZNYBEF",
+  "workflow_name": "ImplementAndSimplify",
+  "goal": "# Fix: Stage durations always show 0s in PR descriptions\n\n## Context\n\n`extract_stage_durations()` in `retro.rs` builds a HashMap keyed by `node_label` (the human-readable name like `\"Preflight Compile\"`), but all three lookup sites use `node_id` (the DOT graph identifier like `\"preflight_compile\"`). Every lookup misses, falls back to `unwrap_or(0)`, and all stages show `0s`.\n\nThe existing test doesn't catch this because it uses nodes where `node_id == node_label` (both `\"plan\"`).\n\n## Changes\n\n### 1. Fix the key mismatch — `retro.rs:196`\n\nChange `envelope.get(\"node_label\")` to `envelope.get(\"node_id\")` so the HashMap key matches lookups.\n\n```\n- let Some(name) = envelope.get(\"node_label\").and_then(|v| v.as_str()) else {\n+ let Some(name) = envelope.get(\"node_id\").and_then(|v| v.as_str()) else {\n```\n\n**File:** `lib/crates/fabro-workflows/src/retro.rs:196`\n\n### 2. Update existing test to catch this — `retro.rs:529+`\n\nThe test at line 529 uses `\"node_id\": \"plan\", \"node_label\": \"plan\"` for both events. Change the `node_label` values to differ from `node_id` (e.g., `\"Plan\"` and `\"Code\"`) so the test would have failed before the fix.\n\n**File:** `lib/crates/fabro-workflows/src/retro.rs` — `extract_stage_durations_from_progress_jsonl` test\n\n## Verification\n\n1. `cargo test -p fabro-workflows -- extract_stage_durations` — confirm test passes with the fix\n2. `cargo clippy --workspace -- -D warnings` — no new warnings\n3. `cargo test --workspace` — no regressions\n",
+  "start_time": "2026-03-16T03:47:32.136843Z",
+  "node_count": 13,
+  "edge_count": 16,
+  "run_branch": "fabro/run/01KKTC2ZKDGYS61ZXPV4ZNYBEF",
+  "base_sha": "470fcfe1200b2102c0cdf91c73b0ed8d925f258a",
+  "base_branch": "main",
+  "workflow_slug": "implement",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro"
+}
