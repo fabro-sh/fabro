@@ -76,8 +76,9 @@ pub fn graph_command(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Dark mode CSS injected into SVG output.
-const DARK_MODE_STYLE: &str = r##"<style>
+/// Dark mode CSS injected into SVG output (leading newline included for insertion).
+const DARK_MODE_STYLE: &str = r##"
+<style>
   @media (prefers-color-scheme: dark) {
     text { fill: #e0e0e0 !important; }
     [stroke="#357f9e"] { stroke: #5bb8d8; }
@@ -104,7 +105,8 @@ pub fn inject_dot_style_defaults(source: &str) -> String {
 /// 1. Remove the white background `<polygon>` element
 /// 2. Insert a dark-mode `<style>` block after the opening `<svg ...>` tag
 pub fn postprocess_svg(raw: Vec<u8>) -> Vec<u8> {
-    let mut svg = String::from_utf8_lossy(&raw).into_owned();
+    let mut svg = String::from_utf8(raw)
+        .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
 
     // Remove white background polygon (single line containing it)
     svg = svg
@@ -122,7 +124,7 @@ pub fn postprocess_svg(raw: Vec<u8>) -> Vec<u8> {
         .find("<svg")
         .and_then(|start| svg[start..].find('>').map(|end| start + end))
     {
-        svg.insert_str(svg_close + 1, &format!("\n{DARK_MODE_STYLE}"));
+        svg.insert_str(svg_close + 1, DARK_MODE_STYLE);
     }
 
     svg.into_bytes()

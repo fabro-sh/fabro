@@ -1432,20 +1432,9 @@ async fn get_retro(
     }
 }
 
-async fn get_graph(
-    _auth: AuthenticatedService,
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Response {
-    let dot_source = {
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        match runs.get(&id) {
-            Some(managed_run) => managed_run.dot_source.clone(),
-            None => return ApiError::not_found("Run not found.").into_response(),
-        }
-    };
-
-    let styled_source = fabro_workflows::cli::graph::inject_dot_style_defaults(&dot_source);
+/// Render DOT source to a styled SVG via the `dot` subprocess (async).
+pub(crate) async fn render_dot_svg(dot_source: &str) -> Response {
+    let styled_source = fabro_workflows::cli::graph::inject_dot_style_defaults(dot_source);
 
     let mut child = match tokio::process::Command::new("dot")
         .arg("-Tsvg")
@@ -1467,7 +1456,6 @@ async fn get_graph(
     if let Some(mut stdin) = child.stdin.take() {
         use tokio::io::AsyncWriteExt;
         let _ = stdin.write_all(styled_source.as_bytes()).await;
-        // stdin is dropped here, closing the pipe
     }
 
     match child.wait_with_output().await {
@@ -1484,6 +1472,22 @@ async fn get_graph(
         Err(e) => ApiError::new(StatusCode::BAD_GATEWAY, format!("dot process error: {e}"))
             .into_response(),
     }
+}
+
+async fn get_graph(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let dot_source = {
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        match runs.get(&id) {
+            Some(managed_run) => managed_run.dot_source.clone(),
+            None => return ApiError::not_found("Run not found.").into_response(),
+        }
+    };
+
+    render_dot_svg(&dot_source).await
 }
 
 #[cfg(test)]
