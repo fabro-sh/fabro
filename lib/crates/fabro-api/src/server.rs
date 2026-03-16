@@ -1445,6 +1445,8 @@ async fn get_graph(
         }
     };
 
+    let styled_source = fabro_workflows::cli::graph::inject_dot_style_defaults(&dot_source);
+
     let mut child = match tokio::process::Command::new("dot")
         .arg("-Tsvg")
         .stdin(std::process::Stdio::piped())
@@ -1464,7 +1466,7 @@ async fn get_graph(
 
     if let Some(mut stdin) = child.stdin.take() {
         use tokio::io::AsyncWriteExt;
-        let _ = stdin.write_all(dot_source.as_bytes()).await;
+        let _ = stdin.write_all(styled_source.as_bytes()).await;
         // stdin is dropped here, closing the pipe
     }
 
@@ -1472,7 +1474,7 @@ async fn get_graph(
         Ok(output) if output.status.success() => (
             StatusCode::OK,
             [("content-type", "image/svg+xml")],
-            output.stdout,
+            fabro_workflows::cli::graph::postprocess_svg(output.stdout),
         )
             .into_response(),
         Ok(output) => {
