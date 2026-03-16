@@ -1,33 +1,37 @@
 {
-  "timestamp": "2026-03-16T02:00:05.443804Z",
-  "current_node": "preflight_compile",
+  "timestamp": "2026-03-16T02:00:24.568155Z",
+  "current_node": "preflight_lint",
   "completed_nodes": [
     "start",
     "toolchain",
-    "preflight_compile"
+    "preflight_compile",
+    "preflight_lint"
   ],
   "node_retries": {
-    "toolchain": 1,
+    "preflight_lint": 1,
     "preflight_compile": 1,
-    "start": 1
+    "start": 1,
+    "toolchain": 1
   },
   "context_values": {
-    "internal.thread_id": "toolchain",
+    "internal.thread_id": "preflight_compile",
     "internal.retry_count.start": 1,
     "thread.toolchain.current_node": "preflight_compile",
-    "current.preamble": "Goal: # Style SVG output from `fabro graph` and API\n\n## Context\n\nSVGs from `fabro graph` use raw Graphviz defaults (black strokes, white bg, Times-serif). The docs SVGs look much better: teal nodes, gray edges, Helvetica font, transparent bg, dark mode CSS. The goal is to make `fabro graph` and the API `get_graph` endpoint produce the same styled output without building a layout engine.\n\n## Approach: DOT defaults + SVG post-processing\n\n### Step 1: `inject_dot_style_defaults(source: &str) -> String` in `graph.rs`\n\nFind first `{`, insert after it:\n```dot\n    bgcolor=\"transparent\"\n    node [color=\"#357f9e\", fontname=\"Helvetica\", fontsize=12, fontcolor=\"#1a1a1a\"]\n    edge [color=\"#666666\", fontname=\"Helvetica\", fontsize=10, fontcolor=\"#666666\"]\n```\nThese are DOT defaults — per-node/edge attrs override them. Applies to both SVG and PNG.\n\n### Step 2: `postprocess_svg(raw: Vec<u8>) -> Vec<u8>` in `graph.rs`\n\nSVG-only. Two string operations:\n1. Remove line containing `<polygon fill=\"white\" stroke=\"none\"` (the white background)\n2. Insert dark mode `<style>` block after the `<svg ...>` closing `>`\n\n### Step 3: Wire into `render_dot()` in `graph.rs`\n\n- Call `inject_dot_style_defaults` on source before piping to `dot`\n- Call `postprocess_svg` on output when format is SVG\n\n### Step 4: Wire into `get_graph()` in `server.rs` (line ~1440, ~1467, ~1472)\n\n- Wrap `dot_source` with `inject_dot_style_defaults`\n- Wrap `output.stdout` with `postprocess_svg`\n\n### Step 5: Wire into `get_run_graph()` in `demo/mod.rs` (line ~227, ~248, ~252)\n\nSame two wraps.\n\n### Step 6: Tests in `graph.rs`\n\n- `inject_dot_style_defaults` inserts expected attrs\n- `inject_dot_style_defaults` returns unchanged if no `{`\n- `postprocess_svg` removes white background\n- `postprocess_svg` injects dark mode style block\n- Update `graph_valid_workflow_svg` to assert styled output\n\n## Files to modify\n\n1. `lib/crates/fabro-workflows/src/cli/graph.rs` — add 2 pub fns, modify `render_dot`, add tests\n2. `lib/crates/fabro-api/src/server.rs` — 2-line change in `get_graph`\n3. `lib/crates/fabro-api/src/demo/mod.rs` — 2-line change in `get_run_graph`\n\n## Verification\n\n1. `cargo test -p fabro-workflows -- graph` — unit tests pass\n2. `cargo test -p fabro-api` — API tests pass\n3. `cargo clippy --workspace -- -D warnings` — no warnings\n4. `fabro graph fabro/workflows/implement/workflow.fabro -o /tmp/test.svg` — visually inspect:\n   - Teal node strokes, gray edges, Helvetica font\n   - No white background\n   - Dark mode `<style>` block present\n   - Compare with `docs/images/tutorial-plan-implement.svg`\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n",
+    "current.preamble": "Goal: # Style SVG output from `fabro graph` and API\n\n## Context\n\nSVGs from `fabro graph` use raw Graphviz defaults (black strokes, white bg, Times-serif). The docs SVGs look much better: teal nodes, gray edges, Helvetica font, transparent bg, dark mode CSS. The goal is to make `fabro graph` and the API `get_graph` endpoint produce the same styled output without building a layout engine.\n\n## Approach: DOT defaults + SVG post-processing\n\n### Step 1: `inject_dot_style_defaults(source: &str) -> String` in `graph.rs`\n\nFind first `{`, insert after it:\n```dot\n    bgcolor=\"transparent\"\n    node [color=\"#357f9e\", fontname=\"Helvetica\", fontsize=12, fontcolor=\"#1a1a1a\"]\n    edge [color=\"#666666\", fontname=\"Helvetica\", fontsize=10, fontcolor=\"#666666\"]\n```\nThese are DOT defaults — per-node/edge attrs override them. Applies to both SVG and PNG.\n\n### Step 2: `postprocess_svg(raw: Vec<u8>) -> Vec<u8>` in `graph.rs`\n\nSVG-only. Two string operations:\n1. Remove line containing `<polygon fill=\"white\" stroke=\"none\"` (the white background)\n2. Insert dark mode `<style>` block after the `<svg ...>` closing `>`\n\n### Step 3: Wire into `render_dot()` in `graph.rs`\n\n- Call `inject_dot_style_defaults` on source before piping to `dot`\n- Call `postprocess_svg` on output when format is SVG\n\n### Step 4: Wire into `get_graph()` in `server.rs` (line ~1440, ~1467, ~1472)\n\n- Wrap `dot_source` with `inject_dot_style_defaults`\n- Wrap `output.stdout` with `postprocess_svg`\n\n### Step 5: Wire into `get_run_graph()` in `demo/mod.rs` (line ~227, ~248, ~252)\n\nSame two wraps.\n\n### Step 6: Tests in `graph.rs`\n\n- `inject_dot_style_defaults` inserts expected attrs\n- `inject_dot_style_defaults` returns unchanged if no `{`\n- `postprocess_svg` removes white background\n- `postprocess_svg` injects dark mode style block\n- Update `graph_valid_workflow_svg` to assert styled output\n\n## Files to modify\n\n1. `lib/crates/fabro-workflows/src/cli/graph.rs` — add 2 pub fns, modify `render_dot`, add tests\n2. `lib/crates/fabro-api/src/server.rs` — 2-line change in `get_graph`\n3. `lib/crates/fabro-api/src/demo/mod.rs` — 2-line change in `get_run_graph`\n\n## Verification\n\n1. `cargo test -p fabro-workflows -- graph` — unit tests pass\n2. `cargo test -p fabro-api` — API tests pass\n3. `cargo clippy --workspace -- -D warnings` — no warnings\n4. `fabro graph fabro/workflows/implement/workflow.fabro -o /tmp/test.svg` — visually inspect:\n   - Teal node strokes, gray edges, Helvetica font\n   - No white background\n   - Dark mode `<style>` block present\n   - Compare with `docs/images/tutorial-plan-implement.svg`\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n- **preflight_compile**: success\n  - Script: `cargo check -q --workspace 2>&1`\n  - Stdout: (empty)\n  - Stderr: (empty)\n",
     "internal.run_id": "01KKT5VWYY8VQFETNRC7RTYKDW",
     "failure_class": "",
     "outcome": "success",
     "internal.retry_count.preflight_compile": 1,
+    "internal.retry_count.preflight_lint": 1,
     "internal.node_visit_count": 1,
     "internal.fidelity": "compact",
-    "current_node": "preflight_compile",
+    "current_node": "preflight_lint",
     "graph.rankdir": "LR",
     "internal.retry_count.toolchain": 1,
     "command.output": "",
     "command.stderr": "",
     "graph.model_stylesheet": "\n            * { backend: api; model: claude-opus-4-6;}\n        ",
+    "thread.preflight_compile.current_node": "preflight_lint",
     "graph.goal": "# Style SVG output from `fabro graph` and API\n\n## Context\n\nSVGs from `fabro graph` use raw Graphviz defaults (black strokes, white bg, Times-serif). The docs SVGs look much better: teal nodes, gray edges, Helvetica font, transparent bg, dark mode CSS. The goal is to make `fabro graph` and the API `get_graph` endpoint produce the same styled output without building a layout engine.\n\n## Approach: DOT defaults + SVG post-processing\n\n### Step 1: `inject_dot_style_defaults(source: &str) -> String` in `graph.rs`\n\nFind first `{`, insert after it:\n```dot\n    bgcolor=\"transparent\"\n    node [color=\"#357f9e\", fontname=\"Helvetica\", fontsize=12, fontcolor=\"#1a1a1a\"]\n    edge [color=\"#666666\", fontname=\"Helvetica\", fontsize=10, fontcolor=\"#666666\"]\n```\nThese are DOT defaults — per-node/edge attrs override them. Applies to both SVG and PNG.\n\n### Step 2: `postprocess_svg(raw: Vec<u8>) -> Vec<u8>` in `graph.rs`\n\nSVG-only. Two string operations:\n1. Remove line containing `<polygon fill=\"white\" stroke=\"none\"` (the white background)\n2. Insert dark mode `<style>` block after the `<svg ...>` closing `>`\n\n### Step 3: Wire into `render_dot()` in `graph.rs`\n\n- Call `inject_dot_style_defaults` on source before piping to `dot`\n- Call `postprocess_svg` on output when format is SVG\n\n### Step 4: Wire into `get_graph()` in `server.rs` (line ~1440, ~1467, ~1472)\n\n- Wrap `dot_source` with `inject_dot_style_defaults`\n- Wrap `output.stdout` with `postprocess_svg`\n\n### Step 5: Wire into `get_run_graph()` in `demo/mod.rs` (line ~227, ~248, ~252)\n\nSame two wraps.\n\n### Step 6: Tests in `graph.rs`\n\n- `inject_dot_style_defaults` inserts expected attrs\n- `inject_dot_style_defaults` returns unchanged if no `{`\n- `postprocess_svg` removes white background\n- `postprocess_svg` injects dark mode style block\n- Update `graph_valid_workflow_svg` to assert styled output\n\n## Files to modify\n\n1. `lib/crates/fabro-workflows/src/cli/graph.rs` — add 2 pub fns, modify `render_dot`, add tests\n2. `lib/crates/fabro-api/src/server.rs` — 2-line change in `get_graph`\n3. `lib/crates/fabro-api/src/demo/mod.rs` — 2-line change in `get_run_graph`\n\n## Verification\n\n1. `cargo test -p fabro-workflows -- graph` — unit tests pass\n2. `cargo test -p fabro-api` — API tests pass\n3. `cargo clippy --workspace -- -D warnings` — no warnings\n4. `fabro graph fabro/workflows/implement/workflow.fabro -o /tmp/test.svg` — visually inspect:\n   - Teal node strokes, gray edges, Helvetica font\n   - No white background\n   - Dark mode `<style>` block present\n   - Compare with `docs/images/tutorial-plan-implement.svg`\n",
     "failure_signature": "",
     "thread.start.current_node": "toolchain"
@@ -43,6 +47,15 @@
       "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
       "duration_ms": 61
     },
+    "preflight_lint": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": ""
+      },
+      "notes": "Script completed: cargo clippy -q --workspace -- -D warnings 2>&1",
+      "duration_ms": 16369
+    },
     "preflight_compile": {
       "status": "success",
       "context_updates": {
@@ -57,8 +70,9 @@
       "duration_ms": 0
     }
   },
-  "next_node_id": "preflight_lint",
+  "next_node_id": "implement",
   "node_visits": {
+    "preflight_lint": 1,
     "start": 1,
     "toolchain": 1,
     "preflight_compile": 1
