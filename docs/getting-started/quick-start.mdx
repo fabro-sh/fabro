@@ -12,9 +12,23 @@ Fabro has two modes:
 
 ## Install
 
-```bash
-curl -fsSL https://fabro.sh/install.sh | bash
-```
+<Tabs>
+  <Tab title="Claude Code">
+    ```bash
+    curl -fsSL https://fabro.sh/install.md | claude
+    ```
+  </Tab>
+  <Tab title="Codex">
+    ```bash
+    codex "$(curl -fsSL https://fabro.sh/install.md)"
+    ```
+  </Tab>
+  <Tab title="Bash">
+    ```bash
+    curl -fsSL https://fabro.sh/install.sh | bash
+    ```
+  </Tab>
+</Tabs>
 
 ## Initialize your project
 

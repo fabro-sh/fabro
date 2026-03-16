@@ -10,6 +10,13 @@ AI coding agents are powerful but unpredictable. You either babysit every step o
 [![docs](https://img.shields.io/badge/docs-fabro.dev-357F9E)](https://docs.fabro.sh)
 
 ```bash
+# With Claude Code
+curl -fsSL https://fabro.sh/install.md | claude
+
+# With Codex
+codex "$(curl -fsSL https://fabro.sh/install.md)"
+
+# With Bash
 curl -fsSL https://fabro.sh/install.sh | bash
 ```
 
@@ -101,14 +108,14 @@ Fabro ships with [comprehensive documentation](https://docs.fabro.sh) covering e
 ### Install
 
 ```bash
+# With Claude Code
+curl -fsSL https://fabro.sh/install.md | claude
+
+# With Codex
+codex "$(curl -fsSL https://fabro.sh/install.md)"
+
+# With Bash
 curl -fsSL https://fabro.sh/install.sh | bash
-
-# Initialize your project
-cd my-repo/
-fabro init
-
-# Run your first workflow
-fabro run hello
 ```
 
 ---
