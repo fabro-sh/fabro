@@ -190,3 +190,23 @@
 .graph-draw .graph-edge {
   animation-play-state: running;
 }
+
+/* Install widget tabs */
+.install-tab {
+  color: var(--color-ice-300);
+  background: transparent;
+  cursor: pointer;
+}
+.install-tab:hover {
+  color: var(--color-ice-50);
+}
+.install-tab.active {
+  color: var(--color-teal-300);
+  background: var(--color-navy-800);
+}
+.install-panel {
+  display: none;
+}
+.install-panel.active {
+  display: block;
+}

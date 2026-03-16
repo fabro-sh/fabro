@@ -126,8 +126,30 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
           and intervene only where it matters.
         </p>
         <div class="reveal reveal-d3 mt-10 flex flex-col items-center gap-5">
-          <div class="hidden sm:block overflow-x-auto rounded-xl border border-navy-600 bg-navy-900/60 px-6 py-3">
-            <code class="text-xs font-mono text-teal-300 sm:text-sm">$ curl -fsSL https://fabro.sh/install.sh | bash</code>
+          <div class="hidden sm:block install-widget">
+            <div class="flex gap-1 mb-2 justify-center">
+              <button class="install-tab active text-xs font-semibold px-3 py-1 rounded-md transition-colors" data-target="claude">Claude</button>
+              <button class="install-tab text-xs font-semibold px-3 py-1 rounded-md transition-colors" data-target="codex">Codex</button>
+              <button class="install-tab text-xs font-semibold px-3 py-1 rounded-md transition-colors" data-target="bash">Bash</button>
+            </div>
+            <div class="install-panel active relative group overflow-x-auto rounded-xl border border-navy-600 bg-navy-900/60 px-6 py-3 pr-12" data-panel="claude">
+              <code class="text-xs font-mono text-teal-300 sm:text-sm">$ curl -fsSL https://fabro.sh/install.md | claude</code>
+              <button class="copy-btn absolute right-3 top-1/2 -translate-y-1/2 text-ice-300/40 hover:text-teal-300 transition-colors opacity-0 group-hover:opacity-100" data-copy="curl -fsSL https://fabro.sh/install.md | claude" aria-label="Copy to clipboard">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
+            <div class="install-panel relative group overflow-x-auto rounded-xl border border-navy-600 bg-navy-900/60 px-6 py-3 pr-12" data-panel="codex">
+              <code class="text-xs font-mono text-teal-300 sm:text-sm">$ codex "$(curl -fsSL https://fabro.sh/install.md)"</code>
+              <button class="copy-btn absolute right-3 top-1/2 -translate-y-1/2 text-ice-300/40 hover:text-teal-300 transition-colors opacity-0 group-hover:opacity-100" data-copy="codex &quot;$(curl -fsSL https://fabro.sh/install.md)&quot;" aria-label="Copy to clipboard">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
+            <div class="install-panel relative group overflow-x-auto rounded-xl border border-navy-600 bg-navy-900/60 px-6 py-3 pr-12" data-panel="bash">
+              <code class="text-xs font-mono text-teal-300 sm:text-sm">$ curl -fsSL https://fabro.sh/install.sh | bash</code>
+              <button class="copy-btn absolute right-3 top-1/2 -translate-y-1/2 text-ice-300/40 hover:text-teal-300 transition-colors opacity-0 group-hover:opacity-100" data-copy="curl -fsSL https://fabro.sh/install.sh | bash" aria-label="Copy to clipboard">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
           </div>
           <div class="flex items-center gap-4">
             <a
@@ -146,7 +168,7 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
         </div>
 
         <!-- Runs board screenshot -->
-        <div class="reveal-scale reveal-d4 mt-16">
+        <div class="mt-16">
           <div class="rounded-xl border border-navy-800 shadow-[0_0_80px_-20px_rgba(103,178,215,0.12)] overflow-hidden">
             <picture>
               <source srcset="/runs-board.webp" type="image/webp" />
@@ -599,8 +621,30 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
         </div>
 
         <div class="reveal reveal-d2 mt-10 flex flex-col items-center gap-5">
-          <div class="overflow-x-auto rounded-xl border border-navy-600 bg-navy-900/60 px-6 py-3">
-            <code class="text-xs font-mono text-teal-300 sm:text-sm">$ curl -fsSL https://fabro.sh/install.sh | bash</code>
+          <div class="install-widget">
+            <div class="flex gap-1 mb-2 justify-center">
+              <button class="install-tab active text-xs font-semibold px-3 py-1 rounded-md transition-colors" data-target="claude">Claude</button>
+              <button class="install-tab text-xs font-semibold px-3 py-1 rounded-md transition-colors" data-target="codex">Codex</button>
+              <button class="install-tab text-xs font-semibold px-3 py-1 rounded-md transition-colors" data-target="bash">Bash</button>
+            </div>
+            <div class="install-panel active relative group overflow-x-auto rounded-xl border border-navy-600 bg-navy-900/60 px-6 py-3 pr-12" data-panel="claude">
+              <code class="text-xs font-mono text-teal-300 sm:text-sm">$ curl -fsSL https://fabro.sh/install.md | claude</code>
+              <button class="copy-btn absolute right-3 top-1/2 -translate-y-1/2 text-ice-300/40 hover:text-teal-300 transition-colors opacity-0 group-hover:opacity-100" data-copy="curl -fsSL https://fabro.sh/install.md | claude" aria-label="Copy to clipboard">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
+            <div class="install-panel relative group overflow-x-auto rounded-xl border border-navy-600 bg-navy-900/60 px-6 py-3 pr-12" data-panel="codex">
+              <code class="text-xs font-mono text-teal-300 sm:text-sm">$ codex "$(curl -fsSL https://fabro.sh/install.md)"</code>
+              <button class="copy-btn absolute right-3 top-1/2 -translate-y-1/2 text-ice-300/40 hover:text-teal-300 transition-colors opacity-0 group-hover:opacity-100" data-copy="codex &quot;$(curl -fsSL https://fabro.sh/install.md)&quot;" aria-label="Copy to clipboard">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
+            <div class="install-panel relative group overflow-x-auto rounded-xl border border-navy-600 bg-navy-900/60 px-6 py-3 pr-12" data-panel="bash">
+              <code class="text-xs font-mono text-teal-300 sm:text-sm">$ curl -fsSL https://fabro.sh/install.sh | bash</code>
+              <button class="copy-btn absolute right-3 top-1/2 -translate-y-1/2 text-ice-300/40 hover:text-teal-300 transition-colors opacity-0 group-hover:opacity-100" data-copy="curl -fsSL https://fabro.sh/install.sh | bash" aria-label="Copy to clipboard">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
           </div>
           <div class="flex items-center justify-center gap-4">
             <a
@@ -734,5 +778,35 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
       );
       graphObserver.observe(graphContainer);
     }
+
+    // Install widget: tab switching
+    document.querySelectorAll(".install-widget").forEach((widget) => {
+      widget.querySelectorAll(".install-tab").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          const target = tab.getAttribute("data-target");
+          widget.querySelectorAll(".install-tab").forEach((t) => t.classList.remove("active"));
+          widget.querySelectorAll(".install-panel").forEach((p) => p.classList.remove("active"));
+          tab.classList.add("active");
+          widget.querySelector(`.install-panel[data-panel="${target}"]`)?.classList.add("active");
+        });
+      });
+    });
+
+    // Install widget: copy buttons
+    document.querySelectorAll(".copy-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const text = btn.getAttribute("data-copy");
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(() => {
+          const svg = btn.innerHTML;
+          btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+          btn.classList.add("!opacity-100", "!text-teal-300");
+          setTimeout(() => {
+            btn.innerHTML = svg;
+            btn.classList.remove("!opacity-100", "!text-teal-300");
+          }, 1500);
+        });
+      });
+    });
   </script>
 </Layout>
