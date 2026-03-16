@@ -71,6 +71,20 @@ impl LocalSandbox {
     }
 }
 
+#[cfg(unix)]
+async fn set_default_file_permissions(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))
+        .await
+        .map_err(|e| format!("Failed to set permissions on {}: {e}", path.display()))
+}
+
+#[cfg(not(unix))]
+async fn set_default_file_permissions(_path: &Path) -> Result<(), String> {
+    Ok(())
+}
+
 #[async_trait]
 impl Sandbox for LocalSandbox {
     async fn read_file(
@@ -96,7 +110,8 @@ impl Sandbox for LocalSandbox {
         }
         tokio::fs::write(&full_path, content)
             .await
-            .map_err(|e| format!("Failed to write {}: {e}", full_path.display()))
+            .map_err(|e| format!("Failed to write {}: {e}", full_path.display()))?;
+        set_default_file_permissions(&full_path).await
     }
 
     async fn delete_file(&self, path: &str) -> Result<(), String> {
@@ -379,6 +394,7 @@ impl Sandbox for LocalSandbox {
                 local_path.display()
             )
         })?;
+        set_default_file_permissions(local_path).await?;
         Ok(())
     }
 
@@ -400,6 +416,7 @@ impl Sandbox for LocalSandbox {
                 full_path.display()
             )
         })?;
+        set_default_file_permissions(&full_path).await?;
         Ok(())
     }
 
@@ -508,6 +525,13 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    #[cfg(unix)]
+    fn file_mode(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
     fn temp_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("local_env_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -558,6 +582,62 @@ mod tests {
         let written = std::fs::read_to_string(dir.join("sub/dir/test.txt")).unwrap();
         assert_eq!(written, "content");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_file_sets_default_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = temp_dir();
+        let path = dir.join("private.txt");
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        let env = LocalSandbox::new(dir.clone());
+        env.write_file("private.txt", "new").await.unwrap();
+
+        assert_eq!(file_mode(&path), 0o644);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn upload_file_from_local_sets_default_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = temp_dir();
+        let scratch = temp_dir();
+        let src = scratch.join("upload.txt");
+        std::fs::write(&src, "content").unwrap();
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        let env = LocalSandbox::new(dir.clone());
+        env.upload_file_from_local(&src, "uploaded.txt").await.unwrap();
+
+        assert_eq!(file_mode(&dir.join("uploaded.txt")), 0o644);
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(&scratch).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn download_file_to_local_sets_default_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = temp_dir();
+        let scratch = temp_dir();
+        let remote = dir.join("remote.txt");
+        let local = scratch.join("downloaded.txt");
+        std::fs::write(&remote, "content").unwrap();
+        std::fs::set_permissions(&remote, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        let env = LocalSandbox::new(dir.clone());
+        env.download_file_to_local("remote.txt", &local).await.unwrap();
+
+        assert_eq!(file_mode(&local), 0o644);
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(&scratch).unwrap();
     }
 
     #[tokio::test]
