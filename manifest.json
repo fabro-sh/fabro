@@ -1,0 +1,13 @@
+{
+  "run_id": "01KKTJ3P1WSJTEJFYSX1MTTFEJ",
+  "workflow_name": "SWEBench",
+  "goal": "Allow ValidationErrors to equal each other when created identically\nDescription\n\t \n\t\t(last modified by kamni)\n\t \nCurrently ValidationErrors (django.core.exceptions.ValidationError) that have identical messages don't equal each other, which is counter-intuitive, and can make certain kinds of testing more complicated. Please add an __eq__ method that allows two ValidationErrors to be compared. \nIdeally, this would be more than just a simple self.messages == other.messages. It would be most helpful if the comparison were independent of the order in which errors were raised in a field or in non_field_errors.\n\n\n\n## Additional Context\n\nI probably wouldn't want to limit the comparison to an error's message but rather to its full set of attributes (message, code, params). While params is always pushed into message when iterating over the errors in an ValidationError, I believe it can be beneficial to know if the params that were put inside are the same.\n​PR",
+  "start_time": "2026-03-16T05:32:49.030484Z",
+  "node_count": 5,
+  "edge_count": 4,
+  "run_branch": "fabro/run/01KKTJ3P1WSJTEJFYSX1MTTFEJ",
+  "base_sha": "470fcfe1200b2102c0cdf91c73b0ed8d925f258a",
+  "base_branch": "main",
+  "workflow_slug": "django__django-13220",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/evals/swe-bench/results/gpt54-baseline/runs/django__django-13220"
+}
