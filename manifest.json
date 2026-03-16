@@ -1,0 +1,13 @@
+{
+  "run_id": "01KKV8B6H5AR39BG4FD3HM52ZD",
+  "workflow_name": "SWEBench",
+  "goal": "Add check to ensure max_length fits longest choice.\nDescription\n\t\nThere is currently no check to ensure that Field.max_length is large enough to fit the longest value in Field.choices.\nThis would be very helpful as often this mistake is not noticed until an attempt is made to save a record with those values that are too long.\n",
+  "start_time": "2026-03-16T12:01:24.916242Z",
+  "node_count": 5,
+  "edge_count": 4,
+  "run_branch": "fabro/run/01KKV8B6H5AR39BG4FD3HM52ZD",
+  "base_sha": "470fcfe1200b2102c0cdf91c73b0ed8d925f258a",
+  "base_branch": "main",
+  "workflow_slug": "django__django-11742",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/evals/swe-bench/results/haiku-baseline/runs/django__django-11742"
+}
