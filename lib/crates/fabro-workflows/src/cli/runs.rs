@@ -43,6 +43,10 @@ pub struct RunsListArgs {
     /// Show all runs, not just running (like docker ps -a)
     #[arg(short = 'a', long)]
     pub all: bool,
+
+    /// Only display run IDs
+    #[arg(short = 'q', long)]
+    pub quiet: bool,
 }
 
 #[derive(Args)]
@@ -470,6 +474,13 @@ pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
             StatusFilter::RunningOnly
         },
     );
+
+    if args.quiet {
+        for run in &filtered {
+            println!("{}", run.run_id);
+        }
+        return Ok(());
+    }
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&filtered)?);
