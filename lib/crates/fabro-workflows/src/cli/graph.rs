@@ -1,7 +1,9 @@
+use std::borrow::Cow;
 use std::fmt;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::LazyLock;
 
 use anyhow::bail;
 use clap::{Args, ValueEnum};
@@ -99,15 +101,20 @@ pub fn graph_command(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
     Ok(())
 }
 
+static RANKDIR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"rankdir\s*=\s*\w+").unwrap());
+
 /// If a direction override is given, rewrite `rankdir=…` in the DOT source.
-fn apply_direction(source: &str, direction: Option<GraphDirection>) -> String {
+fn apply_direction<'a>(source: &'a str, direction: Option<GraphDirection>) -> Cow<'a, str> {
     match direction {
         Some(dir) => {
-            let re = regex::Regex::new(r"rankdir\s*=\s*\w+").unwrap();
-            re.replace_all(source, format!("rankdir={dir}"))
-                .into_owned()
+            let replacement = match dir {
+                GraphDirection::Lr => "rankdir=LR",
+                GraphDirection::Tb => "rankdir=TB",
+            };
+            RANKDIR_RE.replace_all(source, replacement)
         }
-        None => source.to_string(),
+        None => Cow::Borrowed(source),
     }
 }
 
