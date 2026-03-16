@@ -40,10 +40,10 @@ root = \"fabro/\"
 # Disable retrospective analysis after workflow runs:
 # retro = false
 
-# Auto-create pull requests on successful workflow runs:
-# [pull_request]
-# enabled = true
-# draft = true
+# Auto-create pull requests on successful workflow runs.
+[pull_request]
+enabled = true
+draft = true
 ",
     )
     .with_context(|| format!("failed to write {}", fabro_toml.display()))?;
