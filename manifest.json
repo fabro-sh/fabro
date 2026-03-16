@@ -1,0 +1,13 @@
+{
+  "run_id": "01KKTJAPBV2XJGZP0KCZ2M2AX4",
+  "workflow_name": "SWEBench",
+  "goal": "",
+  "start_time": "2026-03-16T05:36:37.154100Z",
+  "node_count": 5,
+  "edge_count": 4,
+  "run_branch": "fabro/run/01KKTJAPBV2XJGZP0KCZ2M2AX4",
+  "base_sha": "470fcfe1200b2102c0cdf91c73b0ed8d925f258a",
+  "base_branch": "main",
+  "workflow_slug": "django__django-14155",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/evals/swe-bench/results/haiku-baseline/runs/django__django-14155"
+}
