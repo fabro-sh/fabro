@@ -1,0 +1,13 @@
+{
+  "run_id": "01KKT3CAH2A81T3MC2SYFVX3TQ",
+  "workflow_name": "ImplementAndSimplify",
+  "goal": "# Add `--direction` flag to `fabro graph`\n\n## Context\nThe web UI already has LR/TB toggle buttons. The CLI `fabro graph` has no equivalent — it renders whatever `rankdir` the DOT file declares. We'll add a `--direction` option that overrides the DOT file's `rankdir` before passing it to `dot`.\n\n## Changes\n\n### 1. `lib/crates/fabro-workflows/src/cli/graph.rs`\n- Add `GraphDirection` enum (`Lr`, `Tb`) with `ValueEnum` + `Display`\n- Add `--direction` option to `GraphArgs` (optional, short `-d`)\n- In `graph_command`, if `--direction` is set, regex-replace `rankdir=\\w+` in the DOT source before calling `render_dot` (same approach the web UI uses)\n\n### 2. `docs/reference/cli.mdx` (~line 372-376)\n- Add row: `--direction <DIR>` / `Graph direction: `lr` (default) or `tb``\n\n### 3. Test\n- Add test: DOT source has `rankdir=LR`, pass `direction=Some(Tb)`, assert rendered SVG doesn't contain `rankdir=LR` (or better: assert the DOT passed to `dot` was rewritten). Simplest: unit-test the replacement logic directly.\n\n## Verification\n```\ncargo test -p fabro-workflows -- graph\ncargo clippy --workspace -- -D warnings\nfabro graph some-workflow.fabro --direction tb -o out.svg  # manual smoke test\n```\n",
+  "start_time": "2026-03-16T01:15:22.570741Z",
+  "node_count": 13,
+  "edge_count": 16,
+  "run_branch": "fabro/run/01KKT3CAH2A81T3MC2SYFVX3TQ",
+  "base_sha": "edcbee5f5e247c877a2b78c784a9140b2d31448c",
+  "base_branch": "main",
+  "workflow_slug": "implement",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro"
+}
