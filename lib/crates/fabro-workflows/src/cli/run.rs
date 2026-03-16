@@ -7,6 +7,7 @@ use std::time::Instant;
 use anyhow::{bail, Context};
 use chrono::{Local, Utc};
 use fabro_agent::{DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox};
+use fabro_util::shell::shell_quote;
 use fabro_util::terminal::Styles;
 use tracing::debug;
 
@@ -311,6 +312,84 @@ struct CostAccumulator {
     total_reasoning_tokens: i64,
     total_cost: f64,
     has_pricing: bool,
+}
+
+/// Constructs a fallback git clone command when the target directory is not empty.
+/// Converts `git clone <url> .` to `git init && git remote add origin <url> && git fetch origin && git checkout [branch]`
+/// Returns None if the command doesn't match a git clone pattern that can be handled.
+fn construct_git_clone_fallback(cmd: &str) -> Option<String> {
+    // Try to extract git clone parameters from the command
+    // Pattern: git clone [options] <url> [<directory>] [&& other commands]
+    
+    // Split by && to handle compound commands
+    let parts: Vec<&str> = cmd.split("&&").collect();
+    let clone_part = parts.first()?.trim();
+    
+    if !clone_part.starts_with("git clone") {
+        return None;
+    }
+    
+    // Simple regex-like parsing for: git clone [options] <url> [<path>] [&& ...]
+    let tokens: Vec<&str> = clone_part.split_whitespace().collect();
+    if tokens.len() < 3 {
+        return None;
+    }
+    
+    // Find the URL and destination (skip 'git clone' and any leading options)
+    let mut url_idx = 2;
+    let mut url = None;
+    let mut dest = ".";
+    
+    // Skip options (starting with -)
+    while url_idx < tokens.len() && tokens[url_idx].starts_with('-') {
+        // Skip option and its value if it takes one
+        url_idx += 1;
+        if url_idx < tokens.len() && tokens[url_idx - 1].contains('=') == false {
+            // Options like --branch take a value
+            if matches!(tokens.get(url_idx - 1), Some(&opt) if opt.ends_with("branch")) {
+                url_idx += 1;
+            }
+        }
+    }
+    
+    // Next token should be the URL
+    if url_idx < tokens.len() {
+        url = Some(tokens[url_idx]);
+        url_idx += 1;
+    }
+    
+    // Next token might be destination path
+    if url_idx < tokens.len() && !tokens[url_idx].contains("://") {
+        dest = tokens[url_idx];
+    }
+    
+    let url = url?;
+    
+    // Only apply fallback if cloning into current directory
+    if dest != "." {
+        return None;
+    }
+    
+    // Construct fallback command: git init && git remote add origin <url> && git fetch origin
+    // The original command's remaining parts (like git checkout) will handle branch/commit selection
+    let mut fallback_cmd = format!(
+        "git init && git remote add origin {} && git fetch origin",
+        quote_shell_arg(url),
+    );
+    
+    // Append any remaining commands from the original compound command
+    if parts.len() > 1 {
+        let remaining = parts[1..].join("&&");
+        fallback_cmd.push_str(" && ");
+        fallback_cmd.push_str(remaining.trim());
+    }
+    
+    Some(fallback_cmd)
+}
+
+/// Helper function to properly quote shell arguments
+fn quote_shell_arg(s: &str) -> String {
+    shell_quote(s).unwrap_or_else(|_| format!("'{}'", s))
 }
 
 /// Execute a full workflow run.
@@ -1040,10 +1119,28 @@ pub async fn run_command(
                 index,
             });
             let cmd_start = Instant::now();
-            let result = sandbox
+            let mut result = sandbox
                 .exec_command(cmd, 300_000, None, None, None)
                 .await
                 .map_err(|e| anyhow::anyhow!("Setup command failed: {e}"))?;
+            
+            // If command failed with git clone "directory not empty" error, retry with fallback
+            if result.exit_code != 0 
+                && (result.stderr.contains("not an empty directory") 
+                    || result.stderr.contains("already exists and is not an empty"))
+                && cmd.contains("git clone")
+            {
+                // Try to extract the repository URL and branch from the command
+                // Pattern: git clone <url> <path> or just git clone <url>
+                if let Some(retry_cmd) = construct_git_clone_fallback(cmd) {
+                    tracing::info!(original = cmd, fallback = &retry_cmd, "Retrying git clone with fallback");
+                    result = sandbox
+                        .exec_command(&retry_cmd, 300_000, None, None, None)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("Setup command failed: {e}"))?;
+                }
+            }
+            
             let cmd_duration = crate::millis_u64(cmd_start.elapsed());
             if result.exit_code != 0 {
                 emitter.emit(&crate::event::WorkflowRunEvent::SetupFailed {
@@ -3149,5 +3246,46 @@ mod tests {
             &fields[2], "event",
             "third field must be event, got: {fields:?}"
         );
+    }
+
+    #[test]
+    fn git_clone_fallback_simple_django() {
+        let cmd = "git clone https://github.com/django/django.git .";
+        let result = construct_git_clone_fallback(cmd);
+        assert!(result.is_some());
+        let fallback = result.unwrap();
+        assert!(fallback.contains("git init"));
+        assert!(fallback.contains("git remote add origin"));
+        assert!(fallback.contains("git fetch origin"));
+        assert!(!fallback.contains("git clone"));
+    }
+
+    #[test]
+    fn git_clone_fallback_with_compound_commands() {
+        let cmd = "git clone https://github.com/django/django.git . && git checkout 466920f && python -m pip install -e .";
+        let result = construct_git_clone_fallback(cmd);
+        assert!(result.is_some());
+        let fallback = result.unwrap();
+        assert!(fallback.contains("git init"));
+        assert!(fallback.contains("git remote add origin"));
+        assert!(fallback.contains("git fetch origin"));
+        assert!(fallback.contains("git checkout 466920f"));
+        assert!(fallback.contains("python -m pip install -e ."));
+    }
+
+    #[test]
+    fn git_clone_fallback_not_current_dir() {
+        let cmd = "git clone https://github.com/django/django.git /tmp/django";
+        let result = construct_git_clone_fallback(cmd);
+        // Should not apply fallback since not cloning to current directory
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn git_clone_fallback_not_git_clone() {
+        let cmd = "git init && git remote add origin https://github.com/django/django.git";
+        let result = construct_git_clone_fallback(cmd);
+        // Should not apply fallback since it's not a git clone command
+        assert!(result.is_none());
     }
 }
