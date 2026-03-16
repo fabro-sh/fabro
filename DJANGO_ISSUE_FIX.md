@@ -53,3 +53,51 @@ To verify the fix works:
 
 - Regression introduced in: `c8720e7696ca41f3262d5369365cc1bd72a216ca`
 - Issue reproduced at: `8d010f39869f107820421631111417298d1c5bb9`
+
+## Detailed Implementation
+
+The fix should be implemented in `django/utils/autoreload.py` in the file watching logic:
+
+### Original Code Problem
+
+```python
+def iter_modules_and_files(modules, include_packages=False):
+    """Iterate over all modules and yield their filenames."""
+    for module in modules:
+        spec = getattr(module, "__spec__", None)
+        if spec is None:
+            continue  # <- __main__ is skipped here!
+        # ... rest of code
+```
+
+### Fixed Code
+
+```python
+def iter_modules_and_files(modules, include_packages=False):
+    """Iterate over all modules and yield their filenames."""
+    for module in modules:
+        # Special case for __main__ which has __spec__ = None
+        if module.__name__ == '__main__':
+            if hasattr(module, '__file__') and module.__file__:
+                yield module.__file__
+            continue
+        
+        spec = getattr(module, "__spec__", None)
+        if spec is None:
+            continue
+        # ... rest of existing code
+```
+
+## Alternative Approaches Considered
+
+1. **Modify Python's `__main__` module**: Not feasible - this is standard Python behavior
+2. **Track all modules including None specs**: Could cause performance issues and watch unnecessary files
+3. **Special case __main__ in autoreloader**: ✓ Best approach - minimal, targeted fix
+
+## Impact Analysis
+
+- **Files modified**: 1 file (`django/utils/autoreload.py`)
+- **Lines changed**: ~5-10 lines
+- **Backwards compatible**: Yes
+- **Performance impact**: Negligible (only one additional module check)
+- **Risk**: Very low (special case handling only)
