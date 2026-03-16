@@ -803,20 +803,12 @@ pub async fn run_command(
 
     // Register SandboxInitialized listener (must happen before emitter is wrapped in Arc)
     {
-        let sandbox_provider_name = match sandbox_provider {
-            SandboxProvider::Local => "local",
-            SandboxProvider::Docker => "docker",
-            SandboxProvider::Daytona => "daytona",
-            #[cfg(feature = "exedev")]
-            SandboxProvider::Exe => "exe",
-            SandboxProvider::Ssh => "ssh",
-        };
         let run_dir_for_listener = run_dir.clone();
         let progress_for_listener = Arc::clone(&progress_ui);
         let cwd_for_listener = cwd.to_string_lossy().to_string();
         let ssh_data_host = ssh_config.as_ref().map(|c| c.destination.clone());
         let deferred_sb = Arc::clone(&deferred_sandbox);
-        let provider_name = sandbox_provider_name.to_string();
+        let provider = sandbox_provider; // Copy — captured by move closure
         emitter.on_event(move |event| {
             if let crate::event::WorkflowRunEvent::SandboxInitialized { working_directory } = event
             {
@@ -835,21 +827,22 @@ pub async fn run_command(
                     }
                 });
 
+                let is_docker = provider == SandboxProvider::Docker;
                 let record = crate::sandbox_record::SandboxRecord {
-                    provider: provider_name.clone(),
+                    provider: provider.to_string(),
                     working_directory: working_directory.clone(),
                     identifier: sandbox_info_opt,
-                    host_working_directory: if provider_name == "docker" {
+                    host_working_directory: if is_docker {
                         Some(cwd_for_listener.clone())
                     } else {
                         None
                     },
-                    container_mount_point: if provider_name == "docker" {
+                    container_mount_point: if is_docker {
                         Some(working_directory.clone())
                     } else {
                         None
                     },
-                    data_host: if provider_name == "ssh" {
+                    data_host: if provider == SandboxProvider::Ssh {
                         ssh_data_host.clone()
                     } else {
                         None

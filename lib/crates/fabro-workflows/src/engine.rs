@@ -5671,24 +5671,12 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn run_with_lifecycle_fires_sandbox_initialized_event() {
-        let dir = tempfile::tempdir().unwrap();
-        let g = simple_graph();
-
-        let events = Arc::new(std::sync::Mutex::new(Vec::<WorkflowRunEvent>::new()));
-        let events_clone = events.clone();
-        let mut emitter = EventEmitter::new();
-        emitter.on_event(move |event| {
-            events_clone.lock().unwrap().push(event.clone());
-        });
-
-        let engine = WorkflowRunEngine::new(make_registry(), Arc::new(emitter), local_env());
-        let config = RunConfig {
-            run_dir: dir.path().to_path_buf(),
+    fn test_run_config(run_dir: &std::path::Path, run_id: &str) -> RunConfig {
+        RunConfig {
+            run_dir: run_dir.to_path_buf(),
             cancel_token: None,
             dry_run: false,
-            run_id: "lifecycle-test".into(),
+            run_id: run_id.into(),
             git_checkpoint_enabled: false,
             host_repo_path: None,
             base_sha: None,
@@ -5703,14 +5691,37 @@ mod tests {
             pull_request_draft: false,
             asset_globs: Vec::new(),
             workflow_slug: None,
-        };
-        let lifecycle = LifecycleConfig {
-            setup_commands: Vec::new(),
+        }
+    }
+
+    fn test_lifecycle(setup_commands: Vec<String>) -> LifecycleConfig {
+        LifecycleConfig {
+            setup_commands,
             setup_command_timeout_ms: 300_000,
             devcontainer_phases: Vec::new(),
-        };
+        }
+    }
+
+    #[tokio::test]
+    async fn run_with_lifecycle_fires_sandbox_initialized_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = simple_graph();
+
+        let events = Arc::new(std::sync::Mutex::new(Vec::<WorkflowRunEvent>::new()));
+        let events_clone = events.clone();
+        let mut emitter = EventEmitter::new();
+        emitter.on_event(move |event| {
+            events_clone.lock().unwrap().push(event.clone());
+        });
+
+        let engine = WorkflowRunEngine::new(make_registry(), Arc::new(emitter), local_env());
         let (outcome, _) = engine
-            .run_with_lifecycle(&g, config, lifecycle, None)
+            .run_with_lifecycle(
+                &g,
+                test_run_config(dir.path(), "lifecycle-test"),
+                test_lifecycle(Vec::new()),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -5739,33 +5750,13 @@ mod tests {
         });
 
         let engine = WorkflowRunEngine::new(make_registry(), Arc::new(emitter), local_env());
-        let config = RunConfig {
-            run_dir: dir.path().to_path_buf(),
-            cancel_token: None,
-            dry_run: false,
-            run_id: "setup-test".into(),
-            git_checkpoint_enabled: false,
-            host_repo_path: None,
-            base_sha: None,
-            run_branch: None,
-            meta_branch: None,
-            labels: HashMap::new(),
-            checkpoint_exclude_globs: Vec::new(),
-            github_app: None,
-            git_author: crate::git::GitAuthor::default(),
-            base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            asset_globs: Vec::new(),
-            workflow_slug: None,
-        };
-        let lifecycle = LifecycleConfig {
-            setup_commands: vec!["echo hello".to_string()],
-            setup_command_timeout_ms: 300_000,
-            devcontainer_phases: Vec::new(),
-        };
         let (outcome, _) = engine
-            .run_with_lifecycle(&g, config, lifecycle, None)
+            .run_with_lifecycle(
+                &g,
+                test_run_config(dir.path(), "setup-test"),
+                test_lifecycle(vec!["echo hello".to_string()]),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -5788,32 +5779,14 @@ mod tests {
 
         let engine =
             WorkflowRunEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
-        let config = RunConfig {
-            run_dir: dir.path().to_path_buf(),
-            cancel_token: None,
-            dry_run: false,
-            run_id: "setup-fail-test".into(),
-            git_checkpoint_enabled: false,
-            host_repo_path: None,
-            base_sha: None,
-            run_branch: None,
-            meta_branch: None,
-            labels: HashMap::new(),
-            checkpoint_exclude_globs: Vec::new(),
-            github_app: None,
-            git_author: crate::git::GitAuthor::default(),
-            base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            asset_globs: Vec::new(),
-            workflow_slug: None,
-        };
-        let lifecycle = LifecycleConfig {
-            setup_commands: vec!["exit 1".to_string()],
-            setup_command_timeout_ms: 300_000,
-            devcontainer_phases: Vec::new(),
-        };
-        let result = engine.run_with_lifecycle(&g, config, lifecycle, None).await;
+        let result = engine
+            .run_with_lifecycle(
+                &g,
+                test_run_config(dir.path(), "setup-fail-test"),
+                test_lifecycle(vec!["exit 1".to_string()]),
+                None,
+            )
+            .await;
         assert!(result.is_err());
         let err = result.err().unwrap().to_string();
         assert!(
@@ -5852,33 +5825,13 @@ mod tests {
         });
 
         let engine = WorkflowRunEngine::new(make_registry(), Arc::new(emitter), local_env());
-        let config = RunConfig {
-            run_dir: dir.path().to_path_buf(),
-            cancel_token: None,
-            dry_run: false,
-            run_id: "order-test".into(),
-            git_checkpoint_enabled: false,
-            host_repo_path: None,
-            base_sha: None,
-            run_branch: None,
-            meta_branch: None,
-            labels: HashMap::new(),
-            checkpoint_exclude_globs: Vec::new(),
-            github_app: None,
-            git_author: crate::git::GitAuthor::default(),
-            base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            asset_globs: Vec::new(),
-            workflow_slug: None,
-        };
-        let lifecycle = LifecycleConfig {
-            setup_commands: vec!["echo ok".to_string()],
-            setup_command_timeout_ms: 300_000,
-            devcontainer_phases: Vec::new(),
-        };
         engine
-            .run_with_lifecycle(&g, config, lifecycle, None)
+            .run_with_lifecycle(
+                &g,
+                test_run_config(dir.path(), "order-test"),
+                test_lifecycle(vec!["echo ok".to_string()]),
+                None,
+            )
             .await
             .unwrap();
 
