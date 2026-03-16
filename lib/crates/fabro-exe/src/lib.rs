@@ -274,7 +274,7 @@ impl ExeSandbox {
 
             // Fall back to init + fetch + checkout if directory is not empty
             if stderr.contains("not an empty directory")
-                || stderr.contains("already exists and is not an empty")
+                || stderr.contains("already exists and is not an empty directory")
             {
                 let branch = params.branch.as_deref().unwrap_or("main");
                 let fallback_script = format!(
