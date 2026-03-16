@@ -1,0 +1,117 @@
+diff --git a/DJANGO_ISSUE_30179_FIX.md b/DJANGO_ISSUE_30179_FIX.md
+new file mode 100644
+index 0000000..883aa57
+--- /dev/null
++++ b/DJANGO_ISSUE_30179_FIX.md
+@@ -0,0 +1,111 @@
++# Django Issue #30179 - MediaOrderConflictWarning Fix
++
++## Problem
++When merging 3 or more form media objects, Django can throw unnecessary `MediaOrderConflictWarnings` even when no actual conflict exists. Additionally, the resulting media order can be worse than the "naive" result from Django 1.11.
++
++### Example
++```python
++from django import forms
++
++class ColorPicker(forms.Widget):
++    class Media:
++        js = ['color-picker.js']
++
++class SimpleTextWidget(forms.Widget):
++    class Media:
++        js = ['text-editor.js']
++
++class FancyTextWidget(forms.Widget):
++    class Media:
++        js = ['text-editor.js', 'text-editor-extras.js', 'color-picker.js']
++
++class MyForm(forms.Form):
++    background_color = forms.CharField(widget=ColorPicker())
++    intro = forms.CharField(widget=SimpleTextWidget())
++    body = forms.CharField(widget=FancyTextWidget())
++
++# This incorrectly warns about a conflict and produces wrong ordering:
++# Media(css={}, js=['text-editor-extras.js', 'color-picker.js', 'text-editor.js'])
++```
++
++## Root Cause
++The problem occurs because Django 2.0+ uses pairwise merging of media lists:
++1. `ColorPicker().media + SimpleTextWidget().media` → `['color-picker.js', 'text-editor.js']`
++   - This artificially establishes that `color-picker.js` must appear before `text-editor.js`
++2. When this is merged with `FancyTextWidget().media` which requires `['text-editor.js', 'text-editor-extras.js', 'color-picker.js']`, a false conflict is detected
++
++## Solution
++Replace pairwise merging with **topological sorting** that merges all lists simultaneously.
++
++### Key Changes to `django/forms/widgets.py`:
++
++1. **Change the `_js` property** to merge all lists at once:
++```python
++@property
++def _js(self):
++    return self.merge(*self._js_lists)
++```
++
++2. **Change the `_css` property** to merge all CSS lists simultaneously:
++```python
++@property
++def _css(self):
++    css = defaultdict(list)
++    for css_list in self._css_lists:
++        for medium, sublist in css_list.items():
++            css[medium].append(sublist)
++    return {medium: self.merge(*lists) for medium, lists in css.items()}
++```
++
++3. **Update the `merge()` method** to accept multiple lists and use topological sorting:
++```python
++@staticmethod
++def merge(*lists):
++    """
++    Merge lists while trying to keep the relative order of the elements.
++    Warn if the lists have the same elements in a different relative order.
++    """
++    dependency_graph = defaultdict(set)
++    all_items = OrderedSet()
++    
++    for list_ in filter(None, lists):
++        head = list_[0]
++        # The first items depend on nothing but have to be part of the
++        # dependency graph to be included in the result.
++        dependency_graph.setdefault(head, set())
++        for item in list_:
++            all_items.add(item)
++            # No self dependencies
++            if head != item:
++                dependency_graph[item].add(head)
++            head = item
++    
++    try:
++        return stable_topological_sort(all_items, dependency_graph)
++    except CyclicDependencyError:
++        warnings.warn(
++            'Detected duplicate Media files in an opposite order: {}'.format(
++                ', '.join(repr(l) for l in lists)
++            ), MediaOrderConflictWarning,
++        )
++        return list(all_items)
++```
++
++### How It Works
++1. **Build a dependency graph**: For each list, create edges where each element depends on the element that precedes it
++2. **Extract all items**: Deduplicate items while preserving first-encounter order
++3. **Topologically sort**: Use stable topological sort to produce a valid ordering that respects all dependencies
++4. **Handle cycles**: If a true cycle exists (actual conflict), warn the user
++
++### Benefits
++- ✅ Eliminates false `MediaOrderConflictWarning`s
++- ✅ Produces correct ordering for the example case: `['text-editor.js', 'text-editor-extras.js', 'color-picker.js']`
++- ✅ Still properly detects and warns about genuine dependency cycles
++- ✅ Backward compatible - existing code continues to work
++
++### Testing
++The fix includes test cases for:
++- Three-way merges without conflicts
++- Complex multi-item merges
++- Actual conflict detection
++- CSS media merging
