@@ -866,10 +866,10 @@ pub async fn run_command(
                         let sb = Arc::clone(sb);
                         rt.spawn(async move {
                             match sb.ssh_access_command().await {
-                                Ok(Some(_ssh_command)) => {
+                                Ok(Some(ssh_command)) => {
                                     // Note: we can't emit from here since emitter is shared;
                                     // SSH access info is logged via tracing.
-                                    tracing::info!(ssh_command = _ssh_command, "SSH access ready");
+                                    tracing::info!(ssh_command, "SSH access ready");
                                 }
                                 Ok(None) => {}
                                 Err(e) => {
@@ -1128,7 +1128,7 @@ pub async fn run_command(
         .map(|c| c.checkpoint.exclude_globs.clone())
         .unwrap_or_default();
     let pr_cfg = run_cfg.as_ref().and_then(|c| c.pull_request.as_ref());
-    let config = RunConfig {
+    let mut config = RunConfig {
         run_dir: run_dir.clone(),
         cancel_token: None,
         dry_run: dry_run_mode,
@@ -1194,11 +1194,11 @@ pub async fn run_command(
     let engine_result = if let Some(ref checkpoint_path) = args.resume {
         let checkpoint = Checkpoint::load(checkpoint_path)?;
         engine
-            .run_with_lifecycle(&graph, config, lifecycle, Some(&checkpoint))
+            .run_with_lifecycle(&graph, &mut config, lifecycle, Some(&checkpoint))
             .await
     } else {
         engine
-            .run_with_lifecycle(&graph, config, lifecycle, None)
+            .run_with_lifecycle(&graph, &mut config, lifecycle, None)
             .await
     };
     let run_duration_ms = run_start.elapsed().as_millis() as u64;
@@ -1206,24 +1206,15 @@ pub async fn run_command(
     // Restore cwd (worktree is kept for `fabro cp` access; pruned separately)
     let _ = std::env::set_current_dir(&original_cwd);
 
-    // Build FinalizeConfig from the (potentially mutated) config returned by the engine.
-    // For remote sandboxes, run_with_lifecycle fills run_branch, base_sha, base_branch, etc.
-    let finalize_config = match &engine_result {
-        Ok((_, ref config)) => FinalizeConfig::from_run_config(config),
-        Err(_) => {
-            FinalizeConfig::from_run_config_owned(run_id.clone(), None, Some(original_cwd.clone()))
-        }
-    };
-
     {
         let (status, failure_reason) = match &engine_result {
-            Ok((ref o, _)) => (o.status.clone(), o.failure_reason().map(String::from)),
+            Ok(ref o) => (o.status.clone(), o.failure_reason().map(String::from)),
             Err(e) => (crate::outcome::StageStatus::Fail, Some(e.to_string())),
         };
 
         // Map engine result to RunStatus + StatusReason
         let (run_status, status_reason) = match &engine_result {
-            Ok((ref o, _)) => match o.status {
+            Ok(ref o) => match o.status {
                 StageStatus::Success | StageStatus::Skipped => (
                     crate::run_status::RunStatus::Succeeded,
                     Some(crate::run_status::StatusReason::Completed),
@@ -1301,14 +1292,14 @@ pub async fn run_command(
     // Auto-derive retro (always, cheap) and optionally run retro agent
     if !args.no_retro && super::project_config::is_retro_enabled() {
         let (failed, failure_reason) = match &engine_result {
-            Ok((ref o, _)) => (
+            Ok(ref o) => (
                 o.status == StageStatus::Fail,
                 o.failure_reason().map(String::from),
             ),
             Err(e) => (true, Some(e.to_string())),
         };
         generate_retro(
-            &finalize_config.run_id,
+            &config.run_id,
             &graph.name,
             graph.goal(),
             &run_dir,
@@ -1330,18 +1321,18 @@ pub async fn run_command(
     progress_ui.lock().expect("progress lock poisoned").finish();
 
     // Write finalize commit with retro.json + final node files (captures last diff.patch)
-    write_finalize_commit_from(&finalize_config, &run_dir).await;
+    write_finalize_commit(&config, &run_dir).await;
 
     // Auto-create PR on successful completion (skip in dry-run mode)
     let mut pushed_branch: Option<String> = None;
     let mut pr_url: Option<String> = None;
-    if !finalize_config.pull_request_enabled {
+    if !config.pull_request_enabled {
         debug!("Skipping PR creation: pull_request not enabled in config");
     } else if dry_run_mode {
         debug!("Skipping PR creation: dry-run mode");
     } else if let Err(ref e) = engine_result {
         debug!(error = %e, "Skipping PR creation: engine returned an error");
-    } else if let Ok((ref outcome, _)) = engine_result {
+    } else if let Ok(ref outcome) = engine_result {
         if !matches!(
             outcome.status,
             StageStatus::Success | StageStatus::PartialSuccess
@@ -1357,14 +1348,14 @@ pub async fn run_command(
                 Some(ref creds),
                 Some(ref origin),
             ) = (
-                &finalize_config.base_branch,
-                &finalize_config.run_branch,
+                &config.base_branch,
+                &config.run_branch,
                 &github_app,
                 &origin_url,
             ) {
                 // Run branch was pushed during checkpoint commits;
                 // just record it for the PR creation.
-                if finalize_config.git_checkpoint_enabled {
+                if config.git_checkpoint_enabled {
                     pushed_branch = Some(run_branch.clone());
                 }
 
@@ -1376,7 +1367,7 @@ pub async fn run_command(
                     graph.goal(),
                     &diff,
                     &model,
-                    finalize_config.pull_request_draft,
+                    config.pull_request_draft,
                     &run_dir,
                 )
                 .await
@@ -1385,7 +1376,7 @@ pub async fn run_command(
                         emitter.emit(&crate::event::WorkflowRunEvent::PullRequestCreated {
                             pr_url: record.html_url.clone(),
                             pr_number: record.number,
-                            draft: finalize_config.pull_request_draft,
+                            draft: config.pull_request_draft,
                         });
                         pr_url = Some(record.html_url.clone());
                         if let Err(e) = record.save(&run_dir.join("pull_request.json")) {
@@ -1407,7 +1398,7 @@ pub async fn run_command(
         }
     }
 
-    let (outcome, _) = engine_result?;
+    let outcome = engine_result?;
 
     // 8. Print result
     eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="),);
@@ -1759,7 +1750,7 @@ async fn run_from_branch(
     }
 
     let meta_branch = Some(crate::git::MetadataStore::branch_name(&run_id));
-    let config = RunConfig {
+    let mut config = RunConfig {
         run_dir: run_dir.clone(),
         cancel_token: None,
         dry_run: dry_run_mode,
@@ -1792,25 +1783,17 @@ async fn run_from_branch(
 
     let run_start = Instant::now();
     let engine_result = engine
-        .run_with_lifecycle(&graph, config, lifecycle, Some(&checkpoint))
+        .run_with_lifecycle(&graph, &mut config, lifecycle, Some(&checkpoint))
         .await;
     let run_duration_ms = run_start.elapsed().as_millis() as u64;
 
     // Restore cwd (worktree is kept for `fabro cp` access; pruned separately)
     let _ = std::env::set_current_dir(&original_cwd);
 
-    // Build FinalizeConfig from the (potentially mutated) config returned by the engine.
-    let finalize_config = match &engine_result {
-        Ok((_, ref config)) => FinalizeConfig::from_run_config(config),
-        Err(_) => {
-            FinalizeConfig::from_run_config_owned(run_id.clone(), None, Some(original_cwd.clone()))
-        }
-    };
-
     // Auto-derive retro
     if !args.no_retro && super::project_config::is_retro_enabled() {
         let (failed, failure_reason) = match &engine_result {
-            Ok((ref o, _)) => (
+            Ok(ref o) => (
                 o.status == StageStatus::Fail,
                 o.failure_reason().map(String::from),
             ),
@@ -1824,7 +1807,7 @@ async fn run_from_branch(
         };
 
         generate_retro(
-            &finalize_config.run_id,
+            &config.run_id,
             &graph.name,
             graph.goal(),
             &run_dir,
@@ -1843,14 +1826,14 @@ async fn run_from_branch(
     }
 
     // Write finalize commit with retro.json + final node files (captures last diff.patch)
-    write_finalize_commit_from(&finalize_config, &run_dir).await;
+    write_finalize_commit(&config, &run_dir).await;
 
     // Cleanup sandbox via engine (fires SandboxCleanup hook)
     let _ = engine
-        .cleanup_sandbox(&finalize_config.run_id, &graph.name, false)
+        .cleanup_sandbox(&config.run_id, &graph.name, false)
         .await;
 
-    let (outcome, _) = engine_result?;
+    let outcome = engine_result?;
 
     eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="),);
     eprintln!("{}", styles.dim.apply_to(format!("Run:       {run_id}")));
@@ -2271,63 +2254,11 @@ async fn run_preflight(
     }
 }
 
-/// Subset of `RunConfig` fields needed after `run_with_lifecycle` consumes the config.
-struct FinalizeConfig {
-    run_id: String,
-    meta_branch: Option<String>,
-    host_repo_path: Option<PathBuf>,
-    git_author: crate::git::GitAuthor,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
-    base_branch: Option<String>,
-    run_branch: Option<String>,
-    git_checkpoint_enabled: bool,
-    pull_request_enabled: bool,
-    pull_request_draft: bool,
-}
-
-impl FinalizeConfig {
-    /// Build from the (potentially mutated) `RunConfig` returned by the engine.
-    fn from_run_config(config: &RunConfig) -> Self {
-        Self {
-            run_id: config.run_id.clone(),
-            meta_branch: config.meta_branch.clone(),
-            host_repo_path: config.host_repo_path.clone(),
-            git_author: config.git_author.clone(),
-            github_app: config.github_app.clone(),
-            base_branch: config.base_branch.clone(),
-            run_branch: config.run_branch.clone(),
-            git_checkpoint_enabled: config.git_checkpoint_enabled,
-            pull_request_enabled: config.pull_request_enabled,
-            pull_request_draft: config.pull_request_draft,
-        }
-    }
-
-    /// Minimal fallback for error paths where the engine didn't return a config.
-    fn from_run_config_owned(
-        run_id: String,
-        meta_branch: Option<String>,
-        host_repo_path: Option<PathBuf>,
-    ) -> Self {
-        Self {
-            run_id,
-            meta_branch,
-            host_repo_path,
-            git_author: crate::git::GitAuthor::default(),
-            github_app: None,
-            base_branch: None,
-            run_branch: None,
-            git_checkpoint_enabled: false,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-        }
-    }
-}
-
 /// Write a finalize commit to the shadow branch with retro.json and final node files.
 ///
 /// This captures the last diff.patch (written after the final checkpoint) and retro.json.
 /// Best-effort: errors are logged as warnings.
-async fn write_finalize_commit_from(config: &FinalizeConfig, run_dir: &std::path::Path) {
+async fn write_finalize_commit(config: &RunConfig, run_dir: &std::path::Path) {
     let (Some(ref meta_branch), Some(ref repo_path)) =
         (&config.meta_branch, &config.host_repo_path)
     else {

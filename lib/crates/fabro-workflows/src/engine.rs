@@ -1266,16 +1266,15 @@ impl WorkflowRunEngine {
     /// The sandbox is left alive after return so the caller can run retro, PR creation, etc.
     /// Call `cleanup_sandbox()` when done.
     ///
-    /// Returns both the outcome and the (potentially mutated) config — remote git setup
-    /// fills `run_branch`, `base_sha`, `base_branch`, `meta_branch`, and
-    /// `git_checkpoint_enabled`, which callers need for PR creation and finalize commits.
+    /// The config is taken by mutable reference so the caller retains ownership
+    /// and can read any fields mutated by remote git setup after the call.
     pub async fn run_with_lifecycle(
         &self,
         graph: &Graph,
-        mut config: RunConfig,
+        config: &mut RunConfig,
         lifecycle: LifecycleConfig,
         checkpoint: Option<&Checkpoint>,
-    ) -> Result<(Outcome, RunConfig)> {
+    ) -> Result<Outcome> {
         // 1. Initialize sandbox
         self.services
             .sandbox
@@ -1389,23 +1388,11 @@ impl WorkflowRunEngine {
         }
 
         // 7. Execute the workflow graph
-        let outcome = if let Some(cp) = checkpoint {
-            let loop_state = LoopState {
-                node_visits: HashMap::new(),
-                loop_failure_signatures: cp.loop_failure_signatures.clone(),
-                restart_failure_signatures: cp.restart_failure_signatures.clone(),
-            };
-            let (outcome, _context) = self
-                .run_internal(graph, &config, Some(cp), None, None, loop_state)
-                .await?;
-            outcome
+        if let Some(cp) = checkpoint {
+            self.run_from_checkpoint(graph, config, cp).await
         } else {
-            let (outcome, _context) = self
-                .run_internal(graph, &config, None, None, None, LoopState::default())
-                .await?;
-            outcome
-        };
-        Ok((outcome, config))
+            self.run(graph, config).await
+        }
     }
 
     /// Fire the `SandboxCleanup` hook and optionally clean up the sandbox.
@@ -5715,13 +5702,9 @@ mod tests {
         });
 
         let engine = WorkflowRunEngine::new(make_registry(), Arc::new(emitter), local_env());
-        let (outcome, _) = engine
-            .run_with_lifecycle(
-                &g,
-                test_run_config(dir.path(), "lifecycle-test"),
-                test_lifecycle(Vec::new()),
-                None,
-            )
+        let mut config = test_run_config(dir.path(), "lifecycle-test");
+        let outcome = engine
+            .run_with_lifecycle(&g, &mut config, test_lifecycle(Vec::new()), None)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -5750,10 +5733,11 @@ mod tests {
         });
 
         let engine = WorkflowRunEngine::new(make_registry(), Arc::new(emitter), local_env());
-        let (outcome, _) = engine
+        let mut config = test_run_config(dir.path(), "setup-test");
+        let outcome = engine
             .run_with_lifecycle(
                 &g,
-                test_run_config(dir.path(), "setup-test"),
+                &mut config,
                 test_lifecycle(vec!["echo hello".to_string()]),
                 None,
             )
@@ -5779,10 +5763,11 @@ mod tests {
 
         let engine =
             WorkflowRunEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let mut config = test_run_config(dir.path(), "setup-fail-test");
         let result = engine
             .run_with_lifecycle(
                 &g,
-                test_run_config(dir.path(), "setup-fail-test"),
+                &mut config,
                 test_lifecycle(vec!["exit 1".to_string()]),
                 None,
             )
@@ -5825,10 +5810,11 @@ mod tests {
         });
 
         let engine = WorkflowRunEngine::new(make_registry(), Arc::new(emitter), local_env());
+        let mut config = test_run_config(dir.path(), "order-test");
         engine
             .run_with_lifecycle(
                 &g,
-                test_run_config(dir.path(), "order-test"),
+                &mut config,
                 test_lifecycle(vec!["echo ok".to_string()]),
                 None,
             )
