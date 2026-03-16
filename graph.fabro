@@ -1,0 +1,75 @@
+digraph SWEBench {
+    graph [goal="Add support for SCRIPT_NAME in STATIC_URL and MEDIA_URL
+Description
+	 
+		(last modified by Rostyslav Bryzgunov)
+	 
+By default, {% static '...' %} tag just appends STATIC_URL in the path. When running on sub-path, using SCRIPT_NAME WSGI param, it results in incorrect static URL - it doesn't prepend SCRIPT_NAME prefix.
+This problem can be solved with prepending SCRIPT_NAME to STATIC_URL in settings.py but that doesn't work when SCRIPT_NAME is a dynamic value.
+This can be easily added into default Django static tag and django.contrib.staticfiles tag as following:
+def render(self, context):
+	url = self.url(context)
+	# Updating url here with request.META['SCRIPT_NAME'] 
+	if self.varname is None:
+		return url
+	context[self.varname] = url
+		return ''
+On more research I found that FileSystemStorage and StaticFilesStorage ignores SCRIPT_NAME as well. 
+We might have to do a lot of changes but I think it's worth the efforts.
+
+
+
+## Additional Context
+
+This change doesn't seem correct to me (for one, it seems like it could break existing sites). Why not include the appropriate prefix in your STATIC_URL and MEDIA_URL settings?
+This is not a patch. This is just an idea I got about the patch for {% static %} only. The patch will (probably) involve FileSystemStorage and StaticFileSystemStorage classes. The main idea behind this feature was that Django will auto detect script_name header and use that accordingly for creating static and media urls. This will reduce human efforts for setting up sites in future. This patch will also take time to develop so it can be added in Django2.0 timeline.
+What I meant was that I don't think Django should automatically use SCRIPT_NAME in generating those URLs. If you're running your site on a subpath, then you should set your STATIC_URL to '​http://example.com/subpath/static/' or whatever. However, you might not even be hosting static and uploaded files on the same domain as your site (in fact, for user-uploaded files, you shouldn't do that ​for security reasons) in which case SCRIPT_URL is irrelevant in constructing the static/media URLs. How would the change make it easier to setup sites?
+I think that the idea basically makes sense. Ideally, a Django instance shouldn't need to know at which subpath it is being deployed, as this can be considered as purely sysadmin stuff. It would be a good separation of concerns. For example, the Web administrator may change the WSGIScriptAlias from /foo to /bar and the application should continue working. Of course, this only applies when *_URL settings are not full URIs. In practice, it's very likely that many running instances are adapting their *_URL settings to include the base script path, hence the behavior change would be backwards incompatible. The question is whether the change is worth the incompatibility.
+I see. I guess the idea would be to use get_script_prefix() like reverse() does as I don't think we have access to request everywhere we need it. It seems like some public APIs like get_static_url() and get_media_url() would replace accessing the settings directly whenever building URLs. For backwards compatibility, possibly these functions could try to detect if the setting is already prefixed appropriately. Removing the prefix from the settings, however, means that the URLs are no longer correct when generated outside of a request/response cycle though (#16734). I'm not sure if it might create any practical problems, but we might think about addressing that issue first.
+I'm here at DjangoCon US 2016 will try to create a patch for this ticket ;) Why? But before I make the patch, here are some reasons to do it. The first reason is consistency inside Django core: {% url '...' %} template tag does respect SCRIPT_NAME but {% static '...' %} does not reverse(...) function does respect SCRIPT_NAME but static(...) does not And the second reason is that there is no way to make it work in case when SCRIPT_NAME is a dynamic value - see an example below. Of course we shouldn't modify STATIC_URL when it's an absolute URL, with domain & protocol. But if it starts with / - it's relative to our Django project and we need to add SCRIPT_NAME prefix. Real life example You have Django running via WSGI behind reverse proxy (let's call it back-end server), and another HTTP server on the front (let's call it front-end server). Front-end server URL is http://some.domain.com/sub/path/, back-end server URL is http://1.2.3.4:5678/. You want them both to work. You pass SCRIPT_NAME = '/sub/path/' from front-end server to back-end one. But when you access back-end server directly - there is no SCRIPT_NAME passed to WSGI/Django. So we cannot hard-code SCRIPT_NAME in Django settings because it's dynamic.
+Pull-request created: ​https://github.com/django/django/pull/7000
+At least documentation and additional tests look like they are required.
+Absolutely agree with your remarks, Tim. I'll add tests. Could you point to docs that need to be updated?
+I would like to take this ticket on and have a new PR for it: ​https://github.com/django/django/pull/10724"]
+    rankdir=LR
+
+    start [shape=Mdiamond]
+    exit  [shape=Msquare]
+
+    setup         [label="Setup", shape=parallelogram, script="git clone https://github.com/django/django.git . && git checkout 580e644f24f1c5ae5b94784fb73a9953a178fd26 && python -m pip install -e ."]
+    solve         [label="Solve", prompt="Fix this GitHub issue in the repository. Make the minimal code change needed.\n\nAdd support for SCRIPT_NAME in STATIC_URL and MEDIA_URL
+Description
+	 
+		(last modified by Rostyslav Bryzgunov)
+	 
+By default, {% static '...' %} tag just appends STATIC_URL in the path. When running on sub-path, using SCRIPT_NAME WSGI param, it results in incorrect static URL - it doesn't prepend SCRIPT_NAME prefix.
+This problem can be solved with prepending SCRIPT_NAME to STATIC_URL in settings.py but that doesn't work when SCRIPT_NAME is a dynamic value.
+This can be easily added into default Django static tag and django.contrib.staticfiles tag as following:
+def render(self, context):
+	url = self.url(context)
+	# Updating url here with request.META['SCRIPT_NAME'] 
+	if self.varname is None:
+		return url
+	context[self.varname] = url
+		return ''
+On more research I found that FileSystemStorage and StaticFilesStorage ignores SCRIPT_NAME as well. 
+We might have to do a lot of changes but I think it's worth the efforts.
+
+
+
+## Additional Context
+
+This change doesn't seem correct to me (for one, it seems like it could break existing sites). Why not include the appropriate prefix in your STATIC_URL and MEDIA_URL settings?
+This is not a patch. This is just an idea I got about the patch for {% static %} only. The patch will (probably) involve FileSystemStorage and StaticFileSystemStorage classes. The main idea behind this feature was that Django will auto detect script_name header and use that accordingly for creating static and media urls. This will reduce human efforts for setting up sites in future. This patch will also take time to develop so it can be added in Django2.0 timeline.
+What I meant was that I don't think Django should automatically use SCRIPT_NAME in generating those URLs. If you're running your site on a subpath, then you should set your STATIC_URL to '​http://example.com/subpath/static/' or whatever. However, you might not even be hosting static and uploaded files on the same domain as your site (in fact, for user-uploaded files, you shouldn't do that ​for security reasons) in which case SCRIPT_URL is irrelevant in constructing the static/media URLs. How would the change make it easier to setup sites?
+I think that the idea basically makes sense. Ideally, a Django instance shouldn't need to know at which subpath it is being deployed, as this can be considered as purely sysadmin stuff. It would be a good separation of concerns. For example, the Web administrator may change the WSGIScriptAlias from /foo to /bar and the application should continue working. Of course, this only applies when *_URL settings are not full URIs. In practice, it's very likely that many running instances are adapting their *_URL settings to include the base script path, hence the behavior change would be backwards incompatible. The question is whether the change is worth the incompatibility.
+I see. I guess the idea would be to use get_script_prefix() like reverse() does as I don't think we have access to request everywhere we need it. It seems like some public APIs like get_static_url() and get_media_url() would replace accessing the settings directly whenever building URLs. For backwards compatibility, possibly these functions could try to detect if the setting is already prefixed appropriately. Removing the prefix from the settings, however, means that the URLs are no longer correct when generated outside of a request/response cycle though (#16734). I'm not sure if it might create any practical problems, but we might think about addressing that issue first.
+I'm here at DjangoCon US 2016 will try to create a patch for this ticket ;) Why? But before I make the patch, here are some reasons to do it. The first reason is consistency inside Django core: {% url '...' %} template tag does respect SCRIPT_NAME but {% static '...' %} does not reverse(...) function does respect SCRIPT_NAME but static(...) does not And the second reason is that there is no way to make it work in case when SCRIPT_NAME is a dynamic value - see an example below. Of course we shouldn't modify STATIC_URL when it's an absolute URL, with domain & protocol. But if it starts with / - it's relative to our Django project and we need to add SCRIPT_NAME prefix. Real life example You have Django running via WSGI behind reverse proxy (let's call it back-end server), and another HTTP server on the front (let's call it front-end server). Front-end server URL is http://some.domain.com/sub/path/, back-end server URL is http://1.2.3.4:5678/. You want them both to work. You pass SCRIPT_NAME = '/sub/path/' from front-end server to back-end one. But when you access back-end server directly - there is no SCRIPT_NAME passed to WSGI/Django. So we cannot hard-code SCRIPT_NAME in Django settings because it's dynamic.
+Pull-request created: ​https://github.com/django/django/pull/7000
+At least documentation and additional tests look like they are required.
+Absolutely agree with your remarks, Tim. I'll add tests. Could you point to docs that need to be updated?
+I would like to take this ticket on and have a new PR for it: ​https://github.com/django/django/pull/10724"]
+    extract_patch [label="Extract Patch", shape=parallelogram, script="git diff"]
+
+    start -> setup -> solve -> extract_patch -> exit
+}
