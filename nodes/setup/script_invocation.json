@@ -1,0 +1,5 @@
+{
+  "command": "git clone https://github.com/astropy/astropy.git . && git checkout 7269fa3e33e8d02485a647da91a5a2a60a06af61 && sed -i 's/requires = \\[\"setuptools\",/requires = \\[\"setuptools==68.0.0\",/' pyproject.toml && python -m pip install -e .[test] --verbose",
+  "language": "shell",
+  "timeout_ms": null
+}
