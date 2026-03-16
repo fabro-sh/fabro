@@ -59,6 +59,9 @@ futures-util = "0.3"
 openssh = "0.11"
 daytona-sdk = { git = "https://github.com/brynary/daytona-sdk-rust", rev = "06033ca", package = "daytona-sdk" }
 daytona-api-client = { git = "https://github.com/brynary/daytona-sdk-rust", rev = "06033ca", package = "daytona-api-client" }
+sentry = { version = "0.35", default-features = false, features = ["backtrace", "contexts", "ureq", "rustls"] }
+fork = "0.2"
+exec = "0.3"
 
 [profile.release]
 lto = "thin"

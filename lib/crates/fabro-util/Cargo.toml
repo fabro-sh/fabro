@@ -27,6 +27,9 @@ anyhow.workspace = true
 mac_address.workspace = true
 md5.workspace = true
 git2.workspace = true
+sentry.workspace = true
+fork.workspace = true
+exec.workspace = true
 
 [build-dependencies]
 toml = "0.8"

@@ -154,6 +154,12 @@ enum Command {
         /// Path to the JSON event file
         path: PathBuf,
     },
+    /// Send a queued panic event to Sentry (internal)
+    #[command(name = "__send_panic", hide = true)]
+    SendPanic {
+        /// Path to the JSON event file
+        path: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -312,6 +318,8 @@ fn detach_run(args: fabro_workflows::cli::RunArgs) -> Result<()> {
 
 #[tokio::main]
 async fn main() {
+    fabro_util::telemetry::panic::install_panic_hook();
+
     let start = std::time::Instant::now();
     let raw_args: Vec<String> = std::env::args().collect();
 
@@ -449,6 +457,7 @@ async fn main_inner() -> (String, Result<()>) {
             SystemCommand::Df(_) => "system df",
         },
         Command::SendAnalytics { .. } => "__send_analytics",
+        Command::SendPanic { .. } => "__send_panic",
     };
 
     let command_name = command_name.to_string();
@@ -811,6 +820,11 @@ async fn main_inner() -> (String, Result<()>) {
                     fabro_util::telemetry::sender::send_to_segment(&track).await
                 }
                 .await;
+                let _ = std::fs::remove_file(&path);
+                result?;
+            }
+            Command::SendPanic { path } => {
+                let result = fabro_util::telemetry::panic::send_panic_to_sentry(&path).await;
                 let _ = std::fs::remove_file(&path);
                 result?;
             }

@@ -2,8 +2,10 @@ pub mod anonymous_id;
 pub mod context;
 pub mod event;
 pub mod git;
+pub mod panic;
 pub mod sanitize;
 pub mod sender;
+pub mod spawn;
 
 use anyhow::Result;
 use chrono::Utc;

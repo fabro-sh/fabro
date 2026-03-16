@@ -17,35 +17,36 @@ pub fn send(track: Track) {
         return;
     }
 
-    if let Err(err) = spawn_sender(track) {
-        tracing::debug!(%err, "telemetry: failed to spawn analytics sender");
-    }
+    spawn_sender(track);
 }
 
-fn spawn_sender(track: Track) -> std::io::Result<()> {
-    let tmp_dir = dirs::home_dir()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no home directory"))?
-        .join(".fabro")
-        .join("tmp");
+fn spawn_sender(track: Track) {
+    let json = match serde_json::to_vec(&track) {
+        Ok(j) => j,
+        Err(_) => return,
+    };
 
-    std::fs::create_dir_all(&tmp_dir)?;
+    let filename = format!("fabro-event-{}.json", track.message_id);
 
-    let path = tmp_dir.join(format!("fabro-event-{}.json", track.message_id));
-    let json = serde_json::to_vec(&track)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    std::fs::write(&path, json)?;
+    let path = match super::spawn::write_temp_json(&filename, &json) {
+        Some(p) => p,
+        None => return,
+    };
 
-    let exe = std::env::current_exe()?;
-    std::process::Command::new(exe)
-        .arg("__send_analytics")
-        .arg(&path)
-        .env("FABRO_TELEMETRY", "off")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()?;
+    let path_str = match path.to_str() {
+        Some(s) => s.to_string(),
+        None => return,
+    };
 
-    Ok(())
+    let exe = match super::spawn::current_exe_str() {
+        Some(e) => e,
+        None => return,
+    };
+
+    super::spawn::spawn_detached(
+        &[&exe, "__send_analytics", &path_str],
+        &[("FABRO_TELEMETRY", "off")],
+    );
 }
 
 /// Sends a track event to Segment. Called by the `__send_analytics` subcommand.
