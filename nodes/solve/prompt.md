@@ -1,0 +1,39 @@
+Goal: Set default FILE_UPLOAD_PERMISSION to 0o644.
+Description
+	
+Hello,
+As far as I can see, the ​File Uploads documentation page does not mention any permission issues.
+What I would like to see is a warning that in absence of explicitly configured FILE_UPLOAD_PERMISSIONS, the permissions for a file uploaded to FileSystemStorage might not be consistent depending on whether a MemoryUploadedFile or a TemporaryUploadedFile was used for temporary storage of the uploaded data (which, with the default FILE_UPLOAD_HANDLERS, in turn depends on the uploaded data size).
+The tempfile.NamedTemporaryFile + os.rename sequence causes the resulting file permissions to be 0o0600 on some systems (I experience it here on CentOS 7.4.1708 and Python 3.6.5). In all probability, the implementation of Python's built-in tempfile module explicitly sets such permissions for temporary files due to security considerations.
+I found mentions of this issue ​on GitHub, but did not manage to find any existing bug report in Django's bug tracker.
+
+
+
+## Additional Context
+
+I think you're talking about ef70af77ec53160d5ffa060c1bdf5ed93322d84f (#28540). I guess the question is whether or not that documentation should be duplicated elsewhere.
+Thank you Tim, this is precisely what I was looking for! I can only see one issue with the current docs (if you excuse me for bothering you with such minor details). ​The documentation for the FILE_UPLOAD_PERMISSIONS setting reads: If this isn’t given or is None, you’ll get operating-system dependent behavior. On most platforms, temporary files will have a mode of 0o600, and files saved from memory will be saved using the system’s standard umask. As I would understand this text, only temporary files get a mode of 0o600. I would then ask myself: "Why should I care about temporary files, they should be gone anyway after the file is uploaded?" and skip setting FILE_UPLOAD_PERMISSIONS. What is important but is not properly conveyed to the user is that not only temporary files themselves, but also the actual files which end up in the media folder get permissions of 0o600. Currently a developer can only discover this either by careful reading of the Deployment checklist page (manage.py check --deploy does not seem to check FILE_UPLOAD_PERMISSIONS) or by hitting the inconsistent permissions accidentally (like I did). I propose to unify the docs for FILE_UPLOAD_PERMISSIONS on the Settings page and the Deployment checklist page like this: ​https://gist.github.com/earshinov/0340f741189a14d4fd10e3e902203ad6/revisions#diff-14151589d5408f8b64b7e0e580770f0e Pros: It makes more clear that one gets different permissions for the *uploaded* files. It makes the docs more unified and thus easier to synchronously change in the future if/when required. I recognize that my edits might seem too minor and insignificant to be worth the hassle of editing the docs, committing, re-publishing them etc., but still I hope you will find them useful enough to be integrated into the official docs.
+Now that I think about, maybe Django could provide # <Commentary about inconsistent permissions when this setting is omitted> FILE_UPLOAD_PERMISSINS=0o600 in the ​default project settings so that developers don't miss it? 600 seems a reasonable default, particularly because people would get 600 anyway (at least on some operating systems) when the TemporaryFileUploadHandler is engaged.
+Since this has come up again, I've suggested on django-developers (​https://groups.google.com/d/topic/django-developers/h9XbQAPv5-I/discussion) that we adjust the FILE_UPLOAD_PERMISSION default to 0o644 (This was the conclusion I eventually came to from the discussion on #28540.) Lets see what people say there.
+Thus far, no great objections on the mailing list to adjusting the FILE_UPLOAD_PERMISSION default. Thus I'm going to rename this and Accept on that basis. A PR would need to: Adjust the default. Add a Breaking Change note to releases/2.2.txt (on the assumption we can get it in for then.) — This should include a set to None to restore previous behaviour' type comment. Adjust the references in the settings docs and deployment checklist. Make sure any other references are adjusted.
+Replying to Carlton Gibson: Thus far, no great objections on the mailing list to adjusting the FILE_UPLOAD_PERMISSION default. Thus I'm going to rename this and Accept on that basis. Thank you! Hopefully, this change will prevent confusion and unpleasant surprises for Django users in the future.
+Hello everyone, I would like to work on this. But before that there are few important questions: There is a related setting called FILE_UPLOAD_DIRECTORY_PERMISSIONS. Its document says that This value mirrors the functionality and caveats of the FILE_UPLOAD_PERMISSIONS setting. Shall we also change its default from None to 0o644(Please suggest if something different should be provided for directories) and update its document as well? Since 2.2 pre-release branch is now in feature freeze state, Shall we move the change to 3.0 version? On a side note, some tests must be refactored for new values for both of these settings. I think that's alright.
+That note is referring to that non-leaf directories are created using the process umask. (See ​`makedirs()` docs.) This is similar to FILE_UPLOAD_PERMISSIONS, when not using the temporary file upload handler. The underlying issue here is the inconsistency in file permissions, depending on the file size, when using the default settings that Django provides. There is no such inconsistency with directory permissions. As such changes should not be needed to FILE_UPLOAD_DIRECTORY_PERMISSIONS. (Any issues there would need to be addressed under a separate ticket.)
+Replying to Carlton Gibson: I see and understand the issue better now. Thanks for the clarification. I'll make the changes as you have suggested in your previous comment. Only question remaining is about introducing this change in 3.0 version. Shall we move it to 3.0 release?
+Shall we move it to 3.0 release? Yes please.
+
+## Completed stages
+- **setup**: fail
+  - Script: `git clone https://github.com/django/django.git . && git checkout e7fd69d051eaa67cb17f172a39b57253e9cb831a && python -m pip install -e .`
+  - Stdout:
+    ```
+    fatal: destination path '.' already exists and is not an empty directory.
+    ```
+  - Stderr: (empty)
+
+## Context
+- failure_class: deterministic
+- failure_signature: setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.
+
+
+Fix this GitHub issue in the repository. Make the minimal code change needed.
