@@ -1125,6 +1125,20 @@ impl WorkflowRunEngine {
                                     .unwrap_or(usize::MAX),
                                 delay_ms: millis_u64(delay),
                             });
+                        {
+                            let mut hook_ctx = HookContext::new(
+                                HookEvent::StageRetrying,
+                                context.run_id(),
+                                graph.name.clone(),
+                            );
+                            hook_ctx.node_id = Some(node.id.clone());
+                            hook_ctx.node_label = Some(node.label().to_string());
+                            hook_ctx.handler_type = node.handler_type().map(String::from);
+                            hook_ctx.attempt = Some(usize::try_from(attempt).unwrap_or(usize::MAX));
+                            hook_ctx.max_attempts =
+                                Some(usize::try_from(policy.max_attempts).unwrap_or(usize::MAX));
+                            let _ = self.run_hooks(&hook_ctx, None).await;
+                        }
                         tokio::time::sleep(delay).await;
                         continue;
                     }
@@ -1153,6 +1167,20 @@ impl WorkflowRunEngine {
                                     .unwrap_or(usize::MAX),
                                 delay_ms: millis_u64(delay),
                             });
+                        {
+                            let mut hook_ctx = HookContext::new(
+                                HookEvent::StageRetrying,
+                                context.run_id(),
+                                graph.name.clone(),
+                            );
+                            hook_ctx.node_id = Some(node.id.clone());
+                            hook_ctx.node_label = Some(node.label().to_string());
+                            hook_ctx.handler_type = node.handler_type().map(String::from);
+                            hook_ctx.attempt = Some(usize::try_from(attempt).unwrap_or(usize::MAX));
+                            hook_ctx.max_attempts =
+                                Some(usize::try_from(policy.max_attempts).unwrap_or(usize::MAX));
+                            let _ = self.run_hooks(&hook_ctx, None).await;
+                        }
                         tokio::time::sleep(delay).await;
                         continue;
                     }

@@ -14,7 +14,9 @@ pub enum HookEvent {
     EdgeSelected,
     ParallelStart,
     ParallelComplete,
+    /// Reserved: hooks for this event are not yet invoked by the engine.
     SandboxReady,
+    /// Reserved: hooks for this event are not yet invoked by the engine.
     SandboxCleanup,
     CheckpointSaved,
     PreToolUse,

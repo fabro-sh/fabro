@@ -11,6 +11,7 @@ use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
 use crate::graph::{Graph, Node};
+use crate::hook::{HookContext, HookEvent};
 use crate::millis_u64;
 use crate::outcome::{Outcome, StageStatus};
 use fabro_agent::LocalSandbox;
@@ -299,6 +300,14 @@ impl Handler for ParallelHandler {
             join_policy: join_policy.to_string(),
             error_policy: error_policy.to_string(),
         });
+        if let Some(ref runner) = services.hook_runner {
+            let hook_ctx = HookContext::new(
+                HookEvent::ParallelStart,
+                context.run_id(),
+                graph.name.clone(),
+            );
+            let _ = runner.run(&hook_ctx, services.sandbox.clone(), None).await;
+        }
         let max_parallel = node
             .attrs
             .get("max_parallel")
@@ -711,6 +720,14 @@ impl Handler for ParallelHandler {
             success_count,
             failure_count: fail_count,
         });
+        if let Some(ref runner) = services.hook_runner {
+            let hook_ctx = HookContext::new(
+                HookEvent::ParallelComplete,
+                context.run_id(),
+                graph.name.clone(),
+            );
+            let _ = runner.run(&hook_ctx, services.sandbox.clone(), None).await;
+        }
 
         // Evaluate join policy
         let status = match join_policy {
