@@ -68,12 +68,14 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
 
   <main>
     <!-- Hero -->
-    <section class="relative overflow-hidden pt-40 pb-32">
+    <section class="relative overflow-hidden pt-40 pb-24">
       <!-- Atmosphere -->
-      <div class="absolute inset-0 dot-grid"></div>
+      <div class="absolute inset-0 grid-overlay"></div>
+      <div class="absolute inset-0 noise-overlay"></div>
+      <div class="absolute inset-0 scanlines"></div>
       <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--color-navy-800)_0%,_transparent_50%)]"></div>
-      <div class="pointer-events-none absolute top-16 -left-40 h-[500px] w-[500px] rounded-full bg-teal-500/8 blur-[120px] animate-float"></div>
-      <div class="pointer-events-none absolute -top-10 -right-20 h-[400px] w-[400px] rounded-full bg-mint/5 blur-[100px] animate-float" style="animation-delay: -3s"></div>
+      <div class="pointer-events-none absolute top-16 -left-40 h-[500px] w-[500px] rounded-full bg-teal-500/15 blur-[120px] animate-float"></div>
+      <div class="pointer-events-none absolute -top-10 -right-20 h-[400px] w-[400px] rounded-full bg-mint/10 blur-[100px] animate-float" style="animation-delay: -3s"></div>
 
       <div class="relative mx-auto max-w-5xl px-6 text-center">
         <div class="reveal">
@@ -81,7 +83,7 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
             Open Source &middot; MIT Licensed
           </p>
         </div>
-        <h1 class="reveal reveal-d1 font-display text-5xl font-extrabold leading-[1.08] tracking-tight text-ice-50 sm:text-7xl">
+        <h1 class="reveal reveal-d1 font-display text-5xl font-extrabold uppercase tracking-wide text-ice-50 sm:text-7xl leading-[1.08]">
           The dark software factory<br />
           for <span class="gradient-text">expert engineers</span>
         </h1>
@@ -90,8 +92,8 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
           and intervene only where it matters.
         </p>
         <div class="reveal reveal-d3 mt-10 flex flex-col items-center gap-5">
-          <div class="rounded-xl border border-navy-600 bg-navy-900/60 px-6 py-3">
-            <code class="text-sm font-mono text-teal-300">$ curl -fsSL https://fabro.sh/install.sh | bash</code>
+          <div class="overflow-x-auto rounded-xl border border-navy-600 bg-navy-900/60 px-6 py-3">
+            <code class="text-xs font-mono text-teal-300 sm:text-sm">$ curl -fsSL https://fabro.sh/install.sh | bash</code>
           </div>
           <div class="flex items-center gap-4">
             <a
@@ -110,19 +112,22 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
         </div>
 
         <!-- Runs board screenshot -->
-        <div class="reveal reveal-d4 mt-16">
+        <div class="reveal-scale reveal-d4 mt-16">
           <div class="rounded-xl border border-navy-800 shadow-[0_0_80px_-20px_rgba(103,178,215,0.12)] overflow-hidden">
-            <img src="/runs-board.png" alt="Fabro Runs board showing workflows across Working, Pending, Verify, and Merge stages" class="w-full" data-lightbox />
+            <picture>
+              <source srcset="/runs-board.webp" type="image/webp" />
+              <img src="/runs-board.png" alt="Fabro Runs board showing workflows across Working, Pending, Verify, and Merge stages" class="w-full" width="2552" height="1558" loading="lazy" data-lightbox />
+            </picture>
           </div>
         </div>
       </div>
     </section>
 
     <!-- Core Promise -->
-    <section class="relative py-28">
-      <div class="section-divider mx-auto max-w-xs"></div>
-      <div class="mx-auto max-w-3xl px-6 pt-28 text-center">
-        <h2 class="reveal font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
+    <section class="relative py-16">
+      <hr class="mx-auto max-w-xs border-navy-800" />
+      <div class="mx-auto max-w-3xl px-6 pt-16 text-center">
+        <h2 class="reveal font-display text-2xl font-semibold uppercase tracking-widest text-ice-50 sm:text-3xl">
           Stop babysitting agents.<br class="hidden sm:inline" /> Start orchestrating workflows.
         </h2>
         <p class="reveal reveal-d1 mt-5 text-lg leading-relaxed text-ice-300">
@@ -133,116 +138,102 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
       </div>
     </section>
 
-    <!-- Use Cases -->
-    <section class="relative py-28">
-      <div class="section-divider mx-auto max-w-xs"></div>
-      <div class="mx-auto max-w-6xl px-6 pt-28">
-        <h2 class="reveal font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl text-center mb-16">
-          Why teams use Fabro
-        </h2>
-        <div class="grid gap-x-8 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
-          <div class="reveal flex items-start gap-3">
-            <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
-            <div>
-              <div class="font-display font-semibold text-ice-50">Extend disengagement time</div>
-              <div class="mt-1 text-sm text-ice-300">Define a workflow with verification gates and walk away. Fabro keeps the process on track without you.</div>
-            </div>
-          </div>
-          <div class="reveal reveal-d1 flex items-start gap-3">
-            <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
-            <div>
-              <div class="font-display font-semibold text-ice-50">Leverage ensemble intelligence</div>
-              <div class="mt-1 text-sm text-ice-300">Use one model to implement, another to cross-critique, and a third to summarize — all in a single workflow.</div>
-            </div>
-          </div>
-          <div class="reveal reveal-d2 flex items-start gap-3">
-            <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
-            <div>
-              <div class="font-display font-semibold text-ice-50">Guarantee code quality</div>
-              <div class="mt-1 text-sm text-ice-300">Layer test suites, linters, type checkers, and LLM-as-judge into your workflow graph. Failures trigger fix loops automatically.</div>
-            </div>
-          </div>
-          <div class="reveal reveal-d3 flex items-start gap-3">
-            <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
-            <div>
-              <div class="font-display font-semibold text-ice-50">Reduce token bills</div>
-              <div class="mt-1 text-sm text-ice-300">Route cheap tasks to fast models and reserve frontier models for the steps that need them. One-line stylesheet change.</div>
-            </div>
-          </div>
-          <div class="reveal reveal-d4 flex items-start gap-3">
-            <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
-            <div>
-              <div class="font-display font-semibold text-ice-50">Improve agent security</div>
-              <div class="mt-1 text-sm text-ice-300">Run agents in cloud sandboxes with full network and filesystem isolation. Keep untrusted code off your laptop.</div>
-            </div>
-          </div>
-          <div class="reveal reveal-d5 flex items-start gap-3">
-            <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
-            <div>
-              <div class="font-display font-semibold text-ice-50">Run agents 24/7</div>
-              <div class="mt-1 text-sm text-ice-300">The API server queues and executes runs continuously. Close your laptop — results are waiting when you return.</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <!-- Feature Grid -->
-    <section class="relative py-28">
-      <div class="section-divider mx-auto max-w-xs"></div>
-      <div class="mx-auto max-w-6xl px-6 pt-28">
-        <h2 class="reveal font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl text-center mb-16">
+    <section class="relative bg-navy-900 pt-20 pb-28">
+      <div class="mx-auto max-w-6xl px-6">
+        <h2 class="reveal font-display text-2xl font-semibold uppercase tracking-widest text-ice-50 text-center mb-16">
           Key features
         </h2>
         <div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+          <!-- Workflow graphs -->
           <div class="glow-card reveal rounded-xl border border-navy-800 bg-navy-800/25 p-8 relative overflow-hidden">
             <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-teal-700/40 to-transparent"></div>
-            <div class="mb-3 text-2xl">🔀</div>
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg border border-teal-700/30 bg-teal-700/10 text-teal-300">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="5" cy="6" r="3" /><circle cx="19" cy="6" r="3" /><circle cx="12" cy="18" r="3" />
+                <path d="M7.5 8l3 7.5" /><path d="M16.5 8l-3 7.5" />
+              </svg>
+            </div>
+            <p class="font-mono uppercase text-xs tracking-widest text-teal-500 mb-2">Workflow Engine</p>
             <h3 class="font-display text-lg font-semibold text-ice-50">Deterministic workflow graphs</h3>
             <p class="mt-2 text-sm leading-relaxed text-ice-300">
               Define pipelines in Graphviz DOT with branching, loops, parallelism, and human gates. Diffable, reviewable, version-controlled.
             </p>
           </div>
 
+          <!-- Human-in-the-loop -->
           <div class="glow-card reveal reveal-d1 rounded-xl border border-navy-800 bg-navy-800/25 p-8 relative overflow-hidden">
             <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-mint/30 to-transparent"></div>
-            <div class="mb-3 text-2xl">🙋</div>
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg border border-teal-700/30 bg-teal-700/10 text-teal-300">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12,2 20.5,7 20.5,17 12,22 3.5,17 3.5,7" />
+                <polyline points="9,12 11,14 15,10" />
+              </svg>
+            </div>
+            <p class="font-mono uppercase text-xs tracking-widest text-teal-500 mb-2">Control</p>
             <h3 class="font-display text-lg font-semibold text-ice-50">Human-in-the-loop</h3>
             <p class="mt-2 text-sm leading-relaxed text-ice-300">
               Approval gates pause for human decisions. Steer running agents mid-turn. Interview steps collect structured input.
             </p>
           </div>
 
+          <!-- Multi-model routing -->
           <div class="glow-card reveal reveal-d2 rounded-xl border border-navy-800 bg-navy-800/25 p-8 relative overflow-hidden">
             <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-teal-700/40 to-transparent"></div>
-            <div class="mb-3 text-2xl">🎨</div>
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg border border-teal-700/30 bg-teal-700/10 text-teal-300">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="10" cy="10" r="6" /><circle cx="16" cy="10" r="6" /><circle cx="13" cy="16" r="6" />
+              </svg>
+            </div>
+            <p class="font-mono uppercase text-xs tracking-widest text-teal-500 mb-2">Intelligence</p>
             <h3 class="font-display text-lg font-semibold text-ice-50">Multi-model routing</h3>
             <p class="mt-2 text-sm leading-relaxed text-ice-300">
               CSS-like stylesheets route each node to the right model and provider, with automatic fallback chains.
             </p>
           </div>
 
+          <!-- Cloud sandboxes -->
           <div class="glow-card reveal reveal-d3 rounded-xl border border-navy-800 bg-navy-800/25 p-8 relative overflow-hidden">
             <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber/25 to-transparent"></div>
-            <div class="mb-3 text-2xl">☁️</div>
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg border border-teal-700/30 bg-teal-700/10 text-teal-300">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6.5 19a4.5 4.5 0 0 1-.42-8.98 7 7 0 0 1 13.84 0A4.5 4.5 0 0 1 17.5 19H6.5z" />
+                <rect x="10" y="13" width="4" height="5" rx="0.5" /><path d="M12 13v-1.5" /><circle cx="12" cy="15" r="0.75" />
+              </svg>
+            </div>
+            <p class="font-mono uppercase text-xs tracking-widest text-teal-500 mb-2">Isolation</p>
             <h3 class="font-display text-lg font-semibold text-ice-50">Cloud sandboxes</h3>
             <p class="mt-2 text-sm leading-relaxed text-ice-300">
               Run agents in isolated cloud VMs with snapshot-based setup, network controls, and automatic cleanup. SSH in with <code class="text-teal-300">fabro ssh</code>.
             </p>
           </div>
 
+          <!-- Git checkpointing -->
           <div class="glow-card reveal reveal-d4 rounded-xl border border-navy-800 bg-navy-800/25 p-8 relative overflow-hidden">
             <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-mint/30 to-transparent"></div>
-            <div class="mb-3 text-2xl">🌲</div>
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg border border-teal-700/30 bg-teal-700/10 text-teal-300">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="7" cy="6" r="2.5" /><circle cx="7" cy="18" r="2.5" /><circle cx="17" cy="12" r="2.5" />
+                <path d="M7 8.5v7" /><path d="M9.2 7.2l5.3 3.3" />
+              </svg>
+            </div>
+            <p class="font-mono uppercase text-xs tracking-widest text-teal-500 mb-2">Versioning</p>
             <h3 class="font-display text-lg font-semibold text-ice-50">Git checkpointing</h3>
             <p class="mt-2 text-sm leading-relaxed text-ice-300">
               Every stage commits code changes and execution metadata to Git branches. Resume, revert, or trace any change.
             </p>
           </div>
 
+          <!-- Retrospectives -->
           <div class="glow-card reveal reveal-d5 rounded-xl border border-navy-800 bg-navy-800/25 p-8 relative overflow-hidden">
             <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-coral/25 to-transparent"></div>
-            <div class="mb-3 text-2xl">📊</div>
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg border border-teal-700/30 bg-teal-700/10 text-teal-300">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="8" width="3" height="12" rx="0.5" /><rect x="9" y="5" width="3" height="15" rx="0.5" /><rect x="15" y="10" width="3" height="10" rx="0.5" />
+                <path d="M3 14l6-5.5 6 3 6-5" /><polyline points="18,6 21,6.5 20.5,9.5" />
+              </svg>
+            </div>
+            <p class="font-mono uppercase text-xs tracking-widest text-teal-500 mb-2">Analytics</p>
             <h3 class="font-display text-lg font-semibold text-ice-50">Automatic retrospectives</h3>
             <p class="mt-2 text-sm leading-relaxed text-ice-300">
               Each run generates a retro with cost, duration, files touched, and an LLM-written narrative. Your workflows improve over time.
@@ -252,11 +243,19 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
 
         <!-- Bottom row: wider cards -->
         <div class="mt-5 grid gap-5 md:grid-cols-2">
+          <!-- API server + web UI -->
           <div class="glow-card reveal rounded-xl border border-navy-800 bg-navy-800/25 p-8 relative overflow-hidden">
             <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-teal-700/40 to-transparent"></div>
             <div class="flex items-start gap-4">
-              <div class="text-2xl">⚡</div>
+              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-teal-700/30 bg-teal-700/10 text-teal-300">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="4" y="4" width="16" height="16" rx="2" /><line x1="4" y1="9" x2="20" y2="9" />
+                  <circle cx="7" cy="6.5" r="0.75" /><circle cx="10" cy="6.5" r="0.75" />
+                  <path d="M18 13c1.5 0.5 2.5 1 2.5 1" /><path d="M18 16c1.5-0.5 2.5-1 2.5-1" /><path d="M17 11c2 1 3 2.5 3 3.5s-1 2.5-3 3.5" />
+                </svg>
+              </div>
               <div>
+                <p class="font-mono uppercase text-xs tracking-widest text-teal-500 mb-2">Interface</p>
                 <h3 class="font-display text-lg font-semibold text-ice-50">API server + web UI</h3>
                 <p class="mt-2 text-sm leading-relaxed text-ice-300">
                   REST API with SSE event streaming and a React web UI. Run workflows programmatically or as a service. Queue runs, track progress, manage at scale.
@@ -264,11 +263,18 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
               </div>
             </div>
           </div>
+          <!-- Single binary -->
           <div class="glow-card reveal reveal-d1 rounded-xl border border-navy-800 bg-navy-800/25 p-8 relative overflow-hidden">
             <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-teal-700/40 to-transparent"></div>
             <div class="flex items-start gap-4">
-              <div class="text-2xl">🦀</div>
+              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-teal-700/30 bg-teal-700/10 text-teal-300">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 3l-7 4v6l7 4 7-4V7l-7-4z" /><path d="M12 11v6" /><path d="M5 7l7 4 7-4" />
+                  <path d="M8 1v3" /><polyline points="6,2.5 8,4 10,2.5" />
+                </svg>
+              </div>
               <div>
+                <p class="font-mono uppercase text-xs tracking-widest text-teal-500 mb-2">Distribution</p>
                 <h3 class="font-display text-lg font-semibold text-ice-50">Single binary, no runtime</h3>
                 <p class="mt-2 text-sm leading-relaxed text-ice-300">
                   One compiled Rust executable with zero dependencies. No Python, no Node, no Docker required.
@@ -281,12 +287,11 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
     </section>
 
     <!-- Workflow-as-Code -->
-    <section class="relative py-28">
-      <div class="section-divider mx-auto max-w-xs"></div>
-      <div class="mx-auto max-w-6xl px-6 pt-28">
+    <section class="relative border-t border-navy-800 py-28">
+      <div class="mx-auto max-w-6xl px-6">
         <div class="grid items-start gap-16 lg:grid-cols-2">
-          <div class="reveal">
-            <h2 class="font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
+          <div class="reveal-left">
+            <h2 class="font-display text-2xl font-semibold uppercase tracking-widest text-ice-50">
               Workflow-as-Code
             </h2>
             <p class="mt-5 text-lg leading-relaxed text-ice-300">
@@ -313,10 +318,56 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
             </ul>
           </div>
 
-          <div class="reveal reveal-d1 space-y-5">
-            <!-- Rendered workflow graph -->
-            <div class="rounded-xl border border-navy-800 bg-navy-900/40 p-6 flex items-center justify-center">
-              <img src="/plan-implement.svg" alt="Plan-Implement workflow graph: Start → Plan → Approve Plan → Implement → Simplify → Exit with a Revise loop" class="w-full max-w-xl" data-lightbox />
+          <div class="reveal-right space-y-5">
+            <!-- Inline workflow graph SVG with draw-in animation -->
+            <div id="workflow-graph" class="rounded-xl border border-navy-800 bg-navy-900/40 p-6 flex items-center justify-center">
+              <svg width="674" height="44" viewBox="0 0 674 44" xmlns="http://www.w3.org/2000/svg" class="w-full max-w-xl" data-lightbox>
+                <g transform="translate(4, 40.25) scale(1, -1) translate(0, -36.25)" style="transform-origin: center;">
+                </g>
+                <g transform="translate(4, 3.75)">
+                  <!-- start node -->
+                  <polygon fill="none" stroke="#357f9e" stroke-width="1.5" points="35.26,0 70.52,18.12 35.26,36.12 0,18.12" />
+                  <text text-anchor="middle" x="35.26" y="23" font-family="Helvetica,sans-serif" font-size="12" fill="#e8edf3">Start</text>
+
+                  <!-- plan node -->
+                  <rect x="107.52" y="0" width="54" height="36" rx="6" fill="none" stroke="#357f9e" stroke-width="1.5" />
+                  <text text-anchor="middle" x="134.52" y="23" font-family="Helvetica,sans-serif" font-size="12" fill="#e8edf3">Plan</text>
+
+                  <!-- approve node -->
+                  <polygon fill="none" stroke="#357f9e" stroke-width="1.5" points="290.98,0 353.68,18.12 290.98,36.12 228.27,18.12" />
+                  <text text-anchor="middle" x="290.98" y="23" font-family="Helvetica,sans-serif" font-size="12" fill="#e8edf3">Approve Plan</text>
+
+                  <!-- implement node -->
+                  <rect x="425.68" y="0" width="71.5" height="36" rx="6" fill="none" stroke="#357f9e" stroke-width="1.5" />
+                  <text text-anchor="middle" x="461.43" y="23" font-family="Helvetica,sans-serif" font-size="12" fill="#e8edf3">Implement</text>
+
+                  <!-- simplify node -->
+                  <rect x="534.18" y="0" width="58.75" height="36" rx="6" fill="none" stroke="#357f9e" stroke-width="1.5" />
+                  <text text-anchor="middle" x="563.55" y="23" font-family="Helvetica,sans-serif" font-size="12" fill="#e8edf3">Simplify</text>
+
+                  <!-- exit node -->
+                  <rect x="629.93" y="0" width="36.25" height="36.25" fill="none" stroke="#357f9e" stroke-width="1.5" />
+                  <text text-anchor="middle" x="648.05" y="23" font-family="Helvetica,sans-serif" font-size="12" fill="#e8edf3">Exit</text>
+
+                  <!-- Edges -->
+                  <path class="graph-edge" fill="none" stroke="#a8b5c5" stroke-width="1.5" d="M71.37,18.12 L105.8,18.12" marker-end="url(#arrow)" />
+                  <path class="graph-edge" fill="none" stroke="#a8b5c5" stroke-width="1.5" d="M161.72,18.12 L225.77,18.12" marker-end="url(#arrow)" style="animation-delay: 0.15s" />
+                  <path class="graph-edge" fill="none" stroke="#a8b5c5" stroke-width="1.5" d="M354.22,18.12 L423.81,18.12" marker-end="url(#arrow)" style="animation-delay: 0.3s" />
+                  <text text-anchor="middle" x="389.68" y="14" font-family="Helvetica,sans-serif" font-size="10" fill="#a8b5c5">Approve</text>
+                  <path class="graph-edge" fill="none" stroke="#a8b5c5" stroke-width="1.5" d="M497.45,18.12 L532.17,18.12" marker-end="url(#arrow)" style="animation-delay: 0.45s" />
+                  <path class="graph-edge" fill="none" stroke="#a8b5c5" stroke-width="1.5" d="M593.41,18.12 L628.13,18.12" marker-end="url(#arrow)" style="animation-delay: 0.6s" />
+
+                  <!-- Revise loop -->
+                  <path class="graph-edge" fill="none" stroke="#a8b5c5" stroke-width="1.5" d="M247.15,29.2 C226.65,33 201.77,35.8 179.52,32.25 C177.32,31.9 175.08,31.5 172.83,31" marker-end="url(#arrow)" style="animation-delay: 0.75s" />
+                  <text text-anchor="middle" x="194.9" y="36" font-family="Helvetica,sans-serif" font-size="10" fill="#a8b5c5">Revise</text>
+
+                  <defs>
+                    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                      <path d="M0,0 L10,5 L0,10 z" fill="#a8b5c5" />
+                    </marker>
+                  </defs>
+                </g>
+              </svg>
             </div>
 
             <!-- DOT source code -->
@@ -335,17 +386,19 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
     </section>
 
     <!-- Human-in-the-Loop -->
-    <section class="relative py-28">
-      <div class="section-divider mx-auto max-w-xs"></div>
-      <div class="mx-auto max-w-6xl px-6 pt-28">
+    <section class="relative py-24">
+      <div class="mx-auto max-w-7xl px-6">
         <div class="grid items-start gap-16 lg:grid-cols-2">
-          <div class="order-2 lg:order-1 reveal reveal-d1">
+          <div class="order-2 lg:order-1 reveal-left reveal-d1">
             <div class="rounded-xl border border-navy-800 shadow-[0_0_60px_-15px_rgba(103,178,215,0.08)] overflow-hidden">
-              <img src="/run-detail.png" alt="Fabro verification view showing Traceability, Readability, Reliability, Code Coverage, Maintainability, and Security checks" class="w-full" data-lightbox />
+              <picture>
+                <source srcset="/run-detail.webp" type="image/webp" />
+                <img src="/run-detail.png" alt="Fabro verification view showing Traceability, Readability, Reliability, Code Coverage, Maintainability, and Security checks" class="w-full" width="2000" height="1556" loading="lazy" data-lightbox />
+              </picture>
             </div>
           </div>
-          <div class="order-1 lg:order-2 reveal">
-            <h2 class="font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
+          <div class="order-1 lg:order-2 reveal-right">
+            <h2 class="font-display text-2xl font-semibold uppercase tracking-widest text-ice-50">
               Verification is a<br class="hidden sm:inline" /> first-class concept
             </h2>
             <p class="mt-5 text-lg leading-relaxed text-ice-300">
@@ -360,13 +413,14 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
       </div>
     </section>
 
-    <!-- Multi-model -->
+    <!-- Multi-model + Observability -->
     <section class="relative py-28">
-      <div class="section-divider mx-auto max-w-xs"></div>
+      <div class="border-t border-navy-800 mx-auto max-w-6xl"></div>
       <div class="mx-auto max-w-6xl px-6 pt-28">
+        <!-- Multi-model: 2-col -->
         <div class="grid items-start gap-16 lg:grid-cols-2">
-          <div class="reveal">
-            <h2 class="font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
+          <div class="reveal-left">
+            <h2 class="font-display text-2xl font-semibold uppercase tracking-widest text-ice-50">
               Multi-model, multi-provider
             </h2>
             <p class="mt-5 text-lg leading-relaxed text-ice-300">
@@ -389,7 +443,7 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
             </ul>
           </div>
 
-          <div class="reveal reveal-d2 rounded-xl border border-navy-800 bg-navy-900/60 p-6 shadow-[0_0_60px_-15px_rgba(103,178,215,0.08)]">
+          <div class="reveal-right rounded-xl border border-navy-800 bg-navy-900/60 p-6 shadow-[0_0_60px_-15px_rgba(103,178,215,0.08)]">
             <div class="mb-3 flex items-center gap-2">
               <span class="h-3 w-3 rounded-full bg-coral/70"></span>
               <span class="h-3 w-3 rounded-full bg-amber/70"></span>
@@ -399,124 +453,67 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
             <pre class="overflow-x-auto text-sm leading-relaxed"><code class="font-mono" set:html={cssExample} /></pre>
           </div>
         </div>
-      </div>
-    </section>
 
-    <!-- Sandboxes -->
-    <section class="relative py-28">
-      <div class="section-divider mx-auto max-w-xs"></div>
-      <div class="mx-auto max-w-6xl px-6 pt-28">
-        <div class="grid items-start gap-16 lg:grid-cols-2">
-          <div class="order-2 lg:order-1 reveal reveal-d1">
-            <div class="rounded-xl border border-navy-800 bg-navy-900/60 p-6">
-              <div class="space-y-3 font-mono text-sm">
-                <div class="flex items-center gap-3">
-                  <span class="text-ice-300/50">$</span>
-                  <span class="text-teal-300">fabro run deploy --sandbox daytona</span>
-                </div>
-                <div class="text-ice-300/70 pl-5">
-                  <div>Provisioning sandbox... <span class="text-mint">done</span> (3.2s)</div>
-                  <div>Cloning repository... <span class="text-mint">done</span></div>
-                  <div>Running workflow... <span class="text-mint">stage 1/5</span></div>
-                </div>
-                <div class="mt-4 flex items-center gap-3 border-t border-navy-800 pt-3">
-                  <span class="text-ice-300/50">$</span>
-                  <span class="text-teal-300">fabro ssh</span>
-                  <span class="text-ice-300/50 text-xs">← shell into the running sandbox</span>
-                </div>
-                <div class="flex items-center gap-3">
-                  <span class="text-ice-300/50">$</span>
-                  <span class="text-teal-300">fabro preview 3000</span>
-                  <span class="text-ice-300/50 text-xs">← expose a port for live debugging</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="order-1 lg:order-2 reveal">
-            <h2 class="font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
-              Cloud sandboxes with<br class="hidden sm:inline" /> SSH and preview links
+        <!-- Gradient divider between multi-model and observability -->
+        <div class="section-divider mx-auto my-28 max-w-xs"></div>
+
+        <!-- Observability: centered -->
+        <div class="mx-auto max-w-4xl">
+          <div class="text-center">
+            <h2 class="reveal font-display text-2xl font-semibold uppercase tracking-widest text-ice-50">
+              Ground-up observability
             </h2>
-            <p class="mt-5 text-lg leading-relaxed text-ice-300">
-              Run agents in isolated cloud VMs — not on your laptop. Full network and filesystem isolation,
-              snapshot-based setup, and automatic cleanup.
+            <p class="reveal reveal-d1 mt-5 text-lg leading-relaxed text-ice-300">
+              Full traceability across runs — every model call, every tool invocation, every decision point.
+              Query run data with SQL. Automatic retrospectives rate each run and surface friction points.
             </p>
-            <ul class="mt-8 space-y-4">
-              <li class="flex items-start gap-3">
-                <span class="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-teal-500"></span>
-                <span class="text-ice-300">Shell into running sandboxes with <code class="text-teal-300">fabro ssh</code></span>
-              </li>
-              <li class="flex items-start gap-3">
-                <span class="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-teal-500"></span>
-                <span class="text-ice-300">Expose ports with <code class="text-teal-300">fabro preview</code> for live debugging</span>
-              </li>
-              <li class="flex items-start gap-3">
-                <span class="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-teal-500"></span>
-                <span class="text-ice-300">6 providers: local, Docker, Daytona, SSH, exe.dev, Sprites</span>
-              </li>
-            </ul>
           </div>
-        </div>
-      </div>
-    </section>
 
-    <!-- Observability -->
-    <section class="relative py-28">
-      <div class="section-divider mx-auto max-w-xs"></div>
-      <div class="mx-auto max-w-4xl px-6 pt-28">
-        <div class="text-center">
-          <h2 class="reveal font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
-            Ground-up observability
-          </h2>
-          <p class="reveal reveal-d1 mt-5 text-lg leading-relaxed text-ice-300">
-            Full traceability across runs — every model call, every tool invocation, every decision point.
-            Query run data with SQL. Automatic retrospectives rate each run and surface friction points.
-          </p>
-        </div>
-
-        <!-- Trace visualization -->
-        <div class="reveal reveal-d2 mt-16 rounded-xl border border-navy-800 bg-navy-900/40 p-6 overflow-hidden">
-          <div class="mb-5 flex items-center gap-2.5">
-            <div class="h-2 w-2 rounded-full bg-mint animate-pulse-glow"></div>
-            <span class="text-xs font-mono text-ice-300/70">fabro.workflow.run — trace</span>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center gap-3">
-              <span class="shrink-0 w-20 text-right text-xs font-mono text-ice-300/50">workflow</span>
-              <div class="relative h-7 flex-1">
-                <div class="absolute inset-x-0 h-full rounded-md bg-teal-700/25 border border-teal-700/30 flex items-center px-3">
-                  <span class="text-[11px] font-mono text-teal-300">fabro.workflow.run — 24.3s</span>
+          <!-- Trace visualization with animated bars -->
+          <div class="reveal reveal-d2 mt-16 rounded-xl border border-navy-800 bg-navy-900/40 p-6 overflow-hidden" id="trace-container">
+            <div class="mb-5 flex items-center gap-2.5">
+              <div class="h-2 w-2 rounded-full bg-mint animate-pulse-glow"></div>
+              <span class="text-xs font-mono text-ice-300/70">fabro.workflow.run — trace</span>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-3">
+                <span class="shrink-0 w-20 text-right text-xs font-mono text-ice-300/50">workflow</span>
+                <div class="relative h-7 flex-1">
+                  <div class="trace-bar absolute inset-x-0 h-full rounded-md bg-teal-700/25 border border-teal-700/30 flex items-center px-3">
+                    <span class="text-[11px] font-mono text-teal-300">fabro.workflow.run — 24.3s</span>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div class="flex items-center gap-3">
-              <span class="shrink-0 w-20 text-right text-xs font-mono text-ice-300/50">plan</span>
-              <div class="relative h-7 flex-1">
-                <div class="absolute left-[1%] h-full rounded-md bg-teal-500/15 border border-teal-500/25 flex items-center px-3" style="width: 18%">
-                  <span class="text-[11px] font-mono text-teal-300 truncate">4.1s</span>
+              <div class="flex items-center gap-3">
+                <span class="shrink-0 w-20 text-right text-xs font-mono text-ice-300/50">plan</span>
+                <div class="relative h-7 flex-1">
+                  <div class="trace-bar absolute left-[1%] h-full rounded-md bg-teal-500/15 border border-teal-500/25 flex items-center px-3" style="width: 18%; transition-delay: 150ms">
+                    <span class="text-[11px] font-mono text-teal-300 truncate">4.1s</span>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div class="flex items-center gap-3">
-              <span class="shrink-0 w-20 text-right text-xs font-mono text-ice-300/50">implement</span>
-              <div class="relative h-7 flex-1">
-                <div class="absolute left-[20%] h-full rounded-md bg-mint/12 border border-mint/20 flex items-center px-3" style="width: 42%">
-                  <span class="text-[11px] font-mono text-mint truncate">12.7s</span>
+              <div class="flex items-center gap-3">
+                <span class="shrink-0 w-20 text-right text-xs font-mono text-ice-300/50">implement</span>
+                <div class="relative h-7 flex-1">
+                  <div class="trace-bar absolute left-[20%] h-full rounded-md bg-mint/12 border border-mint/20 flex items-center px-3" style="width: 42%; transition-delay: 300ms">
+                    <span class="text-[11px] font-mono text-mint truncate">12.7s</span>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div class="flex items-center gap-3">
-              <span class="shrink-0 w-20 text-right text-xs font-mono text-ice-300/50">simplify</span>
-              <div class="relative h-7 flex-1">
-                <div class="absolute left-[63%] h-full rounded-md bg-amber/12 border border-amber/20 flex items-center px-3" style="width: 18%">
-                  <span class="text-[11px] font-mono text-amber truncate">4.2s</span>
+              <div class="flex items-center gap-3">
+                <span class="shrink-0 w-20 text-right text-xs font-mono text-ice-300/50">simplify</span>
+                <div class="relative h-7 flex-1">
+                  <div class="trace-bar absolute left-[63%] h-full rounded-md bg-amber/12 border border-amber/20 flex items-center px-3" style="width: 18%; transition-delay: 450ms">
+                    <span class="text-[11px] font-mono text-amber truncate">4.2s</span>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div class="flex items-center gap-3">
-              <span class="shrink-0 w-20 text-right text-xs font-mono text-ice-300/50">retro</span>
-              <div class="relative h-7 flex-1">
-                <div class="absolute left-[82%] h-full rounded-md bg-coral/12 border border-coral/20 flex items-center px-3" style="width: 14%">
-                  <span class="text-[11px] font-mono text-coral truncate">3.3s</span>
+              <div class="flex items-center gap-3">
+                <span class="shrink-0 w-20 text-right text-xs font-mono text-ice-300/50">retro</span>
+                <div class="relative h-7 flex-1">
+                  <div class="trace-bar absolute left-[82%] h-full rounded-md bg-coral/12 border border-coral/20 flex items-center px-3" style="width: 14%; transition-delay: 600ms">
+                    <span class="text-[11px] font-mono text-coral truncate">3.3s</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -525,56 +522,18 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
       </div>
     </section>
 
-    <!-- CLI -->
-    <section class="relative py-28">
-      <div class="section-divider mx-auto max-w-xs"></div>
-      <div class="mx-auto max-w-4xl px-6 pt-28">
-        <div class="text-center">
-          <h2 class="reveal font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
-            Powerful CLI
-          </h2>
-          <p class="reveal reveal-d1 mt-5 text-lg leading-relaxed text-ice-300">
-            One binary. Zero dependencies. Everything you need to run, inspect, and manage workflows.
-          </p>
-        </div>
-        <div class="reveal reveal-d2 mt-12 rounded-xl border border-navy-800 bg-navy-900/60 p-6 font-mono text-sm">
-          <div class="space-y-4">
-            <div>
-              <div class="text-ice-300/50 text-xs mb-2">Run workflows</div>
-              <div class="text-teal-300">$ fabro run plan-implement</div>
-              <div class="text-teal-300 mt-1">$ fabro run --sandbox daytona --resume</div>
-            </div>
-            <div class="border-t border-navy-800 pt-4">
-              <div class="text-ice-300/50 text-xs mb-2">Manage runs</div>
-              <div class="text-teal-300">$ fabro ps</div>
-              <div class="text-teal-300 mt-1">$ fabro logs &lt;run-id&gt;</div>
-              <div class="text-teal-300 mt-1">$ fabro diff &lt;run-id&gt;</div>
-            </div>
-            <div class="border-t border-navy-800 pt-4">
-              <div class="text-ice-300/50 text-xs mb-2">Debug sandboxes</div>
-              <div class="text-teal-300">$ fabro ssh</div>
-              <div class="text-teal-300 mt-1">$ fabro preview 3000</div>
-            </div>
-            <div class="border-t border-navy-800 pt-4">
-              <div class="text-ice-300/50 text-xs mb-2">Ship results</div>
-              <div class="text-teal-300">$ fabro pr create &lt;run-id&gt;</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Why Fabro -->
-    <section class="relative py-28">
-      <div class="section-divider mx-auto max-w-xs"></div>
-      <div class="mx-auto max-w-4xl px-6 pt-28 text-center">
-        <h2 class="reveal font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl">
-          Shippable outcomes,<br class="hidden sm:inline" /> not impressive output
+    <!-- CTA (with Why Fabro contrast grid) -->
+    <section class="relative overflow-hidden border-t border-navy-800 py-32">
+      <div class="absolute inset-0 grid-overlay"></div>
+      <div class="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[600px] w-[600px] rounded-full bg-teal-700/6 blur-[150px]"></div>
+      <div class="relative mx-auto max-w-3xl px-6 text-center">
+        <h2 class="reveal font-display text-4xl font-bold uppercase tracking-wide text-ice-50 sm:text-5xl">
+          Workflows you can audit.<br />
+          <span class="gradient-text">Output you can trust.</span>
         </h2>
-        <p class="reveal reveal-d1 mt-5 text-lg text-ice-300">
-          Most AI coding tools optimize for impressive output. Fabro optimizes for what actually merges.
-        </p>
-        <div class="reveal reveal-d2 mt-14 grid gap-x-8 gap-y-8 text-left sm:grid-cols-2">
+
+        <!-- Why Fabro — 2x2 contrast grid -->
+        <div class="reveal reveal-d1 mt-14 grid gap-x-8 gap-y-6 text-left sm:grid-cols-2">
           <div class="flex items-start gap-4">
             <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
             <div>
@@ -604,22 +563,10 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
             </div>
           </div>
         </div>
-      </div>
-    </section>
 
-    <!-- CTA -->
-    <section class="relative overflow-hidden py-32">
-      <div class="absolute inset-0 dot-grid"></div>
-      <div class="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[600px] w-[600px] rounded-full bg-teal-700/6 blur-[150px]"></div>
-      <div class="section-divider mx-auto max-w-xs"></div>
-      <div class="relative mx-auto max-w-3xl px-6 pt-32 text-center">
-        <h2 class="reveal font-display text-4xl font-bold tracking-tight text-ice-50 sm:text-5xl">
-          Workflows you can audit.<br />
-          <span class="gradient-text">Output you can trust.</span>
-        </h2>
-        <div class="reveal reveal-d1 mt-10 flex flex-col items-center gap-5">
-          <div class="rounded-xl border border-navy-600 bg-navy-900/60 px-6 py-3">
-            <code class="text-sm font-mono text-teal-300">$ curl -fsSL https://fabro.sh/install.sh | bash</code>
+        <div class="reveal reveal-d2 mt-10 flex flex-col items-center gap-5">
+          <div class="overflow-x-auto rounded-xl border border-navy-600 bg-navy-900/60 px-6 py-3">
+            <code class="text-xs font-mono text-teal-300 sm:text-sm">$ curl -fsSL https://fabro.sh/install.sh | bash</code>
           </div>
           <div class="flex items-center justify-center gap-4">
             <a
@@ -640,47 +587,64 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
     </section>
   </main>
 
-  <!-- Footer -->
-  <footer class="border-t border-navy-800/60 py-12">
+  <!-- Footer — 3-column -->
+  <footer class="border-t border-navy-800/60 py-16">
     <div class="mx-auto max-w-6xl px-6">
-      <div class="flex flex-col items-center justify-between gap-4 sm:flex-row">
-        <div class="flex items-center gap-4">
-          <img src="/logotype.svg" alt="Fabro" class="h-5" />
-          <span class="text-sm text-ice-300/60">Open source, MIT-licensed</span>
+      <div class="grid gap-10 sm:grid-cols-3">
+        <!-- Col 1: Logo + tagline -->
+        <div>
+          <img src="/logotype.svg" alt="Fabro" class="h-6 mb-4" />
+          <p class="text-sm text-ice-300/60">The dark software factory for expert engineers.</p>
+          <p class="mt-2 text-xs text-ice-300/40">Open source, MIT-licensed</p>
         </div>
-        <div class="flex items-center gap-5">
-          <a href="https://docs.fabro.sh" class="text-sm text-ice-300 hover:text-ice-50 transition-colors">Docs</a>
-          <a href="https://github.com/fabro-sh/fabro" class="text-ice-300 hover:text-ice-50 transition-colors" aria-label="GitHub">
-            <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-          </a>
+        <!-- Col 2: Product -->
+        <div>
+          <h3 class="font-display text-sm font-semibold uppercase tracking-widest text-ice-300/70 mb-4">Product</h3>
+          <ul class="space-y-2 text-sm">
+            <li><a href="https://docs.fabro.sh/getting-started/quick-start" class="text-ice-300 hover:text-ice-50 transition-colors">Quick Start</a></li>
+            <li><a href="https://docs.fabro.sh" class="text-ice-300 hover:text-ice-50 transition-colors">Docs</a></li>
+            <li><a href="https://github.com/fabro-sh/fabro/releases" class="text-ice-300 hover:text-ice-50 transition-colors">Releases</a></li>
+          </ul>
         </div>
+        <!-- Col 3: Community -->
+        <div>
+          <h3 class="font-display text-sm font-semibold uppercase tracking-widest text-ice-300/70 mb-4">Community</h3>
+          <ul class="space-y-2 text-sm">
+            <li><a href="https://github.com/fabro-sh/fabro" class="text-ice-300 hover:text-ice-50 transition-colors">GitHub</a></li>
+            <li><a href="https://github.com/fabro-sh/fabro/issues" class="text-ice-300 hover:text-ice-50 transition-colors">Issues</a></li>
+            <li><a href="https://github.com/fabro-sh/fabro/discussions" class="text-ice-300 hover:text-ice-50 transition-colors">Discussions</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="mt-10 border-t border-navy-800/40 pt-6 text-center text-xs text-ice-300/40">
+        &copy; 2025 Fabro. All rights reserved.
       </div>
     </div>
   </footer>
 
-  <!-- Lightbox overlay -->
-  <div id="lightbox" class="fixed inset-0 z-[100] hidden items-center justify-center bg-navy-950/90 backdrop-blur-sm cursor-zoom-out p-8">
+  <!-- Lightbox overlay (with CSS transition) -->
+  <div id="lightbox" class="lightbox-overlay fixed inset-0 z-[100] flex items-center justify-center bg-navy-950/90 backdrop-blur-sm cursor-zoom-out p-8">
     <img id="lightbox-img" src="" alt="" class="max-h-full max-w-full rounded-xl shadow-2xl" />
   </div>
 
   <script>
-    // Lightbox
-    const lightbox = document.getElementById("lightbox");
-    const lightboxImg = document.getElementById("lightbox-img");
+    // Lightbox with opacity transition
+    const lightbox = document.getElementById("lightbox")!;
+    const lightboxImg = document.getElementById("lightbox-img")! as HTMLImageElement;
     document.querySelectorAll("[data-lightbox]").forEach((el) => {
-      el.style.cursor = "zoom-in";
+      (el as HTMLElement).style.cursor = "zoom-in";
       el.addEventListener("click", () => {
-        lightboxImg.src = el.src || el.querySelector("img")?.src || "";
-        lightboxImg.alt = el.alt || "";
-        lightbox.classList.remove("hidden");
-        lightbox.classList.add("flex");
+        const imgEl = el as HTMLImageElement;
+        lightboxImg.src = imgEl.src || el.querySelector("img")?.src || "";
+        lightboxImg.alt = imgEl.alt || "";
+        lightbox.classList.add("active");
       });
     });
     lightbox.addEventListener("click", () => {
-      lightbox.classList.add("hidden");
-      lightbox.classList.remove("flex");
+      lightbox.classList.remove("active");
     });
 
+    // Scroll reveal — observe all reveal variants + trace bars
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -692,6 +656,33 @@ const cssExample = `<span class="text-ice-300">/* All nodes default to fast + ch
       },
       { threshold: 0.15, rootMargin: "0px 0px -40px 0px" }
     );
-    document.querySelectorAll(".reveal").forEach((el) => observer.observe(el));
+    document.querySelectorAll(".reveal, .reveal-left, .reveal-right, .reveal-scale, .trace-bar").forEach((el) => observer.observe(el));
+
+    // Workflow graph draw-in
+    const graphContainer = document.getElementById("workflow-graph");
+    if (graphContainer) {
+      const graphEdges = graphContainer.querySelectorAll(".graph-edge");
+      graphEdges.forEach((edge) => {
+        const pathEl = edge as SVGPathElement;
+        if (pathEl.getTotalLength) {
+          const length = pathEl.getTotalLength();
+          pathEl.style.strokeDasharray = String(length);
+          pathEl.style.strokeDashoffset = String(length);
+        }
+      });
+
+      const graphObserver = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              graphContainer.classList.add("graph-draw");
+              graphObserver.unobserve(entry.target);
+            }
+          });
+        },
+        { threshold: 0.3 }
+      );
+      graphObserver.observe(graphContainer);
+    }
   </script>
 </Layout>
