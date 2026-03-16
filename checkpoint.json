@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-03-16T11:58:12.461330Z",
+  "current_node": "setup",
+  "completed_nodes": [
+    "start",
+    "setup"
+  ],
+  "node_retries": {
+    "start": 1,
+    "setup": 1
+  },
+  "context_values": {
+    "thread.start.current_node": "setup",
+    "internal.fidelity": "compact",
+    "outcome": "fail",
+    "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n",
+    "failure_class": "deterministic",
+    "current.preamble": "Goal: Correct expected format in invalid DurationField error message\nDescription\n\t\nIf you enter a duration \"14:00\" into a duration field, it translates to \"00:14:00\" which is 14 minutes.\nThe current error message for invalid DurationField says that this should be the format of durations: \"[DD] [HH:[MM:]]ss[.uuuuuu]\". But according to the actual behaviour, it should be: \"[DD] [[HH:]MM:]ss[.uuuuuu]\", because seconds are mandatory, minutes are optional, and hours are optional if minutes are provided.\nThis seems to be a mistake in all Django versions that support the DurationField.\nAlso the duration fields could have a default help_text with the requested format, because the syntax is not self-explanatory.\n\n",
+    "graph.rankdir": "LR",
+    "graph.goal": "Correct expected format in invalid DurationField error message\nDescription\n\t\nIf you enter a duration \"14:00\" into a duration field, it translates to \"00:14:00\" which is 14 minutes.\nThe current error message for invalid DurationField says that this should be the format of durations: \"[DD] [HH:[MM:]]ss[.uuuuuu]\". But according to the actual behaviour, it should be: \"[DD] [[HH:]MM:]ss[.uuuuuu]\", because seconds are mandatory, minutes are optional, and hours are optional if minutes are provided.\nThis seems to be a mistake in all Django versions that support the DurationField.\nAlso the duration fields could have a default help_text with the requested format, because the syntax is not self-explanatory.\n",
+    "internal.run_id": "01KKV85C29P0NV1C8QF3MBQV62",
+    "internal.node_visit_count": 1,
+    "internal.retry_count.start": 1,
+    "internal.retry_count.setup": 1,
+    "command.stderr": "",
+    "current_node": "setup",
+    "failure_signature": "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.",
+    "internal.thread_id": "start"
+  },
+  "logs": [],
+  "node_outcomes": {
+    "setup": {
+      "status": "fail",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n"
+      },
+      "failure": {
+        "message": "Script failed with exit code: 128\n\n## stdout\nfatal: destination path '.' already exists and is not an empty directory.\n",
+        "failure_class": "deterministic"
+      },
+      "duration_ms": 42
+    },
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    }
+  },
+  "next_node_id": "solve",
+  "loop_failure_signatures": {
+    "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.": 1
+  },
+  "node_visits": {
+    "start": 1,
+    "setup": 1
+  }
+}
