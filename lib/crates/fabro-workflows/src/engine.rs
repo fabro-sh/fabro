@@ -1265,13 +1265,17 @@ impl WorkflowRunEngine {
     ///
     /// The sandbox is left alive after return so the caller can run retro, PR creation, etc.
     /// Call `cleanup_sandbox()` when done.
+    ///
+    /// Returns both the outcome and the (potentially mutated) config — remote git setup
+    /// fills `run_branch`, `base_sha`, `base_branch`, `meta_branch`, and
+    /// `git_checkpoint_enabled`, which callers need for PR creation and finalize commits.
     pub async fn run_with_lifecycle(
         &self,
         graph: &Graph,
         mut config: RunConfig,
         lifecycle: LifecycleConfig,
         checkpoint: Option<&Checkpoint>,
-    ) -> Result<Outcome> {
+    ) -> Result<(Outcome, RunConfig)> {
         // 1. Initialize sandbox
         self.services
             .sandbox
@@ -1385,7 +1389,7 @@ impl WorkflowRunEngine {
         }
 
         // 7. Execute the workflow graph
-        if let Some(cp) = checkpoint {
+        let outcome = if let Some(cp) = checkpoint {
             let loop_state = LoopState {
                 node_visits: HashMap::new(),
                 loop_failure_signatures: cp.loop_failure_signatures.clone(),
@@ -1394,13 +1398,14 @@ impl WorkflowRunEngine {
             let (outcome, _context) = self
                 .run_internal(graph, &config, Some(cp), None, None, loop_state)
                 .await?;
-            Ok(outcome)
+            outcome
         } else {
             let (outcome, _context) = self
                 .run_internal(graph, &config, None, None, None, LoopState::default())
                 .await?;
-            Ok(outcome)
-        }
+            outcome
+        };
+        Ok((outcome, config))
     }
 
     /// Fire the `SandboxCleanup` hook and optionally clean up the sandbox.
@@ -5704,7 +5709,7 @@ mod tests {
             setup_command_timeout_ms: 300_000,
             devcontainer_phases: Vec::new(),
         };
-        let outcome = engine
+        let (outcome, _) = engine
             .run_with_lifecycle(&g, config, lifecycle, None)
             .await
             .unwrap();
@@ -5759,7 +5764,7 @@ mod tests {
             setup_command_timeout_ms: 300_000,
             devcontainer_phases: Vec::new(),
         };
-        let outcome = engine
+        let (outcome, _) = engine
             .run_with_lifecycle(&g, config, lifecycle, None)
             .await
             .unwrap();
@@ -5810,7 +5815,7 @@ mod tests {
         };
         let result = engine.run_with_lifecycle(&g, config, lifecycle, None).await;
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.err().unwrap().to_string();
         assert!(
             err.contains("Setup command failed"),
             "expected setup failure error, got: {err}"
