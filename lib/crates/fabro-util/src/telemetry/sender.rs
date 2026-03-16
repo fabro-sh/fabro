@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
@@ -30,17 +32,22 @@ fn spawn_sender(track: Track) {
     super::spawn::spawn_fabro_subcommand("__send_analytics", &filename, &json);
 }
 
-/// Sends a track event to Segment. Called by the `__send_analytics` subcommand.
-pub async fn send_to_segment(track: &Track) -> anyhow::Result<()> {
+/// Reads a serialized track event from `path` and sends it to Segment.
+/// Called by the `__send_analytics` subcommand.
+/// No-ops if `SEGMENT_WRITE_KEY` was not set at compile time.
+pub async fn send_to_segment(path: &Path) -> anyhow::Result<()> {
     let write_key = SEGMENT_WRITE_KEY
         .ok_or_else(|| anyhow::anyhow!("SEGMENT_WRITE_KEY not set at compile time"))?;
+
+    let json = std::fs::read(path)?;
+    let track: Track = serde_json::from_slice(&json)?;
 
     let auth = STANDARD.encode(format!("{write_key}:"));
 
     let resp = reqwest::Client::new()
         .post(SEGMENT_API_URL)
         .header("Authorization", format!("Basic {auth}"))
-        .json(track)
+        .json(&track)
         .send()
         .await?;
 

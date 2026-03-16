@@ -814,12 +814,7 @@ async fn main_inner() -> (String, Result<()>) {
                 }
             },
             Command::SendAnalytics { path } => {
-                let result = async {
-                    let json = std::fs::read(&path)?;
-                    let track: fabro_util::telemetry::event::Track = serde_json::from_slice(&json)?;
-                    fabro_util::telemetry::sender::send_to_segment(&track).await
-                }
-                .await;
+                let result = fabro_util::telemetry::sender::send_to_segment(&path).await;
                 let _ = std::fs::remove_file(&path);
                 result?;
             }

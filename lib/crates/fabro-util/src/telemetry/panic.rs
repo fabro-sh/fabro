@@ -52,7 +52,7 @@ pub fn build_panic_event(message: &str) -> Event<'static> {
     );
 
     // Set release to the package version.
-    event.release = Some(env!("CARGO_PKG_VERSION").into());
+    event.release = Some(crate::version::FABRO_VERSION.into());
 
     event
 }
@@ -111,13 +111,7 @@ pub async fn send_panic_to_sentry(path: &Path) -> anyhow::Result<()> {
     let json = std::fs::read(path)?;
     let event: Event<'static> = serde_json::from_slice(&json)?;
 
-    let guard = sentry::init((
-        dsn,
-        sentry::ClientOptions {
-            release: Some(env!("CARGO_PKG_VERSION").into()),
-            ..Default::default()
-        },
-    ));
+    let guard = sentry::init((dsn, sentry::ClientOptions::default()));
 
     sentry::capture_event(event);
 
