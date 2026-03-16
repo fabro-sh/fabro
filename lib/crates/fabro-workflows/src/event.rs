@@ -201,6 +201,10 @@ pub enum WorkflowRunEvent {
     Sandbox {
         event: SandboxEvent,
     },
+    /// Emitted after the sandbox has been initialized (by engine lifecycle).
+    SandboxInitialized {
+        working_directory: String,
+    },
     SetupStarted {
         command_count: usize,
     },
@@ -533,6 +537,11 @@ impl WorkflowRunEvent {
             }
             Self::Agent { .. } => {}
             Self::Sandbox { .. } => {}
+            Self::SandboxInitialized {
+                working_directory, ..
+            } => {
+                info!(working_directory, "Sandbox initialized");
+            }
             Self::ParallelEarlyTermination {
                 reason,
                 completed_count,
@@ -2456,5 +2465,32 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0], "started");
         assert_eq!(events[1], "completed");
+    }
+
+    #[test]
+    fn sandbox_initialized_event_serialization() {
+        let event = WorkflowRunEvent::SandboxInitialized {
+            working_directory: "/workspace/project".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("SandboxInitialized"));
+        assert!(json.contains("/workspace/project"));
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            deserialized,
+            WorkflowRunEvent::SandboxInitialized {
+                working_directory
+            } if working_directory == "/workspace/project"
+        ));
+    }
+
+    #[test]
+    fn flatten_sandbox_initialized() {
+        let event = WorkflowRunEvent::SandboxInitialized {
+            working_directory: "/workspace".to_string(),
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "SandboxInitialized");
+        assert_eq!(fields["working_directory"], "/workspace");
     }
 }

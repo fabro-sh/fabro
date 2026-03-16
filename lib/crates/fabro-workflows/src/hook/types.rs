@@ -28,7 +28,11 @@ impl HookEvent {
     pub fn is_blocking_by_default(self) -> bool {
         matches!(
             self,
-            Self::RunStart | Self::StageStart | Self::EdgeSelected | Self::PreToolUse
+            Self::RunStart
+                | Self::StageStart
+                | Self::EdgeSelected
+                | Self::PreToolUse
+                | Self::SandboxReady
         )
     }
 }
@@ -231,6 +235,8 @@ mod tests {
         assert!(HookEvent::RunStart.is_blocking_by_default());
         assert!(HookEvent::StageStart.is_blocking_by_default());
         assert!(HookEvent::EdgeSelected.is_blocking_by_default());
+        assert!(HookEvent::SandboxReady.is_blocking_by_default());
+        assert!(!HookEvent::SandboxCleanup.is_blocking_by_default());
         assert!(!HookEvent::RunComplete.is_blocking_by_default());
         assert!(!HookEvent::StageFailed.is_blocking_by_default());
         assert!(!HookEvent::CheckpointSaved.is_blocking_by_default());

@@ -829,6 +829,59 @@ pub async fn git_replace_worktree(sandbox: &dyn Sandbox, path: &str, branch: &st
     git_add_worktree(sandbox, path, branch).await
 }
 
+/// Set up git inside a remote sandbox for checkpoint commits.
+/// Returns `(base_sha, branch_name, base_branch)` on success.
+pub async fn setup_remote_git(
+    sandbox: &dyn Sandbox,
+    run_id: &str,
+) -> std::result::Result<(String, String, Option<String>), String> {
+    // Get current branch name before creating the run branch
+    let branch_result = sandbox
+        .exec_command("git rev-parse --abbrev-ref HEAD", 10_000, None, None, None)
+        .await
+        .map_err(|e| format!("git rev-parse --abbrev-ref HEAD failed: {e}"))?;
+    let base_branch = if branch_result.exit_code == 0 {
+        let name = branch_result.stdout.trim().to_string();
+        if name.is_empty() || name == "HEAD" {
+            None
+        } else {
+            Some(name)
+        }
+    } else {
+        None
+    };
+
+    // Get current HEAD as base SHA
+    let sha_result = sandbox
+        .exec_command("git rev-parse HEAD", 10_000, None, None, None)
+        .await
+        .map_err(|e| format!("git rev-parse HEAD failed: {e}"))?;
+    if sha_result.exit_code != 0 {
+        return Err(format!(
+            "git rev-parse HEAD failed (exit {}): {}",
+            sha_result.exit_code, sha_result.stderr
+        ));
+    }
+    let base_sha = sha_result.stdout.trim().to_string();
+
+    let branch_name = format!("{}{run_id}", crate::git::RUN_BRANCH_PREFIX);
+
+    // Create and checkout a run branch
+    let checkout_cmd = format!("git checkout -b {branch_name}");
+    let checkout_result = sandbox
+        .exec_command(&checkout_cmd, 10_000, None, None, None)
+        .await
+        .map_err(|e| format!("git checkout failed: {e}"))?;
+    if checkout_result.exit_code != 0 {
+        return Err(format!(
+            "git checkout -b failed (exit {}): {}",
+            checkout_result.exit_code, checkout_result.stderr
+        ));
+    }
+
+    Ok((base_sha, branch_name, base_branch))
+}
+
 /// Configuration for a workflow run.
 pub struct RunConfig {
     pub run_dir: PathBuf,
@@ -865,6 +918,16 @@ pub struct RunConfig {
     pub asset_globs: Vec<String>,
     /// Workflow directory slug (e.g. "smoke" from `fabro/workflows/smoke/`).
     pub workflow_slug: Option<String>,
+}
+
+/// Configuration for sandbox lifecycle management within the engine.
+pub struct LifecycleConfig {
+    /// Setup commands to run inside the sandbox after initialization.
+    pub setup_commands: Vec<String>,
+    /// Timeout in milliseconds for each setup command.
+    pub setup_command_timeout_ms: u64,
+    /// Devcontainer lifecycle phases and their commands.
+    pub devcontainer_phases: Vec<(String, Vec<fabro_devcontainer::Command>)>,
 }
 
 /// The workflow run execution engine.
@@ -1188,6 +1251,180 @@ impl WorkflowRunEngine {
             .run_internal(graph, config, None, None, None, LoopState::default())
             .await?;
         Ok(outcome)
+    }
+
+    /// Run a workflow with full sandbox lifecycle management.
+    ///
+    /// 1. Initialize sandbox
+    /// 2. Fire `SandboxReady` hook (blocking — can abort run)
+    /// 3. Emit `SandboxInitialized` event
+    /// 4. Remote git setup if `sandbox.is_remote()`
+    /// 5. Run setup commands
+    /// 6. Run devcontainer lifecycle phases
+    /// 7. Execute the workflow graph via `run_internal`
+    ///
+    /// The sandbox is left alive after return so the caller can run retro, PR creation, etc.
+    /// Call `cleanup_sandbox()` when done.
+    pub async fn run_with_lifecycle(
+        &self,
+        graph: &Graph,
+        mut config: RunConfig,
+        lifecycle: LifecycleConfig,
+        checkpoint: Option<&Checkpoint>,
+    ) -> Result<Outcome> {
+        // 1. Initialize sandbox
+        self.services
+            .sandbox
+            .initialize()
+            .await
+            .map_err(|e| FabroError::engine(format!("Failed to initialize sandbox: {e}")))?;
+
+        // 2. Fire SandboxReady hook (blocking — can abort run)
+        {
+            let hook_ctx = HookContext::new(
+                HookEvent::SandboxReady,
+                config.run_id.clone(),
+                graph.name.clone(),
+            );
+            let decision = self.run_hooks(&hook_ctx, None).await;
+            if let HookDecision::Block { reason } = decision {
+                let msg = reason.unwrap_or_else(|| "blocked by SandboxReady hook".into());
+                return Err(FabroError::engine(msg));
+            }
+        }
+
+        // 3. Emit SandboxInitialized event
+        self.services
+            .emitter
+            .emit(&WorkflowRunEvent::SandboxInitialized {
+                working_directory: self.services.sandbox.working_directory().to_string(),
+            });
+
+        // 4. Remote git setup if sandbox is remote and config doesn't already have git info
+        //    (skip when resuming from an existing branch — caller sets run_branch/base_sha)
+        if self.services.sandbox.is_remote() && config.run_branch.is_none() {
+            match setup_remote_git(self.services.sandbox.as_ref(), &config.run_id).await {
+                Ok((base_sha, run_branch, base_branch)) => {
+                    config.git_checkpoint_enabled = true;
+                    config.base_sha = Some(base_sha);
+                    config.run_branch = Some(run_branch);
+                    if config.base_branch.is_none() {
+                        config.base_branch = base_branch;
+                    }
+                    config.meta_branch =
+                        Some(crate::git::MetadataStore::branch_name(&config.run_id));
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Remote git setup failed, running without git checkpoints");
+                    // Leave config.git_checkpoint_enabled as-is (false for remote when no base_sha)
+                }
+            }
+        }
+
+        // 5. Run setup commands
+        if !lifecycle.setup_commands.is_empty() {
+            self.services.emitter.emit(&WorkflowRunEvent::SetupStarted {
+                command_count: lifecycle.setup_commands.len(),
+            });
+            let setup_start = Instant::now();
+            for (index, cmd) in lifecycle.setup_commands.iter().enumerate() {
+                self.services
+                    .emitter
+                    .emit(&WorkflowRunEvent::SetupCommandStarted {
+                        command: cmd.clone(),
+                        index,
+                    });
+                let cmd_start = Instant::now();
+                let result = self
+                    .services
+                    .sandbox
+                    .exec_command(cmd, lifecycle.setup_command_timeout_ms, None, None, None)
+                    .await
+                    .map_err(|e| FabroError::engine(format!("Setup command failed: {e}")))?;
+                let cmd_duration = crate::millis_u64(cmd_start.elapsed());
+                if result.exit_code != 0 {
+                    self.services.emitter.emit(&WorkflowRunEvent::SetupFailed {
+                        command: cmd.clone(),
+                        index,
+                        exit_code: result.exit_code,
+                        stderr: result.stderr.clone(),
+                    });
+                    return Err(FabroError::engine(format!(
+                        "Setup command failed (exit code {}): {cmd}\n{}",
+                        result.exit_code, result.stderr,
+                    )));
+                }
+                self.services
+                    .emitter
+                    .emit(&WorkflowRunEvent::SetupCommandCompleted {
+                        command: cmd.clone(),
+                        index,
+                        exit_code: result.exit_code,
+                        duration_ms: cmd_duration,
+                    });
+            }
+            let setup_duration = crate::millis_u64(setup_start.elapsed());
+            self.services
+                .emitter
+                .emit(&WorkflowRunEvent::SetupCompleted {
+                    duration_ms: setup_duration,
+                });
+        }
+
+        // 6. Run devcontainer lifecycle phases
+        for (phase, commands) in &lifecycle.devcontainer_phases {
+            crate::devcontainer_bridge::run_devcontainer_lifecycle(
+                self.services.sandbox.as_ref(),
+                &self.services.emitter,
+                phase,
+                commands,
+                lifecycle.setup_command_timeout_ms,
+            )
+            .await
+            .map_err(|e| FabroError::engine(e.to_string()))?;
+        }
+
+        // 7. Execute the workflow graph
+        if let Some(cp) = checkpoint {
+            let loop_state = LoopState {
+                node_visits: HashMap::new(),
+                loop_failure_signatures: cp.loop_failure_signatures.clone(),
+                restart_failure_signatures: cp.restart_failure_signatures.clone(),
+            };
+            let (outcome, _context) = self
+                .run_internal(graph, &config, Some(cp), None, None, loop_state)
+                .await?;
+            Ok(outcome)
+        } else {
+            let (outcome, _context) = self
+                .run_internal(graph, &config, None, None, None, LoopState::default())
+                .await?;
+            Ok(outcome)
+        }
+    }
+
+    /// Fire the `SandboxCleanup` hook and optionally clean up the sandbox.
+    ///
+    /// Call this after the retro/PR work is done. The hook fires even when
+    /// `preserve` is true (observability), but the actual cleanup is skipped.
+    pub async fn cleanup_sandbox(
+        &self,
+        run_id: &str,
+        workflow_name: &str,
+        preserve: bool,
+    ) -> std::result::Result<(), String> {
+        // Fire SandboxCleanup hook (non-blocking)
+        let hook_ctx = HookContext::new(
+            HookEvent::SandboxCleanup,
+            run_id.to_string(),
+            workflow_name.to_string(),
+        );
+        let _ = self.run_hooks(&hook_ctx, None).await;
+
+        if !preserve {
+            self.services.sandbox.cleanup().await?;
+        }
+        Ok(())
     }
 
     /// Run a workflow seeded with an existing context. Returns both the outcome
@@ -5426,6 +5663,241 @@ mod tests {
         assert!(
             git_checkpoint_node_ids.contains(&"work"),
             "work node should have a git checkpoint, but found: {git_checkpoint_node_ids:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_with_lifecycle_fires_sandbox_initialized_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = simple_graph();
+
+        let events = Arc::new(std::sync::Mutex::new(Vec::<WorkflowRunEvent>::new()));
+        let events_clone = events.clone();
+        let mut emitter = EventEmitter::new();
+        emitter.on_event(move |event| {
+            events_clone.lock().unwrap().push(event.clone());
+        });
+
+        let engine = WorkflowRunEngine::new(make_registry(), Arc::new(emitter), local_env());
+        let config = RunConfig {
+            run_dir: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "lifecycle-test".into(),
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+            labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
+            git_author: crate::git::GitAuthor::default(),
+            base_branch: None,
+            pull_request_enabled: false,
+            pull_request_draft: false,
+            asset_globs: Vec::new(),
+            workflow_slug: None,
+        };
+        let lifecycle = LifecycleConfig {
+            setup_commands: Vec::new(),
+            setup_command_timeout_ms: 300_000,
+            devcontainer_phases: Vec::new(),
+        };
+        let outcome = engine
+            .run_with_lifecycle(&g, config, lifecycle, None)
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, StageStatus::Success);
+
+        let collected = events.lock().unwrap();
+        let sandbox_init_count = collected
+            .iter()
+            .filter(|e| matches!(e, WorkflowRunEvent::SandboxInitialized { .. }))
+            .count();
+        assert_eq!(
+            sandbox_init_count, 1,
+            "expected exactly one SandboxInitialized event"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_with_lifecycle_runs_setup_commands() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = simple_graph();
+
+        let events = Arc::new(std::sync::Mutex::new(Vec::<WorkflowRunEvent>::new()));
+        let events_clone = events.clone();
+        let mut emitter = EventEmitter::new();
+        emitter.on_event(move |event| {
+            events_clone.lock().unwrap().push(event.clone());
+        });
+
+        let engine = WorkflowRunEngine::new(make_registry(), Arc::new(emitter), local_env());
+        let config = RunConfig {
+            run_dir: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "setup-test".into(),
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+            labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
+            git_author: crate::git::GitAuthor::default(),
+            base_branch: None,
+            pull_request_enabled: false,
+            pull_request_draft: false,
+            asset_globs: Vec::new(),
+            workflow_slug: None,
+        };
+        let lifecycle = LifecycleConfig {
+            setup_commands: vec!["echo hello".to_string()],
+            setup_command_timeout_ms: 300_000,
+            devcontainer_phases: Vec::new(),
+        };
+        let outcome = engine
+            .run_with_lifecycle(&g, config, lifecycle, None)
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, StageStatus::Success);
+
+        let collected = events.lock().unwrap();
+        let setup_started = collected
+            .iter()
+            .any(|e| matches!(e, WorkflowRunEvent::SetupStarted { .. }));
+        let setup_completed = collected
+            .iter()
+            .any(|e| matches!(e, WorkflowRunEvent::SetupCompleted { .. }));
+        assert!(setup_started, "expected SetupStarted event");
+        assert!(setup_completed, "expected SetupCompleted event");
+    }
+
+    #[tokio::test]
+    async fn run_with_lifecycle_setup_failure_aborts_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = simple_graph();
+
+        let engine =
+            WorkflowRunEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let config = RunConfig {
+            run_dir: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "setup-fail-test".into(),
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+            labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
+            git_author: crate::git::GitAuthor::default(),
+            base_branch: None,
+            pull_request_enabled: false,
+            pull_request_draft: false,
+            asset_globs: Vec::new(),
+            workflow_slug: None,
+        };
+        let lifecycle = LifecycleConfig {
+            setup_commands: vec!["exit 1".to_string()],
+            setup_command_timeout_ms: 300_000,
+            devcontainer_phases: Vec::new(),
+        };
+        let result = engine.run_with_lifecycle(&g, config, lifecycle, None).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Setup command failed"),
+            "expected setup failure error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_sandbox_fires_hook() {
+        let engine =
+            WorkflowRunEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        // With preserve=true, cleanup should succeed without error
+        let result = engine.cleanup_sandbox("test-run", "test-wf", true).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn run_with_lifecycle_emits_events_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = simple_graph();
+
+        let event_names = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let names_clone = event_names.clone();
+        let mut emitter = EventEmitter::new();
+        emitter.on_event(move |event| {
+            let name = match event {
+                WorkflowRunEvent::SandboxInitialized { .. } => "SandboxInitialized",
+                WorkflowRunEvent::SetupStarted { .. } => "SetupStarted",
+                WorkflowRunEvent::SetupCompleted { .. } => "SetupCompleted",
+                WorkflowRunEvent::WorkflowRunStarted { .. } => "WorkflowRunStarted",
+                WorkflowRunEvent::WorkflowRunCompleted { .. } => "WorkflowRunCompleted",
+                _ => return,
+            };
+            names_clone.lock().unwrap().push(name.to_string());
+        });
+
+        let engine = WorkflowRunEngine::new(make_registry(), Arc::new(emitter), local_env());
+        let config = RunConfig {
+            run_dir: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "order-test".into(),
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+            labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
+            git_author: crate::git::GitAuthor::default(),
+            base_branch: None,
+            pull_request_enabled: false,
+            pull_request_draft: false,
+            asset_globs: Vec::new(),
+            workflow_slug: None,
+        };
+        let lifecycle = LifecycleConfig {
+            setup_commands: vec!["echo ok".to_string()],
+            setup_command_timeout_ms: 300_000,
+            devcontainer_phases: Vec::new(),
+        };
+        engine
+            .run_with_lifecycle(&g, config, lifecycle, None)
+            .await
+            .unwrap();
+
+        let names = event_names.lock().unwrap();
+        // SandboxInitialized must come before SetupStarted which comes before WorkflowRunStarted
+        let sandbox_idx = names
+            .iter()
+            .position(|n| n == "SandboxInitialized")
+            .expect("SandboxInitialized not found");
+        let setup_idx = names
+            .iter()
+            .position(|n| n == "SetupStarted")
+            .expect("SetupStarted not found");
+        let run_started_idx = names
+            .iter()
+            .position(|n| n == "WorkflowRunStarted")
+            .expect("WorkflowRunStarted not found");
+        assert!(
+            sandbox_idx < setup_idx,
+            "SandboxInitialized ({sandbox_idx}) should come before SetupStarted ({setup_idx})"
+        );
+        assert!(
+            setup_idx < run_started_idx,
+            "SetupStarted ({setup_idx}) should come before WorkflowRunStarted ({run_started_idx})"
         );
     }
 }

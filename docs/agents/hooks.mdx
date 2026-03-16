@@ -94,7 +94,7 @@ Each hook fires on a specific lifecycle event:
 | `edge_selected` | After an edge is chosen for traversal | Yes |
 | `parallel_start` | Before parallel branches fan out | No |
 | `parallel_complete` | After parallel branches merge | No |
-| `sandbox_ready` | After the sandbox environment is created | No |
+| `sandbox_ready` | After the sandbox is initialized and ready | Yes |
 | `sandbox_cleanup` | Before the sandbox is torn down | No |
 | `checkpoint_saved` | After a checkpoint is written to disk | No |
 | `pre_tool_use` | Before an agent tool call executes | Yes |
@@ -137,7 +137,7 @@ sandbox = false
 
 Blocking hooks can affect workflow execution. Non-blocking hooks run for side effects only — their decisions are ignored.
 
-**Blocking by default:** `run_start`, `stage_start`, `edge_selected`, `pre_tool_use`. These events represent decision points where a hook can prevent or redirect execution.
+**Blocking by default:** `run_start`, `stage_start`, `edge_selected`, `pre_tool_use`, `sandbox_ready`. These events represent decision points where a hook can prevent or redirect execution.
 
 **Non-blocking by default:** All other events. Override with `blocking = true` if needed.
 
