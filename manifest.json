@@ -1,0 +1,13 @@
+{
+  "run_id": "01KKTJ3G9KH30VHBYYKA0DCZMM",
+  "workflow_name": "SWEBench",
+  "goal": "Django throws error when different apps with different models have the same name table name.\nDescription\n\t\nError message:\ntable_name: (models.E028) db_table 'table_name' is used by multiple models: base.ModelName, app2.ModelName.\nWe have a Base app that points to a central database and that has its own tables. We then have multiple Apps that talk to their own databases. Some share the same table names.\nWe have used this setup for a while, but after upgrading to Django 2.2 we're getting an error saying we're not allowed 2 apps, with 2 different models to have the same table names. \nIs this correct behavior? We've had to roll back to Django 2.0 for now.\n\n\n\n## Additional Context\n\nRegression in [5d25804eaf81795c7d457e5a2a9f0b9b0989136c], ticket #20098. My opinion is that as soon as the project has a non-empty DATABASE_ROUTERS setting, the error should be turned into a warning, as it becomes difficult to say for sure that it's an error. And then the project can add the warning in SILENCED_SYSTEM_CHECKS.\nI agree with your opinion. Assigning to myself, patch on its way Replying to Claude Paroz: Regression in [5d25804eaf81795c7d457e5a2a9f0b9b0989136c], ticket #20098. My opinion is that as soon as the project has a non-empty DATABASE_ROUTERS setting, the error should be turned into a warning, as it becomes difficult to say for sure that it's an error. And then the project can add the warning in SILENCED_SYSTEM_CHECKS.",
+  "start_time": "2026-03-16T05:32:51.023421Z",
+  "node_count": 5,
+  "edge_count": 4,
+  "run_branch": "fabro/run/01KKTJ3G9KH30VHBYYKA0DCZMM",
+  "base_sha": "470fcfe1200b2102c0cdf91c73b0ed8d925f258a",
+  "base_branch": "main",
+  "workflow_slug": "django__django-11630",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/evals/swe-bench/results/gemini-baseline/runs/django__django-11630"
+}
