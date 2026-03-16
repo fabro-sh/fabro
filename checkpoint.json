@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-03-16T05:34:01.937991Z",
+  "current_node": "setup",
+  "completed_nodes": [
+    "start",
+    "setup"
+  ],
+  "node_retries": {
+    "setup": 1,
+    "start": 1
+  },
+  "context_values": {
+    "current_node": "setup",
+    "command.stderr": "",
+    "graph.goal": "Added model class to app_list context\nDescription\n\t \n\t\t(last modified by Raffaele Salmaso)\n\t \nI need to manipulate the app_list in my custom admin view, and the easiest way to get the result is to have access to the model class (currently the dictionary is a serialized model).\nIn addition I would make the _build_app_dict method public, as it is used by the two views index and app_index.\n",
+    "internal.retry_count.start": 1,
+    "graph.rankdir": "LR",
+    "failure_class": "deterministic",
+    "failure_signature": "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.",
+    "internal.fidelity": "compact",
+    "internal.thread_id": "start",
+    "thread.start.current_node": "setup",
+    "internal.run_id": "01KKTJ36X6TSF5ZHY7X196J6ZR",
+    "current.preamble": "Goal: Added model class to app_list context\nDescription\n\t \n\t\t(last modified by Raffaele Salmaso)\n\t \nI need to manipulate the app_list in my custom admin view, and the easiest way to get the result is to have access to the model class (currently the dictionary is a serialized model).\nIn addition I would make the _build_app_dict method public, as it is used by the two views index and app_index.\n\n",
+    "outcome": "fail",
+    "internal.retry_count.setup": 1,
+    "internal.node_visit_count": 1,
+    "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n"
+  },
+  "logs": [],
+  "node_outcomes": {
+    "setup": {
+      "status": "fail",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n"
+      },
+      "failure": {
+        "message": "Script failed with exit code: 128\n\n## stdout\nfatal: destination path '.' already exists and is not an empty directory.\n",
+        "failure_class": "deterministic"
+      },
+      "duration_ms": 19
+    },
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    }
+  },
+  "next_node_id": "solve",
+  "loop_failure_signatures": {
+    "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.": 1
+  },
+  "node_visits": {
+    "setup": 1,
+    "start": 1
+  }
+}
