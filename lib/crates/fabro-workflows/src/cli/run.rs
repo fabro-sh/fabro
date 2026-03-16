@@ -1244,7 +1244,6 @@ pub async fn run_command(
         .as_ref()
         .map(|c| c.checkpoint.exclude_globs.clone())
         .unwrap_or_default();
-    let pr_cfg = run_cfg.as_ref().and_then(|c| c.pull_request.as_ref());
     let config = RunConfig {
         run_dir: run_dir.clone(),
         cancel_token: None,
@@ -1269,8 +1268,11 @@ pub async fn run_command(
         github_app: github_app.clone(),
         git_author,
         base_branch: detected_base_branch.or(remote_base_branch),
-        pull_request_enabled: pr_cfg.is_some_and(|p| p.enabled),
-        pull_request_draft: pr_cfg.is_none_or(|p| p.draft),
+        pull_request: run_cfg
+            .as_ref()
+            .and_then(|c| c.pull_request.as_ref())
+            .filter(|p| p.enabled)
+            .cloned(),
         asset_globs: run_cfg
             .as_ref()
             .and_then(|c| c.assets.as_ref())
@@ -1416,76 +1418,78 @@ pub async fn run_command(
     // Auto-create PR on successful completion (skip in dry-run mode)
     let mut pushed_branch: Option<String> = None;
     let mut pr_url: Option<String> = None;
-    if !config.pull_request_enabled {
-        debug!("Skipping PR creation: pull_request not enabled in config");
-    } else if dry_run_mode {
-        debug!("Skipping PR creation: dry-run mode");
-    } else if let Err(ref e) = engine_result {
-        debug!(error = %e, "Skipping PR creation: engine returned an error");
-    } else if let Ok(ref outcome) = engine_result {
-        if !matches!(
-            outcome.status,
-            StageStatus::Success | StageStatus::PartialSuccess
-        ) {
-            debug!(status = ?outcome.status, "Skipping PR creation: run status is not success");
-        } else {
-            let diff = tokio::fs::read_to_string(run_dir.join("final.patch"))
-                .await
-                .unwrap_or_default();
-            if let (
-                Some(ref base_branch),
-                Some(ref run_branch),
-                Some(ref creds),
-                Some(ref origin),
-            ) = (
-                &config.base_branch,
-                &config.run_branch,
-                &github_app,
-                &origin_url,
+    if let Some(ref pr_cfg) = config.pull_request {
+        if dry_run_mode {
+            debug!("Skipping PR creation: dry-run mode");
+        } else if let Err(ref e) = engine_result {
+            debug!(error = %e, "Skipping PR creation: engine returned an error");
+        } else if let Ok(ref outcome) = engine_result {
+            if !matches!(
+                outcome.status,
+                StageStatus::Success | StageStatus::PartialSuccess
             ) {
-                // Run branch was pushed during checkpoint commits;
-                // just record it for the PR creation.
-                if config.git_checkpoint_enabled {
-                    pushed_branch = Some(run_branch.clone());
-                }
-
-                match crate::pull_request::maybe_open_pull_request(
-                    creds,
-                    origin,
-                    base_branch,
-                    run_branch,
-                    graph.goal(),
-                    &diff,
-                    &model,
-                    config.pull_request_draft,
-                    &run_dir,
-                )
-                .await
-                {
-                    Ok(Some(record)) => {
-                        emitter.emit(&crate::event::WorkflowRunEvent::PullRequestCreated {
-                            pr_url: record.html_url.clone(),
-                            pr_number: record.number,
-                            draft: config.pull_request_draft,
-                        });
-                        pr_url = Some(record.html_url.clone());
-                        if let Err(e) = record.save(&run_dir.join("pull_request.json")) {
-                            tracing::warn!(error = %e, "Failed to save pull_request.json");
-                        }
+                debug!(status = ?outcome.status, "Skipping PR creation: run status is not success");
+            } else {
+                let diff = tokio::fs::read_to_string(run_dir.join("final.patch"))
+                    .await
+                    .unwrap_or_default();
+                if let (
+                    Some(ref base_branch),
+                    Some(ref run_branch),
+                    Some(ref creds),
+                    Some(ref origin),
+                ) = (
+                    &config.base_branch,
+                    &config.run_branch,
+                    &github_app,
+                    &origin_url,
+                ) {
+                    // Run branch was pushed during checkpoint commits;
+                    // just record it for the PR creation.
+                    if config.git_checkpoint_enabled {
+                        pushed_branch = Some(run_branch.clone());
                     }
-                    Ok(None) => {} // empty diff, logged at DEBUG
-                    Err(e) => {
-                        emitter.emit(&crate::event::WorkflowRunEvent::PullRequestFailed {
-                            error: e.to_string(),
-                        });
-                        eprintln!(
-                            "{} PR creation failed: {e}",
-                            styles.yellow.apply_to("Warning:")
-                        );
+
+                    match crate::pull_request::maybe_open_pull_request(
+                        creds,
+                        origin,
+                        base_branch,
+                        run_branch,
+                        graph.goal(),
+                        &diff,
+                        &model,
+                        pr_cfg,
+                        &run_dir,
+                    )
+                    .await
+                    {
+                        Ok(Some(record)) => {
+                            emitter.emit(&crate::event::WorkflowRunEvent::PullRequestCreated {
+                                pr_url: record.html_url.clone(),
+                                pr_number: record.number,
+                                draft: pr_cfg.draft,
+                            });
+                            pr_url = Some(record.html_url.clone());
+                            if let Err(e) = record.save(&run_dir.join("pull_request.json")) {
+                                tracing::warn!(error = %e, "Failed to save pull_request.json");
+                            }
+                        }
+                        Ok(None) => {} // empty diff, logged at DEBUG
+                        Err(e) => {
+                            emitter.emit(&crate::event::WorkflowRunEvent::PullRequestFailed {
+                                error: e.to_string(),
+                            });
+                            eprintln!(
+                                "{} PR creation failed: {e}",
+                                styles.yellow.apply_to("Warning:")
+                            );
+                        }
                     }
                 }
             }
         }
+    } else {
+        debug!("Skipping PR creation: pull_request not enabled in config");
     }
 
     let outcome = engine_result?;
@@ -1923,8 +1927,7 @@ async fn run_from_branch(
         github_app: github_app.clone(),
         git_author,
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };

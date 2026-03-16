@@ -403,8 +403,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -601,8 +600,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -790,8 +788,7 @@ async fn daytona_parallel_git_branching_e2e() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1170,8 +1167,7 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1313,8 +1309,7 @@ async fn daytona_asset_collection() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1571,8 +1566,7 @@ async fn daytona_git_push_run_branch_to_origin() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };

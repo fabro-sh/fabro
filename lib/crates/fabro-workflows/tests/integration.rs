@@ -205,8 +205,7 @@ async fn end_to_end_linear_pipeline() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -351,8 +350,7 @@ async fn end_to_end_branching_pipeline() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -479,8 +477,7 @@ async fn end_to_end_human_gate_pipeline() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -597,8 +594,7 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -725,8 +721,7 @@ async fn goal_gate_routes_to_retry_target_when_present() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1044,8 +1039,7 @@ async fn retry_on_failure_then_succeed() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1126,8 +1120,7 @@ async fn pipeline_with_many_nodes() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1459,8 +1452,7 @@ async fn smoke_test_with_mock_codergen_backend() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1567,8 +1559,7 @@ async fn end_to_end_parallel_fan_out_fan_in() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1687,8 +1678,7 @@ async fn resume_from_checkpoint_completes_pipeline() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1793,8 +1783,7 @@ async fn resume_from_checkpoint_preserves_goal_gate_outcomes() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1843,8 +1832,7 @@ async fn graph_goal_in_context() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1885,8 +1873,7 @@ async fn event_streaming_lifecycle() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -1971,8 +1958,7 @@ async fn context_flow_between_stages() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -2030,8 +2016,7 @@ async fn tool_handler_e2e() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -2106,8 +2091,7 @@ async fn auto_approve_interviewer_e2e() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -2149,8 +2133,7 @@ async fn codergen_without_backend_simulated() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -2260,8 +2243,7 @@ async fn branching_loop_back_on_failure() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -2351,8 +2333,7 @@ async fn human_gate_loops_back() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -2415,8 +2396,7 @@ async fn scenario_ship_a_feature() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -2507,8 +2487,7 @@ async fn scenario_parallel_expert_review() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -2597,8 +2576,7 @@ async fn scenario_node_retries_on_retry_status() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -2665,8 +2643,7 @@ async fn scenario_loop_restart_resets_context() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -2739,8 +2716,7 @@ async fn scenario_bug_triage_router() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -2804,8 +2780,7 @@ async fn scenario_crash_recovery() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -2919,8 +2894,7 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -3002,8 +2976,7 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -3144,8 +3117,7 @@ async fn conditional_branching_success_fail_paths() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -3203,8 +3175,7 @@ async fn edge_selection_condition_match_wins_over_weight() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -3256,8 +3227,7 @@ async fn edge_selection_weight_breaks_ties() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -3301,8 +3271,7 @@ async fn edge_selection_lexical_tiebreak() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -3365,8 +3334,7 @@ async fn context_updates_visible_across_nodes() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -3415,8 +3383,7 @@ async fn stylesheet_applies_model_override() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -3477,8 +3444,7 @@ async fn custom_handler_registration_and_execution() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -3554,8 +3520,7 @@ async fn integration_smoke_plan_implement_review_done() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -3664,8 +3629,7 @@ async fn manager_loop_runs_child_engine_e2e() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -3805,8 +3769,7 @@ async fn manager_loop_context_flows_e2e() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -3885,8 +3848,7 @@ async fn manager_loop_child_dotfile_e2e() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -4005,8 +3967,7 @@ async fn graph_merge_e2e_through_engine() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -4162,8 +4123,7 @@ async fn fidelity_default_is_compact() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -4225,8 +4185,7 @@ async fn fidelity_graph_default_applied() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -4284,8 +4243,7 @@ async fn fidelity_node_overrides_graph_default() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -4349,8 +4307,7 @@ async fn fidelity_edge_overrides_node_and_graph() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -4404,8 +4361,7 @@ async fn fidelity_full_produces_empty_preamble() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -4469,8 +4425,7 @@ async fn fidelity_truncate_preamble_minimal() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -4547,8 +4502,7 @@ async fn fidelity_summary_low_mode() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -4620,8 +4574,7 @@ async fn fidelity_summary_medium_mode() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -4693,8 +4646,7 @@ async fn fidelity_summary_high_mode() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -4759,8 +4711,7 @@ async fn fidelity_full_sets_thread_id_in_context() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -4836,8 +4787,7 @@ async fn fidelity_full_nodes_share_thread_id() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -4923,8 +4873,7 @@ async fn fidelity_resume_degrades_full_to_summary_high() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -5026,8 +4975,7 @@ async fn fidelity_resume_degrade_only_affects_first_hop() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -5116,8 +5064,7 @@ async fn fidelity_resume_no_degrade_when_not_full() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -5164,8 +5111,7 @@ async fn fidelity_stored_in_checkpoint_context() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -5256,8 +5202,7 @@ async fn fidelity_precedence_multi_node_pipeline() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -5330,8 +5275,7 @@ async fn fidelity_compact_preamble_includes_completed_stages_and_context() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -5412,8 +5356,7 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -5486,8 +5429,7 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -5563,8 +5505,7 @@ async fn fidelity_thread_id_fallback_to_previous_node_in_pipeline() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -5623,8 +5564,7 @@ async fn fidelity_thread_id_from_node_class_in_pipeline() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -5686,8 +5626,7 @@ async fn fidelity_edge_thread_id_override_in_pipeline() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -5750,8 +5689,7 @@ async fn fidelity_full_without_explicit_thread_id_uses_previous_node() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -5824,8 +5762,7 @@ async fn fidelity_from_parsed_dot_pipeline() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -5878,8 +5815,7 @@ async fn fidelity_checkpoint_roundtrip_preserves_fidelity() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -5954,8 +5890,7 @@ async fn fidelity_node_thread_id_overrides_edge_thread_id_in_pipeline() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -6047,8 +5982,7 @@ async fn fidelity_resume_preserves_context_values_across_checkpoint() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -6265,8 +6199,7 @@ mod real_llm {
             github_app: None,
             git_author: fabro_workflows::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -6386,8 +6319,7 @@ mod real_llm {
             github_app: None,
             git_author: fabro_workflows::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -6532,8 +6464,7 @@ mod real_llm {
             github_app: None,
             git_author: fabro_workflows::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -6646,8 +6577,7 @@ mod real_llm {
             github_app: None,
             git_author: fabro_workflows::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -6749,8 +6679,7 @@ async fn human_gate_freeform_only_routes_text() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -6887,8 +6816,7 @@ async fn human_gate_freeform_with_fixed_choice_match() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -7009,8 +6937,7 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -7145,8 +7072,7 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -7261,8 +7187,7 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -7528,8 +7453,7 @@ fn make_run_config(dir: &std::path::Path) -> RunConfig {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     }
@@ -8671,8 +8595,7 @@ async fn arc_e2e_with_real_llm() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -8806,8 +8729,7 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -9012,8 +8934,7 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -9239,8 +9160,7 @@ async fn artifact_pointers_rewritten_for_remote_sandbox() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -9376,8 +9296,7 @@ async fn node_dir_uses_visit_count_on_revisit() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -10357,8 +10276,7 @@ async fn full_pipeline_with_cli_backend_node() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -10495,8 +10413,7 @@ async fn stylesheet_backend_property_routes_to_cli() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -10783,8 +10700,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -10976,8 +10892,7 @@ async fn git_checkpoint_host_writes_shadow_branch() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -11177,8 +11092,7 @@ async fn parallel_git_branching_host_e2e() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -11443,8 +11357,7 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -11828,8 +11741,7 @@ async fn e2e_circuit_breaker_deterministic_self_loop() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -11882,8 +11794,7 @@ async fn e2e_circuit_breaker_custom_limit() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -11929,8 +11840,7 @@ async fn e2e_circuit_breaker_ignores_transient_failures() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -11983,8 +11893,7 @@ async fn e2e_circuit_breaker_different_reasons_separate_counters() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -12030,8 +11939,7 @@ async fn e2e_circuit_breaker_loop_restart() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -12099,8 +12007,7 @@ async fn e2e_failure_signature_persisted_in_context() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -12170,8 +12077,7 @@ async fn e2e_failure_signature_hint_overrides_reason_in_context() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -12233,8 +12139,7 @@ async fn e2e_signature_maps_persist_in_checkpoint() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -12367,8 +12272,7 @@ async fn e2e_circuit_breaker_emits_events_before_abort() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -12441,8 +12345,7 @@ async fn e2e_circuit_breaker_does_not_fire_below_limit() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -12544,8 +12447,7 @@ async fn e2e_circuit_breaker_multi_stage_impl_verify_cycle() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -12648,8 +12550,7 @@ async fn e2e_loop_restart_blocked_for_deterministic_failure() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -12695,8 +12596,7 @@ async fn e2e_loop_restart_blocked_for_structural_failure() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -12742,8 +12642,7 @@ async fn e2e_loop_restart_blocked_for_budget_exhausted_failure() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -12789,8 +12688,7 @@ async fn e2e_loop_restart_blocked_for_canceled_failure() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -12833,8 +12731,7 @@ async fn e2e_loop_restart_blocked_for_compilation_loop_failure() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -12881,8 +12778,7 @@ async fn e2e_loop_restart_allowed_for_transient_infra() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -12992,8 +12888,7 @@ async fn e2e_stall_watchdog_triggers_from_dot_parsed_pipeline() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -13055,8 +12950,7 @@ async fn e2e_stall_watchdog_kept_alive_by_handler_events() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -13108,8 +13002,7 @@ async fn e2e_stall_watchdog_disabled_with_zero_timeout() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -13180,8 +13073,7 @@ async fn e2e_stall_watchdog_with_explicit_timeout_override() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -13318,8 +13210,7 @@ async fn asset_collection_local_sandbox_success() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: vec!["test-results/**".to_string()],
         workflow_slug: None,
     };
@@ -13434,8 +13325,7 @@ async fn asset_collection_local_sandbox_on_failure() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: vec!["test-results/**".to_string()],
         workflow_slug: None,
     };
@@ -13532,8 +13422,7 @@ async fn asset_collection_docker_sandbox() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };
@@ -13608,8 +13497,7 @@ async fn wait_timer_e2e() {
         github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: false,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };

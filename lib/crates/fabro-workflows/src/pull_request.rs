@@ -355,7 +355,7 @@ pub async fn maybe_open_pull_request(
     goal: &str,
     diff: &str,
     model: &str,
-    draft: bool,
+    pr_config: &crate::cli::run_config::PullRequestConfig,
     run_dir: &Path,
 ) -> Result<Option<PullRequestRecord>, String> {
     if diff.is_empty() {
@@ -379,7 +379,7 @@ pub async fn maybe_open_pull_request(
         head_branch,
         &title,
         &body,
-        draft,
+        pr_config.draft,
     )
     .await?;
 
@@ -904,6 +904,10 @@ mod tests {
             app_id: "123".to_string(),
             private_key_pem: "unused".to_string(),
         };
+        let pr_config = crate::cli::run_config::PullRequestConfig {
+            enabled: true,
+            draft: false,
+        };
         let result = maybe_open_pull_request(
             &creds,
             "https://github.com/owner/repo.git",
@@ -912,7 +916,7 @@ mod tests {
             "Fix bug",
             "",
             "claude-sonnet-4-20250514",
-            false,
+            &pr_config,
             tmp.path(),
         )
         .await;
