@@ -1,0 +1,3 @@
+The fix works correctly. The old regex with `^...$` incorrectly matched `'bad\n'` (a username ending with a newline), while the new regex with `\A...\Z` properly rejects it. All valid usernames continue to match.
+
+**Summary of changes:** In `/tmp/django_repo/django/contrib/auth/validators.py`, changed the `regex` attribute in both `ASCIIUsernameValidator` and `UnicodeUsernameValidator` from `r'^[\w.@+-]+$'` to `r'\A[\w.@+-]+\Z'`. This replaces `^` and `$` anchors (which allow a trailing newline due to Python regex behavior) with `\A` and `\Z` anchors (which match only the absolute start and end of the string), preventing usernames with trailing newlines from being accepted.
