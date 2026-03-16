@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-03-16T05:32:47.268473Z",
+  "current_node": "setup",
+  "completed_nodes": [
+    "start",
+    "setup"
+  ],
+  "node_retries": {
+    "setup": 1,
+    "start": 1
+  },
+  "context_values": {
+    "current_node": "setup",
+    "internal.run_id": "01KKTJ3P221FPVHMHG1W9G3V1G",
+    "thread.start.current_node": "setup",
+    "failure_class": "deterministic",
+    "internal.fidelity": "compact",
+    "internal.node_visit_count": 1,
+    "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n",
+    "failure_signature": "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.",
+    "command.stderr": "",
+    "internal.retry_count.start": 1,
+    "internal.retry_count.setup": 1,
+    "current.preamble": "Goal: AlterOrderWithRespectTo() with ForeignKey crash when _order is included in Index().\nDescription\n\t\n\tclass Meta:\n\t\tdb_table = 'look_image'\n\t\torder_with_respect_to = 'look'\n\t\tindexes = [\n\t\t\tmodels.Index(fields=['look', '_order']),\n\t\t\tmodels.Index(fields=['created_at']),\n\t\t\tmodels.Index(fields=['updated_at']),\n\t\t]\nmigrations.CreateModel(\n\t\t\tname='LookImage',\n\t\t\tfields=[\n\t\t\t\t('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),\n\t\t\t\t('look', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='images', to='posts.Look', verbose_name='LOOK')),\n\t\t\t\t('image_url', models.URLField(blank=True, max_length=10000, null=True)),\n\t\t\t\t('image', models.ImageField(max_length=2000, upload_to='')),\n\t\t\t\t('deleted', models.DateTimeField(editable=False, null=True)),\n\t\t\t\t('created_at', models.DateTimeField(auto_now_add=True)),\n\t\t\t\t('updated_at', models.DateTimeField(auto_now=True)),\n\t\t\t],\n\t\t),\n\t\tmigrations.AddIndex(\n\t\t\tmodel_name='lookimage',\n\t\t\tindex=models.Index(fields=['look', '_order'], name='look_image_look_id_eaff30_idx'),\n\t\t),\n\t\tmigrations.AddIndex(\n\t\t\tmodel_name='lookimage',\n\t\t\tindex=models.Index(fields=['created_at'], name='look_image_created_f746cf_idx'),\n\t\t),\n\t\tmigrations.AddIndex(\n\t\t\tmodel_name='lookimage',\n\t\t\tindex=models.Index(fields=['updated_at'], name='look_image_updated_aceaf9_idx'),\n\t\t),\n\t\tmigrations.AlterOrderWithRespectTo(\n\t\t\tname='lookimage',\n\t\t\torder_with_respect_to='look',\n\t\t),\nI added orders_with_respect_to in new model class's Meta class and also made index for '_order' field by combining with other field. And a new migration file based on the model looks like the code above.\nThe problem is operation AlterOrderWithRespectTo after AddIndex of '_order' raising error because '_order' field had not been created yet.\nIt seems to be AlterOrderWithRespectTo has to proceed before AddIndex of '_order'.\n\n\n\n## Additional Context\n\nThanks for this report. IMO order_with_respect_to should be included in CreateModel()'s options, I'm not sure why it is in a separate operation when it refers to a ForeignKey.\nI reproduced the issue adding order_with_respect_to and indexes = [models.Index(fields='_order')] at the same time to an existent model. class Meta: order_with_respect_to = 'foo' indexes = [models.Index(fields='_order')] A small broken test: ​https://github.com/iurisilvio/django/commit/5c6504e67f1d2749efd13daca440dfa54708a4b2 I'll try to fix the issue, but I'm not sure the way to fix it. Can we reorder autodetected migrations?\n​PR\n",
+    "internal.thread_id": "start",
+    "outcome": "fail",
+    "graph.goal": "AlterOrderWithRespectTo() with ForeignKey crash when _order is included in Index().\nDescription\n\t\n\tclass Meta:\n\t\tdb_table = 'look_image'\n\t\torder_with_respect_to = 'look'\n\t\tindexes = [\n\t\t\tmodels.Index(fields=['look', '_order']),\n\t\t\tmodels.Index(fields=['created_at']),\n\t\t\tmodels.Index(fields=['updated_at']),\n\t\t]\nmigrations.CreateModel(\n\t\t\tname='LookImage',\n\t\t\tfields=[\n\t\t\t\t('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),\n\t\t\t\t('look', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='images', to='posts.Look', verbose_name='LOOK')),\n\t\t\t\t('image_url', models.URLField(blank=True, max_length=10000, null=True)),\n\t\t\t\t('image', models.ImageField(max_length=2000, upload_to='')),\n\t\t\t\t('deleted', models.DateTimeField(editable=False, null=True)),\n\t\t\t\t('created_at', models.DateTimeField(auto_now_add=True)),\n\t\t\t\t('updated_at', models.DateTimeField(auto_now=True)),\n\t\t\t],\n\t\t),\n\t\tmigrations.AddIndex(\n\t\t\tmodel_name='lookimage',\n\t\t\tindex=models.Index(fields=['look', '_order'], name='look_image_look_id_eaff30_idx'),\n\t\t),\n\t\tmigrations.AddIndex(\n\t\t\tmodel_name='lookimage',\n\t\t\tindex=models.Index(fields=['created_at'], name='look_image_created_f746cf_idx'),\n\t\t),\n\t\tmigrations.AddIndex(\n\t\t\tmodel_name='lookimage',\n\t\t\tindex=models.Index(fields=['updated_at'], name='look_image_updated_aceaf9_idx'),\n\t\t),\n\t\tmigrations.AlterOrderWithRespectTo(\n\t\t\tname='lookimage',\n\t\t\torder_with_respect_to='look',\n\t\t),\nI added orders_with_respect_to in new model class's Meta class and also made index for '_order' field by combining with other field. And a new migration file based on the model looks like the code above.\nThe problem is operation AlterOrderWithRespectTo after AddIndex of '_order' raising error because '_order' field had not been created yet.\nIt seems to be AlterOrderWithRespectTo has to proceed before AddIndex of '_order'.\n\n\n\n## Additional Context\n\nThanks for this report. IMO order_with_respect_to should be included in CreateModel()'s options, I'm not sure why it is in a separate operation when it refers to a ForeignKey.\nI reproduced the issue adding order_with_respect_to and indexes = [models.Index(fields='_order')] at the same time to an existent model. class Meta: order_with_respect_to = 'foo' indexes = [models.Index(fields='_order')] A small broken test: ​https://github.com/iurisilvio/django/commit/5c6504e67f1d2749efd13daca440dfa54708a4b2 I'll try to fix the issue, but I'm not sure the way to fix it. Can we reorder autodetected migrations?\n​PR",
+    "graph.rankdir": "LR"
+  },
+  "logs": [],
+  "node_outcomes": {
+    "setup": {
+      "status": "fail",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n"
+      },
+      "failure": {
+        "message": "Script failed with exit code: 128\n\n## stdout\nfatal: destination path '.' already exists and is not an empty directory.\n",
+        "failure_class": "deterministic"
+      },
+      "duration_ms": 44
+    },
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    }
+  },
+  "next_node_id": "solve",
+  "loop_failure_signatures": {
+    "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.": 1
+  },
+  "node_visits": {
+    "start": 1,
+    "setup": 1
+  }
+}
