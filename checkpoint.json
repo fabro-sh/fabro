@@ -1,12 +1,14 @@
 {
-  "timestamp": "2026-03-16T03:48:42.828668Z",
-  "current_node": "preflight_compile",
+  "timestamp": "2026-03-16T03:49:00.120307Z",
+  "current_node": "preflight_lint",
   "completed_nodes": [
     "start",
     "toolchain",
-    "preflight_compile"
+    "preflight_compile",
+    "preflight_lint"
   ],
   "node_retries": {
+    "preflight_lint": 1,
     "toolchain": 1,
     "preflight_compile": 1,
     "start": 1
@@ -21,28 +23,21 @@
     "graph.model_stylesheet": "\n            * { backend: api; model: claude-opus-4-6;}\n        ",
     "internal.run_id": "01KKTC2ZKDGYS61ZXPV4ZNYBEF",
     "internal.fidelity": "compact",
-    "current.preamble": "Goal: # Fix: Stage durations always show 0s in PR descriptions\n\n## Context\n\n`extract_stage_durations()` in `retro.rs` builds a HashMap keyed by `node_label` (the human-readable name like `\"Preflight Compile\"`), but all three lookup sites use `node_id` (the DOT graph identifier like `\"preflight_compile\"`). Every lookup misses, falls back to `unwrap_or(0)`, and all stages show `0s`.\n\nThe existing test doesn't catch this because it uses nodes where `node_id == node_label` (both `\"plan\"`).\n\n## Changes\n\n### 1. Fix the key mismatch — `retro.rs:196`\n\nChange `envelope.get(\"node_label\")` to `envelope.get(\"node_id\")` so the HashMap key matches lookups.\n\n```\n- let Some(name) = envelope.get(\"node_label\").and_then(|v| v.as_str()) else {\n+ let Some(name) = envelope.get(\"node_id\").and_then(|v| v.as_str()) else {\n```\n\n**File:** `lib/crates/fabro-workflows/src/retro.rs:196`\n\n### 2. Update existing test to catch this — `retro.rs:529+`\n\nThe test at line 529 uses `\"node_id\": \"plan\", \"node_label\": \"plan\"` for both events. Change the `node_label` values to differ from `node_id` (e.g., `\"Plan\"` and `\"Code\"`) so the test would have failed before the fix.\n\n**File:** `lib/crates/fabro-workflows/src/retro.rs` — `extract_stage_durations_from_progress_jsonl` test\n\n## Verification\n\n1. `cargo test -p fabro-workflows -- extract_stage_durations` — confirm test passes with the fix\n2. `cargo clippy --workspace -- -D warnings` — no new warnings\n3. `cargo test --workspace` — no regressions\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n",
-    "internal.thread_id": "toolchain",
+    "current.preamble": "Goal: # Fix: Stage durations always show 0s in PR descriptions\n\n## Context\n\n`extract_stage_durations()` in `retro.rs` builds a HashMap keyed by `node_label` (the human-readable name like `\"Preflight Compile\"`), but all three lookup sites use `node_id` (the DOT graph identifier like `\"preflight_compile\"`). Every lookup misses, falls back to `unwrap_or(0)`, and all stages show `0s`.\n\nThe existing test doesn't catch this because it uses nodes where `node_id == node_label` (both `\"plan\"`).\n\n## Changes\n\n### 1. Fix the key mismatch — `retro.rs:196`\n\nChange `envelope.get(\"node_label\")` to `envelope.get(\"node_id\")` so the HashMap key matches lookups.\n\n```\n- let Some(name) = envelope.get(\"node_label\").and_then(|v| v.as_str()) else {\n+ let Some(name) = envelope.get(\"node_id\").and_then(|v| v.as_str()) else {\n```\n\n**File:** `lib/crates/fabro-workflows/src/retro.rs:196`\n\n### 2. Update existing test to catch this — `retro.rs:529+`\n\nThe test at line 529 uses `\"node_id\": \"plan\", \"node_label\": \"plan\"` for both events. Change the `node_label` values to differ from `node_id` (e.g., `\"Plan\"` and `\"Code\"`) so the test would have failed before the fix.\n\n**File:** `lib/crates/fabro-workflows/src/retro.rs` — `extract_stage_durations_from_progress_jsonl` test\n\n## Verification\n\n1. `cargo test -p fabro-workflows -- extract_stage_durations` — confirm test passes with the fix\n2. `cargo clippy --workspace -- -D warnings` — no new warnings\n3. `cargo test --workspace` — no regressions\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n- **preflight_compile**: success\n  - Script: `cargo check -q --workspace 2>&1`\n  - Stdout: (empty)\n  - Stderr: (empty)\n",
+    "internal.thread_id": "preflight_compile",
     "thread.toolchain.current_node": "preflight_compile",
     "command.output": "",
     "graph.rankdir": "LR",
     "internal.retry_count.preflight_compile": 1,
-    "current_node": "preflight_compile",
+    "current_node": "preflight_lint",
+    "internal.retry_count.preflight_lint": 1,
     "failure_class": "",
     "failure_signature": "",
-    "internal.node_visit_count": 1
+    "internal.node_visit_count": 1,
+    "thread.preflight_compile.current_node": "preflight_lint"
   },
   "logs": [],
   "node_outcomes": {
-    "toolchain": {
-      "status": "success",
-      "context_updates": {
-        "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n",
-        "command.stderr": ""
-      },
-      "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
-      "duration_ms": 27
-    },
     "preflight_compile": {
       "status": "success",
       "context_updates": {
@@ -55,12 +50,31 @@
     "start": {
       "status": "success",
       "duration_ms": 0
+    },
+    "preflight_lint": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: cargo clippy -q --workspace -- -D warnings 2>&1",
+      "duration_ms": 15534
+    },
+    "toolchain": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+      "duration_ms": 27
     }
   },
-  "next_node_id": "preflight_lint",
+  "next_node_id": "implement",
   "node_visits": {
     "toolchain": 1,
     "preflight_compile": 1,
-    "start": 1
+    "start": 1,
+    "preflight_lint": 1
   }
 }
