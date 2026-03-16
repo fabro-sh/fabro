@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-03-16T12:04:57.114002Z",
+  "current_node": "setup",
+  "completed_nodes": [
+    "start",
+    "setup"
+  ],
+  "node_retries": {
+    "start": 1,
+    "setup": 1
+  },
+  "context_values": {
+    "current.preamble": "Goal: Issue when passing empty lists/arrays to WCS transformations\nThe following should not fail but instead should return empty lists/arrays:\r\n\r\n```\r\nIn [1]: from astropy.wcs import WCS\r\n\r\nIn [2]: wcs = WCS('2MASS_h.fits')\r\n\r\nIn [3]: wcs.wcs_pix2world([], [], 0)\r\n---------------------------------------------------------------------------\r\nInconsistentAxisTypesError                Traceback (most recent call last)\r\n<ipython-input-3-e2cc0e97941a> in <module>()\r\n----> 1 wcs.wcs_pix2world([], [], 0)\r\n\r\n~/Dropbox/Code/Astropy/astropy/astropy/wcs/wcs.py in wcs_pix2world(self, *args, **kwargs)\r\n   1352         return self._array_converter(\r\n   1353             lambda xy, o: self.wcs.p2s(xy, o)['world'],\r\n-> 1354             'output', *args, **kwargs)\r\n   1355     wcs_pix2world.__doc__ = \"\"\"\r\n   1356         Transforms pixel coordinates to world coordinates by doing\r\n\r\n~/Dropbox/Code/Astropy/astropy/astropy/wcs/wcs.py in _array_converter(self, func, sky, ra_dec_order, *args)\r\n   1267                     \"a 1-D array for each axis, followed by an origin.\")\r\n   1268 \r\n-> 1269             return _return_list_of_arrays(axes, origin)\r\n   1270 \r\n   1271         raise TypeError(\r\n\r\n~/Dropbox/Code/Astropy/astropy/astropy/wcs/wcs.py in _return_list_of_arrays(axes, origin)\r\n   1223             if ra_dec_order and sky == 'input':\r\n   1224                 xy = self._denormalize_sky(xy)\r\n-> 1225             output = func(xy, origin)\r\n   1226             if ra_dec_order and sky == 'output':\r\n   1227                 output = self._normalize_sky(output)\r\n\r\n~/Dropbox/Code/Astropy/astropy/astropy/wcs/wcs.py in <lambda>(xy, o)\r\n   1351             raise ValueError(\"No basic WCS settings were created.\")\r\n   1352         return self._array_converter(\r\n-> 1353             lambda xy, o: self.wcs.p2s(xy, o)['world'],\r\n   1354             'output', *args, **kwargs)\r\n   1355     wcs_pix2world.__doc__ = \"\"\"\r\n\r\nInconsistentAxisTypesError: ERROR 4 in wcsp2s() at line 2646 of file cextern/wcslib/C/wcs.c:\r\nncoord and/or nelem inconsistent with the wcsprm.\r\n```\n\n",
+    "internal.node_visit_count": 1,
+    "thread.start.current_node": "setup",
+    "failure_signature": "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.",
+    "graph.rankdir": "LR",
+    "graph.goal": "Issue when passing empty lists/arrays to WCS transformations\nThe following should not fail but instead should return empty lists/arrays:\r\n\r\n```\r\nIn [1]: from astropy.wcs import WCS\r\n\r\nIn [2]: wcs = WCS('2MASS_h.fits')\r\n\r\nIn [3]: wcs.wcs_pix2world([], [], 0)\r\n---------------------------------------------------------------------------\r\nInconsistentAxisTypesError                Traceback (most recent call last)\r\n<ipython-input-3-e2cc0e97941a> in <module>()\r\n----> 1 wcs.wcs_pix2world([], [], 0)\r\n\r\n~/Dropbox/Code/Astropy/astropy/astropy/wcs/wcs.py in wcs_pix2world(self, *args, **kwargs)\r\n   1352         return self._array_converter(\r\n   1353             lambda xy, o: self.wcs.p2s(xy, o)['world'],\r\n-> 1354             'output', *args, **kwargs)\r\n   1355     wcs_pix2world.__doc__ = \"\"\"\r\n   1356         Transforms pixel coordinates to world coordinates by doing\r\n\r\n~/Dropbox/Code/Astropy/astropy/astropy/wcs/wcs.py in _array_converter(self, func, sky, ra_dec_order, *args)\r\n   1267                     \"a 1-D array for each axis, followed by an origin.\")\r\n   1268 \r\n-> 1269             return _return_list_of_arrays(axes, origin)\r\n   1270 \r\n   1271         raise TypeError(\r\n\r\n~/Dropbox/Code/Astropy/astropy/astropy/wcs/wcs.py in _return_list_of_arrays(axes, origin)\r\n   1223             if ra_dec_order and sky == 'input':\r\n   1224                 xy = self._denormalize_sky(xy)\r\n-> 1225             output = func(xy, origin)\r\n   1226             if ra_dec_order and sky == 'output':\r\n   1227                 output = self._normalize_sky(output)\r\n\r\n~/Dropbox/Code/Astropy/astropy/astropy/wcs/wcs.py in <lambda>(xy, o)\r\n   1351             raise ValueError(\"No basic WCS settings were created.\")\r\n   1352         return self._array_converter(\r\n-> 1353             lambda xy, o: self.wcs.p2s(xy, o)['world'],\r\n   1354             'output', *args, **kwargs)\r\n   1355     wcs_pix2world.__doc__ = \"\"\"\r\n\r\nInconsistentAxisTypesError: ERROR 4 in wcsp2s() at line 2646 of file cextern/wcslib/C/wcs.c:\r\nncoord and/or nelem inconsistent with the wcsprm.\r\n```\n",
+    "internal.thread_id": "start",
+    "internal.retry_count.setup": 1,
+    "internal.fidelity": "compact",
+    "internal.retry_count.start": 1,
+    "command.stderr": "",
+    "internal.run_id": "01KKV8D5H2GWEXFMNEWCBNAEFT",
+    "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n",
+    "outcome": "fail",
+    "failure_class": "deterministic",
+    "current_node": "setup"
+  },
+  "logs": [],
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
+    "setup": {
+      "status": "fail",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n"
+      },
+      "failure": {
+        "message": "Script failed with exit code: 128\n\n## stdout\nfatal: destination path '.' already exists and is not an empty directory.\n",
+        "failure_class": "deterministic"
+      },
+      "duration_ms": 20
+    }
+  },
+  "next_node_id": "solve",
+  "loop_failure_signatures": {
+    "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.": 1
+  },
+  "node_visits": {
+    "setup": 1,
+    "start": 1
+  }
+}

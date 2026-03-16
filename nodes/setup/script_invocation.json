@@ -1,0 +1,5 @@
+{
+  "command": "git clone https://github.com/astropy/astropy.git . && git checkout d5bd3f68bb6d5ce3a61bdce9883ee750d1afade5 && python -m pip install -e .[test] --verbose",
+  "language": "shell",
+  "timeout_ms": null
+}
