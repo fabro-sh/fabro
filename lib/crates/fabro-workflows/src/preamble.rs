@@ -124,15 +124,21 @@ fn format_token_count(tokens: i64) -> String {
     }
 }
 
-fn tail_lines(text: &str, max_lines: usize) -> String {
+fn tail_lines(text: &str, max_lines: usize, indent: &str) -> String {
     let all_lines: Vec<&str> = text.lines().collect();
     if all_lines.len() <= max_lines {
-        return text.to_string();
+        return all_lines
+            .iter()
+            .map(|l| format!("{indent}{l}"))
+            .collect::<Vec<_>>()
+            .join("\n");
     }
     let omitted = all_lines.len() - max_lines;
-    let mut result = format!("({omitted} lines omitted)\n");
-    result.push_str(&all_lines[all_lines.len() - max_lines..].join("\n"));
-    result
+    let mut parts = vec![format!("{indent}({omitted} lines omitted)")];
+    for line in &all_lines[all_lines.len() - max_lines..] {
+        parts.push(format!("{indent}{line}"));
+    }
+    parts.join("\n")
 }
 
 /// Returns the set of context keys that are rendered inline under a stage's
@@ -178,10 +184,7 @@ fn render_compact_stage_details(
                 } else {
                     lines.push("  - Stdout:".to_string());
                     lines.push("    ```".to_string());
-                    lines.push(format!(
-                        "    {}",
-                        tail_lines(stdout.trim(), COMPACT_OUTPUT_MAX_LINES)
-                    ));
+                    lines.push(tail_lines(stdout.trim(), COMPACT_OUTPUT_MAX_LINES, "    "));
                     lines.push("    ```".to_string());
                 }
             }
@@ -192,10 +195,7 @@ fn render_compact_stage_details(
                 } else {
                     lines.push("  - Stderr:".to_string());
                     lines.push("    ```".to_string());
-                    lines.push(format!(
-                        "    {}",
-                        tail_lines(stderr.trim(), COMPACT_OUTPUT_MAX_LINES)
-                    ));
+                    lines.push(tail_lines(stderr.trim(), COMPACT_OUTPUT_MAX_LINES, "    "));
                     lines.push("    ```".to_string());
                 }
             }
@@ -257,9 +257,10 @@ fn render_summary_high_stage_section(
                     } else {
                         lines.push("- Stdout:".to_string());
                         lines.push("  ```".to_string());
-                        lines.push(format!(
-                            "  {}",
-                            tail_lines(stdout.trim(), SUMMARY_HIGH_OUTPUT_MAX_LINES)
+                        lines.push(tail_lines(
+                            stdout.trim(),
+                            SUMMARY_HIGH_OUTPUT_MAX_LINES,
+                            "  ",
                         ));
                         lines.push("  ```".to_string());
                     }
@@ -275,9 +276,10 @@ fn render_summary_high_stage_section(
                     } else {
                         lines.push("- Stderr:".to_string());
                         lines.push("  ```".to_string());
-                        lines.push(format!(
-                            "  {}",
-                            tail_lines(stderr.trim(), SUMMARY_HIGH_OUTPUT_MAX_LINES)
+                        lines.push(tail_lines(
+                            stderr.trim(),
+                            SUMMARY_HIGH_OUTPUT_MAX_LINES,
+                            "  ",
                         ));
                         lines.push("  ```".to_string());
                     }
@@ -2109,21 +2111,21 @@ mod tests {
     #[test]
     fn tail_lines_returns_full_text_when_under_limit() {
         let text = "line1\nline2\nline3";
-        let result = tail_lines(text, 5);
+        let result = tail_lines(text, 5, "");
         assert_eq!(result, text);
     }
 
     #[test]
     fn tail_lines_returns_full_text_at_exact_limit() {
         let text = "line1\nline2\nline3";
-        let result = tail_lines(text, 3);
+        let result = tail_lines(text, 3, "");
         assert_eq!(result, text);
     }
 
     #[test]
     fn tail_lines_truncates_and_shows_omission() {
         let text = "line1\nline2\nline3\nline4\nline5";
-        let result = tail_lines(text, 2);
+        let result = tail_lines(text, 2, "");
         assert_eq!(result, "(3 lines omitted)\nline4\nline5");
         assert!(!result.contains("line1"));
         assert!(!result.contains("line2"));
