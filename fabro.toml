@@ -2,7 +2,9 @@ version = 1
 
 [fabro]
 root = "fabro/"
-retro = false
+
+[features]
+retros = false
 
 [pull_request]
 draft = false
@@ -47,3 +49,10 @@ ENV PATH="/root/.bun/bin:${PATH}"
 
 WORKDIR /root
 """
+
+[[hooks]]
+name = "cargo-fmt"
+event = "post_tool_use"
+matcher = "write_file|edit_file|apply_patch"
+command = "cargo fmt"
+blocking = true

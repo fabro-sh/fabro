@@ -186,17 +186,46 @@ If the LLM fails to produce valid JSON, the hook **fails open** (proceeds). This
 
 ## Matchers
 
-The `matcher` field is a regex pattern that filters which stages trigger a hook. It is matched against:
+The `matcher` field is a regex that filters when a hook fires. The regex is tested against five context fields — **if any field matches, the hook fires**. If `matcher` is omitted, the hook fires unconditionally for its event.
 
-- The **node ID** (e.g., `"implement"`, `"test"`)
-- The **handler type** (e.g., `"agent"`, `"command"`, `"prompt"`)
-- The **edge source** and **edge target** (for `edge_selected` events)
-- The **tool name** (for `pre_tool_use`, `post_tool_use`, `post_tool_use_failure` events)
+The five fields are always the same regardless of event, but not all fields are populated for every event:
 
-If any of these fields match the regex, the hook fires. If `matcher` is omitted, the hook fires for all stages of the specified event.
+| Context field | Populated for events |
+|---|---|
+| `node_id` — the graph node ID (e.g., `"implement"`, `"test"`) | `stage_start`, `stage_complete`, `stage_failed`, `stage_retrying`, `checkpoint_saved`, `pre_tool_use`, `post_tool_use`, `post_tool_use_failure` |
+| `handler_type` — the node's handler (e.g., `"agent"`, `"command"`, `"prompt"`) | `stage_start`, `stage_complete`, `stage_failed`, `stage_retrying` |
+| `edge_from` — the source node of the selected edge | `edge_selected` |
+| `edge_to` — the target node of the selected edge | `edge_selected` |
+| `tool_name` — the agent tool being called | `pre_tool_use`, `post_tool_use`, `post_tool_use_failure` |
 
-```toml title="run.toml"
-# Only fire for agent nodes
+Run-level events (`run_start`, `run_complete`, `run_failed`) and sandbox/parallel events have no matchable fields — a matcher on these events will never match, so omit it.
+
+<Note>
+Because the regex is tested against **all populated fields**, a matcher can match unintended fields. For example, `matcher = "write_file"` on a `stage_start` hook would fire if a node happened to be named `"write_file"`. Use anchored patterns like `^write_file$` or scope matchers to tool-specific events to avoid surprises.
+</Note>
+
+### Tool names
+
+For tool-level events, `tool_name` is the agent tool's internal name. The available tool names depend on the LLM provider profile, but the common set is:
+
+| Tool name | Category | Description |
+|---|---|---|
+| `read_file` | read | Read a single file |
+| `read_many_files` | read | Read multiple files (Gemini profile) |
+| `grep` | read | Search file contents with regex |
+| `glob` | read | Find files by glob pattern |
+| `list_dir` | read | List directory contents (Gemini profile) |
+| `write_file` | write | Create or overwrite a file |
+| `edit_file` | write | Apply targeted edits to a file (Anthropic, Gemini profiles) |
+| `apply_patch` | write | Apply a unified diff patch (OpenAI profile) |
+| `shell` | shell | Execute a shell command |
+| `web_search` | shell | Search the web |
+| `web_fetch` | shell | Fetch a URL |
+
+### Examples
+
+```toml
+# Only fire for agent handler nodes
 [[hooks]]
 event = "stage_start"
 command = "./scripts/agent-guard.sh"
@@ -207,6 +236,21 @@ matcher = "^agent$"
 event = "stage_complete"
 command = "./scripts/report-test.sh"
 matcher = "test"
+
+# Auto-format Rust after file writes
+[[hooks]]
+event = "post_tool_use"
+command = "cargo fmt"
+matcher = "write_file|edit_file|apply_patch"
+blocking = true
+
+# Gate shell commands with a guardrail
+[[hooks]]
+event = "pre_tool_use"
+type = "prompt"
+prompt = "Is this shell command safe to run?"
+matcher = "^shell$"
+model = "haiku"
 ```
 
 ## Execution environment
@@ -357,7 +401,6 @@ timeout_ms = 120000
 name = "cargo-fmt"
 event = "post_tool_use"
 command = "cargo fmt"
-matcher = "write_file"
-blocking = false
-sandbox = true
+matcher = "write_file|edit_file|apply_patch"
+blocking = true
 ```
