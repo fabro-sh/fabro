@@ -1,0 +1,29 @@
+diff --git a/lib/crates/fabro-workflows/src/cli/runs.rs b/lib/crates/fabro-workflows/src/cli/runs.rs
+index c83164e..50feafb 100644
+--- a/lib/crates/fabro-workflows/src/cli/runs.rs
++++ b/lib/crates/fabro-workflows/src/cli/runs.rs
+@@ -43,6 +43,10 @@ pub struct RunsListArgs {
+     /// Show all runs, not just running (like docker ps -a)
+     #[arg(short = 'a', long)]
+     pub all: bool,
++
++    /// Only display run IDs
++    #[arg(short = 'q', long)]
++    pub quiet: bool,
+ }
+ 
+ #[derive(Args)]
+@@ -471,6 +475,13 @@ pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
+         },
+     );
+ 
++    if args.quiet {
++        for run in &filtered {
++            println!("{}", run.run_id);
++        }
++        return Ok(());
++    }
++
+     if args.json {
+         println!("{}", serde_json::to_string_pretty(&filtered)?);
+         return Ok(());
