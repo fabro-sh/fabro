@@ -1,0 +1,40 @@
+diff --git a/lib/crates/fabro-exe/src/lib.rs b/lib/crates/fabro-exe/src/lib.rs
+index 74efc9c..bc96ac7 100644
+--- a/lib/crates/fabro-exe/src/lib.rs
++++ b/lib/crates/fabro-exe/src/lib.rs
+@@ -274,7 +274,7 @@ impl ExeSandbox {
+ 
+             // Fall back to init + fetch + checkout if directory is not empty
+             if stderr.contains("not an empty directory")
+-                || stderr.contains("already exists and is not an empty")
++                || stderr.contains("already exists and is not an empty directory")
+             {
+                 let branch = params.branch.as_deref().unwrap_or("main");
+                 let fallback_script = format!(
+@@ -1809,4 +1809,4 @@ mod tests {
+             "glob filter should be properly escaped, got: {inner}",
+         );
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/crates/fabro-ssh/src/lib.rs b/lib/crates/fabro-ssh/src/lib.rs
+index d5c5bac..2c175ff 100644
+--- a/lib/crates/fabro-ssh/src/lib.rs
++++ b/lib/crates/fabro-ssh/src/lib.rs
+@@ -205,7 +205,7 @@ impl SshSandbox {
+ 
+             // Fall back to init + fetch + checkout if directory is not empty
+             if stderr.contains("not an empty directory")
+-                || stderr.contains("already exists and is not an empty")
++                || stderr.contains("already exists and is not an empty directory")
+             {
+                 let branch = params.branch.as_deref().unwrap_or("main");
+                 let fallback_script = format!(
+@@ -1354,4 +1354,4 @@ mod tests {
+         let sandbox = sandbox_with_mock(MockSshRunner::new());
+         assert_eq!(sandbox.resolve_path("/tmp/file.txt"), "/tmp/file.txt");
+     }
+-}
++}
+\ No newline at end of file
