@@ -1,0 +1,13 @@
+{
+  "run_id": "01KKV8RZMG00PMJEH60S957SFP",
+  "workflow_name": "SWEBench",
+  "goal": "ForeignKey's to_field parameter gets the old field's name when renaming a PrimaryKey.\nDescription\n\t\nHaving these two models \nclass ModelA(models.Model):\n\tfield_wrong = models.CharField('field1', max_length=50, primary_key=True) # I'm a Primary key.\nclass ModelB(models.Model):\n\tfield_fk = models.ForeignKey(ModelA, blank=True, null=True, on_delete=models.CASCADE) \n... migrations applyed ...\nthe ModelA.field_wrong field has been renamed ... and Django recognizes the \"renaming\"\n# Primary key renamed\nclass ModelA(models.Model):\n\tfield_fixed = models.CharField('field1', max_length=50, primary_key=True) # I'm a Primary key.\nAttempts to to_field parameter. \nThe to_field points to the old_name (field_typo) and not to the new one (\"field_fixed\")\nclass Migration(migrations.Migration):\n\tdependencies = [\n\t\t('app1', '0001_initial'),\n\t]\n\toperations = [\n\t\tmigrations.RenameField(\n\t\t\tmodel_name='modela',\n\t\t\told_name='field_wrong',\n\t\t\tnew_name='field_fixed',\n\t\t),\n\t\tmigrations.AlterField(\n\t\t\tmodel_name='modelb',\n\t\t\tname='modela',\n\t\t\tfield=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, to='app1.ModelB', to_field='field_wrong'),\n\t\t),\n\t]\n\n\n\n## Additional Context\n\nThanks for this ticket. It looks like a regression in dcdd219ee1e062dc6189f382e0298e0adf5d5ddf, because an AlterField operation wasn't generated in such cases before this change (and I don't think we need it).",
+  "start_time": "2026-03-16T12:08:54.571461Z",
+  "node_count": 5,
+  "edge_count": 4,
+  "run_branch": "fabro/run/01KKV8RZMG00PMJEH60S957SFP",
+  "base_sha": "470fcfe1200b2102c0cdf91c73b0ed8d925f258a",
+  "base_branch": "main",
+  "workflow_slug": "django__django-11910",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/evals/swe-bench/results/gemini-baseline/runs/django__django-11910"
+}
