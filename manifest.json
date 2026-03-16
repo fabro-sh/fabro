@@ -1,0 +1,13 @@
+{
+  "run_id": "01KKTJG2GBA84K3MBZB56GB8GM",
+  "workflow_name": "SWEBench",
+  "goal": "",
+  "start_time": "2026-03-16T05:39:33.596669Z",
+  "node_count": 5,
+  "edge_count": 4,
+  "run_branch": "fabro/run/01KKTJG2GBA84K3MBZB56GB8GM",
+  "base_sha": "470fcfe1200b2102c0cdf91c73b0ed8d925f258a",
+  "base_branch": "main",
+  "workflow_slug": "django__django-15202",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/evals/swe-bench/results/gemini-baseline/runs/django__django-15202"
+}
