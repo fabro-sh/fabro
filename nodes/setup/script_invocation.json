@@ -1,0 +1,5 @@
+{
+  "command": "git clone https://github.com/django/django.git . && git checkout 910ecd1b8df7678f45c3d507dde6bcb1faafa243 && python -m pip install -e .",
+  "language": "shell",
+  "timeout_ms": null
+}
