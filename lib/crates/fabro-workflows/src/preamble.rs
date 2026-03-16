@@ -6,6 +6,9 @@ use crate::context::Context;
 use crate::graph::{is_llm_handler_type, Graph, Node};
 use crate::outcome::Outcome;
 
+const COMPACT_OUTPUT_MAX_LINES: usize = 25;
+const SUMMARY_HIGH_OUTPUT_MAX_LINES: usize = 50;
+
 /// Build a fidelity-appropriate preamble string for non-full context modes.
 ///
 /// The preamble provides prior conversation context to the next LLM session,
@@ -121,6 +124,17 @@ fn format_token_count(tokens: i64) -> String {
     }
 }
 
+fn tail_lines(text: &str, max_lines: usize) -> String {
+    let all_lines: Vec<&str> = text.lines().collect();
+    if all_lines.len() <= max_lines {
+        return text.to_string();
+    }
+    let omitted = all_lines.len() - max_lines;
+    let mut result = format!("({omitted} lines omitted)\n");
+    result.push_str(&all_lines[all_lines.len() - max_lines..].join("\n"));
+    result
+}
+
 /// Returns the set of context keys that are rendered inline under a stage's
 /// handler-specific details, so they can be skipped in the trailing context section.
 fn stage_rendered_keys(node_id: &str, outcome: &Outcome) -> HashSet<String> {
@@ -164,7 +178,10 @@ fn render_compact_stage_details(
                 } else {
                     lines.push("  - Stdout:".to_string());
                     lines.push("    ```".to_string());
-                    lines.push(format!("    {}", stdout.trim()));
+                    lines.push(format!(
+                        "    {}",
+                        tail_lines(stdout.trim(), COMPACT_OUTPUT_MAX_LINES)
+                    ));
                     lines.push("    ```".to_string());
                 }
             }
@@ -175,7 +192,10 @@ fn render_compact_stage_details(
                 } else {
                     lines.push("  - Stderr:".to_string());
                     lines.push("    ```".to_string());
-                    lines.push(format!("    {}", stderr.trim()));
+                    lines.push(format!(
+                        "    {}",
+                        tail_lines(stderr.trim(), COMPACT_OUTPUT_MAX_LINES)
+                    ));
                     lines.push("    ```".to_string());
                 }
             }
@@ -237,7 +257,10 @@ fn render_summary_high_stage_section(
                     } else {
                         lines.push("- Stdout:".to_string());
                         lines.push("  ```".to_string());
-                        lines.push(format!("  {}", stdout.trim()));
+                        lines.push(format!(
+                            "  {}",
+                            tail_lines(stdout.trim(), SUMMARY_HIGH_OUTPUT_MAX_LINES)
+                        ));
                         lines.push("  ```".to_string());
                     }
                 }
@@ -252,7 +275,10 @@ fn render_summary_high_stage_section(
                     } else {
                         lines.push("- Stderr:".to_string());
                         lines.push("  ```".to_string());
-                        lines.push(format!("  {}", stderr.trim()));
+                        lines.push(format!(
+                            "  {}",
+                            tail_lines(stderr.trim(), SUMMARY_HIGH_OUTPUT_MAX_LINES)
+                        ));
                         lines.push("  ```".to_string());
                     }
                 }
@@ -2075,6 +2101,173 @@ mod tests {
         assert!(
             preamble.contains("## Current sub-workflow"),
             "should contain current sub-workflow section header"
+        );
+    }
+
+    // --- tail_lines ---
+
+    #[test]
+    fn tail_lines_returns_full_text_when_under_limit() {
+        let text = "line1\nline2\nline3";
+        let result = tail_lines(text, 5);
+        assert_eq!(result, text);
+    }
+
+    #[test]
+    fn tail_lines_returns_full_text_at_exact_limit() {
+        let text = "line1\nline2\nline3";
+        let result = tail_lines(text, 3);
+        assert_eq!(result, text);
+    }
+
+    #[test]
+    fn tail_lines_truncates_and_shows_omission() {
+        let text = "line1\nline2\nline3\nline4\nline5";
+        let result = tail_lines(text, 2);
+        assert_eq!(result, "(3 lines omitted)\nline4\nline5");
+        assert!(!result.contains("line1"));
+        assert!(!result.contains("line2"));
+        assert!(!result.contains("line3"));
+    }
+
+    #[test]
+    fn compact_command_stage_truncates_long_stdout() {
+        let mut graph = Graph::new("test");
+        let mut build = Node::new("build");
+        build.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("parallelogram".to_string()),
+        );
+        build.attrs.insert(
+            "script".to_string(),
+            AttrValue::String("cargo check".to_string()),
+        );
+        graph.nodes.insert("build".to_string(), build);
+
+        let context = Context::new();
+        let completed_nodes = vec!["build".to_string()];
+        let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
+        let mut outcome = Outcome::success();
+        // Generate >25 lines of stdout
+        let long_stdout: String = (1..=30)
+            .map(|i| format!("output line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        outcome.context_updates.insert(
+            keys::COMMAND_OUTPUT.to_string(),
+            serde_json::json!(long_stdout),
+        );
+        node_outcomes.insert("build".to_string(), outcome);
+
+        let preamble = build_preamble(
+            keys::Fidelity::Compact,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            preamble.contains("(5 lines omitted)"),
+            "should show omission indicator for long stdout, got:\n{preamble}"
+        );
+        assert!(
+            preamble.contains("output line 30"),
+            "should keep last lines"
+        );
+        assert!(
+            !preamble.contains("output line 1\n"),
+            "should drop early lines"
+        );
+    }
+
+    #[test]
+    fn summary_high_command_stage_truncates_long_stdout() {
+        let mut graph = Graph::new("test");
+        let mut build = Node::new("build");
+        build.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("parallelogram".to_string()),
+        );
+        build.attrs.insert(
+            "script".to_string(),
+            AttrValue::String("cargo check".to_string()),
+        );
+        graph.nodes.insert("build".to_string(), build);
+
+        let context = Context::new();
+        let completed_nodes = vec!["build".to_string()];
+        let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
+        let mut outcome = Outcome::success();
+        // Generate >50 lines of stdout
+        let long_stdout: String = (1..=60)
+            .map(|i| format!("output line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        outcome.context_updates.insert(
+            keys::COMMAND_OUTPUT.to_string(),
+            serde_json::json!(long_stdout),
+        );
+        node_outcomes.insert("build".to_string(), outcome);
+
+        let preamble = build_preamble(
+            keys::Fidelity::SummaryHigh,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            preamble.contains("(10 lines omitted)"),
+            "should show omission indicator for long stdout, got:\n{preamble}"
+        );
+        assert!(
+            preamble.contains("output line 60"),
+            "should keep last lines"
+        );
+        assert!(
+            !preamble.contains("output line 1\n"),
+            "should drop early lines"
+        );
+    }
+
+    #[test]
+    fn summary_high_artifact_stdout_not_truncated() {
+        let mut graph = Graph::new("test");
+        let mut build = Node::new("build");
+        build.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("parallelogram".to_string()),
+        );
+        graph.nodes.insert("build".to_string(), build);
+
+        let context = Context::new();
+        let completed_nodes = vec!["build".to_string()];
+        let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
+        let mut outcome = Outcome::success();
+        // Artifact pointer — should NOT be truncated
+        outcome.context_updates.insert(
+            keys::COMMAND_OUTPUT.to_string(),
+            serde_json::json!("file:///tmp/artifacts/stdout.txt"),
+        );
+        node_outcomes.insert("build".to_string(), outcome);
+
+        let preamble = build_preamble(
+            keys::Fidelity::SummaryHigh,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            !preamble.contains("lines omitted"),
+            "artifact pointers should not be truncated, got:\n{preamble}"
+        );
+        assert!(
+            preamble.contains("/tmp/artifacts/stdout.txt"),
+            "should show artifact path"
         );
     }
 
