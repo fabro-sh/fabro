@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-03-16T12:07:48.890781Z",
+  "current_node": "setup",
+  "completed_nodes": [
+    "start",
+    "setup"
+  ],
+  "node_retries": {
+    "start": 1,
+    "setup": 1
+  },
+  "context_values": {
+    "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n",
+    "failure_class": "deterministic",
+    "internal.retry_count.setup": 1,
+    "current.preamble": "Goal: Django throws error when different apps with different models have the same name table name.\nDescription\n\t\nError message:\ntable_name: (models.E028) db_table 'table_name' is used by multiple models: base.ModelName, app2.ModelName.\nWe have a Base app that points to a central database and that has its own tables. We then have multiple Apps that talk to their own databases. Some share the same table names.\nWe have used this setup for a while, but after upgrading to Django 2.2 we're getting an error saying we're not allowed 2 apps, with 2 different models to have the same table names. \nIs this correct behavior? We've had to roll back to Django 2.0 for now.\n\n\n\n## Additional Context\n\nRegression in [5d25804eaf81795c7d457e5a2a9f0b9b0989136c], ticket #20098. My opinion is that as soon as the project has a non-empty DATABASE_ROUTERS setting, the error should be turned into a warning, as it becomes difficult to say for sure that it's an error. And then the project can add the warning in SILENCED_SYSTEM_CHECKS.\nI agree with your opinion. Assigning to myself, patch on its way Replying to Claude Paroz: Regression in [5d25804eaf81795c7d457e5a2a9f0b9b0989136c], ticket #20098. My opinion is that as soon as the project has a non-empty DATABASE_ROUTERS setting, the error should be turned into a warning, as it becomes difficult to say for sure that it's an error. And then the project can add the warning in SILENCED_SYSTEM_CHECKS.\n",
+    "internal.fidelity": "compact",
+    "internal.node_visit_count": 1,
+    "internal.run_id": "01KKV8PZ6ZTM4TXXN53C0PW9CY",
+    "graph.goal": "Django throws error when different apps with different models have the same name table name.\nDescription\n\t\nError message:\ntable_name: (models.E028) db_table 'table_name' is used by multiple models: base.ModelName, app2.ModelName.\nWe have a Base app that points to a central database and that has its own tables. We then have multiple Apps that talk to their own databases. Some share the same table names.\nWe have used this setup for a while, but after upgrading to Django 2.2 we're getting an error saying we're not allowed 2 apps, with 2 different models to have the same table names. \nIs this correct behavior? We've had to roll back to Django 2.0 for now.\n\n\n\n## Additional Context\n\nRegression in [5d25804eaf81795c7d457e5a2a9f0b9b0989136c], ticket #20098. My opinion is that as soon as the project has a non-empty DATABASE_ROUTERS setting, the error should be turned into a warning, as it becomes difficult to say for sure that it's an error. And then the project can add the warning in SILENCED_SYSTEM_CHECKS.\nI agree with your opinion. Assigning to myself, patch on its way Replying to Claude Paroz: Regression in [5d25804eaf81795c7d457e5a2a9f0b9b0989136c], ticket #20098. My opinion is that as soon as the project has a non-empty DATABASE_ROUTERS setting, the error should be turned into a warning, as it becomes difficult to say for sure that it's an error. And then the project can add the warning in SILENCED_SYSTEM_CHECKS.",
+    "current_node": "setup",
+    "failure_signature": "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.",
+    "command.stderr": "",
+    "internal.thread_id": "start",
+    "thread.start.current_node": "setup",
+    "internal.retry_count.start": 1,
+    "outcome": "fail",
+    "graph.rankdir": "LR"
+  },
+  "logs": [],
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
+    "setup": {
+      "status": "fail",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "fatal: destination path '.' already exists and is not an empty directory.\n"
+      },
+      "failure": {
+        "message": "Script failed with exit code: 128\n\n## stdout\nfatal: destination path '.' already exists and is not an empty directory.\n",
+        "failure_class": "deterministic"
+      },
+      "duration_ms": 24
+    }
+  },
+  "next_node_id": "solve",
+  "loop_failure_signatures": {
+    "setup|deterministic|script failed with exit code: <n> ## stdout fatal: destination path '.' already exists and is not an empty directory.": 1
+  },
+  "node_visits": {
+    "start": 1,
+    "setup": 1
+  }
+}
