@@ -1,0 +1,22 @@
+diff --git a/docs/execution/run-configuration.mdx b/docs/execution/run-configuration.mdx
+index 27c330d..82c9473 100644
+--- a/docs/execution/run-configuration.mdx
++++ b/docs/execution/run-configuration.mdx
+@@ -141,6 +141,10 @@ timeout_ms = 60000
+ 
+ Each command must exit with status 0. If any command fails or times out, the run aborts before the workflow starts.
+ 
++<Note>
++When cloning repositories, always clone into a named subdirectory rather than the current directory (`.`). The current working directory may already contain files, causing `git clone` to fail with "destination path already exists and is not an empty directory". Use `git clone <url> <dirname>` instead.
++</Note>
++
+ ### `[sandbox]`
+ 
+ Configure how agent tools (bash, file edits) are executed.
+@@ -488,4 +492,4 @@ Use `--preflight` to validate a run config without executing it:
+ 
+ ```bash
+ fabro run run.toml --preflight
+-```
++```
+\ No newline at end of file
