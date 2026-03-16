@@ -97,28 +97,8 @@ fn spawn_panic_sender(event: Event<'static>) {
         Err(_) => return,
     };
 
-    let event_id = event.event_id;
-    let filename = format!("fabro-panic-{event_id}.json");
-
-    let path = match super::spawn::write_temp_json(&filename, &json) {
-        Some(p) => p,
-        None => return,
-    };
-
-    let path_str = match path.to_str() {
-        Some(s) => s.to_string(),
-        None => return,
-    };
-
-    let exe = match super::spawn::current_exe_str() {
-        Some(e) => e,
-        None => return,
-    };
-
-    super::spawn::spawn_detached(
-        &[&exe, "__send_panic", &path_str],
-        &[("FABRO_TELEMETRY", "off")],
-    );
+    let filename = format!("fabro-panic-{}.json", event.event_id);
+    super::spawn::spawn_fabro_subcommand("__send_panic", &filename, &json);
 }
 
 /// Send a serialized Sentry panic event. Called by the `__send_panic` subcommand.

@@ -27,26 +27,7 @@ fn spawn_sender(track: Track) {
     };
 
     let filename = format!("fabro-event-{}.json", track.message_id);
-
-    let path = match super::spawn::write_temp_json(&filename, &json) {
-        Some(p) => p,
-        None => return,
-    };
-
-    let path_str = match path.to_str() {
-        Some(s) => s.to_string(),
-        None => return,
-    };
-
-    let exe = match super::spawn::current_exe_str() {
-        Some(e) => e,
-        None => return,
-    };
-
-    super::spawn::spawn_detached(
-        &[&exe, "__send_analytics", &path_str],
-        &[("FABRO_TELEMETRY", "off")],
-    );
+    super::spawn::spawn_fabro_subcommand("__send_analytics", &filename, &json);
 }
 
 /// Sends a track event to Segment. Called by the `__send_analytics` subcommand.

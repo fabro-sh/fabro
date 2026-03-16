@@ -1,5 +1,3 @@
-use std::path::Path;
-
 /// Spawn a fully detached subprocess that survives parent exit and terminal close.
 ///
 /// On Unix this uses the double-fork pattern (fork → setsid → close_fd → fork → exec)
@@ -52,9 +50,8 @@ fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)]) {
                     }
 
                     // Replace the process with the target command.
-                    let err = exec::execvp(args[0], args);
-                    // If execvp returns, it failed.
-                    eprintln!("spawn_detached: exec failed: {err}");
+                    let _err = exec::execvp(args[0], args);
+                    // If execvp returns, it failed. stderr is closed so we can't log.
                     std::process::exit(1);
                 }
                 Err(_) => std::process::exit(1),
@@ -88,61 +85,46 @@ fn spawn_detached_windows(args: &[&str], env: &[(&str, &str)]) {
     }
 }
 
-/// Write JSON bytes to a temp file in `~/.fabro/tmp/` and return the path.
-/// Returns `None` if the home directory is unavailable or write fails.
-pub fn write_temp_json(filename: &str, json: &[u8]) -> Option<std::path::PathBuf> {
-    let tmp_dir = dirs::home_dir()?.join(".fabro").join("tmp");
-    std::fs::create_dir_all(&tmp_dir).ok()?;
+/// Serialize data as JSON to a temp file and spawn `fabro <subcommand> <path>`
+/// as a fully detached subprocess. Sets `FABRO_TELEMETRY=off` to prevent recursion.
+///
+/// This is the shared pattern used by both analytics and panic senders.
+/// No-ops silently if the exe path can't be resolved or the temp file can't be written.
+pub fn spawn_fabro_subcommand(subcommand: &str, filename: &str, json: &[u8]) {
+    let tmp_dir = match dirs::home_dir() {
+        Some(h) => h.join(".fabro").join("tmp"),
+        None => return,
+    };
+    if std::fs::create_dir_all(&tmp_dir).is_err() {
+        return;
+    }
     let path = tmp_dir.join(filename);
-    std::fs::write(&path, json).ok()?;
-    Some(path)
-}
+    if std::fs::write(&path, json).is_err() {
+        return;
+    }
 
-/// Build the argv for spawning a `fabro` hidden subcommand with a temp file path.
-pub fn build_fabro_argv<'a>(exe: &'a str, subcommand: &'a str, path: &'a str) -> Vec<&'a str> {
-    vec![exe, subcommand, path]
-}
+    let path_str = match path.to_str() {
+        Some(s) => s.to_string(),
+        None => return,
+    };
 
-/// Convenience: get the current exe as a String, or None.
-pub fn current_exe_str() -> Option<String> {
-    std::env::current_exe()
+    let exe = match std::env::current_exe()
         .ok()
         .and_then(|p| p.to_str().map(|s| s.to_string()))
-}
+    {
+        Some(e) => e,
+        None => return,
+    };
 
-/// Check whether a path exists (for tests / cleanup verification).
-pub fn path_exists(path: &Path) -> bool {
-    path.exists()
+    spawn_detached(
+        &[&exe, subcommand, &path_str],
+        &[("FABRO_TELEMETRY", "off")],
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn write_temp_json_creates_file() {
-        let json = br#"{"test": true}"#;
-        let path = write_temp_json("fabro-test-spawn.json", json).expect("write_temp_json failed");
-        assert!(path.exists());
-        let contents = std::fs::read(&path).unwrap();
-        assert_eq!(contents, json);
-        std::fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn build_fabro_argv_correct() {
-        let argv = build_fabro_argv("/usr/bin/fabro", "__send_analytics", "/tmp/event.json");
-        assert_eq!(
-            argv,
-            vec!["/usr/bin/fabro", "__send_analytics", "/tmp/event.json"]
-        );
-    }
-
-    #[test]
-    fn current_exe_str_returns_some() {
-        // In test context there is always a current exe.
-        assert!(current_exe_str().is_some());
-    }
 
     #[test]
     fn spawn_detached_empty_args_is_noop() {
