@@ -76,6 +76,10 @@ fn is_broken_pipe(message: &str) -> bool {
 
 /// Report a panic to Sentry. Called from the panic hook.
 fn report_panic(info: &PanicHookInfo<'_>) {
+    if SENTRY_DSN.is_none() {
+        return;
+    }
+
     let level = super::telemetry_level();
     if level == TelemetryLevel::Off {
         return;
@@ -103,7 +107,7 @@ fn spawn_panic_sender(event: Event<'static>) {
 
 /// Send a serialized Sentry panic event. Called by the `__send_panic` subcommand.
 ///
-/// Reads the JSON event from `path`, sends it to Sentry, then deletes the file.
+/// Reads the JSON event from `path` and sends it to Sentry.
 /// No-ops if `SENTRY_DSN` was not set at compile time.
 pub async fn send_panic_to_sentry(path: &Path) -> anyhow::Result<()> {
     let dsn = SENTRY_DSN.ok_or_else(|| anyhow::anyhow!("SENTRY_DSN not set at compile time"))?;
