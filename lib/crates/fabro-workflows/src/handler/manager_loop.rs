@@ -95,7 +95,7 @@ impl Handler for SubWorkflowHandler {
         let poll_interval = node
             .attrs
             .get("manager.poll_interval")
-            .and_then(fabro_graphviz::graph::types::AttrValue::as_duration)
+            .and_then(fabro_graphviz::graph::AttrValue::as_duration)
             .unwrap_or_else(|| {
                 let raw = node
                     .attrs
@@ -108,7 +108,7 @@ impl Handler for SubWorkflowHandler {
         let max_cycles = node
             .attrs
             .get("manager.max_cycles")
-            .and_then(fabro_graphviz::graph::types::AttrValue::as_i64)
+            .and_then(fabro_graphviz::graph::AttrValue::as_i64)
             .unwrap_or(1000);
         let max_cycles = u64::try_from(max_cycles).unwrap_or(1000).max(1);
 

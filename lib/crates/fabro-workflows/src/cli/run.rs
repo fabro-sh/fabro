@@ -59,7 +59,7 @@ fn resolve_cli_goal(
 /// Apply goal to the graph from TOML config or CLI flag.
 /// Precedence: CLI `--goal` / `--goal-file` > TOML `goal` > DOT `graph [goal="..."]`.
 fn apply_goal_override(
-    graph: &mut fabro_graphviz::graph::types::Graph,
+    graph: &mut fabro_graphviz::graph::Graph,
     cli_goal: Option<&str>,
     toml_goal: Option<&str>,
 ) {
@@ -68,7 +68,7 @@ fn apply_goal_override(
         debug!(goal = %goal, "overriding graph goal");
         graph.attrs.insert(
             "goal".to_string(),
-            fabro_graphviz::graph::types::AttrValue::String(goal.to_string()),
+            fabro_graphviz::graph::AttrValue::String(goal.to_string()),
         );
     }
 }
@@ -81,7 +81,7 @@ fn resolve_model_provider(
     cli_provider: Option<&str>,
     run_cfg: Option<&WorkflowRunConfig>,
     run_defaults: &RunDefaults,
-    graph: &fabro_graphviz::graph::types::Graph,
+    graph: &fabro_graphviz::graph::Graph,
 ) -> (String, Option<String>) {
     let toml_model = run_cfg
         .and_then(|c| c.llm.as_ref())
@@ -403,13 +403,13 @@ pub async fn run_command(
     apply_goal_override(&mut graph, cli_goal.as_deref(), toml_goal);
 
     // Inline @file references in the (possibly overridden) goal
-    if let Some(fabro_graphviz::graph::types::AttrValue::String(goal)) = graph.attrs.get("goal") {
+    if let Some(fabro_graphviz::graph::AttrValue::String(goal)) = graph.attrs.get("goal") {
         let fallback = dirs::home_dir().map(|h| h.join(".fabro"));
         let resolved = crate::transform::resolve_file_ref(goal, dot_dir, fallback.as_deref());
         if resolved != *goal {
             graph.attrs.insert(
                 "goal".to_string(),
-                fabro_graphviz::graph::types::AttrValue::String(resolved),
+                fabro_graphviz::graph::AttrValue::String(resolved),
             );
         }
     }
@@ -1928,7 +1928,7 @@ fn print_assets(run_dir: &std::path::Path, styles: &Styles) {
 /// a styled check report.
 #[allow(clippy::too_many_arguments)]
 async fn run_preflight(
-    graph: &fabro_graphviz::graph::types::Graph,
+    graph: &fabro_graphviz::graph::Graph,
     run_cfg: &Option<run_config::WorkflowRunConfig>,
     args: &RunArgs,
     run_defaults: &RunDefaults,
@@ -2113,7 +2113,7 @@ async fn run_preflight(
             // Collect all distinct (model, provider) pairs from LLM nodes
             let mut model_providers = std::collections::BTreeSet::new();
             for node in graph.nodes.values() {
-                if !fabro_graphviz::graph::types::is_llm_handler_type(node.handler_type()) {
+                if !fabro_graphviz::graph::is_llm_handler_type(node.handler_type()) {
                     continue;
                 }
                 let node_model = node.model().unwrap_or(&model);
@@ -2501,7 +2501,7 @@ mod tests {
 
     #[test]
     fn apply_goal_override_cli_wins_over_toml() {
-        use fabro_graphviz::graph::types::{AttrValue, Graph};
+        use fabro_graphviz::graph::{AttrValue, Graph};
         let mut graph = Graph::new("test");
         graph.attrs.insert(
             "goal".to_string(),
@@ -2513,7 +2513,7 @@ mod tests {
 
     #[test]
     fn apply_goal_override_toml_wins_over_dot() {
-        use fabro_graphviz::graph::types::{AttrValue, Graph};
+        use fabro_graphviz::graph::{AttrValue, Graph};
         let mut graph = Graph::new("test");
         graph.attrs.insert(
             "goal".to_string(),
@@ -2525,7 +2525,7 @@ mod tests {
 
     #[test]
     fn apply_goal_override_noop_when_none() {
-        use fabro_graphviz::graph::types::{AttrValue, Graph};
+        use fabro_graphviz::graph::{AttrValue, Graph};
         let mut graph = Graph::new("test");
         graph.attrs.insert(
             "goal".to_string(),
@@ -2558,7 +2558,7 @@ mod tests {
 
     #[test]
     fn resolve_model_provider_defaults() {
-        let graph = fabro_graphviz::graph::types::Graph::new("test");
+        let graph = fabro_graphviz::graph::Graph::new("test");
         let defaults = RunDefaults::default();
         let (model, provider) = resolve_model_provider(None, None, None, &defaults, &graph);
         assert_eq!(model, "claude-opus-4-6");
@@ -2568,7 +2568,7 @@ mod tests {
 
     #[test]
     fn resolve_model_provider_cli_overrides_toml() {
-        let graph = fabro_graphviz::graph::types::Graph::new("test");
+        let graph = fabro_graphviz::graph::Graph::new("test");
         let defaults = RunDefaults::default();
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
@@ -2603,8 +2603,8 @@ mod tests {
 
     #[test]
     fn resolve_model_provider_toml_overrides_graph() {
-        use fabro_graphviz::graph::types::AttrValue;
-        let mut graph = fabro_graphviz::graph::types::Graph::new("test");
+        use fabro_graphviz::graph::AttrValue;
+        let mut graph = fabro_graphviz::graph::Graph::new("test");
         graph.attrs.insert(
             "default_model".to_string(),
             AttrValue::String("graph-model".to_string()),
@@ -2642,8 +2642,8 @@ mod tests {
 
     #[test]
     fn resolve_model_provider_graph_attrs_used_as_fallback() {
-        use fabro_graphviz::graph::types::AttrValue;
-        let mut graph = fabro_graphviz::graph::types::Graph::new("test");
+        use fabro_graphviz::graph::AttrValue;
+        let mut graph = fabro_graphviz::graph::Graph::new("test");
         graph.attrs.insert(
             "default_model".to_string(),
             AttrValue::String("gpt-5.2".to_string()),
@@ -2661,7 +2661,7 @@ mod tests {
 
     #[test]
     fn resolve_model_provider_alias_expansion() {
-        let graph = fabro_graphviz::graph::types::Graph::new("test");
+        let graph = fabro_graphviz::graph::Graph::new("test");
         let defaults = RunDefaults::default();
         let (model, provider) = resolve_model_provider(Some("opus"), None, None, &defaults, &graph);
         assert_eq!(model, "claude-opus-4-6");
@@ -2670,7 +2670,7 @@ mod tests {
 
     #[test]
     fn resolve_model_provider_run_defaults_used() {
-        let graph = fabro_graphviz::graph::types::Graph::new("test");
+        let graph = fabro_graphviz::graph::Graph::new("test");
         let defaults = RunDefaults {
             llm: Some(run_config::LlmConfig {
                 model: Some("default-model".to_string()),
@@ -2686,7 +2686,7 @@ mod tests {
 
     #[test]
     fn resolve_model_provider_toml_overrides_run_defaults() {
-        let graph = fabro_graphviz::graph::types::Graph::new("test");
+        let graph = fabro_graphviz::graph::Graph::new("test");
         let defaults = RunDefaults {
             llm: Some(run_config::LlmConfig {
                 model: Some("default-model".to_string()),

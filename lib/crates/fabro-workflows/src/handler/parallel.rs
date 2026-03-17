@@ -312,7 +312,7 @@ impl Handler for ParallelHandler {
         let max_parallel = node
             .attrs
             .get("max_parallel")
-            .and_then(fabro_graphviz::graph::types::AttrValue::as_i64)
+            .and_then(fabro_graphviz::graph::AttrValue::as_i64)
             .unwrap_or(4);
         let max_parallel = usize::try_from(max_parallel).unwrap_or(4).max(1);
 
