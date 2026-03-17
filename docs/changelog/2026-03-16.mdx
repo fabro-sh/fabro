@@ -1,15 +1,36 @@
 ---
-title: "Stream retry resilience"
+title: "Auto-merge for PRs, lifecycle hooks, and styled workflow graphs"
 date: "2026-03-16"
 ---
 
-## Graceful recovery from dropped LLM streams
+## Auto-merge for workflow-created pull requests
 
-When an LLM provider drops a stream mid-response — common under high concurrency with OpenAI — Fabro now retries the same turn up to 3 times instead of failing the entire agent session. Conversation history is preserved across retries, and any partial assistant output from the interrupted stream is replayed so the model can continue where it left off. Previously, a dropped stream would kill the stage and restart from scratch, losing all progress in the current turn.
+Workflows that create pull requests can now automatically merge them once CI passes. Set `auto_merge = true` in your `[pull_request]` config and Fabro enables GitHub's auto-merge via the GraphQL API. You can control the merge method with `merge_strategy` — squash (default), merge, or rebase. If the target repo doesn't have auto-merge enabled in its settings, Fabro warns but doesn't fail the run.
+
+```toml
+[pull_request]
+auto_merge = true
+merge_strategy = "squash"
+```
+
+## Lifecycle hooks fully wired
+
+Three hook events — `stage_retrying`, `parallel_start`, and `parallel_complete` — were previously defined and documented but never actually fired by the engine. They now trigger at the correct points: `stage_retrying` fires immediately before backoff sleep on both error-retry and explicit-retry paths, and the parallel hooks fire when parallel node groups start and finish execution. If you had hooks configured for these events that weren't running, they'll start working now.
 
 ## More
 
+<Accordion title="CLI">
+- Added `-q`/`--quiet` flag to `fabro ps`, mirroring `docker ps -q` — outputs only run IDs, one per line, composable with `-a` (e.g., `fabro ps -qa`)
+</Accordion>
+
 <Accordion title="Improvements">
+- Agent sessions now retry up to 3 times when an LLM provider drops a stream mid-response, preserving conversation history and replaying partial output
+- Workflow graph SVGs from `fabro graph` and the API now render with styled defaults (teal nodes, clean typography) and automatic dark mode support
+- Crash reporting via Sentry — CLI panics are now captured and uploaded in a detached subprocess so they survive parent exit
 - Added `install.md` for AI-agent-driven installation (Claude Code, Codex, etc.), with platform detection, binary download, and PATH setup
 - Installer now skips shell config modification in non-interactive mode, printing the manual PATH export instead
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed stage durations always showing `0s` in PR descriptions due to a key mismatch between node labels and node IDs
 </Accordion>
