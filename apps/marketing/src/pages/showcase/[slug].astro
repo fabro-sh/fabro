@@ -4,36 +4,26 @@ import Nav from "../../components/Nav.astro";
 import Footer from "../../components/Footer.astro";
 import PageScripts from "../../components/PageScripts.astro";
 import { getCollection, render } from "astro:content";
+import { langIcons } from "../../lib/langIcons";
+import { renderWorkflow } from "../../lib/renderWorkflow";
 
 export async function getStaticPaths() {
-  const entries = await getCollection("showcase");
-  return entries.map((entry) => ({
+  const entries = (await getCollection("showcase")).sort(
+    (a, b) => a.data.sortOrder - b.data.sortOrder
+  );
+  return entries.map((entry, i) => ({
     params: { slug: entry.id },
-    props: { entry },
+    props: {
+      entry,
+      prev: entries[i - 1] ?? null,
+      next: entries[i + 1] ?? null,
+    },
   }));
 }
 
-const { entry } = Astro.props;
+const { entry, prev, next } = Astro.props;
 const { Content } = await render(entry);
-
-const langIcons: Record<string, { label: string; path: string }> = {
-  python: {
-    label: "Python",
-    path: "M12 1.5c-5.1 0-4.8 2.2-4.8 2.2l.006 2.3H12.4v.7H4.8S1.5 6.3 1.5 11.5s2.9 5 2.9 5h1.7V14.1s-.1-2.9 2.8-2.9h4.9s2.8 0 2.8-2.7V3.8s.4-2.3-4.6-2.3zm-2.7 1.3a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8zM12 22.5c5.1 0 4.8-2.2 4.8-2.2l-.006-2.3H11.6v-.7h7.6s3.3.4 3.3-4.8-2.9-5-2.9-5h-1.7v2.4s.1 2.9-2.8 2.9h-4.9s-2.8 0-2.8 2.7v4.7s-.4 2.3 4.6 2.3zm2.7-1.3a.9.9 0 1 1 0-1.8.9.9 0 0 1 0 1.8z",
-  },
-  rust: {
-    label: "Rust",
-    path: "M23.8 14.1l-1.2-.7a10.5 10.5 0 0 0 0-2.8l1.2-.7a.3.3 0 0 0 .1-.4 12 12 0 0 0-2.6-4.5.3.3 0 0 0-.4 0l-1.2.7a10.2 10.2 0 0 0-2.4-1.4V3a.3.3 0 0 0-.2-.3 12 12 0 0 0-5.2 0 .3.3 0 0 0-.2.3v1.3a10.2 10.2 0 0 0-2.4 1.4l-1.2-.7a.3.3 0 0 0-.4 0A12 12 0 0 0 5.1 9.5a.3.3 0 0 0 .1.4l1.2.7a10.5 10.5 0 0 0 0 2.8l-1.2.7a.3.3 0 0 0-.1.4 12 12 0 0 0 2.6 4.5.3.3 0 0 0 .4 0l1.2-.7c.7.6 1.5 1 2.4 1.4V21a.3.3 0 0 0 .2.3 12 12 0 0 0 5.2 0 .3.3 0 0 0 .2-.3v-1.3c.9-.4 1.7-.8 2.4-1.4l1.2.7a.3.3 0 0 0 .4 0 12 12 0 0 0 2.6-4.5.3.3 0 0 0-.1-.4zM12 16.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z",
-  },
-  typescript: {
-    label: "TypeScript",
-    path: "M1.5 1.5h21v21h-21V1.5zm10.2 10.2v-1.8h6.6v1.8h-2.3v6.6h-2v-6.6h-2.3zm-4.1-1.8h2v4.5c0 .7.1 1.2.3 1.5.4.5 1 .8 1.8.8s1.4-.3 1.8-.8c.2-.3.3-.8.3-1.5V9.9h2v4.7c0 1-.2 1.8-.7 2.4-.7.9-1.8 1.3-3.4 1.3s-2.7-.4-3.4-1.3c-.5-.6-.7-1.4-.7-2.4V9.9z",
-  },
-  ruby: {
-    label: "Ruby",
-    path: "M20.6 18.3L21.7 5l-5.5 1.5-2.5-3.5-3 3.2L4.3 3 3 10.5l3.3 2-3 4.2 5.3.8 1.5 4 4.5-2.8 4 3.6 2-4z",
-  },
-};
+const workflowSvg = await renderWorkflow(entry.data.workflow);
 ---
 
 <Layout title={`${entry.data.title} — Showcase — Fabro`} description={entry.data.description}>
@@ -50,8 +40,8 @@ const langIcons: Record<string, { label: string; path: string }> = {
           Showcase
         </a>
 
-        <!-- Hero header -->
-        <header class="mb-10 border-b border-navy-800/40 pb-8">
+        <!-- Header -->
+        <header class="mb-10">
           <h1 class="reveal reveal-d1 font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl leading-[1.15]">
             {entry.data.title}
           </h1>
@@ -59,12 +49,12 @@ const langIcons: Record<string, { label: string; path: string }> = {
             {entry.data.description}
           </p>
 
-          {/* Language icons + tags */}
-          <div class="reveal reveal-d2 mt-5 flex flex-wrap items-center gap-3">
+          {/* Compact metadata strip */}
+          <div class="reveal reveal-d2 mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-ice-300/60">
             {entry.data.languages.map((lang) => {
               const icon = langIcons[lang];
               return icon ? (
-                <span class="flex items-center gap-1.5 text-sm text-ice-300/60" title={icon.label}>
+                <span class="flex items-center gap-1.5" title={icon.label}>
                   <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
                     <path d={icon.path} />
                   </svg>
@@ -73,15 +63,17 @@ const langIcons: Record<string, { label: string; path: string }> = {
               ) : null;
             })}
             <span class="text-ice-300/20">|</span>
-            {entry.data.tags.map((tag) => (
-              <span class="rounded-full border border-navy-800 bg-navy-900/60 px-3 py-1 text-xs text-ice-300/70">
-                {tag}
-              </span>
+            {entry.data.models.map((model) => (
+              <span class="font-mono text-xs text-teal-300/70">{model}</span>
+            ))}
+            <span class="text-ice-300/20">|</span>
+            {entry.data.skills.map((skill) => (
+              <span class="font-mono text-xs text-ice-300/50">{skill}</span>
             ))}
           </div>
 
           {/* GitHub button */}
-          <div class="reveal reveal-d3 mt-6">
+          <div class="reveal reveal-d3 mt-5">
             <a
               href={entry.data.github}
               class="inline-flex items-center gap-2 rounded-lg border border-navy-600 px-4 py-2 text-sm font-medium text-ice-300 transition-all hover:border-teal-700/60 hover:text-ice-50"
@@ -94,54 +86,22 @@ const langIcons: Record<string, { label: string; path: string }> = {
           </div>
         </header>
 
-        <!-- Workflow section -->
-        <section class="reveal reveal-d3 mb-10">
+        <!-- Workflow graph — hero element -->
+        <section class="reveal-scale reveal-d3 mb-10">
           <h2 class="font-display text-lg font-semibold text-ice-50 mb-4">Workflow</h2>
-          <div class="rounded-xl border border-navy-800/60 bg-navy-950/80 p-6 overflow-x-auto">
-            <pre class="font-mono text-sm leading-relaxed"><code class="showcase-dot">{entry.data.workflow}</code></pre>
-          </div>
+          <div class="showcase-graph-hero rounded-xl border border-navy-800/60 bg-navy-950/80 p-6 flex items-center justify-center overflow-x-auto" set:html={workflowSvg} />
         </section>
 
-        <!-- Models & Skills -->
-        <section class="reveal reveal-d4 mb-10">
-          <div class="grid gap-6 sm:grid-cols-2">
-            <div>
-              <h2 class="font-display text-lg font-semibold text-ice-50 mb-3">Models</h2>
-              <div class="flex flex-wrap gap-2">
-                {entry.data.models.map((model) => (
-                  <span class="rounded-lg border border-teal-700/30 bg-teal-500/10 px-3 py-1.5 text-xs font-mono text-teal-300">
-                    {model}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div>
-              <h2 class="font-display text-lg font-semibold text-ice-50 mb-3">Skills</h2>
-              <div class="flex flex-wrap gap-2">
-                {entry.data.skills.map((skill) => (
-                  <span class="rounded-lg border border-navy-800 bg-navy-900/60 px-3 py-1.5 text-xs font-mono text-ice-300/70">
-                    {skill}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- Prompt section with expand/collapse -->
+        <!-- Prompt section -->
         <section class="reveal reveal-d4 mb-10">
           <h2 class="font-display text-lg font-semibold text-ice-50 mb-4">Prompt</h2>
           <div class="rounded-xl border border-navy-800/60 bg-navy-900/30 p-6 relative">
             <div
               id="prompt-container"
-              class="grid overflow-hidden transition-[grid-template-rows] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
-              style="grid-template-rows: 0fr;"
+              class="overflow-hidden transition-[max-height] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] max-h-[4.5em]"
             >
-              <div class="min-h-0">
-                <p class="font-mono text-sm leading-relaxed text-ice-300/80 whitespace-pre-wrap">{entry.data.prompt}</p>
-              </div>
+              <p class="font-mono text-sm leading-relaxed text-ice-300/80 whitespace-pre-wrap">{entry.data.prompt}</p>
             </div>
-            <p id="prompt-preview" class="font-mono text-sm leading-relaxed text-ice-300/80 line-clamp-3">{entry.data.prompt}</p>
             <button
               id="prompt-toggle"
               class="group mt-4 flex items-center gap-2 text-sm text-ice-300/50 hover:text-teal-300 transition-colors cursor-pointer"
@@ -165,12 +125,40 @@ const langIcons: Record<string, { label: string; path: string }> = {
         </section>
 
         <!-- About (rendered markdown body) -->
-        <section class="reveal reveal-d5">
+        <section class="reveal-left reveal-d5">
           <h2 class="font-display text-lg font-semibold text-ice-50 mb-4">About</h2>
           <div class="prose">
             <Content />
           </div>
         </section>
+
+        <!-- Prev / Next navigation -->
+        {(prev || next) && (
+          <nav class="reveal reveal-d5 mt-16 grid gap-4 sm:grid-cols-2 border-t border-navy-800/40 pt-8">
+            {prev ? (
+              <a href={`/showcase/${prev.id}`} class="group flex items-start gap-3 rounded-lg border border-navy-800/60 bg-navy-900/30 p-4 transition-all hover:border-teal-700/40">
+                <svg class="mt-0.5 h-5 w-5 shrink-0 text-ice-300/40 transition-transform group-hover:-translate-x-1 group-hover:text-teal-300" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                  <polyline points="15,18 9,12 15,6" />
+                </svg>
+                <div>
+                  <span class="text-xs text-ice-300/40">Previous</span>
+                  <span class="block font-display text-sm font-semibold text-ice-50 group-hover:text-teal-300 transition-colors">{prev.data.title}</span>
+                </div>
+              </a>
+            ) : <div />}
+            {next ? (
+              <a href={`/showcase/${next.id}`} class="group flex items-start gap-3 rounded-lg border border-navy-800/60 bg-navy-900/30 p-4 transition-all hover:border-teal-700/40 text-right sm:flex-row-reverse">
+                <svg class="mt-0.5 h-5 w-5 shrink-0 text-ice-300/40 transition-transform group-hover:translate-x-1 group-hover:text-teal-300" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                  <polyline points="9,6 15,12 9,18" />
+                </svg>
+                <div>
+                  <span class="text-xs text-ice-300/40">Next</span>
+                  <span class="block font-display text-sm font-semibold text-ice-50 group-hover:text-teal-300 transition-colors">{next.data.title}</span>
+                </div>
+              </a>
+            ) : <div />}
+          </nav>
+        )}
       </div>
     </article>
   </main>
@@ -179,19 +167,16 @@ const langIcons: Record<string, { label: string; path: string }> = {
   <PageScripts />
 
   <script>
-    // Prompt expand/collapse toggle
     const toggle = document.getElementById("prompt-toggle");
     const container = document.getElementById("prompt-container");
-    const preview = document.getElementById("prompt-preview");
     const chevron = document.getElementById("prompt-chevron");
     const label = document.getElementById("prompt-toggle-label");
 
-    if (toggle && container && preview && chevron && label) {
+    if (toggle && container && chevron && label) {
       toggle.addEventListener("click", () => {
         const isExpanded = toggle.getAttribute("aria-expanded") === "true";
         toggle.setAttribute("aria-expanded", String(!isExpanded));
-        container.style.gridTemplateRows = isExpanded ? "0fr" : "1fr";
-        preview.style.display = isExpanded ? "" : "none";
+        container.style.maxHeight = isExpanded ? "4.5em" : `${container.scrollHeight}px`;
         chevron.style.transform = isExpanded ? "" : "rotate(180deg)";
         label.textContent = isExpanded ? "Show full prompt" : "Hide prompt";
       });
@@ -200,8 +185,8 @@ const langIcons: Record<string, { label: string; path: string }> = {
 </Layout>
 
 <style>
-  /* Graphviz syntax coloring for workflow code block */
-  .showcase-dot {
-    color: var(--color-ice-300);
+  .showcase-graph-hero :global(svg) {
+    max-width: 100%;
+    height: auto;
   }
 </style>
