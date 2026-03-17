@@ -1237,7 +1237,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-agent"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1270,7 +1270,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-api"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1320,7 +1320,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-beastie"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "core-foundation 0.9.4",
  "libc",
@@ -1329,7 +1329,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-cli"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1382,7 +1382,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-config"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1398,7 +1398,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-db"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "sqlx",
@@ -1409,7 +1409,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-devcontainer"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "insta",
  "reqwest 0.12.28",
@@ -1424,7 +1424,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-exe"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -1443,7 +1443,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-git-storage"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "git2",
  "tempfile",
@@ -1454,7 +1454,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-github"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -1471,7 +1471,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-linear"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "fabro-tracker",
@@ -1485,7 +1485,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-llm"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1514,7 +1514,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-mcp"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -1528,7 +1528,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-openai-oauth"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "axum",
  "base64",
@@ -1546,7 +1546,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-slack"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "fabro-workflows",
  "futures-util",
@@ -1564,7 +1564,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-sprites"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -1581,7 +1581,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-ssh"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -1599,14 +1599,14 @@ dependencies = [
 
 [[package]]
 name = "fabro-tracker"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
 ]
 
 [[package]]
 name = "fabro-types"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "chrono",
  "prettyplease",
@@ -1621,7 +1621,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-util"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -1651,7 +1651,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-workflows"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
