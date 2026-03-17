@@ -360,14 +360,16 @@ pub async fn poll_device_flow(
 
 #[derive(Deserialize)]
 struct CallbackParams {
-    code: String,
+    code: Option<String>,
     state: String,
+    error: Option<String>,
+    error_description: Option<String>,
 }
 
 pub async fn start_callback_server(
     port: u16,
     expected_state: String,
-) -> Result<(u16, tokio::sync::oneshot::Receiver<String>), String> {
+) -> Result<(u16, tokio::sync::oneshot::Receiver<Result<String, String>>), String> {
     let listener = tokio::net::TcpListener::bind(format!("localhost:{port}"))
         .await
         .map_err(|e| format!("Failed to bind callback server: {e}"))?;
@@ -376,7 +378,7 @@ pub async fn start_callback_server(
         .map_err(|e| format!("Failed to get local address: {e}"))?
         .port();
 
-    let (code_tx, code_rx) = tokio::sync::oneshot::channel::<String>();
+    let (code_tx, code_rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
     let code_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(code_tx)));
@@ -393,8 +395,63 @@ pub async fn start_callback_server(
                         axum::response::Html("State mismatch".to_string()),
                     );
                 }
+
+                if let Some(error) = params.error {
+                    let desc = params
+                        .error_description
+                        .unwrap_or_else(|| error.clone());
+                    if let Some(tx) = code_tx.lock().unwrap().take() {
+                        let _ = tx.send(Err(desc.clone()));
+                    }
+                    if let Some(tx) = shutdown_tx.lock().unwrap().take() {
+                        let _ = tx.send(());
+                    }
+                    return (
+                        axum::http::StatusCode::BAD_REQUEST,
+                        axum::response::Html(format!(
+                            r#"<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Authorization Failed</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f6f8fa; color: #1f2328; }}
+  .card {{ text-align: center; background: #fff; border: 1px solid #d1d9e0; border-radius: 12px; padding: 48px; max-width: 420px; }}
+  .icon {{ font-size: 48px; margin-bottom: 16px; }}
+  h1 {{ font-size: 20px; font-weight: 600; margin: 0 0 8px; }}
+  p {{ font-size: 14px; color: #59636e; margin: 0; }}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">&#10007;</div>
+  <h1>Authorization Failed</h1>
+  <p>{desc}</p>
+</div>
+</body>
+</html>"#
+                        )),
+                    );
+                }
+
+                let code = match params.code {
+                    Some(c) => c,
+                    None => {
+                        if let Some(tx) = code_tx.lock().unwrap().take() {
+                            let _ = tx.send(Err("No authorization code received".to_string()));
+                        }
+                        if let Some(tx) = shutdown_tx.lock().unwrap().take() {
+                            let _ = tx.send(());
+                        }
+                        return (
+                            axum::http::StatusCode::BAD_REQUEST,
+                            axum::response::Html("No authorization code received".to_string()),
+                        );
+                    }
+                };
+
                 if let Some(tx) = code_tx.lock().unwrap().take() {
-                    let _ = tx.send(params.code);
+                    let _ = tx.send(Ok(code));
                 }
                 if let Some(tx) = shutdown_tx.lock().unwrap().take() {
                     let _ = tx.send(());
@@ -462,7 +519,8 @@ pub async fn run_browser_flow(issuer: &str, client_id: &str) -> Result<TokenResp
 
     let code = code_rx
         .await
-        .map_err(|_| "Did not receive authorization code".to_string())?;
+        .map_err(|_| "Did not receive authorization code".to_string())?
+        .map_err(|e| format!("Authorization failed: {e}"))?;
 
     let client = reqwest::Client::new();
     exchange_code_for_tokens(
@@ -1004,7 +1062,7 @@ mod tests {
             .await
             .unwrap();
 
-        let code = code_rx.await.unwrap();
+        let code = code_rx.await.unwrap().unwrap();
         assert_eq!(code, "abc");
     }
 
