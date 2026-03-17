@@ -626,10 +626,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         github_app: None,
         git_author: state.git_author.clone(),
         base_branch: None,
-        pull_request_enabled: false,
-        pull_request_draft: true,
-        pull_request_auto_merge: false,
-        pull_request_merge_strategy: fabro_workflows::cli::run_config::MergeStrategy::Squash,
+        pull_request: None,
         asset_globs: Vec::new(),
         workflow_slug: None,
     };

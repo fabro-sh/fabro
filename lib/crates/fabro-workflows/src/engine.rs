@@ -16,6 +16,7 @@ use fabro_git_storage::trailerlink::{self, Trailer};
 use crate::artifact::{offload_large_values, sync_artifacts_to_env, ArtifactStore};
 use crate::asset_snapshot;
 use crate::checkpoint::Checkpoint;
+use crate::cli::run_config::PullRequestConfig;
 use crate::condition::evaluate_condition;
 use crate::context;
 use crate::context::Context;
@@ -857,14 +858,8 @@ pub struct RunConfig {
     pub git_author: crate::git::GitAuthor,
     /// Name of the branch the run was started from (for PR base).
     pub base_branch: Option<String>,
-    /// Whether to auto-create a PR on successful completion.
-    pub pull_request_enabled: bool,
-    /// Whether to create the PR as a draft.
-    pub pull_request_draft: bool,
-    /// Whether to enable GitHub auto-merge on the created PR.
-    pub pull_request_auto_merge: bool,
-    /// Merge strategy for auto-merge (squash, merge, rebase).
-    pub pull_request_merge_strategy: crate::cli::run_config::MergeStrategy,
+    /// Pull request configuration; `None` = disabled.
+    pub pull_request: Option<PullRequestConfig>,
     /// Glob patterns for asset collection. Empty = no asset collection.
     pub asset_globs: Vec<String>,
     /// Workflow directory slug (e.g. "smoke" from `fabro/workflows/smoke/`).
@@ -978,26 +973,6 @@ impl WorkflowRunEngine {
         );
         hook_ctx.failure_reason = Some(error.to_string());
         let _ = self.run_hooks(&hook_ctx, work_dir).await;
-    }
-
-    /// Fire a non-blocking StageRetrying hook.
-    async fn stage_retrying_hook(
-        &self,
-        node: &Node,
-        context: &Context,
-        graph: &Graph,
-        attempt: u32,
-        policy: &RetryPolicy,
-    ) {
-        let mut hook_ctx = HookContext::new(
-            HookEvent::StageRetrying,
-            context.run_id(),
-            graph.name.clone(),
-        );
-        hook_ctx.set_node(node);
-        hook_ctx.attempt = Some(usize::try_from(attempt).unwrap_or(usize::MAX));
-        hook_ctx.max_attempts = Some(usize::try_from(policy.max_attempts).unwrap_or(usize::MAX));
-        let _ = self.run_hooks(&hook_ctx, None).await;
     }
 
     /// Mirror graph-level attributes into the context.
@@ -1149,8 +1124,6 @@ impl WorkflowRunEngine {
                                     .unwrap_or(usize::MAX),
                                 delay_ms: millis_u64(delay),
                             });
-                        self.stage_retrying_hook(node, context, graph, attempt, policy)
-                            .await;
                         tokio::time::sleep(delay).await;
                         continue;
                     }
@@ -1179,8 +1152,6 @@ impl WorkflowRunEngine {
                                     .unwrap_or(usize::MAX),
                                 delay_ms: millis_u64(delay),
                             });
-                        self.stage_retrying_hook(node, context, graph, attempt, policy)
-                            .await;
                         tokio::time::sleep(delay).await;
                         continue;
                     }
@@ -1657,7 +1628,9 @@ impl WorkflowRunEngine {
                 let mut hook_ctx =
                     HookContext::new(HookEvent::StageStart, run_id.clone(), graph.name.clone());
                 hook_ctx.cwd = hook_work_dir.as_ref().map(|p| p.display().to_string());
-                hook_ctx.set_node(node);
+                hook_ctx.node_id = Some(node.id.clone());
+                hook_ctx.node_label = Some(node.label().to_string());
+                hook_ctx.handler_type = node.handler_type().map(String::from);
                 hook_ctx.attempt = Some(1);
                 hook_ctx.max_attempts =
                     Some(usize::try_from(retry_policy.max_attempts).unwrap_or(usize::MAX));
@@ -1793,7 +1766,9 @@ impl WorkflowRunEngine {
                         run_id.clone(),
                         graph.name.clone(),
                     );
-                    hook_ctx.set_node(node);
+                    hook_ctx.node_id = Some(node.id.clone());
+                    hook_ctx.node_label = Some(node.label().to_string());
+                    hook_ctx.handler_type = node.handler_type().map(String::from);
                     hook_ctx.status = Some("fail".into());
                     hook_ctx.failure_reason = outcome.failure_reason().map(String::from);
                     let _ = self.run_hooks(&hook_ctx, hook_work_dir.as_deref()).await;
@@ -1825,7 +1800,9 @@ impl WorkflowRunEngine {
                         run_id.clone(),
                         graph.name.clone(),
                     );
-                    hook_ctx.set_node(node);
+                    hook_ctx.node_id = Some(node.id.clone());
+                    hook_ctx.node_label = Some(node.label().to_string());
+                    hook_ctx.handler_type = node.handler_type().map(String::from);
                     hook_ctx.status = Some(outcome.status.to_string());
                     let _ = self.run_hooks(&hook_ctx, hook_work_dir.as_deref()).await;
                 }
@@ -3047,10 +3024,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3079,10 +3053,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3119,10 +3090,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3155,10 +3123,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3187,10 +3152,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3232,10 +3194,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3301,10 +3260,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3397,10 +3353,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3436,10 +3389,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3470,10 +3420,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3504,10 +3451,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3542,10 +3486,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3708,10 +3649,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3757,10 +3695,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3824,10 +3759,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3894,10 +3826,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3968,10 +3897,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4031,10 +3957,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4095,10 +4018,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4134,10 +4054,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4169,10 +4086,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4203,10 +4117,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4250,10 +4161,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4334,10 +4242,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4371,10 +4276,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4410,10 +4312,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4454,10 +4353,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4496,10 +4392,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4535,10 +4428,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4635,10 +4525,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4850,10 +4737,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4892,10 +4776,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4941,10 +4822,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5030,10 +4908,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5130,10 +5005,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5207,10 +5079,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5271,10 +5140,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5336,10 +5202,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5497,10 +5360,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };

@@ -156,10 +156,7 @@ impl Handler for SubWorkflowHandler {
                 .map(|gs| gs.git_author.clone())
                 .unwrap_or_default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: true,
-            pull_request_auto_merge: false,
-            pull_request_merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
