@@ -259,7 +259,7 @@ impl Handler for AgentHandler {
         let thread_id = context.thread_id();
         let tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>> =
             services.hook_runner.as_ref().map(|hr| {
-                Arc::new(crate::hook::bridge::WorkflowToolHookCallback {
+                Arc::new(fabro_hooks::WorkflowToolHookCallback {
                     hook_runner: Arc::clone(hr),
                     sandbox: Arc::clone(&services.sandbox),
                     run_id: context.run_id(),

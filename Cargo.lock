@@ -1286,6 +1286,7 @@ dependencies = [
  "fabro-exe",
  "fabro-github",
  "fabro-graphviz",
+ "fabro-hooks",
  "fabro-interview",
  "fabro-llm",
  "fabro-retro",
@@ -1391,6 +1392,7 @@ dependencies = [
  "anyhow",
  "dirs",
  "fabro-agent",
+ "fabro-hooks",
  "fabro-mcp",
  "fabro-util",
  "fabro-workflows",
@@ -1503,6 +1505,24 @@ dependencies = [
  "regex",
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "fabro-hooks"
+version = "0.174.0"
+dependencies = [
+ "async-trait",
+ "fabro-agent",
+ "fabro-llm",
+ "mockito",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "tracing",
 ]
 
 [[package]]
@@ -1745,6 +1765,7 @@ dependencies = [
  "fabro-git-storage",
  "fabro-github",
  "fabro-graphviz",
+ "fabro-hooks",
  "fabro-interview",
  "fabro-llm",
  "fabro-mcp",

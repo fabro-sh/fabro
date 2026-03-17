@@ -21,9 +21,9 @@ use crate::context::Context;
 use crate::engine::GitState;
 use crate::error::FabroError;
 use crate::event::EventEmitter;
-use crate::hook::{HookContext, HookDecision, HookRunner};
 use crate::outcome::Outcome;
 use fabro_graphviz::graph::{shape_to_handler_type, Graph, Node};
+use fabro_hooks::{HookContext, HookDecision, HookRunner};
 use fabro_interview::Interviewer;
 
 /// Shared services available to all handlers during execution.

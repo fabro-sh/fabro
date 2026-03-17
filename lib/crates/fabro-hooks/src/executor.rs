@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use fabro_agent::Sandbox;
 
-use super::config::{HookDefinition, HookType, TlsMode};
-use super::types::{HookContext, HookDecision, HookResult, PromptHookResponse};
+use crate::config::{HookDefinition, HookType, TlsMode};
+use crate::types::{HookContext, HookDecision, HookResult, PromptHookResponse};
 
 const HOOK_EVALUATOR_SYSTEM_PROMPT: &str = "You are a hook evaluator for a workflow engine. Given context about a workflow event, evaluate the condition.";
 
@@ -599,8 +599,8 @@ impl HookExecutor for HookExecutorImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hook::config::HookType;
-    use crate::hook::types::HookEvent;
+    use crate::config::HookType;
+    use crate::types::HookEvent;
 
     fn make_context() -> HookContext {
         HookContext::new(HookEvent::StageStart, "run-1".into(), "test-wf".into())

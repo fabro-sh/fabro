@@ -73,7 +73,7 @@ pub struct WorkflowRunConfig {
     pub sandbox: Option<SandboxConfig>,
     pub vars: Option<HashMap<String, String>>,
     #[serde(default)]
-    pub hooks: Vec<crate::hook::HookDefinition>,
+    pub hooks: Vec<fabro_hooks::HookDefinition>,
     #[serde(default)]
     pub checkpoint: CheckpointConfig,
     pub pull_request: Option<PullRequestConfig>,
@@ -164,7 +164,7 @@ pub struct RunDefaults {
     pub pull_request: Option<PullRequestConfig>,
     pub assets: Option<AssetsConfig>,
     #[serde(default)]
-    pub hooks: Vec<crate::hook::HookDefinition>,
+    pub hooks: Vec<fabro_hooks::HookDefinition>,
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerEntry>,
     pub github: Option<GitHubConfig>,
@@ -291,10 +291,10 @@ impl WorkflowRunConfig {
 
         // Merge hooks: defaults as base, workflow overrides by name
         if !defaults.hooks.is_empty() {
-            let base = crate::hook::HookConfig {
+            let base = fabro_hooks::HookConfig {
                 hooks: defaults.hooks.clone(),
             };
-            let overlay = crate::hook::HookConfig {
+            let overlay = fabro_hooks::HookConfig {
                 hooks: std::mem::take(&mut self.hooks),
             };
             self.hooks = base.merge(overlay).hooks;
@@ -427,10 +427,10 @@ impl RunDefaults {
         }
 
         if !overlay.hooks.is_empty() {
-            let base = crate::hook::HookConfig {
+            let base = fabro_hooks::HookConfig {
                 hooks: std::mem::take(&mut self.hooks),
             };
-            let over = crate::hook::HookConfig {
+            let over = fabro_hooks::HookConfig {
                 hooks: overlay.hooks,
             };
             self.hooks = base.merge(over).hooks;
@@ -1711,14 +1711,14 @@ command = "echo done"
 "#;
         let cfg: WorkflowRunConfig = toml::from_str(toml).unwrap();
         assert_eq!(cfg.hooks.len(), 2);
-        assert_eq!(cfg.hooks[0].event, crate::hook::HookEvent::StageStart);
+        assert_eq!(cfg.hooks[0].event, fabro_hooks::HookEvent::StageStart);
         assert_eq!(
             cfg.hooks[0].command.as_deref(),
             Some("./scripts/pre-check.sh")
         );
         assert_eq!(cfg.hooks[0].blocking, Some(true));
         assert_eq!(cfg.hooks[0].sandbox, Some(false));
-        assert_eq!(cfg.hooks[1].event, crate::hook::HookEvent::RunComplete);
+        assert_eq!(cfg.hooks[1].event, fabro_hooks::HookEvent::RunComplete);
     }
 
     #[test]
@@ -2399,9 +2399,9 @@ command = "echo done"
         )
         .unwrap();
         let defaults = RunDefaults {
-            hooks: vec![crate::hook::HookDefinition {
+            hooks: vec![fabro_hooks::HookDefinition {
                 name: Some("default-hook".into()),
-                event: crate::hook::HookEvent::RunStart,
+                event: fabro_hooks::HookEvent::RunStart,
                 command: Some("echo start".into()),
                 hook_type: None,
                 matcher: None,
@@ -2433,9 +2433,9 @@ command = "echo from-workflow"
         )
         .unwrap();
         let defaults = RunDefaults {
-            hooks: vec![crate::hook::HookDefinition {
+            hooks: vec![fabro_hooks::HookDefinition {
                 name: Some("shared".into()),
-                event: crate::hook::HookEvent::RunStart,
+                event: fabro_hooks::HookEvent::RunStart,
                 command: Some("echo from-default".into()),
                 hook_type: None,
                 matcher: None,
@@ -2447,7 +2447,7 @@ command = "echo from-workflow"
         };
         cfg.apply_defaults(&defaults);
         assert_eq!(cfg.hooks.len(), 1);
-        assert_eq!(cfg.hooks[0].event, crate::hook::HookEvent::RunComplete);
+        assert_eq!(cfg.hooks[0].event, fabro_hooks::HookEvent::RunComplete);
     }
 
     #[test]

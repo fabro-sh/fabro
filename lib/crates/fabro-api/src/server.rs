@@ -104,7 +104,7 @@ pub struct AppState {
     pub db: sqlx::SqlitePool,
     max_concurrent_runs: usize,
     scheduler_notify: tokio::sync::Notify,
-    pub hooks: Vec<fabro_workflows::hook::HookDefinition>,
+    pub hooks: Vec<fabro_hooks::HookDefinition>,
     git_author: fabro_workflows::git::GitAuthor,
     pub sessions: crate::sessions::SessionStore,
     llm_client: tokio::sync::OnceCell<fabro_llm::client::Client>,
@@ -404,7 +404,7 @@ pub fn create_app_state_with_options(
     dry_run: bool,
     max_concurrent_runs: usize,
     git_author: fabro_workflows::git::GitAuthor,
-    hooks: Vec<fabro_workflows::hook::HookDefinition>,
+    hooks: Vec<fabro_hooks::HookDefinition>,
 ) -> Arc<AppState> {
     Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
@@ -586,10 +586,10 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
 
     // Wire up hook runner from server config
     if !state.hooks.is_empty() {
-        let hook_config = fabro_workflows::hook::HookConfig {
+        let hook_config = fabro_hooks::HookConfig {
             hooks: state.hooks.clone(),
         };
-        let runner = fabro_workflows::hook::HookRunner::new(hook_config);
+        let runner = fabro_hooks::HookRunner::new(hook_config);
         engine.set_hook_runner(std::sync::Arc::new(runner));
     }
 

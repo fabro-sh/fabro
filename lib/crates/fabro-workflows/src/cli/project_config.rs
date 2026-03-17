@@ -8,7 +8,7 @@ use super::run_config::{
     AssetsConfig, CheckpointConfig, GitHubConfig, LlmConfig, McpServerEntry, PullRequestConfig,
     RunDefaults, SandboxConfig, SetupConfig,
 };
-use crate::hook::HookDefinition;
+use fabro_hooks::HookDefinition;
 
 const CONFIG_FILENAME: &str = "fabro.toml";
 

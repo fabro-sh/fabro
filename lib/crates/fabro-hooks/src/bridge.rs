@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use fabro_agent::{Sandbox, ToolHookCallback, ToolHookDecision};
 
-use super::runner::HookRunner;
-use super::types::{HookContext, HookDecision, HookEvent};
+use crate::runner::HookRunner;
+use crate::types::{HookContext, HookDecision, HookEvent};
 
 /// Bridge between the workflow hook system and the agent tool-hook callback.
 ///
@@ -72,9 +72,9 @@ impl ToolHookCallback for WorkflowToolHookCallback {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hook::config::{HookConfig, HookDefinition};
-    use crate::hook::executor::HookExecutor;
-    use crate::hook::types::{HookContext, HookResult};
+    use crate::config::{HookConfig, HookDefinition};
+    use crate::executor::HookExecutor;
+    use crate::types::{HookContext, HookResult};
     use std::path::Path;
     use std::sync::Mutex;
 

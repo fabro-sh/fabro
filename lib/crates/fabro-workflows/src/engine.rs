@@ -23,11 +23,11 @@ use crate::context::Context;
 use crate::error::{FabroError, FailureClass, FailureSignature, Result};
 use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::handler::{EngineServices, HandlerRegistry};
-use crate::hook::{HookContext, HookDecision, HookEvent, HookRunner};
 use crate::millis_u64;
 use crate::outcome::{Outcome, StageStatus};
 use crate::preamble::build_preamble;
 use fabro_graphviz::graph::{Edge, Graph, Node};
+use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_interview::Interviewer;
 
 /// Classify the failure mode of a completed outcome.

@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 
-use super::types::HookEvent;
+use crate::types::HookEvent;
 
 /// TLS verification mode for HTTP hooks.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default, Serialize)]

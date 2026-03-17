@@ -7404,14 +7404,14 @@ fn subgraph_without_label_no_class_derived() {
 // ---------------------------------------------------------------------------
 
 /// Helper: create a WorkflowRunEngine with hooks configured from HookDefinitions.
-fn engine_with_hooks(hooks: Vec<fabro_workflows::hook::HookDefinition>) -> WorkflowRunEngine {
+fn engine_with_hooks(hooks: Vec<fabro_hooks::HookDefinition>) -> WorkflowRunEngine {
     let registry = make_linear_registry();
     let emitter = Arc::new(EventEmitter::new());
     let sandbox = local_env();
     let mut engine = WorkflowRunEngine::new(registry, emitter, sandbox);
     if !hooks.is_empty() {
-        let config = fabro_workflows::hook::HookConfig { hooks };
-        let runner = fabro_workflows::hook::HookRunner::new(config);
+        let config = fabro_hooks::HookConfig { hooks };
+        let runner = fabro_hooks::HookRunner::new(config);
         engine.set_hook_runner(Arc::new(runner));
     }
     engine
@@ -7419,7 +7419,7 @@ fn engine_with_hooks(hooks: Vec<fabro_workflows::hook::HookDefinition>) -> Workf
 
 /// Helper: create a WorkflowRunEngine with hooks and event capture.
 fn engine_with_hooks_and_events(
-    hooks: Vec<fabro_workflows::hook::HookDefinition>,
+    hooks: Vec<fabro_hooks::HookDefinition>,
 ) -> (
     WorkflowRunEngine,
     Arc<std::sync::Mutex<Vec<WorkflowRunEvent>>>,
@@ -7430,8 +7430,8 @@ fn engine_with_hooks_and_events(
     let sandbox = local_env();
     let mut engine = WorkflowRunEngine::new(registry, Arc::new(emitter), sandbox);
     if !hooks.is_empty() {
-        let config = fabro_workflows::hook::HookConfig { hooks };
-        let runner = fabro_workflows::hook::HookRunner::new(config);
+        let config = fabro_hooks::HookConfig { hooks };
+        let runner = fabro_hooks::HookRunner::new(config);
         engine.set_hook_runner(Arc::new(runner));
     }
     (engine, events)
@@ -7459,11 +7459,8 @@ fn make_run_config(dir: &std::path::Path) -> RunConfig {
     }
 }
 
-fn make_hook(
-    event: fabro_workflows::hook::HookEvent,
-    command: &str,
-) -> fabro_workflows::hook::HookDefinition {
-    fabro_workflows::hook::HookDefinition {
+fn make_hook(event: fabro_hooks::HookEvent, command: &str) -> fabro_hooks::HookDefinition {
+    fabro_hooks::HookDefinition {
         name: None,
         event,
         command: Some(command.into()),
@@ -7516,10 +7513,7 @@ fn branching_dot() -> &'static str {
 
 #[tokio::test]
 async fn hook_run_start_proceed_allows_run() {
-    let hooks = vec![make_hook(
-        fabro_workflows::hook::HookEvent::RunStart,
-        "exit 0",
-    )];
+    let hooks = vec![make_hook(fabro_hooks::HookEvent::RunStart, "exit 0")];
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -7531,10 +7525,7 @@ async fn hook_run_start_proceed_allows_run() {
 
 #[tokio::test]
 async fn hook_run_start_block_prevents_run() {
-    let hooks = vec![make_hook(
-        fabro_workflows::hook::HookEvent::RunStart,
-        "exit 1",
-    )];
+    let hooks = vec![make_hook(fabro_hooks::HookEvent::RunStart, "exit 1")];
     let (engine, events) = engine_with_hooks_and_events(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -7570,7 +7561,7 @@ async fn hook_run_start_block_prevents_run() {
 async fn hook_run_start_block_with_json_reason() {
     // Hook that outputs JSON with a reason
     let hooks = vec![make_hook(
-        fabro_workflows::hook::HookEvent::RunStart,
+        fabro_hooks::HookEvent::RunStart,
         r#"echo '{"decision":"block","reason":"policy violation"}'; exit 2"#,
     )];
     let engine = engine_with_hooks(hooks);
@@ -7591,10 +7582,7 @@ async fn hook_run_start_block_with_json_reason() {
 
 #[tokio::test]
 async fn hook_stage_start_proceed_allows_execution() {
-    let hooks = vec![make_hook(
-        fabro_workflows::hook::HookEvent::StageStart,
-        "exit 0",
-    )];
+    let hooks = vec![make_hook(fabro_hooks::HookEvent::StageStart, "exit 0")];
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -7618,7 +7606,7 @@ async fn hook_stage_start_proceed_allows_execution() {
 async fn hook_stage_start_skip_bypasses_node() {
     // Hook that outputs skip decision as JSON
     let hooks = vec![make_hook(
-        fabro_workflows::hook::HookEvent::StageStart,
+        fabro_hooks::HookEvent::StageStart,
         r#"echo '{"decision":"skip","reason":"not needed"}'; exit 0"#,
     )];
     let (engine, events) = engine_with_hooks_and_events(hooks);
@@ -7657,10 +7645,7 @@ async fn hook_stage_start_skip_bypasses_node() {
 
 #[tokio::test]
 async fn hook_stage_start_block_aborts_run() {
-    let hooks = vec![make_hook(
-        fabro_workflows::hook::HookEvent::StageStart,
-        "exit 1",
-    )];
+    let hooks = vec![make_hook(fabro_hooks::HookEvent::StageStart, "exit 1")];
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -7674,7 +7659,7 @@ async fn hook_stage_start_block_aborts_run() {
 async fn hook_stage_start_matcher_filters_by_node_id() {
     // Hook that only matches nodes with "step2" in their ID
     let mut hook = make_hook(
-        fabro_workflows::hook::HookEvent::StageStart,
+        fabro_hooks::HookEvent::StageStart,
         r#"echo '{"decision":"skip","reason":"filtered"}'"#,
     );
     hook.matcher = Some("step2".into());
@@ -7713,7 +7698,7 @@ async fn hook_stage_start_matcher_filters_by_node_id() {
 #[tokio::test]
 async fn hook_stage_start_matcher_no_match_proceeds() {
     // Hook with matcher that matches nothing
-    let mut hook = make_hook(fabro_workflows::hook::HookEvent::StageStart, "exit 1");
+    let mut hook = make_hook(fabro_hooks::HookEvent::StageStart, "exit 1");
     hook.matcher = Some("nonexistent_node".into());
     let hooks = vec![hook];
 
@@ -7734,7 +7719,7 @@ async fn hook_stage_complete_fires_after_success() {
     let marker = dir.path().join("stage_complete_marker.txt");
 
     let hooks = vec![make_hook(
-        fabro_workflows::hook::HookEvent::StageComplete,
+        fabro_hooks::HookEvent::StageComplete,
         &format!("echo $FABRO_NODE_ID >> {}", marker.display()),
     )];
     let engine = engine_with_hooks(hooks);
@@ -7764,10 +7749,7 @@ async fn hook_stage_complete_fires_after_success() {
 #[tokio::test]
 async fn hook_stage_complete_failure_does_not_block_pipeline() {
     // Non-blocking hook that fails should not affect the pipeline
-    let hooks = vec![make_hook(
-        fabro_workflows::hook::HookEvent::StageComplete,
-        "exit 1",
-    )];
+    let hooks = vec![make_hook(fabro_hooks::HookEvent::StageComplete, "exit 1")];
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -7789,7 +7771,7 @@ async fn hook_run_complete_fires_on_success() {
     let marker = dir.path().join("run_complete_marker.txt");
 
     let hooks = vec![make_hook(
-        fabro_workflows::hook::HookEvent::RunComplete,
+        fabro_hooks::HookEvent::RunComplete,
         &format!("echo done > {}", marker.display()),
     )];
     let engine = engine_with_hooks(hooks);
@@ -7814,11 +7796,11 @@ async fn hook_run_complete_does_not_fire_on_blocked_run() {
 
     let hooks = vec![
         make_hook(
-            fabro_workflows::hook::HookEvent::RunStart,
+            fabro_hooks::HookEvent::RunStart,
             "exit 1", // block the run
         ),
         make_hook(
-            fabro_workflows::hook::HookEvent::RunComplete,
+            fabro_hooks::HookEvent::RunComplete,
             &format!("echo done > {}", marker.display()),
         ),
     ];
@@ -7843,11 +7825,11 @@ async fn hook_run_failed_fires_on_stage_block() {
 
     let hooks = vec![
         make_hook(
-            fabro_workflows::hook::HookEvent::StageStart,
+            fabro_hooks::HookEvent::StageStart,
             "exit 1", // block during stage
         ),
         make_hook(
-            fabro_workflows::hook::HookEvent::RunFailed,
+            fabro_hooks::HookEvent::RunFailed,
             &format!("echo failed > {}", marker.display()),
         ),
     ];
@@ -7870,7 +7852,7 @@ async fn hook_receives_env_vars() {
     let env_file = dir.path().join("hook_env.txt");
 
     let hooks = vec![make_hook(
-        fabro_workflows::hook::HookEvent::StageComplete,
+        fabro_hooks::HookEvent::StageComplete,
         &format!(
             "echo \"event=$FABRO_EVENT run=$FABRO_RUN_ID wf=$FABRO_WORKFLOW node=$FABRO_NODE_ID\" >> {}",
             env_file.display()
@@ -7917,11 +7899,11 @@ async fn multiple_hooks_same_event_all_fire() {
 
     let hooks = vec![
         make_hook(
-            fabro_workflows::hook::HookEvent::StageComplete,
+            fabro_hooks::HookEvent::StageComplete,
             &format!("echo hook1 > {}", marker1.display()),
         ),
         make_hook(
-            fabro_workflows::hook::HookEvent::StageComplete,
+            fabro_hooks::HookEvent::StageComplete,
             &format!("echo hook2 > {}", marker2.display()),
         ),
     ];
@@ -7954,7 +7936,7 @@ async fn no_hooks_configured_runs_normally() {
 async fn hook_edge_selected_override_redirects_routing() {
     // Hook that overrides edge routing to pathB when it would go to pathA
     let mut hook = make_hook(
-        fabro_workflows::hook::HookEvent::EdgeSelected,
+        fabro_hooks::HookEvent::EdgeSelected,
         // Override routing to pathB
         r#"echo '{"decision":"override","edge_to":"pathB"}'"#,
     );
@@ -7987,7 +7969,7 @@ async fn hook_edge_selected_override_redirects_routing() {
 
 #[tokio::test]
 async fn hook_edge_selected_block_aborts_run() {
-    let mut hook = make_hook(fabro_workflows::hook::HookEvent::EdgeSelected, "exit 1");
+    let mut hook = make_hook(fabro_hooks::HookEvent::EdgeSelected, "exit 1");
     hook.matcher = Some("^plan$".into());
     let hooks = vec![hook];
 
@@ -8008,7 +7990,7 @@ async fn hook_checkpoint_saved_fires() {
     let marker = dir.path().join("checkpoint_marker.txt");
 
     let hooks = vec![make_hook(
-        fabro_workflows::hook::HookEvent::CheckpointSaved,
+        fabro_hooks::HookEvent::CheckpointSaved,
         &format!("echo $FABRO_NODE_ID >> {}", marker.display()),
     )];
     let engine = engine_with_hooks(hooks);
@@ -8031,10 +8013,7 @@ async fn hook_checkpoint_saved_fires() {
 
 #[tokio::test]
 async fn hook_stage_start_exit_2_blocks() {
-    let hooks = vec![make_hook(
-        fabro_workflows::hook::HookEvent::StageStart,
-        "exit 2",
-    )];
+    let hooks = vec![make_hook(fabro_hooks::HookEvent::StageStart, "exit 2")];
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
@@ -8049,7 +8028,7 @@ async fn hook_stage_start_exit_2_blocks() {
 
 #[tokio::test]
 async fn hook_config_merge_concatenates() {
-    use fabro_workflows::hook::{HookConfig, HookDefinition, HookEvent};
+    use fabro_hooks::{HookConfig, HookDefinition, HookEvent};
 
     let server_hooks = HookConfig {
         hooks: vec![HookDefinition {
@@ -8084,7 +8063,7 @@ async fn hook_config_merge_concatenates() {
 
 #[tokio::test]
 async fn hook_config_merge_run_overrides_by_name() {
-    use fabro_workflows::hook::{HookConfig, HookDefinition, HookEvent};
+    use fabro_hooks::{HookConfig, HookDefinition, HookEvent};
 
     let server_hooks = HookConfig {
         hooks: vec![HookDefinition {
@@ -8150,10 +8129,7 @@ command = "echo done"
 
     let cfg: fabro_workflows::cli::run_config::WorkflowRunConfig = toml::from_str(toml).unwrap();
     assert_eq!(cfg.hooks.len(), 2);
-    assert_eq!(
-        cfg.hooks[0].event,
-        fabro_workflows::hook::HookEvent::StageStart
-    );
+    assert_eq!(cfg.hooks[0].event, fabro_hooks::HookEvent::StageStart);
     assert_eq!(cfg.hooks[0].matcher.as_deref(), Some("agent_loop"));
     assert!(cfg.hooks[0].is_blocking());
     assert!(!cfg.hooks[0].runs_in_sandbox());
@@ -8161,10 +8137,7 @@ command = "echo done"
         cfg.hooks[0].timeout(),
         std::time::Duration::from_millis(30000)
     );
-    assert_eq!(
-        cfg.hooks[1].event,
-        fabro_workflows::hook::HookEvent::RunComplete
-    );
+    assert_eq!(cfg.hooks[1].event, fabro_hooks::HookEvent::RunComplete);
     assert!(!cfg.hooks[1].is_blocking()); // RunComplete non-blocking by default
 }
 
@@ -8173,7 +8146,7 @@ command = "echo done"
 #[tokio::test]
 async fn hook_blocking_override_makes_non_blocking_event_blocking() {
     // StageComplete is non-blocking by default, but force it to blocking
-    let mut hook = make_hook(fabro_workflows::hook::HookEvent::StageComplete, "exit 1");
+    let mut hook = make_hook(fabro_hooks::HookEvent::StageComplete, "exit 1");
     hook.blocking = Some(true);
     let hooks = vec![hook];
 
@@ -8195,7 +8168,7 @@ async fn hook_blocking_override_makes_non_blocking_event_blocking() {
 #[tokio::test]
 async fn hook_non_blocking_override_on_blocking_event() {
     // RunStart is blocking by default, but force it to non-blocking
-    let mut hook = make_hook(fabro_workflows::hook::HookEvent::RunStart, "exit 1");
+    let mut hook = make_hook(fabro_hooks::HookEvent::RunStart, "exit 1");
     hook.blocking = Some(false);
     let hooks = vec![hook];
 
@@ -8216,7 +8189,7 @@ async fn hook_non_blocking_override_on_blocking_event() {
 async fn hook_matcher_regex_pattern() {
     // Hook matches any node starting with "step"
     let mut hook = make_hook(
-        fabro_workflows::hook::HookEvent::StageStart,
+        fabro_hooks::HookEvent::StageStart,
         r#"echo '{"decision":"skip","reason":"regex match"}'"#,
     );
     hook.matcher = Some("^step".into());
@@ -8255,7 +8228,7 @@ async fn hook_matcher_regex_pattern() {
 #[tokio::test]
 async fn hook_json_proceed_explicit() {
     let hooks = vec![make_hook(
-        fabro_workflows::hook::HookEvent::RunStart,
+        fabro_hooks::HookEvent::RunStart,
         r#"echo '{"decision":"proceed"}'"#,
     )];
     let engine = engine_with_hooks(hooks);
@@ -8270,7 +8243,7 @@ async fn hook_json_proceed_explicit() {
 #[tokio::test]
 async fn hook_json_block_with_reason() {
     let hooks = vec![make_hook(
-        fabro_workflows::hook::HookEvent::RunStart,
+        fabro_hooks::HookEvent::RunStart,
         r#"echo '{"decision":"block","reason":"forbidden by policy"}'; exit 2"#,
     )];
     let engine = engine_with_hooks(hooks);
@@ -8294,7 +8267,7 @@ async fn hook_sandbox_false_runs_on_host() {
     let marker = dir.path().join("host_hook.txt");
 
     let mut hook = make_hook(
-        fabro_workflows::hook::HookEvent::RunComplete,
+        fabro_hooks::HookEvent::RunComplete,
         &format!("echo host > {}", marker.display()),
     );
     hook.sandbox = Some(false);
@@ -8338,13 +8311,10 @@ timeout_ms = 120000
     assert_eq!(cfg.hooks.len(), 2);
 
     // Prompt hook
-    assert_eq!(
-        cfg.hooks[0].event,
-        fabro_workflows::hook::HookEvent::StageStart
-    );
+    assert_eq!(cfg.hooks[0].event, fabro_hooks::HookEvent::StageStart);
     assert!(matches!(
         cfg.hooks[0].resolved_hook_type().as_deref(),
-        Some(fabro_workflows::hook::HookType::Prompt { prompt, model })
+        Some(fabro_hooks::HookType::Prompt { prompt, model })
             if prompt == "Should this stage proceed?" && *model == Some("haiku".into())
     ));
     assert_eq!(
@@ -8353,13 +8323,10 @@ timeout_ms = 120000
     );
 
     // Agent hook
-    assert_eq!(
-        cfg.hooks[1].event,
-        fabro_workflows::hook::HookEvent::RunComplete
-    );
+    assert_eq!(cfg.hooks[1].event, fabro_hooks::HookEvent::RunComplete);
     assert!(matches!(
         cfg.hooks[1].resolved_hook_type().as_deref(),
-        Some(fabro_workflows::hook::HookType::Agent { prompt, model, max_tool_rounds })
+        Some(fabro_hooks::HookType::Agent { prompt, model, max_tool_rounds })
             if prompt == "Verify all tests pass."
             && *model == Some("sonnet".into())
             && *max_tool_rounds == Some(10)
@@ -8377,11 +8344,11 @@ timeout_ms = 120000
 async fn hook_prompt_proceed_allows_run() {
     dotenvy::dotenv().ok();
 
-    let hooks = vec![fabro_workflows::hook::HookDefinition {
+    let hooks = vec![fabro_hooks::HookDefinition {
         name: Some("prompt-proceed".into()),
-        event: fabro_workflows::hook::HookEvent::RunStart,
+        event: fabro_hooks::HookEvent::RunStart,
         command: None,
-        hook_type: Some(fabro_workflows::hook::HookType::Prompt {
+        hook_type: Some(fabro_hooks::HookType::Prompt {
             prompt: "A workflow is starting. Always approve. Respond with {\"ok\": true}.".into(),
             model: Some("haiku".into()),
         }),
@@ -8405,11 +8372,11 @@ async fn hook_prompt_block_prevents_run() {
     dotenvy::dotenv().ok();
 
     // Use a factual question that evaluates to false: "Is 2+2=5?"
-    let hooks = vec![fabro_workflows::hook::HookDefinition {
+    let hooks = vec![fabro_hooks::HookDefinition {
         name: Some("prompt-block".into()),
-        event: fabro_workflows::hook::HookEvent::RunStart,
+        event: fabro_hooks::HookEvent::RunStart,
         command: None,
-        hook_type: Some(fabro_workflows::hook::HookType::Prompt {
+        hook_type: Some(fabro_hooks::HookType::Prompt {
             prompt: "Check: is 2+2 equal to 5? If the statement is true, respond {\"ok\": true}. If false, respond {\"ok\": false, \"reason\": \"math check failed\"}.".into(),
             model: Some("haiku".into()),
         }),
@@ -8435,11 +8402,11 @@ async fn hook_prompt_block_prevents_run() {
 async fn hook_agent_proceed_allows_run() {
     dotenvy::dotenv().ok();
 
-    let hooks = vec![fabro_workflows::hook::HookDefinition {
+    let hooks = vec![fabro_hooks::HookDefinition {
         name: Some("agent-proceed".into()),
-        event: fabro_workflows::hook::HookEvent::RunStart,
+        event: fabro_hooks::HookEvent::RunStart,
         command: None,
-        hook_type: Some(fabro_workflows::hook::HookType::Agent {
+        hook_type: Some(fabro_hooks::HookType::Agent {
             prompt: "A workflow is starting. Always approve. Respond with {\"ok\": true}. Do not use any tools.".into(),
             model: Some("haiku".into()),
             max_tool_rounds: Some(1),
@@ -8467,11 +8434,11 @@ async fn hook_agent_with_tool_use() {
     let marker = dir.path().join("hook_check.txt");
     std::fs::write(&marker, "READY").unwrap();
 
-    let hooks = vec![fabro_workflows::hook::HookDefinition {
+    let hooks = vec![fabro_hooks::HookDefinition {
         name: Some("agent-tools".into()),
-        event: fabro_workflows::hook::HookEvent::RunStart,
+        event: fabro_hooks::HookEvent::RunStart,
         command: None,
-        hook_type: Some(fabro_workflows::hook::HookType::Agent {
+        hook_type: Some(fabro_hooks::HookType::Agent {
             prompt: format!(
                 "Read the file at {} using the read_file tool. If it contains 'READY', respond with {{\"ok\": true}}. Otherwise respond with {{\"ok\": false, \"reason\": \"not ready\"}}.",
                 marker.display()
@@ -8497,10 +8464,10 @@ async fn hook_agent_with_tool_use() {
 #[tokio::test]
 async fn hooks_do_not_duplicate_workflow_events() {
     let hooks = vec![
-        make_hook(fabro_workflows::hook::HookEvent::RunStart, "exit 0"),
-        make_hook(fabro_workflows::hook::HookEvent::StageStart, "exit 0"),
-        make_hook(fabro_workflows::hook::HookEvent::StageComplete, "exit 0"),
-        make_hook(fabro_workflows::hook::HookEvent::RunComplete, "exit 0"),
+        make_hook(fabro_hooks::HookEvent::RunStart, "exit 0"),
+        make_hook(fabro_hooks::HookEvent::StageStart, "exit 0"),
+        make_hook(fabro_hooks::HookEvent::StageComplete, "exit 0"),
+        make_hook(fabro_hooks::HookEvent::RunComplete, "exit 0"),
     ];
     let (engine, events) = engine_with_hooks_and_events(hooks);
     let graph = parse(simple_linear_dot()).unwrap();

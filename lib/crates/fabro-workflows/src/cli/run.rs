@@ -1103,10 +1103,10 @@ pub async fn run_command(
             .map(|c| &c.hooks)
             .unwrap_or(&run_defaults.hooks);
         if !hooks.is_empty() {
-            let hook_config = crate::hook::HookConfig {
+            let hook_config = fabro_hooks::HookConfig {
                 hooks: hooks.clone(),
             };
-            let runner = crate::hook::HookRunner::new(hook_config);
+            let runner = fabro_hooks::HookRunner::new(hook_config);
             engine.set_hook_runner(Arc::new(runner));
         }
     }

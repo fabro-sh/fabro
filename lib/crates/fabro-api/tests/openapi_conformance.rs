@@ -9,12 +9,12 @@ use fabro_api::jwt_auth::AuthMode;
 use fabro_api::server::{build_router, create_app_state};
 use fabro_api::server_config::*;
 use fabro_daytona::*;
+use fabro_hooks::*;
 use fabro_interview::Interviewer;
 use fabro_workflows::cli::run_config::*;
 use fabro_workflows::handler::exit::ExitHandler;
 use fabro_workflows::handler::start::StartHandler;
 use fabro_workflows::handler::HandlerRegistry;
-use fabro_workflows::hook::*;
 use tower::ServiceExt;
 
 fn test_registry(_interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {

@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use fabro_agent::Sandbox;
 
-use super::config::{HookConfig, HookDefinition};
-use super::executor::{HookExecutor, HookExecutorImpl};
-use super::types::{HookContext, HookDecision};
+use crate::config::{HookConfig, HookDefinition};
+use crate::executor::{HookExecutor, HookExecutorImpl};
+use crate::types::{HookContext, HookDecision};
 
 /// Central orchestrator: filters matching hooks, executes them, merges decisions.
 pub struct HookRunner {
@@ -210,8 +210,8 @@ impl HookRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hook::config::HookConfig;
-    use crate::hook::types::{HookContext, HookEvent, HookResult};
+    use crate::config::HookConfig;
+    use crate::types::{HookContext, HookEvent, HookResult};
 
     struct MockExecutor {
         decision: HookDecision,

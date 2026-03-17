@@ -15,6 +15,7 @@ exedev = ["fabro-workflows/exedev"]
 [dependencies]
 anyhow.workspace = true
 fabro-agent = { path = "../fabro-agent" }
+fabro-hooks = { path = "../fabro-hooks" }
 fabro-mcp = { path = "../fabro-mcp" }
 fabro-workflows = { path = "../fabro-workflows" }
 fabro-util = { path = "../fabro-util" }

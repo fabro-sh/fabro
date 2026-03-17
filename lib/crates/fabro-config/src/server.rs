@@ -465,7 +465,7 @@ matcher = "agent_loop"
         assert_eq!(config.run_defaults.hooks.len(), 2);
         assert_eq!(
             config.run_defaults.hooks[0].event,
-            fabro_workflows::hook::HookEvent::RunStart
+            fabro_hooks::HookEvent::RunStart
         );
         assert_eq!(
             config.run_defaults.hooks[0].command.as_deref(),
@@ -473,7 +473,7 @@ matcher = "agent_loop"
         );
         assert_eq!(
             config.run_defaults.hooks[1].event,
-            fabro_workflows::hook::HookEvent::StageComplete
+            fabro_hooks::HookEvent::StageComplete
         );
         assert_eq!(
             config.run_defaults.hooks[1].matcher.as_deref(),
