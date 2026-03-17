@@ -193,7 +193,7 @@ pub fn extract_stage_durations(run_dir: &Path) -> HashMap<String, u64> {
         if envelope.get("event").and_then(|v| v.as_str()) != Some("StageCompleted") {
             continue;
         }
-        let Some(name) = envelope.get("node_label").and_then(|v| v.as_str()) else {
+        let Some(name) = envelope.get("node_id").and_then(|v| v.as_str()) else {
             continue;
         };
         let Some(duration_ms) = envelope.get("duration_ms").and_then(|v| v.as_u64()) else {
@@ -533,7 +533,7 @@ mod tests {
             "run_id": "r1",
             "event": "StageCompleted",
             "node_id": "plan",
-            "node_label": "plan",
+            "node_label": "Plan",
             "stage_index": 0,
             "duration_ms": 5000,
             "status": "success",
@@ -552,7 +552,7 @@ mod tests {
             "run_id": "r1",
             "event": "StageCompleted",
             "node_id": "code",
-            "node_label": "code",
+            "node_label": "Code",
             "stage_index": 1,
             "duration_ms": 15000,
             "status": "success",
