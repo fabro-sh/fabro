@@ -21,6 +21,8 @@ pub struct Adapter {
     pub(crate) http: super::http_api::HttpApi,
     org_id: Option<String>,
     project_id: Option<String>,
+    /// When true, always use streaming (required by the Codex endpoint).
+    codex_mode: bool,
 }
 
 impl Adapter {
@@ -30,7 +32,14 @@ impl Adapter {
             http: super::http_api::HttpApi::new(api_key, DEFAULT_BASE_URL),
             org_id: None,
             project_id: None,
+            codex_mode: false,
         }
+    }
+
+    #[must_use]
+    pub fn with_codex_mode(mut self) -> Self {
+        self.codex_mode = true;
+        self
     }
 
     #[must_use]
@@ -83,6 +92,23 @@ impl Adapter {
         }
         req
     }
+
+    /// Complete a request by streaming and collecting the final response.
+    /// Used for the Codex endpoint which requires `stream: true`.
+    async fn complete_via_stream(&self, request: &Request) -> Result<Response, SdkError> {
+        use futures::StreamExt;
+        let mut event_stream = self.stream(request).await?;
+        let mut last_response: Option<Response> = None;
+        while let Some(event) = event_stream.next().await {
+            if let Ok(StreamEvent::Finish { response, .. }) = event {
+                last_response = Some(*response);
+                break;
+            }
+        }
+        last_response.ok_or_else(|| SdkError::Network {
+            message: "Stream ended without a finish event".into(),
+        })
+    }
 }
 
 // --- Request types (Responses API format) ---
@@ -111,6 +137,7 @@ struct ApiRequest {
     stop: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     metadata: Option<std::collections::HashMap<String, String>>,
+    store: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     stream: bool,
 }
@@ -348,7 +375,10 @@ fn translate_response_format(format: &ResponseFormat) -> Option<serde_json::Valu
 }
 
 /// Build an `ApiRequest` from a unified `Request`.
-fn build_api_request(request: &Request, stream: bool) -> ApiRequest {
+///
+/// When `codex_mode` is true, unsupported fields (`temperature`, `max_output_tokens`, `top_p`)
+/// are omitted and empty instructions are sent as `""` (required by the Codex endpoint).
+fn build_api_request(request: &Request, stream: bool, codex_mode: bool) -> ApiRequest {
     let (instructions, input) = translate_input(&request.messages);
     let api_tools = request.tools.as_ref().map(|t| translate_tools(t));
     let tool_choice = request.tool_choice.as_ref().map(translate_tool_choice);
@@ -361,26 +391,37 @@ fn build_api_request(request: &Request, stream: bool) -> ApiRequest {
         .as_ref()
         .and_then(translate_response_format);
 
+    let instructions = if codex_mode {
+        Some(instructions.unwrap_or_default())
+    } else {
+        instructions
+    };
+
     ApiRequest {
         model: request.model.clone(),
         input,
         instructions,
-        temperature: request.temperature,
-        max_output_tokens: request.max_tokens,
-        top_p: request.top_p,
+        temperature: if codex_mode {
+            None
+        } else {
+            request.temperature
+        },
+        max_output_tokens: if codex_mode { None } else { request.max_tokens },
+        top_p: if codex_mode { None } else { request.top_p },
         tools: api_tools,
         tool_choice,
         reasoning,
         text,
         stop: request.stop_sequences.clone(),
         metadata: request.metadata.clone(),
+        store: false,
         stream,
     }
 }
 
 /// Serialize an `ApiRequest` to JSON and merge any `provider_options.openai` keys into it.
-fn build_request_body(request: &Request, stream: bool) -> serde_json::Value {
-    let api_request = build_api_request(request, stream);
+fn build_request_body(request: &Request, stream: bool, codex_mode: bool) -> serde_json::Value {
+    let api_request = build_api_request(request, stream, codex_mode);
     let mut body = serde_json::to_value(&api_request).unwrap_or_else(|_| serde_json::json!({}));
 
     if let Some(openai_opts) = request
@@ -883,10 +924,15 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
+        // Codex endpoint requires streaming; collect the stream into a response.
+        if self.codex_mode {
+            return self.complete_via_stream(request).await;
+        }
+
         if let Some(tc) = &request.tool_choice {
             crate::provider::validate_tool_choice(self, tc)?;
         }
-        let request_body = build_request_body(request, false);
+        let request_body = build_request_body(request, false, false);
         let url = format!("{}/responses", self.http.base_url);
 
         let mut req = self.build_request(&url).json(&request_body);
@@ -942,7 +988,7 @@ impl ProviderAdapter for Adapter {
         if let Some(tc) = &request.tool_choice {
             crate::provider::validate_tool_choice(self, tc)?;
         }
-        let request_body = build_request_body(request, true);
+        let request_body = build_request_body(request, true, self.codex_mode);
         let url = format!("{}/responses", self.http.base_url);
 
         let http_resp = self
@@ -1040,7 +1086,7 @@ mod tests {
         let mut request = minimal_request();
         request.metadata = Some(metadata);
 
-        let body = build_request_body(&request, false);
+        let body = build_request_body(&request, false, false);
         let meta = body.get("metadata").expect("metadata should be present");
         assert_eq!(meta["user_id"], "u123");
         assert_eq!(meta["session"], "s456");
@@ -1049,7 +1095,7 @@ mod tests {
     #[test]
     fn build_request_body_omits_metadata_when_none() {
         let request = minimal_request();
-        let body = build_request_body(&request, false);
+        let body = build_request_body(&request, false, false);
         assert!(body.get("metadata").is_none());
     }
 
@@ -1063,7 +1109,7 @@ mod tests {
             }
         }));
 
-        let body = build_request_body(&request, false);
+        let body = build_request_body(&request, false, false);
         assert_eq!(body["store"], true);
         assert_eq!(body["previous_response_id"], "resp_abc123");
     }
@@ -1078,7 +1124,7 @@ mod tests {
             }
         }));
 
-        let body = build_request_body(&request, false);
+        let body = build_request_body(&request, false, false);
         // provider_options should override the base field
         assert_eq!(body["temperature"], 0.9);
     }
@@ -1092,7 +1138,7 @@ mod tests {
             }
         }));
 
-        let body = build_request_body(&request, false);
+        let body = build_request_body(&request, false, false);
         // anthropic options should not leak into the OpenAI request
         assert!(body.get("thinking").is_none());
     }
@@ -1100,7 +1146,7 @@ mod tests {
     #[test]
     fn build_request_body_no_provider_options() {
         let request = minimal_request();
-        let body = build_request_body(&request, false);
+        let body = build_request_body(&request, false, false);
         assert_eq!(body["model"], "gpt-4o");
         // stream field is omitted when false (skip_serializing_if)
         assert!(body.get("stream").is_none());
@@ -1109,7 +1155,7 @@ mod tests {
     #[test]
     fn build_request_body_stream_flag() {
         let request = minimal_request();
-        let body = build_request_body(&request, true);
+        let body = build_request_body(&request, true, false);
         assert!(body["stream"].as_bool().unwrap_or(false));
     }
 
@@ -1126,7 +1172,7 @@ mod tests {
             }
         }));
 
-        let body = build_request_body(&request, false);
+        let body = build_request_body(&request, false, false);
         assert_eq!(body["metadata"]["trace_id"], "t789");
         assert_eq!(body["store"], true);
     }
@@ -1509,7 +1555,7 @@ mod tests {
         let mut request = minimal_request();
         request.stop_sequences = Some(vec!["END".to_string(), "STOP".to_string()]);
 
-        let body = build_request_body(&request, false);
+        let body = build_request_body(&request, false, false);
         let stop = body.get("stop").expect("stop should be present");
         let arr = stop.as_array().expect("stop should be an array");
         assert_eq!(arr.len(), 2);
@@ -1520,7 +1566,7 @@ mod tests {
     #[test]
     fn build_request_body_omits_stop_when_none() {
         let request = minimal_request();
-        let body = build_request_body(&request, false);
+        let body = build_request_body(&request, false, false);
         assert!(body.get("stop").is_none());
     }
 

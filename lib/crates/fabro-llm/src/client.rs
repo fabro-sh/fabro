@@ -55,7 +55,16 @@ impl Client {
         }
         if let Ok(key) = std::env::var("OPENAI_API_KEY") {
             let mut adapter = providers::OpenAiAdapter::new(key);
-            if let Ok(base_url) = std::env::var("OPENAI_BASE_URL") {
+            if let Ok(account_id) = std::env::var("CHATGPT_ACCOUNT_ID") {
+                // Codex OAuth: route through chatgpt.com backend with required headers
+                adapter = adapter
+                    .with_base_url("https://chatgpt.com/backend-api/codex")
+                    .with_codex_mode();
+                let mut headers = std::collections::HashMap::new();
+                headers.insert("ChatGPT-Account-Id".to_string(), account_id);
+                headers.insert("originator".to_string(), "fabro".to_string());
+                adapter = adapter.with_default_headers(headers);
+            } else if let Ok(base_url) = std::env::var("OPENAI_BASE_URL") {
                 adapter = adapter.with_base_url(base_url);
             }
             if let Ok(org_id) = std::env::var("OPENAI_ORG_ID") {

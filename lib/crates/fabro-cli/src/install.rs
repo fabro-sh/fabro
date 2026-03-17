@@ -280,14 +280,22 @@ fn detect_binary_on_path(binary: &str) -> bool {
 }
 
 /// Convert OAuth tokens to env var pairs for ~/.fabro/.env.
-fn openai_oauth_env_pairs(access_token: &str, refresh_token: &str) -> Vec<(String, String)> {
-    vec![
+fn openai_oauth_env_pairs(
+    access_token: &str,
+    refresh_token: &str,
+    account_id: Option<&str>,
+) -> Vec<(String, String)> {
+    let mut pairs = vec![
         ("OPENAI_API_KEY".to_string(), access_token.to_string()),
         (
             "OPENAI_REFRESH_TOKEN".to_string(),
             refresh_token.to_string(),
         ),
-    ]
+    ];
+    if let Some(id) = account_id {
+        pairs.push(("CHATGPT_ACCOUNT_ID".to_string(), id.to_string()));
+    }
+    pairs
 }
 
 // ---------------------------------------------------------------------------
@@ -681,9 +689,11 @@ pub async fn run_install() -> Result<()> {
             {
                 Ok(tokens) => {
                     tracing::info!("OpenAI OAuth browser flow completed");
+                    let account_id = fabro_openai_oauth::extract_account_id(&tokens);
                     env_pairs.extend(openai_oauth_env_pairs(
                         &tokens.access_token,
                         &tokens.refresh_token,
+                        account_id.as_deref(),
                     ));
                     configured_providers.push(Provider::OpenAi);
                     openai_via_oauth = true;
@@ -1005,20 +1015,27 @@ mod tests {
 
     #[test]
     fn openai_oauth_env_pairs_sets_api_key() {
-        let pairs = openai_oauth_env_pairs("tok", "ref");
+        let pairs = openai_oauth_env_pairs("tok", "ref", None);
         assert!(pairs.contains(&("OPENAI_API_KEY".to_string(), "tok".to_string())));
     }
 
     #[test]
     fn openai_oauth_env_pairs_sets_refresh_token() {
-        let pairs = openai_oauth_env_pairs("tok", "ref");
+        let pairs = openai_oauth_env_pairs("tok", "ref", None);
         assert!(pairs.contains(&("OPENAI_REFRESH_TOKEN".to_string(), "ref".to_string())));
     }
 
     #[test]
     fn openai_oauth_env_pairs_count() {
-        let pairs = openai_oauth_env_pairs("tok", "ref");
+        let pairs = openai_oauth_env_pairs("tok", "ref", None);
         assert_eq!(pairs.len(), 2);
+    }
+
+    #[test]
+    fn openai_oauth_env_pairs_with_account_id() {
+        let pairs = openai_oauth_env_pairs("tok", "ref", Some("acct_123"));
+        assert!(pairs.contains(&("CHATGPT_ACCOUNT_ID".to_string(), "acct_123".to_string())));
+        assert_eq!(pairs.len(), 3);
     }
 
     // -- Session secret (server only) --

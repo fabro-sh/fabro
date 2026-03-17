@@ -77,10 +77,7 @@ pub fn build_authorize_url(
         ("response_type", "code"),
         ("client_id", client_id),
         ("redirect_uri", redirect_uri),
-        (
-            "scope",
-            "openid profile email offline_access api.responses.write",
-        ),
+        ("scope", "openid profile email offline_access"),
         ("code_challenge", &pkce.challenge),
         ("code_challenge_method", "S256"),
         ("state", state),

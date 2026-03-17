@@ -79,6 +79,8 @@ fabro ps            # active runs only
 fabro ps -a         # all runs including completed
 fabro ps --workflow deploy --label env=prod
 fabro ps --json
+fabro ps -q         # run IDs only, one per line
+fabro ps -qa        # all run IDs
 ```
 
 The table shows run ID, status, workflow name, goal, and timing.
@@ -91,6 +93,7 @@ The table shows run ID, status, workflow name, goal, and timing.
 | `--label <KEY=VALUE>` | Filter by label (repeatable, AND semantics) |
 | `--orphans` | Include orphan directories (no `manifest.json`) |
 | `--json` | Output as JSON |
+| `-q, --quiet` | Only display full run IDs, one per line (no headers or footers). Takes precedence over `--json`. |
 
 ## `fabro rm`
 
@@ -361,7 +364,7 @@ fabro system df -v
 
 ## `fabro graph`
 
-Render a workflow graph as SVG or PNG. Requires [Graphviz](https://graphviz.org) (`dot`) to be installed.
+Render a workflow graph as SVG or PNG. Requires [Graphviz](https://graphviz.org) (`dot`) to be installed. SVG output includes styled defaults (teal node strokes, clean typography, transparent background) and automatic dark mode support via `prefers-color-scheme` media queries.
 
 ```bash
 fabro graph workflow.fabro

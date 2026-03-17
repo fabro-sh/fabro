@@ -19,6 +19,8 @@ pub fn parse_error_body(
                 .get("error")
                 .and_then(|e| e.get("message"))
                 .and_then(serde_json::Value::as_str)
+                // Codex endpoint returns {"detail": "..."} instead of {"error": {"message": "..."}}
+                .or_else(|| v.get("detail").and_then(serde_json::Value::as_str))
                 .unwrap_or("Unknown error")
                 .to_string();
             let error_code = v
