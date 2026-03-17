@@ -1,6 +1,6 @@
 ---
 title: "Fabro Language"
-description: "Complete reference for Fabro's DOT workflow language"
+description: "Complete reference for Fabro's Graphviz workflow language"
 ---
 
 Fabro workflows are written in a subset of the [Graphviz DOT language](https://graphviz.org/doc/info/lang.html) with extensions for agent orchestration. This page is the complete syntax reference. For conceptual introductions, see [Workflows](/core-concepts/workflows) and [Nodes & Stages](/workflows/stages-and-nodes).
@@ -323,7 +323,7 @@ shared [prompt="@~/shared-prompts/review.md"]
 parent [prompt="@../common/plan.md"]
 ```
 
-Untracked `@file` references (files not committed to git) are inlined into the DOT source at prepare time, so they work even inside sandboxes that only see the git tree.
+Untracked `@file` references (files not committed to git) are inlined into the Graphviz source at prepare time, so they work even inside sandboxes that only see the git tree.
 
 Fabro validates `@file` references at parse time — if the referenced file does not exist, validation fails with a clear error pointing to the bad reference.
 

@@ -1,0 +1,4 @@
+title: Git checkpoints
+description: Every stage commits code and execution metadata to Git branches. Resume or fork from any checkpoint.
+status: shipped
+date: 2026-03-01

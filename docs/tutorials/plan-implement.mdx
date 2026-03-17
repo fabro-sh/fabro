@@ -83,7 +83,7 @@ The `simplify` node uses `@files-internal/prompts/simplify.md` instead of an inl
 simplify [label="Simplify", prompt="@files-internal/prompts/simplify.md"]
 ```
 
-The `@` prefix tells Fabro to load the prompt from a Markdown file, resolved relative to the DOT file's location. This keeps DOT files concise and lets you version prompts as standalone files. See [Prompts](/agents/prompts) for details.
+The `@` prefix tells Fabro to load the prompt from a Markdown file, resolved relative to the Graphviz file's location. This keeps Graphviz files concise and lets you version prompts as standalone files. See [Prompts](/agents/prompts) for details.
 
 ## Context flow between nodes
 
@@ -100,7 +100,7 @@ The agent reads `plan.md` (as instructed by its prompt), but the preamble gives 
 
 - **Human gates** (`shape=hexagon`) pause for human input with edge labels as options
 - **Revision loops** are just edges that point back to earlier nodes
-- **Prompt file references** (`@path/to/file.md`) keep DOT files clean
+- **Prompt file references** (`@path/to/file.md`) keep Graphviz files clean
 - **`reasoning_effort`** controls how hard the model thinks
 - Nodes receive preambles summarizing prior stages
 

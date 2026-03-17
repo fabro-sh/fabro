@@ -1,0 +1,4 @@
+title: REST API server mode
+description: REST API with SSE event streaming for queuing runs, tracking progress, and managing workflows programmatically.
+status: building
+date: 2026-04-02

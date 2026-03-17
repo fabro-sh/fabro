@@ -44,7 +44,7 @@ The `Fabro-Checkpoint` trailer links each run branch commit to its metadata bran
 The metadata branch (`fabro/meta/{run_id}`) is an orphan branch that stores structured run data using Git's object storage directly (via `git2`). It is initialized at run start with:
 
 - **`manifest.json`** — Run metadata: run ID, graph name, node/edge counts, base SHA, and branch name
-- **`graph.fabro`** — The workflow DOT source as it was parsed
+- **`graph.fabro`** — The workflow Graphviz source as it was parsed
 
 After each node, the metadata branch is updated with:
 
@@ -111,7 +111,7 @@ Resume from the Git branches created during a previous run:
 fabro run --run-branch fabro/run/01JKXYZ...
 ```
 
-This reads the checkpoint, manifest, and graph DOT from the metadata branch (`fabro/meta/01JKXYZ...`), re-attaches a worktree to the existing run branch, and resumes execution. No workflow file argument is needed — everything is recovered from Git.
+This reads the checkpoint, manifest, and Graphviz graph from the metadata branch (`fabro/meta/01JKXYZ...`), re-attaches a worktree to the existing run branch, and resumes execution. No workflow file argument is needed — everything is recovered from Git.
 
 <Accordion title="What happens during resume">
 1. Fabro reads `checkpoint.json` from the metadata branch

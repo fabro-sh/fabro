@@ -1,0 +1,192 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import Footer from "../../components/Footer.astro";
+import PageScripts from "../../components/PageScripts.astro";
+import { getCollection, render } from "astro:content";
+import { langIcons } from "../../lib/langIcons";
+import { renderWorkflow } from "../../lib/renderWorkflow";
+
+export async function getStaticPaths() {
+  const entries = (await getCollection("showcase")).sort(
+    (a, b) => a.data.sortOrder - b.data.sortOrder
+  );
+  return entries.map((entry, i) => ({
+    params: { slug: entry.id },
+    props: {
+      entry,
+      prev: entries[i - 1] ?? null,
+      next: entries[i + 1] ?? null,
+    },
+  }));
+}
+
+const { entry, prev, next } = Astro.props;
+const { Content } = await render(entry);
+const workflowSvg = await renderWorkflow(entry.data.workflow);
+---
+
+<Layout title={`${entry.data.title} — Showcase — Fabro`} description={entry.data.description}>
+  <Nav currentPage="showcase" />
+
+  <main>
+    <article class="relative pt-24 sm:pt-28 pb-24">
+      <div class="relative mx-auto max-w-3xl px-6">
+        <!-- Back link -->
+        <a href="/showcase" class="reveal inline-flex items-center gap-2 text-sm text-ice-300/60 hover:text-teal-300 transition-colors mb-10 group">
+          <svg class="h-4 w-4 transition-transform group-hover:-translate-x-1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+            <polyline points="15,18 9,12 15,6" />
+          </svg>
+          Showcase
+        </a>
+
+        <!-- Header -->
+        <header class="mb-10">
+          <h1 class="reveal reveal-d1 font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl leading-[1.15]">
+            {entry.data.title}
+          </h1>
+          <p class="reveal reveal-d2 mt-3 text-lg text-ice-300">
+            {entry.data.description}
+          </p>
+
+          {/* Compact metadata strip */}
+          <div class="reveal reveal-d2 mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-ice-300/60">
+            {entry.data.languages.map((lang) => {
+              const icon = langIcons[lang];
+              return icon ? (
+                <span class="flex items-center gap-1.5" title={icon.label}>
+                  <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d={icon.path} />
+                  </svg>
+                  {icon.label}
+                </span>
+              ) : null;
+            })}
+            <span class="text-ice-300/20">|</span>
+            {entry.data.models.map((model) => (
+              <span class="font-mono text-xs text-teal-300/70">{model}</span>
+            ))}
+            <span class="text-ice-300/20">|</span>
+            {entry.data.skills.map((skill) => (
+              <span class="font-mono text-xs text-ice-300/50">{skill}</span>
+            ))}
+          </div>
+
+          {/* GitHub button */}
+          <div class="reveal reveal-d3 mt-5">
+            <a
+              href={entry.data.github}
+              class="inline-flex items-center gap-2 rounded-lg border border-navy-600 px-4 py-2 text-sm font-medium text-ice-300 transition-all hover:border-teal-700/60 hover:text-ice-50"
+            >
+              <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+              </svg>
+              View on GitHub
+            </a>
+          </div>
+        </header>
+
+        <!-- Workflow graph — hero element -->
+        <section class="reveal-scale reveal-d3 mb-10">
+          <h2 class="font-display text-lg font-semibold text-ice-50 mb-4">Workflow</h2>
+          <div class="showcase-graph-hero rounded-xl border border-navy-800/60 bg-navy-950/80 p-6 flex items-center justify-center overflow-x-auto" set:html={workflowSvg} />
+        </section>
+
+        <!-- Prompt section -->
+        <section class="reveal reveal-d4 mb-10">
+          <h2 class="font-display text-lg font-semibold text-ice-50 mb-4">Prompt</h2>
+          <div class="rounded-xl border border-navy-800/60 bg-navy-900/30 p-6 relative">
+            <div
+              id="prompt-container"
+              class="overflow-hidden transition-[max-height] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] max-h-[4.5em]"
+            >
+              <p class="font-mono text-sm leading-relaxed text-ice-300/80 whitespace-pre-wrap">{entry.data.prompt}</p>
+            </div>
+            <button
+              id="prompt-toggle"
+              class="group mt-4 flex items-center gap-2 text-sm text-ice-300/50 hover:text-teal-300 transition-colors cursor-pointer"
+              aria-expanded="false"
+            >
+              <svg
+                id="prompt-chevron"
+                class="h-4 w-4 transition-transform duration-300"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                viewBox="0 0 24 24"
+              >
+                <polyline points="6,9 12,15 18,9" />
+              </svg>
+              <span id="prompt-toggle-label">Show full prompt</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- About (rendered markdown body) -->
+        <section class="reveal-left reveal-d5">
+          <h2 class="font-display text-lg font-semibold text-ice-50 mb-4">About</h2>
+          <div class="prose">
+            <Content />
+          </div>
+        </section>
+
+        <!-- Prev / Next navigation -->
+        {(prev || next) && (
+          <nav class="reveal reveal-d5 mt-16 grid gap-4 sm:grid-cols-2 border-t border-navy-800/40 pt-8">
+            {prev ? (
+              <a href={`/showcase/${prev.id}`} class="group flex items-start gap-3 rounded-lg border border-navy-800/60 bg-navy-900/30 p-4 transition-all hover:border-teal-700/40">
+                <svg class="mt-0.5 h-5 w-5 shrink-0 text-ice-300/40 transition-transform group-hover:-translate-x-1 group-hover:text-teal-300" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                  <polyline points="15,18 9,12 15,6" />
+                </svg>
+                <div>
+                  <span class="text-xs text-ice-300/40">Previous</span>
+                  <span class="block font-display text-sm font-semibold text-ice-50 group-hover:text-teal-300 transition-colors">{prev.data.title}</span>
+                </div>
+              </a>
+            ) : <div />}
+            {next ? (
+              <a href={`/showcase/${next.id}`} class="group flex items-start gap-3 rounded-lg border border-navy-800/60 bg-navy-900/30 p-4 transition-all hover:border-teal-700/40 text-right sm:flex-row-reverse">
+                <svg class="mt-0.5 h-5 w-5 shrink-0 text-ice-300/40 transition-transform group-hover:translate-x-1 group-hover:text-teal-300" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                  <polyline points="9,6 15,12 9,18" />
+                </svg>
+                <div>
+                  <span class="text-xs text-ice-300/40">Next</span>
+                  <span class="block font-display text-sm font-semibold text-ice-50 group-hover:text-teal-300 transition-colors">{next.data.title}</span>
+                </div>
+              </a>
+            ) : <div />}
+          </nav>
+        )}
+      </div>
+    </article>
+  </main>
+
+  <Footer />
+  <PageScripts />
+
+  <script>
+    const toggle = document.getElementById("prompt-toggle");
+    const container = document.getElementById("prompt-container");
+    const chevron = document.getElementById("prompt-chevron");
+    const label = document.getElementById("prompt-toggle-label");
+
+    if (toggle && container && chevron && label) {
+      toggle.addEventListener("click", () => {
+        const isExpanded = toggle.getAttribute("aria-expanded") === "true";
+        toggle.setAttribute("aria-expanded", String(!isExpanded));
+        container.style.maxHeight = isExpanded ? "4.5em" : `${container.scrollHeight}px`;
+        chevron.style.transform = isExpanded ? "" : "rotate(180deg)";
+        label.textContent = isExpanded ? "Show full prompt" : "Hide prompt";
+      });
+    }
+  </script>
+</Layout>
+
+<style>
+  .showcase-graph-hero :global(svg) {
+    max-width: 100%;
+    height: auto;
+  }
+</style>

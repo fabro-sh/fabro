@@ -20,7 +20,7 @@ The naming format is `YYYYMMDD-{run_id}`, where `run_id` is the ULID assigned to
 | File | Format | When written | Description |
 |---|---|---|---|
 | `manifest.json` | JSON | Run start | Run metadata — `run_id`, `workflow_name`, `goal`, `start_time`, `node_count`, `edge_count`, `run_branch`, `base_sha`, `labels` |
-| `graph.fabro` | DOT | Run start | Copy of the workflow graph |
+| `graph.fabro` | Graphviz | Run start | Copy of the workflow graph |
 | `run.pid` | Text | Run start | Process ID of the running CLI process. Presence indicates the run is active; an orphaned file indicates a crash. |
 | `run.toml` | TOML | Run start | Copy of the original workflow file (only when the workflow is defined in TOML) |
 | `progress.jsonl` | JSONL | Continuous | Event stream — one JSON object per line for every significant event (stage starts, completions, tool calls, retries, etc.). See [Observability](/execution/observability) for the full event catalog. |

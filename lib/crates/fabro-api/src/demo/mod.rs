@@ -226,37 +226,7 @@ pub async fn get_run_graph(
     // Use graphviz to render the demo DOT source
     let dot_source = "digraph demo {\n  graph [goal=\"Demo\"]\n  rankdir=LR\n  start [shape=Mdiamond, label=\"Start\"]\n  detect [label=\"Detect\\nDrift\"]\n  exit [shape=Msquare, label=\"Exit\"]\n  propose [label=\"Propose\\nChanges\"]\n  review [label=\"Review\\nChanges\"]\n  apply [label=\"Apply\\nChanges\"]\n  start -> detect\n  detect -> exit [label=\"No drift\"]\n  detect -> propose [label=\"Drift found\"]\n  propose -> review\n  review -> propose [label=\"Revise\"]\n  review -> apply [label=\"Accept\"]\n  apply -> exit\n}";
 
-    let mut child = match tokio::process::Command::new("dot")
-        .arg("-Tsvg")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(_) => {
-            return ApiError::new(
-                StatusCode::BAD_GATEWAY,
-                "Graphviz dot command not available.",
-            )
-            .into_response();
-        }
-    };
-
-    if let Some(mut stdin) = child.stdin.take() {
-        use tokio::io::AsyncWriteExt;
-        let _ = stdin.write_all(dot_source.as_bytes()).await;
-    }
-
-    match child.wait_with_output().await {
-        Ok(output) if output.status.success() => (
-            StatusCode::OK,
-            [("content-type", "image/svg+xml")],
-            output.stdout,
-        )
-            .into_response(),
-        _ => ApiError::new(StatusCode::BAD_GATEWAY, "Dot rendering failed.").into_response(),
-    }
+    crate::server::render_dot_svg(dot_source).await
 }
 
 pub async fn get_run_retro(

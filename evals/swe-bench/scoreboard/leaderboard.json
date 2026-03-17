@@ -1,0 +1,67 @@
+[
+  {
+    "run_name": "gpt54-20min-20260316",
+    "date": "2026-03-17",
+    "model": "gpt-5.4",
+    "provider": "openai",
+    "resolved": 197,
+    "total": 300,
+    "resolve_pct": 65.7,
+    "patched": 297,
+    "patch_pct": 99.0,
+    "total_cost_usd": 718.62,
+    "avg_cost_usd": 2.3954
+  },
+  {
+    "run_name": "opus-20min-20260316",
+    "date": "2026-03-16",
+    "model": "claude-opus-4-6",
+    "provider": "anthropic",
+    "resolved": 174,
+    "total": 300,
+    "resolve_pct": 58.0,
+    "patched": 300,
+    "patch_pct": 100.0,
+    "total_cost_usd": 218.65,
+    "avg_cost_usd": 0.7288
+  },
+  {
+    "run_name": "sonnet-20min-20260316",
+    "date": "2026-03-16",
+    "model": "claude-sonnet-4-6",
+    "provider": "anthropic",
+    "resolved": 173,
+    "total": 300,
+    "resolve_pct": 57.7,
+    "patched": 297,
+    "patch_pct": 99.0,
+    "total_cost_usd": 55.22,
+    "avg_cost_usd": 0.1841
+  },
+  {
+    "run_name": "sonnet-baseline-20260316",
+    "date": "2026-03-16",
+    "model": "claude-sonnet-4-6",
+    "provider": "anthropic",
+    "resolved": 167,
+    "total": 300,
+    "resolve_pct": 55.7,
+    "patched": 281,
+    "patch_pct": 93.7,
+    "total_cost_usd": 39.78,
+    "avg_cost_usd": 0.1326
+  },
+  {
+    "run_name": "haiku-baseline-20260316",
+    "date": "2026-03-16",
+    "model": "claude-haiku-4-5",
+    "provider": "anthropic",
+    "resolved": 162,
+    "total": 300,
+    "resolve_pct": 54.0,
+    "patched": 293,
+    "patch_pct": 97.7,
+    "total_cost_usd": 26.13,
+    "avg_cost_usd": 0.0871
+  }
+]

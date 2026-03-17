@@ -1,0 +1,4 @@
+title: Cloud sandboxes
+description: Isolated cloud VMs with snapshot-based setup, network controls, SSH access, and preview URLs.
+status: shipped
+date: 2026-03-15

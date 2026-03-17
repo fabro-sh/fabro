@@ -423,6 +423,8 @@ mod tests {
             Some(PullRequestConfig {
                 enabled: true,
                 draft: false,
+                auto_merge: false,
+                merge_strategy: crate::cli::run_config::MergeStrategy::Squash,
             })
         );
     }

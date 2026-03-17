@@ -342,6 +342,11 @@ pub async fn build_pr_body(
     Ok(body)
 }
 
+/// Auto-merge configuration for a pull request.
+pub struct AutoMergeConfig {
+    pub merge_strategy: crate::cli::run_config::MergeStrategy,
+}
+
 /// Optionally open a pull request after a successful workflow run.
 ///
 /// Returns `Ok(Some(PullRequestRecord))` if a PR was created, `Ok(None)` if
@@ -356,6 +361,7 @@ pub async fn maybe_open_pull_request(
     diff: &str,
     model: &str,
     draft: bool,
+    auto_merge: Option<AutoMergeConfig>,
     run_dir: &Path,
 ) -> Result<Option<PullRequestRecord>, String> {
     if diff.is_empty() {
@@ -371,7 +377,7 @@ pub async fn maybe_open_pull_request(
 
     let title = pr_title_from_goal(goal);
 
-    let (html_url, number) = github_app::create_pull_request(
+    let created = github_app::create_pull_request(
         creds,
         &owner,
         &repo,
@@ -383,11 +389,33 @@ pub async fn maybe_open_pull_request(
     )
     .await?;
 
-    info!(pr_url = %html_url, number, "Pull request created");
+    info!(pr_url = %created.html_url, created.number, "Pull request created");
+
+    if let Some(am_cfg) = auto_merge {
+        let merge_method = match am_cfg.merge_strategy {
+            crate::cli::run_config::MergeStrategy::Squash => github_app::AutoMergeMethod::Squash,
+            crate::cli::run_config::MergeStrategy::Merge => github_app::AutoMergeMethod::Merge,
+            crate::cli::run_config::MergeStrategy::Rebase => github_app::AutoMergeMethod::Rebase,
+        };
+        match github_app::enable_auto_merge(creds, &owner, &repo, &created.node_id, merge_method)
+            .await
+        {
+            Ok(()) => {
+                info!(pr_number = created.number, "Auto-merge enabled");
+            }
+            Err(e) => {
+                tracing::warn!(
+                    pr_number = created.number,
+                    error = %e,
+                    "Failed to enable auto-merge (repo may not have auto-merge enabled in settings)"
+                );
+            }
+        }
+    }
 
     Ok(Some(PullRequestRecord {
-        html_url,
-        number,
+        html_url: created.html_url,
+        number: created.number,
         owner,
         repo,
         base_branch: base_branch.to_string(),
@@ -913,6 +941,7 @@ mod tests {
             "",
             "claude-sonnet-4-20250514",
             false,
+            None,
             tmp.path(),
         )
         .await;

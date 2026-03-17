@@ -16,6 +16,7 @@ use fabro_git_storage::trailerlink::{self, Trailer};
 use crate::artifact::{offload_large_values, sync_artifacts_to_env, ArtifactStore};
 use crate::asset_snapshot;
 use crate::checkpoint::Checkpoint;
+use crate::cli::run_config::PullRequestConfig;
 use crate::condition::evaluate_condition;
 use crate::context;
 use crate::context::Context;
@@ -910,10 +911,8 @@ pub struct RunConfig {
     pub git_author: crate::git::GitAuthor,
     /// Name of the branch the run was started from (for PR base).
     pub base_branch: Option<String>,
-    /// Whether to auto-create a PR on successful completion.
-    pub pull_request_enabled: bool,
-    /// Whether to create the PR as a draft.
-    pub pull_request_draft: bool,
+    /// Pull request configuration; `None` = disabled.
+    pub pull_request: Option<PullRequestConfig>,
     /// Glob patterns for asset collection. Empty = no asset collection.
     pub asset_globs: Vec<String>,
     /// Workflow directory slug (e.g. "smoke" from `fabro/workflows/smoke/`).
@@ -3254,8 +3253,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3284,8 +3282,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3322,8 +3319,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3356,8 +3352,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3386,8 +3381,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3429,8 +3423,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3496,8 +3489,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3590,8 +3582,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3627,8 +3618,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3659,8 +3649,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3691,8 +3680,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3727,8 +3715,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3891,8 +3878,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -3938,8 +3924,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4003,8 +3988,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4071,8 +4055,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4143,8 +4126,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4204,8 +4186,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4266,8 +4247,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4303,8 +4283,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4336,8 +4315,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4368,8 +4346,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4413,8 +4390,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4495,8 +4471,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4530,8 +4505,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4567,8 +4541,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4609,8 +4582,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4649,8 +4621,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4686,8 +4657,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4784,8 +4754,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -4997,8 +4966,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5037,8 +5005,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5084,8 +5051,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5171,8 +5137,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5269,8 +5234,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5344,8 +5308,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5406,8 +5369,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5469,8 +5431,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };
@@ -5628,8 +5589,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         };

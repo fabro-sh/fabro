@@ -1,0 +1,105 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import Footer from "../../components/Footer.astro";
+import PageScripts from "../../components/PageScripts.astro";
+import { getCollection } from "astro:content";
+import { langIcons } from "../../lib/langIcons";
+import { renderWorkflow } from "../../lib/renderWorkflow";
+
+const entries = (await getCollection("showcase")).sort(
+  (a, b) => a.data.sortOrder - b.data.sortOrder
+);
+
+const workflowSvgs = new Map<string, string>();
+for (const entry of entries) {
+  workflowSvgs.set(entry.id, await renderWorkflow(entry.data.workflow));
+}
+---
+
+<Layout title="Showcase — Fabro" description="Projects and recipes built with Fabro workflows.">
+  <Nav currentPage="showcase" />
+
+  <main>
+    <!-- Header -->
+    <section class="relative pt-24 sm:pt-28 pb-10">
+      <div class="absolute inset-0 noise-overlay"></div>
+      <div class="pointer-events-none absolute top-8 -left-40 h-[400px] w-[400px] rounded-full bg-teal-500/8 blur-[120px]"></div>
+
+      <div class="relative mx-auto max-w-4xl px-6">
+        <h1 class="reveal font-display text-4xl font-bold tracking-tight text-ice-50 sm:text-5xl leading-[1.1]">
+          Showcase
+        </h1>
+        <p class="reveal reveal-d1 mt-3 text-lg text-ice-300">
+          Reproducible workflow recipes built with Fabro. Clone, customize, and run.
+        </p>
+      </div>
+    </section>
+
+    <!-- Card grid -->
+    <section class="relative pb-24">
+      <div class="mx-auto max-w-4xl px-6">
+        <div class="grid gap-6 sm:grid-cols-2">
+          {entries.map((entry, i) => (
+            <a
+              href={`/showcase/${entry.id}`}
+              class={`reveal reveal-d${Math.min(i + 2, 5)} glow-card group block rounded-xl border border-navy-800/60 bg-navy-900/30 overflow-hidden transition-all duration-400 hover:border-teal-700/40 hover:shadow-[0_0_40px_-8px_rgba(53,127,158,0.12)]`}
+            >
+              {/* Workflow graph thumbnail */}
+              <div class="relative h-36 bg-navy-950/80 flex items-center justify-center p-4 overflow-hidden">
+                <div class="showcase-graph-thumb w-full h-full flex items-center justify-center opacity-60 group-hover:opacity-90 transition-opacity duration-400" set:html={workflowSvgs.get(entry.id)} />
+                <div class="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-teal-500/20 to-transparent" />
+              </div>
+
+              {/* Card body */}
+              <div class="p-6">
+                <h2 class="font-display text-lg font-semibold text-ice-50 group-hover:text-teal-300 transition-colors">
+                  {entry.data.title}
+                </h2>
+                <p class="mt-2 text-sm leading-relaxed text-ice-300/70 line-clamp-2">
+                  {entry.data.description}
+                </p>
+
+                {/* Language icons */}
+                <div class="mt-4 flex items-center gap-3">
+                  {entry.data.languages.map((lang) => {
+                    const icon = langIcons[lang];
+                    return icon ? (
+                      <span class="flex items-center gap-1.5 text-xs text-ice-300/50" title={icon.label}>
+                        <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                          <path d={icon.path} />
+                        </svg>
+                        {icon.label}
+                      </span>
+                    ) : null;
+                  })}
+                </div>
+
+                {/* Tags */}
+                <div class="mt-3 flex flex-wrap gap-1.5">
+                  {entry.data.tags.map((tag) => (
+                    <span class="rounded-full border border-navy-800 bg-navy-900/60 px-3 py-1 text-xs text-ice-300/70">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <Footer />
+  <PageScripts />
+</Layout>
+
+<style>
+  .showcase-graph-thumb :global(svg) {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+  }
+</style>

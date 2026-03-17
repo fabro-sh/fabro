@@ -81,7 +81,7 @@ The child workflow runs through its own start → implement → validate → gat
 |---|---|
 | `stack.child_workflow` | Path to the child workflow file (resolved relative to the parent). Preferred. |
 | `stack.child_dotfile` | Backward-compatible alias for `stack.child_workflow`. |
-| `stack.child_dot_source` | Inline child DOT source (alternative to `child_workflow`) |
+| `stack.child_dot_source` | Inline child Graphviz source (alternative to `child_workflow`) |
 | `manager.max_cycles` | Safety limit on poll cycles before the child is cancelled (default: 1000) |
 | `manager.poll_interval` | How often to check for completion or stop conditions (default: `45s`) |
 | `manager.stop_condition` | Condition expression that, when true, cancels the child early |
@@ -134,7 +134,7 @@ For simpler cases, just add more nodes to a single workflow. Sub-workflows add a
   <Card title="Nodes & Stages" icon="shapes" href="/workflows/stages-and-nodes">
     Complete reference for all node types.
   </Card>
-  <Card title="DOT Language" icon="code" href="/reference/dot-language">
+  <Card title="Graphviz Language" icon="code" href="/reference/dot-language">
     Full syntax reference including sub-workflow attributes.
   </Card>
   <Card title="Context" icon="database" href="/execution/context">

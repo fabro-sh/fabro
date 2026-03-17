@@ -1,0 +1,64 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import Footer from "../../components/Footer.astro";
+import PageScripts from "../../components/PageScripts.astro";
+import { getCollection, render } from "astro:content";
+
+export async function getStaticPaths() {
+  const posts = await getCollection("blog");
+  return posts.map((post) => ({
+    params: { slug: post.id },
+    props: { post },
+  }));
+}
+
+const { post } = Astro.props;
+const { Content } = await render(post);
+
+const formatDate = (date: Date) =>
+  date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+const wordCount = post.body?.split(/\s+/).length ?? 0;
+const readingTime = Math.max(1, Math.round(wordCount / 250));
+---
+
+<Layout title={`${post.data.title} — Fabro`} description={post.data.description}>
+  <Nav currentPage="blog" />
+
+  <main>
+    <article class="relative pt-24 sm:pt-28 pb-24">
+      <div class="relative mx-auto max-w-3xl px-6">
+        <!-- Back link -->
+        <a href="/blog" class="reveal inline-flex items-center gap-2 text-sm text-ice-300/60 hover:text-teal-300 transition-colors mb-10 group">
+          <svg class="h-4 w-4 transition-transform group-hover:-translate-x-1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+            <polyline points="15,18 9,12 15,6" />
+          </svg>
+          Blog
+        </a>
+
+        <!-- Header -->
+        <header class="mb-10 border-b border-navy-800/40 pb-8">
+          <h1 class="reveal reveal-d1 font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl leading-[1.15]">
+            {post.data.title}
+          </h1>
+          <div class="reveal reveal-d2 mt-4 flex items-center gap-3 text-sm text-ice-300/50">
+            <time class="font-mono">{formatDate(post.data.date)}</time>
+            <span>&middot;</span>
+            <span>{post.data.author}</span>
+            <span>&middot;</span>
+            <span>{readingTime} min read</span>
+          </div>
+        </header>
+
+        <!-- Content -->
+        <div class="reveal reveal-d3 prose">
+          <Content />
+        </div>
+      </div>
+    </article>
+  </main>
+
+  <Footer />
+  <PageScripts />
+</Layout>

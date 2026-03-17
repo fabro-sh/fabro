@@ -80,6 +80,7 @@ impl SubAgentManager {
                     if matches!(
                         &event.event,
                         AgentEvent::TextDelta { .. }
+                            | AgentEvent::AssistantOutputReplace { .. }
                             | AgentEvent::ReasoningDelta { .. }
                             | AgentEvent::ToolCallOutputDelta { .. }
                             | AgentEvent::AssistantTextStart

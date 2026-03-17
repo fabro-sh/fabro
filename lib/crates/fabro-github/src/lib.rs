@@ -259,10 +259,17 @@ pub async fn create_installation_access_token_for_pr(
     .await
 }
 
+/// Result of a successful pull request creation.
+pub struct CreatedPullRequest {
+    pub html_url: String,
+    pub number: u64,
+    pub node_id: String,
+}
+
 /// Create a pull request on GitHub.
 ///
 /// Signs a JWT, obtains a PR-scoped installation token, and POSTs to the
-/// GitHub pulls API. Returns `(html_url, pr_number)` on success.
+/// GitHub pulls API.
 #[allow(clippy::too_many_arguments)]
 pub async fn create_pull_request(
     creds: &GitHubAppCredentials,
@@ -273,7 +280,7 @@ pub async fn create_pull_request(
     title: &str,
     body: &str,
     draft: bool,
-) -> Result<(String, u64), String> {
+) -> Result<CreatedPullRequest, String> {
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
     let client = reqwest::Client::new();
 
@@ -329,6 +336,7 @@ pub async fn create_pull_request(
     struct PullRequestResponse {
         html_url: String,
         number: u64,
+        node_id: String,
     }
 
     let pr: PullRequestResponse = resp
@@ -336,7 +344,94 @@ pub async fn create_pull_request(
         .await
         .map_err(|e| format!("Failed to parse pull request response: {e}"))?;
 
-    Ok((pr.html_url, pr.number))
+    Ok(CreatedPullRequest {
+        html_url: pr.html_url,
+        number: pr.number,
+        node_id: pr.node_id,
+    })
+}
+
+/// GitHub GraphQL merge method for auto-merge.
+#[derive(Clone, Copy, Debug)]
+pub enum AutoMergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
+impl AutoMergeMethod {
+    fn as_graphql_value(self) -> &'static str {
+        match self {
+            Self::Merge => "MERGE",
+            Self::Squash => "SQUASH",
+            Self::Rebase => "REBASE",
+        }
+    }
+}
+
+/// Enable auto-merge on a pull request via GitHub's GraphQL API.
+///
+/// Requires the PR's `node_id` (from the REST API response) and a merge method.
+/// The repository must have auto-merge enabled in its settings.
+pub async fn enable_auto_merge(
+    creds: &GitHubAppCredentials,
+    owner: &str,
+    repo: &str,
+    pr_node_id: &str,
+    merge_method: AutoMergeMethod,
+) -> Result<(), String> {
+    let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
+    let client = reqwest::Client::new();
+
+    let token =
+        create_installation_access_token_for_pr(&client, &jwt, owner, repo, GITHUB_API_BASE_URL)
+            .await?;
+
+    let query = format!(
+        r#"mutation {{
+  enablePullRequestAutoMerge(input: {{pullRequestId: "{pr_node_id}", mergeMethod: {merge_method}}}) {{
+    pullRequest {{
+      autoMergeRequest {{
+        enabledAt
+        mergeMethod
+      }}
+    }}
+  }}
+}}"#,
+        merge_method = merge_method.as_graphql_value(),
+    );
+
+    tracing::debug!(
+        pr_node_id,
+        merge_method = merge_method.as_graphql_value(),
+        "Enabling auto-merge"
+    );
+
+    let resp = client
+        .post(format!("{GITHUB_API_BASE_URL}/graphql"))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("User-Agent", "fabro")
+        .json(&serde_json::json!({ "query": query }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to enable auto-merge: {e}"))?;
+
+    let status = resp.status();
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse auto-merge response: {e}"))?;
+
+    if !status.is_success() {
+        return Err(format!("Auto-merge request failed ({status}): {body}"));
+    }
+
+    if let Some(errors) = body.get("errors") {
+        return Err(format!("Auto-merge GraphQL error: {errors}"));
+    }
+
+    tracing::info!(pr_node_id, "Auto-merge enabled");
+    Ok(())
 }
 
 /// Convert a Git SSH URL to HTTPS format for token-based authentication.

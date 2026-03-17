@@ -3,7 +3,7 @@ title: "Variables"
 description: "Using variables in workflows"
 ---
 
-Fabro supports `$variable` placeholders that let you parameterize workflows without editing the DOT file.
+Fabro supports `$variable` placeholders that let you parameterize workflows without editing the Graphviz file.
 
 ## Run config variables
 
@@ -20,7 +20,7 @@ repo_url = "https://github.com/fabro-sh/fabro"
 language = "rust"
 ```
 
-These variables are expanded into the DOT source **before** the graph is parsed. You can use `$variable` anywhere in the DOT file — goals, prompts, labels, scripts, or any other attribute:
+These variables are expanded into the Graphviz source **before** the graph is parsed. You can use `$variable` anywhere in the Graphviz file — goals, prompts, labels, scripts, or any other attribute:
 
 ```dot title="check.fabro"
 digraph Check {
@@ -40,7 +40,7 @@ When launched with `fabro run run.toml`, Fabro replaces `$repo_name`, `$repo_url
 
 ### Undefined variables
 
-If a `$variable` in the DOT file has no matching entry in `[vars]`, Fabro raises an error. This catches typos early — a misspelled `$langauge` fails immediately rather than passing a literal `$langauge` to the LLM.
+If a `$variable` in the Graphviz file has no matching entry in `[vars]`, Fabro raises an error. This catches typos early — a misspelled `$langauge` fails immediately rather than passing a literal `$langauge` to the LLM.
 
 ### Escaping `$`
 

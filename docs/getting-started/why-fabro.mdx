@@ -3,7 +3,7 @@ title: "Why Fabro?"
 description: "The problems Fabro solves for AI-assisted software teams"
 ---
 
-Fabro is the open source, dark software factory for small teams of expert engineers. It replaces the prompt-wait-review loop with version-controlled workflow graphs that orchestrate AI agents, shell commands, and human decisions into repeatable, long-horizon coding processes.
+Fabro is the open source dark software factory for small teams of expert engineers. It replaces the prompt-wait-review loop with version-controlled workflow graphs that orchestrate AI agents, shell commands, and human decisions into repeatable, long-horizon coding processes.
 
 ## The problem
 
@@ -19,11 +19,11 @@ AI coding agents have transformed software engineering productivity, but the sur
 
 ## How Fabro solves this
 
-Fabro gives you a deterministic harness around non-deterministic AI. You define **workflow graphs** in DOT files that specify exactly what happens, in what order, with which models, and where humans weigh in. Fabro handles orchestration, parallelism, model routing, verification, and observability.
+Fabro gives you a deterministic harness around non-deterministic AI. You define **workflow graphs** in Graphviz files that specify exactly what happens, in what order, with which models, and where humans weigh in. Fabro handles orchestration, parallelism, model routing, verification, and observability.
 
 <Columns cols={2}>
   <Card title="Version-controlled workflows" icon="diagram-project">
-    Define workflows as code in Graphviz DOT. Nodes are agents, shell commands, or human input gates. Fan out, loop, branch, and resume — all traceable and repeatable.
+    Define workflows as code in Graphviz. Nodes are agents, shell commands, or human input gates. Fan out, loop, branch, and resume — all traceable and repeatable.
   </Card>
   <Card title="Multi-model orchestration" icon="microchip">
     Route tasks to the right model using CSS-like stylesheets. Cross-critique with fresh eyes, delegate simple tasks to fast models, and fail over automatically when providers go down.
@@ -46,7 +46,7 @@ Fabro gives you a deterministic harness around non-deterministic AI. You define 
 
 ## What a workflow looks like
 
-Workflows are defined in Graphviz DOT, a simple graph description language. Here's a plan-approve-implement workflow and its DOT source:
+Workflows are defined in Graphviz, a simple graph description language. Here's a plan-approve-implement workflow and its Graphviz source:
 
 <Frame>
   <img src="/images/plan-implement-workflow.svg" alt="Plan-Implement workflow graph" />

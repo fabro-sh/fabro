@@ -16,13 +16,13 @@ Fabro has two interfaces, both backed by the same workflow engine:
 - **Standalone mode** (`fabro run`) — Run a single workflow synchronously in your terminal. Best for local development, one-off runs, and CI/CD.
 - **Server mode** (`fabro serve`) — Start an HTTP API server with a web UI, concurrent run scheduling, and team access. Best for production use and running at scale.
 
-Both modes parse the same DOT files, use the same execution engine, and support the same sandbox providers. See [Server Mode](/administration/deploy-server) for a detailed comparison and setup guide, or [Architecture](/reference/architecture) for internals.
+Both modes parse the same Graphviz files, use the same execution engine, and support the same sandbox providers. See [Server Mode](/administration/deploy-server) for a detailed comparison and setup guide, or [Architecture](/reference/architecture) for internals.
 
 ## Author time
 
 You provide three inputs:
 
-1. **Workflow graph** (`.fabro`) — A Graphviz DOT file defining nodes, edges, and their attributes. This is the core of what Fabro executes. See [Workflows](/core-concepts/workflows).
+1. **Workflow graph** (`.fabro`) — A Graphviz file defining nodes, edges, and their attributes. This is the core of what Fabro executes. See [Workflows](/core-concepts/workflows).
 2. **Run config** (`.toml`, optional) — Overrides for the default model, sandbox provider, setup commands, and variables. See [Run Configuration](/execution/run-configuration).
 3. **API keys** (`.env`) — Provider credentials for LLM APIs. See [Quick Start](/getting-started/quick-start).
 
@@ -30,7 +30,7 @@ You provide three inputs:
 
 When you run `fabro run`, Fabro:
 
-1. Parses the DOT file into an in-memory graph of nodes and edges
+1. Parses the Graphviz file into an in-memory graph of nodes and edges
 2. Validates the graph structure (exactly one start node, one exit node, all edges point to valid nodes)
 3. Applies the [model stylesheet](/workflows/stylesheets) to resolve which LLM model each node uses
 4. Merges run config defaults with CLI flags (CLI flags override the config, config overrides graph defaults)

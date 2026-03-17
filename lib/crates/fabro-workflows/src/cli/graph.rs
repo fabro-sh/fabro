@@ -101,6 +101,25 @@ pub fn graph_command(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Dark mode CSS injected into SVG output (leading newline included for insertion).
+const DARK_MODE_STYLE: &str = r##"
+<style>
+  @media (prefers-color-scheme: dark) {
+    text { fill: #e0e0e0 !important; }
+    [stroke="#357f9e"] { stroke: #5bb8d8; }
+    [stroke="#666666"] { stroke: #999999; }
+    polygon[fill="#357f9e"] { fill: #5bb8d8; }
+    polygon[fill="#666666"] { fill: #999999; }
+  }
+</style>"##;
+
+/// DOT graph-level defaults injected after the first `{`.
+const DOT_STYLE_DEFAULTS: &str = r##"
+    bgcolor="transparent"
+    node [color="#357f9e", fontname="Helvetica", fontsize=12, fontcolor="#1a1a1a"]
+    edge [color="#666666", fontname="Helvetica", fontsize=10, fontcolor="#666666"]
+"##;
+
 static RANKDIR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"rankdir\s*=\s*\w+").unwrap());
 
@@ -115,8 +134,52 @@ fn apply_direction<'a>(source: &'a str, direction: Option<GraphDirection>) -> Co
     }
 }
 
-/// Spawn the `dot` command to render DOT source into the given format.
-fn render_dot(source: &str, format: GraphFormat) -> anyhow::Result<Vec<u8>> {
+/// Inject DOT graph-level style defaults (transparent background, teal nodes,
+/// gray edges, Helvetica font) right after the first `{` in the DOT source.
+/// Per-node/edge attributes override these defaults.
+fn inject_dot_style_defaults(source: &str) -> String {
+    let Some(pos) = source.find('{') else {
+        return source.to_string();
+    };
+    let (before, after) = source.split_at(pos + 1);
+    format!("{before}{DOT_STYLE_DEFAULTS}{after}")
+}
+
+/// Post-process raw SVG output from Graphviz:
+/// 1. Remove the white background `<polygon>` element
+/// 2. Insert a dark-mode `<style>` block after the opening `<svg ...>` tag
+fn postprocess_svg(raw: Vec<u8>) -> Vec<u8> {
+    let mut svg = String::from_utf8(raw)
+        .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
+
+    // Remove white background polygon (single line containing it)
+    svg = svg
+        .lines()
+        .filter(|line| {
+            !(line.contains("<polygon")
+                && line.contains("fill=\"white\"")
+                && line.contains("stroke=\"none\""))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Insert dark mode style block after the opening <svg ...> tag
+    if let Some(svg_close) = svg
+        .find("<svg")
+        .and_then(|start| svg[start..].find('>').map(|end| start + end))
+    {
+        svg.insert_str(svg_close + 1, DARK_MODE_STYLE);
+    }
+
+    svg.into_bytes()
+}
+
+/// Render styled DOT source into the given format via the `dot` command.
+///
+/// Injects style defaults (colors, fonts, transparent background) into the DOT
+/// source, then post-processes SVG output with dark-mode CSS and background removal.
+pub fn render_dot(source: &str, format: GraphFormat) -> anyhow::Result<Vec<u8>> {
+    let styled_source = inject_dot_style_defaults(source);
     let mut child = match Command::new("dot")
         .arg(format!("-T{format}"))
         .stdin(std::process::Stdio::piped())
@@ -134,7 +197,7 @@ fn render_dot(source: &str, format: GraphFormat) -> anyhow::Result<Vec<u8>> {
     };
 
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(source.as_bytes())?;
+        stdin.write_all(styled_source.as_bytes())?;
     }
 
     let output = child.wait_with_output()?;
@@ -144,7 +207,12 @@ fn render_dot(source: &str, format: GraphFormat) -> anyhow::Result<Vec<u8>> {
         bail!("dot failed: {stderr}");
     }
 
-    Ok(output.stdout)
+    let raw = output.stdout;
+    if matches!(format, GraphFormat::Svg) {
+        Ok(postprocess_svg(raw))
+    } else {
+        Ok(raw)
+    }
 }
 
 /// Check whether the `dot` command is available on PATH.
@@ -236,6 +304,14 @@ mod tests {
 
         let content = std::fs::read_to_string(&output_path).unwrap();
         assert!(content.contains("<svg"), "expected SVG content");
+        assert!(
+            content.contains("prefers-color-scheme: dark"),
+            "expected dark mode style block"
+        );
+        assert!(
+            !content.contains("fill=\"white\""),
+            "white background should be removed"
+        );
     }
 
     #[test]
@@ -300,6 +376,52 @@ mod tests {
         assert!(output_path.exists(), "output file should exist");
         let content = std::fs::read_to_string(&output_path).unwrap();
         assert!(!content.is_empty(), "output file should not be empty");
+    }
+
+    #[test]
+    fn inject_dot_style_defaults_inserts_attrs() {
+        let source = "digraph G {\n    a -> b\n}";
+        let styled = inject_dot_style_defaults(source);
+        assert!(styled.contains("bgcolor=\"transparent\""));
+        assert!(styled.contains("node [color=\"#357f9e\""));
+        assert!(styled.contains("fontname=\"Helvetica\""));
+        assert!(styled.contains("edge [color=\"#666666\""));
+        // Original content preserved
+        assert!(styled.contains("a -> b"));
+    }
+
+    #[test]
+    fn inject_dot_style_defaults_no_brace() {
+        let source = "no brace here";
+        let result = inject_dot_style_defaults(source);
+        assert_eq!(result, source);
+    }
+
+    #[test]
+    fn postprocess_svg_removes_white_bg() {
+        let svg = b"<svg xmlns=\"...\" width=\"100\">\n<polygon fill=\"white\" stroke=\"none\" points=\"0,0 100,0 100,100 0,100\"/>\n<g>content</g>\n</svg>";
+        let result = postprocess_svg(svg.to_vec());
+        let result_str = String::from_utf8(result).unwrap();
+        assert!(
+            !result_str.contains("fill=\"white\""),
+            "white background polygon should be removed"
+        );
+        assert!(result_str.contains("<g>content</g>"));
+    }
+
+    #[test]
+    fn postprocess_svg_injects_dark_mode() {
+        let svg = b"<svg xmlns=\"...\" width=\"100\">\n<g>content</g>\n</svg>";
+        let result = postprocess_svg(svg.to_vec());
+        let result_str = String::from_utf8(result).unwrap();
+        assert!(
+            result_str.contains("prefers-color-scheme: dark"),
+            "dark mode style block should be present"
+        );
+        // Style block should come after <svg ...>
+        let svg_tag_end = result_str.find('>').unwrap();
+        let style_pos = result_str.find("<style>").unwrap();
+        assert!(style_pos > svg_tag_end);
     }
 
     #[test]

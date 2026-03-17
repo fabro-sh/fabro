@@ -22,10 +22,10 @@ goal = "Implement the login feature"
 | Field | Required | Description |
 |---|---|---|
 | `version` | Yes | Config format version. Must be `1`. |
-| `graph` | Yes | Path to the DOT workflow file, resolved relative to the TOML file's directory. |
-| `goal` | No | What the workflow should accomplish. Passed to agents and used in retrospectives. Can also be provided via `--goal` CLI flag or DOT graph `goal` attribute. |
+| `graph` | Yes | Path to the Graphviz workflow file, resolved relative to the TOML file's directory. |
+| `goal` | No | What the workflow should accomplish. Passed to agents and used in retrospectives. Can also be provided via `--goal` CLI flag or Graphviz graph `goal` attribute. |
 
-Goal precedence: CLI `--goal` > TOML `goal` > DOT graph attribute.
+Goal precedence: CLI `--goal` > TOML `goal` > Graphviz graph attribute.
 
 ## Full example
 
@@ -275,7 +275,7 @@ Exclude globs from `server.toml` defaults and the run config are merged (union, 
 
 ### `[vars]`
 
-Define variables that are expanded into the DOT source before the graph is parsed. See [Variables](/workflows/variables) for the full reference.
+Define variables that are expanded into the Graphviz source before the graph is parsed. See [Variables](/workflows/variables) for the full reference.
 
 ```toml title="run.toml"
 [vars]
@@ -284,7 +284,7 @@ repo_url = "https://github.com/fabro-sh/fabro"
 language = "rust"
 ```
 
-Variables can be used anywhere in the DOT file with `$name` syntax:
+Variables can be used anywhere in the Graphviz file with `$name` syntax:
 
 ```dot title="c-i.fabro"
 digraph CI {
@@ -294,7 +294,7 @@ digraph CI {
 }
 ```
 
-If a `$variable` in the DOT file has no matching entry in `[vars]`, Fabro raises an error immediately. A bare `$` not followed by an identifier (e.g. `costs $5`) is left as-is.
+If a `$variable` in the Graphviz file has no matching entry in `[vars]`, Fabro raises an error immediately. A bare `$` not followed by an identifier (e.g. `costs $5`) is left as-is.
 
 ### `[assets]`
 
@@ -345,12 +345,16 @@ Automatically open a GitHub pull request when the workflow run completes success
 [pull_request]
 enabled = true
 draft = true
+auto_merge = false
+merge_strategy = "squash"
 ```
 
 | Field | Description |
 |---|---|
 | `enabled` | When `true`, Fabro creates a PR from the agent's working branch after a successful run. Default: `false`. |
 | `draft` | When `true`, the PR is created as a draft pull request. Default: `true`. |
+| `auto_merge` | When `true`, enables GitHub auto-merge on the created PR. Implies `draft = false` since GitHub doesn't allow auto-merge on draft PRs. The repository must have auto-merge enabled in GitHub settings. Default: `false`. |
+| `merge_strategy` | Merge method when `auto_merge` is enabled: `squash` (default), `merge`, or `rebase`. |
 
 ### `[github]`
 
@@ -426,11 +430,11 @@ Settings can come from multiple sources. Fabro resolves them in this order (firs
 | CLI flags (`--model`, `--provider`, `--sandbox`) | |
 | Project defaults (`fabro.toml`) | |
 | Server defaults (`~/.fabro/server.toml`) | |
-| DOT graph attributes (`default_model`, `default_provider`) | |
+| Graphviz graph attributes (`default_model`, `default_provider`) | |
 | Built-in defaults | Lowest |
 
 <Note>
-For model and provider specifically, the precedence is: CLI flags > TOML config > project defaults > server defaults > DOT graph attributes > built-in defaults. Stylesheet rules on individual nodes always take priority over all of these.
+For model and provider specifically, the precedence is: CLI flags > TOML config > project defaults > server defaults > Graphviz graph attributes > built-in defaults. Stylesheet rules on individual nodes always take priority over all of these.
 </Note>
 
 ### Project defaults (`fabro.toml`)
@@ -480,9 +484,9 @@ The same merge behavior applies to Daytona labels. All other fields use simple "
 Fabro validates the run config when it loads:
 
 - **Version check** — Only `version = 1` is accepted. Other versions are rejected immediately.
-- **Required fields** — `version` and `graph` are required. `goal` is optional (can be provided via `--goal` or DOT graph attribute).
+- **Required fields** — `version` and `graph` are required. `goal` is optional (can be provided via `--goal` or Graphviz graph attribute).
 - **Unknown fields** — Extra fields not listed above are rejected (`deny_unknown_fields`).
-- **Variable check** — Any `$variable` in the DOT file without a matching `[vars]` entry produces an error.
+- **Variable check** — Any `$variable` in the Graphviz file without a matching `[vars]` entry produces an error.
 
 Use `--preflight` to validate a run config without executing it:
 

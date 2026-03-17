@@ -4,7 +4,21 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   integrations: [react()],
+  redirects: {
+    "/discord": {
+      status: 302,
+      destination:
+        "https://discord.gg/KE6w49Vg",
+    },
+    "/docs": {
+      status: 302,
+      destination: "https://docs.fabro.sh",
+    },
+  },
   vite: {
     plugins: [tailwindcss()],
+    server: {
+      allowedHosts: [".ngrok-free.app"],
+    },
   },
 });

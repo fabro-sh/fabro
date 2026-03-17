@@ -330,6 +330,7 @@ fn spawn_retro_event_forwarder(session: &Session, emitter: Arc<EventEmitter>) ->
                 AgentEvent::SessionStarted
                     | AgentEvent::SessionEnded
                     | AgentEvent::AssistantTextStart
+                    | AgentEvent::AssistantOutputReplace { .. }
                     | AgentEvent::TextDelta { .. }
                     | AgentEvent::ReasoningDelta { .. }
                     | AgentEvent::ToolCallOutputDelta { .. }

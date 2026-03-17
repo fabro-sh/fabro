@@ -1,0 +1,4 @@
+title: Workflow engine
+description: Graphviz graph parsing with agent, command, and human nodes. Dynamic edge selection with conditions and loops.
+status: shipped
+date: 2026-02-15

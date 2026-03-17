@@ -573,6 +573,7 @@ pub fn format_event_pretty(line: &str, styles: &fabro_util::terminal::Styles) ->
         "Agent.SessionStarted"
         | "Agent.SessionEnded"
         | "Agent.AssistantTextStart"
+        | "Agent.AssistantOutputReplace"
         | "Agent.TextDelta"
         | "Agent.ReasoningDelta"
         | "Agent.ToolCallOutputDelta"
@@ -812,6 +813,14 @@ mod tests {
     fn pretty_skips_noise_events() {
         let styles = no_color_styles();
         let line = r#"{"ts":"2026-01-01T14:23:12Z","event":"Agent.TextDelta","delta":"hello"}"#;
+        assert!(format_event_pretty(line, &styles).is_none());
+    }
+
+    #[test]
+    fn pretty_skips_assistant_output_replace_noise_event() {
+        let styles = no_color_styles();
+        let line =
+            r#"{"ts":"2026-01-01T14:23:12Z","event":"Agent.AssistantOutputReplace","text":""}"#;
         assert!(format_event_pretty(line, &styles).is_none());
     }
 

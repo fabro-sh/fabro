@@ -1,0 +1,4 @@
+title: Verifications
+description: Deterministic quality gates — test suites, linters, type checkers, and LLM-as-judge — wired into the workflow graph.
+status: building
+date: 2026-04-01

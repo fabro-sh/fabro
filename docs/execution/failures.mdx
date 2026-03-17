@@ -27,7 +27,7 @@ implement -> escalate  [condition="failure_class=deterministic"]
 
 ## Retry layers
 
-Fabro retries failures at two levels: **LLM retries** handle transient API errors inside a single model call, and **node retries** re-execute the entire node handler when the first level isn't enough. These layers are independent — a node retry re-runs the full handler, which gets its own fresh set of LLM retries.
+Fabro retries failures at three levels: **LLM retries** handle transient API errors inside a single model call, **turn-level retries** recover from dropped streams mid-response, and **node retries** re-execute the entire node handler when the first two levels aren't enough. These layers are independent — a node retry re-runs the full handler, which gets its own fresh set of LLM and turn-level retries.
 
 ### LLM retries
 
@@ -45,9 +45,13 @@ Only transient errors are retried: rate limits, server errors (5xx), timeouts, n
 
 If the provider returns a `Retry-After` header, Fabro respects it — unless the delay exceeds 60 seconds, in which case the call fails rather than blocking the run.
 
+### Turn-level retries
+
+When an LLM stream drops mid-response (common under high concurrency), Fabro retries the same agent turn up to 3 times instead of failing the entire session. Conversation history is preserved across retries, and any partial assistant output from the interrupted stream is replayed so the model can continue where it left off. This avoids restarting the full stage from scratch for transient stream failures.
+
 ### Node retries
 
-When a node handler fails (after LLM retries are exhausted), the engine can retry the entire node. This is controlled by **retry policies**.
+When a node handler fails (after LLM and turn-level retries are exhausted), the engine can retry the entire node. This is controlled by **retry policies**.
 
 #### Retry policies
 
@@ -266,8 +270,9 @@ digraph Example {
 A node failure does **not** automatically terminate the run. Fabro follows this escalation path:
 
 1. **LLM retries** — transient API errors are retried inside the model call (up to 3 retries)
-2. **Provider failover** — if configured, switch to a fallback provider
-3. **Node retries** — re-execute the entire handler (per the retry policy)
+2. **Turn-level retries** — dropped streams retry the same agent turn (up to 3 retries), preserving conversation history
+3. **Provider failover** — if configured, switch to a fallback provider
+4. **Node retries** — re-execute the entire handler (per the retry policy)
 4. **Edge routing** — if the node ultimately fails, look for an outgoing edge that matches (e.g., `condition="outcome=fail"`)
 5. **Retry target** — if no matching edge exists, check `retry_target` / `fallback_retry_target` on the node and graph
 6. **Run failure** — if none of the above produces a path forward, the run terminates

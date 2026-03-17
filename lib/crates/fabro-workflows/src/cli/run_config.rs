@@ -32,6 +32,19 @@ pub struct PullRequestConfig {
     pub enabled: bool,
     #[serde(default = "default_true")]
     pub draft: bool,
+    #[serde(default)]
+    pub auto_merge: bool,
+    #[serde(default)]
+    pub merge_strategy: MergeStrategy,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MergeStrategy {
+    #[default]
+    Squash,
+    Merge,
+    Rebase,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -2153,6 +2166,8 @@ enabled = true
             pull_request: Some(PullRequestConfig {
                 enabled: false,
                 draft: false,
+                auto_merge: false,
+                merge_strategy: MergeStrategy::Squash,
             }),
             ..RunDefaults::default()
         };
@@ -2174,6 +2189,8 @@ graph = "w.fabro"
             pull_request: Some(PullRequestConfig {
                 enabled: true,
                 draft: false,
+                auto_merge: false,
+                merge_strategy: MergeStrategy::Squash,
             }),
             ..RunDefaults::default()
         };
