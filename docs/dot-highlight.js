@@ -101,12 +101,8 @@
     });
   }
 
-  // Debug: mark that the script ran
-  document.documentElement.setAttribute("data-dot-highlight", "loaded");
-
   // Run after a short delay to let React hydration complete
   function init() {
-    document.documentElement.setAttribute("data-dot-highlight", "init");
     highlightDotBlocks();
     // Re-run on SPA navigation (Mintlify uses Next.js)
     var observer = new MutationObserver(function () {
