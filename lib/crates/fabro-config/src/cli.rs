@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use tracing::debug;
 
 use crate::run::RunDefaults;
 
@@ -119,23 +118,7 @@ impl CliConfig {
 /// Load CLI config from an explicit path or `~/.fabro/cli.toml`, returning defaults if the
 /// default file doesn't exist. An explicit path that doesn't exist is an error.
 pub fn load_cli_config(path: Option<&Path>) -> anyhow::Result<CliConfig> {
-    if let Some(explicit) = path {
-        debug!(path = %explicit.display(), "Loading CLI config from explicit path");
-        let contents = std::fs::read_to_string(explicit)?;
-        return Ok(toml::from_str(&contents)?);
-    }
-
-    let Some(home) = dirs::home_dir() else {
-        debug!("No home directory found, using default CLI config");
-        return Ok(CliConfig::default());
-    };
-    let default_path = home.join(".fabro").join("cli.toml");
-    debug!(path = %default_path.display(), "Loading CLI config");
-    match std::fs::read_to_string(&default_path) {
-        Ok(contents) => Ok(toml::from_str(&contents)?),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(CliConfig::default()),
-        Err(e) => Err(e.into()),
-    }
+    crate::load_config_file(path, "cli.toml")
 }
 
 #[cfg(test)]

@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
 use crate::run::RunDefaults;
 
@@ -150,23 +149,7 @@ pub struct ServerConfig {
 /// Load server config from an explicit path or `~/.fabro/server.toml`, returning defaults if the
 /// default file doesn't exist. An explicit path that doesn't exist is an error.
 pub fn load_server_config(path: Option<&Path>) -> anyhow::Result<ServerConfig> {
-    if let Some(explicit) = path {
-        debug!(path = %explicit.display(), "Loading server config from explicit path");
-        let contents = std::fs::read_to_string(explicit)?;
-        return Ok(toml::from_str(&contents)?);
-    }
-
-    let Some(home) = dirs::home_dir() else {
-        debug!("No home directory found, using default server config");
-        return Ok(ServerConfig::default());
-    };
-    let default_path = home.join(".fabro").join("server.toml");
-    debug!(path = %default_path.display(), "Loading server config");
-    match std::fs::read_to_string(&default_path) {
-        Ok(contents) => Ok(toml::from_str(&contents)?),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(ServerConfig::default()),
-        Err(e) => Err(e.into()),
-    }
+    crate::load_config_file(path, "server.toml")
 }
 
 /// Resolve the data directory: config value > default `~/.fabro`.

@@ -125,142 +125,36 @@ impl WorkflowRunConfig {
     /// Each field uses the first non-`None` value (task config wins).
     /// Vars are merged: defaults first, then task config overwrites.
     pub fn apply_defaults(&mut self, defaults: &RunDefaults) {
-        if self.work_dir.is_none() {
-            self.work_dir = defaults.work_dir.clone();
-        }
+        // Build a RunDefaults from the task's current fields (the "overlay"),
+        // then merge it on top of the server defaults (the "base").
+        // This gives "task wins" semantics via merge_overlay's "overlay wins".
+        let task_overlay = RunDefaults {
+            work_dir: self.work_dir.take(),
+            llm: self.llm.take(),
+            setup: self.setup.take(),
+            sandbox: self.sandbox.take(),
+            vars: self.vars.take(),
+            checkpoint: std::mem::take(&mut self.checkpoint),
+            pull_request: self.pull_request.take(),
+            assets: self.assets.take(),
+            hooks: std::mem::take(&mut self.hooks),
+            mcp_servers: std::mem::take(&mut self.mcp_servers),
+            github: self.github.take(),
+        };
+        let mut merged = defaults.clone();
+        merged.merge_overlay(task_overlay);
 
-        match (&mut self.llm, &defaults.llm) {
-            (Some(task), Some(default)) => {
-                if task.model.is_none() {
-                    task.model = default.model.clone();
-                }
-                if task.provider.is_none() {
-                    task.provider = default.provider.clone();
-                }
-                if task.fallbacks.is_none() {
-                    task.fallbacks = default.fallbacks.clone();
-                }
-            }
-            (None, Some(_)) => self.llm = defaults.llm.clone(),
-            _ => {}
-        }
-
-        match (&mut self.setup, &defaults.setup) {
-            (Some(task), Some(default)) => {
-                if task.timeout_ms.is_none() {
-                    task.timeout_ms = default.timeout_ms;
-                }
-            }
-            (None, Some(_)) => self.setup = defaults.setup.clone(),
-            _ => {}
-        }
-
-        match (&mut self.sandbox, &defaults.sandbox) {
-            (Some(task), Some(default)) => {
-                if task.provider.is_none() {
-                    task.provider = default.provider.clone();
-                }
-                if task.preserve.is_none() {
-                    task.preserve = default.preserve;
-                }
-                if task.devcontainer.is_none() {
-                    task.devcontainer = default.devcontainer;
-                }
-                if task.local.is_none() {
-                    task.local = default.local.clone();
-                }
-                match (&mut task.daytona, &default.daytona) {
-                    (Some(task_d), Some(default_d)) => {
-                        if task_d.auto_stop_interval.is_none() {
-                            task_d.auto_stop_interval = default_d.auto_stop_interval;
-                        }
-                        if task_d.snapshot.is_none() {
-                            task_d.snapshot = default_d.snapshot.clone();
-                        }
-                        if let Some(ref default_labels) = default_d.labels {
-                            let mut merged = default_labels.clone();
-                            if let Some(ref task_labels) = task_d.labels {
-                                merged.extend(task_labels.clone());
-                            }
-                            task_d.labels = Some(merged);
-                        }
-                        if task_d.network.is_none() {
-                            task_d.network = default_d.network.clone();
-                        }
-                    }
-                    (None, Some(_)) => task.daytona = default.daytona.clone(),
-                    _ => {}
-                }
-                #[cfg(feature = "exedev")]
-                match (&mut task.exe, &default.exe) {
-                    (Some(task_e), Some(default_e)) => {
-                        if task_e.image.is_none() {
-                            task_e.image = default_e.image.clone();
-                        }
-                    }
-                    (None, Some(_)) => task.exe = default.exe.clone(),
-                    _ => {}
-                }
-                if task.ssh.is_none() {
-                    task.ssh = default.ssh.clone();
-                }
-                if let Some(ref default_env) = default.env {
-                    let mut merged = default_env.clone();
-                    if let Some(ref task_env) = task.env {
-                        merged.extend(task_env.clone());
-                    }
-                    task.env = Some(merged);
-                }
-            }
-            (None, Some(_)) => self.sandbox = defaults.sandbox.clone(),
-            _ => {}
-        }
-
-        if let Some(ref default_vars) = defaults.vars {
-            let mut merged = default_vars.clone();
-            if let Some(ref task_vars) = self.vars {
-                merged.extend(task_vars.clone());
-            }
-            self.vars = Some(merged);
-        }
-
-        if !defaults.checkpoint.exclude_globs.is_empty() {
-            let mut merged = defaults.checkpoint.exclude_globs.clone();
-            merged.append(&mut self.checkpoint.exclude_globs.clone());
-            merged.sort();
-            merged.dedup();
-            self.checkpoint.exclude_globs = merged;
-        }
-
-        if self.pull_request.is_none() {
-            self.pull_request = defaults.pull_request.clone();
-        }
-
-        if self.assets.is_none() {
-            self.assets = defaults.assets.clone();
-        }
-
-        // Merge hooks: defaults as base, workflow overrides by name
-        if !defaults.hooks.is_empty() {
-            let base = HookConfig {
-                hooks: defaults.hooks.clone(),
-            };
-            let overlay = HookConfig {
-                hooks: std::mem::take(&mut self.hooks),
-            };
-            self.hooks = base.merge(overlay).hooks;
-        }
-
-        // Merge mcp_servers: defaults as base, workflow overrides by key
-        if !defaults.mcp_servers.is_empty() {
-            let mut merged = defaults.mcp_servers.clone();
-            merged.extend(std::mem::take(&mut self.mcp_servers));
-            self.mcp_servers = merged;
-        }
-
-        if self.github.is_none() {
-            self.github = defaults.github.clone();
-        }
+        self.work_dir = merged.work_dir;
+        self.llm = merged.llm;
+        self.setup = merged.setup;
+        self.sandbox = merged.sandbox;
+        self.vars = merged.vars;
+        self.checkpoint = merged.checkpoint;
+        self.pull_request = merged.pull_request;
+        self.assets = merged.assets;
+        self.hooks = merged.hooks;
+        self.mcp_servers = merged.mcp_servers;
+        self.github = merged.github;
     }
 }
 
@@ -268,8 +162,6 @@ impl RunDefaults {
     /// Merge an overlay on top of this base. The overlay takes precedence
     /// for simple fields; compound fields (vars, hooks, mcp_servers) are
     /// deep-merged with the overlay winning on collision.
-    ///
-    /// Uses the same deep-merge semantics as `WorkflowRunConfig::apply_defaults`.
     pub fn merge_overlay(&mut self, overlay: RunDefaults) {
         if overlay.work_dir.is_some() {
             self.work_dir = overlay.work_dir;
@@ -344,6 +236,9 @@ impl RunDefaults {
                     }
                     (None, Some(over_e)) => base.exe = Some(over_e),
                     _ => {}
+                }
+                if over.ssh.is_some() {
+                    base.ssh = over.ssh;
                 }
                 if let Some(over_env) = over.env {
                     let mut merged = base.env.take().unwrap_or_default();
