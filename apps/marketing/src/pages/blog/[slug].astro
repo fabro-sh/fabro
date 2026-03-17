@@ -30,7 +30,7 @@ const readingTime = Math.max(1, Math.round(wordCount / 250));
     <article class="relative pt-24 sm:pt-28 pb-24">
       <div class="relative mx-auto max-w-3xl px-6">
         <!-- Back link -->
-        <a href="/blog" class="reveal inline-flex items-center gap-2 text-sm text-ice-300/60 hover:text-teal-300 transition-colors mb-10 group">
+        <a href="/blog" class="inline-flex items-center gap-2 text-sm text-ice-300/60 hover:text-teal-300 transition-colors mb-10 group">
           <svg class="h-4 w-4 transition-transform group-hover:-translate-x-1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
             <polyline points="15,18 9,12 15,6" />
           </svg>
@@ -39,10 +39,10 @@ const readingTime = Math.max(1, Math.round(wordCount / 250));
 
         <!-- Header -->
         <header class="mb-10 border-b border-navy-800/40 pb-8">
-          <h1 class="reveal reveal-d1 font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl leading-[1.15]">
+          <h1 class="font-display text-3xl font-bold tracking-tight text-ice-50 sm:text-4xl leading-[1.15]">
             {post.data.title}
           </h1>
-          <div class="reveal reveal-d2 mt-4 flex items-center gap-3 text-sm text-ice-300/50">
+          <div class="mt-4 flex items-center gap-3 text-sm text-ice-300/50">
             <time class="font-mono">{formatDate(post.data.date)}</time>
             <span>&middot;</span>
             <span>{post.data.author}</span>
@@ -52,7 +52,7 @@ const readingTime = Math.max(1, Math.round(wordCount / 250));
         </header>
 
         <!-- Content -->
-        <div class="reveal reveal-d3 prose">
+        <div class="prose">
           <Content />
         </div>
       </div>
