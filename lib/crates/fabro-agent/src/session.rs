@@ -15,6 +15,7 @@ use crate::types::{AgentEvent, SessionState, Turn};
 use fabro_llm::client::Client;
 use fabro_llm::error::{ProviderErrorKind, SdkError};
 use fabro_llm::generate::StreamAccumulator;
+use fabro_llm::provider::StreamEventStream;
 use fabro_llm::types::{Message, Request, StreamEvent, ToolChoice};
 use fabro_mcp::config::McpServerConfig;
 use futures::StreamExt;
@@ -389,6 +390,38 @@ impl Session {
         AgentError::Aborted(reason)
     }
 
+    fn emit_llm_error(&mut self, err: SdkError) -> AgentError {
+        self.event_emitter.emit(
+            self.id.clone(),
+            AgentEvent::Error {
+                error: AgentError::Llm(err.clone()),
+            },
+        );
+        if is_auth_error(&err) {
+            self.state = SessionState::Closed;
+        }
+        AgentError::Llm(err)
+    }
+
+    async fn open_stream_with_retry(
+        &mut self,
+        client: &Client,
+        request: &Request,
+        retry_policy: &fabro_llm::types::RetryPolicy,
+    ) -> Result<StreamEventStream, AgentError> {
+        let stream_result = fabro_llm::retry::retry(retry_policy, || {
+            let client = client.clone();
+            let request = request.clone();
+            async move { client.stream(&request).await }
+        })
+        .await;
+
+        match stream_result {
+            Ok(stream) => Ok(stream),
+            Err(err) => Err(self.emit_llm_error(err)),
+        }
+    }
+
     #[must_use]
     pub fn followup_queue_handle(&self) -> Arc<Mutex<VecDeque<String>>> {
         self.followup_queue.clone()
@@ -596,84 +629,101 @@ impl Session {
                 ..Default::default()
             };
             let client = self.llm_client.clone();
-            let stream_result = fabro_llm::retry::retry(&retry_policy, || {
-                let c = client.clone();
-                let r = request.clone();
-                async move { c.stream(&r).await }
-            })
-            .await;
-            let mut event_stream = match stream_result {
-                Ok(stream) => stream,
-                Err(err) => {
-                    self.event_emitter.emit(
-                        self.id.clone(),
-                        AgentEvent::Error {
-                            error: AgentError::Llm(err.clone()),
-                        },
-                    );
-                    if is_auth_error(&err) {
-                        self.state = SessionState::Closed;
-                    }
-                    return Err(AgentError::Llm(err));
-                }
-            };
+            let mut event_stream = self
+                .open_stream_with_retry(&client, &request, &retry_policy)
+                .await?;
 
-            let mut accumulator = StreamAccumulator::new();
+            // Consume the stream, retrying up to 3 times if the provider
+            // closes the stream without sending a Finish event. If visible
+            // output was already emitted, clear it before replaying the turn.
+            const STREAM_CONSUME_RETRIES: usize = 3;
+            let mut response = None;
 
-            while let Some(event_result) = event_stream.next().await {
-                match event_result {
-                    Ok(event) => {
-                        match &event {
-                            StreamEvent::TextDelta { ref delta, .. } => {
-                                self.event_emitter.emit(
-                                    self.id.clone(),
-                                    AgentEvent::TextDelta {
-                                        delta: delta.clone(),
-                                    },
-                                );
+            for stream_attempt in 0..=STREAM_CONSUME_RETRIES {
+                let mut accumulator = StreamAccumulator::new();
+                let mut emitted_text = String::new();
+                let mut emitted_reasoning = String::new();
+
+                while let Some(event_result) = event_stream.next().await {
+                    match event_result {
+                        Ok(event) => {
+                            match &event {
+                                StreamEvent::TextDelta { ref delta, .. } => {
+                                    emitted_text.push_str(delta);
+                                    self.event_emitter.emit(
+                                        self.id.clone(),
+                                        AgentEvent::TextDelta {
+                                            delta: delta.clone(),
+                                        },
+                                    );
+                                }
+                                StreamEvent::ReasoningDelta { ref delta } => {
+                                    emitted_reasoning.push_str(delta);
+                                    self.event_emitter.emit(
+                                        self.id.clone(),
+                                        AgentEvent::ReasoningDelta {
+                                            delta: delta.clone(),
+                                        },
+                                    );
+                                }
+                                _ => {}
                             }
-                            StreamEvent::ReasoningDelta { ref delta } => {
-                                self.event_emitter.emit(
-                                    self.id.clone(),
-                                    AgentEvent::ReasoningDelta {
-                                        delta: delta.clone(),
-                                    },
-                                );
-                            }
-                            _ => {}
+                            accumulator.process(&event);
                         }
-                        accumulator.process(&event);
+                        Err(err) => {
+                            return Err(self.emit_llm_error(err));
+                        }
                     }
-                    Err(err) => {
-                        self.event_emitter.emit(
-                            self.id.clone(),
-                            AgentEvent::Error {
-                                error: AgentError::Llm(err.clone()),
-                            },
-                        );
-                        return Err(AgentError::Llm(err));
+
+                    // Check cancellation between chunks
+                    if self.cancel_token.is_cancelled() {
+                        break;
                     }
                 }
 
-                // Check cancellation between chunks
+                // If aborted during streaming, drop the stream to cancel the HTTP
+                // connection, then close the session before returning.
                 if self.cancel_token.is_cancelled() {
+                    drop(event_stream);
+                    self.close();
+                    return Err(self.aborted_error());
+                }
+
+                if let Some(resp) = accumulator.response().cloned() {
+                    response = Some(resp);
                     break;
                 }
+
+                // No Finish event — retry if we have attempts left
+                if stream_attempt < STREAM_CONSUME_RETRIES {
+                    tracing::warn!(
+                        attempt = stream_attempt + 1,
+                        max = STREAM_CONSUME_RETRIES,
+                        "Stream ended without Finish event, retrying turn"
+                    );
+                    if !emitted_text.is_empty() || !emitted_reasoning.is_empty() {
+                        self.event_emitter.emit(
+                            self.id.clone(),
+                            AgentEvent::AssistantOutputReplace {
+                                text: String::new(),
+                                reasoning: None,
+                            },
+                        );
+                    }
+                    event_stream = self
+                        .open_stream_with_retry(&client, &request, &retry_policy)
+                        .await?;
+                }
             }
 
-            // If aborted during streaming, drop the stream to cancel the HTTP
-            // connection, then close the session before returning.
-            if self.cancel_token.is_cancelled() {
-                drop(event_stream);
-                self.close();
-                return Err(self.aborted_error());
-            }
-
-            let response = accumulator.response().cloned().ok_or_else(|| {
-                AgentError::Llm(SdkError::Stream {
-                    message: "Stream ended without a Finish event".into(),
-                })
-            })?;
+            let response = match response {
+                Some(response) => response,
+                None => {
+                    return Err(self.emit_llm_error(SdkError::Stream {
+                        message: "Stream ended without a Finish event (after retries)".into(),
+                    }))
+                }
+            };
 
             // Record assistant turn
             let text = response.text();
@@ -874,10 +924,96 @@ mod tests {
     use super::*;
     use crate::test_support::*;
     use crate::tool_registry::{RegisteredTool, ToolRegistry};
-    use fabro_llm::error::ProviderErrorDetail;
+    use fabro_llm::error::{ProviderErrorDetail, ProviderErrorKind};
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
-    use fabro_llm::types::{Response, Role, ToolDefinition};
+    use fabro_llm::types::{Request, Response, Role, StreamEvent, ToolDefinition};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[derive(Clone)]
+    enum ScriptedStreamCall {
+        Response(Response),
+        Events(Vec<Result<StreamEvent, SdkError>>),
+        Error(SdkError),
+    }
+
+    struct ScriptedStreamProvider {
+        calls: Vec<ScriptedStreamCall>,
+        call_index: AtomicUsize,
+    }
+
+    impl ScriptedStreamProvider {
+        fn new(calls: Vec<ScriptedStreamCall>) -> Self {
+            assert!(
+                !calls.is_empty(),
+                "scripted stream provider needs at least one call"
+            );
+            Self {
+                calls,
+                call_index: AtomicUsize::new(0),
+            }
+        }
+
+        fn events_for_response(response: Response) -> Vec<Result<StreamEvent, SdkError>> {
+            let mut events = Vec::new();
+            let text = response.text();
+            if !text.is_empty() {
+                events.push(Ok(StreamEvent::text_delta(text, None)));
+            }
+
+            for part in &response.message.content {
+                if let fabro_llm::types::ContentPart::ToolCall(tool_call) = part {
+                    events.push(Ok(StreamEvent::ToolCallEnd {
+                        tool_call: tool_call.clone(),
+                    }));
+                }
+            }
+
+            events.push(Ok(StreamEvent::finish(
+                response.finish_reason.clone(),
+                response.usage.clone(),
+                response,
+            )));
+            events
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ProviderAdapter for ScriptedStreamProvider {
+        fn name(&self) -> &'static str {
+            "mock"
+        }
+
+        async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
+            Err(SdkError::Configuration {
+                message: "ScriptedStreamProvider does not implement complete()".into(),
+            })
+        }
+
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
+            let idx = self.call_index.fetch_add(1, Ordering::SeqCst);
+            let scripted = if idx < self.calls.len() {
+                self.calls[idx].clone()
+            } else {
+                self.calls[self.calls.len() - 1].clone()
+            };
+
+            match scripted {
+                ScriptedStreamCall::Response(response) => Ok(Box::pin(futures::stream::iter(
+                    Self::events_for_response(response),
+                ))),
+                ScriptedStreamCall::Events(events) => Ok(Box::pin(futures::stream::iter(events))),
+                ScriptedStreamCall::Error(err) => Err(err),
+            }
+        }
+    }
+
+    async fn make_session_with_provider(provider: Arc<dyn ProviderAdapter>) -> Session {
+        let client = make_client(provider).await;
+        let profile = Arc::new(TestProfile::new());
+        let env = Arc::new(MockSandbox::default());
+        Session::new(client, profile, env, SessionConfig::default())
+    }
 
     // --- Tests ---
 
@@ -1845,6 +1981,153 @@ mod tests {
             result,
             Err(AgentError::Llm(SdkError::Stream { .. }))
         ));
+    }
+
+    #[tokio::test]
+    async fn stream_retries_when_stream_ends_without_finish_before_any_deltas() {
+        let provider = Arc::new(ScriptedStreamProvider::new(vec![
+            ScriptedStreamCall::Events(vec![]),
+            ScriptedStreamCall::Response(text_response("Recovered")),
+        ]));
+        let mut session = make_session_with_provider(provider.clone()).await;
+        let mut rx = session.subscribe();
+
+        session.process_input("Hello").await.unwrap();
+
+        assert_eq!(provider.call_index.load(Ordering::SeqCst), 2);
+        let turns = session.history().turns();
+        assert!(matches!(
+            turns.last(),
+            Some(Turn::Assistant { content, .. }) if content == "Recovered"
+        ));
+
+        let mut assistant_text_start_count = 0;
+        let mut replace_count = 0;
+        let mut deltas = Vec::new();
+        let mut assistant_messages = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            match event.event {
+                AgentEvent::AssistantTextStart => assistant_text_start_count += 1,
+                AgentEvent::AssistantOutputReplace { .. } => replace_count += 1,
+                AgentEvent::TextDelta { delta } => deltas.push(delta),
+                AgentEvent::AssistantMessage { text, .. } => assistant_messages.push(text),
+                _ => {}
+            }
+        }
+
+        assert_eq!(assistant_text_start_count, 1);
+        assert_eq!(replace_count, 0);
+        assert_eq!(deltas, vec!["Recovered".to_string()]);
+        assert_eq!(assistant_messages, vec!["Recovered".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn stream_retries_with_output_replace_after_partial_text() {
+        let provider = Arc::new(ScriptedStreamProvider::new(vec![
+            ScriptedStreamCall::Events(vec![Ok(StreamEvent::text_delta("Hel", None))]),
+            ScriptedStreamCall::Response(text_response("Hello")),
+        ]));
+        let mut session = make_session_with_provider(provider.clone()).await;
+        let mut rx = session.subscribe();
+
+        session.process_input("Hello").await.unwrap();
+
+        assert_eq!(provider.call_index.load(Ordering::SeqCst), 2);
+        let turns = session.history().turns();
+        assert!(matches!(
+            turns.last(),
+            Some(Turn::Assistant { content, .. }) if content == "Hello"
+        ));
+
+        let mut observed = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            match event.event {
+                AgentEvent::AssistantTextStart => observed.push("start".to_string()),
+                AgentEvent::TextDelta { delta } => observed.push(format!("delta:{delta}")),
+                AgentEvent::AssistantOutputReplace { text, reasoning } => {
+                    observed.push(format!("replace:{text}:{reasoning:?}"));
+                }
+                AgentEvent::AssistantMessage { text, .. } => {
+                    observed.push(format!("message:{text}"));
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(
+            observed,
+            vec![
+                "start".to_string(),
+                "delta:Hel".to_string(),
+                "replace::None".to_string(),
+                "delta:Hello".to_string(),
+                "message:Hello".to_string(),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn retry_open_auth_error_emits_error_and_closes_session() {
+        let auth_error = SdkError::Provider {
+            kind: ProviderErrorKind::Authentication,
+            detail: Box::new(ProviderErrorDetail {
+                status_code: Some(401),
+                ..ProviderErrorDetail::new("bad key", "mock")
+            }),
+        };
+        let provider = Arc::new(ScriptedStreamProvider::new(vec![
+            ScriptedStreamCall::Events(vec![Ok(StreamEvent::text_delta("Hel", None))]),
+            ScriptedStreamCall::Error(auth_error.clone()),
+        ]));
+        let mut session = make_session_with_provider(provider.clone()).await;
+        let mut rx = session.subscribe();
+
+        let result = session.process_input("Hello").await;
+        assert!(matches!(
+            result,
+            Err(AgentError::Llm(SdkError::Provider {
+                kind: ProviderErrorKind::Authentication,
+                ..
+            }))
+        ));
+
+        assert_eq!(provider.call_index.load(Ordering::SeqCst), 2);
+        assert_eq!(session.state(), SessionState::Closed);
+
+        let mut observed = Vec::new();
+        let mut found_auth_error_event = false;
+        while let Ok(event) = rx.try_recv() {
+            match event.event {
+                AgentEvent::AssistantTextStart => observed.push("start".to_string()),
+                AgentEvent::TextDelta { delta } => observed.push(format!("delta:{delta}")),
+                AgentEvent::AssistantOutputReplace { text, reasoning } => {
+                    observed.push(format!("replace:{text}:{reasoning:?}"));
+                }
+                AgentEvent::Error { error } => {
+                    observed.push("error".to_string());
+                    found_auth_error_event = matches!(
+                        error,
+                        AgentError::Llm(SdkError::Provider {
+                            kind: ProviderErrorKind::Authentication,
+                            ..
+                        })
+                    );
+                }
+                AgentEvent::AssistantMessage { .. } => observed.push("message".to_string()),
+                _ => {}
+            }
+        }
+
+        assert_eq!(
+            observed,
+            vec![
+                "start".to_string(),
+                "delta:Hel".to_string(),
+                "replace::None".to_string(),
+                "error".to_string(),
+            ]
+        );
+        assert!(found_auth_error_event, "expected auth error event");
     }
 
     #[tokio::test]

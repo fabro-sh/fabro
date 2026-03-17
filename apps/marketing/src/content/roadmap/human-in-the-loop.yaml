@@ -1,0 +1,4 @@
+title: Interview-based steering
+description: Approval gates, multiple choice, and freeform questions. Steer running agents via CLI, web, or Slack.
+status: shipped
+date: 2026-02-15

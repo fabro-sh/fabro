@@ -7,7 +7,7 @@ Fabro provides two interfaces — a CLI for local development and an HTTP API fo
 
 ## Shared engine
 
-At the core of both modes is the `WorkflowRunEngine`. It parses the DOT graph, walks nodes, dispatches to handlers (agent, command, human, etc.), selects edges, and checkpoints after each stage. The engine is parameterized by an `Interviewer` trait that controls how human-in-the-loop questions are presented — terminal prompts in CLI mode, HTTP request/response in API mode.
+At the core of both modes is the `WorkflowRunEngine`. It parses the Graphviz graph, walks nodes, dispatches to handlers (agent, command, human, etc.), selects edges, and checkpoints after each stage. The engine is parameterized by an `Interviewer` trait that controls how human-in-the-loop questions are presented — terminal prompts in CLI mode, HTTP request/response in API mode.
 
 ## CLI mode
 
@@ -46,7 +46,7 @@ Key server config options:
 
 ### Run lifecycle
 
-1. **Submit** — `POST /runs` with a DOT workflow source. The run is created with status `Queued` and the response returns immediately with the run ID.
+1. **Submit** — `POST /runs` with a Graphviz workflow source. The run is created with status `Queued` and the response returns immediately with the run ID.
 2. **Schedule** — A background scheduler promotes queued runs to `Running` in FIFO order, up to the concurrency limit.
 3. **Execute** — The engine walks the graph, streaming events to all subscribers.
 4. **Complete** — The run transitions to `Completed`, `Failed`, or `Cancelled`.
@@ -82,7 +82,7 @@ cd apps/fabro-web && bun run dev   # Web UI on port 5173
 The UI provides:
 - **Run board** — List and monitor all runs
 - **Run detail** — Real-time stage progress, event stream, diffs, usage stats
-- **Start new run** — Submit a DOT workflow from the browser
+- **Start new run** — Submit a Graphviz workflow from the browser
 - **Human-in-the-loop** — Answer agent questions through the web interface
 - **Sessions** — Interactive chat interface (coming soon)
 - **Insights** — SQL-based analysis across runs via DuckDB

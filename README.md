@@ -2,14 +2,21 @@
 <a href="https://docs.fabro.sh"><img alt="Fabro" src="docs/logo/dark.svg" height="75"></a>
 </div>
 
-## The open source, dark software factory for expert engineers
+## The open source dark software factory for expert engineers
 
-AI coding agents are powerful but unpredictable. You either babysit every step or review a 50-file diff you don't trust. Fabro gives you a middle path: define the process as a graph, let agents execute it, and intervene only where it matters. [Why Fabro?](https://docs.fabro.sh/getting-started/why-arc)
+AI coding agents are powerful but unpredictable. You either babysit every step or review a 50-file diff you don't trust. Fabro gives you a middle path: define the process as a graph, let agents execute it, and intervene only where it matters. [Why Fabro?](https://docs.fabro.sh/getting-started/why-fabro)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE.md)
-[![docs](https://img.shields.io/badge/docs-fabro.dev-357F9E)](https://docs.fabro.sh)
+[![docs](https://img.shields.io/badge/docs-fabro.sh-357F9E)](https://docs.fabro.sh)
 
 ```bash
+# With Claude Code
+curl -fsSL https://fabro.sh/install.md | claude
+
+# With Codex
+codex "$(curl -fsSL https://fabro.sh/install.md)"
+
+# With Bash
 curl -fsSL https://fabro.sh/install.sh | bash
 ```
 
@@ -80,7 +87,7 @@ digraph PlanImplement {
 }
 ```
 
-Agents run as multi-turn LLM sessions with tool access. Human gates (`hexagon`) pause for approval. The stylesheet routes planning to a cheap model and coding to a frontier model. See the [DOT language reference](https://docs.fabro.sh/reference/dot-language) for the full syntax.
+Agents run as multi-turn LLM sessions with tool access. Human gates (`hexagon`) pause for approval. The stylesheet routes planning to a cheap model and coding to a frontier model. See the [Graphviz DOT language reference](https://docs.fabro.sh/reference/dot-language) for the full syntax.
 
 ---
 
@@ -101,14 +108,14 @@ Fabro ships with [comprehensive documentation](https://docs.fabro.sh) covering e
 ### Install
 
 ```bash
+# With Claude Code
+curl -fsSL https://fabro.sh/install.md | claude
+
+# With Codex
+codex "$(curl -fsSL https://fabro.sh/install.md)"
+
+# With Bash
 curl -fsSL https://fabro.sh/install.sh | bash
-
-# Initialize your project
-cd my-repo/
-fabro init
-
-# Run your first workflow
-fabro run hello
 ```
 
 ---

@@ -94,6 +94,12 @@ pub enum AgentEvent {
         text: String,
     },
     AssistantTextStart,
+    /// Replaces the current in-progress assistant output buffers.
+    AssistantOutputReplace {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning: Option<String>,
+    },
     AssistantMessage {
         text: String,
         model: String,
@@ -206,6 +212,7 @@ impl AgentEvent {
             Self::AssistantTextStart => {
                 debug!(session_id, "Assistant response started");
             }
+            Self::AssistantOutputReplace { .. } => {}
             Self::AssistantMessage {
                 model,
                 usage,
@@ -637,6 +644,23 @@ mod tests {
                 assert_eq!(usage.reasoning_tokens, Some(20));
             }
             _ => panic!("expected AssistantMessage"),
+        }
+    }
+
+    #[test]
+    fn agent_event_assistant_output_replace_roundtrip() {
+        let event = AgentEvent::AssistantOutputReplace {
+            text: "Hello again".into(),
+            reasoning: Some("Retrying from scratch".into()),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: AgentEvent = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            AgentEvent::AssistantOutputReplace { text, reasoning } => {
+                assert_eq!(text, "Hello again");
+                assert_eq!(reasoning.as_deref(), Some("Retrying from scratch"));
+            }
+            _ => panic!("expected AssistantOutputReplace"),
         }
     }
 

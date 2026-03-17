@@ -361,7 +361,7 @@ fabro system df -v
 
 ## `fabro graph`
 
-Render a workflow DOT graph as SVG or PNG. Requires [Graphviz](https://graphviz.org) (`dot`) to be installed.
+Render a workflow graph as SVG or PNG. Requires [Graphviz](https://graphviz.org) (`dot`) to be installed.
 
 ```bash
 fabro graph workflow.fabro
@@ -374,11 +374,11 @@ fabro graph run.toml --format svg
 | `<WORKFLOW>` | Path to a `.fabro` workflow file or `.toml` run config (required) |
 | `--format <FORMAT>` | Output format: `svg` (default) or `png` |
 | `-o, --output <FILE>` | Output file path. Defaults to stdout. |
-| `-d, --direction <DIR>` | Graph direction: `lr` or `tb`. If omitted, uses the DOT file's own `rankdir`. |
+| `-d, --direction <DIR>` | Graph direction: `lr` or `tb`. If omitted, uses the Graphviz file's own `rankdir`. |
 
 ## `fabro skill install`
 
-Install the built-in `fabro-create-workflow` skill for AI assistants (Claude Code, Codex). The skill teaches AI assistants Fabro's DOT syntax, node types, and run configuration format.
+Install the built-in `fabro-create-workflow` skill for AI assistants (Claude Code, Codex). The skill teaches AI assistants Fabro's Graphviz syntax, node types, and run configuration format.
 
 ```bash
 # Install into the current project (.claude/skills/ or .agents/skills/)
@@ -522,7 +522,7 @@ fabro validate run.toml
 
 ## `fabro parse`
 
-Parse a DOT file and print its AST as JSON. Useful for debugging workflow definitions.
+Parse a Graphviz file and print its AST as JSON. Useful for debugging workflow definitions.
 
 ```bash
 fabro parse workflow.fabro

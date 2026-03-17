@@ -5,7 +5,7 @@ description: "All node types and how they become stages at runtime"
 
 ## Nodes vs. stages
 
-A **node** is a step defined in the DOT file at author time. A **stage** is the runtime execution of a node. In a simple linear workflow, each node runs once and produces one stage. But when a workflow loops — for example, an implement-test-fix cycle — the same node can produce multiple stages within a single run.
+A **node** is a step defined in the Graphviz file at author time. A **stage** is the runtime execution of a node. In a simple linear workflow, each node runs once and produces one stage. But when a workflow loops — for example, an implement-test-fix cycle — the same node can produce multiple stages within a single run.
 
 This distinction matters for observability and debugging: the workflow graph shows nodes, but the run timeline shows stages. Each stage records its own inputs, outputs, duration, and token usage.
 

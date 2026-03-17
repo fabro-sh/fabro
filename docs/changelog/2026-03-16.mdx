@@ -1,0 +1,15 @@
+---
+title: "Stream retry resilience"
+date: "2026-03-16"
+---
+
+## Graceful recovery from dropped LLM streams
+
+When an LLM provider drops a stream mid-response — common under high concurrency with OpenAI — Fabro now retries the same turn up to 3 times instead of failing the entire agent session. Conversation history is preserved across retries, and any partial assistant output from the interrupted stream is replayed so the model can continue where it left off. Previously, a dropped stream would kill the stage and restart from scratch, losing all progress in the current turn.
+
+## More
+
+<Accordion title="Improvements">
+- Added `install.md` for AI-agent-driven installation (Claude Code, Codex, etc.), with platform detection, binary download, and PATH setup
+- Installer now skips shell config modification in non-interactive mode, printing the manual PATH export instead
+</Accordion>

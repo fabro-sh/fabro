@@ -128,7 +128,7 @@ paths:
       operationId: startRun
       tags: [Runs]
       summary: Start Run
-      description: Queues a new workflow run from a DOT graph source. The run is created in `queued` status and will be picked up by the scheduler.
+      description: Queues a new workflow run from a Graphviz graph source. The run is created in `queued` status and will be picked up by the scheduler.
       requestBody:
         required: true
         content:
@@ -143,7 +143,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/RunStatusResponse"
         "400":
-          description: Invalid DOT source
+          description: Invalid Graphviz source
           content:
             application/json:
               schema:
@@ -673,7 +673,7 @@ paths:
       operationId: retrieveWorkflow
       tags: [Workflows]
       summary: Retrieve Workflow
-      description: Returns the full detail of a workflow including its DOT graph, TOML config, and description.
+      description: Returns the full detail of a workflow including its Graphviz graph, TOML config, and description.
       parameters:
         - $ref: "#/components/parameters/WorkflowName"
       responses:
@@ -1924,14 +1924,14 @@ components:
         - paused
 
     StartRunRequest:
-      description: Request body for starting a new run from a DOT graph source.
+      description: Request body for starting a new run from a Graphviz graph source.
       type: object
       required:
         - dot_source
       properties:
         dot_source:
           type: string
-          description: DOT language source defining the workflow graph.
+          description: Graphviz DOT language source defining the workflow graph.
           example: 'digraph { start [shape=Mdiamond]; exit [shape=Msquare]; start -> exit }'
 
     RunStatusResponse:
@@ -2509,7 +2509,7 @@ components:
           example: 154.0
         dot_id:
           type: string
-          description: Node identifier in the DOT graph source.
+          description: Node identifier in the Graphviz graph source.
           example: propose
 
     ToolUse:
@@ -2923,7 +2923,7 @@ components:
           example: fix_build
         filename:
           type: string
-          description: DOT graph filename.
+          description: Graphviz graph filename.
           example: fix_build.fabro
         last_run:
           $ref: "#/components/schemas/WorkflowLastRun"
@@ -2951,7 +2951,7 @@ components:
           example: fix_build
         filename:
           type: string
-          description: DOT graph filename.
+          description: Graphviz graph filename.
           example: fix_build.fabro
         description:
           type: string
@@ -2961,7 +2961,7 @@ components:
           $ref: "#/components/schemas/RunConfiguration"
         graph:
           type: string
-          description: DOT language source defining the workflow graph.
+          description: Graphviz DOT language source defining the workflow graph.
           example: "digraph fix_build { rankdir=LR; start -> diagnose -> fix -> validate }"
 
     # ── Verification Detail Schemas ──────────────────────────────────────
@@ -4006,7 +4006,7 @@ components:
           example: Diagnose and fix CI build failures
         graph:
           type: string
-          description: DOT graph filename.
+          description: Graphviz graph filename.
           example: fix_build.fabro
         work_dir:
           type: string
@@ -4389,6 +4389,13 @@ components:
         draft:
           type: boolean
           description: Whether to create the pull request as a draft.
+        auto_merge:
+          type: boolean
+          description: Whether to enable GitHub auto-merge on the created PR. Implies draft = false.
+        merge_strategy:
+          type: string
+          enum: [squash, merge, rebase]
+          description: Merge strategy for auto-merge.
 
     WebConfiguration:
       description: Web UI configuration.

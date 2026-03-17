@@ -12,9 +12,23 @@ Fabro has two modes:
 
 ## Install
 
-```bash
-curl -fsSL https://fabro.sh/install.sh | bash
-```
+<Tabs>
+  <Tab title="Claude Code">
+    ```bash
+    curl -fsSL https://fabro.sh/install.md | claude
+    ```
+  </Tab>
+  <Tab title="Codex">
+    ```bash
+    codex "$(curl -fsSL https://fabro.sh/install.md)"
+    ```
+  </Tab>
+  <Tab title="Bash">
+    ```bash
+    curl -fsSL https://fabro.sh/install.sh | bash
+    ```
+  </Tab>
+</Tabs>
 
 ## Initialize your project
 
@@ -52,6 +66,6 @@ fabro run hello
     Understand the problems Fabro solves.
   </Card>
   <Card title="Workflows" icon="diagram-project" href="/core-concepts/workflows">
-    Learn how to define workflow graphs in DOT.
+    Learn how to define workflow graphs in Graphviz.
   </Card>
 </Columns>

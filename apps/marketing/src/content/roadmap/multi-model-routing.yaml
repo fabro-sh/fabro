@@ -1,0 +1,4 @@
+title: Multi-model agent
+description: Multi-turn LLM sessions with bash, file editing, sub-agents, skills, and lifecycle hooks.
+status: shipped
+date: 2026-02-15

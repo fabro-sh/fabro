@@ -100,6 +100,7 @@ fn spawn_event_forwarder(
                 AgentEvent::SessionStarted
                     | AgentEvent::SessionEnded
                     | AgentEvent::AssistantTextStart
+                    | AgentEvent::AssistantOutputReplace { .. }
                     | AgentEvent::TextDelta { .. }
                     | AgentEvent::ReasoningDelta { .. }
                     | AgentEvent::ToolCallOutputDelta { .. }

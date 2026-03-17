@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    {
+      "source": "/discord",
+      "destination": "https://discord.gg/KE6w49Vg",
+      "statusCode": 302
+    },
+    {
+      "source": "/docs",
+      "destination": "https://docs.fabro.sh",
+      "statusCode": 302
+    }
+  ]
+}

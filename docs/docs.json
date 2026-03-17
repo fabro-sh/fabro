@@ -143,6 +143,7 @@
             "group": "Example Workflows",
             "icon": "flask",
             "pages": [
+              "examples/repl-handoff",
               "examples/solitaire",
               "examples/semantic-port",
               "examples/definition-of-done",
@@ -271,6 +272,7 @@
             "group": "March 2026",
             "icon": "clock-rotate-left",
             "pages": [
+              "changelog/2026-03-16",
               "changelog/2026-03-15",
               "changelog/2026-03-14",
               "changelog/2026-03-13",

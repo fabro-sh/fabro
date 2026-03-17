@@ -1,0 +1,97 @@
+{
+  "run_name": "opus-20min-20260316",
+  "timestamp": "2026-03-16T18:42:11.799807+00:00",
+  "model": "claude-opus-4-6",
+  "provider": "anthropic",
+  "fabro_version": "fabro 0.5.0 (4c6ad4d 2026-03-16)",
+  "timeout_s": 1200,
+  "sandbox_cpu": 4,
+  "sandbox_memory_gb": 8,
+  "description": "Opus 4.6, 20min timeout, 4 CPU / 8 GB, default prompt",
+  "notes": "",
+  "total_instances": 300,
+  "patched": 300,
+  "patch_pct": 100.0,
+  "resolved": 174,
+  "resolve_pct": 58.0,
+  "total_gen_cost_usd": 218.65,
+  "avg_gen_cost_usd": 0.7288,
+  "gen_wall_time_s": 1210.0,
+  "eval_wall_time_s": 626.4,
+  "avg_gen_duration_s": 175.6,
+  "avg_eval_duration_s": 47.8,
+  "per_repo": {
+    "astropy/astropy": {
+      "total": 6,
+      "patched": 6,
+      "resolved": 1,
+      "resolve_pct": 16.7
+    },
+    "django/django": {
+      "total": 114,
+      "patched": 114,
+      "resolved": 88,
+      "resolve_pct": 77.2
+    },
+    "matplotlib/matplotlib": {
+      "total": 23,
+      "patched": 23,
+      "resolved": 0,
+      "resolve_pct": 0.0
+    },
+    "mwaskom/seaborn": {
+      "total": 4,
+      "patched": 4,
+      "resolved": 1,
+      "resolve_pct": 25.0
+    },
+    "pallets/flask": {
+      "total": 3,
+      "patched": 3,
+      "resolved": 0,
+      "resolve_pct": 0.0
+    },
+    "psf/requests": {
+      "total": 6,
+      "patched": 6,
+      "resolved": 5,
+      "resolve_pct": 83.3
+    },
+    "pydata/xarray": {
+      "total": 5,
+      "patched": 5,
+      "resolved": 2,
+      "resolve_pct": 40.0
+    },
+    "pylint-dev/pylint": {
+      "total": 6,
+      "patched": 6,
+      "resolved": 0,
+      "resolve_pct": 0.0
+    },
+    "pytest-dev/pytest": {
+      "total": 17,
+      "patched": 17,
+      "resolved": 12,
+      "resolve_pct": 70.6
+    },
+    "scikit-learn/scikit-learn": {
+      "total": 23,
+      "patched": 23,
+      "resolved": 15,
+      "resolve_pct": 65.2
+    },
+    "sphinx-doc/sphinx": {
+      "total": 16,
+      "patched": 16,
+      "resolved": 0,
+      "resolve_pct": 0.0
+    },
+    "sympy/sympy": {
+      "total": 77,
+      "patched": 77,
+      "resolved": 50,
+      "resolve_pct": 64.9
+    }
+  }
+}

@@ -3,3 +3,8 @@ target
 .entire
 node_modules
 tmp
+evals/swe-bench/repos/
+evals/swe-bench/results/
+evals/swe-bench/dockerfiles/
+__pycache__
+.vercel

@@ -1,0 +1,258 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
+import PageScripts from "../components/PageScripts.astro";
+import { getCollection } from "astro:content";
+
+const allItems = await getCollection("roadmap");
+const byDate = (status: string) =>
+  allItems
+    .filter((item) => item.data.status === status)
+    .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+
+const formatDate = (date: Date) =>
+  date.toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+
+const shipped = byDate("shipped");
+const SHIPPED_VISIBLE = 3;
+const shippedVisible = shipped.slice(0, SHIPPED_VISIBLE);
+const shippedHidden = shipped.slice(SHIPPED_VISIBLE);
+
+const building = byDate("building");
+const next = byDate("next");
+
+const statusConfig = {
+  building: {
+    dot: "bg-amber",
+    border: "via-amber/30",
+    label: "text-amber",
+    track: "bg-amber/30",
+    cardBorder: "border-amber/15",
+    cardBg: "bg-amber/5",
+  },
+  next: {
+    dot: "bg-teal-500",
+    border: "via-teal-500/30",
+    label: "text-teal-500",
+    track: "bg-teal-500/30",
+    cardBorder: "border-teal-500/15",
+    cardBg: "bg-teal-500/5",
+  },
+};
+---
+
+<Layout title="Roadmap — Fabro">
+  <Nav currentPage="roadmap" />
+
+  <main>
+    <!-- Header -->
+    <section class="relative overflow-hidden pt-24 sm:pt-28 pb-10">
+      <div class="absolute inset-0 noise-overlay"></div>
+      <div class="pointer-events-none absolute top-8 -left-40 h-[400px] w-[400px] rounded-full bg-teal-500/8 blur-[120px]"></div>
+
+      <div class="relative mx-auto max-w-3xl px-6">
+        <h1 class="reveal font-display text-4xl font-bold tracking-tight text-ice-50 sm:text-5xl leading-[1.1]">
+          Roadmap
+        </h1>
+        <p class="reveal reveal-d1 mt-3 text-lg text-ice-300">
+          What we've shipped, what we're building, and where Fabro is going next.
+        </p>
+      </div>
+    </section>
+
+    <!-- Shipped — compact rows -->
+    <section class="relative pb-12">
+      <div class="mx-auto max-w-3xl px-6">
+        <div class="reveal flex items-center gap-4">
+          <div class="flex items-center gap-3 rounded-full border border-navy-800 bg-navy-900/80 px-5 py-2">
+            <svg class="h-4 w-4 text-mint" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+              <polyline points="20,6 9,17 4,12" />
+            </svg>
+            <span class="font-display text-sm font-semibold uppercase tracking-wider text-mint">Shipped</span>
+          </div>
+          <div class="h-px flex-1 bg-gradient-to-r from-navy-800 to-transparent" />
+        </div>
+
+        <div class="mt-6 space-y-0">
+          {shippedVisible.map((item, i) => (
+            <div class={`reveal reveal-d${i + 1} flex items-center gap-4 py-3 border-b border-navy-800/40`}>
+              <span class="shrink-0 w-20 text-xs font-mono text-mint/60">{item.data.date && formatDate(item.data.date)}</span>
+              <span class="font-display text-sm font-semibold text-ice-50">{item.data.title}</span>
+              <span class="shipped-info relative ml-auto shrink-0">
+                <svg class="h-4 w-4 text-ice-300/30 hover:text-ice-300/60 transition-colors cursor-help" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
+                <span class="shipped-info-tip">{item.data.description}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {shippedHidden.length > 0 && (
+          <div class="reveal reveal-d4">
+            <button
+              id="shipped-toggle"
+              class="group mt-4 flex items-center gap-2 text-sm text-ice-300/50 hover:text-mint transition-colors cursor-pointer"
+              aria-expanded="false"
+              aria-controls="shipped-older"
+            >
+              <svg
+                id="shipped-chevron"
+                class="h-4 w-4 transition-transform duration-300"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                viewBox="0 0 24 24"
+              >
+                <polyline points="6,9 12,15 18,9" />
+              </svg>
+              <span id="shipped-toggle-label">{shippedHidden.length} older features</span>
+            </button>
+
+            <div
+              id="shipped-older"
+              class="grid overflow-hidden transition-[grid-template-rows] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
+              style="grid-template-rows: 0fr;"
+            >
+              <div class="min-h-0">
+                <div class="space-y-0">
+                  {shippedHidden.map((item) => (
+                    <div class="flex items-center gap-4 py-3 border-b border-navy-800/40">
+                      <span class="shrink-0 w-20 text-xs font-mono text-mint/60">{item.data.date && formatDate(item.data.date)}</span>
+                      <span class="font-display text-sm font-semibold text-ice-50">{item.data.title}</span>
+                      <span class="shipped-info relative ml-auto shrink-0">
+                        <svg class="h-4 w-4 text-ice-300/30 hover:text-ice-300/60 transition-colors cursor-help" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                          <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+                        </svg>
+                        <span class="shipped-info-tip">{item.data.description}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+
+    <!-- Building — only render if items exist -->
+    {building.length > 0 && (
+      <section class="relative pb-12">
+        <div class="mx-auto max-w-3xl px-6">
+          <div class="reveal flex items-center gap-4">
+            <div class="flex items-center gap-3 rounded-full border border-navy-800 bg-navy-900/80 px-5 py-2">
+              <div class="h-3 w-3 rounded-full bg-amber animate-pulse-glow" />
+              <span class="font-display text-sm font-semibold uppercase tracking-wider text-amber">Building</span>
+            </div>
+            <div class="h-px flex-1 bg-gradient-to-r from-navy-800 to-transparent" />
+          </div>
+
+          <div class="relative mt-8 ml-5">
+            <div class="absolute top-0 bottom-0 left-0 w-px bg-amber/30" />
+            <div class="space-y-0">
+              {building.map((item, i) => (
+                <div class={`reveal reveal-d${Math.min(i + 1, 5)} relative pl-10 pb-8 group`}>
+                  <div class="absolute left-0 top-1.5 -translate-x-1/2 z-10">
+                    <div class="h-2.5 w-2.5 rounded-full bg-amber ring-4 ring-navy-950 transition-all group-hover:scale-125" />
+                  </div>
+                  <div class="rounded-xl border border-amber/15 bg-amber/5 p-6 relative overflow-hidden transition-all duration-400 hover:border-amber/25 hover:bg-amber/8">
+                    <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber/30 to-transparent" />
+                    <h3 class="font-display text-base font-semibold text-ice-50">{item.data.title}</h3>
+                    <p class="mt-2 text-sm leading-relaxed text-ice-300">{item.data.description}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+    )}
+
+    <!-- Next — only render if items exist -->
+    {next.length > 0 && (
+      <section class="relative pb-24">
+        <div class="mx-auto max-w-3xl px-6">
+          <div class="reveal flex items-center gap-4">
+            <div class="flex items-center gap-3 rounded-full border border-navy-800 bg-navy-900/80 px-5 py-2">
+              <svg class="h-4 w-4 text-teal-500" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12,6 12,12 16,14" />
+              </svg>
+              <span class="font-display text-sm font-semibold uppercase tracking-wider text-teal-500">Next</span>
+            </div>
+            <div class="h-px flex-1 bg-gradient-to-r from-navy-800 to-transparent" />
+          </div>
+
+          <div class="relative mt-8 ml-5">
+            <div class="absolute top-0 bottom-0 left-0 w-px bg-teal-500/30" />
+            <div class="space-y-0">
+              {next.map((item, i) => (
+                <div class={`reveal reveal-d${Math.min(i + 1, 5)} relative pl-10 pb-8 group`}>
+                  <div class="absolute left-0 top-1.5 -translate-x-1/2 z-10">
+                    <div class="h-2.5 w-2.5 rounded-full bg-teal-500 ring-4 ring-navy-950 transition-all group-hover:scale-125" />
+                  </div>
+                  <div class="rounded-xl border border-teal-500/15 bg-teal-500/5 p-6 relative overflow-hidden transition-all duration-400 hover:border-teal-500/25 hover:bg-teal-500/8">
+                    <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-teal-500/30 to-transparent" />
+                    <h3 class="font-display text-base font-semibold text-ice-50">{item.data.title}</h3>
+                    <p class="mt-2 text-sm leading-relaxed text-ice-300">{item.data.description}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+    )}
+
+    <!-- CTA -->
+    <section class="relative overflow-hidden border-t border-navy-800 py-24">
+      <div class="absolute inset-0 grid-overlay"></div>
+      <div class="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[400px] w-[400px] rounded-full bg-teal-700/6 blur-[120px]"></div>
+      <div class="relative mx-auto max-w-2xl px-6 text-center">
+        <h2 class="reveal font-display text-3xl font-bold tracking-tight text-ice-50">
+          Shape what we build
+        </h2>
+        <p class="reveal reveal-d1 mt-4 text-lg leading-relaxed text-ice-300">
+          Have a feature request or want to influence priorities? Join the conversation.
+        </p>
+        <div class="reveal reveal-d2 mt-8 flex items-center justify-center gap-4">
+          <a
+            href="https://github.com/fabro-sh/fabro/discussions"
+            class="rounded-xl bg-teal-700 px-7 py-3.5 text-sm font-semibold text-white transition-all hover:bg-teal-500 hover:shadow-[0_0_24px_-4px_rgba(53,127,158,0.5)]"
+          >
+            Join Discussions
+          </a>
+          <a
+            href="/discord"
+            class="rounded-xl border border-navy-600 px-7 py-3.5 text-sm font-semibold text-ice-300 transition-all hover:border-teal-700/60 hover:text-ice-50"
+          >
+            Discord
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <Footer />
+
+  <PageScripts />
+  <script>
+    // Shipped older items toggle
+    const toggle = document.getElementById("shipped-toggle");
+    const older = document.getElementById("shipped-older");
+    const chevron = document.getElementById("shipped-chevron");
+
+    if (toggle && older && chevron) {
+      toggle.addEventListener("click", () => {
+        const isExpanded = toggle.getAttribute("aria-expanded") === "true";
+        toggle.setAttribute("aria-expanded", String(!isExpanded));
+        older.style.gridTemplateRows = isExpanded ? "0fr" : "1fr";
+        chevron.style.transform = isExpanded ? "" : "rotate(180deg)";
+      });
+    }
+  </script>
+</Layout>

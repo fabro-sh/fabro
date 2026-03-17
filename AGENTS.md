@@ -18,6 +18,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `cd apps/fabro-web && bun run typecheck` — type check
 - `cd apps/fabro-web && bun run build` — production build
 
+### Marketing site (apps/marketing)
+- `cd apps/marketing && bun run dev` — start Astro dev server
+- `cd apps/marketing && bun run build` — production build
+- `cd apps/marketing && vercel --prod` — deploy to Vercel (project: website, domain: fabro.sh)
+
 ### Dev servers
 1. `fabro serve` — starts the Rust API server (demo mode is per-request via `X-Fabro-Demo: 1` header)
 2. `cd apps/fabro-web && bun run dev` — starts the React dev server
@@ -40,11 +45,11 @@ The OpenAPI spec at `docs/api-reference/fabro-api.yaml` is the source of truth f
 
 ## Architecture
 
-Fabro is an AI-powered workflow orchestration platform. Workflows are defined as DOT graphs, where each node is a stage (agent, prompt, command, conditional, human, parallel, etc.) executed by the workflow engine.
+Fabro is an AI-powered workflow orchestration platform. Workflows are defined as Graphviz graphs, where each node is a stage (agent, prompt, command, conditional, human, parallel, etc.) executed by the workflow engine.
 
 ### Rust crates (`lib/crates/`)
 - **fabro-cli** — CLI entry point. Commands: `run`, `exec`, `serve`, `validate`, `parse`, `cp`, `model`, `doctor`, `init`, `install`, `ps`, `system prune`, `llm`
-- **fabro-workflows** — Core workflow engine. Parses DOT graphs, runs stages, manages checkpoints/resume, hooks, retros, and human-in-the-loop interactions
+- **fabro-workflows** — Core workflow engine. Parses Graphviz graphs, runs stages, manages checkpoints/resume, hooks, retros, and human-in-the-loop interactions
 - **fabro-agent** — AI coding agent with tool use (Bash, Read, Write, Edit, Glob, Grep, WebFetch). `Sandbox` trait abstracts execution environments
 - **fabro-api** — Axum HTTP server. Routes for runs, sessions, models, completions, usage. SSE event streaming. Demo mode via header
 - **fabro-exe** — SSH-based sandbox implementation (`ExeSandbox`)
@@ -65,7 +70,7 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 
 ### Key design patterns
 - **Sandbox trait** — Uniform interface for local, Docker, SSH (ExeSandbox), Sprites, and Daytona execution environments
-- **DOT graph workflows** — Stages and transitions defined as DOT graph attributes
+- **Graphviz graph workflows** — Stages and transitions defined as Graphviz graph attributes
 - **OpenAPI-first** — `fabro-api.yaml` drives both Rust type generation (typify) and TypeScript client generation (openapi-generator)
 - **Checkpoint/resume** — Workflows can be paused, checkpointed, and resumed
 

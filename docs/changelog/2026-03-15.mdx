@@ -35,16 +35,23 @@ fabro ps -a     # all runs including completed
 **`[feature_flags]` renamed to `[features]`.** If your `fabro.toml` uses `[feature_flags]`, rename the section to `[features]`.
 </Warning>
 
+<Warning>
+**Retros are now experimental and disabled by default.** If you use retros, enable them explicitly with `retros = true` under `[features]` in your `fabro.toml`.
+</Warning>
+
 ## More
 
 <Accordion title="CLI">
 - Added `fabro asset list` to view run artifacts and `fabro asset cp` to copy them locally with optional `--tree` directory structure
 - Added `fabro rm` command to remove runs by ID with sandbox cleanup
+- Added `--direction` (`-d`) flag to `fabro graph` for overriding layout direction (`lr` or `tb`)
 - Added `-p` short alias for `--pretty` in `fabro logs`
 - Added progress spinner during `run --preflight`
 </Accordion>
 
 <Accordion title="Workflows">
+- Added `auto_merge = true` in `[pull_request]` config to enable GitHub auto-merge on created PRs, with configurable `merge_strategy` (squash/merge/rebase)
+- `fabro init` now generates `[pull_request]` with `enabled = true` and `draft = true` by default
 - Added `selection="random"` node attribute for weighted-random edge selection in workflow graphs
 - GitHub App installation tokens are now automatically injected into sandboxes as `GITHUB_TOKEN`
 - Workflow PRs now open as ready-for-review by default (control with `[pull_request] draft = false`)
@@ -55,11 +62,13 @@ fabro ps -a     # all runs including completed
 </Accordion>
 
 <Accordion title="Improvements">
+- Command output in stage preambles now truncated to the last 25-50 lines, reducing token waste from verbose build logs
 - Asset collection now enforces a 100-file limit and excludes `.venv`, `venv`, `.cache`, `.tox`, `.pytest_cache`, `.mypy_cache`, and `dist` directories
 - Unified dry-run behavior across all handler types — wait and human-in-the-loop nodes now properly simulate without side effects
 </Accordion>
 
 <Accordion title="Fixes">
+- Fixed sub-agent file writes not being tracked in the API backend, causing downstream stages to receive incomplete file lists
 - Fixed `--dry-run` executing command/script nodes instead of simulating them
 - Fixed `--dry-run` pushing branches to remote
 - Fixed `--goal-file` not expanding `~` to the home directory

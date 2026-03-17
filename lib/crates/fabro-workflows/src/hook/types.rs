@@ -14,7 +14,9 @@ pub enum HookEvent {
     EdgeSelected,
     ParallelStart,
     ParallelComplete,
+    /// Reserved: hooks for this event are not yet invoked by the engine.
     SandboxReady,
+    /// Reserved: hooks for this event are not yet invoked by the engine.
     SandboxCleanup,
     CheckpointSaved,
     PreToolUse,
@@ -97,6 +99,13 @@ pub struct HookContext {
 }
 
 impl HookContext {
+    /// Populate node-related fields from a graph `Node`.
+    pub fn set_node(&mut self, node: &crate::graph::Node) {
+        self.node_id = Some(node.id.clone());
+        self.node_label = Some(node.label().to_string());
+        self.handler_type = node.handler_type().map(String::from);
+    }
+
     #[must_use]
     pub fn new(event: HookEvent, run_id: String, workflow_name: String) -> Self {
         Self {

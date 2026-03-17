@@ -94,8 +94,8 @@ Each hook fires on a specific lifecycle event:
 | `edge_selected` | After an edge is chosen for traversal | Yes |
 | `parallel_start` | Before parallel branches fan out | No |
 | `parallel_complete` | After parallel branches merge | No |
-| `sandbox_ready` | After the sandbox environment is created | No |
-| `sandbox_cleanup` | Before the sandbox is torn down | No |
+| `sandbox_ready` | After the sandbox environment is created (reserved — not yet wired) | No |
+| `sandbox_cleanup` | Before the sandbox is torn down (reserved — not yet wired) | No |
 | `checkpoint_saved` | After a checkpoint is written to disk | No |
 | `pre_tool_use` | Before an agent tool call executes | Yes |
 | `post_tool_use` | After an agent tool call succeeds | No |

@@ -11,7 +11,7 @@ The `prompt` attribute on a node defines the task instructions for that stage. I
 
 ### Inline prompts
 
-Short prompts can be written directly in the DOT file:
+Short prompts can be written directly in the Graphviz file:
 
 ```dot
 plan [label="Plan", prompt="Analyze the codebase and write a step-by-step plan."]
@@ -33,7 +33,7 @@ review [
 
 ### External file references
 
-For longer prompts, use the `@` prefix to load from a Markdown file relative to the DOT file:
+For longer prompts, use the `@` prefix to load from a Markdown file relative to the Graphviz file:
 
 ```dot
 plan      [label="Plan Implementation", prompt="@prompts/implement/plan.md"]
@@ -41,9 +41,9 @@ implement [label="Implement",           prompt="@prompts/implement/implement.md"
 review    [label="Review",              prompt="@prompts/implement/review.md"]
 ```
 
-The `@` prefix tells the engine to read the file contents and use them as the prompt text. This keeps DOT files concise and lets you version prompts as standalone Markdown.
+The `@` prefix tells the engine to read the file contents and use them as the prompt text. This keeps Graphviz files concise and lets you version prompts as standalone Markdown.
 
-File references are resolved relative to the DOT file's directory first, then fall back to `~/.fabro/`. This lets you keep shared prompts in your user-level config and reference them from any project.
+File references are resolved relative to the Graphviz file's directory first, then fall back to `~/.fabro/`. This lets you keep shared prompts in your user-level config and reference them from any project.
 
 ### Variable expansion
 

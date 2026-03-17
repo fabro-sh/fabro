@@ -316,6 +316,8 @@ fn fully_populated_server_config() -> ServerConfig {
             pull_request: Some(PullRequestConfig {
                 enabled: true,
                 draft: false,
+                auto_merge: false,
+                merge_strategy: fabro_workflows::cli::run_config::MergeStrategy::Squash,
             }),
             assets: Some(AssetsConfig {
                 include: vec!["test-results/**".into()],

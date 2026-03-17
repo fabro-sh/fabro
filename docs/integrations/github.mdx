@@ -13,6 +13,7 @@ Fabro uses a [GitHub App](https://docs.github.com/en/apps/overview) to authentic
 | **Private repo cloning** | Daytona and Docker sandboxes clone private repositories using short-lived Installation Access Tokens |
 | **Checkpoint pushing** | After each workflow stage, Fabro pushes the run branch and metadata branch back to origin from inside the sandbox |
 | **Auto-PR** | When `[pull_request] enabled = true` in the [run config](/execution/run-configuration#pull_request), Fabro opens a PR from the agent's working branch after a successful run |
+| **Auto-merge** | When `[pull_request] auto_merge = true`, Fabro enables GitHub's auto-merge on created PRs so they merge automatically once required checks pass |
 | **Sandbox GITHUB_TOKEN** | When `[github] permissions` are declared in the run config, Fabro mints a scoped Installation Access Token and injects it as `GITHUB_TOKEN` in the sandbox |
 
 ## Setup

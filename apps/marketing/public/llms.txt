@@ -1,0 +1,80 @@
+# Fabro
+
+> Fabro is the open source dark software factory for expert engineers. Define your process as a workflow graph, let AI agents execute it, and intervene only where it matters.
+
+Fabro replaces the prompt-wait-review loop with version-controlled workflow graphs that orchestrate AI agents, shell commands, and human decisions into repeatable, long-horizon coding processes. Workflows are defined as Graphviz graphs where each node is a stage (agent, prompt, command, conditional, human, parallel, etc.) executed by the workflow engine.
+
+- Open source, MIT-licensed
+- Workflows defined as Graphviz graphs with CSS-like model stylesheets
+- Sandboxed execution via local Docker, Daytona, SSH, or Sprites
+- Checkpoint/resume for long-running workflows
+- Human-in-the-loop via CLI, web UI, or Slack
+- GitHub integration for PR creation and repository access
+- REST API with SSE event streaming
+
+## Getting Started
+
+- [Introduction](https://docs.fabro.sh/getting-started/introduction): Overview of Fabro and what it does
+- [Quick Start](https://docs.fabro.sh/getting-started/quick-start): Get up and running with Fabro
+- [Why Fabro?](https://docs.fabro.sh/getting-started/why-fabro): The problems Fabro solves for AI-assisted software teams
+- [Comparison](https://docs.fabro.sh/getting-started/comparison): How Fabro compares to AI coding agents, software factories, and orchestration platforms
+- [Dark Factory](https://docs.fabro.sh/getting-started/dark-factory): How small teams incrementally adopt a dark factory approach
+
+## Core Concepts
+
+- [Workflows](https://docs.fabro.sh/core-concepts/workflows): Core workflow concepts
+- [Agents](https://docs.fabro.sh/core-concepts/agents): Core agent concepts
+- [Models](https://docs.fabro.sh/core-concepts/models): How Fabro routes tasks to LLM models and providers
+- [How Fabro Works](https://docs.fabro.sh/core-concepts/how-fabro-works): Architecture and execution model
+
+## Tutorials
+
+- [Hello World](https://docs.fabro.sh/tutorials/hello-world): Your first workflow — prompt nodes, tool use, and sub-agents
+- [Plan & Implement](https://docs.fabro.sh/tutorials/plan-implement): Human gates, revision loops, and prompt file references
+
+## Workflows
+
+- [Nodes & Stages](https://docs.fabro.sh/workflows/stages-and-nodes): All node types and how they become stages at runtime
+- [Transitions](https://docs.fabro.sh/workflows/transitions): How Fabro decides which node to execute next
+- [Model Stylesheets](https://docs.fabro.sh/workflows/stylesheets): Assign LLM models to nodes using CSS-like rules
+- [Variables](https://docs.fabro.sh/workflows/variables): Using variables in workflows
+- [Human-in-the-Loop](https://docs.fabro.sh/workflows/human-in-the-loop): Adding human review and intervention
+- [Best Practices](https://docs.fabro.sh/workflows/best-practices): Best practices for designing workflows
+
+## Agents
+
+- [Tools](https://docs.fabro.sh/agents/tools): Built-in tools for file I/O, shell, search, and web access
+- [Prompts](https://docs.fabro.sh/agents/prompts): How Fabro constructs and delivers prompts
+- [Permissions](https://docs.fabro.sh/agents/permissions): Controlling which tools agents can use
+- [Skills](https://docs.fabro.sh/agents/skills): Reusable prompt templates that extend agent capabilities
+- [Hooks](https://docs.fabro.sh/agents/hooks): Run custom logic in response to workflow lifecycle events
+- [Outputs & Artifacts](https://docs.fabro.sh/agents/outputs): Agent responses, file changes, and test assets
+- [MCP](https://docs.fabro.sh/agents/mcp): Extend agents with Model Context Protocol servers
+- [Sub-agents](https://docs.fabro.sh/agents/subagents): Delegate subtasks to child agent sessions
+
+## Execution
+
+- [Environments](https://docs.fabro.sh/execution/environments): Sandbox providers for workflow execution
+- [Run Configuration](https://docs.fabro.sh/execution/run-configuration): Configure runs with TOML files
+- [Checkpoints](https://docs.fabro.sh/execution/checkpoints): Git-based checkpoint and resume
+- [Retros](https://docs.fabro.sh/execution/retros): Automatic retrospectives for every run
+- [Observability](https://docs.fabro.sh/execution/observability): Monitor, inspect, and analyze runs
+
+## Integrations
+
+- [GitHub](https://docs.fabro.sh/integrations/github): Repository access and OAuth login
+- [Slack](https://docs.fabro.sh/integrations/slack): Answer human-in-the-loop questions from Slack
+- [Daytona](https://docs.fabro.sh/integrations/daytona): Sandboxed cloud environments
+
+## Reference
+
+- [API Overview](https://docs.fabro.sh/api-reference/overview): Introduction to the Fabro REST API
+- [CLI Reference](https://docs.fabro.sh/reference/cli): Command-line interface reference
+- [Architecture](https://docs.fabro.sh/reference/architecture): How CLI and API modes work under the hood
+- [Graphviz DOT Language](https://docs.fabro.sh/reference/dot-language): Complete reference for Fabro's workflow language
+
+## Optional
+
+- [Changelog](https://docs.fabro.sh/changelog/2026-03-15): Latest changes and releases
+- [GitHub Repository](https://github.com/fabro-sh/fabro): Source code
+- [Discord](https://fabro.sh/discord): Community chat

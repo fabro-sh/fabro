@@ -22,7 +22,7 @@ use crate::engine::GitState;
 use crate::error::FabroError;
 use crate::event::EventEmitter;
 use crate::graph::{shape_to_handler_type, Graph, Node};
-use crate::hook::HookRunner;
+use crate::hook::{HookContext, HookDecision, HookRunner};
 use crate::interviewer::Interviewer;
 use crate::outcome::Outcome;
 
@@ -51,6 +51,15 @@ impl EngineServices {
     /// Set the git state for the current run.
     pub fn set_git_state(&self, state: Option<Arc<GitState>>) {
         *self.git_state.write().unwrap() = state;
+    }
+
+    /// Run lifecycle hooks and return the merged decision.
+    /// Returns `Proceed` if no hook runner is configured.
+    pub async fn run_hooks(&self, hook_context: &HookContext) -> HookDecision {
+        let Some(ref runner) = self.hook_runner else {
+            return HookDecision::Proceed;
+        };
+        runner.run(hook_context, self.sandbox.clone(), None).await
     }
 
     /// Test-only default: empty registry, no hooks, local sandbox at cwd.

@@ -1220,6 +1220,32 @@ mod tests {
     }
 
     #[test]
+    fn agent_assistant_output_replace_serialization() {
+        let event = WorkflowRunEvent::Agent {
+            stage: "code".to_string(),
+            event: AgentEvent::AssistantOutputReplace {
+                text: String::new(),
+                reasoning: None,
+            },
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("AssistantOutputReplace"));
+
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            WorkflowRunEvent::Agent {
+                stage,
+                event: AgentEvent::AssistantOutputReplace { text, reasoning },
+            } => {
+                assert_eq!(stage, "code");
+                assert!(text.is_empty());
+                assert_eq!(reasoning, None);
+            }
+            _ => panic!("expected Agent(AssistantOutputReplace)"),
+        }
+    }
+
+    #[test]
     fn stage_completed_event_serialization_with_new_fields() {
         use crate::error::FailureClass;
         use crate::outcome::FailureDetail;
@@ -1750,6 +1776,23 @@ mod tests {
         assert_eq!(name, "Agent.SessionStarted");
         assert_eq!(fields["node_id"], "plan");
         assert_eq!(fields["node_label"], "plan");
+        assert!(!fields.contains_key("stage"));
+    }
+
+    #[test]
+    fn flatten_event_agent_assistant_output_replace() {
+        let event = WorkflowRunEvent::Agent {
+            stage: "plan".to_string(),
+            event: AgentEvent::AssistantOutputReplace {
+                text: String::new(),
+                reasoning: None,
+            },
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "Agent.AssistantOutputReplace");
+        assert_eq!(fields["node_id"], "plan");
+        assert_eq!(fields["node_label"], "plan");
+        assert_eq!(fields["text"], "");
         assert!(!fields.contains_key("stage"));
     }
 
