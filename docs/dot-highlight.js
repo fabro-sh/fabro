@@ -101,16 +101,25 @@
     });
   }
 
-  // Run on initial load and on client-side navigation
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", highlightDotBlocks);
-  } else {
+  // Debug: mark that the script ran
+  document.documentElement.setAttribute("data-dot-highlight", "loaded");
+
+  // Run after a short delay to let React hydration complete
+  function init() {
+    document.documentElement.setAttribute("data-dot-highlight", "init");
     highlightDotBlocks();
+    // Re-run on SPA navigation (Mintlify uses Next.js)
+    var observer = new MutationObserver(function () {
+      highlightDotBlocks();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
   }
 
-  // Re-run on SPA navigation (Mintlify uses Next.js)
-  var observer = new MutationObserver(function () {
-    highlightDotBlocks();
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () {
+      setTimeout(init, 100);
+    });
+  } else {
+    setTimeout(init, 100);
+  }
 })();
