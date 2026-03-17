@@ -754,7 +754,7 @@ async fn main_inner() -> (String, Result<()>) {
                 std::process::exit(exit_code);
             }
             Command::Discord => {
-                open::that("https://discord.gg/KE6w49Vg")?;
+                open::that("https://fabro.sh/discord")?;
             }
             Command::Docs => {
                 open::that("https://docs.fabro.sh/")?;
