@@ -1,5 +1,18 @@
 [
   {
+    "run_name": "gpt54-20min-20260316",
+    "date": "2026-03-17",
+    "model": "gpt-5.4",
+    "provider": "openai",
+    "resolved": 197,
+    "total": 300,
+    "resolve_pct": 65.7,
+    "patched": 297,
+    "patch_pct": 99.0,
+    "total_cost_usd": 718.62,
+    "avg_cost_usd": 2.3954
+  },
+  {
     "run_name": "opus-20min-20260316",
     "date": "2026-03-16",
     "model": "claude-opus-4-6",
