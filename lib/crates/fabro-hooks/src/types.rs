@@ -128,63 +128,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hook_event_serde_round_trip() {
-        let events = [
-            HookEvent::RunStart,
-            HookEvent::RunComplete,
-            HookEvent::RunFailed,
-            HookEvent::StageStart,
-            HookEvent::StageComplete,
-            HookEvent::StageFailed,
-            HookEvent::StageRetrying,
-            HookEvent::EdgeSelected,
-            HookEvent::ParallelStart,
-            HookEvent::ParallelComplete,
-            HookEvent::SandboxReady,
-            HookEvent::SandboxCleanup,
-            HookEvent::CheckpointSaved,
-            HookEvent::PreToolUse,
-            HookEvent::PostToolUse,
-            HookEvent::PostToolUseFailure,
-        ];
-        for event in events {
-            let json = serde_json::to_string(&event).unwrap();
-            let back: HookEvent = serde_json::from_str(&json).unwrap();
-            assert_eq!(event, back);
-        }
-    }
-
-    #[test]
-    fn hook_event_serializes_as_snake_case() {
-        assert_eq!(
-            serde_json::to_string(&HookEvent::RunStart).unwrap(),
-            "\"run_start\""
-        );
-        assert_eq!(
-            serde_json::to_string(&HookEvent::StageRetrying).unwrap(),
-            "\"stage_retrying\""
-        );
-    }
-
-    #[test]
-    fn hook_event_display() {
-        assert_eq!(HookEvent::RunStart.to_string(), "run_start");
-        assert_eq!(HookEvent::CheckpointSaved.to_string(), "checkpoint_saved");
-    }
-
-    #[test]
-    fn hook_event_blocking_defaults() {
-        assert!(HookEvent::RunStart.is_blocking_by_default());
-        assert!(HookEvent::StageStart.is_blocking_by_default());
-        assert!(HookEvent::EdgeSelected.is_blocking_by_default());
-        assert!(HookEvent::SandboxReady.is_blocking_by_default());
-        assert!(!HookEvent::SandboxCleanup.is_blocking_by_default());
-        assert!(!HookEvent::RunComplete.is_blocking_by_default());
-        assert!(!HookEvent::StageFailed.is_blocking_by_default());
-        assert!(!HookEvent::CheckpointSaved.is_blocking_by_default());
-    }
-
-    #[test]
     fn hook_context_serde_round_trip() {
         let ctx = HookContext {
             event: HookEvent::StageStart,
@@ -311,29 +254,6 @@ mod tests {
             serde_json::from_str(r#"{"ok": false, "reason": "not ready"}"#).unwrap();
         assert!(!resp.ok);
         assert_eq!(resp.reason.as_deref(), Some("not ready"));
-    }
-
-    #[test]
-    fn pre_tool_use_serde_round_trip() {
-        let json = serde_json::to_string(&HookEvent::PreToolUse).unwrap();
-        assert_eq!(json, "\"pre_tool_use\"");
-        let back: HookEvent = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, HookEvent::PreToolUse);
-    }
-
-    #[test]
-    fn pre_tool_use_is_blocking_by_default() {
-        assert!(HookEvent::PreToolUse.is_blocking_by_default());
-    }
-
-    #[test]
-    fn post_tool_use_is_not_blocking_by_default() {
-        assert!(!HookEvent::PostToolUse.is_blocking_by_default());
-    }
-
-    #[test]
-    fn post_tool_use_failure_is_not_blocking_by_default() {
-        assert!(!HookEvent::PostToolUseFailure.is_blocking_by_default());
     }
 
     #[test]

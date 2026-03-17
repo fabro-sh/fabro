@@ -1395,6 +1395,7 @@ dependencies = [
  "dirs",
  "fabro-util",
  "serde",
+ "serde_json",
  "strsim",
  "tempfile",
  "toml",
