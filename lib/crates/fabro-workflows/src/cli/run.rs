@@ -1450,6 +1450,14 @@ pub async fn run_command(
                         pushed_branch = Some(run_branch.clone());
                     }
 
+                    let auto_merge = if pr_cfg.auto_merge {
+                        Some(crate::pull_request::AutoMergeConfig {
+                            merge_strategy: pr_cfg.merge_strategy,
+                        })
+                    } else {
+                        None
+                    };
+
                     match crate::pull_request::maybe_open_pull_request(
                         creds,
                         origin,
@@ -1459,6 +1467,7 @@ pub async fn run_command(
                         &diff,
                         &model,
                         pr_cfg.draft,
+                        auto_merge,
                         &run_dir,
                     )
                     .await

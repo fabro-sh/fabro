@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Fabro — Font Treatment Comparison</title>
+
+<!-- Current fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;500;600;700&family=Lexend:wght@400;500;600;700&family=Fira+Code:wght@400;500&family=Instrument+Serif:ital@0;1&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700&family=Source+Code+Pro:wght@400;500&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --navy-950: #0F1729;
+    --navy-900: #141C2F;
+    --navy-800: #252C3D;
+    --navy-600: #4B5768;
+    --teal-300: #B5DDEF;
+    --teal-500: #67B2D7;
+    --teal-700: #357F9E;
+    --ice-50: #F7F9FB;
+    --ice-100: #E8EDF3;
+    --ice-300: #A8B5C5;
+    --mint: #5AC8A8;
+    --amber: #F0A45B;
+    --coral: #E86B6B;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--navy-950);
+    color: var(--ice-50);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Page header ── */
+  .page-header {
+    text-align: center;
+    padding: 48px 24px 24px;
+    border-bottom: 1px solid var(--navy-800);
+  }
+  .page-header h1 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--ice-50);
+    margin-bottom: 8px;
+  }
+  .page-header p {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 15px;
+    color: var(--ice-300);
+  }
+
+  /* ── Selector bar ── */
+  .selector-bar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    padding: 16px 24px;
+    background: var(--navy-950);
+    border-bottom: 1px solid var(--navy-800);
+    backdrop-filter: blur(16px);
+  }
+  .selector-btn {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--navy-600);
+    background: transparent;
+    color: var(--ice-300);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .selector-btn:hover {
+    border-color: var(--teal-500);
+    color: var(--ice-50);
+  }
+  .selector-btn.active {
+    background: var(--teal-700);
+    border-color: var(--teal-700);
+    color: white;
+  }
+
+  /* ── Layout ── */
+  .treatments {
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  .treatment {
+    display: none;
+    padding: 48px 24px 80px;
+  }
+  .treatment.visible { display: block; }
+
+  .treatment-label {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+  .treatment-label .tag {
+    display: inline-block;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--teal-300);
+    background: rgba(53, 127, 158, 0.15);
+    border: 1px solid rgba(53, 127, 158, 0.3);
+    padding: 4px 14px;
+    border-radius: 100px;
+    margin-bottom: 12px;
+  }
+  .treatment-label h2 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--ice-50);
+    margin-bottom: 6px;
+  }
+  .treatment-label .fonts-list {
+    font-size: 13px;
+    color: var(--ice-300);
+  }
+  .treatment-label .fonts-list span {
+    color: var(--teal-300);
+    font-weight: 500;
+  }
+
+  /* ── Sample sections ── */
+  .samples {
+    max-width: 960px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 56px;
+  }
+
+  /* Nav sample */
+  .sample-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    border: 1px solid var(--navy-800);
+    border-radius: 12px;
+    background: var(--navy-900);
+  }
+  .sample-nav .logo { font-weight: 700; font-size: 22px; }
+  .sample-nav .links {
+    display: flex;
+    gap: 28px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--ice-100);
+  }
+  .sample-nav .cta-btn {
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 18px;
+    border-radius: 8px;
+    background: var(--teal-700);
+    color: white;
+    border: none;
+  }
+
+  /* Hero sample */
+  .sample-hero {
+    text-align: center;
+  }
+  .sample-hero .badge {
+    display: inline-block;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--teal-300);
+    border: 1px solid rgba(53, 127, 158, 0.35);
+    background: rgba(53, 127, 158, 0.08);
+    padding: 6px 16px;
+    border-radius: 100px;
+    margin-bottom: 24px;
+  }
+  .sample-hero h3 {
+    font-size: 52px;
+    font-weight: 700;
+    line-height: 1.08;
+    letter-spacing: -0.025em;
+    margin-bottom: 20px;
+  }
+  .sample-hero h3 .gradient {
+    background: linear-gradient(135deg, var(--teal-300), var(--mint), var(--teal-500));
+    background-size: 200% 200%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .sample-hero .subtitle {
+    font-size: 18px;
+    line-height: 1.65;
+    color: var(--ice-300);
+    max-width: 580px;
+    margin: 0 auto;
+  }
+
+  /* Feature cards */
+  .sample-features {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .feature-card {
+    padding: 28px 24px;
+    border: 1px solid var(--navy-800);
+    border-radius: 12px;
+    background: linear-gradient(to bottom, var(--navy-900), var(--navy-950));
+    transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s;
+  }
+  .feature-card:hover {
+    border-color: rgba(103, 178, 215, 0.25);
+    box-shadow: 0 0 40px -8px rgba(103, 178, 215, 0.12);
+    transform: translateY(-2px);
+  }
+  .feature-card .icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: rgba(53, 127, 158, 0.12);
+    border: 1px solid rgba(53, 127, 158, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+    color: var(--teal-300);
+    font-size: 16px;
+  }
+  .feature-card h4 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--ice-50);
+  }
+  .feature-card p {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--ice-300);
+  }
+
+  /* Code sample */
+  .sample-code {
+    border: 1px solid var(--navy-800);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--navy-900);
+  }
+  .sample-code .code-header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--navy-800);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ice-300);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .sample-code .code-header .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--mint);
+    opacity: 0.6;
+  }
+  .sample-code pre {
+    padding: 24px;
+    font-size: 13.5px;
+    line-height: 1.7;
+    overflow-x: auto;
+    color: var(--ice-300);
+  }
+  .sample-code .kw { color: var(--teal-300); }
+  .sample-code .fn { color: var(--ice-50); }
+  .sample-code .prop { color: var(--teal-500); }
+  .sample-code .str { color: var(--ice-300); }
+  .sample-code .cm { color: var(--navy-600); }
+
+  /* Body text sample */
+  .sample-prose {
+    max-width: 640px;
+  }
+  .sample-prose h4 {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: var(--ice-50);
+  }
+  .sample-prose p {
+    font-size: 16px;
+    line-height: 1.75;
+    color: var(--ice-300);
+    margin-bottom: 16px;
+  }
+  .sample-prose a {
+    color: var(--teal-300);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .sample-prose code {
+    font-size: 0.875em;
+    background: var(--navy-800);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--teal-300);
+  }
+
+  /* ── Side by side mode ── */
+  .grid-view {
+    display: none;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .grid-view.visible { display: grid; }
+  .grid-view .treatment {
+    display: block;
+    padding: 40px 20px 60px;
+    border-right: 1px solid var(--navy-800);
+  }
+  .grid-view .treatment:last-child { border-right: none; }
+  .grid-view .samples { gap: 40px; }
+  .grid-view .sample-hero h3 { font-size: 32px; }
+  .grid-view .sample-hero .subtitle { font-size: 15px; }
+  .grid-view .sample-features { grid-template-columns: 1fr; }
+  .grid-view .sample-nav { padding: 12px 16px; }
+  .grid-view .sample-nav .links { display: none; }
+  .grid-view .sample-prose h4 { font-size: 20px; }
+  .grid-view .sample-prose p { font-size: 14px; }
+  .grid-view .sample-code pre { font-size: 12px; }
+
+  /* ── Font family assignments ── */
+
+  /* Current: Space Grotesk / DM Sans / JetBrains Mono */
+  .t-current .display { font-family: 'Space Grotesk', sans-serif; }
+  .t-current .body { font-family: 'DM Sans', sans-serif; }
+  .t-current .mono { font-family: 'JetBrains Mono', monospace; }
+
+  /* A: Outfit / Lexend / Fira Code */
+  .t-a .display { font-family: 'Outfit', sans-serif; }
+  .t-a .body { font-family: 'Lexend', sans-serif; }
+  .t-a .mono { font-family: 'Fira Code', monospace; }
+
+  /* B: Instrument Serif / Instrument Sans / IBM Plex Mono */
+  .t-b .display { font-family: 'Instrument Serif', serif; }
+  .t-b .body { font-family: 'Instrument Sans', sans-serif; }
+  .t-b .mono { font-family: 'IBM Plex Mono', monospace; }
+
+  /* C: Syne / Manrope / Source Code Pro */
+  .t-c .display { font-family: 'Syne', sans-serif; }
+  .t-c .body { font-family: 'Manrope', sans-serif; }
+  .t-c .mono { font-family: 'Source Code Pro', monospace; }
+
+  /* view toggle */
+  .view-toggle {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+  }
+  .view-btn {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--navy-800);
+    background: transparent;
+    color: var(--ice-300);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .view-btn.active {
+    background: var(--navy-800);
+    color: var(--ice-50);
+  }
+
+  @media (max-width: 768px) {
+    .sample-features { grid-template-columns: 1fr; }
+    .sample-hero h3 { font-size: 36px; }
+    .grid-view { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Font Treatment Comparison</h1>
+  <p>Comparing the current Fabro marketing site fonts against 3 alternatives</p>
+</div>
+
+<div class="selector-bar">
+  <button class="selector-btn active" data-target="current" onclick="show('current')">Current</button>
+  <button class="selector-btn" data-target="a" onclick="show('a')">A: Razor Geometric</button>
+  <button class="selector-btn" data-target="b" onclick="show('b')">B: Editorial Contrast</button>
+  <button class="selector-btn" data-target="c" onclick="show('c')">C: Bold Industrial</button>
+  <div class="view-toggle">
+    <button class="view-btn active" onclick="setView('single')">Single</button>
+    <button class="view-btn" onclick="setView('grid')">2-up</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════ SINGLE VIEW ═══════════════════════════════════════ -->
+<div class="treatments single-view" id="single-view">
+
+  <!-- CURRENT -->
+  <div class="treatment t-current visible" data-id="current">
+    <div class="treatment-label">
+      <div class="tag">Current</div>
+      <h2 class="display">Space Grotesk + DM Sans + JetBrains Mono</h2>
+      <p class="fonts-list body">Display: <span>Space Grotesk</span> &middot; Body: <span>DM Sans</span> &middot; Mono: <span>JetBrains Mono</span></p>
+    </div>
+    <div class="samples">
+      <div class="sample-nav">
+        <div class="logo display">fabro</div>
+        <div class="links body"><span>Docs</span><span>Blog</span><span>Showcase</span><span>Roadmap</span></div>
+        <button class="cta-btn body">Get started</button>
+      </div>
+      <div class="sample-hero">
+        <div class="badge body">Open source workflow engine</div>
+        <h3 class="display">The dark software factory<br/>for <span class="gradient">expert engineers</span></h3>
+        <p class="subtitle body">Stop babysitting agents. Define your process as a workflow graph, let AI agents execute it, and intervene only where it matters.</p>
+      </div>
+      <div class="sample-features">
+        <div class="feature-card"><div class="icon">&#x25C9;</div><h4 class="display">Workflow graphs</h4><p class="body">Define multi-step processes as Graphviz directed graphs. Each node is a stage with its own prompt, model, and tools.</p></div>
+        <div class="feature-card"><div class="icon">&#x2B21;</div><h4 class="display">Human-in-the-loop</h4><p class="body">Hexagonal approval gates let humans review, revise, or override at any point in the workflow.</p></div>
+        <div class="feature-card"><div class="icon">&#x29BE;</div><h4 class="display">Multi-model routing</h4><p class="body">Assign models per-stage with CSS-like selectors. Use Haiku for triage, Sonnet for code, Gemini for review.</p></div>
+      </div>
+      <div class="sample-code">
+        <div class="code-header mono"><div class="dot"></div>workflow.dot</div>
+        <pre class="mono"><span class="kw">digraph</span> <span class="fn">PlanImplement</span> {
+  <span class="kw">graph</span> [
+    <span class="prop">goal</span>=<span class="str">"Plan, approve, implement, and simplify"</span>
+  ]
+
+  <span class="prop">plan</span>      [label=<span class="str">"Plan"</span>]
+  <span class="prop">approve</span>   [shape=hexagon, label=<span class="str">"Approve Plan"</span>]
+  <span class="prop">implement</span> [label=<span class="str">"Implement"</span>, class=<span class="str">"coding"</span>]
+
+  <span class="str">start -> plan -> approve -> implement -> exit</span>
+}</pre>
+      </div>
+      <div class="sample-prose">
+        <h4 class="display">Verification is a first-class concept</h4>
+        <p class="body">Every workflow can include build gates, test assertions, and human approval stages. When a stage fails, Fabro routes back to the appropriate fix loop — no manual re-runs, no <code class="mono">git stash</code> gymnastics.</p>
+        <p class="body">The <a href="#">retrospective engine</a> runs after every workflow, surfacing what went wrong and why. Over time, your workflows get smarter.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- OPTION A: Razor Geometric -->
+  <div class="treatment t-a" data-id="a">
+    <div class="treatment-label">
+      <div class="tag">Option A</div>
+      <h2 class="display">Outfit + Lexend + Fira Code</h2>
+      <p class="fonts-list body">Display: <span>Outfit</span> &middot; Body: <span>Lexend</span> &middot; Mono: <span>Fira Code</span></p>
+    </div>
+    <div class="samples">
+      <div class="sample-nav">
+        <div class="logo display">fabro</div>
+        <div class="links body"><span>Docs</span><span>Blog</span><span>Showcase</span><span>Roadmap</span></div>
+        <button class="cta-btn body">Get started</button>
+      </div>
+      <div class="sample-hero">
+        <div class="badge body">Open source workflow engine</div>
+        <h3 class="display">The dark software factory<br/>for <span class="gradient">expert engineers</span></h3>
+        <p class="subtitle body">Stop babysitting agents. Define your process as a workflow graph, let AI agents execute it, and intervene only where it matters.</p>
+      </div>
+      <div class="sample-features">
+        <div class="feature-card"><div class="icon">&#x25C9;</div><h4 class="display">Workflow graphs</h4><p class="body">Define multi-step processes as Graphviz directed graphs. Each node is a stage with its own prompt, model, and tools.</p></div>
+        <div class="feature-card"><div class="icon">&#x2B21;</div><h4 class="display">Human-in-the-loop</h4><p class="body">Hexagonal approval gates let humans review, revise, or override at any point in the workflow.</p></div>
+        <div class="feature-card"><div class="icon">&#x29BE;</div><h4 class="display">Multi-model routing</h4><p class="body">Assign models per-stage with CSS-like selectors. Use Haiku for triage, Sonnet for code, Gemini for review.</p></div>
+      </div>
+      <div class="sample-code">
+        <div class="code-header mono"><div class="dot"></div>workflow.dot</div>
+        <pre class="mono"><span class="kw">digraph</span> <span class="fn">PlanImplement</span> {
+  <span class="kw">graph</span> [
+    <span class="prop">goal</span>=<span class="str">"Plan, approve, implement, and simplify"</span>
+  ]
+
+  <span class="prop">plan</span>      [label=<span class="str">"Plan"</span>]
+  <span class="prop">approve</span>   [shape=hexagon, label=<span class="str">"Approve Plan"</span>]
+  <span class="prop">implement</span> [label=<span class="str">"Implement"</span>, class=<span class="str">"coding"</span>]
+
+  <span class="str">start -> plan -> approve -> implement -> exit</span>
+}</pre>
+      </div>
+      <div class="sample-prose">
+        <h4 class="display">Verification is a first-class concept</h4>
+        <p class="body">Every workflow can include build gates, test assertions, and human approval stages. When a stage fails, Fabro routes back to the appropriate fix loop — no manual re-runs, no <code class="mono">git stash</code> gymnastics.</p>
+        <p class="body">The <a href="#">retrospective engine</a> runs after every workflow, surfacing what went wrong and why. Over time, your workflows get smarter.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- OPTION B: Editorial Contrast -->
+  <div class="treatment t-b" data-id="b">
+    <div class="treatment-label">
+      <div class="tag">Option B</div>
+      <h2 class="display">Instrument Serif + Instrument Sans + IBM Plex Mono</h2>
+      <p class="fonts-list body">Display: <span>Instrument Serif</span> &middot; Body: <span>Instrument Sans</span> &middot; Mono: <span>IBM Plex Mono</span></p>
+    </div>
+    <div class="samples">
+      <div class="sample-nav">
+        <div class="logo display">fabro</div>
+        <div class="links body"><span>Docs</span><span>Blog</span><span>Showcase</span><span>Roadmap</span></div>
+        <button class="cta-btn body">Get started</button>
+      </div>
+      <div class="sample-hero">
+        <div class="badge body">Open source workflow engine</div>
+        <h3 class="display">The dark software factory<br/>for <span class="gradient">expert engineers</span></h3>
+        <p class="subtitle body">Stop babysitting agents. Define your process as a workflow graph, let AI agents execute it, and intervene only where it matters.</p>
+      </div>
+      <div class="sample-features">
+        <div class="feature-card"><div class="icon">&#x25C9;</div><h4 class="display">Workflow graphs</h4><p class="body">Define multi-step processes as Graphviz directed graphs. Each node is a stage with its own prompt, model, and tools.</p></div>
+        <div class="feature-card"><div class="icon">&#x2B21;</div><h4 class="display">Human-in-the-loop</h4><p class="body">Hexagonal approval gates let humans review, revise, or override at any point in the workflow.</p></div>
+        <div class="feature-card"><div class="icon">&#x29BE;</div><h4 class="display">Multi-model routing</h4><p class="body">Assign models per-stage with CSS-like selectors. Use Haiku for triage, Sonnet for code, Gemini for review.</p></div>
+      </div>
+      <div class="sample-code">
+        <div class="code-header mono"><div class="dot"></div>workflow.dot</div>
+        <pre class="mono"><span class="kw">digraph</span> <span class="fn">PlanImplement</span> {
+  <span class="kw">graph</span> [
+    <span class="prop">goal</span>=<span class="str">"Plan, approve, implement, and simplify"</span>
+  ]
+
+  <span class="prop">plan</span>      [label=<span class="str">"Plan"</span>]
+  <span class="prop">approve</span>   [shape=hexagon, label=<span class="str">"Approve Plan"</span>]
+  <span class="prop">implement</span> [label=<span class="str">"Implement"</span>, class=<span class="str">"coding"</span>]
+
+  <span class="str">start -> plan -> approve -> implement -> exit</span>
+}</pre>
+      </div>
+      <div class="sample-prose">
+        <h4 class="display">Verification is a first-class concept</h4>
+        <p class="body">Every workflow can include build gates, test assertions, and human approval stages. When a stage fails, Fabro routes back to the appropriate fix loop — no manual re-runs, no <code class="mono">git stash</code> gymnastics.</p>
+        <p class="body">The <a href="#">retrospective engine</a> runs after every workflow, surfacing what went wrong and why. Over time, your workflows get smarter.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- OPTION C: Bold Industrial -->
+  <div class="treatment t-c" data-id="c">
+    <div class="treatment-label">
+      <div class="tag">Option C</div>
+      <h2 class="display">Syne + Manrope + Source Code Pro</h2>
+      <p class="fonts-list body">Display: <span>Syne</span> &middot; Body: <span>Manrope</span> &middot; Mono: <span>Source Code Pro</span></p>
+    </div>
+    <div class="samples">
+      <div class="sample-nav">
+        <div class="logo display">fabro</div>
+        <div class="links body"><span>Docs</span><span>Blog</span><span>Showcase</span><span>Roadmap</span></div>
+        <button class="cta-btn body">Get started</button>
+      </div>
+      <div class="sample-hero">
+        <div class="badge body">Open source workflow engine</div>
+        <h3 class="display">The dark software factory<br/>for <span class="gradient">expert engineers</span></h3>
+        <p class="subtitle body">Stop babysitting agents. Define your process as a workflow graph, let AI agents execute it, and intervene only where it matters.</p>
+      </div>
+      <div class="sample-features">
+        <div class="feature-card"><div class="icon">&#x25C9;</div><h4 class="display">Workflow graphs</h4><p class="body">Define multi-step processes as Graphviz directed graphs. Each node is a stage with its own prompt, model, and tools.</p></div>
+        <div class="feature-card"><div class="icon">&#x2B21;</div><h4 class="display">Human-in-the-loop</h4><p class="body">Hexagonal approval gates let humans review, revise, or override at any point in the workflow.</p></div>
+        <div class="feature-card"><div class="icon">&#x29BE;</div><h4 class="display">Multi-model routing</h4><p class="body">Assign models per-stage with CSS-like selectors. Use Haiku for triage, Sonnet for code, Gemini for review.</p></div>
+      </div>
+      <div class="sample-code">
+        <div class="code-header mono"><div class="dot"></div>workflow.dot</div>
+        <pre class="mono"><span class="kw">digraph</span> <span class="fn">PlanImplement</span> {
+  <span class="kw">graph</span> [
+    <span class="prop">goal</span>=<span class="str">"Plan, approve, implement, and simplify"</span>
+  ]
+
+  <span class="prop">plan</span>      [label=<span class="str">"Plan"</span>]
+  <span class="prop">approve</span>   [shape=hexagon, label=<span class="str">"Approve Plan"</span>]
+  <span class="prop">implement</span> [label=<span class="str">"Implement"</span>, class=<span class="str">"coding"</span>]
+
+  <span class="str">start -> plan -> approve -> implement -> exit</span>
+}</pre>
+      </div>
+      <div class="sample-prose">
+        <h4 class="display">Verification is a first-class concept</h4>
+        <p class="body">Every workflow can include build gates, test assertions, and human approval stages. When a stage fails, Fabro routes back to the appropriate fix loop — no manual re-runs, no <code class="mono">git stash</code> gymnastics.</p>
+        <p class="body">The <a href="#">retrospective engine</a> runs after every workflow, surfacing what went wrong and why. Over time, your workflows get smarter.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════ GRID VIEW ═══════════════════════════════════════ -->
+<div class="grid-view" id="grid-view">
+  <!-- filled dynamically -->
+</div>
+
+<script>
+  let currentView = 'single';
+  let activeIds = ['current'];
+
+  function show(id) {
+    if (currentView === 'single') {
+      activeIds = [id];
+      document.querySelectorAll('#single-view .treatment').forEach(el => {
+        el.classList.toggle('visible', el.dataset.id === id);
+      });
+    } else {
+      // grid: toggle
+      const idx = activeIds.indexOf(id);
+      if (idx > -1) {
+        if (activeIds.length > 1) activeIds.splice(idx, 1);
+      } else {
+        if (activeIds.length >= 2) activeIds.shift();
+        activeIds.push(id);
+      }
+      renderGrid();
+    }
+    updateButtons();
+  }
+
+  function updateButtons() {
+    document.querySelectorAll('.selector-btn').forEach(btn => {
+      btn.classList.toggle('active', activeIds.includes(btn.dataset.target));
+    });
+  }
+
+  function setView(v) {
+    currentView = v;
+    document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.view-btn[onclick="setView('${v}')"]`).classList.add('active');
+
+    if (v === 'single') {
+      document.getElementById('single-view').style.display = 'block';
+      document.getElementById('grid-view').classList.remove('visible');
+      if (activeIds.length > 1) activeIds = [activeIds[0]];
+      document.querySelectorAll('#single-view .treatment').forEach(el => {
+        el.classList.toggle('visible', el.dataset.id === activeIds[0]);
+      });
+    } else {
+      document.getElementById('single-view').style.display = 'none';
+      if (activeIds.length < 2) {
+        const all = ['current', 'a', 'b', 'c'];
+        const next = all.find(x => !activeIds.includes(x));
+        activeIds.push(next);
+      }
+      renderGrid();
+    }
+    updateButtons();
+  }
+
+  function renderGrid() {
+    const grid = document.getElementById('grid-view');
+    grid.innerHTML = '';
+    grid.classList.add('visible');
+    activeIds.forEach(id => {
+      const src = document.querySelector(`#single-view .treatment[data-id="${id}"]`);
+      if (src) {
+        const clone = src.cloneNode(true);
+        clone.classList.add('visible');
+        grid.appendChild(clone);
+      }
+    });
+  }
+</script>
+
+</body>
+</html>
