@@ -1146,7 +1146,7 @@ pub async fn run_command(
         checkpoint_exclude_globs,
         github_app: github_app.clone(),
         git_author,
-        base_branch: detected_base_branch.or(remote_base_branch),
+        base_branch: detected_base_branch,
         pull_request: run_cfg
             .as_ref()
             .and_then(|c| c.pull_request.as_ref())

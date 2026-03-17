@@ -5634,8 +5634,7 @@ mod tests {
             github_app: None,
             git_author: crate::git::GitAuthor::default(),
             base_branch: None,
-            pull_request_enabled: false,
-            pull_request_draft: false,
+            pull_request: None,
             asset_globs: Vec::new(),
             workflow_slug: None,
         }
