@@ -199,7 +199,11 @@ enum SystemCommand {
 #[derive(Subcommand)]
 enum RepoCommand {
     /// Initialize a new project
-    Init,
+    Init {
+        /// Also install the fabro-create-workflow skill
+        #[arg(long, hide = true)]
+        skill: bool,
+    },
     /// Remove fabro.toml and fabro/ directory
     Deinit,
 }
@@ -452,7 +456,7 @@ async fn main_inner() -> (String, Result<()>) {
         Command::Serve(_) => "serve",
         Command::Doctor { .. } => "doctor",
         Command::Repo { command } => match command {
-            RepoCommand::Init => "repo init",
+            RepoCommand::Init { .. } => "repo init",
             RepoCommand::Deinit => "repo deinit",
         },
         Command::Init => "init",
@@ -784,8 +788,12 @@ async fn main_inner() -> (String, Result<()>) {
                 open::that("https://docs.fabro.sh/")?;
             }
             Command::Repo { command } => match command {
-                RepoCommand::Init => {
+                RepoCommand::Init { skill } => {
                     init::run_init().await?;
+                    if skill {
+                        let base = std::env::current_dir()?.join(".claude").join("skills");
+                        skill::install_skill_to(&base)?;
+                    }
                 }
                 RepoCommand::Deinit => {
                     init::run_deinit()?;

@@ -469,6 +469,40 @@ fn test_repo_deinit_fails_when_not_initialized() {
 }
 
 // ---------------------------------------------------------------------------
+// repo init --skill
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_repo_init_skill_installs_skill_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_git_repo(tmp.path());
+
+    fabro()
+        .args(["repo", "init", "--skill"])
+        .current_dir(tmp.path())
+        .assert()
+        .success();
+
+    // Skill files should be installed under .claude/skills/fabro-create-workflow/
+    let skill_dir = tmp.path().join(".claude/skills/fabro-create-workflow");
+    assert!(skill_dir.join("SKILL.md").exists(), "SKILL.md should exist");
+    assert!(
+        skill_dir.join("references/dot-language.md").exists(),
+        "dot-language.md should exist"
+    );
+}
+
+#[test]
+fn test_repo_init_help_does_not_show_skill() {
+    let out = fabro().args(["repo", "init", "--help"]).assert().success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(
+        !stdout.contains("--skill"),
+        "--skill should be hidden from help"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Standalone tests (no sandbox parametrization)
 // ---------------------------------------------------------------------------
 
