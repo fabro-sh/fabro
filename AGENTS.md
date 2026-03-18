@@ -21,7 +21,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Marketing site (apps/marketing)
 - `cd apps/marketing && bun run dev` — start Astro dev server
 - `cd apps/marketing && bun run build` — production build
-- `cd apps/marketing && vercel --prod` — deploy to Vercel (project: website, domain: fabro.sh)
+- `cd apps/marketing && bunx vercel --prod` — deploy to Vercel (project: website, domain: fabro.sh)
 
 ### Dev servers
 1. `fabro serve` — starts the Rust API server (demo mode is per-request via `X-Fabro-Demo: 1` header)
