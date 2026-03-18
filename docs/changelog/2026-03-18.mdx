@@ -1,0 +1,33 @@
+---
+title: "Secret management and repo commands"
+date: "2026-03-18"
+---
+
+## Secret management from the CLI
+
+Managing API keys and credentials previously meant manually editing `~/.fabro/.env`. The new `fabro secret` commands let you get, set, list, and remove secrets directly from the CLI.
+
+```bash
+fabro secret set ANTHROPIC_API_KEY sk-ant-...
+fabro secret list
+fabro secret get ANTHROPIC_API_KEY
+fabro secret rm ANTHROPIC_API_KEY
+```
+
+## Repository lifecycle with `fabro repo`
+
+Project setup commands now live under `fabro repo`. You can initialize a project with `fabro repo init` and, when you want to remove Fabro from a project, reverse it with `fabro repo deinit` — which removes `fabro.toml` and the `fabro/` directory.
+
+```bash
+fabro repo init
+fabro repo deinit
+```
+
+The old `fabro init` still works but prints a deprecation warning.
+
+## More
+
+<Accordion title="CLI">
+- Moved `fabro init` to `fabro repo init` with a backwards-compatible deprecation shim
+- Added `--show-values` flag to `fabro secret list` to reveal secret values
+</Accordion>

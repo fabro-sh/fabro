@@ -537,18 +537,30 @@ fabro parse workflow.fabro
 
 ---
 
-## `fabro init`
+## `fabro repo init`
 
-Initialize a new Fabro project in the current git repository. Creates an `fabro.toml` project config and a sample `hello` workflow.
+Initialize a new Fabro project in the current git repository. Creates a `fabro.toml` project config and a sample `hello` workflow.
 
 ```bash
-fabro init
+fabro repo init
 ```
 
 The command must be run inside a git repository. It creates:
 - `fabro.toml` — project configuration with comments and a link to docs
 - `fabro/workflows/hello/workflow.fabro` — a simple greeting workflow
 - `fabro/workflows/hello/workflow.toml` — run config for the hello workflow
+
+<Note>
+The old `fabro init` still works but prints a deprecation warning. Use `fabro repo init` instead.
+</Note>
+
+## `fabro repo deinit`
+
+Remove Fabro from a project by deleting `fabro.toml` and the `fabro/` directory. Fails with an error if the project is not initialized.
+
+```bash
+fabro repo deinit
+```
 
 ## `fabro diff`
 
@@ -683,6 +695,58 @@ Interactive setup wizard that walks you through configuring API keys and validat
 ```bash
 fabro install
 ```
+
+---
+
+## `fabro secret set`
+
+Store a secret in `~/.fabro/.env`.
+
+```bash
+fabro secret set ANTHROPIC_API_KEY sk-ant-...
+```
+
+| Argument | Description |
+|---|---|
+| `<KEY>` | Name of the secret (required) |
+| `<VALUE>` | Value to store (required) |
+
+## `fabro secret get`
+
+Print the value of a secret from `~/.fabro/.env`.
+
+```bash
+fabro secret get ANTHROPIC_API_KEY
+```
+
+| Argument | Description |
+|---|---|
+| `<KEY>` | Name of the secret (required) |
+
+## `fabro secret list`
+
+List secret names stored in `~/.fabro/.env`.
+
+```bash
+fabro secret list
+fabro secret list --show-values
+```
+
+| Flag | Description |
+|---|---|
+| `--show-values` | Print values alongside keys |
+
+## `fabro secret rm`
+
+Remove a secret from `~/.fabro/.env`.
+
+```bash
+fabro secret rm ANTHROPIC_API_KEY
+```
+
+| Argument | Description |
+|---|---|
+| `<KEY>` | Name of the secret to remove (required) |
 
 ---
 
