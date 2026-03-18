@@ -130,6 +130,7 @@ enum Command {
         command: PrCommand,
     },
     /// Skill management
+    #[command(hide = true)]
     Skill {
         #[command(subcommand)]
         command: SkillCommand,
@@ -199,6 +200,8 @@ enum SystemCommand {
 enum RepoCommand {
     /// Initialize a new project
     Init,
+    /// Remove fabro.toml and fabro/ directory
+    Deinit,
 }
 
 #[derive(Subcommand)]
@@ -450,6 +453,7 @@ async fn main_inner() -> (String, Result<()>) {
         Command::Doctor { .. } => "doctor",
         Command::Repo { command } => match command {
             RepoCommand::Init => "repo init",
+            RepoCommand::Deinit => "repo deinit",
         },
         Command::Init => "init",
         Command::Install => "install",
@@ -782,6 +786,9 @@ async fn main_inner() -> (String, Result<()>) {
             Command::Repo { command } => match command {
                 RepoCommand::Init => {
                     init::run_init().await?;
+                }
+                RepoCommand::Deinit => {
+                    init::run_deinit()?;
                 }
             },
             Command::Init => {

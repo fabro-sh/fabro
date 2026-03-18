@@ -110,6 +110,59 @@ draft = true
     Ok(())
 }
 
+pub fn run_deinit() -> Result<()> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .context("failed to run git")?;
+
+    if !output.status.success() {
+        bail!("not a git repository");
+    }
+
+    let repo_root = PathBuf::from(
+        String::from_utf8(output.stdout)
+            .context("git output was not valid UTF-8")?
+            .trim(),
+    );
+
+    let fabro_toml = repo_root.join("fabro.toml");
+    if !fabro_toml.exists() {
+        bail!("not initialized — fabro.toml not found");
+    }
+
+    let green = console::Style::new().green();
+    let dim = console::Style::new().dim();
+
+    std::fs::remove_file(&fabro_toml)
+        .with_context(|| format!("failed to remove {}", fabro_toml.display()))?;
+    eprintln!(
+        "  {} {}",
+        green.apply_to("✔"),
+        dim.apply_to("removed fabro.toml")
+    );
+
+    let fabro_dir = repo_root.join("fabro");
+    if fabro_dir.exists() {
+        std::fs::remove_dir_all(&fabro_dir)
+            .with_context(|| format!("failed to remove {}", fabro_dir.display()))?;
+        eprintln!(
+            "  {} {}",
+            green.apply_to("✔"),
+            dim.apply_to("removed fabro/")
+        );
+    }
+
+    eprintln!(
+        "\n{}",
+        console::Style::new()
+            .bold()
+            .apply_to("Project deinitialized.")
+    );
+
+    Ok(())
+}
+
 async fn check_github_app_installation() {
     // Get the git remote origin URL
     let output = match std::process::Command::new("git")

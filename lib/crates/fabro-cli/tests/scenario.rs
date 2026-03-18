@@ -411,6 +411,64 @@ fn scenario_full_stack(sandbox: &str) {
 }
 
 // ---------------------------------------------------------------------------
+// repo deinit
+// ---------------------------------------------------------------------------
+
+fn init_git_repo(path: &Path) {
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(path)
+        .output()
+        .expect("git init should succeed");
+}
+
+fn init_fabro_project(path: &Path) {
+    std::fs::write(path.join("fabro.toml"), "version = 1\n").unwrap();
+    let workflow_dir = path.join("fabro/workflows/hello");
+    std::fs::create_dir_all(&workflow_dir).unwrap();
+    std::fs::write(workflow_dir.join("workflow.fabro"), "digraph {}").unwrap();
+    std::fs::write(workflow_dir.join("workflow.toml"), "version = 1\n").unwrap();
+}
+
+#[test]
+fn test_repo_deinit_removes_fabro_toml_and_dir() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_git_repo(tmp.path());
+    init_fabro_project(tmp.path());
+
+    assert!(tmp.path().join("fabro.toml").exists());
+    assert!(tmp.path().join("fabro").exists());
+
+    fabro()
+        .args(["repo", "deinit"])
+        .current_dir(tmp.path())
+        .assert()
+        .success();
+
+    assert!(
+        !tmp.path().join("fabro.toml").exists(),
+        "fabro.toml should be removed"
+    );
+    assert!(
+        !tmp.path().join("fabro").exists(),
+        "fabro/ directory should be removed"
+    );
+}
+
+#[test]
+fn test_repo_deinit_fails_when_not_initialized() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_git_repo(tmp.path());
+
+    fabro()
+        .args(["repo", "deinit"])
+        .current_dir(tmp.path())
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("not initialized"));
+}
+
+// ---------------------------------------------------------------------------
 // Standalone tests (no sandbox parametrization)
 // ---------------------------------------------------------------------------
 
