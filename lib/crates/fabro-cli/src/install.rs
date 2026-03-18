@@ -914,7 +914,7 @@ pub async fn run_install() -> Result<()> {
     eprintln!();
     eprintln!(
         "  Setup complete! Go to your project and run {} to get started.",
-        s.bold_cyan.apply_to("fabro init")
+        s.bold_cyan.apply_to("fabro repo init")
     );
     Ok(())
 }

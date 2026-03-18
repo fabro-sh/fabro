@@ -114,7 +114,8 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Initialize a new project
+    /// Initialize a new project (deprecated: use `repo init`)
+    #[command(hide = true)]
     Init,
     /// Set up the Fabro environment (LLMs, certs, GitHub)
     Install,
@@ -148,6 +149,11 @@ enum Command {
     Docs,
     /// Upgrade fabro to the latest version
     Upgrade(upgrade::UpgradeArgs),
+    /// Repository commands
+    Repo {
+        #[command(subcommand)]
+        command: RepoCommand,
+    },
     /// System maintenance commands
     System {
         #[command(subcommand)]
@@ -187,6 +193,12 @@ enum SystemCommand {
     Prune(commands::runs::RunsPruneArgs),
     /// Show disk usage
     Df(commands::runs::DfArgs),
+}
+
+#[derive(Subcommand)]
+enum RepoCommand {
+    /// Initialize a new project
+    Init,
 }
 
 #[derive(Subcommand)]
@@ -436,6 +448,9 @@ async fn main_inner() -> (String, Result<()>) {
         #[cfg(feature = "server")]
         Command::Serve(_) => "serve",
         Command::Doctor { .. } => "doctor",
+        Command::Repo { command } => match command {
+            RepoCommand::Init => "repo init",
+        },
         Command::Init => "init",
         Command::Install => "install",
         Command::Ps(_) => "ps",
@@ -506,7 +521,11 @@ async fn main_inner() -> (String, Result<()>) {
 
     let upgrade_handle = if matches!(
         cli.command,
-        Command::Run(_) | Command::Exec(_) | Command::Init | Command::Install
+        Command::Run(_)
+            | Command::Exec(_)
+            | Command::Repo { .. }
+            | Command::Init
+            | Command::Install
     ) {
         upgrade::spawn_upgrade_check(cli.no_upgrade_check, upgrade_check_enabled)
     } else {
@@ -760,7 +779,16 @@ async fn main_inner() -> (String, Result<()>) {
             Command::Docs => {
                 open::that("https://docs.fabro.sh/")?;
             }
+            Command::Repo { command } => match command {
+                RepoCommand::Init => {
+                    init::run_init().await?;
+                }
+            },
             Command::Init => {
+                eprintln!(
+                    "{} `fabro init` is deprecated, use `fabro repo init` instead",
+                    console::Style::new().yellow().apply_to("warning:")
+                );
                 init::run_init().await?;
             }
             Command::Install => {
