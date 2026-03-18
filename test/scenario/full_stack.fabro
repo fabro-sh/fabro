@@ -1,0 +1,18 @@
+digraph FullStack {
+    graph [goal="Full-stack scenario: command, agent, human gate, and goal gate verification"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    setup   [label="Setup", shape=parallelogram, script="mkdir -p /tmp/scenario_full && echo ready > /tmp/scenario_full/flag.txt"]
+    plan    [label="Plan", prompt="Read /tmp/scenario_full/flag.txt. Then create a file /tmp/scenario_full/result.txt containing the word PASS.", shape=tab]
+    approve [label="Approve?", shape=hexagon]
+    impl    [label="Implement", prompt="Create the file /tmp/scenario_full/result.txt containing exactly the word PASS on the first line."]
+    verify  [label="Verify", shape=parallelogram, script="cat /tmp/scenario_full/result.txt", goal_gate=true, retry_target="impl"]
+
+    start -> setup -> plan -> approve
+    approve -> impl   [label="[A] Approve"]
+    approve -> plan   [label="[R] Revise"]
+    impl -> verify -> exit
+}

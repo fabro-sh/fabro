@@ -1378,6 +1378,7 @@ dependencies = [
  "jsonwebtoken",
  "libc",
  "open",
+ "paste",
  "predicates",
  "rand 0.8.5",
  "regex",

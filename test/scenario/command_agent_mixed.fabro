@@ -1,0 +1,13 @@
+digraph CommandAgentMixed {
+    graph [goal="Verify sandbox filesystem is shared across command and agent nodes"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    setup  [label="Setup", shape=parallelogram, script="echo SCENARIO_FLAG_42 > /tmp/scenario_flag.txt"]
+    work   [label="Work", prompt="Read the file /tmp/scenario_flag.txt and tell me what it contains."]
+    verify [label="Verify", shape=parallelogram, script="cat /tmp/scenario_flag.txt"]
+
+    start -> setup -> work -> verify -> exit
+}
