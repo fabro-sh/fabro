@@ -1,0 +1,4 @@
+title: Triggers
+description: Start workflows automatically from GitHub events — push, PR, issue, comment, review — with filtered conditions and payload forwarding.
+status: next
+date: 2026-06-02
