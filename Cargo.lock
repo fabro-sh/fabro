@@ -1237,7 +1237,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-agent"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1271,7 +1271,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-api"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1326,7 +1326,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-beastie"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "core-foundation 0.9.4",
  "libc",
@@ -1335,7 +1335,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-cli"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1406,7 +1406,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-config"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1422,7 +1422,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-daytona"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -1445,7 +1445,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-db"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "chrono",
  "sqlx",
@@ -1456,7 +1456,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-devcontainer"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "fabro-util",
  "insta",
@@ -1472,7 +1472,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-exe"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -1492,7 +1492,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-git-storage"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "git2",
  "tempfile",
@@ -1503,7 +1503,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-github"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -1520,7 +1520,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-graphviz"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "nom",
  "regex",
@@ -1530,7 +1530,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-hooks"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "async-trait",
  "fabro-agent",
@@ -1550,7 +1550,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-interview"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "async-trait",
  "dialoguer",
@@ -1563,7 +1563,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-linear"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "async-trait",
  "fabro-tracker",
@@ -1577,7 +1577,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-llm"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1606,7 +1606,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-mcp"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "anyhow",
  "fabro-config",
@@ -1621,7 +1621,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-openai-oauth"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "axum",
  "base64",
@@ -1639,7 +1639,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-retro"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1654,7 +1654,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-slack"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "fabro-interview",
  "fabro-workflows",
@@ -1673,7 +1673,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-sprites"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -1690,7 +1690,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-ssh"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -1709,7 +1709,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-telemetry"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -1733,14 +1733,14 @@ dependencies = [
 
 [[package]]
 name = "fabro-tracker"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "async-trait",
 ]
 
 [[package]]
 name = "fabro-types"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "chrono",
  "prettyplease",
@@ -1755,7 +1755,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-util"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -1775,7 +1775,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-validate"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "fabro-graphviz",
  "fabro-llm",
@@ -1785,7 +1785,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-workflows"
-version = "0.176.0"
+version = "0.176.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
