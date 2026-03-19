@@ -1,0 +1,5 @@
+{
+  "command": "cat /tmp/scenario_flag.txt",
+  "language": "shell",
+  "timeout_ms": null
+}
