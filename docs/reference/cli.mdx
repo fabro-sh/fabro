@@ -143,7 +143,7 @@ fabro exec "Refactor the auth module" --permissions full --auto-approve
 | Argument / Flag | Description | Default |
 |---|---|---|
 | `<PROMPT>` | Task prompt (required) | — |
-| `--provider <PROVIDER>` | LLM provider | `anthropic` |
+| `--provider <PROVIDER>` | LLM provider | Auto-detected from configured API keys (see [default models](/core-concepts/models#default-models)) |
 | `--model <MODEL>` | Model name | Per provider (see below) |
 | `--permissions <LEVEL>` | Permission level: `read-only`, `read-write`, or `full` | `read-write` |
 | `--auto-approve` | Skip interactive prompts; deny tools outside permission level | — |
@@ -690,13 +690,33 @@ fabro asset cp <RUN_ID>:report.html ./output    # specific file
 
 When copying all assets in flat mode, filenames must be unique across nodes. Use `--tree` or `--node` to disambiguate.
 
+## `fabro provider login`
+
+Re-authenticate with an LLM provider without re-running the full install wizard. Useful when tokens expire or when switching accounts.
+
+```bash
+fabro provider login --provider openai
+fabro provider login --provider anthropic
+```
+
+| Flag | Description |
+|---|---|
+| `--provider <PROVIDER>` | LLM provider to authenticate with (required) |
+
+For OpenAI, this launches a browser-based OAuth PKCE flow with an automatic fallback to manual API key entry. All other providers prompt for an API key with validation. Credentials are merged non-destructively into `~/.fabro/.env`.
+
 ## `fabro install`
 
 Interactive setup wizard that walks you through configuring API keys and validating your environment. Runs `fabro doctor` with live probes after setup to validate the configuration.
 
 ```bash
 fabro install
+fabro install --web-url https://fabro.example.com
 ```
+
+| Flag | Description | Default |
+|---|---|---|
+| `--web-url <URL>` | Web UI base URL for OAuth callback endpoints | `http://localhost:5173` |
 
 ---
 
