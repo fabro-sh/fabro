@@ -47,7 +47,7 @@ Fabro uses a [GitHub App](https://docs.github.com/en/apps/overview) to authentic
    - Generates a `SESSION_SECRET` for web app sessions
    - Redirects you to the login page
 
-5. **Install the app** on your GitHub account or organization. Go to `https://github.com/settings/apps/{your-app-slug}/installations` and install it on the repositories Fabro should access.
+5. **Install the app** on your GitHub account or organization. Go to `https://github.com/settings/apps/<your-app-slug>/installations` and install it on the repositories Fabro should access.
 
 ### Verify the configuration
 
@@ -130,7 +130,7 @@ When a workflow runs in a remote sandbox (Daytona or Docker), Fabro clones the c
 1. Fabro detects the local repository's `origin` remote URL and current branch
 2. SSH URLs (e.g. `git@github.com:owner/repo.git`) are converted to HTTPS
 3. Fabro signs a short-lived JWT using the App ID and private key (RS256, 10-minute validity)
-4. Using the JWT, Fabro looks up the GitHub App installation for the repository (`GET /repos/{owner}/{repo}/installation`)
+4. Using the JWT, Fabro looks up the GitHub App installation for the repository (`GET /repos/\{owner\}/\{repo\}/installation`)
 5. Fabro requests a scoped Installation Access Token with `contents: write` permission on the specific repository
 6. The sandbox clones via HTTPS using `x-access-token` as the username and the token as the password
 
@@ -157,7 +157,7 @@ For long-running workflows, Fabro refreshes the token before each push since Ins
 
 ## Troubleshooting
 
-### "GitHub App is not installed for {owner}"
+### "GitHub App is not installed for \{owner\}"
 
 The GitHub App exists but hasn't been installed on the organization or user account that owns the repository. Install it at:
 
@@ -175,7 +175,7 @@ https://github.com/settings/installations
 
 GitHub Apps are **private by default**, meaning they can only be installed on repositories owned by the same account or organization that owns the app. If you need to install the app on a repository owned by a different user or organization, you must make the app public:
 
-1. Go to **GitHub → Settings → Developer settings → GitHub Apps → {your app}**
+1. Go to **GitHub → Settings → Developer settings → GitHub Apps → \{your app\}**
 2. Scroll to the bottom under **Danger zone**
 3. Click **Make public**
 
@@ -185,7 +185,7 @@ Once the app is public, anyone with the installation link can install it on thei
 
 The installation was disabled in GitHub's settings. Re-enable it in the organization's GitHub App settings.
 
-### "GitHub App does not have access to repository {repo}"
+### "GitHub App does not have access to repository \{repo\}"
 
 The app is installed but doesn't have access to this specific repository. Update the installation's repository permissions to include it (the app may be configured for "Only select repositories").
 
