@@ -1,0 +1,13 @@
+{
+  "run_id": "01KM333Y4727H5TTE0XHX8D533",
+  "workflow_name": "CommandPipeline",
+  "goal": "Run two commands in sequence",
+  "start_time": "2026-03-19T13:03:52.435367Z",
+  "node_count": 4,
+  "edge_count": 3,
+  "run_branch": "fabro/run/01KM333Y4727H5TTE0XHX8D533",
+  "base_sha": "10595c9e76ba1be90de1cf49a2a3c183e287d917",
+  "base_branch": "main",
+  "workflow_slug": "scenario",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-cli"
+}
