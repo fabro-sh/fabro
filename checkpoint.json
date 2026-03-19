@@ -1,0 +1,52 @@
+{
+  "timestamp": "2026-03-19T13:28:22.037224Z",
+  "current_node": "cmd",
+  "completed_nodes": [
+    "start",
+    "cmd"
+  ],
+  "node_retries": {
+    "start": 1,
+    "cmd": 1
+  },
+  "context_values": {
+    "current_node": "cmd",
+    "failure_class": "",
+    "internal.retry_count.cmd": 1,
+    "current.preamble": "Goal: Test conditional edge selection after a command\n",
+    "graph.goal": "Test conditional edge selection after a command",
+    "thread.start.current_node": "cmd",
+    "command.stderr": "",
+    "internal.thread_id": "start",
+    "internal.fidelity": "compact",
+    "graph.rankdir": "LR",
+    "failure_signature": "",
+    "command.output": "pass\n",
+    "internal.node_visit_count": 1,
+    "outcome": "success",
+    "internal.retry_count.start": 1,
+    "internal.work_dir": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpFGmsh2/run/worktree",
+    "internal.run_id": "01KM34GS7MGGDNWXB4FCTX9AKP"
+  },
+  "logs": [],
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
+    "cmd": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "pass\n"
+      },
+      "notes": "Script completed: echo pass",
+      "duration_ms": 5
+    }
+  },
+  "next_node_id": "gate",
+  "node_visits": {
+    "start": 1,
+    "cmd": 1
+  }
+}
