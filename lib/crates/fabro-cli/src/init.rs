@@ -253,6 +253,37 @@ async fn check_github_app_installation() {
                 None => format!("https://github.com/organizations/{owner}/settings/installations"),
             };
 
+            // Best-effort: warn if the app is private and the repo belongs to a different owner.
+            if let Ok(app_info) =
+                fabro_github::get_authenticated_app(&client, &jwt, "https://api.github.com").await
+            {
+                if !app_info.owner.login.eq_ignore_ascii_case(&owner) {
+                    if let Ok(false) = fabro_github::is_app_public(
+                        &client,
+                        &app_info.slug,
+                        "https://api.github.com",
+                    )
+                    .await
+                    {
+                        let yellow = console::Style::new().yellow();
+                        eprintln!(
+                            "\n  {} GitHub App \"{}\" is private but this repo belongs to a different owner ({}).",
+                            yellow.apply_to("!"),
+                            app_info.slug,
+                            owner
+                        );
+                        eprintln!(
+                            "    The app must be made public before it can be installed outside {}.",
+                            app_info.owner.login
+                        );
+                        eprintln!(
+                            "    Update visibility at: https://github.com/settings/apps/{}",
+                            app_info.slug
+                        );
+                    }
+                }
+            }
+
             let yellow = console::Style::new().yellow();
             eprintln!(
                 "\n  {} GitHub App is not installed for {owner}/{repo}",
