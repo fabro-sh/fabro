@@ -1,0 +1,5 @@
+{
+  "command": "echo shipped",
+  "language": "shell",
+  "timeout_ms": null
+}

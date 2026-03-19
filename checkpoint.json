@@ -1,27 +1,33 @@
 {
-  "timestamp": "2026-03-19T13:47:56.313166Z",
-  "current_node": "approve",
+  "timestamp": "2026-03-19T13:47:58.424996Z",
+  "current_node": "ship",
   "completed_nodes": [
     "start",
     "draft",
-    "approve"
+    "approve",
+    "ship"
   ],
   "node_retries": {
-    "start": 1,
     "approve": 1,
-    "draft": 1
+    "draft": 1,
+    "start": 1,
+    "ship": 1
   },
   "context_values": {
     "internal.node_visit_count": 1,
     "internal.retry_count.draft": 1,
     "internal.retry_count.approve": 1,
     "human.gate.selected": "A",
-    "current_node": "approve",
+    "current_node": "ship",
     "thread.start.current_node": "draft",
+    "thread.approve.current_node": "ship",
+    "internal.retry_count.ship": 1,
     "failure_class": "",
+    "command.stderr": "",
     "internal.fidelity": "compact",
     "preferred_label": "[A] Approve",
-    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 94 out\n",
+    "command.output": "shipped\n",
+    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 94 out\n- **approve**: success\n\n## Context\n- human.gate.label: [A] Approve\n- human.gate.selected: A\n",
     "outcome": "success",
     "last_stage": "draft",
     "graph.rankdir": "LR",
@@ -29,7 +35,7 @@
     "last_response": "# Greeting\n\nHello! 👋 \n\nI'm Claude, an AI assistant created by Anthropic. I'm here to help you with a wide range of tasks—whether that's coding, writing, analysis, math, creative projects, or just",
     "failure_signature": "",
     "internal.retry_count.start": 1,
-    "internal.thread_id": "draft",
+    "internal.thread_id": "approve",
     "graph.goal": "Test human gate with auto-approve",
     "internal.work_dir": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpvUZRBf/run/worktree",
     "response.draft": "# Greeting\n\nHello! 👋 \n\nI'm Claude, an AI assistant created by Anthropic. I'm here to help you with a wide range of tasks—whether that's coding, writing, analysis, math, creative projects, or just having a conversation. \n\nFeel free to ask me anything, and I'll do my best to provide helpful, accurate, and thoughtful responses. What can I help you with today?",
@@ -38,10 +44,6 @@
   },
   "logs": [],
   "node_outcomes": {
-    "start": {
-      "status": "success",
-      "duration_ms": 0
-    },
     "draft": {
       "status": "success",
       "context_updates": {
@@ -60,6 +62,10 @@
       },
       "duration_ms": 2032
     },
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
     "approve": {
       "status": "success",
       "preferred_label": "[A] Approve",
@@ -71,11 +77,21 @@
         "human.gate.label": "[A] Approve"
       },
       "duration_ms": 0
+    },
+    "ship": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "shipped\n"
+      },
+      "notes": "Script completed: echo shipped",
+      "duration_ms": 2
     }
   },
-  "next_node_id": "ship",
+  "next_node_id": "exit",
   "node_visits": {
     "draft": 1,
+    "ship": 1,
     "approve": 1,
     "start": 1
   }
