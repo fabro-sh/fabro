@@ -6,9 +6,9 @@ use uuid::Uuid;
 
 use crate::event::Track;
 
-const SEGMENT_API_URL: &str = match option_env!("SEGMENT_API_URL") {
+const SEGMENT_BASE_URL: &str = match option_env!("SEGMENT_BASE_URL") {
     Some(url) => url,
-    None => "https://api.segment.io/v1/batch",
+    None => "https://api.segment.io",
 };
 const SEGMENT_WRITE_KEY: Option<&str> = option_env!("SEGMENT_WRITE_KEY");
 
@@ -92,7 +92,7 @@ pub async fn upload(path: &Path) -> anyhow::Result<()> {
     let auth = STANDARD.encode(format!("{write_key}:"));
 
     let resp = reqwest::Client::new()
-        .post(SEGMENT_API_URL)
+        .post(format!("{SEGMENT_BASE_URL}/v1/batch"))
         .header("Authorization", format!("Basic {auth}"))
         .json(&payload)
         .send()
