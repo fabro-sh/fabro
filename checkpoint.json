@@ -1,25 +1,32 @@
 {
-  "timestamp": "2026-03-19T13:41:09.539813Z",
-  "current_node": "draft",
+  "timestamp": "2026-03-19T13:41:11.968774Z",
+  "current_node": "approve",
   "completed_nodes": [
     "start",
-    "draft"
+    "draft",
+    "approve"
   ],
   "node_retries": {
     "draft": 1,
+    "approve": 1,
     "start": 1
   },
   "context_values": {
     "last_stage": "draft",
+    "internal.retry_count.approve": 1,
+    "human.gate.selected": "A",
+    "thread.draft.current_node": "approve",
     "internal.retry_count.draft": 1,
     "internal.run_id": "01KM357YBWHVYEMV9CWQ6PB84Q",
-    "internal.thread_id": "start",
+    "internal.thread_id": "draft",
+    "human.gate.label": "[A] Approve",
     "internal.node_visit_count": 1,
-    "current_node": "draft",
+    "current_node": "approve",
     "internal.retry_count.start": 1,
     "graph.rankdir": "LR",
+    "preferred_label": "[A] Approve",
     "internal.fidelity": "compact",
-    "current.preamble": "Goal: Test human gate with auto-approve\n",
+    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 66 out\n",
     "outcome": "success",
     "failure_class": "",
     "response.draft": "# Greeting\n\nHello! 👋 \n\nI'm ready to help you test the human gate with auto-approve functionality. This involves verifying that workflows can pause at human decision points and automatically proceed when configured to do so.\n\nLet me know what specific aspect you'd like to test or implement!",
@@ -48,13 +55,26 @@
       },
       "duration_ms": 2871
     },
+    "approve": {
+      "status": "success",
+      "preferred_label": "[A] Approve",
+      "suggested_next_ids": [
+        "ship"
+      ],
+      "context_updates": {
+        "human.gate.selected": "A",
+        "human.gate.label": "[A] Approve"
+      },
+      "duration_ms": 0
+    },
     "start": {
       "status": "success",
       "duration_ms": 0
     }
   },
-  "next_node_id": "approve",
+  "next_node_id": "ship",
   "node_visits": {
+    "approve": 1,
     "start": 1,
     "draft": 1
   }
