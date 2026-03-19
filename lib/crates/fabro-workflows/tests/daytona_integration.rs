@@ -1307,7 +1307,7 @@ async fn daytona_asset_collection() {
         git_author: fabro_workflows::git::GitAuthor::default(),
         base_branch: None,
         pull_request: None,
-        asset_globs: Vec::new(),
+        asset_globs: vec!["test-results/**".to_string()],
         workflow_slug: None,
     };
 
