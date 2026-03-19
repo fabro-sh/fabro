@@ -1,28 +1,35 @@
 {
-  "timestamp": "2026-03-19T13:47:58.849657Z",
-  "current_node": "draft",
+  "timestamp": "2026-03-19T13:48:01.293657Z",
+  "current_node": "approve",
   "completed_nodes": [
     "start",
-    "draft"
+    "draft",
+    "approve"
   ],
   "node_retries": {
     "start": 1,
-    "draft": 1
+    "draft": 1,
+    "approve": 1
   },
   "context_values": {
+    "thread.draft.current_node": "approve",
     "internal.node_visit_count": 1,
-    "internal.thread_id": "start",
-    "current_node": "draft",
+    "internal.thread_id": "draft",
+    "internal.retry_count.approve": 1,
+    "preferred_label": "[A] Approve",
+    "human.gate.selected": "A",
+    "current_node": "approve",
     "internal.retry_count.start": 1,
     "outcome": "success",
     "last_response": "# Testing Human Gate with Auto-Approve\n\nHere's a short greeting message:\n\n---\n\n**Hello! 👋**\n\nWelcome to Fabro! This test demonstrates how human gates work with auto-approval enabled. The workflow w",
     "response.draft": "# Testing Human Gate with Auto-Approve\n\nHere's a short greeting message:\n\n---\n\n**Hello! 👋**\n\nWelcome to Fabro! This test demonstrates how human gates work with auto-approval enabled. The workflow will pause at the human gate stage, but since auto-approve is configured, it will automatically continue without requiring manual intervention.\n\nThis is useful for testing workflows that include human approval steps in CI/CD pipelines or automated processes where you want to validate the gate logic without blocking on actual human approval.\n\n---\n\nIf you're looking to set up this test, you'd typically:\n\n1. Define a workflow with a human gate stage\n2. Configure auto-approve in the test setup\n3. Run `fabro run <workflow-name>` to execute\n4. Verify the gate is triggered and auto-approved in the output logs\n\nLet me know if you need help setting up the workflow definition or test configuration!",
+    "human.gate.label": "[A] Approve",
     "thread.start.current_node": "draft",
     "graph.rankdir": "LR",
     "failure_class": "",
     "graph.goal": "Test human gate with auto-approve",
     "internal.retry_count.draft": 1,
-    "current.preamble": "Goal: Test human gate with auto-approve\n",
+    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 202 out\n",
     "failure_signature": "",
     "internal.fidelity": "compact",
     "internal.run_id": "01KM35MF571ZNDXSZW7E0R4D94",
@@ -48,14 +55,27 @@
       },
       "duration_ms": 3149
     },
+    "approve": {
+      "status": "success",
+      "preferred_label": "[A] Approve",
+      "suggested_next_ids": [
+        "ship"
+      ],
+      "context_updates": {
+        "human.gate.selected": "A",
+        "human.gate.label": "[A] Approve"
+      },
+      "duration_ms": 0
+    },
     "start": {
       "status": "success",
       "duration_ms": 0
     }
   },
-  "next_node_id": "approve",
+  "next_node_id": "ship",
   "node_visits": {
     "start": 1,
-    "draft": 1
+    "draft": 1,
+    "approve": 1
   }
 }
