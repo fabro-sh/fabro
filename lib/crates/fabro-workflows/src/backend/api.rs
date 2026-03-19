@@ -160,9 +160,14 @@ impl AgentApiBackend {
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<Session, FabroError> {
+        let model = node.model().unwrap_or(&self.model);
+        let provider = node
+            .provider()
+            .and_then(|p| p.parse::<Provider>().ok())
+            .unwrap_or(self.provider);
         Self::create_session_for(
-            &self.model,
-            self.provider,
+            model,
+            provider,
             node,
             sandbox,
             &self.env,
@@ -412,6 +417,12 @@ impl CodergenBackend for AgentApiBackend {
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<CodergenResult, FabroError> {
+        let actual_model = node.model().unwrap_or(&self.model).to_string();
+        let actual_provider = node
+            .provider()
+            .and_then(|p| p.parse::<Provider>().ok())
+            .unwrap_or(self.provider);
+
         let fidelity = context.fidelity();
         let reuse_key = if fidelity == crate::context::keys::Fidelity::Full {
             thread_id.map(String::from)
@@ -577,7 +588,7 @@ impl CodergenBackend for AgentApiBackend {
         }
 
         let mut stage_usage = StageUsage {
-            model: self.model.clone(),
+            model: actual_model.clone(),
             input_tokens: total_usage.input_tokens,
             output_tokens: total_usage.output_tokens,
             cache_read_tokens: total_usage.cache_read_tokens,
@@ -613,8 +624,8 @@ impl CodergenBackend for AgentApiBackend {
 
         let provider_used = serde_json::json!({
             "mode": "agent",
-            "provider": self.provider.as_str(),
-            "model": &self.model,
+            "provider": actual_provider.as_str(),
+            "model": &actual_model,
         });
         if let Ok(json) = serde_json::to_string_pretty(&provider_used) {
             let _ = std::fs::write(stage_dir.join("provider_used.json"), json);
