@@ -1,0 +1,1 @@
+✅ Done! I've successfully created `/tmp/scenario_full/result.txt` containing exactly the word "PASS" on the first line. The file has been verified and is ready for the goal gate verification.
