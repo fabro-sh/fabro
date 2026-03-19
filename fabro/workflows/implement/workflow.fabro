@@ -20,7 +20,7 @@ digraph ImplementAndSimplify {
     simplify_gpt      [label="Simplify (GPT-54)", prompt="@prompts/simplify.md", model="gpt-54"]
     verify            [label="Verify", shape=parallelogram, script="cargo clippy -q --workspace -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1", goal_gate=true, retry_target="fixup"]
     fixup             [label="Fixup", prompt="The verify step failed. Read the build output from context and fix all clippy lint warnings and test failures.", max_visits=3]
-    fmt               [label="Format", shape=parallelogram, script="cargo fmt --all 2>&1", goal_gate=true, max_retries=0]
+    fmt               [label="Format", shape=parallelogram, script="cargo fmt --all 2>&1", max_retries=0]
 
     start -> toolchain
     toolchain -> preflight_compile [condition="outcome=success"]
