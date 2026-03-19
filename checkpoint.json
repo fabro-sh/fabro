@@ -1,45 +1,48 @@
 {
-  "timestamp": "2026-03-19T13:48:11.845192Z",
-  "current_node": "plan",
+  "timestamp": "2026-03-19T13:48:16.313268Z",
+  "current_node": "approve",
   "completed_nodes": [
     "start",
     "setup",
-    "plan"
+    "plan",
+    "approve"
   ],
   "node_retries": {
-    "start": 1,
+    "plan": 1,
     "setup": 1,
-    "plan": 1
+    "start": 1,
+    "approve": 1
   },
   "context_values": {
+    "preferred_label": "[A] Approve",
     "command.stderr": "",
     "internal.fidelity": "compact",
     "failure_signature": "",
     "graph.rankdir": "LR",
     "graph.goal": "Full-stack scenario: command, agent, human gate, and goal gate verification",
-    "current_node": "plan",
+    "internal.retry_count.approve": 1,
+    "thread.plan.current_node": "approve",
+    "current_node": "approve",
     "internal.node_visit_count": 1,
     "outcome": "success",
     "internal.run_id": "01KM35MF59VV7B5TM1DV1C4MMW",
     "internal.retry_count.start": 1,
     "command.output": "",
+    "human.gate.label": "[A] Approve",
     "internal.retry_count.plan": 1,
     "thread.setup.current_node": "plan",
-    "internal.thread_id": "setup",
+    "internal.thread_id": "plan",
     "response.plan": "I'll help you complete this full-stack scenario. Let me break this down:\n\n1. Read `/tmp/scenario_full/flag.txt`\n2. Create `/tmp/scenario_full/result.txt` with the word \"PASS\"\n\nLet me execute this step by step.\n\n**Step 1: Read the flag file**\n\n```bash\ncat /tmp/scenario_full/flag.txt\n```\n\nExpected output: `ready`\n\n**Step 2: Create the result file**\n\n```bash\necho \"PASS\" > /tmp/scenario_full/result.txt\n```\n\n**Step 3: Verify the result**\n\n```bash\ncat /tmp/scenario_full/result.txt\n```\n\nExpected output: `PASS`\n\n---\n\n## Summary\n\nThe workflow progresses through these stages:\n\n1. **setup** (command) ✓ — Created the directory and flag file\n2. **read_flag** (agent or command) — Read the flag content\n3. **create_result** (command) — Write \"PASS\" to result file\n4. **human_gate** (human) — Manual verification step (if needed)\n5. **goal_gate** (goal) — Verify the final state matches expectations\n\nThe commands above will:\n- ✓ Read `/tmp/scenario_full/flag.txt` → outputs \"ready\"\n- ✓ Create `/tmp/scenario_full/result.txt` with content \"PASS\"\n- ✓ Verify result file exists and contains \"PASS\"\n\nIf this is running in a workflow engine, the goal gate would verify that `/tmp/scenario_full/result.txt` exists and contains exactly \"PASS\".",
     "last_stage": "plan",
     "thread.start.current_node": "setup",
     "internal.retry_count.setup": 1,
     "last_response": "I'll help you complete this full-stack scenario. Let me break this down:\n\n1. Read `/tmp/scenario_full/flag.txt`\n2. Create `/tmp/scenario_full/result.txt` with the word \"PASS\"\n\nLet me execute this step",
     "failure_class": "",
-    "current.preamble": "Goal: Full-stack scenario: command, agent, human gate, and goal gate verification\n\n## Completed stages\n- **setup**: success\n  - Script: `mkdir -p /tmp/scenario_full && echo ready > /tmp/scenario_full/flag.txt`\n  - Stdout: (empty)\n  - Stderr: (empty)\n"
+    "human.gate.selected": "A",
+    "current.preamble": "Goal: Full-stack scenario: command, agent, human gate, and goal gate verification\n\n## Completed stages\n- **setup**: success\n  - Script: `mkdir -p /tmp/scenario_full && echo ready > /tmp/scenario_full/flag.txt`\n  - Stdout: (empty)\n  - Stderr: (empty)\n- **plan**: success\n  - Model: claude-haiku-4-5, 2.1k tokens in / 385 out\n"
   },
   "logs": [],
   "node_outcomes": {
-    "start": {
-      "status": "success",
-      "duration_ms": 0
-    },
     "setup": {
       "status": "success",
       "context_updates": {
@@ -48,6 +51,10 @@
       },
       "notes": "Script completed: mkdir -p /tmp/scenario_full && echo ready > /tmp/scenario_full/flag.txt",
       "duration_ms": 233
+    },
+    "start": {
+      "status": "success",
+      "duration_ms": 0
     },
     "plan": {
       "status": "success",
@@ -66,12 +73,25 @@
         "cost": 0.0032328
       },
       "duration_ms": 4370
+    },
+    "approve": {
+      "status": "success",
+      "preferred_label": "[A] Approve",
+      "suggested_next_ids": [
+        "impl"
+      ],
+      "context_updates": {
+        "human.gate.selected": "A",
+        "human.gate.label": "[A] Approve"
+      },
+      "duration_ms": 0
     }
   },
-  "next_node_id": "approve",
+  "next_node_id": "impl",
   "node_visits": {
     "start": 1,
-    "setup": 1,
-    "plan": 1
+    "plan": 1,
+    "approve": 1,
+    "setup": 1
   }
 }
