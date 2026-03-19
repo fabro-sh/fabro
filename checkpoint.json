@@ -1,47 +1,55 @@
 {
-  "timestamp": "2026-03-19T15:20:55.436858Z",
-  "current_node": "preflight_compile",
+  "timestamp": "2026-03-19T15:21:11.812777Z",
+  "current_node": "preflight_lint",
   "completed_nodes": [
     "start",
     "toolchain",
-    "preflight_compile"
+    "preflight_compile",
+    "preflight_lint"
   ],
   "node_retries": {
     "start": 1,
+    "preflight_lint": 1,
     "preflight_compile": 1,
     "toolchain": 1
   },
   "context_values": {
     "failure_class": "",
     "graph.goal": "# Fix: Default provider should respect configured API keys\n\n## Context\n\nUsers who only have OpenAI (or Gemini) configured hit an error when running workflows without an explicit `--provider` flag. The system hardcodes `Provider::Anthropic` as the fallback in several places, so it tries to call Anthropic even when no `ANTHROPIC_API_KEY` exists.\n\nThe fix: add a `Provider::default_from_env()` method that checks which providers have API keys and picks the best one, then replace all hardcoded `Provider::Anthropic` fallbacks with it.\n\n## Approach: Red/Green TDD\n\nEach step writes failing tests first, then implements to make them pass.\n\n---\n\n### Cycle 1: `Provider::default_with()` core logic\n\n**RED** — Add tests to `lib/crates/fabro-llm/src/provider.rs` (`mod tests`):\n\n```rust\n#[test]\nfn default_with_all_configured_prefers_anthropic() {\n    assert_eq!(Provider::default_with(|_| true), Provider::Anthropic);\n}\n\n#[test]\nfn default_with_only_openai() {\n    assert_eq!(Provider::default_with(|p| p == Provider::OpenAi), Provider::OpenAi);\n}\n\n#[test]\nfn default_with_only_gemini() {\n    assert_eq!(Provider::default_with(|p| p == Provider::Gemini), Provider::Gemini);\n}\n\n#[test]\nfn default_with_openai_and_gemini_prefers_openai() {\n    assert_eq!(\n        Provider::default_with(|p| p == Provider::OpenAi || p == Provider::Gemini),\n        Provider::OpenAi,\n    );\n}\n\n#[test]\nfn default_with_none_configured_falls_back_to_anthropic() {\n    assert_eq!(Provider::default_with(|_| false), Provider::Anthropic);\n}\n\n#[test]\nfn default_with_only_kimi_falls_back_to_anthropic() {\n    assert_eq!(Provider::default_with(|p| p == Provider::Kimi), Provider::Anthropic);\n}\n```\n\nRun `cargo test -p fabro-llm` → compile error (method doesn't exist).\n\n**GREEN** — Add to `impl Provider` in the same file:\n\n```rust\n#[must_use]\npub fn default_from_env() -> Self {\n    Self::default_with(Self::has_api_key)\n}\n\nfn default_with(is_configured: impl Fn(Self) -> bool) -> Self {\n    const PRECEDENCE: [Provider; 3] = [Provider::Anthropic, Provider::OpenAi, Provider::Gemini];\n    PRECEDENCE.iter().copied().find(|&p| is_configured(p)).unwrap_or(Provider::Anthropic)\n}\n```\n\nRun `cargo test -p fabro-llm` → all 6 new tests pass.\n\n---\n\n### Cycle 2: Replace hardcoded fallbacks\n\nThese are mechanical substitutions. For each site, the change is the same pattern: `.unwrap_or(Provider::Anthropic)` → `.unwrap_or_else(Provider::default_from_env)`.\n\n**Sites to update:**\n\n| # | File | Line | What changes |\n|---|------|------|-------------|\n| 1 | `lib/crates/fabro-cli/src/commands/run.rs` | 211 | `resolve_model_provider()` provider fallback |\n| 2 | `lib/crates/fabro-cli/src/commands/run.rs` | 1123 | `run_command()` provider parse fallback |\n| 3 | `lib/crates/fabro-cli/src/commands/run.rs` | 1846-1853 | `run_from_branch()` — hardcoded `\"claude-opus-4-6\"` model + `Provider::Anthropic` |\n| 4 | `lib/crates/fabro-api/src/serve.rs` | 290-310 | `resolve_model_provider()` — `catalog::default_model()` + provider fallback |\n| 5 | `lib/crates/fabro-workflows/src/handler/prompt.rs` | 70 | prompt handler provider fallback |\n| 6 | `lib/crates/fabro-cli/src/commands/pr.rs` | 388 | `catalog::default_model()` → provider-aware default |\n\n**Special cases (not just unwrap_or swaps):**\n\n- **run.rs:1846** — replace `\"claude-opus-4-6\".to_string()` with catalog lookup using `default_from_env()`:\n  ```rust\n  let default_provider = Provider::default_from_env();\n  let model = args.model.unwrap_or_else(|| {\n      fabro_llm::catalog::default_model_for_provider(default_provider.as_str())\n          .map(|m| m.id)\n          .unwrap_or_else(|| default_provider.as_str().to_string())\n  });\n  ```\n\n- **serve.rs:294** — replace `catalog::default_model()` with provider-aware lookup:\n  ```rust\n  let default_provider = Provider::default_from_env();\n  let default_info = provider_str\n      .and_then(fabro_llm::catalog::default_model_for_provider)\n      .unwrap_or_else(|| {\n          fabro_llm::catalog::default_model_for_provider(default_provider.as_str())\n              .unwrap_or_else(fabro_llm::catalog::default_model)\n      });\n  ```\n\n- **pr.rs:388** — replace `catalog::default_model()` with same pattern.\n\nRun `cargo test --workspace` after each file. Run `cargo clippy --workspace -- -D warnings` at the end.\n\n---\n\n## Verification\n\n1. `cargo fmt --check --all`\n2. `cargo clippy --workspace -- -D warnings`\n3. `cargo test --workspace`\n",
-    "current_node": "preflight_compile",
+    "current_node": "preflight_lint",
     "command.stderr": "",
     "command.output": "",
+    "thread.preflight_compile.current_node": "preflight_lint",
     "internal.node_visit_count": 1,
     "internal.retry_count.preflight_compile": 1,
     "outcome": "success",
     "internal.retry_count.toolchain": 1,
     "thread.toolchain.current_node": "preflight_compile",
-    "current.preamble": "Goal: # Fix: Default provider should respect configured API keys\n\n## Context\n\nUsers who only have OpenAI (or Gemini) configured hit an error when running workflows without an explicit `--provider` flag. The system hardcodes `Provider::Anthropic` as the fallback in several places, so it tries to call Anthropic even when no `ANTHROPIC_API_KEY` exists.\n\nThe fix: add a `Provider::default_from_env()` method that checks which providers have API keys and picks the best one, then replace all hardcoded `Provider::Anthropic` fallbacks with it.\n\n## Approach: Red/Green TDD\n\nEach step writes failing tests first, then implements to make them pass.\n\n---\n\n### Cycle 1: `Provider::default_with()` core logic\n\n**RED** — Add tests to `lib/crates/fabro-llm/src/provider.rs` (`mod tests`):\n\n```rust\n#[test]\nfn default_with_all_configured_prefers_anthropic() {\n    assert_eq!(Provider::default_with(|_| true), Provider::Anthropic);\n}\n\n#[test]\nfn default_with_only_openai() {\n    assert_eq!(Provider::default_with(|p| p == Provider::OpenAi), Provider::OpenAi);\n}\n\n#[test]\nfn default_with_only_gemini() {\n    assert_eq!(Provider::default_with(|p| p == Provider::Gemini), Provider::Gemini);\n}\n\n#[test]\nfn default_with_openai_and_gemini_prefers_openai() {\n    assert_eq!(\n        Provider::default_with(|p| p == Provider::OpenAi || p == Provider::Gemini),\n        Provider::OpenAi,\n    );\n}\n\n#[test]\nfn default_with_none_configured_falls_back_to_anthropic() {\n    assert_eq!(Provider::default_with(|_| false), Provider::Anthropic);\n}\n\n#[test]\nfn default_with_only_kimi_falls_back_to_anthropic() {\n    assert_eq!(Provider::default_with(|p| p == Provider::Kimi), Provider::Anthropic);\n}\n```\n\nRun `cargo test -p fabro-llm` → compile error (method doesn't exist).\n\n**GREEN** — Add to `impl Provider` in the same file:\n\n```rust\n#[must_use]\npub fn default_from_env() -> Self {\n    Self::default_with(Self::has_api_key)\n}\n\nfn default_with(is_configured: impl Fn(Self) -> bool) -> Self {\n    const PRECEDENCE: [Provider; 3] = [Provider::Anthropic, Provider::OpenAi, Provider::Gemini];\n    PRECEDENCE.iter().copied().find(|&p| is_configured(p)).unwrap_or(Provider::Anthropic)\n}\n```\n\nRun `cargo test -p fabro-llm` → all 6 new tests pass.\n\n---\n\n### Cycle 2: Replace hardcoded fallbacks\n\nThese are mechanical substitutions. For each site, the change is the same pattern: `.unwrap_or(Provider::Anthropic)` → `.unwrap_or_else(Provider::default_from_env)`.\n\n**Sites to update:**\n\n| # | File | Line | What changes |\n|---|------|------|-------------|\n| 1 | `lib/crates/fabro-cli/src/commands/run.rs` | 211 | `resolve_model_provider()` provider fallback |\n| 2 | `lib/crates/fabro-cli/src/commands/run.rs` | 1123 | `run_command()` provider parse fallback |\n| 3 | `lib/crates/fabro-cli/src/commands/run.rs` | 1846-1853 | `run_from_branch()` — hardcoded `\"claude-opus-4-6\"` model + `Provider::Anthropic` |\n| 4 | `lib/crates/fabro-api/src/serve.rs` | 290-310 | `resolve_model_provider()` — `catalog::default_model()` + provider fallback |\n| 5 | `lib/crates/fabro-workflows/src/handler/prompt.rs` | 70 | prompt handler provider fallback |\n| 6 | `lib/crates/fabro-cli/src/commands/pr.rs` | 388 | `catalog::default_model()` → provider-aware default |\n\n**Special cases (not just unwrap_or swaps):**\n\n- **run.rs:1846** — replace `\"claude-opus-4-6\".to_string()` with catalog lookup using `default_from_env()`:\n  ```rust\n  let default_provider = Provider::default_from_env();\n  let model = args.model.unwrap_or_else(|| {\n      fabro_llm::catalog::default_model_for_provider(default_provider.as_str())\n          .map(|m| m.id)\n          .unwrap_or_else(|| default_provider.as_str().to_string())\n  });\n  ```\n\n- **serve.rs:294** — replace `catalog::default_model()` with provider-aware lookup:\n  ```rust\n  let default_provider = Provider::default_from_env();\n  let default_info = provider_str\n      .and_then(fabro_llm::catalog::default_model_for_provider)\n      .unwrap_or_else(|| {\n          fabro_llm::catalog::default_model_for_provider(default_provider.as_str())\n              .unwrap_or_else(fabro_llm::catalog::default_model)\n      });\n  ```\n\n- **pr.rs:388** — replace `catalog::default_model()` with same pattern.\n\nRun `cargo test --workspace` after each file. Run `cargo clippy --workspace -- -D warnings` at the end.\n\n---\n\n## Verification\n\n1. `cargo fmt --check --all`\n2. `cargo clippy --workspace -- -D warnings`\n3. `cargo test --workspace`\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n",
+    "current.preamble": "Goal: # Fix: Default provider should respect configured API keys\n\n## Context\n\nUsers who only have OpenAI (or Gemini) configured hit an error when running workflows without an explicit `--provider` flag. The system hardcodes `Provider::Anthropic` as the fallback in several places, so it tries to call Anthropic even when no `ANTHROPIC_API_KEY` exists.\n\nThe fix: add a `Provider::default_from_env()` method that checks which providers have API keys and picks the best one, then replace all hardcoded `Provider::Anthropic` fallbacks with it.\n\n## Approach: Red/Green TDD\n\nEach step writes failing tests first, then implements to make them pass.\n\n---\n\n### Cycle 1: `Provider::default_with()` core logic\n\n**RED** — Add tests to `lib/crates/fabro-llm/src/provider.rs` (`mod tests`):\n\n```rust\n#[test]\nfn default_with_all_configured_prefers_anthropic() {\n    assert_eq!(Provider::default_with(|_| true), Provider::Anthropic);\n}\n\n#[test]\nfn default_with_only_openai() {\n    assert_eq!(Provider::default_with(|p| p == Provider::OpenAi), Provider::OpenAi);\n}\n\n#[test]\nfn default_with_only_gemini() {\n    assert_eq!(Provider::default_with(|p| p == Provider::Gemini), Provider::Gemini);\n}\n\n#[test]\nfn default_with_openai_and_gemini_prefers_openai() {\n    assert_eq!(\n        Provider::default_with(|p| p == Provider::OpenAi || p == Provider::Gemini),\n        Provider::OpenAi,\n    );\n}\n\n#[test]\nfn default_with_none_configured_falls_back_to_anthropic() {\n    assert_eq!(Provider::default_with(|_| false), Provider::Anthropic);\n}\n\n#[test]\nfn default_with_only_kimi_falls_back_to_anthropic() {\n    assert_eq!(Provider::default_with(|p| p == Provider::Kimi), Provider::Anthropic);\n}\n```\n\nRun `cargo test -p fabro-llm` → compile error (method doesn't exist).\n\n**GREEN** — Add to `impl Provider` in the same file:\n\n```rust\n#[must_use]\npub fn default_from_env() -> Self {\n    Self::default_with(Self::has_api_key)\n}\n\nfn default_with(is_configured: impl Fn(Self) -> bool) -> Self {\n    const PRECEDENCE: [Provider; 3] = [Provider::Anthropic, Provider::OpenAi, Provider::Gemini];\n    PRECEDENCE.iter().copied().find(|&p| is_configured(p)).unwrap_or(Provider::Anthropic)\n}\n```\n\nRun `cargo test -p fabro-llm` → all 6 new tests pass.\n\n---\n\n### Cycle 2: Replace hardcoded fallbacks\n\nThese are mechanical substitutions. For each site, the change is the same pattern: `.unwrap_or(Provider::Anthropic)` → `.unwrap_or_else(Provider::default_from_env)`.\n\n**Sites to update:**\n\n| # | File | Line | What changes |\n|---|------|------|-------------|\n| 1 | `lib/crates/fabro-cli/src/commands/run.rs` | 211 | `resolve_model_provider()` provider fallback |\n| 2 | `lib/crates/fabro-cli/src/commands/run.rs` | 1123 | `run_command()` provider parse fallback |\n| 3 | `lib/crates/fabro-cli/src/commands/run.rs` | 1846-1853 | `run_from_branch()` — hardcoded `\"claude-opus-4-6\"` model + `Provider::Anthropic` |\n| 4 | `lib/crates/fabro-api/src/serve.rs` | 290-310 | `resolve_model_provider()` — `catalog::default_model()` + provider fallback |\n| 5 | `lib/crates/fabro-workflows/src/handler/prompt.rs` | 70 | prompt handler provider fallback |\n| 6 | `lib/crates/fabro-cli/src/commands/pr.rs` | 388 | `catalog::default_model()` → provider-aware default |\n\n**Special cases (not just unwrap_or swaps):**\n\n- **run.rs:1846** — replace `\"claude-opus-4-6\".to_string()` with catalog lookup using `default_from_env()`:\n  ```rust\n  let default_provider = Provider::default_from_env();\n  let model = args.model.unwrap_or_else(|| {\n      fabro_llm::catalog::default_model_for_provider(default_provider.as_str())\n          .map(|m| m.id)\n          .unwrap_or_else(|| default_provider.as_str().to_string())\n  });\n  ```\n\n- **serve.rs:294** — replace `catalog::default_model()` with provider-aware lookup:\n  ```rust\n  let default_provider = Provider::default_from_env();\n  let default_info = provider_str\n      .and_then(fabro_llm::catalog::default_model_for_provider)\n      .unwrap_or_else(|| {\n          fabro_llm::catalog::default_model_for_provider(default_provider.as_str())\n              .unwrap_or_else(fabro_llm::catalog::default_model)\n      });\n  ```\n\n- **pr.rs:388** — replace `catalog::default_model()` with same pattern.\n\nRun `cargo test --workspace` after each file. Run `cargo clippy --workspace -- -D warnings` at the end.\n\n---\n\n## Verification\n\n1. `cargo fmt --check --all`\n2. `cargo clippy --workspace -- -D warnings`\n3. `cargo test --workspace`\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n- **preflight_compile**: success\n  - Script: `cargo check -q --workspace 2>&1`\n  - Stdout: (empty)\n  - Stderr: (empty)\n",
     "internal.fidelity": "compact",
     "graph.model_stylesheet": "\n            * { backend: api; model: claude-opus-4-6;}\n        ",
     "internal.retry_count.start": 1,
     "internal.run_id": "01KM3AWHY48TDD4FB34M032P2R",
     "graph.rankdir": "LR",
-    "internal.thread_id": "toolchain",
+    "internal.thread_id": "preflight_compile",
     "failure_signature": "",
-    "thread.start.current_node": "toolchain"
+    "thread.start.current_node": "toolchain",
+    "internal.retry_count.preflight_lint": 1
   },
   "logs": [],
   "node_outcomes": {
-    "preflight_compile": {
+    "preflight_lint": {
       "status": "success",
       "context_updates": {
-        "command.stderr": "",
-        "command.output": ""
+        "command.output": "",
+        "command.stderr": ""
       },
-      "notes": "Script completed: cargo check -q --workspace 2>&1",
-      "duration_ms": 68137
+      "notes": "Script completed: cargo clippy -q --workspace -- -D warnings 2>&1",
+      "duration_ms": 13538
+    },
+    "start": {
+      "status": "success",
+      "duration_ms": 0
     },
     "toolchain": {
       "status": "success",
@@ -52,13 +60,19 @@
       "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
       "duration_ms": 88
     },
-    "start": {
+    "preflight_compile": {
       "status": "success",
-      "duration_ms": 0
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": ""
+      },
+      "notes": "Script completed: cargo check -q --workspace 2>&1",
+      "duration_ms": 68137
     }
   },
-  "next_node_id": "preflight_lint",
+  "next_node_id": "implement",
   "node_visits": {
+    "preflight_lint": 1,
     "start": 1,
     "toolchain": 1,
     "preflight_compile": 1
