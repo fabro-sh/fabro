@@ -1066,11 +1066,17 @@ pub async fn run_command(
         }
         SandboxProvider::Daytona => {
             let config = daytona_config.clone().unwrap_or_default();
+            let clone_params = origin_url
+                .as_ref()
+                .map(|url| fabro_daytona::GitCloneParams {
+                    url: fabro_github::ssh_url_to_https(url),
+                    branch: detected_base_branch.clone(),
+                });
             let mut env = fabro_daytona::DaytonaSandbox::new(
                 config,
                 github_app.clone(),
                 Some(run_id.clone()),
-                detected_base_branch.clone(),
+                clone_params,
             )
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;

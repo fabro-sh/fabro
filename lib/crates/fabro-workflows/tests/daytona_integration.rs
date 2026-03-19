@@ -34,7 +34,14 @@ async fn create_env_with_github_app(
     if let Some(home) = dirs::home_dir() {
         dotenvy::from_path(home.join(".fabro/.env")).ok();
     }
-    DaytonaSandbox::new(DaytonaConfig::default(), github_app, None, None)
+    let cwd = std::env::current_dir().unwrap();
+    let clone_params = fabro_daytona::detect_repo_info(&cwd)
+        .ok()
+        .map(|(url, branch)| fabro_daytona::GitCloneParams {
+            url: fabro_github::ssh_url_to_https(&url),
+            branch,
+        });
+    DaytonaSandbox::new(DaytonaConfig::default(), github_app, None, clone_params)
         .await
         .expect("Failed to create Daytona client — is DAYTONA_API_KEY set?")
 }
@@ -1852,9 +1859,6 @@ async fn daytona_cp_upload_download_round_trip() {
 async fn daytona_computer_use_browser_screenshot() {
     use base64::Engine;
 
-    // Run from a temp dir so detect_repo_info() finds no git repo and skips cloning.
-    let tmp = tempfile::tempdir().unwrap();
-    std::env::set_current_dir(tmp.path()).unwrap();
     dotenvy::dotenv().ok();
     if let Some(home) = dirs::home_dir() {
         dotenvy::from_path(home.join(".fabro/.env")).ok();
@@ -2013,8 +2017,6 @@ async fn daytona_playwright_mcp_sandbox_transport() {
     use fabro_agent::Sandbox;
 
     // Create sandbox from daytona-medium (has Node.js + Chromium)
-    let tmp = tempfile::tempdir().unwrap();
-    std::env::set_current_dir(tmp.path()).unwrap();
     dotenvy::dotenv().ok();
     if let Some(home) = dirs::home_dir() {
         dotenvy::from_path(home.join(".fabro/.env")).ok();
