@@ -54,15 +54,13 @@ fn build_segment_batch(content: &str) -> Option<serde_json::Value> {
         if line.is_empty() {
             continue;
         }
-        match serde_json::from_str::<serde_json::Value>(line) {
-            Ok(mut obj) => {
-                if let Some(map) = obj.as_object_mut() {
-                    map.insert(
-                        "type".to_string(),
-                        serde_json::Value::String("track".to_string()),
-                    );
-                }
-                batch.push(obj);
+        match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(line) {
+            Ok(mut map) => {
+                map.insert(
+                    "type".to_string(),
+                    serde_json::Value::String("track".to_string()),
+                );
+                batch.push(serde_json::Value::Object(map));
             }
             Err(err) => {
                 tracing::warn!(%err, "skipping malformed JSONL line");
