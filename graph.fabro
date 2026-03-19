@@ -1,0 +1,12 @@
+digraph CommandPipeline {
+    graph [goal="Run two commands in sequence"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    step1 [label="Step 1", shape=parallelogram, script="echo hello-from-step1"]
+    step2 [label="Step 2", shape=parallelogram, script="echo hello-from-step2"]
+
+    start -> step1 -> step2 -> exit
+}
