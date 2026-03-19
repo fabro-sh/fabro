@@ -1,32 +1,39 @@
 {
-  "timestamp": "2026-03-19T12:59:56.077751Z",
-  "current_node": "draft",
+  "timestamp": "2026-03-19T12:59:58.802327Z",
+  "current_node": "approve",
   "completed_nodes": [
     "start",
-    "draft"
+    "draft",
+    "approve"
   ],
   "node_retries": {
     "start": 1,
+    "approve": 1,
     "draft": 1
   },
   "context_values": {
     "failure_class": "",
+    "internal.retry_count.approve": 1,
     "internal.fidelity": "compact",
     "outcome": "success",
     "graph.rankdir": "LR",
-    "internal.thread_id": "start",
+    "internal.thread_id": "draft",
     "last_stage": "draft",
     "last_response": "# Greeting\n\nHello! 👋\n\nI'm here to help you test the human gate with auto-approve functionality. This looks like it will involve working with Fabro's workflow orchestration system, likely testing th",
+    "preferred_label": "[A] Approve",
     "failure_signature": "",
     "thread.start.current_node": "draft",
     "response.draft": "# Greeting\n\nHello! 👋\n\nI'm here to help you test the human gate with auto-approve functionality. This looks like it will involve working with Fabro's workflow orchestration system, likely testing the human-in-the-loop interaction features.\n\nI'm ready to assist with:\n- Writing test cases for human gates\n- Configuring auto-approve settings\n- Running workflow tests\n- Debugging any issues that arise\n\nLet me know what specific aspect of the human gate auto-approve feature you'd like to tackle first!",
     "internal.retry_count.draft": 1,
+    "human.gate.selected": "A",
+    "thread.draft.current_node": "approve",
     "graph.goal": "Test human gate with auto-approve",
     "internal.node_visit_count": 1,
-    "current_node": "draft",
+    "current_node": "approve",
     "internal.run_id": "01KM32WGAZ1XBY4T2YFCKJKYPG",
-    "current.preamble": "Goal: Test human gate with auto-approve\n",
-    "internal.retry_count.start": 1
+    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 119 out\n",
+    "internal.retry_count.start": 1,
+    "human.gate.label": "[A] Approve"
   },
   "logs": [],
   "node_outcomes": {
@@ -51,11 +58,24 @@
         "cost": 0.0020936
       },
       "duration_ms": 2081
+    },
+    "approve": {
+      "status": "success",
+      "preferred_label": "[A] Approve",
+      "suggested_next_ids": [
+        "ship"
+      ],
+      "context_updates": {
+        "human.gate.selected": "A",
+        "human.gate.label": "[A] Approve"
+      },
+      "duration_ms": 0
     }
   },
-  "next_node_id": "approve",
+  "next_node_id": "ship",
   "node_visits": {
     "start": 1,
-    "draft": 1
+    "draft": 1,
+    "approve": 1
   }
 }
