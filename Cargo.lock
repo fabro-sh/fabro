@@ -1457,6 +1457,7 @@ dependencies = [
 name = "fabro-devcontainer"
 version = "0.174.0"
 dependencies = [
+ "fabro-util",
  "insta",
  "reqwest 0.12.28",
  "serde",
@@ -1534,6 +1535,7 @@ dependencies = [
  "fabro-agent",
  "fabro-config",
  "fabro-llm",
+ "fabro-util",
  "mockito",
  "regex",
  "reqwest 0.12.28",

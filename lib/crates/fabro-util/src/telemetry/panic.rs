@@ -163,11 +163,14 @@ mod tests {
 
     #[test]
     fn report_panic_noop_when_telemetry_off() {
-        // Set telemetry off and verify report_panic doesn't panic itself.
-        std::env::set_var("FABRO_TELEMETRY", "off");
-        // We can't easily create a PanicHookInfo, so test the individual pieces:
-        assert_eq!(super::super::telemetry_level(), TelemetryLevel::Off);
-        std::env::remove_var("FABRO_TELEMETRY");
+        use crate::env::TestEnv;
+        use std::collections::HashMap;
+        // Verify telemetry_level_from returns Off without mutating process env.
+        let env = TestEnv(HashMap::from([("FABRO_TELEMETRY".into(), "off".into())]));
+        assert_eq!(
+            super::super::telemetry_level_from(&env),
+            TelemetryLevel::Off
+        );
     }
 
     #[test]

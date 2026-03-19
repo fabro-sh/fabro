@@ -1,8 +1,9 @@
 /// Context for variable substitution.
-pub struct VariableContext {
+pub struct VariableContext<'a> {
     pub local_workspace_folder: String,
     pub local_workspace_folder_basename: String,
     pub container_workspace_folder: String,
+    pub env: &'a dyn fabro_util::env::Env,
 }
 
 /// Replace devcontainer variables in a string value.
@@ -55,9 +56,13 @@ fn resolve_variable(expr: &str, ctx: &VariableContext) -> Option<String> {
             if let Some(colon_pos) = var_part.find(':') {
                 let var_name = &var_part[..colon_pos];
                 let default = &var_part[colon_pos + 1..];
-                Some(std::env::var(var_name).unwrap_or_else(|_| default.to_string()))
+                Some(
+                    ctx.env
+                        .var(var_name)
+                        .unwrap_or_else(|_| default.to_string()),
+                )
             } else {
-                Some(std::env::var(var_part).unwrap_or_default())
+                Some(ctx.env.var(var_part).unwrap_or_default())
             }
         }
         _ => None,
@@ -67,12 +72,17 @@ fn resolve_variable(expr: &str, ctx: &VariableContext) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fabro_util::env::{SystemEnv, TestEnv};
+    use std::collections::HashMap;
 
-    fn test_ctx() -> VariableContext {
+    fn test_ctx() -> VariableContext<'static> {
+        // Tests that don't exercise localEnv don't care about the env impl.
+        // Use SystemEnv which has no lifetime/allocation concerns.
         VariableContext {
             local_workspace_folder: "/home/user/project".to_string(),
             local_workspace_folder_basename: "project".to_string(),
             container_workspace_folder: "/workspaces/project".to_string(),
+            env: &SystemEnv,
         }
     }
 
@@ -124,6 +134,7 @@ mod tests {
             local_workspace_folder: "/home/user/repos/my-app".to_string(),
             local_workspace_folder_basename: "my-app".to_string(),
             container_workspace_folder: "/workspaces/repos/my-app".to_string(),
+            env: &SystemEnv,
         };
         assert_eq!(
             substitute("${containerWorkspaceFolderBasename}", &ctx),
@@ -151,23 +162,34 @@ mod tests {
 
     #[test]
     fn local_env_with_set_variable() {
-        let ctx = test_ctx();
-        std::env::set_var("FABRO_TEST_VAR_SET", "hello");
+        let env = TestEnv(HashMap::from([(
+            "FABRO_TEST_VAR_SET".into(),
+            "hello".into(),
+        )]));
+        let ctx = VariableContext {
+            env: &env,
+            ..test_ctx()
+        };
         assert_eq!(substitute("${localEnv:FABRO_TEST_VAR_SET}", &ctx), "hello");
-        std::env::remove_var("FABRO_TEST_VAR_SET");
     }
 
     #[test]
     fn local_env_unset_returns_empty() {
-        let ctx = test_ctx();
-        std::env::remove_var("FABRO_TEST_VAR_UNSET_123");
+        let env = TestEnv(HashMap::new());
+        let ctx = VariableContext {
+            env: &env,
+            ..test_ctx()
+        };
         assert_eq!(substitute("${localEnv:FABRO_TEST_VAR_UNSET_123}", &ctx), "");
     }
 
     #[test]
     fn local_env_with_default_when_unset() {
-        let ctx = test_ctx();
-        std::env::remove_var("FABRO_TEST_VAR_DEFAULT_456");
+        let env = TestEnv(HashMap::new());
+        let ctx = VariableContext {
+            env: &env,
+            ..test_ctx()
+        };
         assert_eq!(
             substitute("${localEnv:FABRO_TEST_VAR_DEFAULT_456:fallback}", &ctx),
             "fallback"
@@ -176,13 +198,18 @@ mod tests {
 
     #[test]
     fn local_env_with_default_when_set() {
-        let ctx = test_ctx();
-        std::env::set_var("FABRO_TEST_VAR_DEFAULT_SET", "actual");
+        let env = TestEnv(HashMap::from([(
+            "FABRO_TEST_VAR_DEFAULT_SET".into(),
+            "actual".into(),
+        )]));
+        let ctx = VariableContext {
+            env: &env,
+            ..test_ctx()
+        };
         assert_eq!(
             substitute("${localEnv:FABRO_TEST_VAR_DEFAULT_SET:fallback}", &ctx),
             "actual"
         );
-        std::env::remove_var("FABRO_TEST_VAR_DEFAULT_SET");
     }
 
     #[test]

@@ -237,8 +237,14 @@ async fn check_github_app_installation() {
 
     let client = reqwest::Client::new();
 
-    match fabro_github::check_app_installed(&client, &jwt, &owner, &repo, "https://api.github.com")
-        .await
+    match fabro_github::check_app_installed(
+        &client,
+        &jwt,
+        &owner,
+        &repo,
+        fabro_github::GITHUB_API_BASE_URL,
+    )
+    .await
     {
         Ok(true) => {
             let green = console::Style::new().green();
@@ -254,6 +260,42 @@ async fn check_github_app_installation() {
             };
 
             let yellow = console::Style::new().yellow();
+
+            // Best-effort: warn if the app is private and the repo belongs to a different owner.
+            if let Ok(app_info) = fabro_github::get_authenticated_app(
+                &client,
+                &jwt,
+                fabro_github::GITHUB_API_BASE_URL,
+            )
+            .await
+            {
+                let cross_owner = !app_info.owner.login.eq_ignore_ascii_case(&owner);
+                let is_private = cross_owner
+                    && fabro_github::is_app_public(
+                        &client,
+                        &app_info.slug,
+                        fabro_github::GITHUB_API_BASE_URL,
+                    )
+                    .await
+                        == Ok(false);
+
+                if is_private {
+                    eprintln!(
+                        "\n  {} GitHub App \"{}\" is private but this repo belongs to a different owner ({}).",
+                        yellow.apply_to("!"),
+                        app_info.slug,
+                        owner
+                    );
+                    eprintln!(
+                        "    The app must be made public before it can be installed outside {}.",
+                        app_info.owner.login
+                    );
+                    eprintln!(
+                        "    Update visibility at: https://github.com/settings/apps/{}",
+                        app_info.slug
+                    );
+                }
+            }
             eprintln!(
                 "\n  {} GitHub App is not installed for {owner}/{repo}",
                 yellow.apply_to("!")
@@ -275,7 +317,7 @@ async fn check_github_app_installation() {
                     &jwt,
                     &owner,
                     &repo,
-                    "https://api.github.com",
+                    fabro_github::GITHUB_API_BASE_URL,
                 )
                 .await
                 {

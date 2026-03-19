@@ -13,8 +13,7 @@
       "cache_input_cost_per_mtok": 1.50
     },
     "estimated_output_tps": 25,
-    "aliases": ["opus", "claude-opus"],
-    "default": true
+    "aliases": ["opus", "claude-opus"]
   },
   {
     "id": "claude-sonnet-4-5",
@@ -46,7 +45,8 @@
       "cache_input_cost_per_mtok": 0.30
     },
     "estimated_output_tps": 50,
-    "aliases": ["sonnet", "claude-sonnet"]
+    "aliases": ["sonnet", "claude-sonnet"],
+    "default": true
   },
   {
     "id": "claude-haiku-4-5",

@@ -9,6 +9,7 @@ description = "Parse and resolve devcontainer.json into Dockerfiles and lifecycl
 doctest = false
 
 [dependencies]
+fabro-util = { path = "../fabro-util" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = "0.9"

@@ -40,7 +40,11 @@ pub trait HookExecutor: Send + Sync {
 /// Interpolate `$VAR` and `${VAR}` references in `value` using environment
 /// variables, but only when the variable name appears in `allowed_vars`.
 /// Unlisted or missing vars are replaced with the empty string.
-pub fn interpolate_env_vars(value: &str, allowed_vars: &[String]) -> String {
+pub fn interpolate_env_vars(
+    value: &str,
+    allowed_vars: &[String],
+    env: &dyn fabro_util::env::Env,
+) -> String {
     let mut result = String::with_capacity(value.len());
     let mut chars = value.chars().peekable();
 
@@ -66,7 +70,7 @@ pub fn interpolate_env_vars(value: &str, allowed_vars: &[String]) -> String {
             }
 
             if !var_name.is_empty() && allowed_vars.iter().any(|v| v == &var_name) {
-                if let Ok(val) = std::env::var(&var_name) {
+                if let Ok(val) = env.var(&var_name) {
                     result.push_str(&val);
                 }
             }
@@ -403,6 +407,7 @@ impl HookExecutorImpl {
 
     /// Execute an HTTP hook: POST context JSON and parse the response.
     /// Fail-open: non-2xx and connection errors return `Proceed`.
+    #[allow(clippy::too_many_arguments)]
     async fn execute_http(
         client: &reqwest::Client,
         url: &str,
@@ -411,6 +416,7 @@ impl HookExecutorImpl {
         tls: &TlsMode,
         context: &HookContext,
         timeout: std::time::Duration,
+        env: &dyn fabro_util::env::Env,
     ) -> HookDecision {
         // Enforce URL scheme based on TLS mode
         match tls {
@@ -430,7 +436,7 @@ impl HookExecutorImpl {
 
         if let Some(hdrs) = headers {
             for (key, value) in hdrs {
-                let interpolated = interpolate_env_vars(value, allowed_env_vars);
+                let interpolated = interpolate_env_vars(value, allowed_env_vars, env);
                 request = request.header(key, interpolated);
             }
         }
@@ -547,6 +553,7 @@ impl HookExecutor for HookExecutorImpl {
                     tls,
                     context,
                     definition.timeout(),
+                    &fabro_util::env::SystemEnv,
                 )
                 .await
             }
@@ -837,60 +844,69 @@ mod tests {
 
     // --- interpolate_env_vars tests ---
 
+    fn test_env(vars: &[(&str, &str)]) -> fabro_util::env::TestEnv {
+        fabro_util::env::TestEnv(
+            vars.iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        )
+    }
+
     #[test]
     fn interpolate_resolves_allowed_var() {
-        std::env::set_var("FABRO_TEST_KEY_1", "secret123");
+        let env = test_env(&[("FABRO_TEST_KEY_1", "secret123")]);
         let result = interpolate_env_vars(
             "Bearer $FABRO_TEST_KEY_1",
             &["FABRO_TEST_KEY_1".to_string()],
+            &env,
         );
         assert_eq!(result, "Bearer secret123");
-        std::env::remove_var("FABRO_TEST_KEY_1");
     }
 
     #[test]
     fn interpolate_resolves_braced_var() {
-        std::env::set_var("FABRO_TEST_KEY_2", "val");
-        let result =
-            interpolate_env_vars("x${FABRO_TEST_KEY_2}y", &["FABRO_TEST_KEY_2".to_string()]);
+        let env = test_env(&[("FABRO_TEST_KEY_2", "val")]);
+        let result = interpolate_env_vars(
+            "x${FABRO_TEST_KEY_2}y",
+            &["FABRO_TEST_KEY_2".to_string()],
+            &env,
+        );
         assert_eq!(result, "xvaly");
-        std::env::remove_var("FABRO_TEST_KEY_2");
     }
 
     #[test]
     fn interpolate_unlisted_var_becomes_empty() {
-        std::env::set_var("FABRO_TEST_KEY_3", "should_not_appear");
-        let result = interpolate_env_vars("prefix-$FABRO_TEST_KEY_3-suffix", &[]);
+        let env = test_env(&[("FABRO_TEST_KEY_3", "should_not_appear")]);
+        let result = interpolate_env_vars("prefix-$FABRO_TEST_KEY_3-suffix", &[], &env);
         assert_eq!(result, "prefix--suffix");
-        std::env::remove_var("FABRO_TEST_KEY_3");
     }
 
     #[test]
     fn interpolate_missing_var_becomes_empty() {
-        std::env::remove_var("FABRO_TEST_NOEXIST");
+        let env = test_env(&[]);
         let result = interpolate_env_vars(
             "a$FABRO_TEST_NOEXIST-b",
             &["FABRO_TEST_NOEXIST".to_string()],
+            &env,
         );
         assert_eq!(result, "a-b");
     }
 
     #[test]
     fn interpolate_no_vars_passes_through() {
-        assert_eq!(interpolate_env_vars("plain text", &[]), "plain text");
+        let env = test_env(&[]);
+        assert_eq!(interpolate_env_vars("plain text", &[], &env), "plain text");
     }
 
     #[test]
     fn interpolate_mixed_text() {
-        std::env::set_var("FABRO_TEST_A", "hello");
-        std::env::set_var("FABRO_TEST_B", "world");
+        let env = test_env(&[("FABRO_TEST_A", "hello"), ("FABRO_TEST_B", "world")]);
         let result = interpolate_env_vars(
             "$FABRO_TEST_A ${FABRO_TEST_B}!",
             &["FABRO_TEST_A".to_string(), "FABRO_TEST_B".to_string()],
+            &env,
         );
         assert_eq!(result, "hello world!");
-        std::env::remove_var("FABRO_TEST_A");
-        std::env::remove_var("FABRO_TEST_B");
     }
 
     // --- HTTP hook execution tests ---
@@ -915,6 +931,7 @@ mod tests {
             &TlsMode::Off,
             &make_context(),
             std::time::Duration::from_secs(5),
+            &test_env(&[]),
         )
         .await;
 
@@ -946,6 +963,7 @@ mod tests {
             &TlsMode::Off,
             &make_context(),
             std::time::Duration::from_secs(5),
+            &test_env(&[]),
         )
         .await;
 
@@ -972,6 +990,7 @@ mod tests {
             &TlsMode::Off,
             &make_context(),
             std::time::Duration::from_secs(5),
+            &test_env(&[]),
         )
         .await;
 
@@ -990,6 +1009,7 @@ mod tests {
             &TlsMode::Off,
             &make_context(),
             std::time::Duration::from_secs(1),
+            &test_env(&[]),
         )
         .await;
 
@@ -998,7 +1018,7 @@ mod tests {
 
     #[tokio::test]
     async fn http_hook_sends_interpolated_headers() {
-        std::env::set_var("FABRO_TEST_TOKEN", "my-secret");
+        let env = test_env(&[("FABRO_TEST_TOKEN", "my-secret")]);
 
         let mut server = mockito::Server::new_async().await;
         let mock = server
@@ -1023,12 +1043,12 @@ mod tests {
             &TlsMode::Off,
             &make_context(),
             std::time::Duration::from_secs(5),
+            &env,
         )
         .await;
 
         mock.assert_async().await;
         assert_eq!(decision, HookDecision::Proceed);
-        std::env::remove_var("FABRO_TEST_TOKEN");
     }
 
     // --- TLS mode enforcement tests ---
@@ -1044,6 +1064,7 @@ mod tests {
             &TlsMode::Verify,
             &make_context(),
             std::time::Duration::from_secs(5),
+            &test_env(&[]),
         )
         .await;
 
@@ -1061,6 +1082,7 @@ mod tests {
             &TlsMode::NoVerify,
             &make_context(),
             std::time::Duration::from_secs(5),
+            &test_env(&[]),
         )
         .await;
 
@@ -1086,6 +1108,7 @@ mod tests {
             &TlsMode::Off,
             &make_context(),
             std::time::Duration::from_secs(5),
+            &test_env(&[]),
         )
         .await;
 

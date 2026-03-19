@@ -37,6 +37,19 @@ pub struct PullRequestRef {
     pub ref_name: String,
 }
 
+/// Owner information for a GitHub App.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AppOwner {
+    pub login: String,
+}
+
+/// Information about a GitHub App from the authenticated `/app` endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AppInfo {
+    pub slug: String,
+    pub owner: AppOwner,
+}
+
 /// Credentials for authenticating as a GitHub App.
 #[derive(Clone, Debug)]
 pub struct GitHubAppCredentials {
@@ -520,6 +533,70 @@ pub async fn check_app_installed(
             .to_string()),
         status => Err(format!(
             "Unexpected status {status} checking GitHub App installation"
+        )),
+    }
+}
+
+/// Fetch information about the authenticated GitHub App.
+///
+/// Uses the App JWT to call `GET /app` and returns the app's slug and owner.
+pub async fn get_authenticated_app(
+    client: &reqwest::Client,
+    jwt: &str,
+    base_url: &str,
+) -> Result<AppInfo, String> {
+    let url = format!("{base_url}/app");
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {jwt}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "fabro")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch GitHub App info: {e}"))?;
+
+    match resp.status().as_u16() {
+        200 => {}
+        401 => {
+            return Err("GitHub App authentication failed. \
+                 Check that app_id and GITHUB_APP_PRIVATE_KEY are correct."
+                .to_string())
+        }
+        status => {
+            return Err(format!(
+                "Unexpected status {status} fetching GitHub App info"
+            ))
+        }
+    }
+
+    resp.json::<AppInfo>()
+        .await
+        .map_err(|e| format!("Failed to parse GitHub App info: {e}"))
+}
+
+/// Check whether a GitHub App is publicly visible.
+///
+/// Calls `GET /apps/{slug}` **without** authentication. Public apps return 200,
+/// private apps return 404 to unauthenticated requests.
+pub async fn is_app_public(
+    client: &reqwest::Client,
+    slug: &str,
+    base_url: &str,
+) -> Result<bool, String> {
+    let url = format!("{base_url}/apps/{slug}");
+    let resp = client
+        .get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "fabro")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to check GitHub App visibility: {e}"))?;
+
+    match resp.status().as_u16() {
+        200 => Ok(true),
+        404 => Ok(false),
+        status => Err(format!(
+            "Unexpected status {status} checking GitHub App visibility"
         )),
     }
 }
@@ -1716,6 +1793,104 @@ mod tests {
             result.unwrap_err().contains("authentication failed"),
             "expected auth error"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // get_authenticated_app
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn get_authenticated_app_success() {
+        let mut server = mockito::Server::new_async().await;
+
+        server
+            .mock("GET", "/app")
+            .match_header("Authorization", "Bearer test-jwt")
+            .with_status(200)
+            .with_body(r#"{"slug": "my-fabro-app", "owner": {"login": "my-org"}}"#)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let info = get_authenticated_app(&client, "test-jwt", &server.url())
+            .await
+            .unwrap();
+        assert_eq!(info.slug, "my-fabro-app");
+        assert_eq!(info.owner.login, "my-org");
+    }
+
+    #[tokio::test]
+    async fn get_authenticated_app_auth_failure() {
+        let mut server = mockito::Server::new_async().await;
+
+        server
+            .mock("GET", "/app")
+            .with_status(401)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let result = get_authenticated_app(&client, "bad-jwt", &server.url()).await;
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("authentication failed"),
+            "expected auth error"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // is_app_public
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn is_app_public_returns_true_on_200() {
+        let mut server = mockito::Server::new_async().await;
+
+        server
+            .mock("GET", "/apps/my-fabro-app")
+            .with_status(200)
+            .with_body(r#"{"slug": "my-fabro-app"}"#)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let result = is_app_public(&client, "my-fabro-app", &server.url()).await;
+        assert_eq!(result.unwrap(), true);
+    }
+
+    #[tokio::test]
+    async fn is_app_public_returns_false_on_404() {
+        let mut server = mockito::Server::new_async().await;
+
+        server
+            .mock("GET", "/apps/my-private-app")
+            .with_status(404)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let result = is_app_public(&client, "my-private-app", &server.url()).await;
+        assert_eq!(result.unwrap(), false);
+    }
+
+    #[tokio::test]
+    async fn is_app_public_no_auth_header() {
+        let mut server = mockito::Server::new_async().await;
+
+        // Verify the request does NOT include an Authorization header
+        let mock = server
+            .mock("GET", "/apps/my-app")
+            .match_header("Authorization", mockito::Matcher::Missing)
+            .with_status(200)
+            .with_body(r#"{"slug": "my-app"}"#)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let result = is_app_public(&client, "my-app", &server.url()).await;
+        assert_eq!(result.unwrap(), true);
+
+        mock.assert_async().await;
     }
 
     // -----------------------------------------------------------------------

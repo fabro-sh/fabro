@@ -14,7 +14,7 @@ fn summarizer_model_id(provider: Provider) -> ModelId {
         | Provider::Kimi
         | Provider::Zai
         | Provider::Minimax
-        | Provider::Inception => ModelId::new(Provider::OpenAi, "gpt-5-mini"),
+        | Provider::Inception => ModelId::new(Provider::OpenAi, "gpt-5.4-mini"),
         Provider::Gemini => ModelId::new(Provider::Gemini, "gemini-3-flash-preview"),
         Provider::Anthropic => ModelId::new(Provider::Anthropic, "claude-haiku-4-5"),
     }
@@ -126,7 +126,7 @@ macro_rules! provider_tests {
             "claude-haiku-4-5",
             anthropic
         );
-        provider_test!($scenario, Provider::OpenAi, "gpt-5-mini", openai);
+        provider_test!($scenario, Provider::OpenAi, "gpt-5.4-mini", openai);
         provider_test!(
             $scenario,
             Provider::Gemini,
@@ -487,7 +487,7 @@ loop_detection_tests!(
     "claude-haiku-4-5",
     anthropic_loop_detection
 );
-loop_detection_tests!(Provider::OpenAi, "gpt-5-mini", openai_loop_detection);
+loop_detection_tests!(Provider::OpenAi, "gpt-5.4-mini", openai_loop_detection);
 loop_detection_tests!(
     Provider::Gemini,
     "gemini-3-flash-preview",

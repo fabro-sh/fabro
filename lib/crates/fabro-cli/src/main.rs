@@ -4,6 +4,7 @@ mod doctor;
 mod init;
 mod install;
 mod logging;
+mod provider_auth;
 mod skill;
 mod upgrade;
 
@@ -164,6 +165,11 @@ enum Command {
         #[command(subcommand)]
         command: RepoCommand,
     },
+    /// Provider operations
+    Provider {
+        #[command(subcommand)]
+        command: ProviderCommand,
+    },
     /// System maintenance commands
     System {
         #[command(subcommand)]
@@ -242,6 +248,12 @@ enum WorkflowCommand {
     List(commands::workflow::WorkflowListArgs),
     /// Create a new workflow
     Create(commands::workflow::WorkflowCreateArgs),
+}
+
+#[derive(Subcommand)]
+enum ProviderCommand {
+    /// Log in to an LLM provider
+    Login(commands::provider::ProviderLoginArgs),
 }
 
 #[derive(Subcommand)]
@@ -430,7 +442,7 @@ fn send_telemetry_event(
     });
 
     let track = telemetry.build_track(event_name, properties);
-    fabro_util::telemetry::sender::send(track);
+    fabro_util::telemetry::sender::emit(&[track]);
     debug!(
         event = event_name,
         subcommand = command_name,
@@ -510,6 +522,9 @@ async fn main_inner() -> (String, Result<()>) {
         Command::Discord => "discord",
         Command::Docs => "docs",
         Command::Upgrade(_) => "upgrade",
+        Command::Provider { command } => match command {
+            ProviderCommand::Login(_) => "provider login",
+        },
         Command::System { command } => match command {
             SystemCommand::Prune(_) => "system prune",
             SystemCommand::Df(_) => "system df",
@@ -903,6 +918,11 @@ async fn main_inner() -> (String, Result<()>) {
             Command::Upgrade(args) => {
                 upgrade::run_upgrade(args).await?;
             }
+            Command::Provider { command } => match command {
+                ProviderCommand::Login(args) => {
+                    commands::provider::login_command(args).await?;
+                }
+            },
             Command::System { command } => match command {
                 SystemCommand::Prune(args) => {
                     commands::runs::prune_command(&args)?;
@@ -912,7 +932,7 @@ async fn main_inner() -> (String, Result<()>) {
                 }
             },
             Command::SendAnalytics { path } => {
-                let result = fabro_util::telemetry::sender::send_to_segment(&path).await;
+                let result = fabro_util::telemetry::sender::upload(&path).await;
                 let _ = std::fs::remove_file(&path);
                 result?;
             }
@@ -933,4 +953,50 @@ async fn main_inner() -> (String, Result<()>) {
     }
 
     (command_name, result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn parse_provider_login_openai() {
+        let cli = Cli::try_parse_from(["fabro", "provider", "login", "--provider", "openai"])
+            .expect("should parse");
+        match cli.command {
+            Command::Provider {
+                command: ProviderCommand::Login(args),
+            } => {
+                assert_eq!(args.provider, fabro_llm::provider::Provider::OpenAi);
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_provider_login_anthropic() {
+        let cli = Cli::try_parse_from(["fabro", "provider", "login", "--provider", "anthropic"])
+            .expect("should parse");
+        match cli.command {
+            Command::Provider {
+                command: ProviderCommand::Login(args),
+            } => {
+                assert_eq!(args.provider, fabro_llm::provider::Provider::Anthropic);
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_provider_login_missing_provider_flag() {
+        let result = Cli::try_parse_from(["fabro", "provider", "login"]);
+        assert!(result.is_err(), "should fail without --provider");
+    }
+
+    #[test]
+    fn parse_provider_login_bogus_provider() {
+        let result = Cli::try_parse_from(["fabro", "provider", "login", "--provider", "bogus"]);
+        assert!(result.is_err(), "should fail with unknown provider");
+    }
 }

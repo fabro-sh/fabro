@@ -1852,9 +1852,6 @@ async fn daytona_cp_upload_download_round_trip() {
 async fn daytona_computer_use_browser_screenshot() {
     use base64::Engine;
 
-    // Run from a temp dir so detect_repo_info() finds no git repo and skips cloning.
-    let tmp = tempfile::tempdir().unwrap();
-    std::env::set_current_dir(tmp.path()).unwrap();
     dotenvy::dotenv().ok();
     if let Some(home) = dirs::home_dir() {
         dotenvy::from_path(home.join(".fabro/.env")).ok();
@@ -1867,6 +1864,7 @@ async fn daytona_computer_use_browser_screenshot() {
             disk: None,
             dockerfile: None,
         }),
+        skip_clone: true,
         ..DaytonaConfig::default()
     };
     let env = DaytonaSandbox::new(config, None, None, None)
@@ -2013,8 +2011,6 @@ async fn daytona_playwright_mcp_sandbox_transport() {
     use fabro_agent::Sandbox;
 
     // Create sandbox from daytona-medium (has Node.js + Chromium)
-    let tmp = tempfile::tempdir().unwrap();
-    std::env::set_current_dir(tmp.path()).unwrap();
     dotenvy::dotenv().ok();
     if let Some(home) = dirs::home_dir() {
         dotenvy::from_path(home.join(".fabro/.env")).ok();
@@ -2027,6 +2023,7 @@ async fn daytona_playwright_mcp_sandbox_transport() {
             disk: None,
             dockerfile: None,
         }),
+        skip_clone: true,
         ..DaytonaConfig::default()
     };
     let sandbox = DaytonaSandbox::new(config, None, None, None)

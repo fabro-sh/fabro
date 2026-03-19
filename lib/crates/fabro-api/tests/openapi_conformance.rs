@@ -305,6 +305,7 @@ fn fully_populated_server_config() -> ServerConfig {
                         dockerfile: Some(DockerfileSource::Inline("FROM x".into())),
                     }),
                     network: Some(DaytonaNetwork::Block),
+                    skip_clone: false,
                 }),
                 exe: Some(fabro_exe::ExeConfig { image: None }),
                 ssh: None,

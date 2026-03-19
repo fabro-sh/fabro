@@ -387,8 +387,8 @@ pub async fn run_with_args_and_client(
     // Resolve model and build profile
     let model = args.model.unwrap_or_else(|| {
         fabro_llm::catalog::default_model_for_provider(provider.as_str())
-            .map(|m| m.id)
-            .unwrap_or_else(|| provider.as_str().to_string())
+            .unwrap_or_else(fabro_llm::catalog::default_model_from_env)
+            .id
     });
     eprintln!("{}", styles.dim.apply_to(format!("Using model: {model}")));
     let mut profile = build_profile(provider, &model, Some(client.clone()));

@@ -174,10 +174,12 @@ impl DevcontainerResolver {
             .clone()
             .unwrap_or_else(|| format!("/workspaces/{repo_name}"));
 
+        let system_env = fabro_util::env::SystemEnv;
         let preliminary_vars = variables::VariableContext {
             local_workspace_folder: repo_root.to_string_lossy().to_string(),
             local_workspace_folder_basename: repo_name.clone(),
             container_workspace_folder: raw_workspace_folder.clone(),
+            env: &system_env,
         };
         let workspace_folder = variables::substitute(&raw_workspace_folder, &preliminary_vars);
 
@@ -185,6 +187,7 @@ impl DevcontainerResolver {
             local_workspace_folder: repo_root.to_string_lossy().to_string(),
             local_workspace_folder_basename: repo_name.clone(),
             container_workspace_folder: workspace_folder.clone(),
+            env: &system_env,
         };
 
         // Handle compose mode

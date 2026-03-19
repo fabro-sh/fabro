@@ -12,6 +12,9 @@ pub struct DaytonaConfig {
     pub labels: Option<HashMap<String, String>>,
     pub snapshot: Option<DaytonaSnapshotConfig>,
     pub network: Option<DaytonaNetwork>,
+    /// Skip git repo detection and cloning during initialization.
+    #[serde(default)]
+    pub skip_clone: bool,
 }
 
 /// Network access mode for a Daytona sandbox.

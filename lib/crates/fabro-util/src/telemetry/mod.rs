@@ -71,7 +71,11 @@ impl Telemetry {
 }
 
 pub fn telemetry_level() -> TelemetryLevel {
-    match std::env::var("FABRO_TELEMETRY").as_deref() {
+    telemetry_level_from(&crate::env::SystemEnv)
+}
+
+pub fn telemetry_level_from(env: &dyn crate::env::Env) -> TelemetryLevel {
+    match env.var("FABRO_TELEMETRY").as_deref() {
         Ok("off") => TelemetryLevel::Off,
         Ok("errors") => TelemetryLevel::Errors,
         Ok("all") => TelemetryLevel::All,
@@ -88,28 +92,27 @@ pub fn telemetry_level() -> TelemetryLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::env::TestEnv;
     use serde_json::json;
+    use std::collections::HashMap;
 
     #[test]
     fn telemetry_level_defaults_to_off_in_debug() {
         // In test builds (debug_assertions=true), default is Off
-        std::env::remove_var("FABRO_TELEMETRY");
-        assert_eq!(telemetry_level(), TelemetryLevel::Off);
+        let env = TestEnv(HashMap::new());
+        assert_eq!(telemetry_level_from(&env), TelemetryLevel::Off);
     }
 
     #[test]
     fn telemetry_level_parses_env_var() {
-        std::env::set_var("FABRO_TELEMETRY", "all");
-        assert_eq!(telemetry_level(), TelemetryLevel::All);
+        let env = TestEnv(HashMap::from([("FABRO_TELEMETRY".into(), "all".into())]));
+        assert_eq!(telemetry_level_from(&env), TelemetryLevel::All);
 
-        std::env::set_var("FABRO_TELEMETRY", "errors");
-        assert_eq!(telemetry_level(), TelemetryLevel::Errors);
+        let env = TestEnv(HashMap::from([("FABRO_TELEMETRY".into(), "errors".into())]));
+        assert_eq!(telemetry_level_from(&env), TelemetryLevel::Errors);
 
-        std::env::set_var("FABRO_TELEMETRY", "off");
-        assert_eq!(telemetry_level(), TelemetryLevel::Off);
-
-        // Clean up
-        std::env::remove_var("FABRO_TELEMETRY");
+        let env = TestEnv(HashMap::from([("FABRO_TELEMETRY".into(), "off".into())]));
+        assert_eq!(telemetry_level_from(&env), TelemetryLevel::Off);
     }
 
     #[test]

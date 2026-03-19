@@ -855,16 +855,9 @@ async fn probe_daytona() -> Option<Result<(), String>> {
     )
 }
 
-pub(crate) fn cheapest_model(provider: Provider) -> String {
-    let models = fabro_llm::catalog::list_models(Some(provider.as_str()));
-    models
-        .iter()
-        .min_by(|a, b| {
-            let cost_a = a.costs.input_cost_per_mtok.unwrap_or(f64::MAX);
-            let cost_b = b.costs.input_cost_per_mtok.unwrap_or(f64::MAX);
-            cost_a.total_cmp(&cost_b)
-        })
-        .map(|m| m.id.clone())
+pub(crate) fn probe_model(provider: Provider) -> String {
+    fabro_llm::catalog::probe_model_for_provider(provider.as_str())
+        .map(|m| m.id)
         .unwrap_or_else(|| format!("unknown-{}", provider.as_str()))
 }
 
@@ -873,7 +866,7 @@ async fn probe_llm_provider(
     provider: Provider,
 ) -> (Provider, Result<(), String>) {
     let request = fabro_llm::types::Request {
-        model: cheapest_model(provider),
+        model: probe_model(provider),
         messages: vec![fabro_llm::types::Message::user("hi")],
         provider: Some(provider.as_str().to_string()),
         tools: None,
