@@ -1,0 +1,61 @@
+{
+  "timestamp": "2026-03-19T13:28:28.510918Z",
+  "current_node": "draft",
+  "completed_nodes": [
+    "start",
+    "draft"
+  ],
+  "node_retries": {
+    "start": 1,
+    "draft": 1
+  },
+  "context_values": {
+    "graph.rankdir": "LR",
+    "outcome": "success",
+    "internal.fidelity": "compact",
+    "thread.start.current_node": "draft",
+    "current.preamble": "Goal: Test human gate with auto-approve\n",
+    "internal.thread_id": "start",
+    "graph.goal": "Test human gate with auto-approve",
+    "last_stage": "draft",
+    "internal.node_visit_count": 1,
+    "internal.retry_count.draft": 1,
+    "failure_class": "",
+    "current_node": "draft",
+    "internal.retry_count.start": 1,
+    "response.draft": "# Human Gate Auto-Approve Test\n\nHere's a greeting for testing the human gate feature:\n\n```\n👋 Welcome to the Human Gate Auto-Approve Test!\n\nThis workflow demonstrates the human-in-the-loop stage with automatic approval.\nWhen the workflow encounters a human gate, it will pause and wait for approval,\nthen automatically resume and continue execution.\n\nLet's see it in action! 🚀\n```\n\nTo test this, you could:\n\n1. Create a workflow with a human gate stage\n2. Run it with `fabro run <workflow-name>`\n3. The workflow will pause at the human gate\n4. Approve it (via API, CLI, or web UI)\n5. Verify it resumes and completes successfully\n\nWould you like me to help you set up a test workflow or add test cases for this functionality?",
+    "internal.run_id": "01KM34GS97DJ1W5DWYQ2XRRQMY",
+    "failure_signature": "",
+    "last_response": "# Human Gate Auto-Approve Test\n\nHere's a greeting for testing the human gate feature:\n\n```\n👋 Welcome to the Human Gate Auto-Approve Test!\n\nThis workflow demonstrates the human-in-the-loop stage wit"
+  },
+  "logs": [],
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
+    "draft": {
+      "status": "success",
+      "context_updates": {
+        "response.draft": "# Human Gate Auto-Approve Test\n\nHere's a greeting for testing the human gate feature:\n\n```\n👋 Welcome to the Human Gate Auto-Approve Test!\n\nThis workflow demonstrates the human-in-the-loop stage with automatic approval.\nWhen the workflow encounters a human gate, it will pause and wait for approval,\nthen automatically resume and continue execution.\n\nLet's see it in action! 🚀\n```\n\nTo test this, you could:\n\n1. Create a workflow with a human gate stage\n2. Run it with `fabro run <workflow-name>`\n3. The workflow will pause at the human gate\n4. Approve it (via API, CLI, or web UI)\n5. Verify it resumes and completes successfully\n\nWould you like me to help you set up a test workflow or add test cases for this functionality?",
+        "last_stage": "draft",
+        "last_response": "# Human Gate Auto-Approve Test\n\nHere's a greeting for testing the human gate feature:\n\n```\n👋 Welcome to the Human Gate Auto-Approve Test!\n\nThis workflow demonstrates the human-in-the-loop stage wit"
+      },
+      "notes": "Stage completed: draft",
+      "usage": {
+        "model": "claude-haiku-4-5",
+        "input_tokens": 2022,
+        "output_tokens": 190,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost": 0.0023776
+      },
+      "duration_ms": 2909
+    }
+  },
+  "next_node_id": "approve",
+  "node_visits": {
+    "start": 1,
+    "draft": 1
+  }
+}
