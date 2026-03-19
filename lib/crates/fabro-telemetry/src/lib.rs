@@ -124,8 +124,7 @@ pub fn shutdown() {
     }
 }
 
-/// Check whether an event should be tracked given a telemetry level.
-pub fn should_track_for_level(level: TelemetryLevel, is_error: bool) -> bool {
+fn should_track_for_level(level: TelemetryLevel, is_error: bool) -> bool {
     match level {
         TelemetryLevel::Off => false,
         TelemetryLevel::Errors => is_error,

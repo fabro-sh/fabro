@@ -386,23 +386,26 @@ async fn main() {
     let duration_ms = start.elapsed().as_millis() as u64;
 
     let is_error = result.is_err();
+    let command = fabro_telemetry::sanitize::sanitize_command(&raw_args, &command_name);
+    let repository = fabro_telemetry::git::repository_identifier();
+    let ci = std::env::var("CI").is_ok();
     if is_error {
         fabro_telemetry::track!("CLI Errored", {
             "subcommand": command_name,
-            "command": fabro_telemetry::sanitize::sanitize_command(&raw_args, &command_name),
+            "command": command,
             "durationMs": duration_ms,
-            "repository": fabro_telemetry::git::repository_identifier(),
-            "ci": std::env::var("CI").is_ok(),
+            "repository": repository,
+            "ci": ci,
             "success": false,
             "exitCode": 1,
         }, error);
     } else {
         fabro_telemetry::track!("CLI Executed", {
             "subcommand": command_name,
-            "command": fabro_telemetry::sanitize::sanitize_command(&raw_args, &command_name),
+            "command": command,
             "durationMs": duration_ms,
-            "repository": fabro_telemetry::git::repository_identifier(),
-            "ci": std::env::var("CI").is_ok(),
+            "repository": repository,
+            "ci": ci,
             "success": true,
             "exitCode": 0,
         });

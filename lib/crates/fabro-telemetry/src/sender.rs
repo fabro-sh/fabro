@@ -79,12 +79,12 @@ fn build_segment_batch(content: &str) -> Option<serde_json::Value> {
 /// on the background telemetry thread.
 /// No-ops if `SEGMENT_WRITE_KEY` was not set at compile time or `tracks` is empty.
 pub fn upload_blocking(tracks: &[Track]) -> anyhow::Result<()> {
-    let write_key = SEGMENT_WRITE_KEY
-        .ok_or_else(|| anyhow::anyhow!("SEGMENT_WRITE_KEY not set at compile time"))?;
-
     if tracks.is_empty() {
         return Ok(());
     }
+
+    let write_key = SEGMENT_WRITE_KEY
+        .ok_or_else(|| anyhow::anyhow!("SEGMENT_WRITE_KEY not set at compile time"))?;
 
     let lines: Vec<String> = tracks
         .iter()
@@ -268,9 +268,9 @@ mod tests {
 
     #[test]
     fn upload_blocking_noops_with_empty_tracks() {
-        // With no write key, but empty tracks should still error on write key check
+        // Empty tracks returns Ok without checking credentials
         let result = upload_blocking(&[]);
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 
     // -- Step 4: upload() tests --
