@@ -8,6 +8,7 @@ pub mod logs;
 pub mod parse;
 pub mod pr;
 pub mod preview;
+pub mod provider;
 pub mod rewind;
 pub mod run;
 mod run_progress;

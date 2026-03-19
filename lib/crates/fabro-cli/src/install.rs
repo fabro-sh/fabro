@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 use axum::extract::Query;
 use axum::response::Html;
 use axum::routing::get;
-use dialoguer::{Confirm, MultiSelect, Password, Select};
+use dialoguer::{MultiSelect, Select};
 use fabro_llm::provider::Provider;
 use fabro_util::terminal::Styles;
 use rand::Rng;
@@ -16,6 +16,10 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
 use crate::doctor;
+use crate::provider_auth::{
+    openai_oauth_env_pairs, prompt_and_validate_key, prompt_confirm, provider_display_name,
+    write_env_file,
+};
 
 // ---------------------------------------------------------------------------
 // OpenSSL helpers (server mode only)
@@ -200,37 +204,7 @@ ca = "~/.fabro/certs/ca.crt"
 }
 
 // ---------------------------------------------------------------------------
-// Provider key URLs
-// ---------------------------------------------------------------------------
-
-fn provider_key_url(provider: Provider) -> &'static str {
-    match provider {
-        Provider::Anthropic => "https://console.anthropic.com/settings/keys",
-        Provider::OpenAi => "https://platform.openai.com/api-keys",
-        Provider::Gemini => "https://aistudio.google.com/apikey",
-        Provider::Kimi => "https://platform.moonshot.cn/console/api-keys",
-        Provider::Zai => "https://open.bigmodel.cn/usercenter/apikeys",
-        Provider::Minimax => {
-            "https://platform.minimaxi.com/user-center/basic-information/interface-key"
-        }
-        Provider::Inception => "https://console.inceptionlabs.ai/api-keys",
-    }
-}
-
-fn provider_display_name(provider: Provider) -> &'static str {
-    match provider {
-        Provider::Anthropic => "Anthropic",
-        Provider::OpenAi => "OpenAI",
-        Provider::Gemini => "Gemini",
-        Provider::Kimi => "Kimi",
-        Provider::Zai => "Zai",
-        Provider::Minimax => "Minimax",
-        Provider::Inception => "Inception",
-    }
-}
-
-// ---------------------------------------------------------------------------
-// OpenAI OAuth helpers
+// Binary detection
 // ---------------------------------------------------------------------------
 
 /// Check if a binary exists on PATH using the doctor.rs pattern.
@@ -244,50 +218,14 @@ fn detect_binary_on_path(binary: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Convert OAuth tokens to env var pairs for ~/.fabro/.env.
-fn openai_oauth_env_pairs(
-    access_token: &str,
-    refresh_token: &str,
-    account_id: Option<&str>,
-) -> Vec<(String, String)> {
-    let mut pairs = vec![
-        ("OPENAI_API_KEY".to_string(), access_token.to_string()),
-        (
-            "OPENAI_REFRESH_TOKEN".to_string(),
-            refresh_token.to_string(),
-        ),
-    ];
-    if let Some(id) = account_id {
-        pairs.push(("CHATGPT_ACCOUNT_ID".to_string(), id.to_string()));
-    }
-    pairs
-}
-
 // ---------------------------------------------------------------------------
 // Interactive setup
 // ---------------------------------------------------------------------------
-
-fn prompt_confirm(prompt: &str, default: bool) -> Result<bool> {
-    Ok(
-        Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            .with_prompt(prompt)
-            .default(default)
-            .interact_on(&dialoguer::console::Term::stderr())?,
-    )
-}
 
 #[cfg(feature = "server")]
 fn prompt_input(prompt: &str) -> Result<String> {
     Ok(
         dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            .with_prompt(prompt)
-            .interact_on(&dialoguer::console::Term::stderr())?,
-    )
-}
-
-fn prompt_password(prompt: &str) -> Result<String> {
-    Ok(
-        Password::with_theme(&dialoguer::theme::ColorfulTheme::default())
             .with_prompt(prompt)
             .interact_on(&dialoguer::console::Term::stderr())?,
     )
@@ -532,22 +470,6 @@ async fn setup_github_app(arc_dir: &Path, s: &Styles) -> Result<Vec<(String, Str
     }
 
     Ok(env_pairs)
-}
-
-fn write_env_file(arc_dir: &Path, env_pairs: &[(String, String)], s: &Styles) -> Result<()> {
-    let env_path = arc_dir.join(".env");
-    let existing = std::fs::read_to_string(&env_path).unwrap_or_default();
-    let refs: Vec<(&str, &str)> = env_pairs
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
-    let merged = fabro_config::dotenv::merge_env(&existing, &refs);
-    fabro_config::dotenv::write_env_file(&env_path, &merged)?;
-    eprintln!(
-        "  {}",
-        s.dim.apply_to(format!("Wrote {}", env_path.display()))
-    );
-    Ok(())
 }
 
 pub async fn run_install() -> Result<()> {
@@ -894,67 +816,6 @@ mod hex {
 // Tests
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// API key validation
-// ---------------------------------------------------------------------------
-
-async fn validate_api_key(provider: Provider, api_key: &str) -> Result<(), String> {
-    // Temporarily set the env var so Client::from_env() picks it up
-    let env_var = provider.api_key_env_vars()[0];
-    std::env::set_var(env_var, api_key);
-
-    let client = fabro_llm::client::Client::from_env()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let params = fabro_llm::generate::GenerateParams::new(doctor::cheapest_model(provider))
-        .provider(provider.as_str())
-        .prompt("Say OK")
-        .max_tokens(16)
-        .client(std::sync::Arc::new(client));
-
-    tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        fabro_llm::generate::generate(params),
-    )
-    .await
-    .map_err(|_| "timeout (30s)".to_string())?
-    .map(|_| ())
-    .map_err(|e| e.to_string())
-}
-
-async fn prompt_and_validate_key(provider: Provider, s: &Styles) -> Result<(String, String)> {
-    let env_var = provider.api_key_env_vars()[0];
-    let url = provider_key_url(provider);
-    eprintln!(
-        "  {}",
-        s.dim.apply_to(format!("Get your API key at: {url}"))
-    );
-
-    loop {
-        let prompt = env_var.to_string();
-        let key: String = tokio::task::spawn_blocking(move || prompt_password(&prompt)).await??;
-
-        eprintln!("  {}", s.dim.apply_to("Validating API key..."));
-        match validate_api_key(provider, &key).await {
-            Ok(()) => {
-                eprintln!("  {} API key is valid", s.green.apply_to("✔"));
-                return Ok((env_var.to_string(), key));
-            }
-            Err(e) => {
-                eprintln!("  [error] API key validation failed: {e}");
-                let retry = tokio::task::spawn_blocking(|| {
-                    prompt_confirm("Try again with a different key?", true)
-                })
-                .await??;
-                if !retry {
-                    return Ok((env_var.to_string(), key));
-                }
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -969,33 +830,6 @@ mod tests {
     #[test]
     fn detect_binary_returns_false_for_nonexistent() {
         assert!(!detect_binary_on_path("arc_nonexistent_xyz"));
-    }
-
-    // -- OpenAI OAuth env pairs --
-
-    #[test]
-    fn openai_oauth_env_pairs_sets_api_key() {
-        let pairs = openai_oauth_env_pairs("tok", "ref", None);
-        assert!(pairs.contains(&("OPENAI_API_KEY".to_string(), "tok".to_string())));
-    }
-
-    #[test]
-    fn openai_oauth_env_pairs_sets_refresh_token() {
-        let pairs = openai_oauth_env_pairs("tok", "ref", None);
-        assert!(pairs.contains(&("OPENAI_REFRESH_TOKEN".to_string(), "ref".to_string())));
-    }
-
-    #[test]
-    fn openai_oauth_env_pairs_count() {
-        let pairs = openai_oauth_env_pairs("tok", "ref", None);
-        assert_eq!(pairs.len(), 2);
-    }
-
-    #[test]
-    fn openai_oauth_env_pairs_with_account_id() {
-        let pairs = openai_oauth_env_pairs("tok", "ref", Some("acct_123"));
-        assert!(pairs.contains(&("CHATGPT_ACCOUNT_ID".to_string(), "acct_123".to_string())));
-        assert_eq!(pairs.len(), 3);
     }
 
     // -- Session secret (server only) --
@@ -1150,24 +984,5 @@ mod tests {
         assert_eq!(tls.cert, PathBuf::from("~/.fabro/certs/server.crt"));
         assert_eq!(tls.key, PathBuf::from("~/.fabro/certs/server.key"));
         assert_eq!(tls.ca, PathBuf::from("~/.fabro/certs/ca.crt"));
-    }
-
-    // -- Provider key URLs --
-
-    #[test]
-    fn every_provider_has_key_url() {
-        for provider in Provider::ALL {
-            let url = provider_key_url(*provider);
-            assert!(!url.is_empty(), "{provider:?} has empty URL");
-            assert!(url.starts_with("https://"), "{provider:?} URL: {url}");
-        }
-    }
-
-    // -- API key validation --
-
-    #[tokio::test]
-    async fn validate_api_key_rejects_invalid_key() {
-        let result = validate_api_key(Provider::Anthropic, "sk-invalid-key-12345").await;
-        assert!(result.is_err(), "expected invalid key to be rejected");
     }
 }
