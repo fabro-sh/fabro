@@ -23,9 +23,13 @@ pub fn get_model_info(model_id: &str) -> Option<ModelInfo> {
 /// Returns `None` if the provider has no models or none marked as default.
 #[must_use]
 pub fn default_model_for_provider(provider: &str) -> Option<ModelInfo> {
+    // Normalize aliases like "open_ai" → "openai" through Provider::from_str.
+    let canonical = provider
+        .parse::<crate::provider::Provider>()
+        .map_or(provider, |p| p.as_str());
     BUILT_IN_MODELS
         .iter()
-        .find(|m| m.provider == provider && m.default)
+        .find(|m| m.provider == canonical && m.default)
         .cloned()
 }
 
@@ -183,6 +187,10 @@ mod tests {
 
         let m = default_model_for_provider("gemini").unwrap();
         assert_eq!(m.id, "gemini-3.1-pro-preview");
+
+        // Provider aliases are normalized (e.g. "open_ai" → "openai")
+        let m = default_model_for_provider("open_ai").unwrap();
+        assert_eq!(m.id, "gpt-5.4");
 
         assert!(default_model_for_provider("nonexistent").is_none());
     }
