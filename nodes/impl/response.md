@@ -1,0 +1,1 @@
+Perfect! I've created the file `/tmp/scenario_full/result.txt` with exactly the word "PASS" on the first line. The task has been completed successfully.
