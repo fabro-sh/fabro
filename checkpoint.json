@@ -1,15 +1,17 @@
 {
-  "timestamp": "2026-03-19T15:55:41.355929Z",
-  "current_node": "preflight_compile",
+  "timestamp": "2026-03-19T15:56:03.680717Z",
+  "current_node": "preflight_lint",
   "completed_nodes": [
     "start",
     "toolchain",
-    "preflight_compile"
+    "preflight_compile",
+    "preflight_lint"
   ],
   "node_retries": {
+    "preflight_compile": 1,
     "start": 1,
     "toolchain": 1,
-    "preflight_compile": 1
+    "preflight_lint": 1
   },
   "context_values": {
     "graph.model_stylesheet": "\n            * { backend: api; model: claude-opus-4-6;}\n        ",
@@ -17,9 +19,10 @@
     "command.stderr": "",
     "internal.retry_count.toolchain": 1,
     "internal.retry_count.start": 1,
+    "internal.retry_count.preflight_lint": 1,
     "internal.retry_count.preflight_compile": 1,
-    "current_node": "preflight_compile",
-    "current.preamble": "Goal: # Fix: Add OAuth callback URLs to CLI-generated GitHub App manifest\n\n## Context\n\nGitHub issue #97: `fabro install` creates a GitHub App that passes `fabro doctor` but cannot be used to log into `fabro-web`. The CLI manifest (`install.rs:340-354`) omits `callback_urls` and `setup_url`, so GitHub rejects the OAuth login flow with \"This GitHub App must be configured with a callback URL.\"\n\nThe web setup flow (`setup.tsx:15-31`) already includes these fields correctly.\n\n## Changes\n\n### 1. Add `--web-url` flag to the `Install` command\n\n**File:** `lib/crates/fabro-cli/src/main.rs`\n\nConvert the `Install` variant from a unit variant (line 121) to a struct variant with a `--web-url` option:\n\n```rust\n/// Set up the Fabro environment (LLMs, certs, GitHub)\nInstall {\n    /// Base URL for the web UI (used for OAuth callback URLs)\n    #[arg(long, default_value = \"http://localhost:5173\")]\n    web_url: String,\n},\n```\n\nUpdate the match arm (line 833) to pass `web_url` through:\n\n```rust\nCommand::Install { web_url } => {\n    install::run_install(&web_url).await?;\n}\n```\n\nUpdate the command-name match (line ~481) if it pattern-matches on `Install`.\n\n### 2. Accept `web_url` in `run_install` and pass to `setup_github_app`\n\n**File:** `lib/crates/fabro-cli/src/install.rs`\n\n- Change `pub async fn run_install()` (line 553) signature to `pub async fn run_install(web_url: &str)`\n- Change `async fn setup_github_app(arc_dir: &Path, s: &Styles)` (line 325) to also accept `web_url: &str`\n- Pass `web_url` through at the call site inside `run_install`\n\n### 3. Add `callback_urls` and `setup_url` to the manifest\n\n**File:** `lib/crates/fabro-cli/src/install.rs` (lines 340-354)\n\nUse the `web_url` parameter to construct the OAuth URLs:\n\n```rust\nlet manifest = serde_json::json!({\n    \"name\": app_name,\n    \"url\": \"https://github.com/apps/arc\",\n    \"redirect_url\": format!(\"http://127.0.0.1:{port}/callback\"),\n    \"callback_urls\": [format!(\"{web_url}/auth/callback\")],\n    \"setup_url\": format!(\"{web_url}/setup/callback\"),\n    \"public\": false,\n    \"default_permissions\": {\n        \"contents\": \"write\",\n        \"metadata\": \"read\",\n        \"pull_requests\": \"write\",\n        \"checks\": \"write\",\n        \"issues\": \"write\",\n        \"emails\": \"read\"\n    },\n    \"default_events\": []\n});\n```\n\n### 4. Add unit test for manifest callback fields\n\n**File:** `lib/crates/fabro-cli/src/install.rs` (test module at bottom of file)\n\nExtract a `build_github_app_manifest(port: u16, web_url: &str) -> serde_json::Value` helper from `setup_github_app` and add a test that asserts:\n- `callback_urls` contains `[\"{web_url}/auth/callback\"]`\n- `setup_url` equals `\"{web_url}/setup/callback\"`\n\n## Verification\n\n1. `cargo build -p fabro-cli` — compiles without errors\n2. `cargo test -p fabro-cli` — all tests pass including new manifest test\n3. `cargo clippy --workspace -- -D warnings` — no lint warnings\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n",
+    "current_node": "preflight_lint",
+    "current.preamble": "Goal: # Fix: Add OAuth callback URLs to CLI-generated GitHub App manifest\n\n## Context\n\nGitHub issue #97: `fabro install` creates a GitHub App that passes `fabro doctor` but cannot be used to log into `fabro-web`. The CLI manifest (`install.rs:340-354`) omits `callback_urls` and `setup_url`, so GitHub rejects the OAuth login flow with \"This GitHub App must be configured with a callback URL.\"\n\nThe web setup flow (`setup.tsx:15-31`) already includes these fields correctly.\n\n## Changes\n\n### 1. Add `--web-url` flag to the `Install` command\n\n**File:** `lib/crates/fabro-cli/src/main.rs`\n\nConvert the `Install` variant from a unit variant (line 121) to a struct variant with a `--web-url` option:\n\n```rust\n/// Set up the Fabro environment (LLMs, certs, GitHub)\nInstall {\n    /// Base URL for the web UI (used for OAuth callback URLs)\n    #[arg(long, default_value = \"http://localhost:5173\")]\n    web_url: String,\n},\n```\n\nUpdate the match arm (line 833) to pass `web_url` through:\n\n```rust\nCommand::Install { web_url } => {\n    install::run_install(&web_url).await?;\n}\n```\n\nUpdate the command-name match (line ~481) if it pattern-matches on `Install`.\n\n### 2. Accept `web_url` in `run_install` and pass to `setup_github_app`\n\n**File:** `lib/crates/fabro-cli/src/install.rs`\n\n- Change `pub async fn run_install()` (line 553) signature to `pub async fn run_install(web_url: &str)`\n- Change `async fn setup_github_app(arc_dir: &Path, s: &Styles)` (line 325) to also accept `web_url: &str`\n- Pass `web_url` through at the call site inside `run_install`\n\n### 3. Add `callback_urls` and `setup_url` to the manifest\n\n**File:** `lib/crates/fabro-cli/src/install.rs` (lines 340-354)\n\nUse the `web_url` parameter to construct the OAuth URLs:\n\n```rust\nlet manifest = serde_json::json!({\n    \"name\": app_name,\n    \"url\": \"https://github.com/apps/arc\",\n    \"redirect_url\": format!(\"http://127.0.0.1:{port}/callback\"),\n    \"callback_urls\": [format!(\"{web_url}/auth/callback\")],\n    \"setup_url\": format!(\"{web_url}/setup/callback\"),\n    \"public\": false,\n    \"default_permissions\": {\n        \"contents\": \"write\",\n        \"metadata\": \"read\",\n        \"pull_requests\": \"write\",\n        \"checks\": \"write\",\n        \"issues\": \"write\",\n        \"emails\": \"read\"\n    },\n    \"default_events\": []\n});\n```\n\n### 4. Add unit test for manifest callback fields\n\n**File:** `lib/crates/fabro-cli/src/install.rs` (test module at bottom of file)\n\nExtract a `build_github_app_manifest(port: u16, web_url: &str) -> serde_json::Value` helper from `setup_github_app` and add a test that asserts:\n- `callback_urls` contains `[\"{web_url}/auth/callback\"]`\n- `setup_url` equals `\"{web_url}/setup/callback\"`\n\n## Verification\n\n1. `cargo build -p fabro-cli` — compiles without errors\n2. `cargo test -p fabro-cli` — all tests pass including new manifest test\n3. `cargo clippy --workspace -- -D warnings` — no lint warnings\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n- **preflight_compile**: success\n  - Script: `cargo check -q --workspace 2>&1`\n  - Stdout: (empty)\n  - Stderr: (empty)\n",
     "failure_signature": "",
     "graph.goal": "# Fix: Add OAuth callback URLs to CLI-generated GitHub App manifest\n\n## Context\n\nGitHub issue #97: `fabro install` creates a GitHub App that passes `fabro doctor` but cannot be used to log into `fabro-web`. The CLI manifest (`install.rs:340-354`) omits `callback_urls` and `setup_url`, so GitHub rejects the OAuth login flow with \"This GitHub App must be configured with a callback URL.\"\n\nThe web setup flow (`setup.tsx:15-31`) already includes these fields correctly.\n\n## Changes\n\n### 1. Add `--web-url` flag to the `Install` command\n\n**File:** `lib/crates/fabro-cli/src/main.rs`\n\nConvert the `Install` variant from a unit variant (line 121) to a struct variant with a `--web-url` option:\n\n```rust\n/// Set up the Fabro environment (LLMs, certs, GitHub)\nInstall {\n    /// Base URL for the web UI (used for OAuth callback URLs)\n    #[arg(long, default_value = \"http://localhost:5173\")]\n    web_url: String,\n},\n```\n\nUpdate the match arm (line 833) to pass `web_url` through:\n\n```rust\nCommand::Install { web_url } => {\n    install::run_install(&web_url).await?;\n}\n```\n\nUpdate the command-name match (line ~481) if it pattern-matches on `Install`.\n\n### 2. Accept `web_url` in `run_install` and pass to `setup_github_app`\n\n**File:** `lib/crates/fabro-cli/src/install.rs`\n\n- Change `pub async fn run_install()` (line 553) signature to `pub async fn run_install(web_url: &str)`\n- Change `async fn setup_github_app(arc_dir: &Path, s: &Styles)` (line 325) to also accept `web_url: &str`\n- Pass `web_url` through at the call site inside `run_install`\n\n### 3. Add `callback_urls` and `setup_url` to the manifest\n\n**File:** `lib/crates/fabro-cli/src/install.rs` (lines 340-354)\n\nUse the `web_url` parameter to construct the OAuth URLs:\n\n```rust\nlet manifest = serde_json::json!({\n    \"name\": app_name,\n    \"url\": \"https://github.com/apps/arc\",\n    \"redirect_url\": format!(\"http://127.0.0.1:{port}/callback\"),\n    \"callback_urls\": [format!(\"{web_url}/auth/callback\")],\n    \"setup_url\": format!(\"{web_url}/setup/callback\"),\n    \"public\": false,\n    \"default_permissions\": {\n        \"contents\": \"write\",\n        \"metadata\": \"read\",\n        \"pull_requests\": \"write\",\n        \"checks\": \"write\",\n        \"issues\": \"write\",\n        \"emails\": \"read\"\n    },\n    \"default_events\": []\n});\n```\n\n### 4. Add unit test for manifest callback fields\n\n**File:** `lib/crates/fabro-cli/src/install.rs` (test module at bottom of file)\n\nExtract a `build_github_app_manifest(port: u16, web_url: &str) -> serde_json::Value` helper from `setup_github_app` and add a test that asserts:\n- `callback_urls` contains `[\"{web_url}/auth/callback\"]`\n- `setup_url` equals `\"{web_url}/setup/callback\"`\n\n## Verification\n\n1. `cargo build -p fabro-cli` — compiles without errors\n2. `cargo test -p fabro-cli` — all tests pass including new manifest test\n3. `cargo clippy --workspace -- -D warnings` — no lint warnings\n",
     "internal.run_id": "01KM3CVZ1NCEER5MRVNTPZYJ6D",
@@ -30,13 +33,23 @@
     "outcome": "success",
     "internal.fidelity": "compact",
     "thread.toolchain.current_node": "preflight_compile",
-    "internal.thread_id": "toolchain"
+    "thread.preflight_compile.current_node": "preflight_lint",
+    "internal.thread_id": "preflight_compile"
   },
   "logs": [],
   "node_outcomes": {
     "start": {
       "status": "success",
       "duration_ms": 0
+    },
+    "preflight_lint": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": ""
+      },
+      "notes": "Script completed: cargo clippy -q --workspace -- -D warnings 2>&1",
+      "duration_ms": 14022
     },
     "toolchain": {
       "status": "success",
@@ -57,10 +70,11 @@
       "duration_ms": 71776
     }
   },
-  "next_node_id": "preflight_lint",
+  "next_node_id": "implement",
   "node_visits": {
-    "preflight_compile": 1,
     "start": 1,
-    "toolchain": 1
+    "preflight_compile": 1,
+    "toolchain": 1,
+    "preflight_lint": 1
   }
 }
