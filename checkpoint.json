@@ -1,23 +1,28 @@
 {
-  "timestamp": "2026-03-19T12:59:58.802327Z",
-  "current_node": "approve",
+  "timestamp": "2026-03-19T13:00:01.231764Z",
+  "current_node": "ship",
   "completed_nodes": [
     "start",
     "draft",
-    "approve"
+    "approve",
+    "ship"
   ],
   "node_retries": {
+    "draft": 1,
     "start": 1,
-    "approve": 1,
-    "draft": 1
+    "ship": 1,
+    "approve": 1
   },
   "context_values": {
     "failure_class": "",
     "internal.retry_count.approve": 1,
     "internal.fidelity": "compact",
     "outcome": "success",
+    "thread.approve.current_node": "ship",
+    "internal.retry_count.ship": 1,
     "graph.rankdir": "LR",
-    "internal.thread_id": "draft",
+    "command.stderr": "",
+    "internal.thread_id": "approve",
     "last_stage": "draft",
     "last_response": "# Greeting\n\nHello! 👋\n\nI'm here to help you test the human gate with auto-approve functionality. This looks like it will involve working with Fabro's workflow orchestration system, likely testing th",
     "preferred_label": "[A] Approve",
@@ -29,9 +34,10 @@
     "thread.draft.current_node": "approve",
     "graph.goal": "Test human gate with auto-approve",
     "internal.node_visit_count": 1,
-    "current_node": "approve",
+    "command.output": "shipped\n",
+    "current_node": "ship",
     "internal.run_id": "01KM32WGAZ1XBY4T2YFCKJKYPG",
-    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 119 out\n",
+    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 119 out\n- **approve**: success\n\n## Context\n- human.gate.label: [A] Approve\n- human.gate.selected: A\n",
     "internal.retry_count.start": 1,
     "human.gate.label": "[A] Approve"
   },
@@ -39,6 +45,27 @@
   "node_outcomes": {
     "start": {
       "status": "success",
+      "duration_ms": 0
+    },
+    "ship": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "shipped\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: echo shipped",
+      "duration_ms": 23
+    },
+    "approve": {
+      "status": "success",
+      "preferred_label": "[A] Approve",
+      "suggested_next_ids": [
+        "ship"
+      ],
+      "context_updates": {
+        "human.gate.selected": "A",
+        "human.gate.label": "[A] Approve"
+      },
       "duration_ms": 0
     },
     "draft": {
@@ -58,24 +85,13 @@
         "cost": 0.0020936
       },
       "duration_ms": 2081
-    },
-    "approve": {
-      "status": "success",
-      "preferred_label": "[A] Approve",
-      "suggested_next_ids": [
-        "ship"
-      ],
-      "context_updates": {
-        "human.gate.selected": "A",
-        "human.gate.label": "[A] Approve"
-      },
-      "duration_ms": 0
     }
   },
-  "next_node_id": "ship",
+  "next_node_id": "exit",
   "node_visits": {
     "start": 1,
     "draft": 1,
-    "approve": 1
+    "approve": 1,
+    "ship": 1
   }
 }
