@@ -1,22 +1,26 @@
 {
-  "timestamp": "2026-03-19T13:03:59.759462Z",
-  "current_node": "draft",
+  "timestamp": "2026-03-19T13:04:02.173217Z",
+  "current_node": "approve",
   "completed_nodes": [
     "start",
-    "draft"
+    "draft",
+    "approve"
   ],
   "node_retries": {
     "start": 1,
-    "draft": 1
+    "draft": 1,
+    "approve": 1
   },
   "context_values": {
     "internal.run_id": "01KM333Y5T1X55N1VJAYZD2HNV",
     "internal.retry_count.draft": 1,
+    "preferred_label": "[A] Approve",
     "failure_signature": "",
-    "internal.thread_id": "start",
-    "current_node": "draft",
+    "internal.thread_id": "draft",
+    "current_node": "approve",
     "internal.node_visit_count": 1,
     "thread.start.current_node": "draft",
+    "human.gate.selected": "A",
     "outcome": "success",
     "graph.rankdir": "LR",
     "graph.goal": "Test human gate with auto-approve",
@@ -24,7 +28,10 @@
     "last_stage": "draft",
     "last_response": "# Greeting Message\n\nHello! 👋\n\nI'm ready to help you test the human gate with auto-approve functionality. This is a great way to verify that the workflow engine can properly handle human-in-the-loop",
     "response.draft": "# Greeting Message\n\nHello! 👋\n\nI'm ready to help you test the human gate with auto-approve functionality. This is a great way to verify that the workflow engine can properly handle human-in-the-loop stages and automatically proceed when approval is granted.\n\nLet me know what you'd like to do next!",
-    "current.preamble": "Goal: Test human gate with auto-approve\n",
+    "thread.draft.current_node": "approve",
+    "internal.retry_count.approve": 1,
+    "human.gate.label": "[A] Approve",
+    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 72 out\n",
     "failure_class": "",
     "internal.retry_count.start": 1
   },
@@ -32,6 +39,18 @@
   "node_outcomes": {
     "start": {
       "status": "success",
+      "duration_ms": 0
+    },
+    "approve": {
+      "status": "success",
+      "preferred_label": "[A] Approve",
+      "suggested_next_ids": [
+        "ship"
+      ],
+      "context_updates": {
+        "human.gate.label": "[A] Approve",
+        "human.gate.selected": "A"
+      },
       "duration_ms": 0
     },
     "draft": {
@@ -53,9 +72,10 @@
       "duration_ms": 1873
     }
   },
-  "next_node_id": "approve",
+  "next_node_id": "ship",
   "node_visits": {
     "draft": 1,
+    "approve": 1,
     "start": 1
   }
 }
