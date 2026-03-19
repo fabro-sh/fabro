@@ -1,0 +1,6 @@
+{
+  "status": "fail",
+  "notes": null,
+  "failure_reason": "LLM error: Stream error: Stream ended without a Finish event (after retries)",
+  "timestamp": "2026-03-19T16:04:40.933471+00:00"
+}
