@@ -1,36 +1,55 @@
 {
-  "timestamp": "2026-03-19T13:28:25.740082Z",
-  "current_node": "draft",
+  "timestamp": "2026-03-19T13:28:27.912608Z",
+  "current_node": "approve",
   "completed_nodes": [
     "start",
-    "draft"
+    "draft",
+    "approve"
   ],
   "node_retries": {
     "draft": 1,
+    "approve": 1,
     "start": 1
   },
   "context_values": {
     "failure_signature": "",
     "last_response": "# Greeting\n\nHello! 👋 I'm Claude, an AI assistant created by Anthropic. I'm here to help you with a wide range of tasks—whether that's answering questions, writing code, analyzing documents, debug",
+    "internal.retry_count.approve": 1,
+    "human.gate.label": "[A] Approve",
     "thread.start.current_node": "draft",
     "internal.work_dir": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpNJdBlG/run/worktree",
     "failure_class": "",
     "graph.goal": "Test human gate with auto-approve",
-    "current_node": "draft",
-    "current.preamble": "Goal: Test human gate with auto-approve\n",
+    "current_node": "approve",
+    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 214 out\n",
     "internal.retry_count.draft": 1,
     "last_stage": "draft",
     "response.draft": "# Greeting\n\nHello! 👋 I'm Claude, an AI assistant created by Anthropic. I'm here to help you with a wide range of tasks—whether that's answering questions, writing code, analyzing documents, debugging problems, or brainstorming ideas.\n\nLooking at your repository, I can see you're working on **Fabro**, an impressive AI-powered workflow orchestration platform. I'm familiar with the codebase and ready to assist with:\n\n- **Rust development** across your crates (workflows, API, agents, sandboxes, etc.)\n- **TypeScript/React** work on the fabro-web frontend\n- **Testing workflows** with your CLI and engine\n- **API design** and OpenAPI spec updates\n- **Architecture questions** and implementation guidance\n\nFeel free to ask me anything about your codebase, and I'll reference the CLAUDE.md guidance and strategy docs as needed. Let's build something great! 🚀",
-    "internal.thread_id": "start",
+    "internal.thread_id": "draft",
     "graph.rankdir": "LR",
     "internal.fidelity": "compact",
+    "thread.draft.current_node": "approve",
+    "human.gate.selected": "A",
     "outcome": "success",
     "internal.run_id": "01KM34GS7JM6D9D392ABDJVMAC",
+    "preferred_label": "[A] Approve",
     "internal.node_visit_count": 1,
     "internal.retry_count.start": 1
   },
   "logs": [],
   "node_outcomes": {
+    "approve": {
+      "status": "success",
+      "preferred_label": "[A] Approve",
+      "suggested_next_ids": [
+        "ship"
+      ],
+      "context_updates": {
+        "human.gate.label": "[A] Approve",
+        "human.gate.selected": "A"
+      },
+      "duration_ms": 0
+    },
     "draft": {
       "status": "success",
       "context_updates": {
@@ -54,9 +73,10 @@
       "duration_ms": 0
     }
   },
-  "next_node_id": "approve",
+  "next_node_id": "ship",
   "node_visits": {
     "draft": 1,
-    "start": 1
+    "start": 1,
+    "approve": 1
   }
 }
