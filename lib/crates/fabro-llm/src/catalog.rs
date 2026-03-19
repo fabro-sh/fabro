@@ -29,6 +29,14 @@ pub fn default_model_for_provider(provider: &str) -> Option<ModelInfo> {
         .cloned()
 }
 
+/// Default model for the best-available provider (based on configured API keys),
+/// falling back to the global catalog default.
+#[must_use]
+pub fn default_model_from_env() -> ModelInfo {
+    let provider = crate::provider::Provider::default_from_env();
+    default_model_for_provider(provider.as_str()).unwrap_or_else(default_model)
+}
+
 /// Get the overall default model (the first model marked `default` in catalog.json).
 #[must_use]
 pub fn default_model() -> ModelInfo {

@@ -383,12 +383,9 @@ async fn create_from(
         );
     }
 
-    let model = args.model.unwrap_or_else(|| {
-        let default_provider = fabro_llm::provider::Provider::default_from_env();
-        fabro_llm::catalog::default_model_for_provider(default_provider.as_str())
-            .map(|m| m.id)
-            .unwrap_or_else(|| fabro_llm::catalog::default_model().id.to_string())
-    });
+    let model = args
+        .model
+        .unwrap_or_else(|| fabro_llm::catalog::default_model_from_env().id);
 
     let record = fabro_workflows::pull_request::maybe_open_pull_request(
         &creds,

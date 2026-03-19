@@ -205,13 +205,11 @@ fn resolve_model_provider(
         .or_else(|| graph.attrs.get("default_model").and_then(|v| v.as_str()))
         .map(String::from)
         .unwrap_or_else(|| {
-            let provider_enum = provider
+            provider
                 .as_deref()
-                .and_then(|s| s.parse::<Provider>().ok())
-                .unwrap_or_else(Provider::default_from_env);
-            fabro_llm::catalog::default_model_for_provider(provider_enum.as_str())
-                .map(|m| m.id)
-                .unwrap_or_else(|| provider_enum.as_str().to_string())
+                .and_then(fabro_llm::catalog::default_model_for_provider)
+                .unwrap_or_else(fabro_llm::catalog::default_model_from_env)
+                .id
         });
 
     // Resolve model alias through catalog
@@ -1895,19 +1893,16 @@ async fn run_from_branch(
             .map(|c| c.provider_names().is_empty())
             .unwrap_or(true);
 
-    let default_provider = fabro_llm::provider::Provider::default_from_env();
-    let model = args.model.unwrap_or_else(|| {
-        fabro_llm::catalog::default_model_for_provider(default_provider.as_str())
-            .map(|m| m.id)
-            .unwrap_or_else(|| default_provider.as_str().to_string())
-    });
+    let model = args
+        .model
+        .unwrap_or_else(|| fabro_llm::catalog::default_model_from_env().id);
     let provider_enum = args
         .provider
         .as_deref()
         .map(|s| s.parse::<fabro_llm::provider::Provider>())
         .transpose()
         .map_err(|e| anyhow::anyhow!("{e}"))?
-        .unwrap_or(default_provider);
+        .unwrap_or_else(fabro_llm::provider::Provider::default_from_env);
 
     // No fallback config available for branch resume; use empty chain.
     let fallback_chain = Vec::new();

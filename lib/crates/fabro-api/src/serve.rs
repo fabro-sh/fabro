@@ -290,14 +290,10 @@ fn resolve_model_provider(
         .unwrap_or_else(|| {
             // Look up default model from catalog for the given provider,
             // falling back to the best provider with an API key configured.
-            let default_provider = Provider::default_from_env();
-            let default_info = provider_str
+            provider_str
                 .and_then(fabro_llm::catalog::default_model_for_provider)
-                .unwrap_or_else(|| {
-                    fabro_llm::catalog::default_model_for_provider(default_provider.as_str())
-                        .unwrap_or_else(fabro_llm::catalog::default_model)
-                });
-            default_info.id
+                .unwrap_or_else(fabro_llm::catalog::default_model_from_env)
+                .id
         });
 
     // Resolve model alias through catalog
