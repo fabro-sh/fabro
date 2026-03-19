@@ -1,0 +1,5 @@
+{
+  "command": "echo pass",
+  "language": "shell",
+  "timeout_ms": null
+}
