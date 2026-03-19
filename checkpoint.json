@@ -1,25 +1,29 @@
 {
-  "timestamp": "2026-03-19T13:03:56.842615Z",
-  "current_node": "approve",
+  "timestamp": "2026-03-19T13:03:58.816349Z",
+  "current_node": "ship",
   "completed_nodes": [
     "start",
     "draft",
-    "approve"
+    "approve",
+    "ship"
   ],
   "node_retries": {
-    "draft": 1,
     "approve": 1,
-    "start": 1
+    "start": 1,
+    "draft": 1,
+    "ship": 1
   },
   "context_values": {
     "last_response": "# Human Gate Auto-Approve Test\n\nHello! I'm ready to help you test the human gate with auto-approve functionality.\n\nThis involves testing the workflow engine's ability to:\n1. Pause execution at a human",
     "internal.run_id": "01KM333Y44MQ74VZ2YHXCBK4RW",
     "failure_class": "",
-    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 85 out\n",
+    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 85 out\n- **approve**: success\n\n## Context\n- human.gate.label: [A] Approve\n- human.gate.selected: A\n",
     "internal.fidelity": "compact",
+    "internal.retry_count.ship": 1,
     "last_stage": "draft",
+    "thread.approve.current_node": "ship",
     "graph.rankdir": "LR",
-    "current_node": "approve",
+    "current_node": "ship",
     "thread.start.current_node": "draft",
     "internal.retry_count.draft": 1,
     "graph.goal": "Test human gate with auto-approve",
@@ -28,16 +32,27 @@
     "internal.node_visit_count": 1,
     "internal.retry_count.approve": 1,
     "human.gate.label": "[A] Approve",
-    "internal.thread_id": "draft",
+    "internal.thread_id": "approve",
     "internal.retry_count.start": 1,
     "preferred_label": "[A] Approve",
     "outcome": "success",
     "thread.draft.current_node": "approve",
+    "command.output": "shipped\n",
     "response.draft": "# Human Gate Auto-Approve Test\n\nHello! I'm ready to help you test the human gate with auto-approve functionality.\n\nThis involves testing the workflow engine's ability to:\n1. Pause execution at a human gate stage\n2. Automatically approve the gate without manual intervention\n3. Resume the workflow from the checkpoint\n\nLet me know what you'd like to test or implement!",
-    "human.gate.selected": "A"
+    "human.gate.selected": "A",
+    "command.stderr": ""
   },
   "logs": [],
   "node_outcomes": {
+    "ship": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "shipped\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: echo shipped",
+      "duration_ms": 3
+    },
     "draft": {
       "status": "success",
       "context_updates": {
@@ -73,10 +88,11 @@
       "duration_ms": 0
     }
   },
-  "next_node_id": "ship",
+  "next_node_id": "exit",
   "node_visits": {
-    "draft": 1,
+    "ship": 1,
     "approve": 1,
-    "start": 1
+    "start": 1,
+    "draft": 1
   }
 }
