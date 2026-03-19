@@ -1,0 +1,5 @@
+{
+  "command": "cargo clippy -q --workspace -- -D warnings 2>&1",
+  "language": "shell",
+  "timeout_ms": null
+}
