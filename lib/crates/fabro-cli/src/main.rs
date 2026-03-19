@@ -426,7 +426,7 @@ fn send_telemetry_event(
     });
 
     let track = telemetry.build_track(event_name, properties);
-    fabro_util::telemetry::sender::send(track);
+    fabro_util::telemetry::sender::emit(&[track]);
     debug!(
         event = event_name,
         subcommand = command_name,
@@ -908,7 +908,7 @@ async fn main_inner() -> (String, Result<()>) {
                 }
             },
             Command::SendAnalytics { path } => {
-                let result = fabro_util::telemetry::sender::send_to_segment(&path).await;
+                let result = fabro_util::telemetry::sender::upload(&path).await;
                 let _ = std::fs::remove_file(&path);
                 result?;
             }
