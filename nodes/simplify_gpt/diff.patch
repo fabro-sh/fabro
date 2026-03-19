@@ -1,0 +1,16 @@
+diff --git a/lib/crates/fabro-util/src/telemetry/sender.rs b/lib/crates/fabro-util/src/telemetry/sender.rs
+index 1c1018aa..48025cab 100644
+--- a/lib/crates/fabro-util/src/telemetry/sender.rs
++++ b/lib/crates/fabro-util/src/telemetry/sender.rs
+@@ -56,10 +56,7 @@ fn build_segment_batch(content: &str) -> Option<serde_json::Value> {
+         }
+         match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(line) {
+             Ok(mut map) => {
+-                map.insert(
+-                    "type".to_string(),
+-                    serde_json::Value::String("track".to_string()),
+-                );
++                map.insert("type".into(), "track".into());
+                 batch.push(serde_json::Value::Object(map));
+             }
+             Err(err) => {
