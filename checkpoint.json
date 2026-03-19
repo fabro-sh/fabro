@@ -1,12 +1,14 @@
 {
-  "timestamp": "2026-03-19T13:28:33.215307Z",
-  "current_node": "plan",
+  "timestamp": "2026-03-19T13:28:35.479155Z",
+  "current_node": "approve",
   "completed_nodes": [
     "start",
     "setup",
-    "plan"
+    "plan",
+    "approve"
   ],
   "node_retries": {
+    "approve": 1,
     "setup": 1,
     "start": 1,
     "plan": 1
@@ -18,17 +20,22 @@
     "internal.retry_count.start": 1,
     "outcome": "success",
     "internal.work_dir": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpUT9oFG/run/worktree",
-    "current.preamble": "Goal: Full-stack scenario: command, agent, human gate, and goal gate verification\n\n## Completed stages\n- **setup**: success\n  - Script: `mkdir -p /tmp/scenario_full && echo ready > /tmp/scenario_full/flag.txt`\n  - Stdout: (empty)\n  - Stderr: (empty)\n",
+    "current.preamble": "Goal: Full-stack scenario: command, agent, human gate, and goal gate verification\n\n## Completed stages\n- **setup**: success\n  - Script: `mkdir -p /tmp/scenario_full && echo ready > /tmp/scenario_full/flag.txt`\n  - Stdout: (empty)\n  - Stderr: (empty)\n- **plan**: success\n  - Model: claude-haiku-4-5, 2.1k tokens in / 288 out\n",
     "internal.retry_count.plan": 1,
     "thread.setup.current_node": "plan",
+    "human.gate.selected": "A",
     "graph.goal": "Full-stack scenario: command, agent, human gate, and goal gate verification",
     "last_response": "I'll help you complete this full-stack scenario. Let me start by reading the flag file, then create the result file.\n<function_calls>\n<invoke name=\"bash\">\n<parameter name=\"command\">cat /tmp/scenario_f",
+    "human.gate.label": "[A] Approve",
     "graph.rankdir": "LR",
     "thread.start.current_node": "setup",
     "command.stderr": "",
-    "internal.thread_id": "setup",
+    "preferred_label": "[A] Approve",
+    "internal.thread_id": "plan",
+    "thread.plan.current_node": "approve",
     "last_stage": "plan",
-    "current_node": "plan",
+    "current_node": "approve",
+    "internal.retry_count.approve": 1,
     "failure_class": "",
     "internal.fidelity": "compact",
     "failure_signature": "",
@@ -67,12 +74,25 @@
         "cost": 0.0028448
       },
       "duration_ms": 8511
+    },
+    "approve": {
+      "status": "success",
+      "preferred_label": "[A] Approve",
+      "suggested_next_ids": [
+        "impl"
+      ],
+      "context_updates": {
+        "human.gate.selected": "A",
+        "human.gate.label": "[A] Approve"
+      },
+      "duration_ms": 0
     }
   },
-  "next_node_id": "approve",
+  "next_node_id": "impl",
   "node_visits": {
     "setup": 1,
+    "plan": 1,
     "start": 1,
-    "plan": 1
+    "approve": 1
   }
 }
