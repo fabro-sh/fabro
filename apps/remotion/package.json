@@ -1,0 +1,20 @@
+{
+  "name": "fabro-remotion",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render FabroIntro out/intro.mp4",
+    "build": "remotion render FabroIntro out/intro.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.437",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "4.0.437"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "^5.7.0"
+  }
+}
