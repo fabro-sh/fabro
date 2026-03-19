@@ -206,13 +206,11 @@ fn resolve_model_provider(
         .or_else(|| graph.attrs.get("default_model").and_then(|v| v.as_str()))
         .map(String::from)
         .unwrap_or_else(|| {
-            let provider_enum = provider
+            provider
                 .as_deref()
-                .and_then(|s| s.parse::<Provider>().ok())
-                .unwrap_or(Provider::Anthropic);
-            fabro_llm::catalog::default_model_for_provider(provider_enum.as_str())
-                .map(|m| m.id)
-                .unwrap_or_else(|| provider_enum.as_str().to_string())
+                .and_then(fabro_llm::catalog::default_model_for_provider)
+                .unwrap_or_else(fabro_llm::catalog::default_model_from_env)
+                .id
         });
 
     // Resolve model alias through catalog
@@ -1163,13 +1161,13 @@ pub async fn run_command(
         &graph,
     );
 
-    // Parse provider string to enum (defaults to Anthropic)
+    // Parse provider string to enum (defaults to best available from env)
     let provider_enum: Provider = provider
         .as_deref()
         .map(|s| s.parse::<Provider>())
         .transpose()
         .map_err(|e| anyhow::anyhow!("{e}"))?
-        .unwrap_or(Provider::Anthropic);
+        .unwrap_or_else(Provider::default_from_env);
 
     // Resolve fallback chain from config
     let fallback_chain = resolve_fallback_chain(provider_enum, &model, run_cfg.as_ref());
@@ -1892,14 +1890,16 @@ async fn run_from_branch(
             .map(|c| c.provider_names().is_empty())
             .unwrap_or(true);
 
-    let model = args.model.unwrap_or_else(|| "claude-opus-4-6".to_string());
+    let model = args
+        .model
+        .unwrap_or_else(|| fabro_llm::catalog::default_model_from_env().id);
     let provider_enum = args
         .provider
         .as_deref()
         .map(|s| s.parse::<fabro_llm::provider::Provider>())
         .transpose()
         .map_err(|e| anyhow::anyhow!("{e}"))?
-        .unwrap_or(fabro_llm::provider::Provider::Anthropic);
+        .unwrap_or_else(fabro_llm::provider::Provider::default_from_env);
 
     // No fallback config available for branch resume; use empty chain.
     let fallback_chain = Vec::new();

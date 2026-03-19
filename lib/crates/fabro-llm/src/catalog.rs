@@ -18,15 +18,32 @@ pub fn get_model_info(model_id: &str) -> Option<ModelInfo> {
         .cloned()
 }
 
+/// Normalize provider aliases (e.g. `"open_ai"` → `"openai"`) through
+/// `Provider::from_str`. Returns the input unchanged if it's not a known alias.
+fn canonical_provider(provider: &str) -> &str {
+    provider
+        .parse::<crate::provider::Provider>()
+        .map_or(provider, |p| p.as_str())
+}
+
 /// Get the default model for a provider, as marked in catalog.json.
 ///
 /// Returns `None` if the provider has no models or none marked as default.
 #[must_use]
 pub fn default_model_for_provider(provider: &str) -> Option<ModelInfo> {
+    let provider = canonical_provider(provider);
     BUILT_IN_MODELS
         .iter()
         .find(|m| m.provider == provider && m.default)
         .cloned()
+}
+
+/// Default model for the best-available provider (based on configured API keys),
+/// falling back to the global catalog default.
+#[must_use]
+pub fn default_model_from_env() -> ModelInfo {
+    let provider = crate::provider::Provider::default_from_env();
+    default_model_for_provider(provider.as_str()).unwrap_or_else(default_model)
 }
 
 /// Get the overall default model (the first model marked `default` in catalog.json).
@@ -45,6 +62,7 @@ pub fn list_models(provider: Option<&str>) -> Vec<ModelInfo> {
     provider.map_or_else(
         || BUILT_IN_MODELS.clone(),
         |p| {
+            let p = canonical_provider(p);
             BUILT_IN_MODELS
                 .iter()
                 .filter(|m| m.provider == p)
@@ -61,6 +79,7 @@ pub fn list_models(provider: Option<&str>) -> Vec<ModelInfo> {
 /// Returns `None` if no model on the target provider matches all capabilities.
 #[must_use]
 pub fn closest_model(target_provider: &str, reference: &ModelInfo) -> Option<ModelInfo> {
+    let target_provider = canonical_provider(target_provider);
     BUILT_IN_MODELS
         .iter()
         .filter(|m| {
@@ -175,6 +194,10 @@ mod tests {
 
         let m = default_model_for_provider("gemini").unwrap();
         assert_eq!(m.id, "gemini-3.1-pro-preview");
+
+        // Provider aliases are normalized (e.g. "open_ai" → "openai")
+        let m = default_model_for_provider("open_ai").unwrap();
+        assert_eq!(m.id, "gpt-5.4");
 
         assert!(default_model_for_provider("nonexistent").is_none());
     }

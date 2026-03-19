@@ -58,6 +58,26 @@ impl Provider {
             .any(|var| std::env::var(var).is_ok())
     }
 
+    /// Pick the best default provider based on which API keys are available.
+    ///
+    /// Checks Anthropic → OpenAI → Gemini; falls back to Anthropic if none
+    /// have a key configured.
+    #[must_use]
+    pub fn default_from_env() -> Self {
+        Self::default_with(Self::has_api_key)
+    }
+
+    /// Testable core of [`default_from_env`]: walks the precedence list and
+    /// returns the first provider for which `is_configured` returns `true`.
+    fn default_with(is_configured: impl Fn(Self) -> bool) -> Self {
+        const PRECEDENCE: [Provider; 3] = [Provider::Anthropic, Provider::OpenAi, Provider::Gemini];
+        PRECEDENCE
+            .iter()
+            .copied()
+            .find(|&p| is_configured(p))
+            .unwrap_or(Provider::Anthropic)
+    }
+
     /// Stable lowercase string representation used in `Request.provider`,
     /// adapter names, and other serialization boundaries.
     #[must_use]
@@ -234,6 +254,48 @@ mod tests {
     #[test]
     fn inception_as_str() {
         assert_eq!(Provider::Inception.as_str(), "inception");
+    }
+
+    #[test]
+    fn default_with_all_configured_prefers_anthropic() {
+        assert_eq!(Provider::default_with(|_| true), Provider::Anthropic);
+    }
+
+    #[test]
+    fn default_with_only_openai() {
+        assert_eq!(
+            Provider::default_with(|p| p == Provider::OpenAi),
+            Provider::OpenAi
+        );
+    }
+
+    #[test]
+    fn default_with_only_gemini() {
+        assert_eq!(
+            Provider::default_with(|p| p == Provider::Gemini),
+            Provider::Gemini
+        );
+    }
+
+    #[test]
+    fn default_with_openai_and_gemini_prefers_openai() {
+        assert_eq!(
+            Provider::default_with(|p| p == Provider::OpenAi || p == Provider::Gemini),
+            Provider::OpenAi,
+        );
+    }
+
+    #[test]
+    fn default_with_none_configured_falls_back_to_anthropic() {
+        assert_eq!(Provider::default_with(|_| false), Provider::Anthropic);
+    }
+
+    #[test]
+    fn default_with_only_kimi_falls_back_to_anthropic() {
+        assert_eq!(
+            Provider::default_with(|p| p == Provider::Kimi),
+            Provider::Anthropic
+        );
     }
 
     #[test]
