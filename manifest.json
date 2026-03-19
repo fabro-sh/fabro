@@ -1,0 +1,13 @@
+{
+  "run_id": "01KM32WG9KR45VGYZENHTMZ307",
+  "workflow_name": "ConditionalBranching",
+  "goal": "Test conditional edge selection after a command",
+  "start_time": "2026-03-19T12:59:48.971222Z",
+  "node_count": 6,
+  "edge_count": 6,
+  "run_branch": "fabro/run/01KM32WG9KR45VGYZENHTMZ307",
+  "base_sha": "10595c9e76ba1be90de1cf49a2a3c183e287d917",
+  "base_branch": "main",
+  "workflow_slug": "scenario",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-cli"
+}
