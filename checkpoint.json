@@ -1,12 +1,14 @@
 {
-  "timestamp": "2026-03-19T12:59:53.514665Z",
-  "current_node": "approve",
+  "timestamp": "2026-03-19T12:59:55.662240Z",
+  "current_node": "ship",
   "completed_nodes": [
     "start",
     "draft",
-    "approve"
+    "approve",
+    "ship"
   ],
   "node_retries": {
+    "ship": 1,
     "approve": 1,
     "start": 1,
     "draft": 1
@@ -14,8 +16,9 @@
   "context_values": {
     "thread.draft.current_node": "approve",
     "internal.fidelity": "compact",
-    "current_node": "approve",
+    "current_node": "ship",
     "last_response": "# Short Greeting Message\n\nHello! 👋 Welcome to Fabro, an AI-powered workflow orchestration platform. I'm here to help you build, test, and deploy intelligent workflows with ease. What can I do for y",
+    "command.stderr": "",
     "human.gate.label": "[A] Approve",
     "failure_class": "",
     "human.gate.selected": "A",
@@ -23,9 +26,12 @@
     "internal.retry_count.draft": 1,
     "last_stage": "draft",
     "response.draft": "# Short Greeting Message\n\nHello! 👋 Welcome to Fabro, an AI-powered workflow orchestration platform. I'm here to help you build, test, and deploy intelligent workflows with ease. What can I do for you today?",
+    "command.output": "shipped\n",
     "internal.retry_count.approve": 1,
-    "internal.thread_id": "draft",
+    "internal.retry_count.ship": 1,
+    "internal.thread_id": "approve",
     "internal.retry_count.start": 1,
+    "thread.approve.current_node": "ship",
     "internal.work_dir": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpXZsOqi/run/worktree",
     "graph.goal": "Test human gate with auto-approve",
     "graph.rankdir": "LR",
@@ -34,10 +40,19 @@
     "internal.run_id": "01KM32WG9KQ7466HBJAA2KTXFX",
     "internal.node_visit_count": 1,
     "failure_signature": "",
-    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 55 out\n"
+    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 55 out\n- **approve**: success\n\n## Context\n- human.gate.label: [A] Approve\n- human.gate.selected: A\n"
   },
   "logs": [],
   "node_outcomes": {
+    "ship": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "shipped\n"
+      },
+      "notes": "Script completed: echo shipped",
+      "duration_ms": 3
+    },
     "approve": {
       "status": "success",
       "preferred_label": "[A] Approve",
@@ -73,10 +88,11 @@
       "duration_ms": 1981
     }
   },
-  "next_node_id": "ship",
+  "next_node_id": "exit",
   "node_visits": {
     "draft": 1,
     "approve": 1,
+    "ship": 1,
     "start": 1
   }
 }
