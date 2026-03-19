@@ -1,0 +1,62 @@
+{
+  "timestamp": "2026-03-19T13:41:02.935063Z",
+  "current_node": "draft",
+  "completed_nodes": [
+    "start",
+    "draft"
+  ],
+  "node_retries": {
+    "draft": 1,
+    "start": 1
+  },
+  "context_values": {
+    "internal.fidelity": "compact",
+    "current.preamble": "Goal: Test human gate with auto-approve\n",
+    "thread.start.current_node": "draft",
+    "graph.rankdir": "LR",
+    "graph.goal": "Test human gate with auto-approve",
+    "internal.thread_id": "start",
+    "internal.retry_count.draft": 1,
+    "internal.run_id": "01KM357YAFA45FZJX1MBGYB9RJ",
+    "response.draft": "# Greeting\n\nHello! 👋\n\nI'm here to help you test the human gate with auto-approve functionality. Whether you need assistance debugging workflows, understanding how human-in-the-loop gates work in Fabro, or implementing auto-approval logic, I'm ready to assist.\n\nFeel free to share what you'd like to test or any questions you have about the system!",
+    "failure_class": "",
+    "internal.work_dir": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpxWMZQc/run/worktree",
+    "internal.node_visit_count": 1,
+    "current_node": "draft",
+    "failure_signature": "",
+    "outcome": "success",
+    "last_stage": "draft",
+    "internal.retry_count.start": 1,
+    "last_response": "# Greeting\n\nHello! 👋\n\nI'm here to help you test the human gate with auto-approve functionality. Whether you need assistance debugging workflows, understanding how human-in-the-loop gates work in Fa"
+  },
+  "logs": [],
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
+    "draft": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "draft",
+        "response.draft": "# Greeting\n\nHello! 👋\n\nI'm here to help you test the human gate with auto-approve functionality. Whether you need assistance debugging workflows, understanding how human-in-the-loop gates work in Fabro, or implementing auto-approval logic, I'm ready to assist.\n\nFeel free to share what you'd like to test or any questions you have about the system!",
+        "last_response": "# Greeting\n\nHello! 👋\n\nI'm here to help you test the human gate with auto-approve functionality. Whether you need assistance debugging workflows, understanding how human-in-the-loop gates work in Fa"
+      },
+      "notes": "Stage completed: draft",
+      "usage": {
+        "model": "claude-haiku-4-5",
+        "input_tokens": 2022,
+        "output_tokens": 85,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost": 0.0019576000000000003
+      },
+      "duration_ms": 1778
+    }
+  },
+  "next_node_id": "approve",
+  "node_visits": {
+    "start": 1,
+    "draft": 1
+  }
+}
