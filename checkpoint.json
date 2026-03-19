@@ -1,27 +1,31 @@
 {
-  "timestamp": "2026-03-19T13:04:00.170932Z",
-  "current_node": "gate",
+  "timestamp": "2026-03-19T13:04:02.466260Z",
+  "current_node": "passed",
   "completed_nodes": [
     "start",
     "cmd",
-    "gate"
+    "gate",
+    "passed"
   ],
   "node_retries": {
+    "gate": 1,
     "start": 1,
     "cmd": 1,
-    "gate": 1
+    "passed": 1
   },
   "context_values": {
     "internal.run_id": "01KM333Y5TZZDC8XWAR6GFX8MN",
-    "current.preamble": "Goal: Test conditional edge selection after a command\n\n## Completed stages\n- **cmd**: success\n  - Script: `echo pass`\n  - Stdout:\n    ```\n    pass\n    ```\n  - Stderr: (empty)\n",
+    "current.preamble": "Goal: Test conditional edge selection after a command\n\n## Completed stages\n- **cmd**: success\n  - Script: `echo pass`\n  - Stdout:\n    ```\n    pass\n    ```\n  - Stderr: (empty)\n- **gate**: success\n",
+    "internal.retry_count.passed": 1,
     "internal.fidelity": "compact",
     "internal.retry_count.start": 1,
-    "command.output": "pass\n",
+    "command.output": "branch-passed\n",
     "graph.rankdir": "LR",
     "failure_signature": "",
     "internal.node_visit_count": 1,
     "outcome": "success",
-    "internal.thread_id": "cmd",
+    "thread.gate.current_node": "passed",
+    "internal.thread_id": "gate",
     "thread.cmd.current_node": "gate",
     "graph.goal": "Test conditional edge selection after a command",
     "failure_class": "",
@@ -29,7 +33,7 @@
     "command.stderr": "",
     "internal.retry_count.cmd": 1,
     "internal.retry_count.gate": 1,
-    "current_node": "gate"
+    "current_node": "passed"
   },
   "logs": [],
   "node_outcomes": {
@@ -42,6 +46,15 @@
       "notes": "Conditional node evaluated: gate",
       "duration_ms": 0
     },
+    "passed": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "branch-passed\n"
+      },
+      "notes": "Script completed: echo branch-passed",
+      "duration_ms": 25
+    },
     "cmd": {
       "status": "success",
       "context_updates": {
@@ -52,9 +65,10 @@
       "duration_ms": 25
     }
   },
-  "next_node_id": "passed",
+  "next_node_id": "exit",
   "node_visits": {
     "start": 1,
+    "passed": 1,
     "cmd": 1,
     "gate": 1
   }
