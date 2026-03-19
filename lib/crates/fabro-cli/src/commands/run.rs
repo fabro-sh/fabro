@@ -20,6 +20,7 @@ use fabro_workflows::cost::{compute_stage_cost, format_cost};
 use fabro_workflows::devcontainer_bridge;
 use fabro_workflows::engine::{RunConfig, WorkflowRunEngine};
 use fabro_workflows::event::EventEmitter;
+use fabro_workflows::git::GitSyncStatus;
 use fabro_workflows::handler::default_registry;
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::sandbox_provider::SandboxProvider;
@@ -756,21 +757,17 @@ pub async fn run_command(
     );
 
     // Warn about uncommitted changes that won't be available in the execution environment.
-    if git_status == fabro_workflows::git::GitSyncStatus::Dirty {
-        match workdir_strategy {
-            WorkdirStrategy::LocalWorktree => {
-                eprintln!(
-                    "{} Uncommitted changes will not be included in the worktree.",
-                    styles.yellow.apply_to("Warning:"),
-                );
-            }
-            WorkdirStrategy::Cloud => {
-                eprintln!(
-                    "{} Uncommitted changes will not be included in the remote sandbox.",
-                    styles.yellow.apply_to("Warning:"),
-                );
-            }
-            WorkdirStrategy::LocalDirectory => {}
+    if git_status == GitSyncStatus::Dirty {
+        let env_name = match workdir_strategy {
+            WorkdirStrategy::LocalWorktree => Some("worktree"),
+            WorkdirStrategy::Cloud => Some("remote sandbox"),
+            WorkdirStrategy::LocalDirectory => None,
+        };
+        if let Some(env_name) = env_name {
+            eprintln!(
+                "{} Uncommitted changes will not be included in the {env_name}.",
+                styles.yellow.apply_to("Warning:"),
+            );
         }
     }
 
@@ -785,9 +782,9 @@ pub async fn run_command(
             // For Synced we know no push is needed; for Unsynced we know it is;
             // for Dirty the push status wasn't checked, so check now.
             let needs_push = match git_status {
-                fabro_workflows::git::GitSyncStatus::Synced => false,
-                fabro_workflows::git::GitSyncStatus::Unsynced => true,
-                fabro_workflows::git::GitSyncStatus::Dirty => {
+                GitSyncStatus::Synced => false,
+                GitSyncStatus::Unsynced => true,
+                GitSyncStatus::Dirty => {
                     let check_repo = original_cwd.clone();
                     let check_branch = branch.clone();
                     tokio::task::spawn_blocking(move || {
@@ -2092,7 +2089,7 @@ async fn run_preflight(
     run_cfg: &Option<run_config::WorkflowRunConfig>,
     args: &RunArgs,
     run_defaults: &RunDefaults,
-    git_status: fabro_workflows::git::GitSyncStatus,
+    git_status: GitSyncStatus,
     sandbox_provider: SandboxProvider,
     styles: &'static Styles,
     github_app: Option<fabro_github::GitHubAppCredentials>,
@@ -2136,7 +2133,7 @@ async fn run_preflight(
             CheckDetail::new(format!("Setup commands: {setup_command_count}")),
             CheckDetail {
                 text: format!("Git: {git_status}"),
-                warn: git_status != fabro_workflows::git::GitSyncStatus::Synced,
+                warn: git_status != GitSyncStatus::Synced,
             },
         ],
         remediation: None,
