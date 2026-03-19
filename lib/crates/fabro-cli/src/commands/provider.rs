@@ -27,42 +27,7 @@ pub async fn login_command(args: ProviderLoginArgs) -> Result<()> {
         .await??;
 
         if use_oauth {
-            eprintln!(
-                "  {}",
-                s.dim.apply_to("Opening browser for OpenAI login...")
-            );
-            match fabro_openai_oauth::run_browser_flow(
-                fabro_openai_oauth::DEFAULT_ISSUER,
-                fabro_openai_oauth::DEFAULT_CLIENT_ID,
-            )
-            .await
-            {
-                Ok(tokens) => {
-                    tracing::info!("OpenAI OAuth browser flow completed");
-                    let account_id = fabro_openai_oauth::extract_account_id(&tokens);
-                    let pairs = provider_auth::openai_oauth_env_pairs(
-                        &tokens.access_token,
-                        &tokens.refresh_token,
-                        account_id.as_deref(),
-                    );
-                    eprintln!(
-                        "  {} OpenAI configured via browser login",
-                        s.green.apply_to("✔")
-                    );
-                    pairs
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "OpenAI OAuth browser flow failed");
-                    eprintln!("  Browser login failed: {e}");
-                    eprintln!(
-                        "  {}",
-                        s.dim.apply_to("Falling back to manual API key entry.")
-                    );
-                    let (env_var, key) =
-                        provider_auth::prompt_and_validate_key(Provider::OpenAi, &s).await?;
-                    vec![(env_var, key)]
-                }
-            }
+            provider_auth::run_openai_oauth_or_api_key(&s).await?
         } else {
             let (env_var, key) =
                 provider_auth::prompt_and_validate_key(Provider::OpenAi, &s).await?;

@@ -17,7 +17,7 @@ use tokio::sync::oneshot;
 
 use crate::doctor;
 use crate::provider_auth::{
-    openai_oauth_env_pairs, prompt_and_validate_key, prompt_confirm, provider_display_name,
+    prompt_and_validate_key, prompt_confirm, provider_display_name, run_openai_oauth_or_api_key,
     write_env_file,
 };
 
@@ -559,44 +559,10 @@ pub async fn run_install() -> Result<()> {
         .await??;
 
         if use_oauth {
-            eprintln!(
-                "  {}",
-                s.dim.apply_to("Opening browser for OpenAI login...")
-            );
-            match fabro_openai_oauth::run_browser_flow(
-                fabro_openai_oauth::DEFAULT_ISSUER,
-                fabro_openai_oauth::DEFAULT_CLIENT_ID,
-            )
-            .await
-            {
-                Ok(tokens) => {
-                    tracing::info!("OpenAI OAuth browser flow completed");
-                    let account_id = fabro_openai_oauth::extract_account_id(&tokens);
-                    env_pairs.extend(openai_oauth_env_pairs(
-                        &tokens.access_token,
-                        &tokens.refresh_token,
-                        account_id.as_deref(),
-                    ));
-                    configured_providers.push(Provider::OpenAi);
-                    openai_via_oauth = true;
-                    eprintln!(
-                        "  {} OpenAI configured via browser login",
-                        s.green.apply_to("✔")
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "OpenAI OAuth browser flow failed");
-                    eprintln!("  Browser login failed: {e}");
-                    eprintln!(
-                        "  {}",
-                        s.dim.apply_to("Falling back to manual API key entry.")
-                    );
-                    let (env_var, key) = prompt_and_validate_key(Provider::OpenAi, &s).await?;
-                    env_pairs.push((env_var, key));
-                    configured_providers.push(Provider::OpenAi);
-                    openai_via_oauth = true;
-                }
-            }
+            let pairs = run_openai_oauth_or_api_key(&s).await?;
+            env_pairs.extend(pairs);
+            configured_providers.push(Provider::OpenAi);
+            openai_via_oauth = true;
         }
     }
 
