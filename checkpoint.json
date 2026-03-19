@@ -1,13 +1,15 @@
 {
-  "timestamp": "2026-03-19T13:41:17.146954Z",
-  "current_node": "plan",
+  "timestamp": "2026-03-19T13:41:20.846498Z",
+  "current_node": "approve",
   "completed_nodes": [
     "start",
     "setup",
-    "plan"
+    "plan",
+    "approve"
   ],
   "node_retries": {
     "setup": 1,
+    "approve": 1,
     "start": 1,
     "plan": 1
   },
@@ -22,16 +24,21 @@
     "thread.setup.current_node": "plan",
     "internal.retry_count.setup": 1,
     "internal.retry_count.plan": 1,
-    "current.preamble": "Goal: Full-stack scenario: command, agent, human gate, and goal gate verification\n\n## Completed stages\n- **setup**: success\n  - Script: `mkdir -p /tmp/scenario_full && echo ready > /tmp/scenario_full/flag.txt`\n  - Stdout: (empty)\n  - Stderr: (empty)\n",
+    "human.gate.label": "[A] Approve",
+    "human.gate.selected": "A",
+    "current.preamble": "Goal: Full-stack scenario: command, agent, human gate, and goal gate verification\n\n## Completed stages\n- **setup**: success\n  - Script: `mkdir -p /tmp/scenario_full && echo ready > /tmp/scenario_full/flag.txt`\n  - Stdout: (empty)\n  - Stderr: (empty)\n- **plan**: success\n  - Model: claude-haiku-4-5, 2.1k tokens in / 333 out\n",
     "outcome": "success",
-    "internal.thread_id": "setup",
+    "internal.thread_id": "plan",
+    "internal.retry_count.approve": 1,
     "internal.fidelity": "compact",
     "internal.node_visit_count": 1,
     "thread.start.current_node": "setup",
     "command.output": "",
     "last_stage": "plan",
     "failure_signature": "",
-    "current_node": "plan",
+    "thread.plan.current_node": "approve",
+    "preferred_label": "[A] Approve",
+    "current_node": "approve",
     "internal.retry_count.start": 1
   },
   "logs": [],
@@ -48,6 +55,18 @@
       },
       "notes": "Script completed: mkdir -p /tmp/scenario_full && echo ready > /tmp/scenario_full/flag.txt",
       "duration_ms": 260
+    },
+    "approve": {
+      "status": "success",
+      "preferred_label": "[A] Approve",
+      "suggested_next_ids": [
+        "impl"
+      ],
+      "context_updates": {
+        "human.gate.selected": "A",
+        "human.gate.label": "[A] Approve"
+      },
+      "duration_ms": 0
     },
     "plan": {
       "status": "success",
@@ -68,10 +87,11 @@
       "duration_ms": 4010
     }
   },
-  "next_node_id": "approve",
+  "next_node_id": "impl",
   "node_visits": {
     "start": 1,
     "setup": 1,
-    "plan": 1
+    "plan": 1,
+    "approve": 1
   }
 }
