@@ -320,9 +320,33 @@ struct CallbackParams {
     code: String,
 }
 
+fn build_github_app_manifest(app_name: &str, port: u16, web_url: &str) -> serde_json::Value {
+    serde_json::json!({
+        "name": app_name,
+        "url": "https://github.com/apps/arc",
+        "redirect_url": format!("http://127.0.0.1:{port}/callback"),
+        "callback_urls": [format!("{web_url}/auth/callback")],
+        "setup_url": format!("{web_url}/setup/callback"),
+        "public": false,
+        "default_permissions": {
+            "contents": "write",
+            "metadata": "read",
+            "pull_requests": "write",
+            "checks": "write",
+            "issues": "write",
+            "emails": "read"
+        },
+        "default_events": []
+    })
+}
+
 /// Run the GitHub App manifest registration flow via a temporary local server.
 /// Returns env var pairs (key, value) for secrets to merge into `.env`.
-async fn setup_github_app(arc_dir: &Path, s: &Styles) -> Result<Vec<(String, String)>> {
+async fn setup_github_app(
+    arc_dir: &Path,
+    s: &Styles,
+    web_url: &str,
+) -> Result<Vec<(String, String)>> {
     // Random suffix so app names don't collide
     let mut rng = rand::thread_rng();
     let suffix: String = (0..6)
@@ -337,21 +361,7 @@ async fn setup_github_app(arc_dir: &Path, s: &Styles) -> Result<Vec<(String, Str
     let addr: SocketAddr = listener.local_addr()?;
     let port = addr.port();
 
-    let manifest = serde_json::json!({
-        "name": app_name,
-        "url": "https://github.com/apps/arc",
-        "redirect_url": format!("http://127.0.0.1:{port}/callback"),
-        "public": false,
-        "default_permissions": {
-            "contents": "write",
-            "metadata": "read",
-            "pull_requests": "write",
-            "checks": "write",
-            "issues": "write",
-            "emails": "read"
-        },
-        "default_events": []
-    });
+    let manifest = build_github_app_manifest(&app_name, port, web_url);
     let manifest_json = serde_json::to_string(&manifest)?;
     let escaped_manifest = manifest_json
         .replace('&', "&amp;")
@@ -550,7 +560,7 @@ fn write_env_file(arc_dir: &Path, env_pairs: &[(String, String)], s: &Styles) ->
     Ok(())
 }
 
-pub async fn run_install() -> Result<()> {
+pub async fn run_install(web_url: &str) -> Result<()> {
     let s = Styles::detect_stderr();
     let emoji = console::Emoji("⚒️  ", "");
 
@@ -752,7 +762,7 @@ pub async fn run_install() -> Result<()> {
         .await??;
 
         if setup_github {
-            let github_env_pairs = setup_github_app(&arc_dir, &s).await?;
+            let github_env_pairs = setup_github_app(&arc_dir, &s, web_url).await?;
             let slug = {
                 let cli_toml_path = arc_dir.join("cli.toml");
                 let toml_content = std::fs::read_to_string(&cli_toml_path).unwrap_or_default();
@@ -1161,6 +1171,23 @@ mod tests {
             assert!(!url.is_empty(), "{provider:?} has empty URL");
             assert!(url.starts_with("https://"), "{provider:?} URL: {url}");
         }
+    }
+
+    // -- GitHub App manifest --
+
+    #[test]
+    fn manifest_includes_callback_urls_and_setup_url() {
+        let web_url = "https://app.example.com";
+        let manifest = build_github_app_manifest("Arc-test", 12345, web_url);
+
+        assert_eq!(
+            manifest["callback_urls"],
+            serde_json::json!(["https://app.example.com/auth/callback"]),
+        );
+        assert_eq!(
+            manifest["setup_url"],
+            serde_json::json!("https://app.example.com/setup/callback"),
+        );
     }
 
     // -- API key validation --
