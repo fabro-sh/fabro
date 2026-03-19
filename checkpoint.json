@@ -1,42 +1,52 @@
 {
-  "timestamp": "2026-03-19T14:34:51.178625Z",
-  "current_node": "approve",
+  "timestamp": "2026-03-19T14:34:53.814263Z",
+  "current_node": "ship",
   "completed_nodes": [
     "start",
     "draft",
-    "approve"
+    "approve",
+    "ship"
   ],
   "node_retries": {
-    "approve": 1,
     "start": 1,
-    "draft": 1
+    "draft": 1,
+    "approve": 1,
+    "ship": 1
   },
   "context_values": {
     "internal.retry_count.start": 1,
     "graph.goal": "Test human gate with auto-approve",
     "thread.draft.current_node": "approve",
-    "internal.thread_id": "draft",
+    "internal.thread_id": "approve",
     "internal.node_visit_count": 1,
     "internal.fidelity": "compact",
     "graph.rankdir": "LR",
-    "current_node": "approve",
-    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 56 out\n",
+    "current_node": "ship",
+    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.0k tokens in / 56 out\n- **approve**: success\n\n## Context\n- human.gate.label: [A] Approve\n- human.gate.selected: A\n",
     "human.gate.selected": "A",
     "response.draft": "# Greeting\n\nHello! 👋\n\nI'm Claude, an AI assistant created by Anthropic. I'm here to help you with coding, analysis, writing, math, creative projects, and much more.\n\nHow can I assist you today?",
     "failure_class": "",
     "failure_signature": "",
+    "thread.approve.current_node": "ship",
     "preferred_label": "[A] Approve",
+    "internal.retry_count.ship": 1,
     "thread.start.current_node": "draft",
     "internal.run_id": "01KM38A5VG531GTEHAEK1GW0FS",
     "internal.retry_count.draft": 1,
     "last_response": "# Greeting\n\nHello! 👋\n\nI'm Claude, an AI assistant created by Anthropic. I'm here to help you with coding, analysis, writing, math, creative projects, and much more.\n\nHow can I assist you today?",
     "human.gate.label": "[A] Approve",
+    "command.output": "shipped\n",
     "outcome": "success",
     "last_stage": "draft",
-    "internal.retry_count.approve": 1
+    "internal.retry_count.approve": 1,
+    "command.stderr": ""
   },
   "logs": [],
   "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
     "approve": {
       "status": "success",
       "preferred_label": "[A] Approve",
@@ -49,9 +59,14 @@
       },
       "duration_ms": 0
     },
-    "start": {
+    "ship": {
       "status": "success",
-      "duration_ms": 0
+      "context_updates": {
+        "command.output": "shipped\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: echo shipped",
+      "duration_ms": 25
     },
     "draft": {
       "status": "success",
@@ -72,10 +87,11 @@
       "duration_ms": 3326
     }
   },
-  "next_node_id": "ship",
+  "next_node_id": "exit",
   "node_visits": {
     "draft": 1,
-    "approve": 1,
-    "start": 1
+    "start": 1,
+    "ship": 1,
+    "approve": 1
   }
 }
