@@ -9,6 +9,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `cargo test --workspace` — run all tests
 - `cargo test -p fabro-api` — test a single crate
 - `cargo test -p fabro-workflows -- test_name` — run a single test
+- `set -a && source .env && set +a && cargo test --workspace -- --ignored` — run all E2E live tests (requires credentials in `.env`, see `.env.example`)
+- `set -a && source .env && set +a && cargo test -p fabro-llm -- --ignored` — run E2E tests for a single crate
 - `cargo fmt --check --all` — check formatting
 - `cargo clippy --workspace -- -D warnings` — lint
 
