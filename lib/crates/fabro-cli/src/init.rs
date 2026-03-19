@@ -269,29 +269,31 @@ async fn check_github_app_installation() {
             )
             .await
             {
-                if !app_info.owner.login.eq_ignore_ascii_case(&owner) {
-                    if let Ok(false) = fabro_github::is_app_public(
+                let cross_owner = !app_info.owner.login.eq_ignore_ascii_case(&owner);
+                let is_private = cross_owner
+                    && fabro_github::is_app_public(
                         &client,
                         &app_info.slug,
                         fabro_github::GITHUB_API_BASE_URL,
                     )
                     .await
-                    {
-                        eprintln!(
-                            "\n  {} GitHub App \"{}\" is private but this repo belongs to a different owner ({}).",
-                            yellow.apply_to("!"),
-                            app_info.slug,
-                            owner
-                        );
-                        eprintln!(
-                            "    The app must be made public before it can be installed outside {}.",
-                            app_info.owner.login
-                        );
-                        eprintln!(
-                            "    Update visibility at: https://github.com/settings/apps/{}",
-                            app_info.slug
-                        );
-                    }
+                        == Ok(false);
+
+                if is_private {
+                    eprintln!(
+                        "\n  {} GitHub App \"{}\" is private but this repo belongs to a different owner ({}).",
+                        yellow.apply_to("!"),
+                        app_info.slug,
+                        owner
+                    );
+                    eprintln!(
+                        "    The app must be made public before it can be installed outside {}.",
+                        app_info.owner.login
+                    );
+                    eprintln!(
+                        "    Update visibility at: https://github.com/settings/apps/{}",
+                        app_info.slug
+                    );
                 }
             }
             eprintln!(
