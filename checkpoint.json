@@ -1,0 +1,51 @@
+{
+  "timestamp": "2026-03-19T14:36:05.757476Z",
+  "current_node": "setup",
+  "completed_nodes": [
+    "start",
+    "setup"
+  ],
+  "node_retries": {
+    "setup": 1,
+    "start": 1
+  },
+  "context_values": {
+    "graph.goal": "Verify sandbox filesystem is shared across command and agent nodes",
+    "internal.run_id": "01KM38A5VGH4270VSF7T76SHES",
+    "internal.thread_id": "start",
+    "internal.retry_count.setup": 1,
+    "command.stderr": "",
+    "internal.node_visit_count": 1,
+    "current.preamble": "Goal: Verify sandbox filesystem is shared across command and agent nodes\n",
+    "command.output": "",
+    "graph.rankdir": "LR",
+    "failure_class": "",
+    "thread.start.current_node": "setup",
+    "failure_signature": "",
+    "internal.fidelity": "compact",
+    "internal.retry_count.start": 1,
+    "current_node": "setup",
+    "outcome": "success"
+  },
+  "logs": [],
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
+    "setup": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": ""
+      },
+      "notes": "Script completed: echo SCENARIO_FLAG_42 > /tmp/scenario_flag.txt",
+      "duration_ms": 291
+    }
+  },
+  "next_node_id": "work",
+  "node_visits": {
+    "start": 1,
+    "setup": 1
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "command": "echo SCENARIO_FLAG_42 > /tmp/scenario_flag.txt",
+  "language": "shell",
+  "timeout_ms": null
+}
