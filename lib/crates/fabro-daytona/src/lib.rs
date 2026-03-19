@@ -570,27 +570,16 @@ impl Sandbox for DaytonaSandbox {
                         }
                     }
                 }
-                Err(e) if self.github_app.is_none() => {
-                    let err = format!(
-                        "Git clone failed: {e}. If this is a private repository, \
-                         configure a GitHub App with `fabro install` and install it \
-                         for your organization."
-                    );
-                    self.emit(SandboxEvent::GitCloneFailed {
-                        url,
-                        error: err.clone(),
-                    });
-                    let duration_ms =
-                        u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                    self.emit(SandboxEvent::InitializeFailed {
-                        provider: "daytona".into(),
-                        error: err.clone(),
-                        duration_ms,
-                    });
-                    return Err(err);
-                }
                 Err(e) => {
-                    let err = format!("Failed to clone repo into Daytona sandbox: {e}");
+                    let err = if self.github_app.is_none() {
+                        format!(
+                            "Git clone failed: {e}. If this is a private repository, \
+                             configure a GitHub App with `fabro install` and install it \
+                             for your organization."
+                        )
+                    } else {
+                        format!("Failed to clone repo into Daytona sandbox: {e}")
+                    };
                     self.emit(SandboxEvent::GitCloneFailed {
                         url,
                         error: err.clone(),
