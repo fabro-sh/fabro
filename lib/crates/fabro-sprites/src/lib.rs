@@ -99,7 +99,7 @@ impl SpritesSandbox {
             .ok_or_else(|| "Sprites sandbox not initialized — call initialize() first".to_string())
     }
 
-    /// Build args for `sprite exec -s <name> [-o org] bash -c <command>`.
+    /// Build args for `sprite exec -s <name> [-o org] -- bash -c <command>`.
     fn build_exec_args(&self, command: &str) -> Result<Vec<String>, String> {
         let name = self.sprite_name()?;
         let mut args = vec!["exec".to_string(), "-s".to_string(), name.to_string()];
@@ -107,6 +107,7 @@ impl SpritesSandbox {
             args.push("-o".to_string());
             args.push(org.clone());
         }
+        args.push("--".to_string());
         args.push("bash".to_string());
         args.push("-c".to_string());
         args.push(command.to_string());
@@ -754,8 +755,9 @@ mod tests {
         assert_eq!(recorded[0].args[0], "exec");
         assert_eq!(recorded[0].args[1], "-s");
         assert_eq!(recorded[0].args[2], "test-sprite");
-        assert_eq!(recorded[0].args[3], "bash");
-        assert_eq!(recorded[0].args[4], "-c");
+        assert_eq!(recorded[0].args[3], "--");
+        assert_eq!(recorded[0].args[4], "bash");
+        assert_eq!(recorded[0].args[5], "-c");
     }
 
     #[tokio::test]
