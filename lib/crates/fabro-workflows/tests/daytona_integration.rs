@@ -1423,8 +1423,8 @@ async fn daytona_clone_private_repo_with_github_app_iat() {
         .unwrap();
     assert_eq!(result.exit_code, 0);
     assert!(
-        result.stdout.contains("brynary/arc"),
-        "origin should point to brynary/arc, got: {}",
+        result.stdout.contains("fabro-sh/fabro"),
+        "origin should point to fabro-sh/fabro, got: {}",
         result.stdout.trim()
     );
 
