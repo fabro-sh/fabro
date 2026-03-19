@@ -1,0 +1,18 @@
+digraph ConditionalBranching {
+    graph [goal="Test conditional edge selection after a command"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    cmd    [label="Run Command", shape=parallelogram, script="echo pass"]
+    gate   [label="Check Result", shape=diamond]
+    passed [label="Passed", shape=parallelogram, script="echo branch-passed"]
+    failed [label="Failed", shape=parallelogram, script="echo branch-failed"]
+
+    start -> cmd -> gate
+    gate -> passed [label="Pass", condition="outcome=success"]
+    gate -> failed [label="Fail"]
+    passed -> exit
+    failed -> exit
+}
