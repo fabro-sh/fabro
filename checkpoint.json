@@ -1,0 +1,65 @@
+{
+  "timestamp": "2026-03-19T13:03:59.379548Z",
+  "current_node": "work",
+  "completed_nodes": [
+    "start",
+    "work"
+  ],
+  "node_retries": {
+    "work": 1,
+    "start": 1
+  },
+  "context_values": {
+    "internal.retry_count.start": 1,
+    "thread.start.current_node": "work",
+    "current_node": "work",
+    "internal.run_id": "01KM333Y45SMBFZX51VC8646YA",
+    "internal.work_dir": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpQqcRYB/run/worktree",
+    "last_stage": "work",
+    "response.work": "Perfect! I've successfully written \"hello\" to the file `scenario_test.txt` in the working directory. The file has been created with the content \"hello\".",
+    "graph.rankdir": "LR",
+    "failure_class": "",
+    "internal.fidelity": "compact",
+    "last_response": "Perfect! I've successfully written \"hello\" to the file `scenario_test.txt` in the working directory. The file has been created with the content \"hello\".",
+    "graph.goal": "Write hello to a file using an agent",
+    "internal.node_visit_count": 1,
+    "outcome": "success",
+    "current.preamble": "Goal: Write hello to a file using an agent\n",
+    "internal.thread_id": "start",
+    "internal.retry_count.work": 1,
+    "failure_signature": ""
+  },
+  "logs": [],
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
+    "work": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "work",
+        "response.work": "Perfect! I've successfully written \"hello\" to the file `scenario_test.txt` in the working directory. The file has been created with the content \"hello\".",
+        "last_response": "Perfect! I've successfully written \"hello\" to the file `scenario_test.txt` in the working directory. The file has been created with the content \"hello\"."
+      },
+      "notes": "Stage completed: work",
+      "usage": {
+        "model": "claude-haiku-4-5",
+        "input_tokens": 571,
+        "output_tokens": 191,
+        "cache_read_tokens": 4714,
+        "cache_write_tokens": 5061,
+        "cost": 0.0012208
+      },
+      "files_touched": [
+        "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpQqcRYB/run/worktree/scenario_test.txt"
+      ],
+      "duration_ms": 6970
+    }
+  },
+  "next_node_id": "exit",
+  "node_visits": {
+    "work": 1,
+    "start": 1
+  }
+}
