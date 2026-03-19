@@ -1,32 +1,36 @@
 {
-  "timestamp": "2026-03-19T12:59:48.976060Z",
-  "current_node": "step1",
+  "timestamp": "2026-03-19T12:59:51.930766Z",
+  "current_node": "step2",
   "completed_nodes": [
     "start",
-    "step1"
+    "step1",
+    "step2"
   ],
   "node_retries": {
+    "step2": 1,
     "step1": 1,
     "start": 1
   },
   "context_values": {
     "command.stderr": "",
+    "internal.retry_count.step2": 1,
     "graph.rankdir": "LR",
     "internal.fidelity": "compact",
-    "current.preamble": "Goal: Run two commands in sequence\n",
+    "current.preamble": "Goal: Run two commands in sequence\n\n## Completed stages\n- **step1**: success\n  - Script: `echo hello-from-step1`\n  - Stdout:\n    ```\n    hello-from-step1\n    ```\n  - Stderr: (empty)\n",
     "internal.node_visit_count": 1,
     "internal.work_dir": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpoLgl5f/run/worktree",
-    "internal.thread_id": "start",
+    "internal.thread_id": "step1",
     "failure_class": "",
     "outcome": "success",
-    "current_node": "step1",
+    "current_node": "step2",
     "internal.retry_count.start": 1,
     "graph.goal": "Run two commands in sequence",
     "failure_signature": "",
     "internal.retry_count.step1": 1,
     "thread.start.current_node": "step1",
-    "command.output": "hello-from-step1\n",
-    "internal.run_id": "01KM32WG9K5WNRTYJKBBV4Z61P"
+    "command.output": "hello-from-step2\n",
+    "internal.run_id": "01KM32WG9K5WNRTYJKBBV4Z61P",
+    "thread.step1.current_node": "step2"
   },
   "logs": [],
   "node_outcomes": {
@@ -42,11 +46,21 @@
       },
       "notes": "Script completed: echo hello-from-step1",
       "duration_ms": 4
+    },
+    "step2": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "hello-from-step2\n"
+      },
+      "notes": "Script completed: echo hello-from-step2",
+      "duration_ms": 2
     }
   },
-  "next_node_id": "step2",
+  "next_node_id": "exit",
   "node_visits": {
     "start": 1,
+    "step2": 1,
     "step1": 1
   }
 }
