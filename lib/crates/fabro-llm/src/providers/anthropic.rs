@@ -107,6 +107,8 @@ struct ApiRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     thinking: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    output_config: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     metadata: Option<std::collections::HashMap<String, String>>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     stream: bool,
@@ -1072,6 +1074,11 @@ fn build_api_request(
 
     let thinking = extract_thinking_config(request.provider_options.as_ref());
 
+    let output_config = request
+        .reasoning_effort
+        .as_ref()
+        .map(|effort| serde_json::json!({"effort": effort}));
+
     let api_request = ApiRequest {
         model: request.model.clone(),
         messages: api_messages,
@@ -1088,6 +1095,7 @@ fn build_api_request(
         tools: api_tools,
         tool_choice: tool_choice_json,
         thinking,
+        output_config,
         metadata: request.metadata.clone(),
         stream,
     };
@@ -1577,6 +1585,7 @@ mod tests {
             tools: None,
             tool_choice: None,
             thinking: None,
+            output_config: None,
             metadata: None,
             stream: false,
         };
@@ -1973,6 +1982,7 @@ mod tests {
             tools: None,
             tool_choice: None,
             thinking: None,
+            output_config: None,
             metadata: None,
             stream: false,
         };
@@ -2004,6 +2014,7 @@ mod tests {
             tools: None,
             tool_choice: None,
             thinking: None,
+            output_config: None,
             metadata: None,
             stream: false,
         };
@@ -2039,5 +2050,54 @@ mod tests {
             result["text"],
             "[Audio content not supported by this provider]"
         );
+    }
+
+    #[test]
+    fn build_api_request_maps_reasoning_effort_to_output_config() {
+        let adapter = Adapter::new("test-key");
+        let request = Request {
+            model: "claude-sonnet-4-20250514".to_string(),
+            messages: vec![Message::user("Hello")],
+            provider: Some("anthropic".to_string()),
+            tools: None,
+            tool_choice: None,
+            response_format: None,
+            temperature: None,
+            top_p: None,
+            max_tokens: Some(128),
+            stop_sequences: None,
+            reasoning_effort: Some("medium".to_string()),
+            metadata: None,
+            provider_options: None,
+        };
+
+        let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
+        assert_eq!(
+            api_request.output_config,
+            Some(serde_json::json!({"effort": "medium"}))
+        );
+    }
+
+    #[test]
+    fn build_api_request_omits_output_config_when_no_reasoning_effort() {
+        let adapter = Adapter::new("test-key");
+        let request = Request {
+            model: "claude-sonnet-4-20250514".to_string(),
+            messages: vec![Message::user("Hello")],
+            provider: Some("anthropic".to_string()),
+            tools: None,
+            tool_choice: None,
+            response_format: None,
+            temperature: None,
+            top_p: None,
+            max_tokens: Some(128),
+            stop_sequences: None,
+            reasoning_effort: None,
+            metadata: None,
+            provider_options: None,
+        };
+
+        let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
+        assert!(api_request.output_config.is_none());
     }
 }
