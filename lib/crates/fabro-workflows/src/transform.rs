@@ -125,7 +125,7 @@ impl Transform for ProviderInferenceTransform {
                 .map(String::from);
             if let Some(model) = model {
                 if !node.attrs.contains_key("provider") {
-                    if let Some(info) = fabro_llm::catalog::get_model_info(&model) {
+                    if let Some(info) = fabro_model::get_model_info(&model) {
                         node.attrs
                             .insert("provider".to_string(), AttrValue::String(info.provider));
                     }

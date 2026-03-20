@@ -53,12 +53,13 @@ case "$OS" in
     ;;
   Linux)
     case "$ARCH" in
-      x86_64) TARGET="x86_64-unknown-linux-gnu" ;;
-      *)      error "Unsupported Linux architecture: $ARCH. Supported: x86_64" ;;
+      x86_64)  TARGET="x86_64-unknown-linux-gnu" ;;
+      aarch64) TARGET="aarch64-unknown-linux-gnu" ;;
+      *)       error "Unsupported Linux architecture: $ARCH. Supported: x86_64, aarch64" ;;
     esac
     ;;
   *)
-    error "Unsupported OS: $OS. Supported platforms: macOS (Apple Silicon), Linux (x86_64)"
+    error "Unsupported OS: $OS. Supported platforms: macOS (Apple Silicon), Linux (x86_64, aarch64)"
     ;;
 esac
 

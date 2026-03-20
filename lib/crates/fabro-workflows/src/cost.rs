@@ -3,7 +3,7 @@ use crate::outcome::StageUsage;
 /// Compute the dollar cost for a stage's token usage, if pricing is available.
 #[must_use]
 pub fn compute_stage_cost(usage: &StageUsage) -> Option<f64> {
-    let info = fabro_llm::catalog::get_model_info(&usage.model)?;
+    let info = fabro_model::get_model_info(&usage.model)?;
     let input_rate = info.costs.input_cost_per_mtok?;
     let output_rate = info.costs.output_cost_per_mtok?;
     Some(

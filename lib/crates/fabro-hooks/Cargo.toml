@@ -12,6 +12,7 @@ doctest = false
 fabro-agent = { path = "../fabro-agent" }
 fabro-config = { path = "../fabro-config" }
 fabro-llm = { path = "../fabro-llm" }
+fabro-model = { path = "../fabro-model" }
 fabro-util = { path = "../fabro-util" }
 serde.workspace = true
 serde_json.workspace = true

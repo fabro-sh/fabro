@@ -525,6 +525,7 @@ mod tests {
             ),
             aliases: [
                 "gpt54",
+                "gpt-54",
             ],
             default: true,
         }
@@ -570,6 +571,7 @@ mod tests {
             ),
             aliases: [
                 "gpt54-pro",
+                "gpt-54-pro",
             ],
             default: false,
         }
@@ -579,6 +581,21 @@ mod tests {
     #[test]
     fn gpt54_alias() {
         assert_eq!(get_model_info("gpt54").unwrap().id, "gpt-5.4");
+    }
+
+    #[test]
+    fn gpt_54_hyphenated_alias() {
+        assert_eq!(get_model_info("gpt-54").unwrap().id, "gpt-5.4");
+    }
+
+    #[test]
+    fn gpt_54_pro_hyphenated_alias() {
+        assert_eq!(get_model_info("gpt-54-pro").unwrap().id, "gpt-5.4-pro");
+    }
+
+    #[test]
+    fn gpt_54_mini_hyphenated_alias() {
+        assert_eq!(get_model_info("gpt-54-mini").unwrap().id, "gpt-5.4-mini");
     }
 
     #[test]

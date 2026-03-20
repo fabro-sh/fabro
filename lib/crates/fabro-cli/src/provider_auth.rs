@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use dialoguer::{Confirm, Password};
-use fabro_llm::provider::Provider;
+use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 
 use crate::doctor;

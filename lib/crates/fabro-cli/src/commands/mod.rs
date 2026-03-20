@@ -20,4 +20,5 @@ pub(crate) mod shared;
 pub mod ssh;
 pub mod start;
 pub mod validate;
+pub mod wait;
 pub mod workflow;

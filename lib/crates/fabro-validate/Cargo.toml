@@ -10,6 +10,6 @@ doctest = false
 
 [dependencies]
 fabro-graphviz = { path = "../fabro-graphviz" }
-fabro-llm = { path = "../fabro-llm" }
+fabro-model = { path = "../fabro-model" }
 serde = { workspace = true }
 thiserror = { workspace = true }

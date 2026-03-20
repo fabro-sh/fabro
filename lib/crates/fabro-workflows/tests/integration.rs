@@ -7630,7 +7630,7 @@ async fn hook_stage_start_skip_bypasses_node() {
         "response.md should not exist when StageStart hook skips node"
     );
 
-    // StageStarted should have been emitted
+    // StageStarted should NOT be emitted for hook-skipped stages (the stage never started)
     let captured = events.lock().unwrap();
     let stage_starts: Vec<_> = captured
         .iter()
@@ -7640,8 +7640,8 @@ async fn hook_stage_start_skip_bypasses_node() {
         })
         .collect();
     assert!(
-        !stage_starts.is_empty(),
-        "StageStarted should be emitted before hook skips"
+        stage_starts.is_empty(),
+        "StageStarted should not be emitted when StageStart hook skips"
     );
 }
 

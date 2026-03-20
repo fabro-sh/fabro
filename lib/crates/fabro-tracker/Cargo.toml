@@ -9,4 +9,13 @@ description = "Tracker trait and types for issue tracking integrations"
 doctest = false
 
 [dependencies]
+fabro-github = { path = "../fabro-github" }
 async-trait.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+tokio = { workspace = true }
+
+[dev-dependencies]
+mockito = "1"
+tokio = { workspace = true, features = ["test-util", "macros"] }

@@ -218,7 +218,7 @@ impl HookExecutorImpl {
     /// Resolve a model alias (e.g. "haiku") to a concrete model ID.
     fn resolve_model(model: &Option<String>) -> String {
         let model_id = model.as_deref().unwrap_or("haiku");
-        let model_info = fabro_llm::catalog::get_model_info(model_id);
+        let model_info = fabro_model::get_model_info(model_id);
         model_info
             .as_ref()
             .map_or(model_id, |m| m.id.as_str())

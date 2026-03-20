@@ -144,7 +144,7 @@ impl Client {
     /// Resolve the provider for a request.
     fn resolve_provider(&self, request: &Request) -> Result<Arc<dyn ProviderAdapter>, SdkError> {
         let catalog_provider =
-            crate::catalog::get_model_info(&request.model).map(|info| info.provider);
+            fabro_model::get_model_info(&request.model).map(|info| info.provider);
 
         let provider_name = request
             .provider

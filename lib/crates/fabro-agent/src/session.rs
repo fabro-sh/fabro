@@ -901,7 +901,7 @@ impl Session {
             temperature: None,
             top_p: None,
             max_tokens: self.config.max_tokens.or_else(|| {
-                fabro_llm::catalog::get_model_info(self.provider_profile.model())
+                fabro_model::get_model_info(self.provider_profile.model())
                     .and_then(|m| m.limits.max_output)
             }),
             stop_sequences: None,
