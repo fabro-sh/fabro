@@ -1149,51 +1149,6 @@ mod tests {
         assert!(branch_needs_push(repo_dir, "origin", "main"));
     }
 
-    /// Helper: create a local repo with a bare remote and push main.
-    fn init_repo_with_remote(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
-        let repo_dir = dir.join("repo");
-        let remote_dir = dir.join("remote.git");
-
-        Command::new("git")
-            .args(["init", "--bare"])
-            .arg(&remote_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args(["init"])
-            .arg(&repo_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args(["remote", "add", "origin"])
-            .arg(&remote_dir)
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args([
-                "-c",
-                "user.name=test",
-                "-c",
-                "user.email=test@test",
-                "commit",
-                "--allow-empty",
-                "-m",
-                "init",
-            ])
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-        Command::new("git")
-            .args(["branch", "-M", "main"])
-            .current_dir(&repo_dir)
-            .output()
-            .unwrap();
-        push_branch(&repo_dir, "origin", "main").unwrap();
-
-        (repo_dir, remote_dir)
-    }
-
     #[test]
     fn metadata_branch_name_uses_meta_prefix() {
         assert_eq!(MetadataStore::branch_name("abc-123"), "fabro/meta/abc-123");
