@@ -1,0 +1,107 @@
+diff --git a/lib/crates/fabro-llm/src/providers/anthropic.rs b/lib/crates/fabro-llm/src/providers/anthropic.rs
+index 4c79de2a..a42c2a99 100644
+--- a/lib/crates/fabro-llm/src/providers/anthropic.rs
++++ b/lib/crates/fabro-llm/src/providers/anthropic.rs
+@@ -1601,19 +1601,8 @@ mod tests {
+     fn build_api_request_omits_whitespace_only_system_prompt() {
+         let adapter = Adapter::new("test-key");
+         let request = Request {
+-            model: "claude-sonnet-4-20250514".to_string(),
+             messages: vec![Message::system("   \n\t"), Message::user("Hello")],
+-            provider: Some("anthropic".to_string()),
+-            tools: None,
+-            tool_choice: None,
+-            response_format: None,
+-            temperature: None,
+-            top_p: None,
+-            max_tokens: Some(128),
+-            stop_sequences: None,
+-            reasoning_effort: None,
+-            metadata: None,
+-            provider_options: None,
++            ..make_base_request()
+         };
+ 
+         let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
+@@ -1623,17 +1612,17 @@ mod tests {
+         );
+     }
+ 
+-    fn make_request_with_format(format: crate::types::ResponseFormat) -> Request {
++    fn make_base_request() -> Request {
+         Request {
+             model: "claude-sonnet-4-20250514".to_string(),
+             messages: vec![Message::user("Hello")],
+-            provider: None,
++            provider: Some("anthropic".to_string()),
+             tools: None,
+             tool_choice: None,
+-            response_format: Some(format),
++            response_format: None,
+             temperature: None,
+             top_p: None,
+-            max_tokens: None,
++            max_tokens: Some(128),
+             stop_sequences: None,
+             reasoning_effort: None,
+             metadata: None,
+@@ -1641,6 +1630,15 @@ mod tests {
+         }
+     }
+ 
++    fn make_request_with_format(format: crate::types::ResponseFormat) -> Request {
++        Request {
++            provider: None,
++            response_format: Some(format),
++            max_tokens: None,
++            ..make_base_request()
++        }
++    }
++
+     #[test]
+     fn response_format_json_schema_injects_synthetic_tool() {
+         let schema = serde_json::json!({
+@@ -2056,19 +2054,8 @@ mod tests {
+     fn build_api_request_maps_reasoning_effort_to_output_config() {
+         let adapter = Adapter::new("test-key");
+         let request = Request {
+-            model: "claude-sonnet-4-20250514".to_string(),
+-            messages: vec![Message::user("Hello")],
+-            provider: Some("anthropic".to_string()),
+-            tools: None,
+-            tool_choice: None,
+-            response_format: None,
+-            temperature: None,
+-            top_p: None,
+-            max_tokens: Some(128),
+-            stop_sequences: None,
+             reasoning_effort: Some("medium".to_string()),
+-            metadata: None,
+-            provider_options: None,
++            ..make_base_request()
+         };
+ 
+         let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
+@@ -2081,21 +2068,7 @@ mod tests {
+     #[test]
+     fn build_api_request_omits_output_config_when_no_reasoning_effort() {
+         let adapter = Adapter::new("test-key");
+-        let request = Request {
+-            model: "claude-sonnet-4-20250514".to_string(),
+-            messages: vec![Message::user("Hello")],
+-            provider: Some("anthropic".to_string()),
+-            tools: None,
+-            tool_choice: None,
+-            response_format: None,
+-            temperature: None,
+-            top_p: None,
+-            max_tokens: Some(128),
+-            stop_sequences: None,
+-            reasoning_effort: None,
+-            metadata: None,
+-            provider_options: None,
+-        };
++        let request = make_base_request();
+ 
+         let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
+         assert!(api_request.output_config.is_none());
