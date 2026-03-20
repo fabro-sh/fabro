@@ -26,7 +26,10 @@ pub async fn attach_run(
     let pid_path = run_dir.join("run.pid");
 
     let is_tty = std::io::stderr().is_terminal();
-    let mut progress_ui = run_progress::ProgressUI::new(is_tty, false);
+    let verbose = fabro_workflows::run_spec::RunSpec::load(run_dir)
+        .map(|spec| spec.verbose)
+        .unwrap_or(false);
+    let mut progress_ui = run_progress::ProgressUI::new(is_tty, verbose);
 
     // Install Ctrl+C handler
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -93,6 +96,9 @@ pub async fn attach_run(
         // Check for interview request
         if interview_request_path.exists() {
             if let Ok(request_data) = std::fs::read_to_string(&interview_request_path) {
+                // Delete the request file immediately to prevent re-prompting
+                let _ = std::fs::remove_file(&interview_request_path);
+
                 if let Ok(question) =
                     serde_json::from_str::<fabro_interview::Question>(&request_data)
                 {

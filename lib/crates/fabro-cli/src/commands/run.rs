@@ -10,7 +10,7 @@ use clap::{Args, ValueEnum};
 use fabro_agent::{DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox};
 use fabro_config::run::{RunDefaults, WorkflowRunConfig};
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
-use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, Interviewer};
+use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, FileInterviewer, Interviewer};
 use fabro_llm::provider::Provider;
 use fabro_util::terminal::Styles;
 use fabro_validate::Severity;
@@ -729,6 +729,10 @@ pub async fn run_command(
     // 4. Build interviewer
     let interviewer: Arc<dyn Interviewer> = if args.auto_approve {
         Arc::new(AutoApproveInterviewer)
+    } else if !std::io::stdin().is_terminal() {
+        // Detached mode (stdin is /dev/null): use file-based IPC so the
+        // attach process can prompt the user on our behalf.
+        Arc::new(FileInterviewer::new(run_dir.clone()))
     } else {
         Arc::new(run_progress::ProgressAwareInterviewer::new(
             ConsoleInterviewer::new(styles),

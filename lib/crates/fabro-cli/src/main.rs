@@ -711,8 +711,25 @@ async fn main_inner() -> (String, Result<()>) {
 
                 // Load spec and reconstruct RunArgs
                 let spec = fabro_workflows::run_spec::RunSpec::load(&run_dir)?;
+
+                // Restore the working directory captured at create time
+                std::env::set_current_dir(&spec.working_directory).map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to set working directory to {}: {e}",
+                        spec.working_directory.display()
+                    )
+                })?;
+
+                // Use the cached graph snapshot instead of the original file
+                let cached_graph = run_dir.join("graph.fabro");
+                let workflow_path = if cached_graph.exists() {
+                    cached_graph
+                } else {
+                    spec.workflow_path
+                };
+
                 let run_args = commands::run::RunArgs {
-                    workflow: Some(spec.workflow_path),
+                    workflow: Some(workflow_path),
                     run_dir: Some(run_dir),
                     dry_run: spec.dry_run,
                     preflight: false,
