@@ -23,6 +23,13 @@ pub fn start_run(run_dir: &Path) -> Result<u32> {
     fabro_workflows::run_spec::RunSpec::load(run_dir)
         .map_err(|e| anyhow::anyhow!("Cannot start run: failed to load spec.json: {e}"))?;
 
+    // Write Starting status before spawning to prevent duplicate engines
+    fabro_workflows::run_status::write_run_status(
+        run_dir,
+        fabro_workflows::run_status::RunStatus::Starting,
+        None,
+    );
+
     let log_file = std::fs::File::create(run_dir.join("detach.log"))?;
 
     let exe = std::env::current_exe()?;

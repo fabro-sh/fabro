@@ -682,13 +682,13 @@ impl ProgressUI {
             }
             "StageStarted" => {
                 let node_id = str_field("node_id").unwrap_or("?");
-                let name = str_field("name").unwrap_or("?");
+                let name = str_field("node_label").unwrap_or("?");
                 let script = str_field("script");
                 self.on_stage_started(node_id, name, script);
             }
             "StageCompleted" => {
                 let node_id = str_field("node_id").unwrap_or("?");
-                let name = str_field("name").unwrap_or("?");
+                let name = str_field("node_label").unwrap_or("?");
                 let duration_ms = u64_field("duration_ms");
                 let status = str_field("status").unwrap_or("success");
                 let succeeded = matches!(status, "success" | "partial_success");
@@ -742,8 +742,10 @@ impl ProgressUI {
             }
             "StageFailed" => {
                 let node_id = str_field("node_id").unwrap_or("?");
-                let name = str_field("name").unwrap_or("?");
-                let message = str_field("message").unwrap_or("unknown error");
+                let name = str_field("node_label").unwrap_or("?");
+                let message = str_field("error")
+                    .or_else(|| str_field("failure_reason"))
+                    .unwrap_or("unknown error");
                 self.finish_stage(node_id, name, red_cross(), "");
                 let red = Style::new().red();
                 let summary = last_line_truncated(message, 120);
@@ -758,12 +760,12 @@ impl ProgressUI {
                     .or_else(|| Some(String::new()));
             }
             "ParallelBranchStarted" => {
-                if let Some(branch) = str_field("branch") {
+                if let Some(branch) = str_field("node_id") {
                     self.on_parallel_branch_started(branch);
                 }
             }
             "ParallelBranchCompleted" => {
-                if let Some(branch) = str_field("branch") {
+                if let Some(branch) = str_field("node_id") {
                     let duration_ms = u64_field("duration_ms");
                     let status = str_field("status").unwrap_or("success");
                     self.on_parallel_branch_completed(branch, duration_ms, status);
@@ -773,7 +775,7 @@ impl ProgressUI {
                 self.parallel_parent = None;
             }
             "Agent.ToolCallStarted" => {
-                let stage = str_field("stage").unwrap_or("?");
+                let stage = str_field("node_id").unwrap_or("?");
                 let tool_name = str_field("tool_name").unwrap_or("?");
                 let tool_call_id = str_field("tool_call_id").unwrap_or("?");
                 let empty = serde_json::Value::Object(serde_json::Map::new());
@@ -785,7 +787,7 @@ impl ProgressUI {
                 self.on_tool_call_started(stage, tool_name, tool_call_id, arguments);
             }
             "Agent.ToolCallCompleted" => {
-                let stage = str_field("stage").unwrap_or("?");
+                let stage = str_field("node_id").unwrap_or("?");
                 let tool_call_id = str_field("tool_call_id").unwrap_or("?");
                 let is_error = envelope
                     .get("is_error")
@@ -794,7 +796,7 @@ impl ProgressUI {
                 self.on_tool_call_completed(stage, tool_call_id, is_error);
             }
             "Agent.AssistantMessage" => {
-                let stage = str_field("stage").unwrap_or("?");
+                let stage = str_field("node_id").unwrap_or("?");
                 let model = str_field("model").unwrap_or("?");
                 // Update turn count
                 if let Some(counts) = self.stage_counts.get_mut(stage) {
@@ -815,7 +817,7 @@ impl ProgressUI {
                 }
             }
             "Agent.CompactionStarted" => {
-                let stage = str_field("stage").unwrap_or("?");
+                let stage = str_field("node_id").unwrap_or("?");
                 if let ProgressRenderer::Tty(tty) = &self.renderer {
                     if let Some(active_stage) = self.active_stages.get_mut(stage) {
                         if let Some(old) = active_stage.compaction_bar.take() {
@@ -832,7 +834,7 @@ impl ProgressUI {
                 }
             }
             "Agent.CompactionCompleted" => {
-                let stage = str_field("stage").unwrap_or("?");
+                let stage = str_field("node_id").unwrap_or("?");
                 let original = u64_field("original_turn_count");
                 let preserved = u64_field("preserved_turn_count");
                 let tracked = u64_field("tracked_file_count");
@@ -872,6 +874,85 @@ impl ProgressUI {
             "RetroFailed" => {
                 let dur = format_duration_ms(u64_field("duration_ms"));
                 self.finish_stage("retro", "Retro", red_cross(), &dur);
+            }
+            "DevcontainerResolved" => {
+                let dockerfile_lines = u64_field("dockerfile_lines");
+                let environment_count = u64_field("environment_count");
+                let lifecycle_command_count = u64_field("lifecycle_command_count");
+                let workspace_folder = str_field("workspace_folder").unwrap_or("?").to_string();
+                let detail = format!(
+                    "{dockerfile_lines} Dockerfile lines, {environment_count} env vars, \
+                     {lifecycle_command_count} lifecycle cmds, {workspace_folder}"
+                );
+                match &self.renderer {
+                    ProgressRenderer::Tty(tty) => {
+                        let bar = tty.multi.add(ProgressBar::new_spinner());
+                        bar.set_style(style_header_done());
+                        bar.finish_with_message("Devcontainer: resolved".to_string());
+                        let detail_bar = tty.multi.insert_after(&bar, ProgressBar::new_spinner());
+                        detail_bar.set_style(style_sandbox_detail());
+                        detail_bar.finish_with_message(detail);
+                    }
+                    ProgressRenderer::Plain => {
+                        eprintln!("    Devcontainer: resolved");
+                        eprintln!("             {detail}");
+                    }
+                }
+            }
+            "DevcontainerLifecycleStarted" => {
+                let phase = str_field("phase").unwrap_or("?");
+                let command_count = u64_field("command_count") as usize;
+                self.devcontainer_command_count = command_count;
+                match &self.renderer {
+                    ProgressRenderer::Tty(tty) => {
+                        let bar = tty.multi.add(ProgressBar::new_spinner());
+                        bar.set_style(style_header_running());
+                        bar.set_message(format!(
+                            "Running devcontainer {phase} ({command_count} commands)..."
+                        ));
+                        bar.enable_steady_tick(Duration::from_millis(100));
+                        self.devcontainer_bar = Some(bar);
+                    }
+                    ProgressRenderer::Plain => {
+                        eprintln!("    Running devcontainer {phase} ({command_count} commands)...");
+                    }
+                }
+            }
+            "DevcontainerLifecycleCompleted" => {
+                let phase = str_field("phase").unwrap_or("?");
+                let duration_ms = u64_field("duration_ms");
+                let dur = format_duration_ms(duration_ms);
+                match &self.renderer {
+                    ProgressRenderer::Tty(_) => {
+                        if let Some(bar) = self.devcontainer_bar.take() {
+                            bar.set_style(style_header_done());
+                            bar.set_prefix(dur);
+                            bar.finish_with_message(format!("Devcontainer: {phase}"));
+                        }
+                    }
+                    ProgressRenderer::Plain => {
+                        eprintln!("    Devcontainer: {phase} ({dur})");
+                    }
+                }
+            }
+            "DevcontainerLifecycleFailed" => {
+                let phase = str_field("phase").unwrap_or("?");
+                let command = str_field("command").unwrap_or("?");
+                let exit_code = u64_field("exit_code");
+                let stderr_text = str_field("stderr").unwrap_or("");
+                if let Some(bar) = self.devcontainer_bar.take() {
+                    bar.abandon();
+                }
+                let red = Style::new().red();
+                let summary = if stderr_text.len() > 120 {
+                    &stderr_text[..120]
+                } else {
+                    stderr_text
+                };
+                self.insert_info_line(&format!(
+                    "{} Devcontainer {phase} command failed (exit {exit_code}): {command}\n         {summary}",
+                    red.apply_to("Error:")
+                ));
             }
             "CliEnsureStarted" => {
                 if let Some(cli_name) = str_field("cli_name") {
@@ -1812,11 +1893,11 @@ mod tests {
     fn handle_json_line_stage_started_and_completed() {
         let mut ui = ProgressUI::new(false, false);
 
-        let started = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"plan","name":"Plan","index":0,"script":null,"attempt":1,"max_attempts":1}"#;
+        let started = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"plan","node_label":"Plan","stage_index":0,"script":null,"attempt":1,"max_attempts":1}"#;
         ui.handle_json_line(started);
         assert!(ui.stage_counts.contains_key("plan"));
 
-        let completed = r#"{"ts":"2026-01-01T12:00:10Z","event":"StageCompleted","node_id":"plan","name":"Plan","index":0,"duration_ms":10000,"status":"success"}"#;
+        let completed = r#"{"ts":"2026-01-01T12:00:10Z","event":"StageCompleted","node_id":"plan","node_label":"Plan","stage_index":0,"duration_ms":10000,"status":"success"}"#;
         ui.handle_json_line(completed);
         // In Plain mode, finish_stage just prints, so verify no panic
     }
@@ -1826,14 +1907,14 @@ mod tests {
         let mut ui = ProgressUI::new(false, true); // verbose
 
         // Start a stage first
-        let started = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"code","name":"Code","index":0,"attempt":1,"max_attempts":1}"#;
+        let started = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"code","node_label":"Code","stage_index":0,"attempt":1,"max_attempts":1}"#;
         ui.handle_json_line(started);
 
-        let tc_start = r#"{"ts":"2026-01-01T12:00:01Z","event":"Agent.ToolCallStarted","stage":"code","tool_name":"read_file","tool_call_id":"tc1","arguments":{"path":"src/main.rs"}}"#;
+        let tc_start = r#"{"ts":"2026-01-01T12:00:01Z","event":"Agent.ToolCallStarted","node_id":"code","node_label":"code","tool_name":"read_file","tool_call_id":"tc1","arguments":{"path":"src/main.rs"}}"#;
         ui.handle_json_line(tc_start);
         assert_eq!(ui.stage_counts.get("code").map(|c| c.1), Some(1));
 
-        let tc_done = r#"{"ts":"2026-01-01T12:00:02Z","event":"Agent.ToolCallCompleted","stage":"code","tool_name":"read_file","tool_call_id":"tc1","is_error":false}"#;
+        let tc_done = r#"{"ts":"2026-01-01T12:00:02Z","event":"Agent.ToolCallCompleted","node_id":"code","node_label":"code","tool_name":"read_file","tool_call_id":"tc1","is_error":false}"#;
         ui.handle_json_line(tc_done);
     }
 
