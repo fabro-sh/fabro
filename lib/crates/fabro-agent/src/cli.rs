@@ -539,7 +539,6 @@ pub async fn run_with_args_and_client(
                             task,
                             ..
                         } => {
-                            let short_id = &agent_id[..8.min(agent_id.len())];
                             let task_preview = if task.len() > 60 {
                                 &task[..crate::truncation::floor_char_boundary(task, 60)]
                             } else {
@@ -548,7 +547,7 @@ pub async fn run_with_args_and_client(
                             eprintln!(
                                 "  {}",
                                 s.dim.apply_to(format!(
-                                    "\u{25b6} subagent {short_id} spawned (depth={depth}) task={task_preview:?}"
+                                    "\u{25b6} subagent {agent_id} spawned (depth={depth}) task={task_preview:?}"
                                 )),
                             );
                         }
@@ -558,11 +557,10 @@ pub async fn run_with_args_and_client(
                             success,
                             turns_used,
                         } => {
-                            let short_id = &agent_id[..8.min(agent_id.len())];
                             eprintln!(
                                 "  {}",
                                 s.dim.apply_to(format!(
-                                    "\u{25a0} subagent {short_id} completed (depth={depth}, success={success}, turns={turns_used})"
+                                    "\u{25a0} subagent {agent_id} completed (depth={depth}, success={success}, turns={turns_used})"
                                 )),
                             );
                         }
@@ -571,20 +569,18 @@ pub async fn run_with_args_and_client(
                             depth,
                             error,
                         } => {
-                            let short_id = &agent_id[..8.min(agent_id.len())];
                             eprintln!(
                                 "  {}",
                                 s.red.apply_to(format!(
-                                    "\u{2717} subagent {short_id} failed (depth={depth}): {error}"
+                                    "\u{2717} subagent {agent_id} failed (depth={depth}): {error}"
                                 )),
                             );
                         }
                         AgentEvent::SubAgentClosed { agent_id, depth } => {
-                            let short_id = &agent_id[..8.min(agent_id.len())];
                             eprintln!(
                                 "  {}",
                                 s.dim.apply_to(format!(
-                                    "\u{25a0} subagent {short_id} closed (depth={depth})"
+                                    "\u{25a0} subagent {agent_id} closed (depth={depth})"
                                 )),
                             );
                         }
@@ -593,11 +589,10 @@ pub async fn run_with_args_and_client(
                             event: child_event,
                             ..
                         } if verbose => {
-                            let short_id = &agent_id[..8.min(agent_id.len())];
                             eprintln!(
                                 "  {}",
                                 s.dim
-                                    .apply_to(format!("[subagent {short_id}] {child_event:?}")),
+                                    .apply_to(format!("[subagent {agent_id}] {child_event:?}")),
                             );
                         }
                         _ => {}

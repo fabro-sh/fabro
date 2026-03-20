@@ -64,7 +64,7 @@ impl SubAgentManager {
             )));
         }
 
-        let agent_id = uuid::Uuid::new_v4().to_string();
+        let agent_id = format!("{:08x}", uuid::Uuid::new_v4().as_fields().0);
         let followup_queue = session.followup_queue_handle();
         let cancel_token = session.cancel_token();
 
