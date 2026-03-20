@@ -57,6 +57,19 @@ impl From<CliSandboxProvider> for SandboxProvider {
     }
 }
 
+impl From<SandboxProvider> for CliSandboxProvider {
+    fn from(value: SandboxProvider) -> Self {
+        match value {
+            SandboxProvider::Local => Self::Local,
+            SandboxProvider::Docker => Self::Docker,
+            SandboxProvider::Daytona => Self::Daytona,
+            #[cfg(feature = "exedev")]
+            SandboxProvider::Exe => Self::Exe,
+            SandboxProvider::Ssh => Self::Ssh,
+        }
+    }
+}
+
 #[derive(Args)]
 pub struct RunArgs {
     /// Path to a .fabro workflow file or .toml task config (not required with --run-branch)
@@ -137,7 +150,7 @@ pub struct RunArgs {
 }
 
 /// Resolve goal from `--goal` string or `--goal-file` path.
-fn resolve_cli_goal(
+pub(crate) fn resolve_cli_goal(
     goal: &Option<String>,
     goal_file: &Option<PathBuf>,
 ) -> anyhow::Result<Option<String>> {
@@ -156,7 +169,7 @@ fn resolve_cli_goal(
 
 /// Apply goal to the graph from TOML config or CLI flag.
 /// Precedence: CLI `--goal` / `--goal-file` > TOML `goal` > DOT `graph [goal="..."]`.
-fn apply_goal_override(
+pub(crate) fn apply_goal_override(
     graph: &mut fabro_graphviz::graph::Graph,
     cli_goal: Option<&str>,
     toml_goal: Option<&str>,
@@ -174,7 +187,7 @@ fn apply_goal_override(
 /// Resolve model and provider through the full precedence chain:
 /// CLI flag > TOML config > run defaults > DOT graph attrs > provider-specific defaults.
 /// Then resolve through the catalog for alias expansion.
-fn resolve_model_provider(
+pub(crate) fn resolve_model_provider(
     cli_model: Option<&str>,
     cli_provider: Option<&str>,
     run_cfg: Option<&WorkflowRunConfig>,
@@ -221,7 +234,7 @@ fn resolve_model_provider(
 }
 
 /// Parse sandbox provider from an optional `SandboxConfig`.
-fn parse_sandbox_provider(
+pub(crate) fn parse_sandbox_provider(
     sandbox: Option<&sandbox_config::SandboxConfig>,
 ) -> anyhow::Result<Option<SandboxProvider>> {
     sandbox
@@ -232,7 +245,7 @@ fn parse_sandbox_provider(
 }
 
 /// Resolve sandbox provider: CLI flag > TOML config > run defaults > default.
-fn resolve_sandbox_provider(
+pub(crate) fn resolve_sandbox_provider(
     cli: Option<SandboxProvider>,
     run_cfg: Option<&WorkflowRunConfig>,
     run_defaults: &RunDefaults,

@@ -45,23 +45,24 @@ impl Interviewer for FileInterviewer {
         let poll = async {
             let response_path = self.response_path();
             loop {
-                if response_path.exists() {
-                    match tokio::fs::read_to_string(&response_path).await {
-                        Ok(data) => match serde_json::from_str::<Answer>(&data) {
-                            Ok(answer) => {
-                                // Clean up both files
-                                let _ = tokio::fs::remove_file(&request_path).await;
-                                let _ = tokio::fs::remove_file(&response_path).await;
-                                return answer;
-                            }
-                            Err(e) => {
-                                tracing::warn!(error = %e, "Failed to parse interview response, retrying");
-                                // File might be partially written, wait and retry
-                            }
-                        },
-                        Err(e) => {
-                            tracing::warn!(error = %e, "Failed to read interview response, retrying");
+                match tokio::fs::read_to_string(&response_path).await {
+                    Ok(data) => match serde_json::from_str::<Answer>(&data) {
+                        Ok(answer) => {
+                            // Clean up both files
+                            let _ = tokio::fs::remove_file(&request_path).await;
+                            let _ = tokio::fs::remove_file(&response_path).await;
+                            return answer;
                         }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "Failed to parse interview response, retrying");
+                            // File might be partially written, wait and retry
+                        }
+                    },
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        // Not written yet, poll again
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to read interview response, retrying");
                     }
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;

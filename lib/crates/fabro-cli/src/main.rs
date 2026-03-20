@@ -728,24 +728,7 @@ async fn main_inner() -> (String, Result<()>) {
                         .sandbox_provider
                         .parse::<fabro_workflows::sandbox_provider::SandboxProvider>()
                         .ok()
-                        .map(|sp| match sp {
-                            fabro_workflows::sandbox_provider::SandboxProvider::Local => {
-                                commands::run::CliSandboxProvider::Local
-                            }
-                            fabro_workflows::sandbox_provider::SandboxProvider::Docker => {
-                                commands::run::CliSandboxProvider::Docker
-                            }
-                            fabro_workflows::sandbox_provider::SandboxProvider::Daytona => {
-                                commands::run::CliSandboxProvider::Daytona
-                            }
-                            fabro_workflows::sandbox_provider::SandboxProvider::Ssh => {
-                                commands::run::CliSandboxProvider::Ssh
-                            }
-                            #[cfg(feature = "exedev")]
-                            fabro_workflows::sandbox_provider::SandboxProvider::Exe => {
-                                commands::run::CliSandboxProvider::Exe
-                            }
-                        }),
+                        .map(commands::run::CliSandboxProvider::from),
                     label: spec
                         .labels
                         .into_iter()

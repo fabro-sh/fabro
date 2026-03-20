@@ -1,117 +1,20 @@
 use std::path::PathBuf;
 
-use anyhow::{bail, Context};
+use anyhow::bail;
 use chrono::Local;
+use fabro_config::project as project_config;
 use fabro_config::run::RunDefaults;
-use fabro_config::{project as project_config, sandbox as sandbox_config};
 use fabro_validate::Severity;
 use fabro_workflows::run_spec::RunSpec;
 use fabro_workflows::sandbox_provider::SandboxProvider;
 use fabro_workflows::workflow::WorkflowBuilder;
 
-use super::run::RunArgs;
+use super::run::{
+    apply_goal_override, resolve_cli_goal, resolve_model_provider, resolve_sandbox_provider,
+    RunArgs,
+};
 use super::shared::{print_diagnostics, read_workflow_file, relative_path};
 use fabro_util::terminal::Styles;
-
-/// Resolve goal from `--goal` string or `--goal-file` path.
-fn resolve_cli_goal(
-    goal: &Option<String>,
-    goal_file: &Option<PathBuf>,
-) -> anyhow::Result<Option<String>> {
-    match (goal, goal_file) {
-        (Some(g), _) => Ok(Some(g.clone())),
-        (_, Some(path)) => {
-            let path = fabro_util::path::expand_tilde(path);
-            let content = std::fs::read_to_string(&path)
-                .with_context(|| format!("failed to read goal file: {}", path.display()))?;
-            tracing::debug!(path = %path.display(), "Goal loaded from file");
-            Ok(Some(content))
-        }
-        _ => Ok(None),
-    }
-}
-
-/// Apply goal to the graph from TOML config or CLI flag.
-fn apply_goal_override(
-    graph: &mut fabro_graphviz::graph::Graph,
-    cli_goal: Option<&str>,
-    toml_goal: Option<&str>,
-) {
-    let goal = cli_goal.or(toml_goal);
-    if let Some(goal) = goal {
-        graph.attrs.insert(
-            "goal".to_string(),
-            fabro_graphviz::graph::AttrValue::String(goal.to_string()),
-        );
-    }
-}
-
-/// Parse sandbox provider from an optional `SandboxConfig`.
-fn parse_sandbox_provider(
-    sandbox: Option<&sandbox_config::SandboxConfig>,
-) -> anyhow::Result<Option<SandboxProvider>> {
-    sandbox
-        .and_then(|s| s.provider.as_deref())
-        .map(|s| s.parse::<SandboxProvider>())
-        .transpose()
-        .map_err(|e| anyhow::anyhow!("Invalid sandbox provider: {e}"))
-}
-
-/// Resolve sandbox provider: CLI flag > TOML config > run defaults > default.
-fn resolve_sandbox_provider(
-    cli: Option<SandboxProvider>,
-    run_cfg: Option<&fabro_config::run::WorkflowRunConfig>,
-    run_defaults: &RunDefaults,
-) -> anyhow::Result<SandboxProvider> {
-    let toml = parse_sandbox_provider(run_cfg.and_then(|c| c.sandbox.as_ref()))?;
-    let defaults = parse_sandbox_provider(run_defaults.sandbox.as_ref())?;
-    Ok(cli.or(toml).or(defaults).unwrap_or_default())
-}
-
-/// Resolve model and provider through the full precedence chain.
-fn resolve_model_provider(
-    cli_model: Option<&str>,
-    cli_provider: Option<&str>,
-    run_cfg: Option<&fabro_config::run::WorkflowRunConfig>,
-    run_defaults: &RunDefaults,
-    graph: &fabro_graphviz::graph::Graph,
-) -> (String, Option<String>) {
-    let toml_model = run_cfg
-        .and_then(|c| c.llm.as_ref())
-        .and_then(|l| l.model.as_deref());
-    let toml_provider = run_cfg
-        .and_then(|c| c.llm.as_ref())
-        .and_then(|l| l.provider.as_deref());
-    let defaults_model = run_defaults.llm.as_ref().and_then(|l| l.model.as_deref());
-    let defaults_provider = run_defaults
-        .llm
-        .as_ref()
-        .and_then(|l| l.provider.as_deref());
-
-    let provider = cli_provider
-        .or(toml_provider)
-        .or(defaults_provider)
-        .or_else(|| graph.attrs.get("default_provider").and_then(|v| v.as_str()))
-        .map(String::from);
-
-    let model = cli_model
-        .or(toml_model)
-        .or(defaults_model)
-        .or_else(|| graph.attrs.get("default_model").and_then(|v| v.as_str()))
-        .map(String::from)
-        .unwrap_or_else(|| {
-            provider
-                .as_deref()
-                .and_then(fabro_llm::catalog::default_model_for_provider)
-                .unwrap_or_else(fabro_llm::catalog::default_model_from_env)
-                .id
-        });
-
-    match fabro_llm::catalog::get_model_info(&model) {
-        Some(info) => (info.id, provider.or(Some(info.provider))),
-        None => (model, provider),
-    }
-}
 
 /// Create a workflow run: allocate run directory, persist spec, return (run_id, run_dir).
 ///

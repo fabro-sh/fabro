@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSpec {
     pub run_id: String,
     pub workflow_path: PathBuf,
@@ -78,23 +78,7 @@ mod tests {
         spec.save(dir.path()).unwrap();
         let loaded = RunSpec::load(dir.path()).unwrap();
 
-        assert_eq!(loaded.run_id, spec.run_id);
-        assert_eq!(loaded.workflow_path, spec.workflow_path);
-        assert_eq!(loaded.dot_source, spec.dot_source);
-        assert_eq!(loaded.working_directory, spec.working_directory);
-        assert_eq!(loaded.goal, spec.goal);
-        assert_eq!(loaded.model, spec.model);
-        assert_eq!(loaded.provider, spec.provider);
-        assert_eq!(loaded.sandbox_provider, spec.sandbox_provider);
-        assert_eq!(loaded.labels, spec.labels);
-        assert_eq!(loaded.verbose, spec.verbose);
-        assert_eq!(loaded.no_retro, spec.no_retro);
-        assert_eq!(loaded.ssh, spec.ssh);
-        assert_eq!(loaded.preserve_sandbox, spec.preserve_sandbox);
-        assert_eq!(loaded.dry_run, spec.dry_run);
-        assert_eq!(loaded.auto_approve, spec.auto_approve);
-        assert_eq!(loaded.resume, spec.resume);
-        assert_eq!(loaded.run_branch, spec.run_branch);
+        assert_eq!(loaded, spec);
     }
 
     #[test]

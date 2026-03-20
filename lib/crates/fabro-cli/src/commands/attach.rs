@@ -2,7 +2,7 @@ use std::io::{BufRead, BufReader, IsTerminal};
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::{bail, Result};
 
@@ -26,7 +26,7 @@ pub async fn attach_run(
     let pid_path = run_dir.join("run.pid");
 
     let is_tty = std::io::stderr().is_terminal();
-    let progress_ui = Arc::new(Mutex::new(run_progress::ProgressUI::new(is_tty, false)));
+    let mut progress_ui = run_progress::ProgressUI::new(is_tty, false);
 
     // Install Ctrl+C handler
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -57,6 +57,7 @@ pub async fn attach_run(
     let file = std::fs::File::open(&progress_path)?;
     let mut reader = BufReader::new(file);
     let mut line = String::new();
+    let mut cached_pid: Option<u32> = None;
 
     loop {
         if cancelled.load(Ordering::Relaxed) {
@@ -85,10 +86,7 @@ pub async fn attach_run(
             }
             let trimmed = line.trim();
             if !trimmed.is_empty() {
-                progress_ui
-                    .lock()
-                    .expect("progress lock poisoned")
-                    .handle_json_line(trimmed);
+                progress_ui.handle_json_line(trimmed);
             }
         }
 
@@ -99,10 +97,7 @@ pub async fn attach_run(
                     serde_json::from_str::<fabro_interview::Question>(&request_data)
                 {
                     // Hide progress bars during interview
-                    progress_ui
-                        .lock()
-                        .expect("progress lock poisoned")
-                        .hide_bars();
+                    progress_ui.hide_bars();
 
                     // Prompt user via ConsoleInterviewer
                     let interviewer = ConsoleInterviewer::new(styles);
@@ -114,10 +109,7 @@ pub async fn attach_run(
                     }
 
                     // Show progress bars again
-                    progress_ui
-                        .lock()
-                        .expect("progress lock poisoned")
-                        .show_bars();
+                    progress_ui.show_bars();
                 }
             }
         }
@@ -125,28 +117,36 @@ pub async fn attach_run(
         // Check if run is complete
         if conclusion_path.exists() {
             // Drain any remaining lines
-            drain_remaining(&mut reader, &mut line, &progress_ui);
+            drain_remaining(&mut reader, &mut line, &mut progress_ui);
             break;
         }
 
-        // Check if engine process is still alive (if PID file exists)
-        if pid_path.exists() {
-            if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
-                if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                    if !process_alive(pid) && !conclusion_path.exists() {
-                        // Engine died without writing conclusion — drain and exit
-                        drain_remaining(&mut reader, &mut line, &progress_ui);
-                        break;
+        // Check if engine process is still alive (cache PID after first read)
+        let engine_alive = match cached_pid {
+            Some(pid) => process_alive(pid),
+            None => {
+                if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
+                    if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                        cached_pid = Some(pid);
+                        process_alive(pid)
+                    } else {
+                        true
                     }
+                } else {
+                    true // no PID file yet, assume alive
                 }
             }
+        };
+        if !engine_alive && !conclusion_path.exists() {
+            drain_remaining(&mut reader, &mut line, &mut progress_ui);
+            break;
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 
     // Finish progress bars
-    progress_ui.lock().expect("progress lock poisoned").finish();
+    progress_ui.finish();
 
     // Determine exit code from conclusion
     if conclusion_path.exists() {
@@ -173,7 +173,7 @@ pub async fn attach_run(
 fn drain_remaining(
     reader: &mut BufReader<std::fs::File>,
     line: &mut String,
-    progress_ui: &Arc<Mutex<run_progress::ProgressUI>>,
+    progress_ui: &mut run_progress::ProgressUI,
 ) {
     loop {
         line.clear();
@@ -182,10 +182,7 @@ fn drain_remaining(
             Ok(_) => {
                 let trimmed = line.trim();
                 if !trimmed.is_empty() {
-                    progress_ui
-                        .lock()
-                        .expect("progress lock poisoned")
-                        .handle_json_line(trimmed);
+                    progress_ui.handle_json_line(trimmed);
                 }
             }
             Err(_) => break,
