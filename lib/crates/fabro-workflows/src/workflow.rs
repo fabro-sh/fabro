@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::error::FabroError;
 use crate::transform::{
-    FileInliningTransform, ProviderInferenceTransform, StylesheetApplicationTransform, Transform,
+    FileInliningTransform, ModelResolutionTransform, StylesheetApplicationTransform, Transform,
     VariableExpansionTransform,
 };
 use fabro_graphviz::graph::Graph;
@@ -61,7 +61,7 @@ impl WorkflowBuilder {
         // Built-in transforms (PreambleTransform moved to engine execution time)
         VariableExpansionTransform.apply(&mut graph);
         StylesheetApplicationTransform.apply(&mut graph);
-        ProviderInferenceTransform.apply(&mut graph);
+        ModelResolutionTransform.apply(&mut graph);
 
         // File inlining when base_dir is provided
         if let Some(dir) = base_dir {
@@ -158,9 +158,10 @@ mod tests {
             start -> work -> exit
         }"#;
         let graph = prepare_from_source(dot).unwrap();
+        // "sonnet" alias is resolved to canonical ID "claude-sonnet-4-6"
         assert_eq!(
             graph.nodes["work"].attrs.get("model"),
-            Some(&AttrValue::String("sonnet".into()))
+            Some(&AttrValue::String("claude-sonnet-4-6".into()))
         );
     }
 

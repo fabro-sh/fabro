@@ -112,10 +112,10 @@ impl Transform for StylesheetApplicationTransform {
     }
 }
 
-/// For nodes with `model` but no `provider`, infer the provider from the model catalog.
-pub struct ProviderInferenceTransform;
+/// Resolves model aliases to canonical IDs and infers the provider from the model catalog.
+pub struct ModelResolutionTransform;
 
-impl Transform for ProviderInferenceTransform {
+impl Transform for ModelResolutionTransform {
     fn apply(&self, graph: &mut Graph) {
         for node in graph.nodes.values_mut() {
             let model = node
@@ -124,8 +124,13 @@ impl Transform for ProviderInferenceTransform {
                 .and_then(AttrValue::as_str)
                 .map(String::from);
             if let Some(model) = model {
-                if !node.attrs.contains_key("provider") {
-                    if let Some(info) = fabro_model::get_model_info(&model) {
+                if let Some(info) = fabro_model::get_model_info(&model) {
+                    // Resolve alias to canonical model ID
+                    if model != info.id {
+                        node.attrs
+                            .insert("model".to_string(), AttrValue::String(info.id.clone()));
+                    }
+                    if !node.attrs.contains_key("provider") {
                         node.attrs
                             .insert("provider".to_string(), AttrValue::String(info.provider));
                     }
@@ -637,7 +642,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // ProviderInferenceTransform tests
+    // ModelResolutionTransform tests
     // -----------------------------------------------------------------------
 
     #[test]
@@ -650,7 +655,7 @@ mod tests {
         );
         graph.nodes.insert("a".to_string(), node);
 
-        ProviderInferenceTransform.apply(&mut graph);
+        ModelResolutionTransform.apply(&mut graph);
 
         assert_eq!(
             graph.nodes["a"]
@@ -675,7 +680,7 @@ mod tests {
         );
         graph.nodes.insert("a".to_string(), node);
 
-        ProviderInferenceTransform.apply(&mut graph);
+        ModelResolutionTransform.apply(&mut graph);
 
         assert_eq!(
             graph.nodes["a"]
@@ -696,7 +701,7 @@ mod tests {
         );
         graph.nodes.insert("a".to_string(), node);
 
-        ProviderInferenceTransform.apply(&mut graph);
+        ModelResolutionTransform.apply(&mut graph);
 
         assert_eq!(graph.nodes["a"].attrs.get("provider"), None);
     }
@@ -707,9 +712,56 @@ mod tests {
         let node = Node::new("a");
         graph.nodes.insert("a".to_string(), node);
 
-        ProviderInferenceTransform.apply(&mut graph);
+        ModelResolutionTransform.apply(&mut graph);
 
         assert_eq!(graph.nodes["a"].attrs.get("provider"), None);
+    }
+
+    #[test]
+    fn model_resolution_resolves_alias_to_canonical_id() {
+        let mut graph = Graph::new("test");
+        let mut node = Node::new("a");
+        node.attrs
+            .insert("model".to_string(), AttrValue::String("gpt-54".to_string()));
+        graph.nodes.insert("a".to_string(), node);
+
+        ModelResolutionTransform.apply(&mut graph);
+
+        assert_eq!(
+            graph.nodes["a"]
+                .attrs
+                .get("model")
+                .and_then(AttrValue::as_str),
+            Some("gpt-5.4")
+        );
+        assert_eq!(
+            graph.nodes["a"]
+                .attrs
+                .get("provider")
+                .and_then(AttrValue::as_str),
+            Some("openai")
+        );
+    }
+
+    #[test]
+    fn model_resolution_keeps_canonical_id_unchanged() {
+        let mut graph = Graph::new("test");
+        let mut node = Node::new("a");
+        node.attrs.insert(
+            "model".to_string(),
+            AttrValue::String("gpt-5.4".to_string()),
+        );
+        graph.nodes.insert("a".to_string(), node);
+
+        ModelResolutionTransform.apply(&mut graph);
+
+        assert_eq!(
+            graph.nodes["a"]
+                .attrs
+                .get("model")
+                .and_then(AttrValue::as_str),
+            Some("gpt-5.4")
+        );
     }
 
     // -----------------------------------------------------------------------
