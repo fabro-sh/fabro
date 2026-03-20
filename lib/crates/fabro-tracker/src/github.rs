@@ -5,7 +5,7 @@ use fabro_github::{
     create_installation_access_token_for_projects, sign_app_jwt, GitHubAppCredentials,
 };
 
-use crate::{Issue, Tracker};
+use crate::{execute_graphql_request, Issue, Tracker};
 
 /// Execute a GitHub GraphQL request and return the response JSON.
 async fn execute_github_graphql(
@@ -15,47 +15,15 @@ async fn execute_github_graphql(
     query: &str,
     variables: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let body = serde_json::json!({
-        "query": query,
-        "variables": variables,
-    });
-
-    let resp = client
-        .post(endpoint)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Content-Type", "application/json")
-        .header("User-Agent", "fabro")
-        .timeout(std::time::Duration::from_secs(30))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("GitHub GraphQL request failed: {e}"))?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body_text = resp.text().await.unwrap_or_default();
-        tracing::warn!(status = %status, "GitHub GraphQL API error");
-        return Err(format!(
-            "GitHub GraphQL API returned HTTP {status}: {body_text}"
-        ));
-    }
-
-    let response: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse GitHub GraphQL response: {e}"))?;
-
-    if let Some(errors) = response["errors"].as_array() {
-        if !errors.is_empty() {
-            let messages: Vec<&str> = errors
-                .iter()
-                .filter_map(|e| e["message"].as_str())
-                .collect();
-            return Err(format!("GitHub GraphQL errors: {}", messages.join("; ")));
-        }
-    }
-
-    Ok(response)
+    execute_graphql_request(
+        client,
+        endpoint,
+        &format!("Bearer {token}"),
+        "GitHub",
+        query,
+        variables,
+    )
+    .await
 }
 
 /// A `Tracker` implementation backed by GitHub Projects V2.
@@ -272,16 +240,21 @@ async fn fetch_project_items_page(
         "cursor": cursor,
     });
 
-    let resp = execute_github_graphql(client, token, graphql_url, query, variables).await?;
+    let mut resp = execute_github_graphql(client, token, graphql_url, query, variables).await?;
 
-    let items_node = &resp["data"]["node"]["items"];
-    let nodes = items_node["nodes"].as_array().cloned().unwrap_or_default();
-    let has_next = items_node["pageInfo"]["hasNextPage"]
+    let has_next = resp["data"]["node"]["items"]["pageInfo"]["hasNextPage"]
         .as_bool()
         .unwrap_or(false);
-    let end_cursor = items_node["pageInfo"]["endCursor"]
+    let end_cursor = resp["data"]["node"]["items"]["pageInfo"]["endCursor"]
         .as_str()
         .map(|s| s.to_string());
+
+    // Take ownership of the nodes array in-place instead of deep-cloning it.
+    let nodes = resp
+        .pointer_mut("/data/node/items/nodes")
+        .and_then(|v| v.as_array_mut())
+        .map(std::mem::take)
+        .unwrap_or_default();
 
     Ok((nodes, has_next, end_cursor))
 }
@@ -476,7 +449,7 @@ impl Tracker for GitHubTracker {
 
         let id_set: std::collections::HashSet<&str> = ids.iter().copied().collect();
         let mut issue_map: std::collections::HashMap<String, Issue> =
-            std::collections::HashMap::new();
+            std::collections::HashMap::with_capacity(ids.len());
         let mut cursor: Option<String> = None;
 
         loop {
@@ -495,6 +468,10 @@ impl Tracker for GitHubTracker {
                         issue_map.insert(issue.id.clone(), issue);
                     }
                 }
+            }
+
+            if issue_map.len() == id_set.len() {
+                break;
             }
 
             if has_next {

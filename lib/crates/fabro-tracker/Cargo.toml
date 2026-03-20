@@ -11,7 +11,6 @@ doctest = false
 [dependencies]
 fabro-github = { path = "../fabro-github" }
 async-trait.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true
 tracing.workspace = true
