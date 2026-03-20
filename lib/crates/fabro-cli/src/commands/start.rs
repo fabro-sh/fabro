@@ -9,25 +9,19 @@ use anyhow::{bail, Result};
 pub fn start_run(run_dir: &Path) -> Result<u32> {
     // Validate status is Submitted
     let status_path = run_dir.join("status.json");
-    if status_path.exists() {
-        let record = fabro_workflows::run_status::RunStatusRecord::load(&status_path)
-            .map_err(|e| anyhow::anyhow!("Failed to read status.json: {e}"))?;
-        if record.status != fabro_workflows::run_status::RunStatus::Submitted {
+    match fabro_workflows::run_status::RunStatusRecord::load(&status_path) {
+        Ok(record) if record.status != fabro_workflows::run_status::RunStatus::Submitted => {
             bail!(
                 "Cannot start run: status is {:?}, expected Submitted",
                 record.status
             );
         }
+        _ => {} // No status file or Submitted — proceed
     }
 
-    // Validate spec.json exists
-    let spec_path = run_dir.join("spec.json");
-    if !spec_path.exists() {
-        bail!(
-            "Cannot start run: spec.json not found in {}",
-            run_dir.display()
-        );
-    }
+    // Validate spec.json is loadable
+    fabro_workflows::run_spec::RunSpec::load(run_dir)
+        .map_err(|e| anyhow::anyhow!("Cannot start run: failed to load spec.json: {e}"))?;
 
     let log_file = std::fs::File::create(run_dir.join("detach.log"))?;
 

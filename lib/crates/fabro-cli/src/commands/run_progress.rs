@@ -776,15 +776,13 @@ impl ProgressUI {
                 let stage = str_field("stage").unwrap_or("?");
                 let tool_name = str_field("tool_name").unwrap_or("?");
                 let tool_call_id = str_field("tool_call_id").unwrap_or("?");
-                let arguments = envelope
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+                let empty = serde_json::Value::Object(serde_json::Map::new());
+                let arguments = envelope.get("arguments").unwrap_or(&empty);
                 // Update tool_call count
                 if let Some(counts) = self.stage_counts.get_mut(stage) {
                     counts.1 += 1;
                 }
-                self.on_tool_call_started(stage, tool_name, tool_call_id, &arguments);
+                self.on_tool_call_started(stage, tool_name, tool_call_id, arguments);
             }
             "Agent.ToolCallCompleted" => {
                 let stage = str_field("stage").unwrap_or("?");
@@ -1560,43 +1558,33 @@ impl ProgressAwareInterviewer {
     pub fn new(inner: ConsoleInterviewer, progress: Arc<Mutex<ProgressUI>>) -> Self {
         Self { inner, progress }
     }
-
-    fn hide_bars(&self) {
-        let ui = self.progress.lock().expect("progress lock poisoned");
-        if let ProgressRenderer::Tty(tty) = &ui.renderer {
-            tty.multi.set_draw_target(ProgressDrawTarget::hidden());
-        }
-    }
-
-    fn show_bars(&self) {
-        let ui = self.progress.lock().expect("progress lock poisoned");
-        if let ProgressRenderer::Tty(tty) = &ui.renderer {
-            tty.multi.set_draw_target(ProgressDrawTarget::stderr());
-        }
-    }
 }
 
 #[async_trait]
 impl Interviewer for ProgressAwareInterviewer {
     async fn ask(&self, question: Question) -> Answer {
-        {
-            let ui = self.progress.lock().expect("progress lock poisoned");
-            if let ProgressRenderer::Tty(tty) = &ui.renderer {
-                let sep = tty.multi.add(ProgressBar::new_spinner());
-                sep.set_style(style_empty());
-                sep.finish();
-                tty.multi.set_draw_target(ProgressDrawTarget::hidden());
-            }
-        }
+        self.progress
+            .lock()
+            .expect("progress lock poisoned")
+            .hide_bars();
         let answer = self.inner.ask(question).await;
-        self.show_bars();
+        self.progress
+            .lock()
+            .expect("progress lock poisoned")
+            .show_bars();
         answer
     }
 
     async fn inform(&self, message: &str, stage: &str) {
-        self.hide_bars();
+        self.progress
+            .lock()
+            .expect("progress lock poisoned")
+            .hide_bars();
         self.inner.inform(message, stage).await;
-        self.show_bars();
+        self.progress
+            .lock()
+            .expect("progress lock poisoned")
+            .show_bars();
     }
 }
 
