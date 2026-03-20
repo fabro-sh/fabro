@@ -119,7 +119,7 @@ fn color_if(use_color: bool, color: Color) -> Option<Color> {
     }
 }
 
-fn model_row(model: &crate::types::ModelInfo, use_color: bool) -> Vec<CellStruct> {
+fn model_row(model: &ModelInfo, use_color: bool) -> Vec<CellStruct> {
     let aliases = model.aliases.join(", ");
     let cost = format!(
         "{} / {}",
