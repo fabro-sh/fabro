@@ -1,0 +1,5 @@
+{
+  "command": "cargo check -q --workspace 2>&1",
+  "language": "shell",
+  "timeout_ms": null
+}
