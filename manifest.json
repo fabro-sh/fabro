@@ -1,0 +1,13 @@
+{
+  "run_id": "01KM4CDSHYC8PQ5NNEHKPJD4V0",
+  "workflow_name": "ImplementAndSimplify",
+  "goal": "# Strip markdown headings and \"Plan:\" prefix from GOAL column in `fabro ps`\n\n## Context\nThe `GOAL` column in `fabro ps` output sometimes shows raw markdown heading markers (`#`, `##`, etc.) and a `Plan:` prefix, which is noisy. We want to strip these for cleaner output.\n\n## Change\n**File:** `lib/crates/fabro-cli/src/commands/runs.rs` — `truncate_goal` function (line 229)\n\nBefore truncating, add two stripping steps:\n1. Strip leading `#` characters and any whitespace after them (e.g. `## Fix bug` → `Fix bug`)\n2. Strip a leading `Plan:` prefix (case-sensitive)\n3. Trim whitespace after both strips\n\nCurrent code:\n```rust\nfn truncate_goal(goal: &str, max_len: usize) -> String {\n    let line = goal.lines().next().unwrap_or(\"\");\n    // ... truncation logic\n}\n```\n\nUpdated logic (inserted after extracting `line`, before truncation):\n```rust\nlet line = line.trim_start_matches('#').trim();\nlet line = line.strip_prefix(\"Plan:\").map(|s| s.trim()).unwrap_or(line);\n```\n\n## Verification\n- `cargo test -p fabro-cli` — run existing tests\n- `cargo clippy --workspace -- -D warnings` — lint check\n- Manual: `fabro ps -a` to confirm goals render without `#` or `Plan:` prefixes\n",
+  "start_time": "2026-03-20T01:05:53.398284Z",
+  "node_count": 12,
+  "edge_count": 15,
+  "run_branch": "fabro/run/01KM4CDSHYC8PQ5NNEHKPJD4V0",
+  "base_sha": "1fc3495ba93e711faaa7ea4db9819d1f61d03b78",
+  "base_branch": "main",
+  "workflow_slug": "implement",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro"
+}
