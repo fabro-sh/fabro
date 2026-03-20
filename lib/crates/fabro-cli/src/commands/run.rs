@@ -11,7 +11,7 @@ use fabro_agent::{DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox};
 use fabro_config::run::{RunDefaults, WorkflowRunConfig};
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, Interviewer};
-use fabro_llm::provider::Provider;
+use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 use fabro_validate::Severity;
 use fabro_workflows::backend::{AgentApiBackend, AgentCliBackend, BackendRouter};
@@ -208,13 +208,13 @@ fn resolve_model_provider(
         .unwrap_or_else(|| {
             provider
                 .as_deref()
-                .and_then(fabro_llm::catalog::default_model_for_provider)
-                .unwrap_or_else(fabro_llm::catalog::default_model_from_env)
+                .and_then(fabro_model::default_model_for_provider)
+                .unwrap_or_else(fabro_model::default_model_from_env)
                 .id
         });
 
     // Resolve model alias through catalog
-    match fabro_llm::catalog::get_model_info(&model) {
+    match fabro_model::get_model_info(&model) {
         Some(info) => (info.id, provider.or(Some(info.provider))),
         None => (model, provider),
     }
@@ -357,13 +357,13 @@ fn resolve_fallback_chain(
     provider: Provider,
     model: &str,
     run_cfg: Option<&WorkflowRunConfig>,
-) -> Vec<fabro_llm::catalog::FallbackTarget> {
+) -> Vec<fabro_model::FallbackTarget> {
     let fallbacks = run_cfg
         .and_then(|c| c.llm.as_ref())
         .and_then(|l| l.fallbacks.as_ref());
 
     match fallbacks {
-        Some(map) => fabro_llm::catalog::build_fallback_chain(provider.as_str(), model, map),
+        Some(map) => fabro_model::build_fallback_chain(provider.as_str(), model, map),
         None => Vec::new(),
     }
 }
@@ -1893,14 +1893,14 @@ async fn run_from_branch(
 
     let model = args
         .model
-        .unwrap_or_else(|| fabro_llm::catalog::default_model_from_env().id);
+        .unwrap_or_else(|| fabro_model::default_model_from_env().id);
     let provider_enum = args
         .provider
         .as_deref()
-        .map(|s| s.parse::<fabro_llm::provider::Provider>())
+        .map(|s| s.parse::<fabro_model::Provider>())
         .transpose()
         .map_err(|e| anyhow::anyhow!("{e}"))?
-        .unwrap_or_else(fabro_llm::provider::Provider::default_from_env);
+        .unwrap_or_else(fabro_model::Provider::default_from_env);
 
     // No fallback config available for branch resume; use empty chain.
     let fallback_chain = Vec::new();
@@ -2281,7 +2281,7 @@ async fn run_preflight(
 
                 // Resolve through catalog to get canonical model ID and provider
                 let (resolved_model, resolved_provider) =
-                    if let Some(info) = fabro_llm::catalog::get_model_info(node_model) {
+                    if let Some(info) = fabro_model::get_model_info(node_model) {
                         (info.id, info.provider)
                     } else {
                         (node_model.to_string(), node_provider.to_string())
@@ -2300,7 +2300,7 @@ async fn run_preflight(
             // If no LLM nodes found, fall back to the default model/provider
             if model_providers.is_empty() {
                 let (resolved_model, resolved_provider) =
-                    if let Some(info) = fabro_llm::catalog::get_model_info(&model) {
+                    if let Some(info) = fabro_model::get_model_info(&model) {
                         (info.id, info.provider)
                     } else {
                         (model.clone(), default_provider.to_string())

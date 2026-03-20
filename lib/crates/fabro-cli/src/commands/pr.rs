@@ -385,7 +385,7 @@ async fn create_from(
 
     let model = args
         .model
-        .unwrap_or_else(|| fabro_llm::catalog::default_model_from_env().id);
+        .unwrap_or_else(|| fabro_model::default_model_from_env().id);
 
     let record = fabro_workflows::pull_request::maybe_open_pull_request(
         &creds,

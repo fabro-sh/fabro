@@ -2,7 +2,7 @@ use std::path::Path;
 
 use async_trait::async_trait;
 
-use fabro_llm::provider::Provider;
+use fabro_model::Provider;
 
 use crate::context::keys;
 use crate::context::Context;

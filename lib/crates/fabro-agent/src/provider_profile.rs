@@ -6,8 +6,8 @@ use crate::subagent::{
     SubAgentManager,
 };
 use crate::tool_registry::ToolRegistry;
-use fabro_llm::provider::Provider;
 use fabro_llm::types::ToolDefinition;
+use fabro_model::Provider;
 use std::sync::Arc;
 
 /// Static capabilities of a provider profile.
@@ -82,7 +82,7 @@ pub trait ProviderProfile: Send + Sync {
 mod tests {
     use super::*;
     use crate::test_support::{MockSandbox, TestProfile};
-    use fabro_llm::provider::Provider;
+    use fabro_model::Provider;
 
     #[test]
     fn profile_provider_and_model() {

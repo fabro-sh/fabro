@@ -9,7 +9,7 @@ use crate::tools::{
     make_edit_file_tool, make_list_dir_tool, make_read_many_files_tool, register_core_tools,
     WebFetchSummarizer,
 };
-use fabro_llm::provider::Provider;
+use fabro_model::Provider;
 
 use super::EnvContext;
 
@@ -199,7 +199,7 @@ in the project.";
     }
 
     fn capabilities(&self) -> ProfileCapabilities {
-        let context_window_size = fabro_llm::catalog::get_model_info(self.model())
+        let context_window_size = fabro_model::get_model_info(self.model())
             .map(|info| info.limits.context_window as usize)
             .unwrap_or(1_000_000);
         ProfileCapabilities {

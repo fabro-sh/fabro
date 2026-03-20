@@ -32,6 +32,7 @@ fabro-interview = { path = "../fabro-interview" }
 fabro-util = { path = "../fabro-util" }
 fabro-git-storage = { path = "../fabro-git-storage" }
 fabro-llm = { path = "../fabro-llm" }
+fabro-model = { path = "../fabro-model" }
 fabro-retro = { path = "../fabro-retro" }
 thiserror.workspace = true
 serde.workspace = true

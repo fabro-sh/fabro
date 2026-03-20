@@ -2,8 +2,8 @@ use crate::config::SessionConfig;
 use crate::sandbox::GrepOptions;
 use crate::tool_registry::RegisteredTool;
 use fabro_llm::client::Client;
-use fabro_llm::provider::ModelId;
 use fabro_llm::types::{Message, Request, ToolDefinition};
+use fabro_model::ModelId;
 use std::borrow::Cow;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -1249,7 +1249,7 @@ mod tests {
         let client = make_client(provider).await;
         let summarizer = WebFetchSummarizer {
             client,
-            model_id: ModelId::new(fabro_llm::provider::Provider::Anthropic, "mock-model"),
+            model_id: ModelId::new(fabro_model::Provider::Anthropic, "mock-model"),
         };
 
         let tool = make_web_fetch_tool(Some(summarizer));
@@ -1342,7 +1342,7 @@ mod tests {
 
         let summarizer = WebFetchSummarizer {
             client,
-            model_id: ModelId::new(fabro_llm::provider::Provider::Anthropic, "target-model"),
+            model_id: ModelId::new(fabro_model::Provider::Anthropic, "target-model"),
         };
 
         let tool = make_web_fetch_tool(Some(summarizer));

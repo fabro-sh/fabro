@@ -9,7 +9,7 @@ use axum::extract::Query;
 use axum::response::Html;
 use axum::routing::get;
 use dialoguer::{MultiSelect, Select};
-use fabro_llm::provider::Provider;
+use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 use rand::Rng;
 use tokio::net::TcpListener;

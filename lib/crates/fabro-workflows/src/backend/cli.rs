@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::sandbox::ExecResult;
 use fabro_agent::Sandbox;
-use fabro_llm::provider::Provider;
+use fabro_model::Provider;
 
 use crate::context::Context;
 use crate::cost::compute_stage_cost;

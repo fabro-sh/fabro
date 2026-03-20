@@ -6,7 +6,7 @@ use crate::sandbox::Sandbox;
 use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{make_edit_file_tool, register_core_tools, WebFetchSummarizer};
-use fabro_llm::provider::Provider;
+use fabro_model::Provider;
 
 use super::EnvContext;
 
@@ -164,7 +164,7 @@ in the project. Keep changes minimal and focused on the task.";
     }
 
     fn capabilities(&self) -> ProfileCapabilities {
-        let context_window_size = fabro_llm::catalog::get_model_info(self.model())
+        let context_window_size = fabro_model::get_model_info(self.model())
             .map(|info| info.limits.context_window as usize)
             .unwrap_or_else(|| {
                 if self.model().contains("opus-4-6") {

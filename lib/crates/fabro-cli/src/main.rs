@@ -952,7 +952,7 @@ mod tests {
             Command::Provider {
                 command: ProviderCommand::Login(args),
             } => {
-                assert_eq!(args.provider, fabro_llm::provider::Provider::OpenAi);
+                assert_eq!(args.provider, fabro_model::Provider::OpenAi);
             }
             _ => panic!("unexpected command variant"),
         }
@@ -966,7 +966,7 @@ mod tests {
             Command::Provider {
                 command: ProviderCommand::Login(args),
             } => {
-                assert_eq!(args.provider, fabro_llm::provider::Provider::Anthropic);
+                assert_eq!(args.provider, fabro_model::Provider::Anthropic);
             }
             _ => panic!("unexpected command variant"),
         }

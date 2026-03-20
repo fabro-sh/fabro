@@ -934,7 +934,7 @@ impl LintRule for StylesheetModelKnownRule {
             for decl in &rule.declarations {
                 match decl.property.as_str() {
                     "model" => {
-                        if fabro_llm::catalog::get_model_info(&decl.value).is_none() {
+                        if fabro_model::get_model_info(&decl.value).is_none() {
                             diagnostics.push(Diagnostic {
                                 rule: self.name().to_string(),
                                 severity: Severity::Warning,
@@ -949,8 +949,8 @@ impl LintRule for StylesheetModelKnownRule {
                         }
                     }
                     "provider" => {
-                        if fabro_llm::Provider::from_str(&decl.value).is_err() {
-                            let valid: Vec<&str> = fabro_llm::Provider::ALL
+                        if fabro_model::Provider::from_str(&decl.value).is_err() {
+                            let valid: Vec<&str> = fabro_model::Provider::ALL
                                 .iter()
                                 .map(|p| p.as_str())
                                 .collect();
