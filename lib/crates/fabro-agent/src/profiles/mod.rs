@@ -9,7 +9,7 @@ pub use openai::OpenAiProfile;
 use crate::sandbox::Sandbox;
 use crate::skills::{format_skills_prompt_section, Skill};
 use crate::tool_registry::ToolRegistry;
-use fabro_llm::provider::Provider;
+use fabro_model::Provider;
 
 /// Common fields shared by all provider profiles.
 ///

@@ -1,4 +1,3 @@
-pub mod catalog;
 pub mod cli;
 pub mod client;
 pub mod error;
@@ -11,5 +10,5 @@ pub mod tools;
 pub mod types;
 
 // Re-export module-level default client helpers (Section 2.5).
+pub use fabro_model::{ModelId, Provider};
 pub use generate::set_default_client;
-pub use provider::{ModelId, Provider};

@@ -1,5 +1,70 @@
 use async_trait::async_trait;
 
+pub mod github;
+pub mod linear;
+
+pub use github::GitHubTracker;
+pub use linear::{LinearConfig, LinearTracker, LINEAR_API_ENDPOINT};
+
+/// Shared GraphQL execution used by both provider modules.
+///
+/// Posts a query + variables to `endpoint`, attaches the given `auth_header`
+/// as the `Authorization` value, and returns the parsed JSON response.
+/// Provider-specific error messages use `provider` as a label.
+pub(crate) async fn execute_graphql_request(
+    client: &reqwest::Client,
+    endpoint: &str,
+    auth_header: &str,
+    provider: &str,
+    query: &str,
+    variables: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({
+        "query": query,
+        "variables": variables,
+    });
+
+    let resp = client
+        .post(endpoint)
+        .header("Authorization", auth_header)
+        .header("Content-Type", "application/json")
+        .header("User-Agent", "fabro")
+        .timeout(std::time::Duration::from_secs(30))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("{provider} GraphQL request failed: {e}"))?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let body_text = resp.text().await.unwrap_or_default();
+        tracing::warn!(status = %status, provider, "GraphQL API error");
+        return Err(format!(
+            "{provider} GraphQL API returned HTTP {status}: {body_text}"
+        ));
+    }
+
+    let response: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse {provider} GraphQL response: {e}"))?;
+
+    if let Some(errors) = response["errors"].as_array() {
+        if !errors.is_empty() {
+            let messages: Vec<&str> = errors
+                .iter()
+                .filter_map(|e| e["message"].as_str())
+                .collect();
+            return Err(format!(
+                "{provider} GraphQL errors: {}",
+                messages.join("; ")
+            ));
+        }
+    }
+
+    Ok(response)
+}
+
 #[derive(Debug, Clone)]
 pub struct BlockerRef {
     pub id: String,

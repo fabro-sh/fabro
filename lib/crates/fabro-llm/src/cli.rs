@@ -13,9 +13,11 @@ use serde::Deserialize;
 
 use fabro_util::terminal::Styles;
 
-use crate::catalog;
+use fabro_model as catalog;
+
 use crate::generate::{self, GenerateParams};
-use crate::types::{Message, ModelInfo};
+use crate::types::Message;
+use fabro_model::ModelInfo;
 
 pub struct ServerConnection {
     pub client: reqwest::Client,
@@ -117,7 +119,7 @@ fn color_if(use_color: bool, color: Color) -> Option<Color> {
     }
 }
 
-fn model_row(model: &crate::types::ModelInfo, use_color: bool) -> Vec<CellStruct> {
+fn model_row(model: &ModelInfo, use_color: bool) -> Vec<CellStruct> {
     let aliases = model.aliases.join(", ");
     let cost = format!(
         "{} / {}",

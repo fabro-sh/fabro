@@ -907,7 +907,7 @@ fn check_model_known(
     context: &str,
     node_id: Option<String>,
 ) -> Option<Diagnostic> {
-    if fabro_llm::catalog::get_model_info(model).is_some() {
+    if fabro_model::get_model_info(model).is_some() {
         return None;
     }
     Some(Diagnostic {
@@ -928,10 +928,10 @@ fn check_provider_known(
     context: &str,
     node_id: Option<String>,
 ) -> Option<Diagnostic> {
-    if fabro_llm::Provider::from_str(provider).is_ok() {
+    if fabro_model::Provider::from_str(provider).is_ok() {
         return None;
     }
-    let valid: Vec<&str> = fabro_llm::Provider::ALL
+    let valid: Vec<&str> = fabro_model::Provider::ALL
         .iter()
         .map(|p| p.as_str())
         .collect();

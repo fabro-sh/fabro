@@ -23,6 +23,7 @@ anyhow.workspace = true
 dotenvy.workspace = true
 fabro-config = { path = "../fabro-config", features = ["clap"] }
 fabro-llm = { path = "../fabro-llm" }
+fabro-model = { path = "../fabro-model" }
 fabro-mcp = { path = "../fabro-mcp" }
 fabro-sandbox = { path = "../fabro-sandbox" }
 fabro-util = { path = "../fabro-util" }

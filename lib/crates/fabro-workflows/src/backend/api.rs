@@ -8,9 +8,9 @@ use fabro_agent::{
     AgentEvent, AnthropicProfile, GeminiProfile, OpenAiProfile, ProviderProfile, Sandbox, Session,
     SessionConfig, Turn,
 };
-use fabro_llm::catalog::FallbackTarget;
 use fabro_llm::client::Client;
-use fabro_llm::provider::Provider;
+use fabro_model::FallbackTarget;
+use fabro_model::Provider;
 
 use crate::context::Context;
 use crate::cost::compute_stage_cost;
@@ -268,9 +268,9 @@ impl CodergenBackend for AgentApiBackend {
             .map(String::from)
             .or_else(|| Some(self.provider.as_str().to_string()));
 
-        let max_tokens = node.max_tokens().or_else(|| {
-            fabro_llm::catalog::get_model_info(model).and_then(|m| m.limits.max_output)
-        });
+        let max_tokens = node
+            .max_tokens()
+            .or_else(|| fabro_model::get_model_info(model).and_then(|m| m.limits.max_output));
 
         let mut messages = Vec::new();
         if let Some(sys) = system_prompt {
@@ -343,8 +343,7 @@ impl CodergenBackend for AgentApiBackend {
                     );
 
                     let max_tokens = node.max_tokens().or_else(|| {
-                        fabro_llm::catalog::get_model_info(&target.model)
-                            .and_then(|m| m.limits.max_output)
+                        fabro_model::get_model_info(&target.model).and_then(|m| m.limits.max_output)
                     });
 
                     let fallback_request = fabro_llm::types::Request {

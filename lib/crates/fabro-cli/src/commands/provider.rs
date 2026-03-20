@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Args;
-use fabro_llm::provider::Provider;
+use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 
 use crate::provider_auth;
