@@ -1,0 +1,113 @@
+diff --git a/lib/crates/fabro-agent/src/cli.rs b/lib/crates/fabro-agent/src/cli.rs
+index c15c48dd..2e97d76c 100644
+--- a/lib/crates/fabro-agent/src/cli.rs
++++ b/lib/crates/fabro-agent/src/cli.rs
+@@ -539,7 +539,6 @@ pub async fn run_with_args_and_client(
+                             task,
+                             ..
+                         } => {
+-                            let short_id = &agent_id[..8.min(agent_id.len())];
+                             let task_preview = if task.len() > 60 {
+                                 &task[..crate::truncation::floor_char_boundary(task, 60)]
+                             } else {
+@@ -548,7 +547,7 @@ pub async fn run_with_args_and_client(
+                             eprintln!(
+                                 "  {}",
+                                 s.dim.apply_to(format!(
+-                                    "\u{25b6} subagent {short_id} spawned (depth={depth}) task={task_preview:?}"
++                                    "\u{25b6} subagent {agent_id} spawned (depth={depth}) task={task_preview:?}"
+                                 )),
+                             );
+                         }
+@@ -558,11 +557,10 @@ pub async fn run_with_args_and_client(
+                             success,
+                             turns_used,
+                         } => {
+-                            let short_id = &agent_id[..8.min(agent_id.len())];
+                             eprintln!(
+                                 "  {}",
+                                 s.dim.apply_to(format!(
+-                                    "\u{25a0} subagent {short_id} completed (depth={depth}, success={success}, turns={turns_used})"
++                                    "\u{25a0} subagent {agent_id} completed (depth={depth}, success={success}, turns={turns_used})"
+                                 )),
+                             );
+                         }
+@@ -571,20 +569,18 @@ pub async fn run_with_args_and_client(
+                             depth,
+                             error,
+                         } => {
+-                            let short_id = &agent_id[..8.min(agent_id.len())];
+                             eprintln!(
+                                 "  {}",
+                                 s.red.apply_to(format!(
+-                                    "\u{2717} subagent {short_id} failed (depth={depth}): {error}"
++                                    "\u{2717} subagent {agent_id} failed (depth={depth}): {error}"
+                                 )),
+                             );
+                         }
+                         AgentEvent::SubAgentClosed { agent_id, depth } => {
+-                            let short_id = &agent_id[..8.min(agent_id.len())];
+                             eprintln!(
+                                 "  {}",
+                                 s.dim.apply_to(format!(
+-                                    "\u{25a0} subagent {short_id} closed (depth={depth})"
++                                    "\u{25a0} subagent {agent_id} closed (depth={depth})"
+                                 )),
+                             );
+                         }
+@@ -593,11 +589,10 @@ pub async fn run_with_args_and_client(
+                             event: child_event,
+                             ..
+                         } if verbose => {
+-                            let short_id = &agent_id[..8.min(agent_id.len())];
+                             eprintln!(
+                                 "  {}",
+                                 s.dim
+-                                    .apply_to(format!("[subagent {short_id}] {child_event:?}")),
++                                    .apply_to(format!("[subagent {agent_id}] {child_event:?}")),
+                             );
+                         }
+                         _ => {}
+diff --git a/lib/crates/fabro-agent/src/subagent.rs b/lib/crates/fabro-agent/src/subagent.rs
+index b29124be..a1bfd21a 100644
+--- a/lib/crates/fabro-agent/src/subagent.rs
++++ b/lib/crates/fabro-agent/src/subagent.rs
+@@ -64,7 +64,7 @@ impl SubAgentManager {
+             )));
+         }
+ 
+-        let agent_id = uuid::Uuid::new_v4().to_string();
++        let agent_id = format!("{:08x}", uuid::Uuid::new_v4().as_fields().0);
+         let followup_queue = session.followup_queue_handle();
+         let cancel_token = session.cancel_token();
+ 
+diff --git a/lib/crates/fabro-cli/src/commands/run_progress.rs b/lib/crates/fabro-cli/src/commands/run_progress.rs
+index 8e821427..b33eea03 100644
+--- a/lib/crates/fabro-cli/src/commands/run_progress.rs
++++ b/lib/crates/fabro-cli/src/commands/run_progress.rs
+@@ -1413,11 +1413,10 @@ impl ProgressUI {
+             }
+             AgentEvent::SubAgentSpawned { agent_id, task, .. } if self.verbose => {
+                 let dim = Style::new().dim();
+-                let short_id = &agent_id[..agent_id.len().min(8)];
+                 self.insert_subagent_line_for_stage(
+                     stage_node_id,
+                     &dim.apply_to(format!(
+-                        "\u{25b8} subagent[{short_id}] \"{}\"",
++                        "\u{25b8} subagent[{agent_id}] \"{}\"",
+                         truncate(task, 50)
+                     ))
+                     .to_string(),
+@@ -1429,11 +1428,10 @@ impl ProgressUI {
+                 success,
+                 ..
+             } if self.verbose => {
+-                let short_id = &agent_id[..agent_id.len().min(8)];
+                 let glyph = if *success { green_check() } else { red_cross() };
+                 self.insert_subagent_line_for_stage(
+                     stage_node_id,
+-                    &format!("{glyph} subagent[{short_id}] ({turns_used} turns)"),
++                    &format!("{glyph} subagent[{agent_id}] ({turns_used} turns)"),
+                 );
+             }
+             _ => {}
