@@ -230,11 +230,15 @@ fn truncate_goal(goal: &str, max_len: usize) -> String {
     let line = goal.lines().next().unwrap_or("");
     let line = line.trim_start_matches('#').trim();
     let line = line.strip_prefix("Plan:").map(|s| s.trim()).unwrap_or(line);
-    let char_count = line.chars().count();
+    truncate_str(line, max_len)
+}
+
+fn truncate_str(s: &str, max_len: usize) -> String {
+    let char_count = s.chars().count();
     if char_count <= max_len {
-        return line.to_string();
+        return s.to_string();
     }
-    let truncated: String = line.chars().take(max_len - 3).collect();
+    let truncated: String = s.chars().take(max_len - 3).collect();
     format!("{truncated}...")
 }
 
@@ -406,7 +410,7 @@ fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Path) -
             };
             vec![
                 short_run_id(&detail.run_id).cell(),
-                truncate_goal(&detail.workflow_name, 16).cell(),
+                truncate_str(&detail.workflow_name, 16).cell(),
                 detail.status.to_string().cell(),
                 age.cell().justify(Justify::Right),
                 size_display.cell().justify(Justify::Right),
