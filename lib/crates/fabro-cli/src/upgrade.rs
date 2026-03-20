@@ -168,6 +168,7 @@ fn detect_target() -> Result<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Ok("aarch64-apple-darwin"),
         ("linux", "x86_64") => Ok("x86_64-unknown-linux-gnu"),
+        ("linux", "aarch64") => Ok("aarch64-unknown-linux-gnu"),
         (os, arch) => bail!("unsupported platform: {os}/{arch}"),
     }
 }
@@ -438,6 +439,8 @@ mod tests {
             assert_eq!(result.unwrap(), "x86_64-unknown-linux-gnu");
         } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
             assert_eq!(result.unwrap(), "aarch64-apple-darwin");
+        } else if cfg!(target_os = "linux") && cfg!(target_arch = "aarch64") {
+            assert_eq!(result.unwrap(), "aarch64-unknown-linux-gnu");
         }
         // On other platforms it would return an error, which is fine
     }
