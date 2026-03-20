@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use fabro_agent::Sandbox;
+use fabro_agent::{Sandbox, WorktreeConfig, WorktreeEvent, WorktreeSandbox};
 use tokio::sync::Semaphore;
 
 use crate::context::keys;
@@ -13,117 +13,10 @@ use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
 use crate::millis_u64;
 use crate::outcome::{Outcome, StageStatus};
-use fabro_agent::LocalSandbox;
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_hooks::{HookContext, HookEvent};
 
 use super::{EngineServices, Handler};
-
-// ---------------------------------------------------------------------------
-// WorktreeSandbox — decorates a Sandbox with a custom working dir
-// ---------------------------------------------------------------------------
-
-/// Wraps an existing `Sandbox` so that all operations use a
-/// different working directory (the worktree path inside a remote sandbox).
-struct WorktreeSandbox {
-    inner: Arc<dyn Sandbox>,
-    worktree_dir: String,
-}
-
-#[async_trait]
-impl Sandbox for WorktreeSandbox {
-    async fn read_file(
-        &self,
-        path: &str,
-        offset: Option<usize>,
-        limit: Option<usize>,
-    ) -> Result<String, String> {
-        self.inner.read_file(path, offset, limit).await
-    }
-    async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
-        self.inner.write_file(path, content).await
-    }
-    async fn delete_file(&self, path: &str) -> Result<(), String> {
-        self.inner.delete_file(path).await
-    }
-    async fn file_exists(&self, path: &str) -> Result<bool, String> {
-        self.inner.file_exists(path).await
-    }
-    async fn list_directory(
-        &self,
-        path: &str,
-        depth: Option<usize>,
-    ) -> Result<Vec<fabro_agent::sandbox::DirEntry>, String> {
-        self.inner.list_directory(path, depth).await
-    }
-    async fn exec_command(
-        &self,
-        command: &str,
-        timeout_ms: u64,
-        working_dir: Option<&str>,
-        env_vars: Option<&std::collections::HashMap<String, String>>,
-        cancel_token: Option<tokio_util::sync::CancellationToken>,
-    ) -> Result<fabro_agent::sandbox::ExecResult, String> {
-        // Default to worktree dir when no explicit working_dir is given
-        let wd = working_dir.unwrap_or(&self.worktree_dir);
-        self.inner
-            .exec_command(command, timeout_ms, Some(wd), env_vars, cancel_token)
-            .await
-    }
-    async fn grep(
-        &self,
-        pattern: &str,
-        path: &str,
-        options: &fabro_agent::sandbox::GrepOptions,
-    ) -> Result<Vec<String>, String> {
-        self.inner.grep(pattern, path, options).await
-    }
-    async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String> {
-        self.inner.glob(pattern, path).await
-    }
-    async fn download_file_to_local(
-        &self,
-        remote_path: &str,
-        local_path: &std::path::Path,
-    ) -> Result<(), String> {
-        self.inner
-            .download_file_to_local(remote_path, local_path)
-            .await
-    }
-    async fn upload_file_from_local(
-        &self,
-        local_path: &std::path::Path,
-        remote_path: &str,
-    ) -> Result<(), String> {
-        self.inner
-            .upload_file_from_local(local_path, remote_path)
-            .await
-    }
-    async fn initialize(&self) -> Result<(), String> {
-        self.inner.initialize().await
-    }
-    async fn cleanup(&self) -> Result<(), String> {
-        self.inner.cleanup().await
-    }
-    fn working_directory(&self) -> &str {
-        &self.worktree_dir
-    }
-    fn platform(&self) -> &str {
-        self.inner.platform()
-    }
-    fn os_version(&self) -> String {
-        self.inner.os_version()
-    }
-    fn is_remote(&self) -> bool {
-        self.inner.is_remote()
-    }
-    async fn ssh_access_command(&self) -> Result<Option<String>, String> {
-        self.inner.ssh_access_command().await
-    }
-    fn origin_url(&self) -> Option<&str> {
-        self.inner.origin_url()
-    }
-}
 
 /// Fans out execution to multiple branches concurrently.
 /// Each branch gets an isolated context clone and runs independently.
@@ -374,7 +267,7 @@ impl Handler for ParallelHandler {
                     crate::git::sanitize_ref_component(branch_key),
                 );
 
-                // Compute worktree path
+                // Compute worktree path (local vs remote path schemes differ)
                 let wt_path_str = if services.sandbox.is_remote() {
                     format!(
                         "{}/.fabro/runs/{}/parallel/{}/{}",
@@ -394,59 +287,38 @@ impl Handler for ParallelHandler {
                 };
                 tracing::debug!(branch = %branch_name, path = %wt_path_str, "Creating worktree for parallel branch");
 
-                // Create branch + worktree + reset via sandbox
-                if !crate::engine::git_create_branch_at(&*services.sandbox, &branch_name, bsha)
+                // Set up worktree via WorktreeSandbox
+                let wt_config = WorktreeConfig {
+                    branch_name: branch_name.clone(),
+                    base_sha: bsha.clone(),
+                    worktree_path: wt_path_str.clone(),
+                    skip_branch_creation: false,
+                };
+                let mut wt_sandbox = WorktreeSandbox::new(Arc::clone(&services.sandbox), wt_config);
+                let emitter_wt = Arc::clone(&services.emitter);
+                wt_sandbox.set_event_callback(Arc::new(move |event| match event {
+                    WorktreeEvent::BranchCreated { branch, sha } => {
+                        emitter_wt.emit(&WorkflowRunEvent::GitBranch { branch, sha });
+                    }
+                    WorktreeEvent::WorktreeAdded { path, branch } => {
+                        emitter_wt.emit(&WorkflowRunEvent::GitWorktreeAdd { path, branch });
+                    }
+                    WorktreeEvent::WorktreeRemoved { path } => {
+                        emitter_wt.emit(&WorkflowRunEvent::GitWorktreeRemove { path });
+                    }
+                    WorktreeEvent::Reset { sha } => {
+                        emitter_wt.emit(&WorkflowRunEvent::GitReset { sha });
+                    }
+                }));
+                wt_sandbox
+                    .initialize()
                     .await
-                {
-                    return Err(FabroError::handler(format!(
-                        "failed to create branch {branch_name}"
-                    )));
-                }
-                services.emitter.emit(&WorkflowRunEvent::GitBranch {
-                    branch: branch_name.clone(),
-                    sha: bsha.clone(),
-                });
-                if !crate::engine::git_replace_worktree(
-                    &*services.sandbox,
-                    &wt_path_str,
-                    &branch_name,
-                )
-                .await
-                {
-                    return Err(FabroError::handler(format!(
-                        "failed to add worktree {wt_path_str}"
-                    )));
-                }
-                services.emitter.emit(&WorkflowRunEvent::GitWorktreeAdd {
-                    path: wt_path_str.clone(),
-                    branch: branch_name.clone(),
-                });
-                let reset_cmd = format!("{} reset --hard {bsha}", crate::engine::GIT_REMOTE);
-                let reset_result = services
-                    .sandbox
-                    .exec_command(&reset_cmd, 30_000, Some(&wt_path_str), None, None)
-                    .await;
-                if !matches!(reset_result, Ok(ref r) if r.exit_code == 0) {
-                    return Err(FabroError::handler(format!(
-                        "failed to reset worktree {wt_path_str}"
-                    )));
-                }
-                services
-                    .emitter
-                    .emit(&WorkflowRunEvent::GitReset { sha: bsha.clone() });
+                    .map_err(|e| FabroError::handler(format!("worktree setup failed: {e}")))?;
 
                 branch_context.set(keys::INTERNAL_WORK_DIR, serde_json::json!(&wt_path_str));
 
-                // Create appropriate sandbox wrapper
                 let wt_path = PathBuf::from(&wt_path_str);
-                let env: Arc<dyn Sandbox> = if services.sandbox.is_remote() {
-                    Arc::new(WorktreeSandbox {
-                        inner: Arc::clone(&services.sandbox),
-                        worktree_dir: wt_path_str,
-                    })
-                } else {
-                    Arc::new(LocalSandbox::new(wt_path.clone()))
-                };
+                let env: Arc<dyn Sandbox> = Arc::new(wt_sandbox);
                 (env, Some(wt_path))
             } else {
                 (Arc::clone(&services.sandbox), None)

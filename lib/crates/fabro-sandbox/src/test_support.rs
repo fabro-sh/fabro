@@ -20,8 +20,12 @@ pub struct MockSandbox {
     pub written_files: Mutex<Vec<(String, String)>>,
     /// Captures the `timeout_ms` argument from `exec_command` calls.
     pub captured_timeout: Mutex<Option<u64>>,
-    /// Captures the `command` argument from `exec_command` calls.
+    /// Captures the `command` argument from `exec_command` calls (last only).
     pub captured_command: Mutex<Option<String>>,
+    /// Captures all `command` arguments from `exec_command` calls in order.
+    pub captured_commands: Mutex<Vec<String>>,
+    /// Captures all `working_dir` arguments from `exec_command` calls in order.
+    pub captured_working_dirs: Mutex<Vec<Option<String>>>,
     /// Captures the `env_vars` argument from `exec_command` calls.
     pub captured_env_vars: Mutex<Option<HashMap<String, String>>>,
     pub event_callback: Option<SandboxEventCallback>,
@@ -67,6 +71,8 @@ impl Default for MockSandbox {
             written_files: Mutex::new(Vec::new()),
             captured_timeout: Mutex::new(None),
             captured_command: Mutex::new(None),
+            captured_commands: Mutex::new(Vec::new()),
+            captured_working_dirs: Mutex::new(Vec::new()),
             captured_env_vars: Mutex::new(None),
             event_callback: None,
         }
@@ -126,7 +132,7 @@ impl Sandbox for MockSandbox {
         &self,
         command: &str,
         timeout_ms: u64,
-        _working_dir: Option<&str>,
+        working_dir: Option<&str>,
         env_vars: Option<&std::collections::HashMap<String, String>>,
         _cancel_token: Option<CancellationToken>,
     ) -> Result<ExecResult, String> {
@@ -138,6 +144,14 @@ impl Sandbox for MockSandbox {
             .captured_command
             .lock()
             .expect("captured_command lock poisoned") = Some(command.to_string());
+        self.captured_commands
+            .lock()
+            .expect("captured_commands lock poisoned")
+            .push(command.to_string());
+        self.captured_working_dirs
+            .lock()
+            .expect("captured_working_dirs lock poisoned")
+            .push(working_dir.map(String::from));
         *self
             .captured_env_vars
             .lock()

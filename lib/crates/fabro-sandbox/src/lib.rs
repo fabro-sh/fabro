@@ -2,6 +2,8 @@ pub mod sandbox;
 
 pub mod read_guard;
 
+pub mod worktree;
+
 #[cfg(feature = "ssh")]
 pub(crate) mod ssh_common;
 
@@ -32,6 +34,8 @@ pub use sandbox::{
 };
 
 pub use read_guard::ReadBeforeWriteSandbox;
+
+pub use worktree::{WorktreeConfig, WorktreeEvent, WorktreeEventCallback, WorktreeSandbox};
 
 #[cfg(feature = "local")]
 pub use local::LocalSandbox;

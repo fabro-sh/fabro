@@ -7,7 +7,10 @@ use std::time::Instant;
 use anyhow::{bail, Context};
 use chrono::{Local, Utc};
 use clap::{Args, ValueEnum};
-use fabro_agent::{DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox};
+use fabro_agent::{
+    DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox, WorktreeConfig, WorktreeEvent,
+    WorktreeSandbox,
+};
 use fabro_config::run::{RunDefaults, WorkflowRunConfig};
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, Interviewer};
@@ -827,22 +830,29 @@ pub async fn run_command(
         }
     }
 
-    // Set up git worktree for local isolation.
-    let (worktree_work_dir, worktree_path, worktree_branch, worktree_base_sha) =
-        if workdir_strategy == WorkdirStrategy::LocalWorktree {
-            match setup_worktree(&original_cwd, &run_dir, &run_id) {
-                Ok((wd, wt, branch, base)) => (Some(wd), Some(wt), Some(branch), Some(base)),
-                Err(e) => {
-                    eprintln!(
-                        "{} Git worktree setup failed ({e}), running without worktree.",
-                        styles.yellow.apply_to("Warning:"),
-                    );
-                    (None, None, None, None)
-                }
+    // Compute worktree configuration for local isolation.
+    // The actual git setup (branch, worktree add, reset) happens inside the sandbox
+    // creation block for SandboxProvider::Local below.
+    let (mut worktree_path, mut worktree_branch, mut worktree_base_sha) = if workdir_strategy
+        == WorkdirStrategy::LocalWorktree
+    {
+        match fabro_workflows::git::head_sha(&original_cwd) {
+            Ok(base_sha) => {
+                let branch_name = format!("{}{run_id}", fabro_workflows::git::RUN_BRANCH_PREFIX);
+                let wt_path = run_dir.join("worktree");
+                (Some(wt_path), Some(branch_name), Some(base_sha))
             }
-        } else {
-            (None, None, None, None)
-        };
+            Err(e) => {
+                eprintln!(
+                    "{} Git worktree setup failed ({e}), running without worktree.",
+                    styles.yellow.apply_to("Warning:"),
+                );
+                (None, None, None)
+            }
+        }
+    } else {
+        (None, None, None)
+    };
 
     if let Some(ref wt) = worktree_path {
         progress_ui
@@ -1115,12 +1125,85 @@ pub async fn run_command(
             Arc::new(env)
         }
         SandboxProvider::Local => {
-            let mut env = LocalSandbox::new(cwd.clone());
-            let emitter_cb = Arc::clone(&emitter);
-            env.set_event_callback(Arc::new(move |event| {
-                emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
-            }));
-            Arc::new(env)
+            if worktree_base_sha.is_some() {
+                // Set up a WorktreeSandbox for git-isolated local execution.
+                let base_sha = worktree_base_sha.clone().unwrap();
+                let branch_name = worktree_branch.clone().unwrap();
+                let wt_path = worktree_path.clone().unwrap();
+                let wt_path_str = wt_path.to_string_lossy().to_string();
+
+                let mut inner = LocalSandbox::new(original_cwd.clone());
+                let emitter_inner = Arc::clone(&emitter);
+                inner.set_event_callback(Arc::new(move |event| {
+                    emitter_inner
+                        .emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
+                }));
+
+                let wt_config = WorktreeConfig {
+                    branch_name: branch_name.clone(),
+                    base_sha: base_sha.clone(),
+                    worktree_path: wt_path_str.clone(),
+                    skip_branch_creation: false,
+                };
+                let mut wt_sandbox = WorktreeSandbox::new(Arc::new(inner), wt_config);
+                let emitter_wt = Arc::clone(&emitter);
+                wt_sandbox.set_event_callback(Arc::new(move |event| match event {
+                    WorktreeEvent::BranchCreated { branch, sha } => {
+                        emitter_wt.emit(&fabro_workflows::event::WorkflowRunEvent::GitBranch {
+                            branch,
+                            sha,
+                        });
+                    }
+                    WorktreeEvent::WorktreeAdded { path, branch } => {
+                        emitter_wt.emit(
+                            &fabro_workflows::event::WorkflowRunEvent::GitWorktreeAdd {
+                                path,
+                                branch,
+                            },
+                        );
+                    }
+                    WorktreeEvent::WorktreeRemoved { path } => {
+                        emitter_wt.emit(
+                            &fabro_workflows::event::WorkflowRunEvent::GitWorktreeRemove { path },
+                        );
+                    }
+                    WorktreeEvent::Reset { sha } => {
+                        emitter_wt
+                            .emit(&fabro_workflows::event::WorkflowRunEvent::GitReset { sha });
+                    }
+                }));
+
+                match wt_sandbox.initialize().await {
+                    Ok(()) => {
+                        std::env::set_current_dir(&wt_path)?;
+                        Arc::new(wt_sandbox) as Arc<dyn Sandbox>
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "{} Git worktree setup failed ({e}), running without worktree.",
+                            styles.yellow.apply_to("Warning:"),
+                        );
+                        // Reset so RunConfig does not enable git checkpointing
+                        worktree_path = None;
+                        worktree_branch = None;
+                        worktree_base_sha = None;
+                        let mut env = LocalSandbox::new(cwd.clone());
+                        let emitter_cb = Arc::clone(&emitter);
+                        env.set_event_callback(Arc::new(move |event| {
+                            emitter_cb
+                                .emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
+                        }));
+                        Arc::new(env) as Arc<dyn Sandbox>
+                    }
+                }
+            } else {
+                let mut env = LocalSandbox::new(cwd.clone());
+                let emitter_cb = Arc::clone(&emitter);
+                env.set_event_callback(Arc::new(move |event| {
+                    emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
+                }));
+                Arc::new(env)
+            }
         }
     };
 
@@ -1276,7 +1359,7 @@ pub async fn run_command(
 
     // 7. Execute
     // Set up metadata branch for git checkpointing (host or remote — engine fills remote)
-    let meta_branch = if worktree_work_dir.is_some() {
+    let meta_branch = if worktree_path.is_some() {
         Some(fabro_workflows::git::MetadataStore::branch_name(&run_id))
     } else {
         None
@@ -1290,7 +1373,7 @@ pub async fn run_command(
         cancel_token: None,
         dry_run: dry_run_mode,
         run_id: run_id.clone(),
-        git_checkpoint_enabled: worktree_work_dir.is_some(),
+        git_checkpoint_enabled: worktree_path.is_some(),
         host_repo_path: Some(original_cwd.clone()),
         base_sha: worktree_base_sha,
         run_branch: worktree_branch,
@@ -1690,29 +1773,6 @@ pub async fn run_command(
     }
 }
 
-/// Set up a git worktree for an isolated workflow run.
-/// Caller must have already verified the repo is clean via `git::ensure_clean`.
-/// Returns (work_dir, worktree_path, branch_name, base_sha) on success.
-fn setup_worktree(
-    original_cwd: &std::path::Path,
-    run_dir: &std::path::Path,
-    run_id: &str,
-) -> anyhow::Result<(PathBuf, PathBuf, String, String)> {
-    let base_sha =
-        fabro_workflows::git::head_sha(original_cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let branch_name = format!("{}{run_id}", fabro_workflows::git::RUN_BRANCH_PREFIX);
-    fabro_workflows::git::create_branch(original_cwd, &branch_name)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    let worktree_path = run_dir.join("worktree");
-    fabro_workflows::git::replace_worktree(original_cwd, &worktree_path, &branch_name)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    std::env::set_current_dir(&worktree_path)?;
-
-    Ok((worktree_path.clone(), worktree_path, branch_name, base_sha))
-}
-
 /// Resume a workflow run from a git run branch.
 ///
 /// Reads the checkpoint, manifest, and graph DOT from the metadata branch
@@ -1808,18 +1868,59 @@ async fn run_from_branch(
     let (sandbox, worktree_path): (Arc<dyn fabro_agent::Sandbox>, Option<PathBuf>) =
         match sandbox_provider {
             SandboxProvider::Local | SandboxProvider::Docker => {
-                // Re-attach worktree to the existing run branch
+                // Re-attach worktree to the existing run branch via WorktreeSandbox.
                 let wt = run_dir.join("worktree");
-                fabro_workflows::git::replace_worktree(&original_cwd, &wt, run_branch).map_err(
-                    |e| anyhow::anyhow!("failed to attach worktree to {run_branch}: {e}"),
-                )?;
-                std::env::set_current_dir(&wt)?;
-                let mut env = fabro_agent::LocalSandbox::new(wt.clone());
-                let emitter_cb = Arc::clone(&emitter);
-                env.set_event_callback(Arc::new(move |event| {
-                    emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
+                let wt_str = wt.to_string_lossy().to_string();
+
+                let mut inner = fabro_agent::LocalSandbox::new(original_cwd.clone());
+                let emitter_inner = Arc::clone(&emitter);
+                inner.set_event_callback(Arc::new(move |event| {
+                    emitter_inner
+                        .emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
                 }));
-                (Arc::new(env), Some(wt))
+
+                let wt_config = WorktreeConfig {
+                    branch_name: run_branch.to_string(),
+                    base_sha: base_sha.clone().unwrap_or_default(),
+                    worktree_path: wt_str.clone(),
+                    skip_branch_creation: true, // branch already exists on resume
+                };
+                let mut wt_sandbox = WorktreeSandbox::new(Arc::new(inner), wt_config);
+                let emitter_wt = Arc::clone(&emitter);
+                wt_sandbox.set_event_callback(Arc::new(move |event| match event {
+                    WorktreeEvent::BranchCreated { branch, sha } => {
+                        emitter_wt.emit(&fabro_workflows::event::WorkflowRunEvent::GitBranch {
+                            branch,
+                            sha,
+                        });
+                    }
+                    WorktreeEvent::WorktreeAdded { path, branch } => {
+                        emitter_wt.emit(
+                            &fabro_workflows::event::WorkflowRunEvent::GitWorktreeAdd {
+                                path,
+                                branch,
+                            },
+                        );
+                    }
+                    WorktreeEvent::WorktreeRemoved { path } => {
+                        emitter_wt.emit(
+                            &fabro_workflows::event::WorkflowRunEvent::GitWorktreeRemove { path },
+                        );
+                    }
+                    WorktreeEvent::Reset { sha } => {
+                        emitter_wt
+                            .emit(&fabro_workflows::event::WorkflowRunEvent::GitReset { sha });
+                    }
+                }));
+
+                wt_sandbox.initialize().await.map_err(|e| {
+                    anyhow::anyhow!("failed to attach worktree to {run_branch}: {e}")
+                })?;
+                std::env::set_current_dir(&wt)?;
+                (
+                    Arc::new(wt_sandbox) as Arc<dyn fabro_agent::Sandbox>,
+                    Some(wt),
+                )
             }
             #[cfg(feature = "exedev")]
             SandboxProvider::Exe => {

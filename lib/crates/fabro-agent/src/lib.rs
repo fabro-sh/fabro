@@ -40,8 +40,8 @@ pub use profiles::{AnthropicProfile, EnvContext, GeminiProfile, OpenAiProfile};
 pub use provider_profile::{ProfileCapabilities, ProviderProfile};
 pub use read_before_write_sandbox::ReadBeforeWriteSandbox;
 pub use sandbox::{
-    format_lines_numbered, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
-    SandboxEventCallback,
+    format_lines_numbered, shell_quote, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
+    SandboxEventCallback, WorktreeConfig, WorktreeEvent, WorktreeEventCallback, WorktreeSandbox,
 };
 pub use session::Session;
 pub use skills::Skill;
