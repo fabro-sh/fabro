@@ -195,6 +195,7 @@ impl AgentApiBackend {
         let config = SessionConfig {
             max_tokens: node.max_tokens(),
             reasoning_effort: Some(node.reasoning_effort().to_string()),
+            speed: node.speed().map(String::from),
             tool_hooks,
             mcp_servers,
             ..SessionConfig::default()
@@ -283,6 +284,7 @@ impl CodergenBackend for AgentApiBackend {
             messages,
             provider,
             reasoning_effort: Some(node.reasoning_effort().to_string()),
+            speed: node.speed().map(String::from),
             tools: None,
             tool_choice: None,
             response_format: None,
@@ -393,6 +395,7 @@ impl CodergenBackend for AgentApiBackend {
             cache_read_tokens: response.usage.cache_read_tokens,
             cache_write_tokens: response.usage.cache_write_tokens,
             reasoning_tokens: response.usage.reasoning_tokens,
+            speed: response.usage.speed.clone(),
             cost: None,
         };
         stage_usage.cost = compute_stage_cost(&stage_usage);
@@ -593,6 +596,7 @@ impl CodergenBackend for AgentApiBackend {
             cache_read_tokens: total_usage.cache_read_tokens,
             cache_write_tokens: total_usage.cache_write_tokens,
             reasoning_tokens: total_usage.reasoning_tokens,
+            speed: total_usage.speed.clone(),
             cost: None,
         };
         stage_usage.cost = compute_stage_cost(&stage_usage);

@@ -588,6 +588,7 @@ pub(crate) fn make_web_fetch_tool(summarizer: Option<WebFetchSummarizer>) -> Reg
                             max_tokens: None,
                             stop_sequences: None,
                             reasoning_effort: None,
+                            speed: None,
                             metadata: None,
                             provider_options: None,
                         };

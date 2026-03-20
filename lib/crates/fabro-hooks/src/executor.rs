@@ -343,6 +343,7 @@ impl HookExecutorImpl {
                     max_tokens: None,
                     stop_sequences: None,
                     reasoning_effort: None,
+                    speed: None,
                     metadata: None,
                     provider_options: None,
                 };

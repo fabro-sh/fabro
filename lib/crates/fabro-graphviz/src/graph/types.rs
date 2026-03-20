@@ -211,6 +211,11 @@ impl Node {
     }
 
     #[must_use]
+    pub fn speed(&self) -> Option<&str> {
+        self.str_attr("speed")
+    }
+
+    #[must_use]
     pub fn auto_status(&self) -> bool {
         self.bool_attr("auto_status").unwrap_or(false)
     }
@@ -534,6 +539,7 @@ mod tests {
         assert_eq!(node.model(), None);
         assert_eq!(node.provider(), None);
         assert_eq!(node.reasoning_effort(), "high");
+        assert_eq!(node.speed(), None);
         assert!(!node.auto_status());
         assert!(!node.allow_partial());
         assert_eq!(node.retry_policy(), None);

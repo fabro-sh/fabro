@@ -1199,6 +1199,7 @@ mod tests {
                     cache_read_tokens: Some(800),
                     cache_write_tokens: Some(50),
                     reasoning_tokens: Some(100),
+                    speed: None,
                     raw: None,
                 },
                 tool_call_count: 3,
@@ -2286,6 +2287,7 @@ mod tests {
                 cache_read_tokens: Some(3000),
                 cache_write_tokens: Some(500),
                 reasoning_tokens: Some(800),
+                speed: None,
                 raw: None,
             }),
         };

@@ -924,6 +924,7 @@ mod tests {
             cache_read_tokens: None,
             cache_write_tokens: None,
             reasoning_tokens: None,
+            speed: None,
             cost: None,
         });
         outcome.files_touched = vec!["src/lib.rs".to_string(), "src/main.rs".to_string()];
@@ -1190,6 +1191,7 @@ mod tests {
             cache_read_tokens: None,
             cache_write_tokens: None,
             reasoning_tokens: None,
+            speed: None,
             cost: None,
         });
         node_outcomes.insert("report".to_string(), outcome);
@@ -1369,6 +1371,7 @@ mod tests {
             cache_read_tokens: None,
             cache_write_tokens: None,
             reasoning_tokens: None,
+            speed: None,
             cost: None,
         });
         outcome.files_touched = vec!["src/lib.rs".to_string()];
@@ -1588,6 +1591,7 @@ mod tests {
             cache_read_tokens: None,
             cache_write_tokens: None,
             reasoning_tokens: None,
+            speed: None,
             cost: None,
         });
         outcome.files_touched = vec!["src/lib.rs".to_string()];

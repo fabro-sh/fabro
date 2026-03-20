@@ -459,6 +459,10 @@ impl Session {
         self.config.reasoning_effort = effort;
     }
 
+    pub fn set_speed(&mut self, speed: Option<String>) {
+        self.config.speed = speed;
+    }
+
     pub const fn set_max_turns(&mut self, max_turns: usize) {
         self.config.max_turns = max_turns;
     }
@@ -906,6 +910,7 @@ impl Session {
             }),
             stop_sequences: None,
             reasoning_effort: self.config.reasoning_effort.clone(),
+            speed: self.config.speed.clone(),
             metadata: None,
             provider_options: self.provider_profile.provider_options(),
         }
