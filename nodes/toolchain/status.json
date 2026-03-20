@@ -1,0 +1,6 @@
+{
+  "status": "success",
+  "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+  "failure_reason": null,
+  "timestamp": "2026-03-20T01:31:57.230854+00:00"
+}
