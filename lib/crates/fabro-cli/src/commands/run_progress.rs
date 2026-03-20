@@ -247,7 +247,13 @@ impl ProgressUI {
             "web_search" => arg("query").map(|q| truncate(q, 60)),
             "web_fetch" => arg("url").map(|u| truncate(u, 60)),
             "spawn_agent" => arg("task").map(|t| truncate(t, 60)),
+            "wait" | "send_input" | "close_agent" => arg("agent_id").map(String::from),
             "use_skill" => arg("skill_name").map(String::from),
+            "apply_patch" => Some("…".into()),
+            "read_many_files" => arguments
+                .get("paths")
+                .and_then(|v| v.as_array())
+                .map(|a| format!("{} files", a.len())),
             _ => None,
         };
 
