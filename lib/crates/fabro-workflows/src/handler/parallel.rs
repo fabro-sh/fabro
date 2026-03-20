@@ -3,14 +3,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use fabro_agent::{Sandbox, WorktreeConfig, WorktreeEvent, WorktreeSandbox};
+use fabro_agent::{Sandbox, WorktreeConfig, WorktreeEvent, WorktreeEventCallback, WorktreeSandbox};
 use tokio::sync::Semaphore;
 
 use crate::context::keys;
 use crate::context::Context;
 use crate::engine::set_hook_node;
 use crate::error::FabroError;
-use crate::event::WorkflowRunEvent;
+use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::millis_u64;
 use crate::outcome::{Outcome, StageStatus};
 use fabro_graphviz::graph::{Graph, Node};
@@ -89,6 +89,24 @@ fn parse_error_policy(raw: &str) -> ErrorPolicy {
         "ignore" => ErrorPolicy::Ignore,
         _ => ErrorPolicy::Continue,
     }
+}
+
+/// Bridge a [`WorktreeEvent`] to the corresponding workflow run event on `emitter`.
+fn worktree_event_callback(emitter: Arc<EventEmitter>) -> WorktreeEventCallback {
+    Arc::new(move |event| match event {
+        WorktreeEvent::BranchCreated { branch, sha } => {
+            emitter.emit(&WorkflowRunEvent::GitBranch { branch, sha });
+        }
+        WorktreeEvent::WorktreeAdded { path, branch } => {
+            emitter.emit(&WorkflowRunEvent::GitWorktreeAdd { path, branch });
+        }
+        WorktreeEvent::WorktreeRemoved { path } => {
+            emitter.emit(&WorkflowRunEvent::GitWorktreeRemove { path });
+        }
+        WorktreeEvent::Reset { sha } => {
+            emitter.emit(&WorkflowRunEvent::GitReset { sha });
+        }
+    })
 }
 
 struct BranchResult {
@@ -283,7 +301,7 @@ impl Handler for ParallelHandler {
                         .join(branch_key)
                         .join("worktree")
                         .to_string_lossy()
-                        .to_string()
+                        .into_owned()
                 };
                 tracing::debug!(branch = %branch_name, path = %wt_path_str, "Creating worktree for parallel branch");
 
@@ -295,21 +313,8 @@ impl Handler for ParallelHandler {
                     skip_branch_creation: false,
                 };
                 let mut wt_sandbox = WorktreeSandbox::new(Arc::clone(&services.sandbox), wt_config);
-                let emitter_wt = Arc::clone(&services.emitter);
-                wt_sandbox.set_event_callback(Arc::new(move |event| match event {
-                    WorktreeEvent::BranchCreated { branch, sha } => {
-                        emitter_wt.emit(&WorkflowRunEvent::GitBranch { branch, sha });
-                    }
-                    WorktreeEvent::WorktreeAdded { path, branch } => {
-                        emitter_wt.emit(&WorkflowRunEvent::GitWorktreeAdd { path, branch });
-                    }
-                    WorktreeEvent::WorktreeRemoved { path } => {
-                        emitter_wt.emit(&WorkflowRunEvent::GitWorktreeRemove { path });
-                    }
-                    WorktreeEvent::Reset { sha } => {
-                        emitter_wt.emit(&WorkflowRunEvent::GitReset { sha });
-                    }
-                }));
+                wt_sandbox
+                    .set_event_callback(worktree_event_callback(Arc::clone(&services.emitter)));
                 wt_sandbox
                     .initialize()
                     .await
@@ -532,7 +537,7 @@ impl Handler for ParallelHandler {
             // Clean up worktrees first
             for result in &results {
                 if let Some(ref wt_path) = result.worktree_path {
-                    let wt_str = wt_path.to_string_lossy().to_string();
+                    let wt_str = wt_path.to_string_lossy().into_owned();
                     crate::engine::git_remove_worktree(&*services.sandbox, &wt_str).await;
                     services
                         .emitter
