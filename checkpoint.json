@@ -1,11 +1,13 @@
 {
-  "timestamp": "2026-03-20T01:03:06.557737Z",
-  "current_node": "toolchain",
+  "timestamp": "2026-03-20T01:04:21.807730Z",
+  "current_node": "preflight_compile",
   "completed_nodes": [
     "start",
-    "toolchain"
+    "toolchain",
+    "preflight_compile"
   ],
   "node_retries": {
+    "preflight_compile": 1,
     "start": 1,
     "toolchain": 1
   },
@@ -14,22 +16,33 @@
     "internal.node_visit_count": 1,
     "failure_signature": "",
     "thread.start.current_node": "toolchain",
-    "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n",
+    "command.output": "",
     "internal.retry_count.toolchain": 1,
     "outcome": "success",
     "command.stderr": "",
-    "internal.thread_id": "start",
+    "internal.thread_id": "toolchain",
     "internal.fidelity": "compact",
-    "current.preamble": "Goal: # Plan: `fabro wait` subcommand\n\n## Context\n\n`fabro run` launches workflows but there's no way to block until a run completes and get its exit code — analogous to `docker wait`. This is useful for scripting (e.g., `fabro run smoke && echo \"passed\"`). The closest existing command is `fabro logs --follow`, which streams events and exits when `conclusion.json` appears.\n\n## Implementation\n\n### 1. Create `lib/crates/fabro-cli/src/commands/wait.rs`\n\n**Args struct:**\n```rust\n#[derive(Args)]\npub struct WaitArgs {\n    /// Run ID prefix or workflow name (most recent run)\n    pub run: String,\n\n    /// Maximum time to wait in seconds\n    #[arg(long, value_name = \"SECONDS\")]\n    pub timeout: Option<u64>,\n\n    /// Poll interval in milliseconds\n    #[arg(long, value_name = \"MS\", default_value = \"1000\")]\n    pub interval: u64,\n\n    /// Output conclusion as JSON\n    #[arg(long)]\n    pub json: bool,\n}\n```\n\n**`run()` function logic:**\n1. Resolve run via `fabro_workflows::run_lookup::resolve_run()` (same as `logs.rs:30`)\n2. Poll `status.json` via `RunStatusRecord::load()` every `--interval` ms\n3. When `status.is_terminal()`, read `conclusion.json` for summary data\n4. Print human-readable status line to stderr (or `--json` to stdout)\n5. Exit 0 for `Succeeded`, exit 1 for `Failed`/`Dead` (use `std::process::exit(1)` to avoid printing an error prefix, matching the pattern in `run.rs`)\n\n**Completion detection:** Poll `status.json` (not `conclusion.json` existence) since `RunStatusRecord::load()` gives the exact status. Fall back to `Dead` if the file is missing (orphaned run).\n\n**Timeout:** Check deadline after each sleep iteration; `bail!()` with a message if exceeded.\n\n### 2. Register in `lib/crates/fabro-cli/src/commands/mod.rs`\n\nAdd `pub mod wait;` between `validate` and `workflow` (line 19).\n\n### 3. Register in `lib/crates/fabro-cli/src/main.rs`\n\nThree insertions:\n\n**(a)** Command enum variant (after `Rewind` at ~line 149):\n```rust\n/// Block until a workflow run completes\nWait(commands::wait::WaitArgs),\n```\n\n**(b)** Command name mapping (~line 497):\n```rust\nCommand::Wait(_) => \"wait\",\n```\n\n**(c)** Execution dispatch (~line 884, after `Rewind`):\n```rust\nCommand::Wait(args) => {\n    let styles = fabro_util::terminal::Styles::detect_stderr();\n    commands::wait::run(args, &styles)?;\n}\n```\n\n### Reused utilities\n\n| Utility | Location |\n|---|---|\n| `resolve_run()` | `fabro_workflows::run_lookup` (run ID/name resolution) |\n| `RunStatusRecord::load()` | `fabro_workflows::run_status` (poll status.json) |\n| `RunStatus::is_terminal()` | `fabro_workflows::run_status` (check completion) |\n| `Conclusion::load()` | `fabro_workflows::conclusion` (read duration/cost) |\n| `format_duration_ms()` | `commands::shared` (human-readable duration) |\n| `Styles` | `fabro_util::terminal` (colored output) |\n\nNo new dependencies needed — all are already in `fabro-cli/Cargo.toml`.\n\n## Verification\n\n1. `cargo build -p fabro-cli` — compiles\n2. `cargo test -p fabro-cli` — existing tests pass\n3. `fabro wait --help` — shows usage\n4. `fabro wait <completed-run-id>` — prints status immediately, exits 0 or 1\n5. Launch a run, then `fabro wait <run-id>` — blocks until completion\n6. `fabro wait --timeout 1 <active-run>` — times out with error\n7. `fabro wait --json <run-id>` — prints JSON to stdout\n\n",
+    "current.preamble": "Goal: # Plan: `fabro wait` subcommand\n\n## Context\n\n`fabro run` launches workflows but there's no way to block until a run completes and get its exit code — analogous to `docker wait`. This is useful for scripting (e.g., `fabro run smoke && echo \"passed\"`). The closest existing command is `fabro logs --follow`, which streams events and exits when `conclusion.json` appears.\n\n## Implementation\n\n### 1. Create `lib/crates/fabro-cli/src/commands/wait.rs`\n\n**Args struct:**\n```rust\n#[derive(Args)]\npub struct WaitArgs {\n    /// Run ID prefix or workflow name (most recent run)\n    pub run: String,\n\n    /// Maximum time to wait in seconds\n    #[arg(long, value_name = \"SECONDS\")]\n    pub timeout: Option<u64>,\n\n    /// Poll interval in milliseconds\n    #[arg(long, value_name = \"MS\", default_value = \"1000\")]\n    pub interval: u64,\n\n    /// Output conclusion as JSON\n    #[arg(long)]\n    pub json: bool,\n}\n```\n\n**`run()` function logic:**\n1. Resolve run via `fabro_workflows::run_lookup::resolve_run()` (same as `logs.rs:30`)\n2. Poll `status.json` via `RunStatusRecord::load()` every `--interval` ms\n3. When `status.is_terminal()`, read `conclusion.json` for summary data\n4. Print human-readable status line to stderr (or `--json` to stdout)\n5. Exit 0 for `Succeeded`, exit 1 for `Failed`/`Dead` (use `std::process::exit(1)` to avoid printing an error prefix, matching the pattern in `run.rs`)\n\n**Completion detection:** Poll `status.json` (not `conclusion.json` existence) since `RunStatusRecord::load()` gives the exact status. Fall back to `Dead` if the file is missing (orphaned run).\n\n**Timeout:** Check deadline after each sleep iteration; `bail!()` with a message if exceeded.\n\n### 2. Register in `lib/crates/fabro-cli/src/commands/mod.rs`\n\nAdd `pub mod wait;` between `validate` and `workflow` (line 19).\n\n### 3. Register in `lib/crates/fabro-cli/src/main.rs`\n\nThree insertions:\n\n**(a)** Command enum variant (after `Rewind` at ~line 149):\n```rust\n/// Block until a workflow run completes\nWait(commands::wait::WaitArgs),\n```\n\n**(b)** Command name mapping (~line 497):\n```rust\nCommand::Wait(_) => \"wait\",\n```\n\n**(c)** Execution dispatch (~line 884, after `Rewind`):\n```rust\nCommand::Wait(args) => {\n    let styles = fabro_util::terminal::Styles::detect_stderr();\n    commands::wait::run(args, &styles)?;\n}\n```\n\n### Reused utilities\n\n| Utility | Location |\n|---|---|\n| `resolve_run()` | `fabro_workflows::run_lookup` (run ID/name resolution) |\n| `RunStatusRecord::load()` | `fabro_workflows::run_status` (poll status.json) |\n| `RunStatus::is_terminal()` | `fabro_workflows::run_status` (check completion) |\n| `Conclusion::load()` | `fabro_workflows::conclusion` (read duration/cost) |\n| `format_duration_ms()` | `commands::shared` (human-readable duration) |\n| `Styles` | `fabro_util::terminal` (colored output) |\n\nNo new dependencies needed — all are already in `fabro-cli/Cargo.toml`.\n\n## Verification\n\n1. `cargo build -p fabro-cli` — compiles\n2. `cargo test -p fabro-cli` — existing tests pass\n3. `fabro wait --help` — shows usage\n4. `fabro wait <completed-run-id>` — prints status immediately, exits 0 or 1\n5. Launch a run, then `fabro wait <run-id>` — blocks until completion\n6. `fabro wait --timeout 1 <active-run>` — times out with error\n7. `fabro wait --json <run-id>` — prints JSON to stdout\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n",
     "graph.rankdir": "LR",
+    "thread.toolchain.current_node": "preflight_compile",
     "graph.goal": "# Plan: `fabro wait` subcommand\n\n## Context\n\n`fabro run` launches workflows but there's no way to block until a run completes and get its exit code — analogous to `docker wait`. This is useful for scripting (e.g., `fabro run smoke && echo \"passed\"`). The closest existing command is `fabro logs --follow`, which streams events and exits when `conclusion.json` appears.\n\n## Implementation\n\n### 1. Create `lib/crates/fabro-cli/src/commands/wait.rs`\n\n**Args struct:**\n```rust\n#[derive(Args)]\npub struct WaitArgs {\n    /// Run ID prefix or workflow name (most recent run)\n    pub run: String,\n\n    /// Maximum time to wait in seconds\n    #[arg(long, value_name = \"SECONDS\")]\n    pub timeout: Option<u64>,\n\n    /// Poll interval in milliseconds\n    #[arg(long, value_name = \"MS\", default_value = \"1000\")]\n    pub interval: u64,\n\n    /// Output conclusion as JSON\n    #[arg(long)]\n    pub json: bool,\n}\n```\n\n**`run()` function logic:**\n1. Resolve run via `fabro_workflows::run_lookup::resolve_run()` (same as `logs.rs:30`)\n2. Poll `status.json` via `RunStatusRecord::load()` every `--interval` ms\n3. When `status.is_terminal()`, read `conclusion.json` for summary data\n4. Print human-readable status line to stderr (or `--json` to stdout)\n5. Exit 0 for `Succeeded`, exit 1 for `Failed`/`Dead` (use `std::process::exit(1)` to avoid printing an error prefix, matching the pattern in `run.rs`)\n\n**Completion detection:** Poll `status.json` (not `conclusion.json` existence) since `RunStatusRecord::load()` gives the exact status. Fall back to `Dead` if the file is missing (orphaned run).\n\n**Timeout:** Check deadline after each sleep iteration; `bail!()` with a message if exceeded.\n\n### 2. Register in `lib/crates/fabro-cli/src/commands/mod.rs`\n\nAdd `pub mod wait;` between `validate` and `workflow` (line 19).\n\n### 3. Register in `lib/crates/fabro-cli/src/main.rs`\n\nThree insertions:\n\n**(a)** Command enum variant (after `Rewind` at ~line 149):\n```rust\n/// Block until a workflow run completes\nWait(commands::wait::WaitArgs),\n```\n\n**(b)** Command name mapping (~line 497):\n```rust\nCommand::Wait(_) => \"wait\",\n```\n\n**(c)** Execution dispatch (~line 884, after `Rewind`):\n```rust\nCommand::Wait(args) => {\n    let styles = fabro_util::terminal::Styles::detect_stderr();\n    commands::wait::run(args, &styles)?;\n}\n```\n\n### Reused utilities\n\n| Utility | Location |\n|---|---|\n| `resolve_run()` | `fabro_workflows::run_lookup` (run ID/name resolution) |\n| `RunStatusRecord::load()` | `fabro_workflows::run_status` (poll status.json) |\n| `RunStatus::is_terminal()` | `fabro_workflows::run_status` (check completion) |\n| `Conclusion::load()` | `fabro_workflows::conclusion` (read duration/cost) |\n| `format_duration_ms()` | `commands::shared` (human-readable duration) |\n| `Styles` | `fabro_util::terminal` (colored output) |\n\nNo new dependencies needed — all are already in `fabro-cli/Cargo.toml`.\n\n## Verification\n\n1. `cargo build -p fabro-cli` — compiles\n2. `cargo test -p fabro-cli` — existing tests pass\n3. `fabro wait --help` — shows usage\n4. `fabro wait <completed-run-id>` — prints status immediately, exits 0 or 1\n5. Launch a run, then `fabro wait <run-id>` — blocks until completion\n6. `fabro wait --timeout 1 <active-run>` — times out with error\n7. `fabro wait --json <run-id>` — prints JSON to stdout\n",
     "internal.run_id": "01KM4C8NP9T0GX1XX23NCZ8HVQ",
-    "current_node": "toolchain",
+    "current_node": "preflight_compile",
     "internal.retry_count.start": 1,
+    "internal.retry_count.preflight_compile": 1,
     "graph.model_stylesheet": "\n            * { backend: api; model: claude-opus-4-6;}\n        "
   },
   "logs": [],
   "node_outcomes": {
+    "preflight_compile": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": ""
+      },
+      "notes": "Script completed: cargo check -q --workspace 2>&1",
+      "duration_ms": 72008
+    },
     "toolchain": {
       "status": "success",
       "context_updates": {
@@ -44,9 +57,10 @@
       "duration_ms": 0
     }
   },
-  "next_node_id": "preflight_compile",
+  "next_node_id": "preflight_lint",
   "node_visits": {
     "start": 1,
-    "toolchain": 1
+    "toolchain": 1,
+    "preflight_compile": 1
   }
 }
