@@ -1,19 +1,23 @@
 {
-  "timestamp": "2026-03-20T01:02:00.293925Z",
-  "current_node": "toolchain",
+  "timestamp": "2026-03-20T01:03:01.493439Z",
+  "current_node": "preflight_compile",
   "completed_nodes": [
     "start",
-    "toolchain"
+    "toolchain",
+    "preflight_compile"
   ],
   "node_retries": {
     "start": 1,
-    "toolchain": 1
+    "toolchain": 1,
+    "preflight_compile": 1
   },
   "context_values": {
-    "internal.thread_id": "start",
+    "internal.thread_id": "toolchain",
     "graph.rankdir": "LR",
-    "current.preamble": "Goal: # Plan: Add node-level model validation + missing catalog aliases\n\n## Context\n\nRunning `fabro run` with `model=\"gpt-54\"` on a workflow node fails at runtime with `LLM error: Not found on anthropic: model: gpt-54`. Two issues contribute:\n\n1. `fabro validate` doesn't warn about unknown model names on **nodes** (only validates stylesheet models via `StylesheetModelKnownRule`)\n2. The catalog is missing hyphenated aliases like `gpt-54` for `gpt-5.4` (only has `gpt54`)\n\n## Step 1: Add hyphenated aliases to catalog\n\n**File: `lib/crates/fabro-llm/src/catalog.json`**\n\n| Model ID | Current aliases | Add |\n|---|---|---|\n| `gpt-5.4` (line 161) | `[\"gpt54\"]` | `\"gpt-54\"` |\n| `gpt-5.4-pro` (line 178) | `[\"gpt54-pro\"]` | `\"gpt-54-pro\"` |\n| `gpt-5.4-mini` (line 194) | `[\"gpt54-mini\"]` | `\"gpt-54-mini\"` |\n\n**File: `lib/crates/fabro-llm/src/catalog.rs`** — add alias resolution tests:\n- `gpt_54_hyphenated_alias` → asserts `get_model_info(\"gpt-54\")` resolves to `gpt-5.4`\n- `gpt_54_pro_hyphenated_alias` → same for `gpt-54-pro`\n- `gpt_54_mini_hyphenated_alias` → same for `gpt-54-mini`\n\nUpdate insta snapshots (`cargo insta review`) for `gpt_5_4_in_catalog` and `gpt_5_4_pro_in_catalog`.\n\n## Step 2: Add `NodeModelKnownRule`\n\n**File: `lib/crates/fabro-validate/src/rules.rs`**\n\nAdd `NodeModelKnownRule` right after `StylesheetModelKnownRule` (after line 977). Mirrors the stylesheet rule but iterates nodes:\n\n- Iterate `graph.nodes.values()`\n- If `node.model()` is `Some` and `get_model_info()` returns `None` → emit `Severity::Warning`\n- If `node.provider()` is `Some` and `Provider::from_str()` fails → emit `Severity::Warning`\n- Set `node_id: Some(node.id.clone())` on each diagnostic\n\nRegister `Box::new(NodeModelKnownRule)` in `built_in_rules()` (line 33, after `StylesheetModelKnownRule`).\n\n**Tests** (following existing `stylesheet_model_known_rule_*` pattern):\n- `node_model_known_rule_valid_model` — known model, no warnings\n- `node_model_known_rule_unknown_model` — unknown model, 1 warning with model name and node ID\n- `node_model_known_rule_alias` — alias like `\"opus\"`, no warnings\n- `node_model_known_rule_unknown_provider` — bad provider, 1 warning\n- `node_model_known_rule_no_model_no_provider` — plain node, no warnings\n\n## Step 3: Fix the workflow\n\n**File: `fabro/workflows/implement/workflow.fabro` line 19**\n\nChange `model=\"gpt-54\"` to `model=\"gpt-54\"` (now valid after Step 1 adds the alias). No change needed — it will just work.\n\n## Verification\n\n```bash\ncargo test -p fabro-llm\ncargo insta review          # accept updated snapshots\ncargo test -p fabro-validate\ncargo clippy --workspace -- -D warnings\ncargo fmt --check --all\n```\n\nThen run `fabro validate fabro/workflows/implement/workflow.fabro` to confirm no warnings.\n\n",
+    "current.preamble": "Goal: # Plan: Add node-level model validation + missing catalog aliases\n\n## Context\n\nRunning `fabro run` with `model=\"gpt-54\"` on a workflow node fails at runtime with `LLM error: Not found on anthropic: model: gpt-54`. Two issues contribute:\n\n1. `fabro validate` doesn't warn about unknown model names on **nodes** (only validates stylesheet models via `StylesheetModelKnownRule`)\n2. The catalog is missing hyphenated aliases like `gpt-54` for `gpt-5.4` (only has `gpt54`)\n\n## Step 1: Add hyphenated aliases to catalog\n\n**File: `lib/crates/fabro-llm/src/catalog.json`**\n\n| Model ID | Current aliases | Add |\n|---|---|---|\n| `gpt-5.4` (line 161) | `[\"gpt54\"]` | `\"gpt-54\"` |\n| `gpt-5.4-pro` (line 178) | `[\"gpt54-pro\"]` | `\"gpt-54-pro\"` |\n| `gpt-5.4-mini` (line 194) | `[\"gpt54-mini\"]` | `\"gpt-54-mini\"` |\n\n**File: `lib/crates/fabro-llm/src/catalog.rs`** — add alias resolution tests:\n- `gpt_54_hyphenated_alias` → asserts `get_model_info(\"gpt-54\")` resolves to `gpt-5.4`\n- `gpt_54_pro_hyphenated_alias` → same for `gpt-54-pro`\n- `gpt_54_mini_hyphenated_alias` → same for `gpt-54-mini`\n\nUpdate insta snapshots (`cargo insta review`) for `gpt_5_4_in_catalog` and `gpt_5_4_pro_in_catalog`.\n\n## Step 2: Add `NodeModelKnownRule`\n\n**File: `lib/crates/fabro-validate/src/rules.rs`**\n\nAdd `NodeModelKnownRule` right after `StylesheetModelKnownRule` (after line 977). Mirrors the stylesheet rule but iterates nodes:\n\n- Iterate `graph.nodes.values()`\n- If `node.model()` is `Some` and `get_model_info()` returns `None` → emit `Severity::Warning`\n- If `node.provider()` is `Some` and `Provider::from_str()` fails → emit `Severity::Warning`\n- Set `node_id: Some(node.id.clone())` on each diagnostic\n\nRegister `Box::new(NodeModelKnownRule)` in `built_in_rules()` (line 33, after `StylesheetModelKnownRule`).\n\n**Tests** (following existing `stylesheet_model_known_rule_*` pattern):\n- `node_model_known_rule_valid_model` — known model, no warnings\n- `node_model_known_rule_unknown_model` — unknown model, 1 warning with model name and node ID\n- `node_model_known_rule_alias` — alias like `\"opus\"`, no warnings\n- `node_model_known_rule_unknown_provider` — bad provider, 1 warning\n- `node_model_known_rule_no_model_no_provider` — plain node, no warnings\n\n## Step 3: Fix the workflow\n\n**File: `fabro/workflows/implement/workflow.fabro` line 19**\n\nChange `model=\"gpt-54\"` to `model=\"gpt-54\"` (now valid after Step 1 adds the alias). No change needed — it will just work.\n\n## Verification\n\n```bash\ncargo test -p fabro-llm\ncargo insta review          # accept updated snapshots\ncargo test -p fabro-validate\ncargo clippy --workspace -- -D warnings\ncargo fmt --check --all\n```\n\nThen run `fabro validate fabro/workflows/implement/workflow.fabro` to confirm no warnings.\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n",
     "failure_signature": "",
+    "thread.toolchain.current_node": "preflight_compile",
+    "internal.retry_count.preflight_compile": 1,
     "internal.fidelity": "compact",
     "graph.model_stylesheet": "\n            * { backend: api; model: claude-opus-4-6;}\n        ",
     "internal.node_visit_count": 1,
@@ -22,14 +26,23 @@
     "command.stderr": "",
     "failure_class": "",
     "outcome": "success",
-    "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n",
-    "current_node": "toolchain",
+    "command.output": "",
+    "current_node": "preflight_compile",
     "internal.run_id": "01KM4C6R7M1XZF086NV6F0S7JS",
     "thread.start.current_node": "toolchain",
     "graph.goal": "# Plan: Add node-level model validation + missing catalog aliases\n\n## Context\n\nRunning `fabro run` with `model=\"gpt-54\"` on a workflow node fails at runtime with `LLM error: Not found on anthropic: model: gpt-54`. Two issues contribute:\n\n1. `fabro validate` doesn't warn about unknown model names on **nodes** (only validates stylesheet models via `StylesheetModelKnownRule`)\n2. The catalog is missing hyphenated aliases like `gpt-54` for `gpt-5.4` (only has `gpt54`)\n\n## Step 1: Add hyphenated aliases to catalog\n\n**File: `lib/crates/fabro-llm/src/catalog.json`**\n\n| Model ID | Current aliases | Add |\n|---|---|---|\n| `gpt-5.4` (line 161) | `[\"gpt54\"]` | `\"gpt-54\"` |\n| `gpt-5.4-pro` (line 178) | `[\"gpt54-pro\"]` | `\"gpt-54-pro\"` |\n| `gpt-5.4-mini` (line 194) | `[\"gpt54-mini\"]` | `\"gpt-54-mini\"` |\n\n**File: `lib/crates/fabro-llm/src/catalog.rs`** — add alias resolution tests:\n- `gpt_54_hyphenated_alias` → asserts `get_model_info(\"gpt-54\")` resolves to `gpt-5.4`\n- `gpt_54_pro_hyphenated_alias` → same for `gpt-54-pro`\n- `gpt_54_mini_hyphenated_alias` → same for `gpt-54-mini`\n\nUpdate insta snapshots (`cargo insta review`) for `gpt_5_4_in_catalog` and `gpt_5_4_pro_in_catalog`.\n\n## Step 2: Add `NodeModelKnownRule`\n\n**File: `lib/crates/fabro-validate/src/rules.rs`**\n\nAdd `NodeModelKnownRule` right after `StylesheetModelKnownRule` (after line 977). Mirrors the stylesheet rule but iterates nodes:\n\n- Iterate `graph.nodes.values()`\n- If `node.model()` is `Some` and `get_model_info()` returns `None` → emit `Severity::Warning`\n- If `node.provider()` is `Some` and `Provider::from_str()` fails → emit `Severity::Warning`\n- Set `node_id: Some(node.id.clone())` on each diagnostic\n\nRegister `Box::new(NodeModelKnownRule)` in `built_in_rules()` (line 33, after `StylesheetModelKnownRule`).\n\n**Tests** (following existing `stylesheet_model_known_rule_*` pattern):\n- `node_model_known_rule_valid_model` — known model, no warnings\n- `node_model_known_rule_unknown_model` — unknown model, 1 warning with model name and node ID\n- `node_model_known_rule_alias` — alias like `\"opus\"`, no warnings\n- `node_model_known_rule_unknown_provider` — bad provider, 1 warning\n- `node_model_known_rule_no_model_no_provider` — plain node, no warnings\n\n## Step 3: Fix the workflow\n\n**File: `fabro/workflows/implement/workflow.fabro` line 19**\n\nChange `model=\"gpt-54\"` to `model=\"gpt-54\"` (now valid after Step 1 adds the alias). No change needed — it will just work.\n\n## Verification\n\n```bash\ncargo test -p fabro-llm\ncargo insta review          # accept updated snapshots\ncargo test -p fabro-validate\ncargo clippy --workspace -- -D warnings\ncargo fmt --check --all\n```\n\nThen run `fabro validate fabro/workflows/implement/workflow.fabro` to confirm no warnings.\n"
   },
   "logs": [],
   "node_outcomes": {
+    "preflight_compile": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: cargo check -q --workspace 2>&1",
+      "duration_ms": 58671
+    },
     "start": {
       "status": "success",
       "duration_ms": 0
@@ -44,8 +57,9 @@
       "duration_ms": 39
     }
   },
-  "next_node_id": "preflight_compile",
+  "next_node_id": "preflight_lint",
   "node_visits": {
+    "preflight_compile": 1,
     "start": 1,
     "toolchain": 1
   }
