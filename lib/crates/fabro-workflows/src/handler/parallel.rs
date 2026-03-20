@@ -267,24 +267,10 @@ impl Handler for ParallelHandler {
                     crate::git::sanitize_ref_component(branch_key),
                 );
 
-                // Compute worktree path (local vs remote path schemes differ)
-                let wt_path_str = if services.sandbox.is_remote() {
-                    format!(
-                        "{}/.fabro/runs/{}/parallel/{}/{}",
-                        services.sandbox.working_directory(),
-                        gs.run_id,
-                        node.id,
-                        branch_key
-                    )
-                } else {
-                    run_dir
-                        .join("parallel")
-                        .join(&node.id)
-                        .join(branch_key)
-                        .join("worktree")
-                        .to_string_lossy()
-                        .into_owned()
-                };
+                // Compute worktree path (each sandbox type knows its own path scheme)
+                let wt_path_str = services
+                    .sandbox
+                    .parallel_worktree_path(run_dir, &gs.run_id, &node.id, branch_key);
                 tracing::debug!(branch = %branch_name, path = %wt_path_str, "Creating worktree for parallel branch");
 
                 // Set up worktree via WorktreeSandbox

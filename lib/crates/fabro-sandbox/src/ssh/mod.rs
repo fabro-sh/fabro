@@ -558,8 +558,34 @@ impl Sandbox for SshSandbox {
         Ok(())
     }
 
-    fn is_remote(&self) -> bool {
-        true
+    async fn setup_git_for_run(&self, run_id: &str) -> Result<Option<crate::GitRunInfo>, String> {
+        crate::setup_git_via_exec(self, run_id).await.map(Some)
+    }
+
+    fn resume_setup_commands(&self, run_branch: &str) -> Vec<String> {
+        vec![format!(
+            "git fetch origin {run_branch} && git checkout {run_branch}"
+        )]
+    }
+
+    async fn git_push_branch(&self, branch: &str) -> bool {
+        crate::git_push_via_exec(self, branch).await
+    }
+
+    fn parallel_worktree_path(
+        &self,
+        _run_dir: &std::path::Path,
+        run_id: &str,
+        node_id: &str,
+        key: &str,
+    ) -> String {
+        format!(
+            "{}/.fabro/runs/{}/parallel/{}/{}",
+            self.working_directory(),
+            run_id,
+            node_id,
+            key
+        )
     }
 
     async fn ssh_access_command(&self) -> Result<Option<String>, String> {

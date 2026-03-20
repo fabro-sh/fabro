@@ -29,8 +29,8 @@ pub mod daytona;
 pub mod test_support;
 
 pub use sandbox::{
-    format_lines_numbered, shell_quote, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
-    SandboxEventCallback,
+    format_lines_numbered, git_push_via_exec, setup_git_via_exec, shell_quote, DirEntry,
+    ExecResult, GitRunInfo, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
 };
 
 pub use read_guard::ReadBeforeWriteSandbox;

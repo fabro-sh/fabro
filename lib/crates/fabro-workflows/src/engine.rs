@@ -762,28 +762,6 @@ pub async fn git_push_host(
     }
 }
 
-/// Push the run branch to origin inside a remote sandbox (best-effort).
-async fn git_push_remote(sandbox: &dyn Sandbox, branch: &str) -> bool {
-    if let Err(e) = sandbox.refresh_push_credentials().await {
-        tracing::warn!(error = %e, "Failed to refresh push credentials");
-    }
-    let cmd = format!("{GIT_REMOTE} push origin {branch}");
-    match sandbox.exec_command(&cmd, 60_000, None, None, None).await {
-        Ok(r) if r.exit_code == 0 => {
-            tracing::info!(branch, "Pushed run branch to origin");
-            true
-        }
-        Ok(r) => {
-            tracing::warn!(branch, exit_code = r.exit_code, "Failed to push run branch");
-            false
-        }
-        Err(e) => {
-            tracing::warn!(branch, error = %e, "Failed to push run branch");
-            false
-        }
-    }
-}
-
 /// Run a git diff via the sandbox.
 async fn git_diff(sandbox: &dyn Sandbox, base: &str) -> Option<String> {
     let cmd = format!("{GIT_REMOTE} diff {base} HEAD");
@@ -835,59 +813,6 @@ pub async fn git_merge_ff_only(sandbox: &dyn Sandbox, sha: &str) -> bool {
 pub async fn git_replace_worktree(sandbox: &dyn Sandbox, path: &str, branch: &str) -> bool {
     let _ = git_remove_worktree(sandbox, path).await;
     git_add_worktree(sandbox, path, branch).await
-}
-
-/// Set up git inside a remote sandbox for checkpoint commits.
-/// Returns `(base_sha, branch_name, base_branch)` on success.
-pub async fn setup_remote_git(
-    sandbox: &dyn Sandbox,
-    run_id: &str,
-) -> std::result::Result<(String, String, Option<String>), String> {
-    // Get current branch name before creating the run branch
-    let branch_result = sandbox
-        .exec_command("git rev-parse --abbrev-ref HEAD", 10_000, None, None, None)
-        .await
-        .map_err(|e| format!("git rev-parse --abbrev-ref HEAD failed: {e}"))?;
-    let base_branch = if branch_result.exit_code == 0 {
-        let name = branch_result.stdout.trim().to_string();
-        if name.is_empty() || name == "HEAD" {
-            None
-        } else {
-            Some(name)
-        }
-    } else {
-        None
-    };
-
-    // Get current HEAD as base SHA
-    let sha_result = sandbox
-        .exec_command("git rev-parse HEAD", 10_000, None, None, None)
-        .await
-        .map_err(|e| format!("git rev-parse HEAD failed: {e}"))?;
-    if sha_result.exit_code != 0 {
-        return Err(format!(
-            "git rev-parse HEAD failed (exit {}): {}",
-            sha_result.exit_code, sha_result.stderr
-        ));
-    }
-    let base_sha = sha_result.stdout.trim().to_string();
-
-    let branch_name = format!("{}{run_id}", crate::git::RUN_BRANCH_PREFIX);
-
-    // Create and checkout a run branch
-    let checkout_cmd = format!("git checkout -b {branch_name}");
-    let checkout_result = sandbox
-        .exec_command(&checkout_cmd, 10_000, None, None, None)
-        .await
-        .map_err(|e| format!("git checkout failed: {e}"))?;
-    if checkout_result.exit_code != 0 {
-        return Err(format!(
-            "git checkout -b failed (exit {}): {}",
-            checkout_result.exit_code, checkout_result.stderr
-        ));
-    }
-
-    Ok((base_sha, branch_name, base_branch))
 }
 
 /// Configuration for a workflow run.
@@ -1264,7 +1189,7 @@ impl WorkflowRunEngine {
     /// 1. Initialize sandbox
     /// 2. Fire `SandboxReady` hook (blocking — can abort run)
     /// 3. Emit `SandboxInitialized` event
-    /// 4. Remote git setup if `sandbox.is_remote()`
+    /// 4. Sandbox git setup via `sandbox.setup_git_for_run()`
     /// 5. Run setup commands
     /// 6. Run devcontainer lifecycle phases
     /// 7. Execute the workflow graph via `run_internal`
@@ -1309,23 +1234,30 @@ impl WorkflowRunEngine {
                 working_directory: self.services.sandbox.working_directory().to_string(),
             });
 
-        // 4. Remote git setup if sandbox is remote and config doesn't already have git info
+        // 4. Sandbox git setup — let the sandbox set up its own git state if needed
         //    (skip when resuming from an existing branch — caller sets run_branch/base_sha)
-        if self.services.sandbox.is_remote() && config.run_branch.is_none() {
-            match setup_remote_git(self.services.sandbox.as_ref(), &config.run_id).await {
-                Ok((base_sha, run_branch, base_branch)) => {
+        if config.run_branch.is_none() {
+            match self
+                .services
+                .sandbox
+                .setup_git_for_run(&config.run_id)
+                .await
+            {
+                Ok(Some(info)) => {
                     config.git_checkpoint_enabled = true;
-                    config.base_sha = Some(base_sha);
-                    config.run_branch = Some(run_branch);
+                    config.base_sha = Some(info.base_sha);
+                    config.run_branch = Some(info.run_branch);
                     if config.base_branch.is_none() {
-                        config.base_branch = base_branch;
+                        config.base_branch = info.base_branch;
                     }
                     config.meta_branch =
                         Some(crate::git::MetadataStore::branch_name(&config.run_id));
                 }
+                Ok(None) => {
+                    // Sandbox does not manage git internally (e.g. local sandbox)
+                }
                 Err(e) => {
-                    tracing::warn!(error = %e, "Remote git setup failed, running without git checkpoints");
-                    // Leave config.git_checkpoint_enabled as-is (false for remote when no base_sha)
+                    tracing::warn!(error = %e, "Sandbox git setup failed, running without git checkpoints");
                 }
             }
         }
@@ -1498,9 +1430,9 @@ impl WorkflowRunEngine {
         };
         self.services.set_git_state(git_state);
 
-        // Local git checkpoint: sandbox is local and checkpointing is enabled
+        // Host-side git checkpoint: sandbox has a host-accessible worktree
         let local_git_checkpoint =
-            config.git_checkpoint_enabled && !self.services.sandbox.is_remote();
+            config.git_checkpoint_enabled && self.services.sandbox.host_git_dir().is_some();
 
         self.services
             .emitter
@@ -2250,8 +2182,9 @@ impl WorkflowRunEngine {
                         // Push run branch (skip in dry-run mode)
                         if !config.dry_run {
                             if let Some(ref branch) = config.run_branch {
-                                let push_ok = if self.services.sandbox.is_remote() {
-                                    git_push_remote(&*self.services.sandbox, branch).await
+                                let push_ok = if self.services.sandbox.git_push_branch(branch).await
+                                {
+                                    true
                                 } else if let Some(ref repo_path) = config.host_repo_path {
                                     let refspec = format!("refs/heads/{branch}");
                                     git_push_host(

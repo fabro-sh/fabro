@@ -143,7 +143,7 @@ pub trait Sandbox: Send + Sync {
     fn working_directory(&self) -> &str;
     fn platform(&self) -> &str;
     fn os_version(&self) -> String;
-    // ... optional methods with defaults: is_remote(), refresh_push_credentials(), etc.
+    // ... optional methods with defaults: setup_git_for_run(), git_push_branch(), etc.
 }
 ```
 

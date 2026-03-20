@@ -735,29 +735,33 @@ pub async fn run_command(
     };
 
     // Determine the working directory strategy.
-    // Remote sandboxes clone from origin; local runs may use a git worktree.
-    let workdir_strategy = if sandbox_provider.is_remote() {
-        WorkdirStrategy::Cloud
-    } else {
-        let worktree_mode = resolve_worktree_mode(run_cfg.as_ref(), &run_defaults);
-        match worktree_mode {
-            sandbox_config::WorktreeMode::Always => WorkdirStrategy::LocalWorktree,
-            sandbox_config::WorktreeMode::Clean => {
-                if git_status.is_clean() {
-                    WorkdirStrategy::LocalWorktree
-                } else {
-                    WorkdirStrategy::LocalDirectory
+    // Only the Local provider supports git worktrees on the host.
+    // Remote sandboxes (Daytona, Exe, SSH) clone from origin inside the sandbox.
+    // Docker uses the bind-mounted host directory as-is.
+    let workdir_strategy = match sandbox_provider {
+        SandboxProvider::Local => {
+            let worktree_mode = resolve_worktree_mode(run_cfg.as_ref(), &run_defaults);
+            match worktree_mode {
+                sandbox_config::WorktreeMode::Always => WorkdirStrategy::LocalWorktree,
+                sandbox_config::WorktreeMode::Clean => {
+                    if git_status.is_clean() {
+                        WorkdirStrategy::LocalWorktree
+                    } else {
+                        WorkdirStrategy::LocalDirectory
+                    }
                 }
-            }
-            sandbox_config::WorktreeMode::Dirty => {
-                if git_status.is_clean() {
-                    WorkdirStrategy::LocalDirectory
-                } else {
-                    WorkdirStrategy::LocalWorktree
+                sandbox_config::WorktreeMode::Dirty => {
+                    if git_status.is_clean() {
+                        WorkdirStrategy::LocalDirectory
+                    } else {
+                        WorkdirStrategy::LocalWorktree
+                    }
                 }
+                sandbox_config::WorktreeMode::Never => WorkdirStrategy::LocalDirectory,
             }
-            sandbox_config::WorktreeMode::Never => WorkdirStrategy::LocalDirectory,
         }
+        SandboxProvider::Docker => WorkdirStrategy::LocalDirectory,
+        _ => WorkdirStrategy::Cloud,
     };
     debug!(
         ?workdir_strategy,
@@ -1831,7 +1835,7 @@ async fn run_from_branch(
     };
 
     let emitter = Arc::new(EventEmitter::new());
-    let (sandbox, worktree_path): (Arc<dyn fabro_agent::Sandbox>, Option<PathBuf>) =
+    let (sandbox, _worktree_path): (Arc<dyn fabro_agent::Sandbox>, Option<PathBuf>) =
         match sandbox_provider {
             SandboxProvider::Local | SandboxProvider::Docker => {
                 // Re-attach worktree to the existing run branch via WorktreeSandbox.
@@ -1904,14 +1908,8 @@ async fn run_from_branch(
     let sandbox: Arc<dyn fabro_agent::Sandbox> =
         Arc::new(fabro_agent::ReadBeforeWriteSandbox::new(sandbox));
 
-    // For remote sandboxes, prepare a setup command to fetch+checkout the existing run branch
-    let resume_setup_commands: Vec<String> = if sandbox.is_remote() {
-        vec![format!(
-            "git fetch origin {run_branch} && git checkout {run_branch}"
-        )]
-    } else {
-        Vec::new()
-    };
+    // Let the sandbox provide any commands needed to resume on the existing run branch
+    let resume_setup_commands: Vec<String> = sandbox.resume_setup_commands(run_branch);
 
     // Build interviewer
     let interviewer: Arc<dyn Interviewer> = if args.auto_approve {
@@ -1966,11 +1964,7 @@ async fn run_from_branch(
         cancel_token: None,
         dry_run: dry_run_mode,
         run_id: run_id.clone(),
-        git_checkpoint_enabled: if sandbox.is_remote() {
-            true
-        } else {
-            worktree_path.is_some()
-        },
+        git_checkpoint_enabled: true, // always true for resume (worktree or sandbox git is set up)
         host_repo_path: Some(original_cwd.clone()),
         base_sha,
         run_branch: Some(run_branch.to_string()),

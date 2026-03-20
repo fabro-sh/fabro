@@ -6,6 +6,16 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+/// Git command prefix that disables background maintenance.
+const GIT: &str = "git -c maintenance.auto=0 -c gc.auto=0";
+
+/// Information returned when a sandbox sets up git for a workflow run.
+pub struct GitRunInfo {
+    pub base_sha: String,
+    pub run_branch: String,
+    pub base_branch: Option<String>,
+}
+
 /// Generates an `#[async_trait] impl Sandbox` block for a decorator type
 /// that wraps an `Arc<dyn Sandbox>`. The caller provides custom method
 /// implementations; all remaining trait methods delegate to the inner field.
@@ -110,8 +120,30 @@ macro_rules! delegate_sandbox {
                 self.$field.set_autostop_interval(minutes).await
             }
 
-            fn is_remote(&self) -> bool {
-                self.$field.is_remote()
+            async fn setup_git_for_run(&self, run_id: &str) -> Result<Option<$crate::GitRunInfo>, String> {
+                self.$field.setup_git_for_run(run_id).await
+            }
+
+            fn resume_setup_commands(&self, run_branch: &str) -> Vec<String> {
+                self.$field.resume_setup_commands(run_branch)
+            }
+
+            async fn git_push_branch(&self, branch: &str) -> bool {
+                self.$field.git_push_branch(branch).await
+            }
+
+            fn host_git_dir(&self) -> Option<&str> {
+                self.$field.host_git_dir()
+            }
+
+            fn parallel_worktree_path(
+                &self,
+                run_dir: &std::path::Path,
+                run_id: &str,
+                node_id: &str,
+                key: &str,
+            ) -> String {
+                self.$field.parallel_worktree_path(run_dir, run_id, node_id, key)
             }
 
             async fn ssh_access_command(&self) -> Result<Option<String>, String> {
@@ -400,9 +432,46 @@ pub trait Sandbox: Send + Sync {
         Ok(())
     }
 
-    /// Whether this sandbox runs on a remote machine (e.g. Daytona, exe.dev).
-    fn is_remote(&self) -> bool {
+    /// Set up git state for a new workflow run.
+    /// Sandboxes that manage their own git clone (e.g., remote VMs) should create
+    /// a run branch and return the git info. Local sandboxes return `None`.
+    async fn setup_git_for_run(&self, _run_id: &str) -> Result<Option<GitRunInfo>, String> {
+        Ok(None)
+    }
+
+    /// Commands to run inside the sandbox when resuming on an existing run branch.
+    fn resume_setup_commands(&self, _run_branch: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Push a run branch to origin from inside the sandbox.
+    /// Returns `true` if the push was handled. When `false`, the engine will
+    /// attempt a host-side push instead.
+    async fn git_push_branch(&self, _branch: &str) -> bool {
         false
+    }
+
+    /// The host-accessible path to this sandbox's git worktree, if applicable.
+    /// When `Some`, the engine runs git operations (add, commit) from the host.
+    fn host_git_dir(&self) -> Option<&str> {
+        None
+    }
+
+    /// Compute the filesystem path for a parallel branch worktree.
+    fn parallel_worktree_path(
+        &self,
+        run_dir: &std::path::Path,
+        _run_id: &str,
+        node_id: &str,
+        key: &str,
+    ) -> String {
+        run_dir
+            .join("parallel")
+            .join(node_id)
+            .join(key)
+            .join("worktree")
+            .to_string_lossy()
+            .into_owned()
     }
 
     /// Return an SSH command string for connecting to this sandbox, if supported.
@@ -453,6 +522,83 @@ pub fn shell_quote(s: &str) -> String {
         |_| format!("'{}'", s.replace('\'', "'\\''")),
         |q| q.to_string(),
     )
+}
+
+/// Helper for sandbox implementations that manage git internally.
+/// Executes git commands inside the sandbox to create a run branch.
+pub async fn setup_git_via_exec(sandbox: &dyn Sandbox, run_id: &str) -> Result<GitRunInfo, String> {
+    // Get current branch name
+    let branch_result = sandbox
+        .exec_command("git rev-parse --abbrev-ref HEAD", 10_000, None, None, None)
+        .await
+        .map_err(|e| format!("git rev-parse --abbrev-ref HEAD failed: {e}"))?;
+    let base_branch = if branch_result.exit_code == 0 {
+        let name = branch_result.stdout.trim().to_string();
+        if name.is_empty() || name == "HEAD" {
+            None
+        } else {
+            Some(name)
+        }
+    } else {
+        None
+    };
+
+    // Get current HEAD as base SHA
+    let sha_result = sandbox
+        .exec_command("git rev-parse HEAD", 10_000, None, None, None)
+        .await
+        .map_err(|e| format!("git rev-parse HEAD failed: {e}"))?;
+    if sha_result.exit_code != 0 {
+        return Err(format!(
+            "git rev-parse HEAD failed (exit {}): {}",
+            sha_result.exit_code, sha_result.stderr
+        ));
+    }
+    let base_sha = sha_result.stdout.trim().to_string();
+
+    let branch_name = format!("fabro/run/{run_id}");
+
+    // Create and checkout a run branch
+    let checkout_cmd = format!("git checkout -b {branch_name}");
+    let checkout_result = sandbox
+        .exec_command(&checkout_cmd, 10_000, None, None, None)
+        .await
+        .map_err(|e| format!("git checkout failed: {e}"))?;
+    if checkout_result.exit_code != 0 {
+        return Err(format!(
+            "git checkout -b failed (exit {}): {}",
+            checkout_result.exit_code, checkout_result.stderr
+        ));
+    }
+
+    Ok(GitRunInfo {
+        base_sha,
+        run_branch: branch_name,
+        base_branch,
+    })
+}
+
+/// Helper for sandbox implementations that manage git internally.
+/// Pushes a branch to origin via exec_command inside the sandbox.
+pub async fn git_push_via_exec(sandbox: &dyn Sandbox, branch: &str) -> bool {
+    if let Err(e) = sandbox.refresh_push_credentials().await {
+        tracing::warn!(error = %e, "Failed to refresh push credentials");
+    }
+    let cmd = format!("{GIT} push origin {branch}");
+    match sandbox.exec_command(&cmd, 60_000, None, None, None).await {
+        Ok(r) if r.exit_code == 0 => {
+            tracing::info!(branch, "Pushed run branch to origin");
+            true
+        }
+        Ok(r) => {
+            tracing::warn!(branch, exit_code = r.exit_code, "Failed to push run branch");
+            false
+        }
+        Err(e) => {
+            tracing::warn!(branch, error = %e, "Failed to push run branch");
+            false
+        }
+    }
 }
 
 #[cfg(test)]

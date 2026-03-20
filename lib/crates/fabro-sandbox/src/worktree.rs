@@ -263,8 +263,31 @@ impl Sandbox for WorktreeSandbox {
         self.inner.set_autostop_interval(minutes).await
     }
 
-    fn is_remote(&self) -> bool {
-        self.inner.is_remote()
+    fn host_git_dir(&self) -> Option<&str> {
+        Some(&self.config.worktree_path)
+    }
+
+    async fn setup_git_for_run(&self, run_id: &str) -> Result<Option<crate::GitRunInfo>, String> {
+        self.inner.setup_git_for_run(run_id).await
+    }
+
+    fn resume_setup_commands(&self, run_branch: &str) -> Vec<String> {
+        self.inner.resume_setup_commands(run_branch)
+    }
+
+    async fn git_push_branch(&self, branch: &str) -> bool {
+        self.inner.git_push_branch(branch).await
+    }
+
+    fn parallel_worktree_path(
+        &self,
+        run_dir: &Path,
+        run_id: &str,
+        node_id: &str,
+        key: &str,
+    ) -> String {
+        self.inner
+            .parallel_worktree_path(run_dir, run_id, node_id, key)
     }
 
     async fn ssh_access_command(&self) -> Result<Option<String>, String> {
