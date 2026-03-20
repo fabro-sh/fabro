@@ -1,0 +1,5 @@
+{
+  "command": "cargo fmt --all 2>&1",
+  "language": "shell",
+  "timeout_ms": null
+}
