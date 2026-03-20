@@ -49,16 +49,18 @@ pub fn run(args: WaitArgs, styles: &Styles) -> Result<()> {
         }
 
         if let Some(dl) = deadline {
-            if std::time::Instant::now() >= dl {
+            let now = std::time::Instant::now();
+            if now >= dl {
                 bail!(
                     "Timed out after {}s waiting for run '{}'",
                     args.timeout.unwrap(),
                     run_info.run_id
                 );
             }
+            std::thread::sleep(interval.min(dl - now));
+        } else {
+            std::thread::sleep(interval);
         }
-
-        std::thread::sleep(interval);
     };
 
     let conclusion_path = run_info.path.join("conclusion.json");
@@ -66,9 +68,9 @@ pub fn run(args: WaitArgs, styles: &Styles) -> Result<()> {
 
     if args.json {
         let json_value = build_json_output(final_status, &run_info.run_id, conclusion.as_ref());
-        let stdout = std::io::stdout();
-        let mut out = stdout.lock();
-        writeln!(out, "{}", serde_json::to_string_pretty(&json_value)?)?;
+        let mut out = std::io::stdout().lock();
+        serde_json::to_writer_pretty(&mut out, &json_value)?;
+        writeln!(out)?;
     } else {
         print_human_output(final_status, &run_info.run_id, conclusion.as_ref(), styles);
     }
@@ -85,24 +87,17 @@ fn build_json_output(
     run_id: &str,
     conclusion: Option<&fabro_workflows::conclusion::Conclusion>,
 ) -> serde_json::Value {
-    let mut map = serde_json::Map::new();
-    map.insert("run_id".into(), serde_json::Value::String(run_id.into()));
-    map.insert(
-        "status".into(),
-        serde_json::Value::String(status.to_string()),
-    );
+    let mut value = serde_json::json!({
+        "run_id": run_id,
+        "status": status.to_string(),
+    });
     if let Some(c) = conclusion {
-        map.insert(
-            "duration_ms".into(),
-            serde_json::Value::Number(c.duration_ms.into()),
-        );
+        value["duration_ms"] = c.duration_ms.into();
         if let Some(cost) = c.total_cost {
-            if let Some(n) = serde_json::Number::from_f64(cost) {
-                map.insert("total_cost".into(), serde_json::Value::Number(n));
-            }
+            value["total_cost"] = cost.into();
         }
     }
-    serde_json::Value::Object(map)
+    value
 }
 
 fn print_human_output(
@@ -115,7 +110,8 @@ fn print_human_output(
         RunStatus::Succeeded => (&styles.bold_green, "Succeeded"),
         RunStatus::Failed => (&styles.bold_red, "Failed"),
         RunStatus::Dead => (&styles.bold_red, "Dead"),
-        _ => (&styles.bold, "Unknown"),
+        // Poll loop only breaks on is_terminal() which is Succeeded | Failed | Dead
+        _ => unreachable!(),
     };
     let status_display = style.apply_to(label);
 
