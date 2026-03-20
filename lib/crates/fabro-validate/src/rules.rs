@@ -31,6 +31,7 @@ pub fn built_in_rules() -> Vec<Box<dyn LintRule>> {
         Box::new(OrphanCustomOutcomeRule),
         Box::new(ScriptAbsoluteCdRule),
         Box::new(StylesheetModelKnownRule),
+        Box::new(NodeModelKnownRule),
         Box::new(UnresolvedFileRefRule),
         Box::new(ThreadIdRequiresFidelityFullRule),
         Box::new(SelectionValidRule),
@@ -976,7 +977,59 @@ impl LintRule for StylesheetModelKnownRule {
     }
 }
 
-// --- Rule 21: unresolved_file_ref (ERROR) ---
+// --- Rule 21: node_model_known (WARNING) ---
+
+struct NodeModelKnownRule;
+
+impl LintRule for NodeModelKnownRule {
+    fn name(&self) -> &'static str {
+        "node_model_known"
+    }
+
+    fn apply(&self, graph: &Graph) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        for node in graph.nodes.values() {
+            if let Some(model) = node.model() {
+                if fabro_llm::catalog::get_model_info(model).is_none() {
+                    diagnostics.push(Diagnostic {
+                        rule: self.name().to_string(),
+                        severity: Severity::Warning,
+                        message: format!(
+                            "Unknown model '{model}' on node '{}'. Run `fabro model list` to see available models",
+                            node.id
+                        ),
+                        node_id: Some(node.id.clone()),
+                        edge: None,
+                        fix: Some("Use a model ID from `fabro model list`".to_string()),
+                    });
+                }
+            }
+            if let Some(provider) = node.provider() {
+                if fabro_llm::Provider::from_str(provider).is_err() {
+                    let valid: Vec<&str> = fabro_llm::Provider::ALL
+                        .iter()
+                        .map(|p| p.as_str())
+                        .collect();
+                    diagnostics.push(Diagnostic {
+                        rule: self.name().to_string(),
+                        severity: Severity::Warning,
+                        message: format!(
+                            "Unknown provider '{provider}' on node '{}'. Valid providers: {}",
+                            node.id,
+                            valid.join(", ")
+                        ),
+                        node_id: Some(node.id.clone()),
+                        edge: None,
+                        fix: Some(format!("Use one of: {}", valid.join(", "))),
+                    });
+                }
+            }
+        }
+        diagnostics
+    }
+}
+
+// --- Rule 22: unresolved_file_ref (ERROR) ---
 
 struct UnresolvedFileRefRule;
 
@@ -3031,6 +3084,76 @@ mod tests {
     fn stylesheet_model_known_rule_no_stylesheet() {
         let g = minimal_graph();
         let rule = StylesheetModelKnownRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // node_model_known rule tests
+
+    #[test]
+    fn node_model_known_rule_valid_model() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "model".to_string(),
+            AttrValue::String("claude-sonnet-4-5".to_string()),
+        );
+        g.nodes.insert("work".to_string(), node);
+        let rule = NodeModelKnownRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn node_model_known_rule_unknown_model() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "model".to_string(),
+            AttrValue::String("nonexistent-model-xyz".to_string()),
+        );
+        g.nodes.insert("work".to_string(), node);
+        let rule = NodeModelKnownRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Warning);
+        assert!(d[0].message.contains("nonexistent-model-xyz"));
+        assert_eq!(d[0].node_id.as_deref(), Some("work"));
+    }
+
+    #[test]
+    fn node_model_known_rule_alias() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs
+            .insert("model".to_string(), AttrValue::String("opus".to_string()));
+        g.nodes.insert("work".to_string(), node);
+        let rule = NodeModelKnownRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn node_model_known_rule_unknown_provider() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "provider".to_string(),
+            AttrValue::String("google".to_string()),
+        );
+        g.nodes.insert("work".to_string(), node);
+        let rule = NodeModelKnownRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Warning);
+        assert!(d[0].message.contains("google"));
+        assert_eq!(d[0].node_id.as_deref(), Some("work"));
+    }
+
+    #[test]
+    fn node_model_known_rule_no_model_no_provider() {
+        let g = minimal_graph();
+        let rule = NodeModelKnownRule;
         let d = rule.apply(&g);
         assert!(d.is_empty());
     }
