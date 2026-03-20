@@ -9,8 +9,6 @@ description = "GitHub App authentication and API helpers for Fabro"
 doctest = false
 
 [dependencies]
-fabro-tracker = { path = "../fabro-tracker" }
-async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true
