@@ -1,6 +1,7 @@
 mod auto_approve;
 mod callback;
 mod console;
+pub mod file;
 mod queue;
 mod recording;
 mod replay;
@@ -203,6 +204,7 @@ pub trait Interviewer: Send + Sync {
 pub use auto_approve::AutoApproveInterviewer;
 pub use callback::CallbackInterviewer;
 pub use console::ConsoleInterviewer;
+pub use file::FileInterviewer;
 pub use queue::QueueInterviewer;
 pub use recording::RecordingInterviewer;
 pub use replay::ReplayInterviewer;
