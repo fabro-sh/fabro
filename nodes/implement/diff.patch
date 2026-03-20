@@ -1,0 +1,1652 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index a2a3ba95..6907c1a0 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1512,6 +1512,7 @@ dependencies = [
+  "serde_json",
+  "tempfile",
+  "tokio",
++ "tracing",
+ ]
+ 
+ [[package]]
+diff --git a/lib/crates/fabro-cli/src/commands/attach.rs b/lib/crates/fabro-cli/src/commands/attach.rs
+new file mode 100644
+index 00000000..3d8f3931
+--- /dev/null
++++ b/lib/crates/fabro-cli/src/commands/attach.rs
+@@ -0,0 +1,218 @@
++use std::io::{BufRead, BufReader, IsTerminal};
++use std::path::Path;
++use std::process::ExitCode;
++use std::sync::atomic::{AtomicBool, Ordering};
++use std::sync::{Arc, Mutex};
++
++use anyhow::{bail, Result};
++
++use fabro_interview::ConsoleInterviewer;
++use fabro_util::terminal::Styles;
++
++use super::run_progress;
++
++/// Attach to a running (or finished) workflow run, rendering progress live.
++///
++/// Returns exit code 0 for success/partial_success, 1 otherwise.
++pub async fn attach_run(
++    run_dir: &Path,
++    kill_on_detach: bool,
++    styles: &'static Styles,
++) -> Result<ExitCode> {
++    let progress_path = run_dir.join("progress.jsonl");
++    let conclusion_path = run_dir.join("conclusion.json");
++    let interview_request_path = run_dir.join("interview_request.json");
++    let interview_response_path = run_dir.join("interview_response.json");
++    let pid_path = run_dir.join("run.pid");
++
++    let is_tty = std::io::stderr().is_terminal();
++    let progress_ui = Arc::new(Mutex::new(run_progress::ProgressUI::new(is_tty, false)));
++
++    // Install Ctrl+C handler
++    let cancelled = Arc::new(AtomicBool::new(false));
++    {
++        let cancelled = Arc::clone(&cancelled);
++        tokio::spawn(async move {
++            let _ = tokio::signal::ctrl_c().await;
++            cancelled.store(true, Ordering::Relaxed);
++        });
++    }
++
++    // Wait for progress.jsonl to appear
++    let mut wait_count = 0;
++    while !progress_path.exists() {
++        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
++        wait_count += 1;
++        if wait_count > 100 {
++            bail!(
++                "Timed out waiting for progress.jsonl to appear in {}",
++                run_dir.display()
++            );
++        }
++        if cancelled.load(Ordering::Relaxed) {
++            return Ok(ExitCode::from(0));
++        }
++    }
++
++    let file = std::fs::File::open(&progress_path)?;
++    let mut reader = BufReader::new(file);
++    let mut line = String::new();
++
++    loop {
++        if cancelled.load(Ordering::Relaxed) {
++            if kill_on_detach {
++                // Kill the engine process
++                kill_engine(&pid_path);
++                // Wait briefly for conclusion
++                for _ in 0..20 {
++                    if conclusion_path.exists() {
++                        break;
++                    }
++                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
++                }
++            } else {
++                eprintln!("Detached from run (engine continues in background)");
++            }
++            break;
++        }
++
++        // Read new lines from progress.jsonl
++        loop {
++            line.clear();
++            let bytes_read = reader.read_line(&mut line)?;
++            if bytes_read == 0 {
++                break;
++            }
++            let trimmed = line.trim();
++            if !trimmed.is_empty() {
++                progress_ui
++                    .lock()
++                    .expect("progress lock poisoned")
++                    .handle_json_line(trimmed);
++            }
++        }
++
++        // Check for interview request
++        if interview_request_path.exists() {
++            if let Ok(request_data) = std::fs::read_to_string(&interview_request_path) {
++                if let Ok(question) =
++                    serde_json::from_str::<fabro_interview::Question>(&request_data)
++                {
++                    // Hide progress bars during interview
++                    progress_ui
++                        .lock()
++                        .expect("progress lock poisoned")
++                        .hide_bars();
++
++                    // Prompt user via ConsoleInterviewer
++                    let interviewer = ConsoleInterviewer::new(styles);
++                    let answer = fabro_interview::Interviewer::ask(&interviewer, question).await;
++
++                    // Write response
++                    if let Ok(response_json) = serde_json::to_string_pretty(&answer) {
++                        let _ = std::fs::write(&interview_response_path, response_json);
++                    }
++
++                    // Show progress bars again
++                    progress_ui
++                        .lock()
++                        .expect("progress lock poisoned")
++                        .show_bars();
++                }
++            }
++        }
++
++        // Check if run is complete
++        if conclusion_path.exists() {
++            // Drain any remaining lines
++            drain_remaining(&mut reader, &mut line, &progress_ui);
++            break;
++        }
++
++        // Check if engine process is still alive (if PID file exists)
++        if pid_path.exists() {
++            if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
++                if let Ok(pid) = pid_str.trim().parse::<u32>() {
++                    if !process_alive(pid) && !conclusion_path.exists() {
++                        // Engine died without writing conclusion — drain and exit
++                        drain_remaining(&mut reader, &mut line, &progress_ui);
++                        break;
++                    }
++                }
++            }
++        }
++
++        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
++    }
++
++    // Finish progress bars
++    progress_ui.lock().expect("progress lock poisoned").finish();
++
++    // Determine exit code from conclusion
++    if conclusion_path.exists() {
++        match fabro_workflows::conclusion::Conclusion::load(&conclusion_path) {
++            Ok(conclusion) => {
++                let success = matches!(
++                    conclusion.status,
++                    fabro_workflows::outcome::StageStatus::Success
++                        | fabro_workflows::outcome::StageStatus::PartialSuccess
++                );
++                Ok(if success {
++                    ExitCode::from(0)
++                } else {
++                    ExitCode::from(1)
++                })
++            }
++            Err(_) => Ok(ExitCode::from(1)),
++        }
++    } else {
++        Ok(ExitCode::from(1))
++    }
++}
++
++fn drain_remaining(
++    reader: &mut BufReader<std::fs::File>,
++    line: &mut String,
++    progress_ui: &Arc<Mutex<run_progress::ProgressUI>>,
++) {
++    loop {
++        line.clear();
++        match reader.read_line(line) {
++            Ok(0) => break,
++            Ok(_) => {
++                let trimmed = line.trim();
++                if !trimmed.is_empty() {
++                    progress_ui
++                        .lock()
++                        .expect("progress lock poisoned")
++                        .handle_json_line(trimmed);
++                }
++            }
++            Err(_) => break,
++        }
++    }
++}
++
++fn kill_engine(pid_path: &Path) {
++    if let Ok(pid_str) = std::fs::read_to_string(pid_path) {
++        if let Ok(pid) = pid_str.trim().parse::<i32>() {
++            #[cfg(unix)]
++            unsafe {
++                libc::kill(pid, libc::SIGTERM);
++            }
++            let _ = pid;
++        }
++    }
++}
++
++fn process_alive(pid: u32) -> bool {
++    #[cfg(unix)]
++    {
++        unsafe { libc::kill(pid as i32, 0) == 0 }
++    }
++    #[cfg(not(unix))]
++    {
++        let _ = pid;
++        true
++    }
++}
+diff --git a/lib/crates/fabro-cli/src/commands/create.rs b/lib/crates/fabro-cli/src/commands/create.rs
+new file mode 100644
+index 00000000..f3782cec
+--- /dev/null
++++ b/lib/crates/fabro-cli/src/commands/create.rs
+@@ -0,0 +1,301 @@
++use std::path::PathBuf;
++
++use anyhow::{bail, Context};
++use chrono::Local;
++use fabro_config::run::RunDefaults;
++use fabro_config::{project as project_config, sandbox as sandbox_config};
++use fabro_validate::Severity;
++use fabro_workflows::run_spec::RunSpec;
++use fabro_workflows::sandbox_provider::SandboxProvider;
++use fabro_workflows::workflow::WorkflowBuilder;
++
++use super::run::RunArgs;
++use super::shared::{print_diagnostics, read_workflow_file, relative_path};
++use fabro_util::terminal::Styles;
++
++/// Resolve goal from `--goal` string or `--goal-file` path.
++fn resolve_cli_goal(
++    goal: &Option<String>,
++    goal_file: &Option<PathBuf>,
++) -> anyhow::Result<Option<String>> {
++    match (goal, goal_file) {
++        (Some(g), _) => Ok(Some(g.clone())),
++        (_, Some(path)) => {
++            let path = fabro_util::path::expand_tilde(path);
++            let content = std::fs::read_to_string(&path)
++                .with_context(|| format!("failed to read goal file: {}", path.display()))?;
++            tracing::debug!(path = %path.display(), "Goal loaded from file");
++            Ok(Some(content))
++        }
++        _ => Ok(None),
++    }
++}
++
++/// Apply goal to the graph from TOML config or CLI flag.
++fn apply_goal_override(
++    graph: &mut fabro_graphviz::graph::Graph,
++    cli_goal: Option<&str>,
++    toml_goal: Option<&str>,
++) {
++    let goal = cli_goal.or(toml_goal);
++    if let Some(goal) = goal {
++        graph.attrs.insert(
++            "goal".to_string(),
++            fabro_graphviz::graph::AttrValue::String(goal.to_string()),
++        );
++    }
++}
++
++/// Parse sandbox provider from an optional `SandboxConfig`.
++fn parse_sandbox_provider(
++    sandbox: Option<&sandbox_config::SandboxConfig>,
++) -> anyhow::Result<Option<SandboxProvider>> {
++    sandbox
++        .and_then(|s| s.provider.as_deref())
++        .map(|s| s.parse::<SandboxProvider>())
++        .transpose()
++        .map_err(|e| anyhow::anyhow!("Invalid sandbox provider: {e}"))
++}
++
++/// Resolve sandbox provider: CLI flag > TOML config > run defaults > default.
++fn resolve_sandbox_provider(
++    cli: Option<SandboxProvider>,
++    run_cfg: Option<&fabro_config::run::WorkflowRunConfig>,
++    run_defaults: &RunDefaults,
++) -> anyhow::Result<SandboxProvider> {
++    let toml = parse_sandbox_provider(run_cfg.and_then(|c| c.sandbox.as_ref()))?;
++    let defaults = parse_sandbox_provider(run_defaults.sandbox.as_ref())?;
++    Ok(cli.or(toml).or(defaults).unwrap_or_default())
++}
++
++/// Resolve model and provider through the full precedence chain.
++fn resolve_model_provider(
++    cli_model: Option<&str>,
++    cli_provider: Option<&str>,
++    run_cfg: Option<&fabro_config::run::WorkflowRunConfig>,
++    run_defaults: &RunDefaults,
++    graph: &fabro_graphviz::graph::Graph,
++) -> (String, Option<String>) {
++    let toml_model = run_cfg
++        .and_then(|c| c.llm.as_ref())
++        .and_then(|l| l.model.as_deref());
++    let toml_provider = run_cfg
++        .and_then(|c| c.llm.as_ref())
++        .and_then(|l| l.provider.as_deref());
++    let defaults_model = run_defaults.llm.as_ref().and_then(|l| l.model.as_deref());
++    let defaults_provider = run_defaults
++        .llm
++        .as_ref()
++        .and_then(|l| l.provider.as_deref());
++
++    let provider = cli_provider
++        .or(toml_provider)
++        .or(defaults_provider)
++        .or_else(|| graph.attrs.get("default_provider").and_then(|v| v.as_str()))
++        .map(String::from);
++
++    let model = cli_model
++        .or(toml_model)
++        .or(defaults_model)
++        .or_else(|| graph.attrs.get("default_model").and_then(|v| v.as_str()))
++        .map(String::from)
++        .unwrap_or_else(|| {
++            provider
++                .as_deref()
++                .and_then(fabro_llm::catalog::default_model_for_provider)
++                .unwrap_or_else(fabro_llm::catalog::default_model_from_env)
++                .id
++        });
++
++    match fabro_llm::catalog::get_model_info(&model) {
++        Some(info) => (info.id, provider.or(Some(info.provider))),
++        None => (model, provider),
++    }
++}
++
++/// Create a workflow run: allocate run directory, persist spec, return (run_id, run_dir).
++///
++/// This does NOT execute the workflow — it only prepares the run directory.
++pub async fn create_run(
++    args: &RunArgs,
++    mut run_defaults: RunDefaults,
++    styles: &Styles,
++) -> anyhow::Result<(String, PathBuf)> {
++    let workflow_path = args
++        .workflow
++        .as_ref()
++        .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
++
++    // Apply project-level config overrides
++    if let Ok(Some((_config_path, project_config))) =
++        project_config::discover_project_config(&std::env::current_dir().unwrap_or_default())
++    {
++        tracing::debug!("Applying run defaults from fabro.toml");
++        run_defaults.merge_overlay(project_config.into_run_defaults());
++    }
++
++    // Resolve workflow arg, load run config if TOML
++    let (dot_path, run_cfg) = {
++        let (dot, cfg) = project_config::resolve_workflow(workflow_path)?;
++        match cfg {
++            Some(mut cfg) => {
++                cfg.apply_defaults(&run_defaults);
++                (dot, Some(cfg))
++            }
++            None => (dot, None),
++        }
++    };
++
++    let directory = run_cfg
++        .as_ref()
++        .and_then(|c| c.work_dir.as_deref())
++        .or(run_defaults.work_dir.as_deref());
++    if let Some(dir) = directory {
++        std::env::set_current_dir(dir)
++            .map_err(|e| anyhow::anyhow!("Failed to set working directory to {dir}: {e}"))?;
++    }
++
++    // Parse and validate workflow
++    let source = read_workflow_file(&dot_path)?;
++    let vars = run_cfg
++        .as_ref()
++        .and_then(|c| c.vars.as_ref())
++        .or(run_defaults.vars.as_ref());
++    let source = match vars {
++        Some(vars) => fabro_workflows::vars::expand_vars(&source, vars)?,
++        None => source,
++    };
++    let dot_dir = dot_path.parent().unwrap_or(std::path::Path::new("."));
++    let (mut graph, diagnostics) =
++        WorkflowBuilder::new().prepare_with_file_inlining(&source, dot_dir)?;
++    let cli_goal = resolve_cli_goal(&args.goal, &args.goal_file)?;
++    let toml_goal = run_cfg.as_ref().and_then(|c| c.goal.as_deref());
++    apply_goal_override(&mut graph, cli_goal.as_deref(), toml_goal);
++
++    // Inline @file references in the goal
++    if let Some(fabro_graphviz::graph::AttrValue::String(goal)) = graph.attrs.get("goal") {
++        let fallback = dirs::home_dir().map(|h| h.join(".fabro"));
++        let resolved =
++            fabro_workflows::transform::resolve_file_ref(goal, dot_dir, fallback.as_deref());
++        if resolved != *goal {
++            graph.attrs.insert(
++                "goal".to_string(),
++                fabro_graphviz::graph::AttrValue::String(resolved),
++            );
++        }
++    }
++
++    eprintln!(
++        "{} {} {}",
++        styles.bold.apply_to("Workflow:"),
++        graph.name,
++        styles.dim.apply_to(format!(
++            "({} nodes, {} edges)",
++            graph.nodes.len(),
++            graph.edges.len()
++        )),
++    );
++    eprintln!(
++        "{} {}",
++        styles.dim.apply_to("Graph:"),
++        styles.dim.apply_to(relative_path(&dot_path)),
++    );
++
++    let goal = graph.goal();
++    if !goal.is_empty() {
++        let first_line = goal.lines().next().unwrap_or(goal);
++        eprintln!("{} {first_line}\n", styles.bold.apply_to("Goal:"));
++    }
++
++    print_diagnostics(&diagnostics, styles);
++
++    if diagnostics.iter().any(|d| d.severity == Severity::Error) {
++        bail!("Validation failed");
++    }
++
++    // Resolve sandbox provider
++    let sandbox_provider = if args.dry_run {
++        SandboxProvider::Local
++    } else {
++        resolve_sandbox_provider(
++            args.sandbox.map(Into::into),
++            run_cfg.as_ref(),
++            &run_defaults,
++        )?
++    };
++
++    // Resolve model and provider
++    let (model, provider) = resolve_model_provider(
++        args.model.as_deref(),
++        args.provider.as_deref(),
++        run_cfg.as_ref(),
++        &run_defaults,
++        &graph,
++    );
++
++    // Create run directory
++    let run_id = ulid::Ulid::new().to_string();
++    let run_dir = args.run_dir.clone().unwrap_or_else(|| {
++        if args.dry_run {
++            std::env::temp_dir().join("fabro-dry-run").join(&run_id)
++        } else {
++            let base = dirs::home_dir()
++                .expect("could not determine home directory")
++                .join(".fabro")
++                .join("runs");
++            base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
++        }
++    });
++    tokio::fs::create_dir_all(&run_dir).await?;
++
++    // Write essential files
++    tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
++    tokio::fs::write(run_dir.join("id.txt"), &run_id).await?;
++    std::fs::File::create(run_dir.join("progress.jsonl"))?;
++    fabro_workflows::run_status::write_run_status(
++        &run_dir,
++        fabro_workflows::run_status::RunStatus::Submitted,
++        None,
++    );
++
++    // Save TOML config alongside the run if present
++    if workflow_path.extension().is_some_and(|ext| ext == "toml") {
++        if let Ok(toml_contents) = tokio::fs::read(workflow_path).await {
++            tokio::fs::write(run_dir.join("run.toml"), toml_contents).await?;
++        }
++    }
++
++    // Build and save RunSpec
++    let working_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
++    let spec = RunSpec {
++        run_id: run_id.clone(),
++        workflow_path: std::fs::canonicalize(workflow_path).unwrap_or(workflow_path.clone()),
++        dot_source: source,
++        working_directory,
++        goal: if goal.is_empty() {
++            None
++        } else {
++            Some(goal.to_string())
++        },
++        model,
++        provider,
++        sandbox_provider: sandbox_provider.to_string(),
++        labels: args
++            .label
++            .iter()
++            .filter_map(|s| s.split_once('='))
++            .map(|(k, v)| (k.to_string(), v.to_string()))
++            .collect(),
++        verbose: args.verbose,
++        no_retro: args.no_retro,
++        ssh: args.ssh,
++        preserve_sandbox: args.preserve_sandbox,
++        dry_run: args.dry_run,
++        auto_approve: args.auto_approve,
++        resume: args.resume.clone(),
++        run_branch: args.run_branch.clone(),
++    };
++    spec.save(&run_dir)?;
++
++    Ok((run_id, run_dir))
++}
+diff --git a/lib/crates/fabro-cli/src/commands/mod.rs b/lib/crates/fabro-cli/src/commands/mod.rs
+index d7cf9c68..19ee09e7 100644
+--- a/lib/crates/fabro-cli/src/commands/mod.rs
++++ b/lib/crates/fabro-cli/src/commands/mod.rs
+@@ -1,5 +1,7 @@
+ pub mod asset;
++pub mod attach;
+ pub mod cp;
++pub mod create;
+ pub mod diff;
+ pub mod fork;
+ pub mod graph;
+@@ -11,10 +13,11 @@ pub mod preview;
+ pub mod provider;
+ pub mod rewind;
+ pub mod run;
+-mod run_progress;
++pub(crate) mod run_progress;
+ pub mod runs;
+ pub mod secret;
+ pub(crate) mod shared;
+ pub mod ssh;
++pub mod start;
+ pub mod validate;
+ pub mod workflow;
+diff --git a/lib/crates/fabro-cli/src/commands/run_progress.rs b/lib/crates/fabro-cli/src/commands/run_progress.rs
+index 5154c3f4..2619cee0 100644
+--- a/lib/crates/fabro-cli/src/commands/run_progress.rs
++++ b/lib/crates/fabro-cli/src/commands/run_progress.rs
+@@ -266,6 +266,20 @@ impl ProgressUI {
+         });
+     }
+ 
++    /// Hide indicatif progress bars (for interview prompts in attach mode).
++    pub fn hide_bars(&self) {
++        if let ProgressRenderer::Tty(tty) = &self.renderer {
++            tty.multi.set_draw_target(ProgressDrawTarget::hidden());
++        }
++    }
++
++    /// Show indicatif progress bars after an interview prompt.
++    pub fn show_bars(&self) {
++        if let ProgressRenderer::Tty(tty) = &self.renderer {
++            tty.multi.set_draw_target(ProgressDrawTarget::stderr());
++        }
++    }
++
+     /// Clear all active bars and release the terminal for normal stderr output.
+     pub fn finish(&mut self) {
+         for (_id, stage) in self.active_stages.drain() {
+@@ -610,6 +624,281 @@ impl ProgressUI {
+         }
+     }
+ 
++    // ── JSONL dispatch ────────────────────────────────────────────────
++
++    /// Parse a JSONL envelope line and dispatch to internal rendering methods.
++    /// Used by the attach loop to render events from progress.jsonl.
++    pub fn handle_json_line(&mut self, line: &str) {
++        let envelope: serde_json::Value = match serde_json::from_str(line) {
++            Ok(v) => v,
++            Err(_) => return,
++        };
++        let event_name = match envelope.get("event").and_then(|v| v.as_str()) {
++            Some(name) => name,
++            None => return,
++        };
++
++        let str_field = |key: &str| -> Option<&str> { envelope.get(key).and_then(|v| v.as_str()) };
++        let u64_field =
++            |key: &str| -> u64 { envelope.get(key).and_then(|v| v.as_u64()).unwrap_or(0) };
++
++        match event_name {
++            "Sandbox.Initializing" => {
++                let provider = str_field("sandbox_provider")
++                    .unwrap_or("unknown")
++                    .to_string();
++                self.on_sandbox_event(&fabro_agent::SandboxEvent::Initializing { provider });
++            }
++            "Sandbox.Ready" => {
++                let provider = str_field("sandbox_provider")
++                    .unwrap_or("unknown")
++                    .to_string();
++                let duration_ms = u64_field("duration_ms");
++                let name = str_field("name").map(String::from);
++                let cpu = envelope.get("cpu").and_then(|v| v.as_f64());
++                let memory = envelope.get("memory").and_then(|v| v.as_f64());
++                let url = str_field("url").map(String::from);
++                self.on_sandbox_event(&fabro_agent::SandboxEvent::Ready {
++                    provider,
++                    duration_ms,
++                    name,
++                    cpu,
++                    memory,
++                    url,
++                });
++            }
++            "SandboxInitialized" => {
++                if let Some(wd) = str_field("working_directory") {
++                    self.set_working_directory(wd.to_string());
++                }
++            }
++            "SetupStarted" => {
++                let count = u64_field("command_count") as usize;
++                self.on_setup_started(count);
++            }
++            "SetupCompleted" => {
++                let duration_ms = u64_field("duration_ms");
++                self.on_setup_completed(duration_ms);
++            }
++            "StageStarted" => {
++                let node_id = str_field("node_id").unwrap_or("?");
++                let name = str_field("name").unwrap_or("?");
++                let script = str_field("script");
++                self.on_stage_started(node_id, name, script);
++            }
++            "StageCompleted" => {
++                let node_id = str_field("node_id").unwrap_or("?");
++                let name = str_field("name").unwrap_or("?");
++                let duration_ms = u64_field("duration_ms");
++                let status = str_field("status").unwrap_or("success");
++                let succeeded = matches!(status, "success" | "partial_success");
++
++                let dur = format_duration_ms(duration_ms);
++
++                // Parse usage for cost
++                let cost_str = envelope
++                    .get("usage")
++                    .and_then(|u| u.get("cost"))
++                    .and_then(|c| c.as_f64())
++                    .map(|c| format!("{}   ", format_cost(c)))
++                    .unwrap_or_default();
++
++                let stats_str = if self.verbose {
++                    let counts = self.stage_counts.get(node_id);
++                    let turn_count = counts.map_or(0, |c| c.0);
++                    let tool_call_count = counts.map_or(0, |c| c.1);
++                    let total_tokens = envelope
++                        .get("usage")
++                        .map(|u| {
++                            u.get("input_tokens").and_then(|v| v.as_i64()).unwrap_or(0)
++                                + u.get("output_tokens").and_then(|v| v.as_i64()).unwrap_or(0)
++                        })
++                        .unwrap_or(0);
++                    if turn_count > 0 || tool_call_count > 0 || total_tokens > 0 {
++                        let dim = Style::new().dim();
++                        format!(
++                            "  {}",
++                            dim.apply_to(format!(
++                                "({} turns, {} tools, {} toks)",
++                                turn_count,
++                                tool_call_count,
++                                format_tokens_human(total_tokens),
++                            ))
++                        )
++                    } else {
++                        String::new()
++                    }
++                } else {
++                    String::new()
++                };
++
++                let prefix = format!("{cost_str}{dur}{stats_str}");
++                let glyph = if succeeded {
++                    green_check()
++                } else {
++                    red_cross()
++                };
++                self.finish_stage(node_id, name, glyph, &prefix);
++            }
++            "StageFailed" => {
++                let node_id = str_field("node_id").unwrap_or("?");
++                let name = str_field("name").unwrap_or("?");
++                let message = str_field("message").unwrap_or("unknown error");
++                self.finish_stage(node_id, name, red_cross(), "");
++                let red = Style::new().red();
++                let summary = last_line_truncated(message, 120);
++                self.insert_info_line(&format!("{} {}", red.apply_to("Error:"), summary));
++            }
++            "ParallelStarted" => {
++                self.parallel_parent = self
++                    .active_stages
++                    .keys()
++                    .next()
++                    .cloned()
++                    .or_else(|| Some(String::new()));
++            }
++            "ParallelBranchStarted" => {
++                if let Some(branch) = str_field("branch") {
++                    self.on_parallel_branch_started(branch);
++                }
++            }
++            "ParallelBranchCompleted" => {
++                if let Some(branch) = str_field("branch") {
++                    let duration_ms = u64_field("duration_ms");
++                    let status = str_field("status").unwrap_or("success");
++                    self.on_parallel_branch_completed(branch, duration_ms, status);
++                }
++            }
++            "ParallelCompleted" => {
++                self.parallel_parent = None;
++            }
++            "Agent.ToolCallStarted" => {
++                let stage = str_field("stage").unwrap_or("?");
++                let tool_name = str_field("tool_name").unwrap_or("?");
++                let tool_call_id = str_field("tool_call_id").unwrap_or("?");
++                let arguments = envelope
++                    .get("arguments")
++                    .cloned()
++                    .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
++                // Update tool_call count
++                if let Some(counts) = self.stage_counts.get_mut(stage) {
++                    counts.1 += 1;
++                }
++                self.on_tool_call_started(stage, tool_name, tool_call_id, &arguments);
++            }
++            "Agent.ToolCallCompleted" => {
++                let stage = str_field("stage").unwrap_or("?");
++                let tool_call_id = str_field("tool_call_id").unwrap_or("?");
++                let is_error = envelope
++                    .get("is_error")
++                    .and_then(|v| v.as_bool())
++                    .unwrap_or(false);
++                self.on_tool_call_completed(stage, tool_call_id, is_error);
++            }
++            "Agent.AssistantMessage" => {
++                let stage = str_field("stage").unwrap_or("?");
++                let model = str_field("model").unwrap_or("?");
++                // Update turn count
++                if let Some(counts) = self.stage_counts.get_mut(stage) {
++                    counts.0 += 1;
++                }
++                // Update model display on stage bar
++                if let ProgressRenderer::Tty(_) = &self.renderer {
++                    if let Some(active_stage) = self.active_stages.get_mut(stage) {
++                        if !active_stage.has_model {
++                            active_stage.has_model = true;
++                            let dim = Style::new().dim();
++                            let suffix = format!(" {}", dim.apply_to(format!("[{model}]")));
++                            active_stage
++                                .spinner
++                                .set_message(format!("{}{}", active_stage.display_name, suffix));
++                        }
++                    }
++                }
++            }
++            "Agent.CompactionStarted" => {
++                let stage = str_field("stage").unwrap_or("?");
++                if let ProgressRenderer::Tty(tty) = &self.renderer {
++                    if let Some(active_stage) = self.active_stages.get_mut(stage) {
++                        if let Some(old) = active_stage.compaction_bar.take() {
++                            old.finish_and_clear();
++                        }
++                        let bar = tty
++                            .multi
++                            .insert_after(active_stage.last_bar(), ProgressBar::new_spinner());
++                        bar.set_style(style_tool_running());
++                        bar.set_message("\u{27f3} compacting context\u{2026}");
++                        bar.enable_steady_tick(Duration::from_millis(100));
++                        active_stage.compaction_bar = Some(bar);
++                    }
++                }
++            }
++            "Agent.CompactionCompleted" => {
++                let stage = str_field("stage").unwrap_or("?");
++                let original = u64_field("original_turn_count");
++                let preserved = u64_field("preserved_turn_count");
++                let tracked = u64_field("tracked_file_count");
++                let msg = format!(
++                    "\u{27f3} compaction: {original} \u{2192} {preserved} turns, {tracked} files"
++                );
++                match &self.renderer {
++                    ProgressRenderer::Tty(_) => {
++                        if let Some(bar) = self
++                            .active_stages
++                            .get_mut(stage)
++                            .and_then(|s| s.compaction_bar.take())
++                        {
++                            bar.set_style(style_tool_done());
++                            bar.finish_with_message(msg);
++                        } else {
++                            self.insert_info_line_for_stage(stage, &msg);
++                        }
++                    }
++                    ProgressRenderer::Plain => {
++                        eprintln!("      {msg}");
++                    }
++                }
++            }
++            "SshAccessReady" => {
++                if let Some(cmd) = str_field("ssh_command") {
++                    self.on_ssh_access_ready(cmd);
++                }
++            }
++            "RetroStarted" => {
++                self.on_stage_started("retro", "Retro", None);
++            }
++            "RetroCompleted" => {
++                let dur = format_duration_ms(u64_field("duration_ms"));
++                self.finish_stage("retro", "Retro", green_check(), &dur);
++            }
++            "RetroFailed" => {
++                let dur = format_duration_ms(u64_field("duration_ms"));
++                self.finish_stage("retro", "Retro", red_cross(), &dur);
++            }
++            "CliEnsureStarted" => {
++                if let Some(cli_name) = str_field("cli_name") {
++                    self.on_cli_ensure_started(cli_name);
++                }
++            }
++            "CliEnsureCompleted" => {
++                if let Some(cli_name) = str_field("cli_name") {
++                    let already_installed = envelope
++                        .get("already_installed")
++                        .and_then(|v| v.as_bool())
++                        .unwrap_or(false);
++                    let duration_ms = u64_field("duration_ms");
++                    self.on_cli_ensure_completed(cli_name, already_installed, duration_ms);
++                }
++            }
++            "CliEnsureFailed" => {
++                if let Some(cli_name) = str_field("cli_name") {
++                    self.on_cli_ensure_failed(cli_name);
++                }
++            }
++            _ => {}
++        }
++    }
++
+     // ── Sandbox ─────────────────────────────────────────────────────────
+ 
+     fn on_sandbox_event(&mut self, event: &fabro_agent::SandboxEvent) {
+@@ -1530,4 +1819,53 @@ mod tests {
+         });
+         assert!(ui.parallel_parent.is_none());
+     }
++
++    #[test]
++    fn handle_json_line_stage_started_and_completed() {
++        let mut ui = ProgressUI::new(false, false);
++
++        let started = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"plan","name":"Plan","index":0,"script":null,"attempt":1,"max_attempts":1}"#;
++        ui.handle_json_line(started);
++        assert!(ui.stage_counts.contains_key("plan"));
++
++        let completed = r#"{"ts":"2026-01-01T12:00:10Z","event":"StageCompleted","node_id":"plan","name":"Plan","index":0,"duration_ms":10000,"status":"success"}"#;
++        ui.handle_json_line(completed);
++        // In Plain mode, finish_stage just prints, so verify no panic
++    }
++
++    #[test]
++    fn handle_json_line_tool_call_round_trip() {
++        let mut ui = ProgressUI::new(false, true); // verbose
++
++        // Start a stage first
++        let started = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"code","name":"Code","index":0,"attempt":1,"max_attempts":1}"#;
++        ui.handle_json_line(started);
++
++        let tc_start = r#"{"ts":"2026-01-01T12:00:01Z","event":"Agent.ToolCallStarted","stage":"code","tool_name":"read_file","tool_call_id":"tc1","arguments":{"path":"src/main.rs"}}"#;
++        ui.handle_json_line(tc_start);
++        assert_eq!(ui.stage_counts.get("code").map(|c| c.1), Some(1));
++
++        let tc_done = r#"{"ts":"2026-01-01T12:00:02Z","event":"Agent.ToolCallCompleted","stage":"code","tool_name":"read_file","tool_call_id":"tc1","is_error":false}"#;
++        ui.handle_json_line(tc_done);
++    }
++
++    #[test]
++    fn handle_json_line_retro_events() {
++        let mut ui = ProgressUI::new(false, false);
++
++        let retro_started = r#"{"ts":"2026-01-01T12:00:00Z","event":"RetroStarted"}"#;
++        ui.handle_json_line(retro_started);
++
++        let retro_completed =
++            r#"{"ts":"2026-01-01T12:00:05Z","event":"RetroCompleted","duration_ms":5000}"#;
++        ui.handle_json_line(retro_completed);
++    }
++
++    #[test]
++    fn handle_json_line_ignores_invalid_json() {
++        let mut ui = ProgressUI::new(false, false);
++        ui.handle_json_line("not valid json");
++        ui.handle_json_line("");
++        ui.handle_json_line("{}"); // no event field
++    }
+ }
+diff --git a/lib/crates/fabro-cli/src/commands/start.rs b/lib/crates/fabro-cli/src/commands/start.rs
+new file mode 100644
+index 00000000..f4213f6a
+--- /dev/null
++++ b/lib/crates/fabro-cli/src/commands/start.rs
+@@ -0,0 +1,61 @@
++use std::path::Path;
++
++use anyhow::{bail, Result};
++
++/// Spawn a detached engine process for the given run directory.
++///
++/// The engine process reads `spec.json` from the run directory and executes the
++/// workflow. Returns the child process PID.
++pub fn start_run(run_dir: &Path) -> Result<u32> {
++    // Validate status is Submitted
++    let status_path = run_dir.join("status.json");
++    if status_path.exists() {
++        let record = fabro_workflows::run_status::RunStatusRecord::load(&status_path)
++            .map_err(|e| anyhow::anyhow!("Failed to read status.json: {e}"))?;
++        if record.status != fabro_workflows::run_status::RunStatus::Submitted {
++            bail!(
++                "Cannot start run: status is {:?}, expected Submitted",
++                record.status
++            );
++        }
++    }
++
++    // Validate spec.json exists
++    let spec_path = run_dir.join("spec.json");
++    if !spec_path.exists() {
++        bail!(
++            "Cannot start run: spec.json not found in {}",
++            run_dir.display()
++        );
++    }
++
++    let log_file = std::fs::File::create(run_dir.join("detach.log"))?;
++
++    let exe = std::env::current_exe()?;
++    let mut cmd = std::process::Command::new(&exe);
++    cmd.args(["_run_engine", "--run-dir"])
++        .arg(run_dir)
++        .stdout(log_file.try_clone()?)
++        .stderr(log_file)
++        .stdin(std::process::Stdio::null());
++
++    // Detach from the controlling terminal on unix
++    #[cfg(unix)]
++    {
++        use std::os::unix::process::CommandExt;
++        unsafe {
++            cmd.pre_exec(|| {
++                libc::setsid();
++                Ok(())
++            });
++        }
++    }
++
++    let child = cmd.spawn()?;
++    let pid = child.id();
++
++    // Write PID file
++    std::fs::write(run_dir.join("run.pid"), pid.to_string())?;
++
++    Ok(pid)
++}
+diff --git a/lib/crates/fabro-cli/src/main.rs b/lib/crates/fabro-cli/src/main.rs
+index 6a4a9ea5..2c8f5c8a 100644
+--- a/lib/crates/fabro-cli/src/main.rs
++++ b/lib/crates/fabro-cli/src/main.rs
+@@ -72,6 +72,25 @@ enum Command {
+     Exec(fabro_agent::cli::AgentArgs),
+     /// Launch a workflow run
+     Run(commands::run::RunArgs),
++    /// Create a workflow run (allocate run dir, persist spec)
++    Create(commands::run::RunArgs),
++    /// Start a created workflow run (spawn engine process)
++    Start {
++        /// Run ID prefix or workflow name
++        run: String,
++    },
++    /// Attach to a running or finished workflow run
++    Attach {
++        /// Run ID prefix or workflow name
++        run: String,
++    },
++    /// Internal: run the engine process (reads spec.json from run dir)
++    #[command(name = "_run_engine", hide = true)]
++    RunEngine {
++        /// Path to the run directory
++        #[arg(long)]
++        run_dir: PathBuf,
++    },
+     /// Validate a workflow
+     Validate(commands::validate::ValidateArgs),
+     /// Render a workflow graph as SVG or PNG
+@@ -290,90 +309,6 @@ pub(crate) fn build_github_app_credentials(
+     })
+ }
+ 
+-/// Fork the workflow as a background process, print the run ID, and exit.
+-fn detach_run(args: commands::run::RunArgs) -> Result<()> {
+-    let run_id = ulid::Ulid::new().to_string();
+-
+-    let run_dir = args.run_dir.clone().unwrap_or_else(|| {
+-        let base = dirs::home_dir()
+-            .expect("could not determine home directory")
+-            .join(".fabro")
+-            .join("runs");
+-        base.join(format!(
+-            "{}-{}",
+-            chrono::Local::now().format("%Y%m%d"),
+-            run_id
+-        ))
+-    });
+-    std::fs::create_dir_all(&run_dir)?;
+-    std::fs::write(run_dir.join("id.txt"), &run_id)?;
+-    fabro_workflows::run_status::write_run_status(
+-        &run_dir,
+-        fabro_workflows::run_status::RunStatus::Submitted,
+-        None,
+-    );
+-    std::fs::File::create(run_dir.join("progress.jsonl"))?;
+-
+-    let log_file = std::fs::File::create(run_dir.join("detach.log"))?;
+-
+-    // Rebuild argv: current exe + original args, stripping --detach/-d, injecting --run-id and --run-dir
+-    let exe = std::env::current_exe()?;
+-    let mut child_args: Vec<String> = Vec::new();
+-    child_args.push("run".to_string());
+-
+-    let raw_args: Vec<String> = std::env::args().collect();
+-    // Skip argv[0] (binary) and argv[1] ("run"), then filter out --detach / -d
+-    let mut iter = raw_args.iter().skip(2).peekable();
+-    while let Some(arg) = iter.next() {
+-        if arg == "--detach" || arg == "-d" {
+-            continue;
+-        }
+-        // Skip --run-dir and its value (we'll override it)
+-        if arg == "--run-dir" {
+-            iter.next(); // consume the value
+-            continue;
+-        }
+-        if arg.starts_with("--run-dir=") {
+-            continue;
+-        }
+-        // Skip --run-id and its value (we'll override it)
+-        if arg == "--run-id" {
+-            iter.next();
+-            continue;
+-        }
+-        if arg.starts_with("--run-id=") {
+-            continue;
+-        }
+-        child_args.push(arg.clone());
+-    }
+-    child_args.push("--run-id".to_string());
+-    child_args.push(run_id.clone());
+-    child_args.push("--run-dir".to_string());
+-    child_args.push(run_dir.to_string_lossy().to_string());
+-
+-    let mut cmd = std::process::Command::new(&exe);
+-    cmd.args(&child_args)
+-        .stdout(log_file.try_clone()?)
+-        .stderr(log_file)
+-        .stdin(std::process::Stdio::null());
+-
+-    // Detach from the controlling terminal on unix
+-    #[cfg(unix)]
+-    {
+-        use std::os::unix::process::CommandExt;
+-        unsafe {
+-            cmd.pre_exec(|| {
+-                libc::setsid();
+-                Ok(())
+-            });
+-        }
+-    }
+-
+-    cmd.spawn()?;
+-    println!("{run_id}");
+-    Ok(())
+-}
+-
+ #[tokio::main]
+ async fn main() {
+     fabro_telemetry::panic::install_panic_hook();
+@@ -456,6 +391,10 @@ async fn main_inner() -> (String, Result<()>) {
+         },
+         Command::Exec(_) => "exec",
+         Command::Run(_) => "run",
++        Command::Create(_) => "create",
++        Command::Start { .. } => "start",
++        Command::Attach { .. } => "attach",
++        Command::RunEngine { .. } => "_run_engine",
+         Command::Validate(_) => "validate",
+         Command::Graph(_) => "graph",
+         Command::Parse(_) => "parse",
+@@ -557,6 +496,7 @@ async fn main_inner() -> (String, Result<()>) {
+     let upgrade_handle = if matches!(
+         cli.command,
+         Command::Run(_)
++            | Command::Create(_)
+             | Command::Exec(_)
+             | Command::Repo { .. }
+             | Command::Init
+@@ -702,26 +642,124 @@ async fn main_inner() -> (String, Result<()>) {
+                 }
+             }
+             Command::Run(mut args) => {
++                let styles: &'static fabro_util::terminal::Styles =
++                    Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
++                let cli_config = cli_config::load_cli_config(None)?;
++                args.verbose = args.verbose || cli_config.verbose;
++
+                 if args.detach {
+-                    return detach_run(args);
+-                }
++                    // Detach mode: create + start + print run ID
++                    let (run_id, run_dir) =
++                        commands::create::create_run(&args, cli_config.run_defaults, styles)
++                            .await?;
++                    commands::start::start_run(&run_dir)?;
++                    println!("{run_id}");
++                } else {
++                    // Foreground mode: use existing run_command
++                    let github_app = build_github_app_credentials(cli_config.app_id());
++                    let git_author = fabro_workflows::git::GitAuthor::from_options(
++                        cli_config.git_author().and_then(|a| a.name.clone()),
++                        cli_config.git_author().and_then(|a| a.email.clone()),
++                    );
++
++                    #[cfg(feature = "sleep_inhibitor")]
++                    let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep);
+ 
++                    commands::run::run_command(
++                        args,
++                        cli_config.run_defaults,
++                        styles,
++                        github_app,
++                        git_author,
++                    )
++                    .await?;
++                }
++            }
++            Command::Create(args) => {
++                let styles: &'static fabro_util::terminal::Styles =
++                    Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
++                let cli_config = cli_config::load_cli_config(None)?;
++                let (run_id, _run_dir) =
++                    commands::create::create_run(&args, cli_config.run_defaults, styles).await?;
++                println!("{run_id}");
++            }
++            Command::Start { run } => {
++                let base = fabro_workflows::run_lookup::default_runs_base();
++                let run_info = fabro_workflows::run_lookup::resolve_run(&base, &run)?;
++                let pid = commands::start::start_run(&run_info.path)?;
++                eprintln!("Started engine process (PID {pid})");
++            }
++            Command::Attach { run } => {
++                let styles: &'static fabro_util::terminal::Styles =
++                    Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
++                let base = fabro_workflows::run_lookup::default_runs_base();
++                let run_info = fabro_workflows::run_lookup::resolve_run(&base, &run)?;
++                let exit_code = commands::attach::attach_run(&run_info.path, false, styles).await?;
++                if exit_code != std::process::ExitCode::SUCCESS {
++                    std::process::exit(1);
++                }
++            }
++            Command::RunEngine { run_dir } => {
+                 let styles: &'static fabro_util::terminal::Styles =
+                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
+                 let cli_config = cli_config::load_cli_config(None)?;
+-                args.verbose = args.verbose || cli_config.verbose;
+                 let github_app = build_github_app_credentials(cli_config.app_id());
+-
+                 let git_author = fabro_workflows::git::GitAuthor::from_options(
+                     cli_config.git_author().and_then(|a| a.name.clone()),
+                     cli_config.git_author().and_then(|a| a.email.clone()),
+                 );
+ 
+-                #[cfg(feature = "sleep_inhibitor")]
+-                let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep);
++                // Load spec and reconstruct RunArgs
++                let spec = fabro_workflows::run_spec::RunSpec::load(&run_dir)?;
++                let run_args = commands::run::RunArgs {
++                    workflow: Some(spec.workflow_path),
++                    run_dir: Some(run_dir),
++                    dry_run: spec.dry_run,
++                    preflight: false,
++                    auto_approve: spec.auto_approve,
++                    resume: spec.resume,
++                    run_branch: spec.run_branch,
++                    goal: spec.goal,
++                    goal_file: None,
++                    model: Some(spec.model),
++                    provider: Some(spec.provider.unwrap_or_default()).filter(|s| !s.is_empty()),
++                    verbose: spec.verbose,
++                    sandbox: spec
++                        .sandbox_provider
++                        .parse::<fabro_workflows::sandbox_provider::SandboxProvider>()
++                        .ok()
++                        .map(|sp| match sp {
++                            fabro_workflows::sandbox_provider::SandboxProvider::Local => {
++                                commands::run::CliSandboxProvider::Local
++                            }
++                            fabro_workflows::sandbox_provider::SandboxProvider::Docker => {
++                                commands::run::CliSandboxProvider::Docker
++                            }
++                            fabro_workflows::sandbox_provider::SandboxProvider::Daytona => {
++                                commands::run::CliSandboxProvider::Daytona
++                            }
++                            fabro_workflows::sandbox_provider::SandboxProvider::Ssh => {
++                                commands::run::CliSandboxProvider::Ssh
++                            }
++                            #[cfg(feature = "exedev")]
++                            fabro_workflows::sandbox_provider::SandboxProvider::Exe => {
++                                commands::run::CliSandboxProvider::Exe
++                            }
++                        }),
++                    label: spec
++                        .labels
++                        .into_iter()
++                        .map(|(k, v)| format!("{k}={v}"))
++                        .collect(),
++                    no_retro: spec.no_retro,
++                    ssh: spec.ssh,
++                    preserve_sandbox: spec.preserve_sandbox,
++                    detach: false,
++                    run_id: Some(spec.run_id),
++                };
+ 
+                 commands::run::run_command(
+-                    args,
++                    run_args,
+                     cli_config.run_defaults,
+                     styles,
+                     github_app,
+@@ -983,4 +1021,54 @@ mod tests {
+         let result = Cli::try_parse_from(["fabro", "provider", "login", "--provider", "bogus"]);
+         assert!(result.is_err(), "should fail with unknown provider");
+     }
++
++    #[test]
++    fn parse_create_command() {
++        let cli = Cli::try_parse_from(["fabro", "create", "my-workflow.toml", "--goal", "test"])
++            .expect("should parse");
++        match cli.command {
++            Command::Create(args) => {
++                assert_eq!(
++                    args.workflow.as_deref(),
++                    Some(std::path::Path::new("my-workflow.toml"))
++                );
++                assert_eq!(args.goal.as_deref(), Some("test"));
++            }
++            _ => panic!("unexpected command variant"),
++        }
++    }
++
++    #[test]
++    fn parse_start_command() {
++        let cli = Cli::try_parse_from(["fabro", "start", "ABC123"]).expect("should parse");
++        match cli.command {
++            Command::Start { run } => {
++                assert_eq!(run, "ABC123");
++            }
++            _ => panic!("unexpected command variant"),
++        }
++    }
++
++    #[test]
++    fn parse_attach_command() {
++        let cli = Cli::try_parse_from(["fabro", "attach", "ABC123"]).expect("should parse");
++        match cli.command {
++            Command::Attach { run } => {
++                assert_eq!(run, "ABC123");
++            }
++            _ => panic!("unexpected command variant"),
++        }
++    }
++
++    #[test]
++    fn parse_run_engine_command() {
++        let cli = Cli::try_parse_from(["fabro", "_run_engine", "--run-dir", "/tmp/runs/test"])
++            .expect("should parse");
++        match cli.command {
++            Command::RunEngine { run_dir } => {
++                assert_eq!(run_dir, std::path::PathBuf::from("/tmp/runs/test"));
++            }
++            _ => panic!("unexpected command variant"),
++        }
++    }
+ }
+diff --git a/lib/crates/fabro-interview/Cargo.toml b/lib/crates/fabro-interview/Cargo.toml
+index 38b2b3d6..d641da18 100644
+--- a/lib/crates/fabro-interview/Cargo.toml
++++ b/lib/crates/fabro-interview/Cargo.toml
+@@ -13,9 +13,10 @@ serde.workspace = true
+ serde_json.workspace = true
+ async-trait.workspace = true
+ tokio.workspace = true
++tracing.workspace = true
+ dialoguer.workspace = true
+ fabro-util = { path = "../fabro-util" }
+ 
+ [dev-dependencies]
+ tokio = { workspace = true, features = ["test-util", "macros"] }
+-tempfile = "3"
++tempfile = "3"
+\ No newline at end of file
+diff --git a/lib/crates/fabro-interview/src/file.rs b/lib/crates/fabro-interview/src/file.rs
+new file mode 100644
+index 00000000..1f0def2a
+--- /dev/null
++++ b/lib/crates/fabro-interview/src/file.rs
+@@ -0,0 +1,163 @@
++use std::path::PathBuf;
++
++use async_trait::async_trait;
++
++use crate::{Answer, Interviewer, Question};
++
++/// An interviewer that communicates via JSON files in the run directory.
++///
++/// The engine process writes `interview_request.json` and polls for
++/// `interview_response.json`. The attach process watches for the request
++/// file, prompts the user, and writes the response file.
++pub struct FileInterviewer {
++    run_dir: PathBuf,
++}
++
++impl FileInterviewer {
++    pub fn new(run_dir: PathBuf) -> Self {
++        Self { run_dir }
++    }
++
++    fn request_path(&self) -> PathBuf {
++        self.run_dir.join("interview_request.json")
++    }
++
++    fn response_path(&self) -> PathBuf {
++        self.run_dir.join("interview_response.json")
++    }
++}
++
++#[async_trait]
++impl Interviewer for FileInterviewer {
++    async fn ask(&self, question: Question) -> Answer {
++        let timeout_secs = question.timeout_seconds;
++        let default_answer = question.default.clone();
++
++        // Write the request file
++        let request_path = self.request_path();
++        let json = serde_json::to_string_pretty(&question).expect("Question serialization failed");
++        if let Err(e) = tokio::fs::write(&request_path, json).await {
++            tracing::warn!(error = %e, "Failed to write interview request");
++            return default_answer.unwrap_or_else(Answer::timeout);
++        }
++
++        // Poll for response with optional timeout
++        let poll = async {
++            let response_path = self.response_path();
++            loop {
++                if response_path.exists() {
++                    match tokio::fs::read_to_string(&response_path).await {
++                        Ok(data) => match serde_json::from_str::<Answer>(&data) {
++                            Ok(answer) => {
++                                // Clean up both files
++                                let _ = tokio::fs::remove_file(&request_path).await;
++                                let _ = tokio::fs::remove_file(&response_path).await;
++                                return answer;
++                            }
++                            Err(e) => {
++                                tracing::warn!(error = %e, "Failed to parse interview response, retrying");
++                                // File might be partially written, wait and retry
++                            }
++                        },
++                        Err(e) => {
++                            tracing::warn!(error = %e, "Failed to read interview response, retrying");
++                        }
++                    }
++                }
++                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
++            }
++        };
++
++        if let Some(secs) = timeout_secs {
++            let duration = std::time::Duration::from_secs_f64(secs);
++            match tokio::time::timeout(duration, poll).await {
++                Ok(answer) => answer,
++                Err(_) => {
++                    // Clean up request file on timeout
++                    let _ = tokio::fs::remove_file(&self.request_path()).await;
++                    default_answer.unwrap_or_else(Answer::timeout)
++                }
++            }
++        } else {
++            poll.await
++        }
++    }
++
++    async fn inform(&self, _message: &str, _stage: &str) {
++        // No-op: inform messages are rendered by the attach process via progress.jsonl
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::{AnswerValue, QuestionType};
++
++    #[tokio::test]
++    async fn write_request_poll_response() {
++        let dir = tempfile::tempdir().unwrap();
++        let run_dir = dir.path().to_path_buf();
++        let interviewer = FileInterviewer::new(run_dir.clone());
++
++        let question = Question::new("approve?", QuestionType::YesNo);
++
++        // Spawn the ask in a background task
++        let ask_handle = tokio::spawn(async move { interviewer.ask(question).await });
++
++        // Wait for the request file to appear
++        let request_path = run_dir.join("interview_request.json");
++        for _ in 0..50 {
++            if request_path.exists() {
++                break;
++            }
++            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
++        }
++        assert!(request_path.exists(), "interview_request.json should exist");
++
++        // Verify the request contains valid Question JSON
++        let request_data = tokio::fs::read_to_string(&request_path).await.unwrap();
++        let parsed: Question = serde_json::from_str(&request_data).unwrap();
++        assert_eq!(parsed.text, "approve?");
++
++        // Write a response
++        let answer = Answer::yes();
++        let response_json = serde_json::to_string_pretty(&answer).unwrap();
++        let response_path = run_dir.join("interview_response.json");
++        tokio::fs::write(&response_path, response_json)
++            .await
++            .unwrap();
++
++        // Wait for the ask to complete
++        let result = ask_handle.await.unwrap();
++        assert_eq!(result.value, AnswerValue::Yes);
++
++        // Both files should be cleaned up
++        assert!(!request_path.exists());
++        assert!(!response_path.exists());
++    }
++
++    #[tokio::test]
++    async fn timeout_returns_default() {
++        let dir = tempfile::tempdir().unwrap();
++        let interviewer = FileInterviewer::new(dir.path().to_path_buf());
++
++        let mut question = Question::new("approve?", QuestionType::YesNo);
++        question.timeout_seconds = Some(0.1);
++        question.default = Some(Answer::no());
++
++        let answer = interviewer.ask(question).await;
++        assert_eq!(answer.value, AnswerValue::No);
++    }
++
++    #[tokio::test]
++    async fn timeout_without_default_returns_timeout() {
++        let dir = tempfile::tempdir().unwrap();
++        let interviewer = FileInterviewer::new(dir.path().to_path_buf());
++
++        let mut question = Question::new("approve?", QuestionType::YesNo);
++        question.timeout_seconds = Some(0.1);
++
++        let answer = interviewer.ask(question).await;
++        assert_eq!(answer.value, AnswerValue::Timeout);
++    }
++}
+diff --git a/lib/crates/fabro-interview/src/lib.rs b/lib/crates/fabro-interview/src/lib.rs
+index 12ac75da..31879dd2 100644
+--- a/lib/crates/fabro-interview/src/lib.rs
++++ b/lib/crates/fabro-interview/src/lib.rs
+@@ -1,6 +1,7 @@
+ mod auto_approve;
+ mod callback;
+ mod console;
++pub mod file;
+ mod queue;
+ mod recording;
+ mod replay;
+@@ -203,6 +204,7 @@ pub trait Interviewer: Send + Sync {
+ pub use auto_approve::AutoApproveInterviewer;
+ pub use callback::CallbackInterviewer;
+ pub use console::ConsoleInterviewer;
++pub use file::FileInterviewer;
+ pub use queue::QueueInterviewer;
+ pub use recording::RecordingInterviewer;
+ pub use replay::ReplayInterviewer;
+diff --git a/lib/crates/fabro-workflows/src/lib.rs b/lib/crates/fabro-workflows/src/lib.rs
+index 012c6f73..f7735562 100644
+--- a/lib/crates/fabro-workflows/src/lib.rs
++++ b/lib/crates/fabro-workflows/src/lib.rs
+@@ -116,6 +116,7 @@ pub mod pull_request;
+ pub mod run_fork;
+ pub mod run_lookup;
+ pub mod run_rewind;
++pub mod run_spec;
+ pub mod run_status;
+ pub mod sandbox_provider;
+ pub mod sandbox_reconnect;
+diff --git a/lib/crates/fabro-workflows/src/run_spec.rs b/lib/crates/fabro-workflows/src/run_spec.rs
+new file mode 100644
+index 00000000..da5d51f8
+--- /dev/null
++++ b/lib/crates/fabro-workflows/src/run_spec.rs
+@@ -0,0 +1,105 @@
++use std::collections::HashMap;
++use std::path::{Path, PathBuf};
++
++use serde::{Deserialize, Serialize};
++
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct RunSpec {
++    pub run_id: String,
++    pub workflow_path: PathBuf,
++    pub dot_source: String,
++    pub working_directory: PathBuf,
++    pub goal: Option<String>,
++    pub model: String,
++    pub provider: Option<String>,
++    pub sandbox_provider: String,
++    pub labels: HashMap<String, String>,
++    pub verbose: bool,
++    pub no_retro: bool,
++    pub ssh: bool,
++    pub preserve_sandbox: bool,
++    pub dry_run: bool,
++    pub auto_approve: bool,
++    pub resume: Option<PathBuf>,
++    pub run_branch: Option<String>,
++}
++
++impl RunSpec {
++    pub fn save(&self, run_dir: &Path) -> anyhow::Result<()> {
++        let path = run_dir.join("spec.json");
++        let json = serde_json::to_string_pretty(self)?;
++        std::fs::write(path, json)?;
++        Ok(())
++    }
++
++    pub fn load(run_dir: &Path) -> anyhow::Result<Self> {
++        let path = run_dir.join("spec.json");
++        let json = std::fs::read_to_string(path)?;
++        let spec = serde_json::from_str(&json)?;
++        Ok(spec)
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn sample_spec() -> RunSpec {
++        let mut labels = HashMap::new();
++        labels.insert("env".to_string(), "test".to_string());
++        labels.insert("team".to_string(), "platform".to_string());
++
++        RunSpec {
++            run_id: "run-abc123".to_string(),
++            workflow_path: PathBuf::from("/home/user/workflows/deploy/workflow.toml"),
++            dot_source: "digraph { a -> b }".to_string(),
++            working_directory: PathBuf::from("/home/user/project"),
++            goal: Some("Deploy to staging".to_string()),
++            model: "claude-sonnet-4-20250514".to_string(),
++            provider: Some("anthropic".to_string()),
++            sandbox_provider: "local".to_string(),
++            labels,
++            verbose: true,
++            no_retro: false,
++            ssh: true,
++            preserve_sandbox: false,
++            dry_run: false,
++            auto_approve: true,
++            resume: Some(PathBuf::from("/tmp/checkpoint")),
++            run_branch: Some("fabro/run/abc123".to_string()),
++        }
++    }
++
++    #[test]
++    fn save_load_roundtrip() {
++        let dir = tempfile::tempdir().unwrap();
++        let spec = sample_spec();
++
++        spec.save(dir.path()).unwrap();
++        let loaded = RunSpec::load(dir.path()).unwrap();
++
++        assert_eq!(loaded.run_id, spec.run_id);
++        assert_eq!(loaded.workflow_path, spec.workflow_path);
++        assert_eq!(loaded.dot_source, spec.dot_source);
++        assert_eq!(loaded.working_directory, spec.working_directory);
++        assert_eq!(loaded.goal, spec.goal);
++        assert_eq!(loaded.model, spec.model);
++        assert_eq!(loaded.provider, spec.provider);
++        assert_eq!(loaded.sandbox_provider, spec.sandbox_provider);
++        assert_eq!(loaded.labels, spec.labels);
++        assert_eq!(loaded.verbose, spec.verbose);
++        assert_eq!(loaded.no_retro, spec.no_retro);
++        assert_eq!(loaded.ssh, spec.ssh);
++        assert_eq!(loaded.preserve_sandbox, spec.preserve_sandbox);
++        assert_eq!(loaded.dry_run, spec.dry_run);
++        assert_eq!(loaded.auto_approve, spec.auto_approve);
++        assert_eq!(loaded.resume, spec.resume);
++        assert_eq!(loaded.run_branch, spec.run_branch);
++    }
++
++    #[test]
++    fn load_nonexistent() {
++        let dir = PathBuf::from("/tmp/nonexistent-run-spec-dir-that-does-not-exist");
++        assert!(RunSpec::load(&dir).is_err());
++    }
++}
