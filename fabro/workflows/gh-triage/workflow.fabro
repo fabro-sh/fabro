@@ -1,0 +1,11 @@
+digraph GhTriage {
+    graph [goal="Check open PRs and issues using the gh CLI and produce a triage summary"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    triage [label="Triage", prompt="Use the gh CLI to check the current repo for open pull requests and issues. Run these commands:\n\n1. gh pr list --state open --limit 20\n2. gh issue list --state open --limit 20\n\nThen produce a triage summary that includes:\n- Total count of open PRs and issues\n- For each PR: number, title, author, age, review status\n- For each issue: number, title, labels, age\n- Any PRs that look stale (older than 7 days with no review activity)\n- Any issues that are unassigned or unlabeled"]
+
+    start -> triage -> exit
+}
