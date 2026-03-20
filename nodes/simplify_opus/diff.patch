@@ -1,0 +1,419 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 5a17acb2..ecba92ce 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1723,7 +1723,6 @@ dependencies = [
+  "fabro-github",
+  "mockito",
+  "reqwest 0.12.28",
+- "serde",
+  "serde_json",
+  "tokio",
+  "tracing",
+diff --git a/lib/crates/fabro-github/Cargo.toml b/lib/crates/fabro-github/Cargo.toml
+index 6bfbe579..25a67241 100644
+--- a/lib/crates/fabro-github/Cargo.toml
++++ b/lib/crates/fabro-github/Cargo.toml
+@@ -20,4 +20,4 @@ tokio = { workspace = true }
+ [dev-dependencies]
+ mockito = "1"
+ tokio = { workspace = true, features = ["test-util", "macros"] }
+-base64.workspace = true
+\ No newline at end of file
++base64.workspace = true
+diff --git a/lib/crates/fabro-tracker/Cargo.toml b/lib/crates/fabro-tracker/Cargo.toml
+index f3861748..459189ba 100644
+--- a/lib/crates/fabro-tracker/Cargo.toml
++++ b/lib/crates/fabro-tracker/Cargo.toml
+@@ -11,7 +11,6 @@ doctest = false
+ [dependencies]
+ fabro-github = { path = "../fabro-github" }
+ async-trait.workspace = true
+-serde.workspace = true
+ serde_json.workspace = true
+ reqwest.workspace = true
+ tracing.workspace = true
+@@ -19,4 +18,4 @@ tokio = { workspace = true }
+ 
+ [dev-dependencies]
+ mockito = "1"
+-tokio = { workspace = true, features = ["test-util", "macros"] }
++tokio = { workspace = true, features = ["test-util", "macros"] }
+\ No newline at end of file
+diff --git a/lib/crates/fabro-tracker/src/github.rs b/lib/crates/fabro-tracker/src/github.rs
+index 0a9c437d..5e0e15f8 100644
+--- a/lib/crates/fabro-tracker/src/github.rs
++++ b/lib/crates/fabro-tracker/src/github.rs
+@@ -5,7 +5,7 @@ use fabro_github::{
+     create_installation_access_token_for_projects, sign_app_jwt, GitHubAppCredentials,
+ };
+ 
+-use crate::{Issue, Tracker};
++use crate::{execute_graphql_request, Issue, Tracker};
+ 
+ /// Execute a GitHub GraphQL request and return the response JSON.
+ async fn execute_github_graphql(
+@@ -15,47 +15,15 @@ async fn execute_github_graphql(
+     query: &str,
+     variables: serde_json::Value,
+ ) -> Result<serde_json::Value, String> {
+-    let body = serde_json::json!({
+-        "query": query,
+-        "variables": variables,
+-    });
+-
+-    let resp = client
+-        .post(endpoint)
+-        .header("Authorization", format!("Bearer {token}"))
+-        .header("Content-Type", "application/json")
+-        .header("User-Agent", "fabro")
+-        .timeout(std::time::Duration::from_secs(30))
+-        .json(&body)
+-        .send()
+-        .await
+-        .map_err(|e| format!("GitHub GraphQL request failed: {e}"))?;
+-
+-    let status = resp.status();
+-    if !status.is_success() {
+-        let body_text = resp.text().await.unwrap_or_default();
+-        tracing::warn!(status = %status, "GitHub GraphQL API error");
+-        return Err(format!(
+-            "GitHub GraphQL API returned HTTP {status}: {body_text}"
+-        ));
+-    }
+-
+-    let response: serde_json::Value = resp
+-        .json()
+-        .await
+-        .map_err(|e| format!("Failed to parse GitHub GraphQL response: {e}"))?;
+-
+-    if let Some(errors) = response["errors"].as_array() {
+-        if !errors.is_empty() {
+-            let messages: Vec<&str> = errors
+-                .iter()
+-                .filter_map(|e| e["message"].as_str())
+-                .collect();
+-            return Err(format!("GitHub GraphQL errors: {}", messages.join("; ")));
+-        }
+-    }
+-
+-    Ok(response)
++    execute_graphql_request(
++        client,
++        endpoint,
++        &format!("Bearer {token}"),
++        "GitHub",
++        query,
++        variables,
++    )
++    .await
+ }
+ 
+ /// A `Tracker` implementation backed by GitHub Projects V2.
+@@ -272,17 +240,22 @@ async fn fetch_project_items_page(
+         "cursor": cursor,
+     });
+ 
+-    let resp = execute_github_graphql(client, token, graphql_url, query, variables).await?;
++    let mut resp = execute_github_graphql(client, token, graphql_url, query, variables).await?;
+ 
+-    let items_node = &resp["data"]["node"]["items"];
+-    let nodes = items_node["nodes"].as_array().cloned().unwrap_or_default();
+-    let has_next = items_node["pageInfo"]["hasNextPage"]
++    let has_next = resp["data"]["node"]["items"]["pageInfo"]["hasNextPage"]
+         .as_bool()
+         .unwrap_or(false);
+-    let end_cursor = items_node["pageInfo"]["endCursor"]
++    let end_cursor = resp["data"]["node"]["items"]["pageInfo"]["endCursor"]
+         .as_str()
+         .map(|s| s.to_string());
+ 
++    // Take ownership of the nodes array in-place instead of deep-cloning it.
++    let nodes = resp
++        .pointer_mut("/data/node/items/nodes")
++        .and_then(|v| v.as_array_mut())
++        .map(std::mem::take)
++        .unwrap_or_default();
++
+     Ok((nodes, has_next, end_cursor))
+ }
+ 
+@@ -476,7 +449,7 @@ impl Tracker for GitHubTracker {
+ 
+         let id_set: std::collections::HashSet<&str> = ids.iter().copied().collect();
+         let mut issue_map: std::collections::HashMap<String, Issue> =
+-            std::collections::HashMap::new();
++            std::collections::HashMap::with_capacity(ids.len());
+         let mut cursor: Option<String> = None;
+ 
+         loop {
+@@ -497,6 +470,10 @@ impl Tracker for GitHubTracker {
+                 }
+             }
+ 
++            if issue_map.len() == id_set.len() {
++                break;
++            }
++
+             if has_next {
+                 cursor = end_cursor;
+             } else {
+diff --git a/lib/crates/fabro-tracker/src/lib.rs b/lib/crates/fabro-tracker/src/lib.rs
+index d2bc5677..fa7df360 100644
+--- a/lib/crates/fabro-tracker/src/lib.rs
++++ b/lib/crates/fabro-tracker/src/lib.rs
+@@ -6,6 +6,65 @@ pub mod linear;
+ pub use github::GitHubTracker;
+ pub use linear::{LinearConfig, LinearTracker, LINEAR_API_ENDPOINT};
+ 
++/// Shared GraphQL execution used by both provider modules.
++///
++/// Posts a query + variables to `endpoint`, attaches the given `auth_header`
++/// as the `Authorization` value, and returns the parsed JSON response.
++/// Provider-specific error messages use `provider` as a label.
++pub(crate) async fn execute_graphql_request(
++    client: &reqwest::Client,
++    endpoint: &str,
++    auth_header: &str,
++    provider: &str,
++    query: &str,
++    variables: serde_json::Value,
++) -> Result<serde_json::Value, String> {
++    let body = serde_json::json!({
++        "query": query,
++        "variables": variables,
++    });
++
++    let resp = client
++        .post(endpoint)
++        .header("Authorization", auth_header)
++        .header("Content-Type", "application/json")
++        .header("User-Agent", "fabro")
++        .timeout(std::time::Duration::from_secs(30))
++        .json(&body)
++        .send()
++        .await
++        .map_err(|e| format!("{provider} GraphQL request failed: {e}"))?;
++
++    let status = resp.status();
++    if !status.is_success() {
++        let body_text = resp.text().await.unwrap_or_default();
++        tracing::warn!(status = %status, provider, "GraphQL API error");
++        return Err(format!(
++            "{provider} GraphQL API returned HTTP {status}: {body_text}"
++        ));
++    }
++
++    let response: serde_json::Value = resp
++        .json()
++        .await
++        .map_err(|e| format!("Failed to parse {provider} GraphQL response: {e}"))?;
++
++    if let Some(errors) = response["errors"].as_array() {
++        if !errors.is_empty() {
++            let messages: Vec<&str> = errors
++                .iter()
++                .filter_map(|e| e["message"].as_str())
++                .collect();
++            return Err(format!(
++                "{provider} GraphQL errors: {}",
++                messages.join("; ")
++            ));
++        }
++    }
++
++    Ok(response)
++}
++
+ #[derive(Debug, Clone)]
+ pub struct BlockerRef {
+     pub id: String,
+diff --git a/lib/crates/fabro-tracker/src/linear.rs b/lib/crates/fabro-tracker/src/linear.rs
+index 2dc211b8..1238af46 100644
+--- a/lib/crates/fabro-tracker/src/linear.rs
++++ b/lib/crates/fabro-tracker/src/linear.rs
+@@ -3,7 +3,7 @@ use std::collections::HashMap;
+ use async_trait::async_trait;
+ use serde_json::Value;
+ 
+-use crate::{BlockerRef, Issue, Tracker};
++use crate::{execute_graphql_request, BlockerRef, Issue, Tracker};
+ 
+ pub const LINEAR_API_ENDPOINT: &str = "https://api.linear.app/graphql";
+ 
+@@ -123,44 +123,15 @@ async fn execute_graphql(
+     query: &str,
+     variables: Value,
+ ) -> Result<Value, String> {
+-    let body = serde_json::json!({
+-        "query": query,
+-        "variables": variables,
+-    });
+-
+-    let resp = client
+-        .post(&config.endpoint)
+-        .header("Authorization", &config.api_key)
+-        .header("Content-Type", "application/json")
+-        .timeout(std::time::Duration::from_secs(30))
+-        .json(&body)
+-        .send()
+-        .await
+-        .map_err(|e| format!("Linear API request failed: {e}"))?;
+-
+-    let status = resp.status();
+-    if !status.is_success() {
+-        let body_text = resp.text().await.unwrap_or_default();
+-        tracing::warn!(status = %status, "Linear API error");
+-        return Err(format!("Linear API returned HTTP {status}: {body_text}"));
+-    }
+-
+-    let response: Value = resp
+-        .json()
+-        .await
+-        .map_err(|e| format!("Failed to parse Linear API response: {e}"))?;
+-
+-    if let Some(errors) = response["errors"].as_array() {
+-        if !errors.is_empty() {
+-            let messages: Vec<&str> = errors
+-                .iter()
+-                .filter_map(|e| e["message"].as_str())
+-                .collect();
+-            return Err(format!("Linear GraphQL errors: {}", messages.join("; ")));
+-        }
+-    }
+-
+-    Ok(response)
++    execute_graphql_request(
++        client,
++        &config.endpoint,
++        &config.api_key,
++        "Linear",
++        query,
++        variables,
++    )
++    .await
+ }
+ 
+ fn extract_issues(response: &Value) -> Result<Vec<Issue>, String> {
+@@ -380,6 +351,25 @@ mod tests {
+         }
+     }
+ 
++    fn make_test_issue() -> Issue {
++        Issue {
++            id: "issue-1".to_string(),
++            project_item_id: None,
++            identifier: "T-1".to_string(),
++            title: "Test".to_string(),
++            description: None,
++            priority: None,
++            state: "Todo".to_string(),
++            branch_name: None,
++            url: "https://linear.app/t".to_string(),
++            assignee_id: None,
++            labels: vec![],
++            blocked_by: vec![],
++            created_at: None,
++            updated_at: None,
++        }
++    }
++
+     fn complete_issue_json() -> Value {
+         serde_json::json!({
+             "id": "issue-1",
+@@ -753,22 +743,7 @@ mod tests {
+             .await;
+ 
+         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+-        let issue = Issue {
+-            id: "issue-1".to_string(),
+-            project_item_id: None,
+-            identifier: "T-1".to_string(),
+-            title: "Test".to_string(),
+-            description: None,
+-            priority: None,
+-            state: "Todo".to_string(),
+-            branch_name: None,
+-            url: "https://linear.app/t".to_string(),
+-            assignee_id: None,
+-            labels: vec![],
+-            blocked_by: vec![],
+-            created_at: None,
+-            updated_at: None,
+-        };
++        let issue = make_test_issue();
+         tracker.create_comment(&issue, "Hello world").await.unwrap();
+     }
+ 
+@@ -785,22 +760,7 @@ mod tests {
+             .await;
+ 
+         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+-        let issue = Issue {
+-            id: "issue-1".to_string(),
+-            project_item_id: None,
+-            identifier: "T-1".to_string(),
+-            title: "Test".to_string(),
+-            description: None,
+-            priority: None,
+-            state: "Todo".to_string(),
+-            branch_name: None,
+-            url: "https://linear.app/t".to_string(),
+-            assignee_id: None,
+-            labels: vec![],
+-            blocked_by: vec![],
+-            created_at: None,
+-            updated_at: None,
+-        };
++        let issue = make_test_issue();
+         let err = tracker.create_comment(&issue, "Hello").await.unwrap_err();
+         assert!(err.contains("success: false"), "got: {err}");
+     }
+@@ -833,22 +793,7 @@ mod tests {
+             .await;
+ 
+         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+-        let issue = Issue {
+-            id: "issue-1".to_string(),
+-            project_item_id: None,
+-            identifier: "T-1".to_string(),
+-            title: "Test".to_string(),
+-            description: None,
+-            priority: None,
+-            state: "Todo".to_string(),
+-            branch_name: None,
+-            url: "https://linear.app/t".to_string(),
+-            assignee_id: None,
+-            labels: vec![],
+-            blocked_by: vec![],
+-            created_at: None,
+-            updated_at: None,
+-        };
++        let issue = make_test_issue();
+         tracker.update_issue_state(&issue, "Done").await.unwrap();
+ 
+         resolve_mock.assert_async().await;
+@@ -868,22 +813,7 @@ mod tests {
+             .await;
+ 
+         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+-        let issue = Issue {
+-            id: "issue-1".to_string(),
+-            project_item_id: None,
+-            identifier: "T-1".to_string(),
+-            title: "Test".to_string(),
+-            description: None,
+-            priority: None,
+-            state: "Todo".to_string(),
+-            branch_name: None,
+-            url: "https://linear.app/t".to_string(),
+-            assignee_id: None,
+-            labels: vec![],
+-            blocked_by: vec![],
+-            created_at: None,
+-            updated_at: None,
+-        };
++        let issue = make_test_issue();
+         let err = tracker
+             .update_issue_state(&issue, "Nonexistent")
+             .await
