@@ -1248,6 +1248,7 @@ dependencies = [
  "fabro-config",
  "fabro-llm",
  "fabro-mcp",
+ "fabro-model",
  "fabro-sandbox",
  "fabro-util",
  "futures",
@@ -1287,6 +1288,7 @@ dependencies = [
  "fabro-hooks",
  "fabro-interview",
  "fabro-llm",
+ "fabro-model",
  "fabro-retro",
  "fabro-sandbox",
  "fabro-types",
@@ -1360,6 +1362,7 @@ dependencies = [
  "fabro-interview",
  "fabro-llm",
  "fabro-mcp",
+ "fabro-model",
  "fabro-openai-oauth",
  "fabro-retro",
  "fabro-sandbox",
@@ -1458,10 +1461,8 @@ dependencies = [
 name = "fabro-github"
 version = "0.176.2"
 dependencies = [
- "async-trait",
  "base64",
  "chrono",
- "fabro-tracker",
  "jsonwebtoken",
  "mockito",
  "reqwest 0.12.28",
@@ -1489,6 +1490,7 @@ dependencies = [
  "fabro-agent",
  "fabro-config",
  "fabro-llm",
+ "fabro-model",
  "fabro-util",
  "mockito",
  "regex",
@@ -1512,19 +1514,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "fabro-linear"
-version = "0.176.2"
-dependencies = [
- "async-trait",
- "fabro-tracker",
- "mockito",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
 ]
 
@@ -1540,6 +1529,7 @@ dependencies = [
  "cli-table",
  "dialoguer",
  "dotenvy",
+ "fabro-model",
  "fabro-util",
  "futures",
  "http",
@@ -1570,6 +1560,15 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "fabro-model"
+version = "0.176.2"
+dependencies = [
+ "insta",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1683,6 +1682,12 @@ name = "fabro-tracker"
 version = "0.176.2"
 dependencies = [
  "async-trait",
+ "fabro-github",
+ "mockito",
+ "reqwest 0.12.28",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1725,7 +1730,7 @@ name = "fabro-validate"
 version = "0.176.2"
 dependencies = [
  "fabro-graphviz",
- "fabro-llm",
+ "fabro-model",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -1751,6 +1756,7 @@ dependencies = [
  "fabro-interview",
  "fabro-llm",
  "fabro-mcp",
+ "fabro-model",
  "fabro-retro",
  "fabro-sandbox",
  "fabro-util",

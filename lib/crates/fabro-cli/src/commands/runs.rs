@@ -228,11 +228,17 @@ fn short_run_id(id: &str) -> &str {
 
 fn truncate_goal(goal: &str, max_len: usize) -> String {
     let line = goal.lines().next().unwrap_or("");
-    let char_count = line.chars().count();
+    let line = line.trim_start_matches('#').trim();
+    let line = line.strip_prefix("Plan:").map(|s| s.trim()).unwrap_or(line);
+    truncate_str(line, max_len)
+}
+
+fn truncate_str(s: &str, max_len: usize) -> String {
+    let char_count = s.chars().count();
     if char_count <= max_len {
-        return line.to_string();
+        return s.to_string();
     }
-    let truncated: String = line.chars().take(max_len - 3).collect();
+    let truncated: String = s.chars().take(max_len - 3).collect();
     format!("{truncated}...")
 }
 
@@ -404,7 +410,7 @@ fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Path) -
             };
             vec![
                 short_run_id(&detail.run_id).cell(),
-                truncate_goal(&detail.workflow_name, 16).cell(),
+                truncate_str(&detail.workflow_name, 16).cell(),
                 detail.status.to_string().cell(),
                 age.cell().justify(Justify::Right),
                 size_display.cell().justify(Justify::Right),
@@ -587,5 +593,35 @@ mod tests {
         assert_eq!(format_size(999), "999 B");
         assert_eq!(format_size(1024), "1.0 KB");
         assert_eq!(format_size(1024 * 1024), "1.0 MB");
+    }
+
+    #[test]
+    fn truncate_goal_strips_markdown_headings() {
+        assert_eq!(truncate_goal("## Fix bug", 50), "Fix bug");
+        assert_eq!(truncate_goal("# Title", 50), "Title");
+        assert_eq!(truncate_goal("### Deep heading", 50), "Deep heading");
+    }
+
+    #[test]
+    fn truncate_goal_strips_plan_prefix() {
+        assert_eq!(truncate_goal("Plan: do stuff", 50), "do stuff");
+    }
+
+    #[test]
+    fn truncate_goal_strips_heading_and_plan_prefix() {
+        assert_eq!(truncate_goal("## Plan: migrate DB", 50), "migrate DB");
+    }
+
+    #[test]
+    fn truncate_goal_plain_text_unchanged() {
+        assert_eq!(truncate_goal("Fix the login bug", 50), "Fix the login bug");
+    }
+
+    #[test]
+    fn truncate_goal_still_truncates_after_stripping() {
+        assert_eq!(
+            truncate_goal("## A long goal description", 10),
+            "A long ..."
+        );
     }
 }

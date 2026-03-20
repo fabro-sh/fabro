@@ -6,7 +6,7 @@ use crate::{
 };
 use clap::{Args, Parser};
 use fabro_llm::client::Client;
-use fabro_llm::provider::{ModelId, Provider};
+use fabro_model::{ModelId, Provider};
 use fabro_util::terminal::Styles;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
@@ -386,8 +386,8 @@ pub async fn run_with_args_and_client(
 
     // Resolve model and build profile
     let model = args.model.unwrap_or_else(|| {
-        fabro_llm::catalog::default_model_for_provider(provider.as_str())
-            .unwrap_or_else(fabro_llm::catalog::default_model_from_env)
+        fabro_model::default_model_for_provider(provider.as_str())
+            .unwrap_or_else(fabro_model::default_model_from_env)
             .id
     });
     eprintln!("{}", styles.dim.apply_to(format!("Using model: {model}")));
@@ -634,7 +634,7 @@ pub async fn run() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabro_llm::provider::Provider;
+    use fabro_model::Provider;
     use serde_json::json;
 
     static NO_COLOR: std::sync::LazyLock<Styles> = std::sync::LazyLock::new(|| Styles::new(false));

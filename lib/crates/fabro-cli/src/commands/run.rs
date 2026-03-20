@@ -12,8 +12,8 @@ use fabro_agent::{
 };
 use fabro_config::run::{RunDefaults, WorkflowRunConfig};
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
-use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, Interviewer};
-use fabro_llm::provider::Provider;
+use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, FileInterviewer, Interviewer};
+use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 use fabro_validate::Severity;
 use fabro_workflows::backend::{AgentApiBackend, AgentCliBackend, BackendRouter};
@@ -55,6 +55,19 @@ impl From<CliSandboxProvider> for SandboxProvider {
             #[cfg(feature = "exedev")]
             CliSandboxProvider::Exe => Self::Exe,
             CliSandboxProvider::Ssh => Self::Ssh,
+        }
+    }
+}
+
+impl From<SandboxProvider> for CliSandboxProvider {
+    fn from(value: SandboxProvider) -> Self {
+        match value {
+            SandboxProvider::Local => Self::Local,
+            SandboxProvider::Docker => Self::Docker,
+            SandboxProvider::Daytona => Self::Daytona,
+            #[cfg(feature = "exedev")]
+            SandboxProvider::Exe => Self::Exe,
+            SandboxProvider::Ssh => Self::Ssh,
         }
     }
 }
@@ -139,7 +152,7 @@ pub struct RunArgs {
 }
 
 /// Resolve goal from `--goal` string or `--goal-file` path.
-fn resolve_cli_goal(
+pub(crate) fn resolve_cli_goal(
     goal: &Option<String>,
     goal_file: &Option<PathBuf>,
 ) -> anyhow::Result<Option<String>> {
@@ -158,7 +171,7 @@ fn resolve_cli_goal(
 
 /// Apply goal to the graph from TOML config or CLI flag.
 /// Precedence: CLI `--goal` / `--goal-file` > TOML `goal` > DOT `graph [goal="..."]`.
-fn apply_goal_override(
+pub(crate) fn apply_goal_override(
     graph: &mut fabro_graphviz::graph::Graph,
     cli_goal: Option<&str>,
     toml_goal: Option<&str>,
@@ -176,7 +189,7 @@ fn apply_goal_override(
 /// Resolve model and provider through the full precedence chain:
 /// CLI flag > TOML config > run defaults > DOT graph attrs > provider-specific defaults.
 /// Then resolve through the catalog for alias expansion.
-fn resolve_model_provider(
+pub(crate) fn resolve_model_provider(
     cli_model: Option<&str>,
     cli_provider: Option<&str>,
     run_cfg: Option<&WorkflowRunConfig>,
@@ -210,20 +223,20 @@ fn resolve_model_provider(
         .unwrap_or_else(|| {
             provider
                 .as_deref()
-                .and_then(fabro_llm::catalog::default_model_for_provider)
-                .unwrap_or_else(fabro_llm::catalog::default_model_from_env)
+                .and_then(fabro_model::default_model_for_provider)
+                .unwrap_or_else(fabro_model::default_model_from_env)
                 .id
         });
 
     // Resolve model alias through catalog
-    match fabro_llm::catalog::get_model_info(&model) {
+    match fabro_model::get_model_info(&model) {
         Some(info) => (info.id, provider.or(Some(info.provider))),
         None => (model, provider),
     }
 }
 
 /// Parse sandbox provider from an optional `SandboxConfig`.
-fn parse_sandbox_provider(
+pub(crate) fn parse_sandbox_provider(
     sandbox: Option<&sandbox_config::SandboxConfig>,
 ) -> anyhow::Result<Option<SandboxProvider>> {
     sandbox
@@ -234,7 +247,7 @@ fn parse_sandbox_provider(
 }
 
 /// Resolve sandbox provider: CLI flag > TOML config > run defaults > default.
-fn resolve_sandbox_provider(
+pub(crate) fn resolve_sandbox_provider(
     cli: Option<SandboxProvider>,
     run_cfg: Option<&WorkflowRunConfig>,
     run_defaults: &RunDefaults,
@@ -359,13 +372,13 @@ fn resolve_fallback_chain(
     provider: Provider,
     model: &str,
     run_cfg: Option<&WorkflowRunConfig>,
-) -> Vec<fabro_llm::catalog::FallbackTarget> {
+) -> Vec<fabro_model::FallbackTarget> {
     let fallbacks = run_cfg
         .and_then(|c| c.llm.as_ref())
         .and_then(|l| l.fallbacks.as_ref());
 
     match fallbacks {
-        Some(map) => fabro_llm::catalog::build_fallback_chain(provider.as_str(), model, map),
+        Some(map) => fabro_model::build_fallback_chain(provider.as_str(), model, map),
         None => Vec::new(),
     }
 }
@@ -431,30 +444,32 @@ fn local_sandbox_with_callback(cwd: PathBuf, emitter: Arc<EventEmitter>) -> Arc<
     Arc::new(env)
 }
 
-/// Execute a full workflow run.
-///
-/// # Errors
-///
-/// Returns an error if the workflow cannot be read, parsed, validated, or executed.
-pub async fn run_command(
-    args: RunArgs,
-    mut run_defaults: RunDefaults,
-    styles: &'static Styles,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
-    git_author: fabro_workflows::git::GitAuthor,
-) -> anyhow::Result<()> {
-    // Handle --run-branch resume: read everything from git metadata
-    if let Some(branch) = args.run_branch.clone() {
-        return run_from_branch(args, &branch, styles, git_author, run_defaults, github_app).await;
-    }
+/// Result of workflow preparation (shared between `create` and `run` commands).
+pub(crate) struct PreparedWorkflow {
+    pub source: String,
+    pub graph: fabro_graphviz::graph::Graph,
+    pub run_cfg: Option<WorkflowRunConfig>,
+    pub sandbox_provider: SandboxProvider,
+    pub model: String,
+    pub provider: Option<String>,
+    pub run_defaults: RunDefaults,
+}
 
+/// Resolve config, parse/validate the workflow graph, and resolve sandbox + model.
+///
+/// Shared between `create_run` (which only persists the spec) and
+/// `run_command` (which goes on to execute the workflow).
+pub(crate) fn prepare_workflow(
+    args: &RunArgs,
+    mut run_defaults: RunDefaults,
+    styles: &Styles,
+) -> anyhow::Result<PreparedWorkflow> {
     let workflow_path = args
         .workflow
         .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("--workflow is required unless --run-branch is provided"))?;
+        .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
 
     // Apply project-level config overrides (fabro.toml) on top of CLI defaults.
-    // Precedence: workflow.toml > fabro.toml > cli.toml/server.toml
     if let Ok(Some((_config_path, project_config))) =
         project_config::discover_project_config(&std::env::current_dir().unwrap_or_default())
     {
@@ -462,7 +477,7 @@ pub async fn run_command(
         run_defaults.merge_overlay(project_config.into_run_defaults());
     }
 
-    // 0. Resolve workflow arg, load run config if TOML, resolve DOT path, apply defaults
+    // Resolve workflow arg, load run config if TOML, apply defaults
     let (dot_path, run_cfg) = {
         let (dot, cfg) = project_config::resolve_workflow(workflow_path)?;
         match cfg {
@@ -474,18 +489,6 @@ pub async fn run_command(
         }
     };
 
-    // Extract workflow slug from the workflow path argument.
-    // If bare name (no extension, e.g. "smoke"), use it directly.
-    // Otherwise derive from the parent directory of the resolved .toml path.
-    let workflow_slug: Option<String> = if workflow_path.extension().is_none() {
-        Some(workflow_path.to_string_lossy().into_owned())
-    } else {
-        workflow_path
-            .parent()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-    };
-
     let directory = run_cfg
         .as_ref()
         .and_then(|c| c.work_dir.as_deref())
@@ -495,15 +498,7 @@ pub async fn run_command(
             .map_err(|e| anyhow::anyhow!("Failed to set working directory to {dir}: {e}"))?;
     }
 
-    // Collect setup commands — they'll be run inside the sandbox
-    let setup_commands: Vec<String> = run_cfg
-        .as_ref()
-        .and_then(|c| c.setup.as_ref())
-        .or(run_defaults.setup.as_ref())
-        .map(|s| s.commands.clone())
-        .unwrap_or_default();
-
-    // 1. Parse and validate workflow
+    // Parse and validate workflow
     let source = read_workflow_file(&dot_path)?;
     let vars = run_cfg
         .as_ref()
@@ -561,8 +556,7 @@ pub async fn run_command(
         bail!("Validation failed");
     }
 
-    // 2. Pre-flight: check git cleanliness before creating any files
-    //    (must happen before logs dir is created, which may be inside the repo)
+    // Resolve sandbox provider
     let sandbox_provider = if args.dry_run {
         SandboxProvider::Local
     } else {
@@ -572,6 +566,76 @@ pub async fn run_command(
             &run_defaults,
         )?
     };
+
+    // Resolve model and provider
+    let (model, provider) = resolve_model_provider(
+        args.model.as_deref(),
+        args.provider.as_deref(),
+        run_cfg.as_ref(),
+        &run_defaults,
+        &graph,
+    );
+
+    Ok(PreparedWorkflow {
+        source,
+        graph,
+        run_cfg,
+        sandbox_provider,
+        model,
+        provider,
+        run_defaults,
+    })
+}
+
+/// Execute a full workflow run.
+///
+/// # Errors
+///
+/// Returns an error if the workflow cannot be read, parsed, validated, or executed.
+pub async fn run_command(
+    args: RunArgs,
+    run_defaults: RunDefaults,
+    styles: &'static Styles,
+    github_app: Option<fabro_github::GitHubAppCredentials>,
+    git_author: fabro_workflows::git::GitAuthor,
+) -> anyhow::Result<()> {
+    // Handle --run-branch resume: read everything from git metadata
+    if let Some(branch) = args.run_branch.clone() {
+        return run_from_branch(args, &branch, styles, git_author, run_defaults, github_app).await;
+    }
+
+    let PreparedWorkflow {
+        source,
+        graph,
+        run_cfg,
+        sandbox_provider,
+        model,
+        provider,
+        run_defaults,
+    } = prepare_workflow(&args, run_defaults, styles)?;
+
+    // Extract workflow slug from the workflow path argument.
+    // If bare name (no extension, e.g. "smoke"), use it directly.
+    // Otherwise derive from the parent directory of the resolved .toml path.
+    let workflow_path = args.workflow.as_ref().unwrap(); // safe: prepare_workflow validated
+    let workflow_slug: Option<String> = if workflow_path.extension().is_none() {
+        Some(workflow_path.to_string_lossy().into_owned())
+    } else {
+        workflow_path
+            .parent()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+    };
+
+    // Collect setup commands — they'll be run inside the sandbox
+    let setup_commands: Vec<String> = run_cfg
+        .as_ref()
+        .and_then(|c| c.setup.as_ref())
+        .or(run_defaults.setup.as_ref())
+        .map(|s| s.commands.clone())
+        .unwrap_or_default();
+
+    // Pre-flight: check git cleanliness before creating any files
     let preserve_sandbox =
         resolve_preserve_sandbox(args.preserve_sandbox, run_cfg.as_ref(), &run_defaults);
     let original_cwd = std::env::current_dir()?;
@@ -727,6 +791,10 @@ pub async fn run_command(
     // 4. Build interviewer
     let interviewer: Arc<dyn Interviewer> = if args.auto_approve {
         Arc::new(AutoApproveInterviewer)
+    } else if !std::io::stdin().is_terminal() {
+        // Detached mode (stdin is /dev/null): use file-based IPC so the
+        // attach process can prompt the user on our behalf.
+        Arc::new(FileInterviewer::new(run_dir.clone()))
     } else {
         Arc::new(run_progress::ProgressAwareInterviewer::new(
             ConsoleInterviewer::new(styles),
@@ -1206,14 +1274,6 @@ pub async fn run_command(
             }
         }
     };
-
-    let (model, provider) = resolve_model_provider(
-        args.model.as_deref(),
-        args.provider.as_deref(),
-        run_cfg.as_ref(),
-        &run_defaults,
-        &graph,
-    );
 
     // Parse provider string to enum (defaults to best available from env)
     let provider_enum: Provider = provider
@@ -1927,14 +1987,14 @@ async fn run_from_branch(
 
     let model = args
         .model
-        .unwrap_or_else(|| fabro_llm::catalog::default_model_from_env().id);
+        .unwrap_or_else(|| fabro_model::default_model_from_env().id);
     let provider_enum = args
         .provider
         .as_deref()
-        .map(|s| s.parse::<fabro_llm::provider::Provider>())
+        .map(|s| s.parse::<fabro_model::Provider>())
         .transpose()
         .map_err(|e| anyhow::anyhow!("{e}"))?
-        .unwrap_or_else(fabro_llm::provider::Provider::default_from_env);
+        .unwrap_or_else(fabro_model::Provider::default_from_env);
 
     // No fallback config available for branch resume; use empty chain.
     let fallback_chain = Vec::new();
@@ -2311,7 +2371,7 @@ async fn run_preflight(
 
                 // Resolve through catalog to get canonical model ID and provider
                 let (resolved_model, resolved_provider) =
-                    if let Some(info) = fabro_llm::catalog::get_model_info(node_model) {
+                    if let Some(info) = fabro_model::get_model_info(node_model) {
                         (info.id, info.provider)
                     } else {
                         (node_model.to_string(), node_provider.to_string())
@@ -2330,7 +2390,7 @@ async fn run_preflight(
             // If no LLM nodes found, fall back to the default model/provider
             if model_providers.is_empty() {
                 let (resolved_model, resolved_provider) =
-                    if let Some(info) = fabro_llm::catalog::get_model_info(&model) {
+                    if let Some(info) = fabro_model::get_model_info(&model) {
                         (info.id, info.provider)
                     } else {
                         (model.clone(), default_provider.to_string())

@@ -1,5 +1,5 @@
 use crate::sandbox::Sandbox;
-use fabro_llm::provider::Provider;
+use fabro_model::Provider;
 use std::collections::HashSet;
 use tracing::{debug, info, warn};
 

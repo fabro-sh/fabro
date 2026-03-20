@@ -266,6 +266,20 @@ impl ProgressUI {
         });
     }
 
+    /// Hide indicatif progress bars (for interview prompts in attach mode).
+    pub fn hide_bars(&self) {
+        if let ProgressRenderer::Tty(tty) = &self.renderer {
+            tty.multi.set_draw_target(ProgressDrawTarget::hidden());
+        }
+    }
+
+    /// Show indicatif progress bars after an interview prompt.
+    pub fn show_bars(&self) {
+        if let ProgressRenderer::Tty(tty) = &self.renderer {
+            tty.multi.set_draw_target(ProgressDrawTarget::stderr());
+        }
+    }
+
     /// Clear all active bars and release the terminal for normal stderr output.
     pub fn finish(&mut self) {
         for (_id, stage) in self.active_stages.drain() {
@@ -605,6 +619,360 @@ impl ProgressUI {
             WorkflowRunEvent::RetroFailed { duration_ms, .. } => {
                 let dur = format_duration_ms(*duration_ms);
                 self.finish_stage("retro", "Retro", red_cross(), &dur);
+            }
+            _ => {}
+        }
+    }
+
+    // ── JSONL dispatch ────────────────────────────────────────────────
+
+    /// Parse a JSONL envelope line and dispatch to internal rendering methods.
+    /// Used by the attach loop to render events from progress.jsonl.
+    pub fn handle_json_line(&mut self, line: &str) {
+        let envelope: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let event_name = match envelope.get("event").and_then(|v| v.as_str()) {
+            Some(name) => name,
+            None => return,
+        };
+
+        let str_field = |key: &str| -> Option<&str> { envelope.get(key).and_then(|v| v.as_str()) };
+        let u64_field =
+            |key: &str| -> u64 { envelope.get(key).and_then(|v| v.as_u64()).unwrap_or(0) };
+
+        match event_name {
+            "Sandbox.Initializing" => {
+                let provider = str_field("sandbox_provider")
+                    .unwrap_or("unknown")
+                    .to_string();
+                self.on_sandbox_event(&fabro_agent::SandboxEvent::Initializing { provider });
+            }
+            "Sandbox.Ready" => {
+                let provider = str_field("sandbox_provider")
+                    .unwrap_or("unknown")
+                    .to_string();
+                let duration_ms = u64_field("duration_ms");
+                let name = str_field("name").map(String::from);
+                let cpu = envelope.get("cpu").and_then(|v| v.as_f64());
+                let memory = envelope.get("memory").and_then(|v| v.as_f64());
+                let url = str_field("url").map(String::from);
+                self.on_sandbox_event(&fabro_agent::SandboxEvent::Ready {
+                    provider,
+                    duration_ms,
+                    name,
+                    cpu,
+                    memory,
+                    url,
+                });
+            }
+            "SandboxInitialized" => {
+                if let Some(wd) = str_field("working_directory") {
+                    self.set_working_directory(wd.to_string());
+                }
+            }
+            "SetupStarted" => {
+                let count = u64_field("command_count") as usize;
+                self.on_setup_started(count);
+            }
+            "SetupCompleted" => {
+                let duration_ms = u64_field("duration_ms");
+                self.on_setup_completed(duration_ms);
+            }
+            "StageStarted" => {
+                let node_id = str_field("node_id").unwrap_or("?");
+                let name = str_field("node_label").unwrap_or("?");
+                let script = str_field("script");
+                self.on_stage_started(node_id, name, script);
+            }
+            "StageCompleted" => {
+                let node_id = str_field("node_id").unwrap_or("?");
+                let name = str_field("node_label").unwrap_or("?");
+                let duration_ms = u64_field("duration_ms");
+                let status = str_field("status").unwrap_or("success");
+                let succeeded = matches!(status, "success" | "partial_success");
+
+                let dur = format_duration_ms(duration_ms);
+
+                // Parse usage for cost
+                let cost_str = envelope
+                    .get("usage")
+                    .and_then(|u| u.get("cost"))
+                    .and_then(|c| c.as_f64())
+                    .map(|c| format!("{}   ", format_cost(c)))
+                    .unwrap_or_default();
+
+                let stats_str = if self.verbose {
+                    let counts = self.stage_counts.get(node_id);
+                    let turn_count = counts.map_or(0, |c| c.0);
+                    let tool_call_count = counts.map_or(0, |c| c.1);
+                    let total_tokens = envelope
+                        .get("usage")
+                        .map(|u| {
+                            u.get("input_tokens").and_then(|v| v.as_i64()).unwrap_or(0)
+                                + u.get("output_tokens").and_then(|v| v.as_i64()).unwrap_or(0)
+                        })
+                        .unwrap_or(0);
+                    if turn_count > 0 || tool_call_count > 0 || total_tokens > 0 {
+                        let dim = Style::new().dim();
+                        format!(
+                            "  {}",
+                            dim.apply_to(format!(
+                                "({} turns, {} tools, {} toks)",
+                                turn_count,
+                                tool_call_count,
+                                format_tokens_human(total_tokens),
+                            ))
+                        )
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
+
+                let prefix = format!("{cost_str}{dur}{stats_str}");
+                let glyph = if succeeded {
+                    green_check()
+                } else {
+                    red_cross()
+                };
+                self.finish_stage(node_id, name, glyph, &prefix);
+            }
+            "StageFailed" => {
+                let node_id = str_field("node_id").unwrap_or("?");
+                let name = str_field("node_label").unwrap_or("?");
+                let message = str_field("error")
+                    .or_else(|| str_field("failure_reason"))
+                    .unwrap_or("unknown error");
+                self.finish_stage(node_id, name, red_cross(), "");
+                let red = Style::new().red();
+                let summary = last_line_truncated(message, 120);
+                self.insert_info_line(&format!("{} {}", red.apply_to("Error:"), summary));
+            }
+            "ParallelStarted" => {
+                self.parallel_parent = self
+                    .active_stages
+                    .keys()
+                    .next()
+                    .cloned()
+                    .or_else(|| Some(String::new()));
+            }
+            "ParallelBranchStarted" => {
+                if let Some(branch) = str_field("node_id") {
+                    self.on_parallel_branch_started(branch);
+                }
+            }
+            "ParallelBranchCompleted" => {
+                if let Some(branch) = str_field("node_id") {
+                    let duration_ms = u64_field("duration_ms");
+                    let status = str_field("status").unwrap_or("success");
+                    self.on_parallel_branch_completed(branch, duration_ms, status);
+                }
+            }
+            "ParallelCompleted" => {
+                self.parallel_parent = None;
+            }
+            "Agent.ToolCallStarted" => {
+                let stage = str_field("node_id").unwrap_or("?");
+                let tool_name = str_field("tool_name").unwrap_or("?");
+                let tool_call_id = str_field("tool_call_id").unwrap_or("?");
+                let empty = serde_json::Value::Object(serde_json::Map::new());
+                let arguments = envelope.get("arguments").unwrap_or(&empty);
+                // Update tool_call count
+                if let Some(counts) = self.stage_counts.get_mut(stage) {
+                    counts.1 += 1;
+                }
+                self.on_tool_call_started(stage, tool_name, tool_call_id, arguments);
+            }
+            "Agent.ToolCallCompleted" => {
+                let stage = str_field("node_id").unwrap_or("?");
+                let tool_call_id = str_field("tool_call_id").unwrap_or("?");
+                let is_error = envelope
+                    .get("is_error")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                self.on_tool_call_completed(stage, tool_call_id, is_error);
+            }
+            "Agent.AssistantMessage" => {
+                let stage = str_field("node_id").unwrap_or("?");
+                let model = str_field("model").unwrap_or("?");
+                // Update turn count
+                if let Some(counts) = self.stage_counts.get_mut(stage) {
+                    counts.0 += 1;
+                }
+                // Update model display on stage bar
+                if let ProgressRenderer::Tty(_) = &self.renderer {
+                    if let Some(active_stage) = self.active_stages.get_mut(stage) {
+                        if !active_stage.has_model {
+                            active_stage.has_model = true;
+                            let dim = Style::new().dim();
+                            let suffix = format!(" {}", dim.apply_to(format!("[{model}]")));
+                            active_stage
+                                .spinner
+                                .set_message(format!("{}{}", active_stage.display_name, suffix));
+                        }
+                    }
+                }
+            }
+            "Agent.CompactionStarted" => {
+                let stage = str_field("node_id").unwrap_or("?");
+                if let ProgressRenderer::Tty(tty) = &self.renderer {
+                    if let Some(active_stage) = self.active_stages.get_mut(stage) {
+                        if let Some(old) = active_stage.compaction_bar.take() {
+                            old.finish_and_clear();
+                        }
+                        let bar = tty
+                            .multi
+                            .insert_after(active_stage.last_bar(), ProgressBar::new_spinner());
+                        bar.set_style(style_tool_running());
+                        bar.set_message("\u{27f3} compacting context\u{2026}");
+                        bar.enable_steady_tick(Duration::from_millis(100));
+                        active_stage.compaction_bar = Some(bar);
+                    }
+                }
+            }
+            "Agent.CompactionCompleted" => {
+                let stage = str_field("node_id").unwrap_or("?");
+                let original = u64_field("original_turn_count");
+                let preserved = u64_field("preserved_turn_count");
+                let tracked = u64_field("tracked_file_count");
+                let msg = format!(
+                    "\u{27f3} compaction: {original} \u{2192} {preserved} turns, {tracked} files"
+                );
+                match &self.renderer {
+                    ProgressRenderer::Tty(_) => {
+                        if let Some(bar) = self
+                            .active_stages
+                            .get_mut(stage)
+                            .and_then(|s| s.compaction_bar.take())
+                        {
+                            bar.set_style(style_tool_done());
+                            bar.finish_with_message(msg);
+                        } else {
+                            self.insert_info_line_for_stage(stage, &msg);
+                        }
+                    }
+                    ProgressRenderer::Plain => {
+                        eprintln!("      {msg}");
+                    }
+                }
+            }
+            "SshAccessReady" => {
+                if let Some(cmd) = str_field("ssh_command") {
+                    self.on_ssh_access_ready(cmd);
+                }
+            }
+            "RetroStarted" => {
+                self.on_stage_started("retro", "Retro", None);
+            }
+            "RetroCompleted" => {
+                let dur = format_duration_ms(u64_field("duration_ms"));
+                self.finish_stage("retro", "Retro", green_check(), &dur);
+            }
+            "RetroFailed" => {
+                let dur = format_duration_ms(u64_field("duration_ms"));
+                self.finish_stage("retro", "Retro", red_cross(), &dur);
+            }
+            "DevcontainerResolved" => {
+                let dockerfile_lines = u64_field("dockerfile_lines");
+                let environment_count = u64_field("environment_count");
+                let lifecycle_command_count = u64_field("lifecycle_command_count");
+                let workspace_folder = str_field("workspace_folder").unwrap_or("?").to_string();
+                let detail = format!(
+                    "{dockerfile_lines} Dockerfile lines, {environment_count} env vars, \
+                     {lifecycle_command_count} lifecycle cmds, {workspace_folder}"
+                );
+                match &self.renderer {
+                    ProgressRenderer::Tty(tty) => {
+                        let bar = tty.multi.add(ProgressBar::new_spinner());
+                        bar.set_style(style_header_done());
+                        bar.finish_with_message("Devcontainer: resolved".to_string());
+                        let detail_bar = tty.multi.insert_after(&bar, ProgressBar::new_spinner());
+                        detail_bar.set_style(style_sandbox_detail());
+                        detail_bar.finish_with_message(detail);
+                    }
+                    ProgressRenderer::Plain => {
+                        eprintln!("    Devcontainer: resolved");
+                        eprintln!("             {detail}");
+                    }
+                }
+            }
+            "DevcontainerLifecycleStarted" => {
+                let phase = str_field("phase").unwrap_or("?");
+                let command_count = u64_field("command_count") as usize;
+                self.devcontainer_command_count = command_count;
+                match &self.renderer {
+                    ProgressRenderer::Tty(tty) => {
+                        let bar = tty.multi.add(ProgressBar::new_spinner());
+                        bar.set_style(style_header_running());
+                        bar.set_message(format!(
+                            "Running devcontainer {phase} ({command_count} commands)..."
+                        ));
+                        bar.enable_steady_tick(Duration::from_millis(100));
+                        self.devcontainer_bar = Some(bar);
+                    }
+                    ProgressRenderer::Plain => {
+                        eprintln!("    Running devcontainer {phase} ({command_count} commands)...");
+                    }
+                }
+            }
+            "DevcontainerLifecycleCompleted" => {
+                let phase = str_field("phase").unwrap_or("?");
+                let duration_ms = u64_field("duration_ms");
+                let dur = format_duration_ms(duration_ms);
+                match &self.renderer {
+                    ProgressRenderer::Tty(_) => {
+                        if let Some(bar) = self.devcontainer_bar.take() {
+                            bar.set_style(style_header_done());
+                            bar.set_prefix(dur);
+                            bar.finish_with_message(format!("Devcontainer: {phase}"));
+                        }
+                    }
+                    ProgressRenderer::Plain => {
+                        eprintln!("    Devcontainer: {phase} ({dur})");
+                    }
+                }
+            }
+            "DevcontainerLifecycleFailed" => {
+                let phase = str_field("phase").unwrap_or("?");
+                let command = str_field("command").unwrap_or("?");
+                let exit_code = u64_field("exit_code");
+                let stderr_text = str_field("stderr").unwrap_or("");
+                if let Some(bar) = self.devcontainer_bar.take() {
+                    bar.abandon();
+                }
+                let red = Style::new().red();
+                let summary = if stderr_text.len() > 120 {
+                    &stderr_text[..120]
+                } else {
+                    stderr_text
+                };
+                self.insert_info_line(&format!(
+                    "{} Devcontainer {phase} command failed (exit {exit_code}): {command}\n         {summary}",
+                    red.apply_to("Error:")
+                ));
+            }
+            "CliEnsureStarted" => {
+                if let Some(cli_name) = str_field("cli_name") {
+                    self.on_cli_ensure_started(cli_name);
+                }
+            }
+            "CliEnsureCompleted" => {
+                if let Some(cli_name) = str_field("cli_name") {
+                    let already_installed = envelope
+                        .get("already_installed")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let duration_ms = u64_field("duration_ms");
+                    self.on_cli_ensure_completed(cli_name, already_installed, duration_ms);
+                }
+            }
+            "CliEnsureFailed" => {
+                if let Some(cli_name) = str_field("cli_name") {
+                    self.on_cli_ensure_failed(cli_name);
+                }
             }
             _ => {}
         }
@@ -1271,43 +1639,33 @@ impl ProgressAwareInterviewer {
     pub fn new(inner: ConsoleInterviewer, progress: Arc<Mutex<ProgressUI>>) -> Self {
         Self { inner, progress }
     }
-
-    fn hide_bars(&self) {
-        let ui = self.progress.lock().expect("progress lock poisoned");
-        if let ProgressRenderer::Tty(tty) = &ui.renderer {
-            tty.multi.set_draw_target(ProgressDrawTarget::hidden());
-        }
-    }
-
-    fn show_bars(&self) {
-        let ui = self.progress.lock().expect("progress lock poisoned");
-        if let ProgressRenderer::Tty(tty) = &ui.renderer {
-            tty.multi.set_draw_target(ProgressDrawTarget::stderr());
-        }
-    }
 }
 
 #[async_trait]
 impl Interviewer for ProgressAwareInterviewer {
     async fn ask(&self, question: Question) -> Answer {
-        {
-            let ui = self.progress.lock().expect("progress lock poisoned");
-            if let ProgressRenderer::Tty(tty) = &ui.renderer {
-                let sep = tty.multi.add(ProgressBar::new_spinner());
-                sep.set_style(style_empty());
-                sep.finish();
-                tty.multi.set_draw_target(ProgressDrawTarget::hidden());
-            }
-        }
+        self.progress
+            .lock()
+            .expect("progress lock poisoned")
+            .hide_bars();
         let answer = self.inner.ask(question).await;
-        self.show_bars();
+        self.progress
+            .lock()
+            .expect("progress lock poisoned")
+            .show_bars();
         answer
     }
 
     async fn inform(&self, message: &str, stage: &str) {
-        self.hide_bars();
+        self.progress
+            .lock()
+            .expect("progress lock poisoned")
+            .hide_bars();
         self.inner.inform(message, stage).await;
-        self.show_bars();
+        self.progress
+            .lock()
+            .expect("progress lock poisoned")
+            .show_bars();
     }
 }
 
@@ -1529,5 +1887,158 @@ mod tests {
             failure_count: 0,
         });
         assert!(ui.parallel_parent.is_none());
+    }
+
+    #[test]
+    fn handle_json_line_stage_started_and_completed() {
+        let mut ui = ProgressUI::new(false, false);
+
+        let started = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"plan","node_label":"Plan","stage_index":0,"script":null,"attempt":1,"max_attempts":1}"#;
+        ui.handle_json_line(started);
+        assert!(ui.stage_counts.contains_key("plan"));
+
+        let completed = r#"{"ts":"2026-01-01T12:00:10Z","event":"StageCompleted","node_id":"plan","node_label":"Plan","stage_index":0,"duration_ms":10000,"status":"success"}"#;
+        ui.handle_json_line(completed);
+        // In Plain mode, finish_stage just prints, so verify no panic
+    }
+
+    #[test]
+    fn handle_json_line_tool_call_round_trip() {
+        let mut ui = ProgressUI::new(false, true); // verbose
+
+        // Start a stage first
+        let started = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"code","node_label":"Code","stage_index":0,"attempt":1,"max_attempts":1}"#;
+        ui.handle_json_line(started);
+
+        let tc_start = r#"{"ts":"2026-01-01T12:00:01Z","event":"Agent.ToolCallStarted","node_id":"code","node_label":"code","tool_name":"read_file","tool_call_id":"tc1","arguments":{"path":"src/main.rs"}}"#;
+        ui.handle_json_line(tc_start);
+        assert_eq!(ui.stage_counts.get("code").map(|c| c.1), Some(1));
+
+        let tc_done = r#"{"ts":"2026-01-01T12:00:02Z","event":"Agent.ToolCallCompleted","node_id":"code","node_label":"code","tool_name":"read_file","tool_call_id":"tc1","is_error":false}"#;
+        ui.handle_json_line(tc_done);
+    }
+
+    #[test]
+    fn handle_json_line_retro_events() {
+        let mut ui = ProgressUI::new(false, false);
+
+        let retro_started = r#"{"ts":"2026-01-01T12:00:00Z","event":"RetroStarted"}"#;
+        ui.handle_json_line(retro_started);
+
+        let retro_completed =
+            r#"{"ts":"2026-01-01T12:00:05Z","event":"RetroCompleted","duration_ms":5000}"#;
+        ui.handle_json_line(retro_completed);
+    }
+
+    #[test]
+    fn handle_json_line_ignores_invalid_json() {
+        let mut ui = ProgressUI::new(false, false);
+        ui.handle_json_line("not valid json");
+        ui.handle_json_line("");
+        ui.handle_json_line("{}"); // no event field
+    }
+
+    // ── Bug regression tests (post-rename JSONL field names) ─────────
+
+    // Bug 1: handle_json_line reads pre-rename field names but real JSONL
+    // uses post-rename names from rename_fields(). These tests use the
+    // actual JSONL format produced by the engine.
+
+    #[test]
+    fn bug1_stage_started_uses_node_label_not_name() {
+        // Real JSONL: rename_fields renames "name" → "node_label"
+        let mut ui = ProgressUI::new(true, false);
+        let started = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"plan","node_label":"Plan","stage_index":0,"script":null,"attempt":1,"max_attempts":1}"#;
+        ui.handle_json_line(started);
+
+        let stage = ui
+            .active_stages
+            .get("plan")
+            .expect("stage should be tracked");
+        assert_eq!(
+            stage.display_name, "Plan",
+            "display name should come from node_label field, not be '?'"
+        );
+    }
+
+    #[test]
+    fn bug1_agent_tool_call_uses_node_id_not_stage() {
+        // Real JSONL: rename_fields renames "stage" → "node_id" for Agent.* events
+        let mut ui = ProgressUI::new(false, true);
+
+        // First create the stage
+        let started = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"code","node_label":"Code","stage_index":0,"attempt":1,"max_attempts":1}"#;
+        ui.handle_json_line(started);
+        assert_eq!(ui.stage_counts.get("code").map(|c| c.1), Some(0));
+
+        // Tool call with post-rename field: "node_id" instead of "stage"
+        let tc_start = r#"{"ts":"2026-01-01T12:00:01Z","event":"Agent.ToolCallStarted","node_id":"code","node_label":"code","tool_name":"read_file","tool_call_id":"tc1","arguments":{"path":"src/main.rs"}}"#;
+        ui.handle_json_line(tc_start);
+
+        assert_eq!(
+            ui.stage_counts.get("code").map(|c| c.1),
+            Some(1),
+            "tool call count should increment using node_id field"
+        );
+    }
+
+    #[test]
+    fn bug1_agent_assistant_message_uses_node_id_not_stage() {
+        // Real JSONL: rename_fields renames "stage" → "node_id"
+        let mut ui = ProgressUI::new(false, true);
+
+        let started = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"code","node_label":"Code","stage_index":0,"attempt":1,"max_attempts":1}"#;
+        ui.handle_json_line(started);
+        assert_eq!(ui.stage_counts.get("code").map(|c| c.0), Some(0));
+
+        // AssistantMessage with post-rename field: "node_id" instead of "stage"
+        let msg = r#"{"ts":"2026-01-01T12:00:01Z","event":"Agent.AssistantMessage","node_id":"code","node_label":"code","model":"claude-sonnet-4-20250514"}"#;
+        ui.handle_json_line(msg);
+
+        assert_eq!(
+            ui.stage_counts.get("code").map(|c| c.0),
+            Some(1),
+            "turn count should increment using node_id field"
+        );
+    }
+
+    #[test]
+    fn bug1_parallel_branch_uses_node_id_not_branch() {
+        // Real JSONL: rename_fields renames "branch" → "node_id"
+        let mut ui = ProgressUI::new(true, false);
+
+        // Set up a parent stage and start parallel
+        let parent = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"fork","node_label":"Fork","stage_index":0,"attempt":1,"max_attempts":1}"#;
+        ui.handle_json_line(parent);
+        let par = r#"{"ts":"2026-01-01T12:00:01Z","event":"ParallelStarted","branch_count":2,"join_policy":"wait_all","error_policy":"continue"}"#;
+        ui.handle_json_line(par);
+        assert!(ui.parallel_parent.is_some());
+
+        // ParallelBranchStarted with post-rename field: "node_id" instead of "branch"
+        let branch = r#"{"ts":"2026-01-01T12:00:02Z","event":"ParallelBranchStarted","node_id":"lint","node_label":"lint","branch_index":0}"#;
+        ui.handle_json_line(branch);
+
+        // Branch should have been registered as a tool_call entry on the parent
+        let parent_stage = ui.active_stages.get("fork").unwrap();
+        assert!(
+            !parent_stage.tool_calls.is_empty(),
+            "parallel branch should be registered using node_id field"
+        );
+    }
+
+    // Bug 5: start_run should write Starting status before spawning engine
+    // (tested in start.rs)
+
+    // Bug 6: handle_json_line is missing devcontainer event dispatch
+
+    #[test]
+    fn bug6_devcontainer_lifecycle_started_dispatched() {
+        let mut ui = ProgressUI::new(false, false);
+        let event = r#"{"ts":"2026-01-01T12:00:00Z","event":"DevcontainerLifecycleStarted","phase":"postCreate","command_count":2}"#;
+        ui.handle_json_line(event);
+        assert_eq!(
+            ui.devcontainer_command_count, 2,
+            "devcontainer_command_count should be set by DevcontainerLifecycleStarted"
+        );
     }
 }
