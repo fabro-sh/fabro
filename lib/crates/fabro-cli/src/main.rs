@@ -149,6 +149,8 @@ enum Command {
     Rewind(commands::rewind::RewindArgs),
     /// Fork a workflow run from an earlier checkpoint into a new run
     Fork(commands::fork::ForkArgs),
+    /// Block until a workflow run completes
+    Wait(commands::wait::WaitArgs),
     /// Workflow operations
     Workflow {
         #[command(subcommand)]
@@ -496,6 +498,7 @@ async fn main_inner() -> (String, Result<()>) {
         },
         Command::Rewind(_) => "rewind",
         Command::Fork(_) => "fork",
+        Command::Wait(_) => "wait",
         Command::Workflow { command } => match command {
             WorkflowCommand::List(_) => "workflow list",
             WorkflowCommand::Create(_) => "workflow create",
@@ -885,6 +888,10 @@ async fn main_inner() -> (String, Result<()>) {
             Command::Fork(args) => {
                 let styles = fabro_util::terminal::Styles::detect_stderr();
                 commands::fork::run(&args, &styles)?;
+            }
+            Command::Wait(args) => {
+                let styles = fabro_util::terminal::Styles::detect_stderr();
+                commands::wait::run(args, &styles)?;
             }
             Command::Workflow { command } => match command {
                 WorkflowCommand::List(args) => {
