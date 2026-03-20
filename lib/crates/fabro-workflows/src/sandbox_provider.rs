@@ -109,6 +109,22 @@ mod tests {
         assert!("invalid".parse::<SandboxProvider>().is_err());
     }
 
+    /// Bug: run.rs uses `!is_remote()` to decide worktree eligibility, but
+    /// Docker is non-remote yet its sandbox creation arm never creates the
+    /// worktree.  This causes worktree variables to be set but the
+    /// branch/worktree never created, leading to checkpoint failures.
+    #[test]
+    fn docker_should_not_be_eligible_for_local_worktree_strategy() {
+        // All non-remote providers must have a sandbox creation arm that
+        // handles worktree setup.  Currently only Local does, so Docker
+        // being non-remote is a bug.
+        assert!(
+            SandboxProvider::Docker.is_remote(),
+            "Docker.is_remote() returns false, making it eligible for LocalWorktree strategy, \
+             but the Docker sandbox creation arm never creates the git worktree"
+        );
+    }
+
     #[test]
     fn sandbox_provider_display() {
         assert_eq!(SandboxProvider::Local.to_string(), "local");

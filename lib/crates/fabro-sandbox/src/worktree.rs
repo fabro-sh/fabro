@@ -572,6 +572,173 @@ mod tests {
     // Accessors
     // -----------------------------------------------------------------------
 
+    // -----------------------------------------------------------------------
+    // Bug: cleanup() destroys worktree, breaking `fabro cp`
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn cleanup_should_preserve_worktree_for_post_run_access() {
+        // The worktree directory must survive cleanup() so that `fabro cp` can
+        // access run artifacts afterward. It is pruned separately by `system prune`.
+        // LocalSandbox.cleanup() was a no-op; WorktreeSandbox should match.
+        let (inner, mock) = make_mock();
+        let wt = WorktreeSandbox::new(inner, make_config("/tmp/wt"));
+
+        wt.cleanup().await.unwrap();
+
+        let cmds = mock.captured_commands.lock().unwrap().clone();
+        assert!(
+            cmds.is_empty(),
+            "cleanup should not issue destructive git commands \
+             (worktree must be preserved for fabro cp), but got: {cmds:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Bug: initialize() is not idempotent — double call destroys worktree
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn initialize_is_idempotent_on_second_call() {
+        // engine.run_with_lifecycle() calls sandbox.initialize() unconditionally,
+        // even when run.rs already called it during sandbox construction.
+        // The second call must be a no-op; it must NOT re-run
+        // `git worktree remove --force` which would destroy the worktree.
+        let (inner, mock) = make_mock();
+        let wt = WorktreeSandbox::new(inner, make_config("/tmp/wt"));
+
+        wt.initialize().await.unwrap();
+        let first_count = mock.captured_commands.lock().unwrap().len();
+
+        wt.initialize().await.unwrap();
+        let second_count = mock.captured_commands.lock().unwrap().len();
+
+        assert_eq!(
+            first_count,
+            second_count,
+            "second initialize() should be a no-op, but it issued {} additional commands",
+            second_count - first_count
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Bug: file operations resolve against inner working_directory, not worktree
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn grep_should_search_worktree_not_inner_working_directory() {
+        // WorktreeSandbox delegates grep() to the inner sandbox without path
+        // adjustment. When the inner LocalSandbox was created with original_cwd,
+        // grep("pattern", ".") searches the original repo instead of the worktree.
+        let original =
+            std::env::temp_dir().join(format!("fabro-test-original-{}", uuid::Uuid::new_v4()));
+        let worktree =
+            std::env::temp_dir().join(format!("fabro-test-worktree-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&original).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        // Put a marker file ONLY in the worktree directory
+        std::fs::write(worktree.join("marker.txt"), "UNIQUE_WORKTREE_MARKER").unwrap();
+
+        let inner: Arc<dyn Sandbox> = Arc::new(crate::local::LocalSandbox::new(original.clone()));
+        let config = WorktreeConfig {
+            branch_name: "test-branch".into(),
+            base_sha: "abc123".into(),
+            worktree_path: worktree.to_string_lossy().to_string(),
+            skip_branch_creation: false,
+        };
+        let wt = WorktreeSandbox::new(inner, config);
+
+        // working_directory() correctly returns the worktree path
+        assert_eq!(wt.working_directory(), worktree.to_string_lossy().as_ref());
+
+        // grep with "." should search the worktree, not the original repo
+        let results = wt
+            .grep("UNIQUE_WORKTREE_MARKER", ".", &GrepOptions::default())
+            .await
+            .unwrap();
+        assert!(
+            !results.is_empty(),
+            "grep(\".\") should search the worktree directory, not the inner sandbox's working directory"
+        );
+
+        std::fs::remove_dir_all(&original).ok();
+        std::fs::remove_dir_all(&worktree).ok();
+    }
+
+    #[tokio::test]
+    async fn glob_should_search_worktree_when_path_is_none() {
+        // WorktreeSandbox delegates glob() to the inner sandbox without path
+        // adjustment. LocalSandbox::glob(pattern, None) defaults to
+        // self.working_directory, which is the original repo path.
+        let original =
+            std::env::temp_dir().join(format!("fabro-test-original-{}", uuid::Uuid::new_v4()));
+        let worktree =
+            std::env::temp_dir().join(format!("fabro-test-worktree-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&original).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        // Put a file ONLY in the worktree directory
+        std::fs::write(worktree.join("worktree_only.txt"), "content").unwrap();
+
+        let inner: Arc<dyn Sandbox> = Arc::new(crate::local::LocalSandbox::new(original.clone()));
+        let config = WorktreeConfig {
+            branch_name: "test-branch".into(),
+            base_sha: "abc123".into(),
+            worktree_path: worktree.to_string_lossy().to_string(),
+            skip_branch_creation: false,
+        };
+        let wt = WorktreeSandbox::new(inner, config);
+
+        let results = wt.glob("*.txt", None).await.unwrap();
+        assert!(
+            results.iter().any(|r| r.contains("worktree_only.txt")),
+            "glob(pattern, None) should search the worktree directory, not the inner sandbox's working directory. Got: {results:?}"
+        );
+
+        std::fs::remove_dir_all(&original).ok();
+        std::fs::remove_dir_all(&worktree).ok();
+    }
+
+    #[tokio::test]
+    async fn read_file_relative_should_resolve_against_worktree() {
+        // WorktreeSandbox delegates read_file() to the inner sandbox without
+        // path adjustment. Relative paths resolve against the inner
+        // LocalSandbox's working_directory (original repo), not the worktree.
+        let original =
+            std::env::temp_dir().join(format!("fabro-test-original-{}", uuid::Uuid::new_v4()));
+        let worktree =
+            std::env::temp_dir().join(format!("fabro-test-worktree-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&original).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        // Put the file ONLY in the worktree directory
+        std::fs::write(worktree.join("only_in_worktree.txt"), "worktree content").unwrap();
+
+        let inner: Arc<dyn Sandbox> = Arc::new(crate::local::LocalSandbox::new(original.clone()));
+        let config = WorktreeConfig {
+            branch_name: "test-branch".into(),
+            base_sha: "abc123".into(),
+            worktree_path: worktree.to_string_lossy().to_string(),
+            skip_branch_creation: false,
+        };
+        let wt = WorktreeSandbox::new(inner, config);
+
+        let result = wt.read_file("only_in_worktree.txt", None, None).await;
+        assert!(
+            result.is_ok(),
+            "read_file with relative path should resolve against worktree, not inner sandbox's working directory. Error: {}",
+            result.unwrap_err()
+        );
+
+        std::fs::remove_dir_all(&original).ok();
+        std::fs::remove_dir_all(&worktree).ok();
+    }
+
+    // -----------------------------------------------------------------------
+    // Accessors
+    // -----------------------------------------------------------------------
+
     #[test]
     fn accessors_return_config_values() {
         let (inner, _mock) = make_mock();
