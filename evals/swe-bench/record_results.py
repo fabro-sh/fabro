@@ -131,6 +131,7 @@ def main():
             "gen_duration_s": gen_duration,
             "eval_duration_s": eval_duration,
             "gen_cost_usd": round(cost, 6) if cost else None,
+            "fabro_run_dir": gen.get("fabro_run_dir"),
         })
 
     # Write per-instance results
