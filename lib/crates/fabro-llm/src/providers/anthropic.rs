@@ -1601,8 +1601,21 @@ mod tests {
     fn build_api_request_omits_whitespace_only_system_prompt() {
         let adapter = Adapter::new("test-key");
         let request = Request {
-            model: "claude-sonnet-4-20250514".to_string(),
             messages: vec![Message::system("   \n\t"), Message::user("Hello")],
+            ..make_base_request()
+        };
+
+        let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
+        assert!(
+            api_request.system.is_none(),
+            "whitespace-only system prompts should be omitted"
+        );
+    }
+
+    fn make_base_request() -> Request {
+        Request {
+            model: "claude-sonnet-4-20250514".to_string(),
+            messages: vec![Message::user("Hello")],
             provider: Some("anthropic".to_string()),
             tools: None,
             tool_choice: None,
@@ -1614,30 +1627,15 @@ mod tests {
             reasoning_effort: None,
             metadata: None,
             provider_options: None,
-        };
-
-        let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
-        assert!(
-            api_request.system.is_none(),
-            "whitespace-only system prompts should be omitted"
-        );
+        }
     }
 
     fn make_request_with_format(format: crate::types::ResponseFormat) -> Request {
         Request {
-            model: "claude-sonnet-4-20250514".to_string(),
-            messages: vec![Message::user("Hello")],
             provider: None,
-            tools: None,
-            tool_choice: None,
             response_format: Some(format),
-            temperature: None,
-            top_p: None,
             max_tokens: None,
-            stop_sequences: None,
-            reasoning_effort: None,
-            metadata: None,
-            provider_options: None,
+            ..make_base_request()
         }
     }
 
@@ -2056,19 +2054,8 @@ mod tests {
     fn build_api_request_maps_reasoning_effort_to_output_config() {
         let adapter = Adapter::new("test-key");
         let request = Request {
-            model: "claude-sonnet-4-20250514".to_string(),
-            messages: vec![Message::user("Hello")],
-            provider: Some("anthropic".to_string()),
-            tools: None,
-            tool_choice: None,
-            response_format: None,
-            temperature: None,
-            top_p: None,
-            max_tokens: Some(128),
-            stop_sequences: None,
             reasoning_effort: Some("medium".to_string()),
-            metadata: None,
-            provider_options: None,
+            ..make_base_request()
         };
 
         let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
@@ -2081,21 +2068,7 @@ mod tests {
     #[test]
     fn build_api_request_omits_output_config_when_no_reasoning_effort() {
         let adapter = Adapter::new("test-key");
-        let request = Request {
-            model: "claude-sonnet-4-20250514".to_string(),
-            messages: vec![Message::user("Hello")],
-            provider: Some("anthropic".to_string()),
-            tools: None,
-            tool_choice: None,
-            response_format: None,
-            temperature: None,
-            top_p: None,
-            max_tokens: Some(128),
-            stop_sequences: None,
-            reasoning_effort: None,
-            metadata: None,
-            provider_options: None,
-        };
+        let request = make_base_request();
 
         let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
         assert!(api_request.output_config.is_none());
