@@ -81,10 +81,8 @@ impl WorktreeSandbox {
         }
     }
 
-    /// Resolve a path relative to the worktree. Absolute paths are returned unchanged.
     fn resolve_path(&self, path: &str) -> String {
-        let p = std::path::Path::new(path);
-        if p.is_absolute() {
+        if std::path::Path::new(path).is_absolute() {
             path.to_string()
         } else {
             format!("{}/{path}", self.config.worktree_path)
@@ -109,7 +107,7 @@ impl Sandbox for WorktreeSandbox {
     async fn initialize(&self) -> Result<(), String> {
         if self
             .initialized
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
+            .swap(true, std::sync::atomic::Ordering::Relaxed)
         {
             return Ok(());
         }
@@ -237,8 +235,8 @@ impl Sandbox for WorktreeSandbox {
 
     async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String> {
         let resolved = path.map(|p| self.resolve_path(p));
-        let glob_path = resolved.as_deref().or(Some(&self.config.worktree_path));
-        self.inner.glob(pattern, glob_path).await
+        let glob_path = resolved.as_deref().unwrap_or(&self.config.worktree_path);
+        self.inner.glob(pattern, Some(glob_path)).await
     }
 
     async fn download_file_to_local(
@@ -326,7 +324,8 @@ impl Sandbox for WorktreeSandbox {
     }
 
     fn mark_agent_read(&self, path: &str) {
-        self.inner.mark_agent_read(path);
+        let resolved = self.resolve_path(path);
+        self.inner.mark_agent_read(&resolved);
     }
 }
 
