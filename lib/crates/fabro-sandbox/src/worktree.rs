@@ -89,15 +89,23 @@ impl Sandbox for WorktreeSandbox {
     // --- Lifecycle ---
 
     /// Set up the git worktree:
-    /// 1. Unless `skip_branch_creation`: force-create the branch at `base_sha`, emit `BranchCreated`.
-    /// 2. Best-effort remove any stale worktree, then add fresh one, emit `WorktreeAdded`.
-    /// 3. Unless `skip_branch_creation`: hard-reset the worktree to `base_sha`, emit `Reset`.
+    /// 1. Best-effort remove any stale worktree at `path` (so the branch is free to be updated).
+    /// 2. Unless `skip_branch_creation`: force-create the branch at `base_sha`, emit `BranchCreated`.
+    /// 3. Add the worktree, emit `WorktreeAdded`.
     ///
     /// Does NOT call `inner.initialize()`.
     async fn initialize(&self) -> Result<(), String> {
         let path = shell_quote(&self.config.worktree_path);
         let branch = shell_quote(&self.config.branch_name);
         let sha = shell_quote(&self.config.base_sha);
+
+        // Best-effort remove any stale worktree registration + directory first,
+        // so that the branch is not "in use" when we try to force-update it.
+        let rm_cmd = format!("{GIT} worktree remove --force {path}");
+        let _ = self
+            .inner
+            .exec_command(&rm_cmd, 30_000, None, None, None)
+            .await;
 
         if !self.config.skip_branch_creation {
             let cmd = format!("{GIT} branch --force {branch} {sha}");
@@ -117,13 +125,6 @@ impl Sandbox for WorktreeSandbox {
                 sha: self.config.base_sha.clone(),
             });
         }
-
-        // Best-effort remove any stale worktree registration + directory
-        let rm_cmd = format!("{GIT} worktree remove --force {path}");
-        let _ = self
-            .inner
-            .exec_command(&rm_cmd, 30_000, None, None, None)
-            .await;
 
         let add_cmd = format!("{GIT} worktree add {path} {branch}");
         let result = self
@@ -334,14 +335,14 @@ mod tests {
         wt.initialize().await.unwrap();
 
         let cmds = mock.captured_commands.lock().unwrap().clone();
-        // branch --force, worktree remove (best-effort), worktree add
+        // worktree remove (best-effort), branch --force, worktree add
         assert_eq!(cmds.len(), 3, "expected 3 git commands, got: {cmds:?}");
-        assert!(cmds[0].contains("branch --force"), "cmd[0]: {}", cmds[0]);
         assert!(
-            cmds[1].contains("worktree remove --force"),
-            "cmd[1]: {}",
-            cmds[1]
+            cmds[0].contains("worktree remove --force"),
+            "cmd[0]: {}",
+            cmds[0]
         );
+        assert!(cmds[1].contains("branch --force"), "cmd[1]: {}", cmds[1]);
         assert!(cmds[2].contains("worktree add"), "cmd[2]: {}", cmds[2]);
     }
 
@@ -381,11 +382,11 @@ mod tests {
         wt.initialize().await.unwrap();
 
         let cmds = mock.captured_commands.lock().unwrap().clone();
-        // The path "/tmp/my worktree" should be quoted in shell commands
+        // The path "/tmp/my worktree" should be quoted in the worktree remove command (cmd[0])
         assert!(
-            cmds[1].contains("'/tmp/my worktree'") || cmds[1].contains("\"/tmp/my worktree\""),
+            cmds[0].contains("'/tmp/my worktree'") || cmds[0].contains("\"/tmp/my worktree\""),
             "worktree path should be shell-quoted: {}",
-            cmds[1]
+            cmds[0]
         );
     }
 
