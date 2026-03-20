@@ -18,7 +18,6 @@ pub enum WorktreeEvent {
     BranchCreated { branch: String, sha: String },
     WorktreeAdded { path: String, branch: String },
     WorktreeRemoved { path: String },
-    Reset { sha: String },
 }
 
 /// Callback type for worktree lifecycle events.
@@ -142,30 +141,6 @@ impl Sandbox for WorktreeSandbox {
             path: self.config.worktree_path.clone(),
             branch: self.config.branch_name.clone(),
         });
-
-        if !self.config.skip_branch_creation {
-            let reset_cmd = format!("{GIT} reset --hard {sha}");
-            let result = self
-                .inner
-                .exec_command(
-                    &reset_cmd,
-                    30_000,
-                    Some(&self.config.worktree_path),
-                    None,
-                    None,
-                )
-                .await?;
-            if result.exit_code != 0 {
-                return Err(format!(
-                    "git reset --hard failed (exit {}): {}",
-                    result.exit_code,
-                    result.stderr.trim()
-                ));
-            }
-            self.emit(WorktreeEvent::Reset {
-                sha: self.config.base_sha.clone(),
-            });
-        }
 
         Ok(())
     }
@@ -359,8 +334,8 @@ mod tests {
         wt.initialize().await.unwrap();
 
         let cmds = mock.captured_commands.lock().unwrap().clone();
-        // branch --force, worktree remove (best-effort), worktree add, reset --hard
-        assert_eq!(cmds.len(), 4, "expected 4 git commands, got: {cmds:?}");
+        // branch --force, worktree remove (best-effort), worktree add
+        assert_eq!(cmds.len(), 3, "expected 3 git commands, got: {cmds:?}");
         assert!(cmds[0].contains("branch --force"), "cmd[0]: {}", cmds[0]);
         assert!(
             cmds[1].contains("worktree remove --force"),
@@ -368,11 +343,10 @@ mod tests {
             cmds[1]
         );
         assert!(cmds[2].contains("worktree add"), "cmd[2]: {}", cmds[2]);
-        assert!(cmds[3].contains("reset --hard"), "cmd[3]: {}", cmds[3]);
     }
 
     #[tokio::test]
-    async fn initialize_emits_branch_worktree_reset_events() {
+    async fn initialize_emits_branch_and_worktree_events() {
         let (inner, _mock) = make_mock();
         let mut wt = WorktreeSandbox::new(inner, make_config("/tmp/wt"));
 
@@ -383,7 +357,6 @@ mod tests {
                 WorktreeEvent::BranchCreated { .. } => "BranchCreated",
                 WorktreeEvent::WorktreeAdded { .. } => "WorktreeAdded",
                 WorktreeEvent::WorktreeRemoved { .. } => "WorktreeRemoved",
-                WorktreeEvent::Reset { .. } => "Reset",
             };
             events_clone.lock().unwrap().push(label.to_string());
         }));
@@ -391,7 +364,7 @@ mod tests {
         wt.initialize().await.unwrap();
 
         let captured = events.lock().unwrap();
-        assert_eq!(*captured, vec!["BranchCreated", "WorktreeAdded", "Reset"]);
+        assert_eq!(*captured, vec!["BranchCreated", "WorktreeAdded"]);
     }
 
     #[tokio::test]
@@ -414,26 +387,6 @@ mod tests {
             "worktree path should be shell-quoted: {}",
             cmds[1]
         );
-    }
-
-    #[tokio::test]
-    async fn initialize_reset_uses_worktree_path_as_working_dir() {
-        let (inner, mock) = make_mock();
-        let wt = WorktreeSandbox::new(inner, make_config("/tmp/wt"));
-
-        wt.initialize().await.unwrap();
-
-        let wdirs = mock.captured_working_dirs.lock().unwrap().clone();
-        // reset command is at index 3, should use worktree path
-        assert_eq!(
-            wdirs[3],
-            Some("/tmp/wt".to_string()),
-            "reset --hard should run in worktree dir"
-        );
-        // branch, remove, add commands use None (inner's default)
-        assert_eq!(wdirs[0], None, "branch command should use inner default");
-        assert_eq!(wdirs[1], None, "worktree remove should use inner default");
-        assert_eq!(wdirs[2], None, "worktree add should use inner default");
     }
 
     // -----------------------------------------------------------------------
@@ -470,7 +423,6 @@ mod tests {
                 WorktreeEvent::BranchCreated { .. } => "BranchCreated",
                 WorktreeEvent::WorktreeAdded { .. } => "WorktreeAdded",
                 WorktreeEvent::WorktreeRemoved { .. } => "WorktreeRemoved",
-                WorktreeEvent::Reset { .. } => "Reset",
             };
             events_clone.lock().unwrap().push(label.to_string());
         }));

@@ -3,14 +3,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use fabro_agent::{Sandbox, WorktreeConfig, WorktreeEvent, WorktreeEventCallback, WorktreeSandbox};
+use fabro_agent::{Sandbox, WorktreeConfig, WorktreeSandbox};
 use tokio::sync::Semaphore;
 
 use crate::context::keys;
 use crate::context::Context;
 use crate::engine::set_hook_node;
 use crate::error::FabroError;
-use crate::event::{EventEmitter, WorkflowRunEvent};
+use crate::event::WorkflowRunEvent;
 use crate::millis_u64;
 use crate::outcome::{Outcome, StageStatus};
 use fabro_graphviz::graph::{Graph, Node};
@@ -89,24 +89,6 @@ fn parse_error_policy(raw: &str) -> ErrorPolicy {
         "ignore" => ErrorPolicy::Ignore,
         _ => ErrorPolicy::Continue,
     }
-}
-
-/// Bridge a [`WorktreeEvent`] to the corresponding workflow run event on `emitter`.
-fn worktree_event_callback(emitter: Arc<EventEmitter>) -> WorktreeEventCallback {
-    Arc::new(move |event| match event {
-        WorktreeEvent::BranchCreated { branch, sha } => {
-            emitter.emit(&WorkflowRunEvent::GitBranch { branch, sha });
-        }
-        WorktreeEvent::WorktreeAdded { path, branch } => {
-            emitter.emit(&WorkflowRunEvent::GitWorktreeAdd { path, branch });
-        }
-        WorktreeEvent::WorktreeRemoved { path } => {
-            emitter.emit(&WorkflowRunEvent::GitWorktreeRemove { path });
-        }
-        WorktreeEvent::Reset { sha } => {
-            emitter.emit(&WorkflowRunEvent::GitReset { sha });
-        }
-    })
 }
 
 struct BranchResult {
@@ -313,8 +295,7 @@ impl Handler for ParallelHandler {
                     skip_branch_creation: false,
                 };
                 let mut wt_sandbox = WorktreeSandbox::new(Arc::clone(&services.sandbox), wt_config);
-                wt_sandbox
-                    .set_event_callback(worktree_event_callback(Arc::clone(&services.emitter)));
+                wt_sandbox.set_event_callback(Arc::clone(&services.emitter).worktree_callback());
                 wt_sandbox
                     .initialize()
                     .await

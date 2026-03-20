@@ -8,8 +8,7 @@ use anyhow::{bail, Context};
 use chrono::{Local, Utc};
 use clap::{Args, ValueEnum};
 use fabro_agent::{
-    DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox, WorktreeConfig, WorktreeEvent,
-    WorktreeEventCallback, WorktreeSandbox,
+    DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox, WorktreeConfig, WorktreeSandbox,
 };
 use fabro_config::run::{RunDefaults, WorkflowRunConfig};
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
@@ -421,25 +420,6 @@ struct CostAccumulator {
     total_reasoning_tokens: i64,
     total_cost: f64,
     has_pricing: bool,
-}
-
-/// Build a callback that forwards [`WorktreeEvent`]s as workflow run events on `emitter`.
-fn worktree_event_callback(emitter: Arc<EventEmitter>) -> WorktreeEventCallback {
-    Arc::new(move |event| match event {
-        WorktreeEvent::BranchCreated { branch, sha } => {
-            emitter.emit(&fabro_workflows::event::WorkflowRunEvent::GitBranch { branch, sha });
-        }
-        WorktreeEvent::WorktreeAdded { path, branch } => {
-            emitter
-                .emit(&fabro_workflows::event::WorkflowRunEvent::GitWorktreeAdd { path, branch });
-        }
-        WorktreeEvent::WorktreeRemoved { path } => {
-            emitter.emit(&fabro_workflows::event::WorkflowRunEvent::GitWorktreeRemove { path });
-        }
-        WorktreeEvent::Reset { sha } => {
-            emitter.emit(&fabro_workflows::event::WorkflowRunEvent::GitReset { sha });
-        }
-    })
 }
 
 /// Create a [`LocalSandbox`] wired to emit [`WorkflowRunEvent::Sandbox`] events.
@@ -1168,7 +1148,7 @@ pub async fn run_command(
                     skip_branch_creation: false,
                 };
                 let mut wt_sandbox = WorktreeSandbox::new(inner, wt_config);
-                wt_sandbox.set_event_callback(worktree_event_callback(Arc::clone(&emitter)));
+                wt_sandbox.set_event_callback(Arc::clone(&emitter).worktree_callback());
 
                 match wt_sandbox.initialize().await {
                     Ok(()) => {
@@ -1866,7 +1846,7 @@ async fn run_from_branch(
                     skip_branch_creation: true, // branch already exists on resume
                 };
                 let mut wt_sandbox = WorktreeSandbox::new(inner, wt_config);
-                wt_sandbox.set_event_callback(worktree_event_callback(Arc::clone(&emitter)));
+                wt_sandbox.set_event_callback(Arc::clone(&emitter).worktree_callback());
 
                 wt_sandbox.initialize().await.map_err(|e| {
                     anyhow::anyhow!("failed to attach worktree to {run_branch}: {e}")
