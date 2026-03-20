@@ -41,6 +41,7 @@ pub struct WorktreeSandbox {
     inner: Arc<dyn Sandbox>,
     config: WorktreeConfig,
     event_callback: Option<WorktreeEventCallback>,
+    initialized: std::sync::atomic::AtomicBool,
 }
 
 impl WorktreeSandbox {
@@ -50,6 +51,7 @@ impl WorktreeSandbox {
             inner,
             config,
             event_callback: None,
+            initialized: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -78,6 +80,16 @@ impl WorktreeSandbox {
             cb(event);
         }
     }
+
+    /// Resolve a path relative to the worktree. Absolute paths are returned unchanged.
+    fn resolve_path(&self, path: &str) -> String {
+        let p = std::path::Path::new(path);
+        if p.is_absolute() {
+            path.to_string()
+        } else {
+            format!("{}/{path}", self.config.worktree_path)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +107,12 @@ impl Sandbox for WorktreeSandbox {
     ///
     /// Does NOT call `inner.initialize()`.
     async fn initialize(&self) -> Result<(), String> {
+        if self
+            .initialized
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Ok(());
+        }
         let path = shell_quote(&self.config.worktree_path);
         let branch = shell_quote(&self.config.branch_name);
         let sha = shell_quote(&self.config.base_sha);
@@ -146,17 +164,9 @@ impl Sandbox for WorktreeSandbox {
         Ok(())
     }
 
-    /// Remove the git worktree and emit `WorktreeRemoved`. Does NOT call `inner.cleanup()`.
+    /// No-op — the worktree must survive cleanup for `fabro cp` access.
+    /// Worktrees are pruned separately by `system prune`.
     async fn cleanup(&self) -> Result<(), String> {
-        let path = shell_quote(&self.config.worktree_path);
-        let cmd = format!("{GIT} worktree remove --force {path}");
-        let _ = self
-            .inner
-            .exec_command(&cmd, 30_000, None, None, None)
-            .await;
-        self.emit(WorktreeEvent::WorktreeRemoved {
-            path: self.config.worktree_path.clone(),
-        });
         Ok(())
     }
 
@@ -187,19 +197,23 @@ impl Sandbox for WorktreeSandbox {
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> Result<String, String> {
-        self.inner.read_file(path, offset, limit).await
+        let resolved = self.resolve_path(path);
+        self.inner.read_file(&resolved, offset, limit).await
     }
 
     async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
-        self.inner.write_file(path, content).await
+        let resolved = self.resolve_path(path);
+        self.inner.write_file(&resolved, content).await
     }
 
     async fn delete_file(&self, path: &str) -> Result<(), String> {
-        self.inner.delete_file(path).await
+        let resolved = self.resolve_path(path);
+        self.inner.delete_file(&resolved).await
     }
 
     async fn file_exists(&self, path: &str) -> Result<bool, String> {
-        self.inner.file_exists(path).await
+        let resolved = self.resolve_path(path);
+        self.inner.file_exists(&resolved).await
     }
 
     async fn list_directory(
@@ -207,7 +221,8 @@ impl Sandbox for WorktreeSandbox {
         path: &str,
         depth: Option<usize>,
     ) -> Result<Vec<DirEntry>, String> {
-        self.inner.list_directory(path, depth).await
+        let resolved = self.resolve_path(path);
+        self.inner.list_directory(&resolved, depth).await
     }
 
     async fn grep(
@@ -216,11 +231,14 @@ impl Sandbox for WorktreeSandbox {
         path: &str,
         options: &GrepOptions,
     ) -> Result<Vec<String>, String> {
-        self.inner.grep(pattern, path, options).await
+        let resolved = self.resolve_path(path);
+        self.inner.grep(pattern, &resolved, options).await
     }
 
     async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String> {
-        self.inner.glob(pattern, path).await
+        let resolved = path.map(|p| self.resolve_path(p));
+        let glob_path = resolved.as_deref().or(Some(&self.config.worktree_path));
+        self.inner.glob(pattern, glob_path).await
     }
 
     async fn download_file_to_local(
@@ -228,8 +246,9 @@ impl Sandbox for WorktreeSandbox {
         remote_path: &str,
         local_path: &Path,
     ) -> Result<(), String> {
+        let resolved = self.resolve_path(remote_path);
         self.inner
-            .download_file_to_local(remote_path, local_path)
+            .download_file_to_local(&resolved, local_path)
             .await
     }
 
@@ -238,8 +257,9 @@ impl Sandbox for WorktreeSandbox {
         local_path: &Path,
         remote_path: &str,
     ) -> Result<(), String> {
+        let resolved = self.resolve_path(remote_path);
         self.inner
-            .upload_file_from_local(local_path, remote_path)
+            .upload_file_from_local(local_path, &resolved)
             .await
     }
 
@@ -488,58 +508,6 @@ mod tests {
     // -----------------------------------------------------------------------
     // cleanup()
     // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn cleanup_issues_worktree_remove_command() {
-        let (inner, mock) = make_mock();
-        let wt = WorktreeSandbox::new(inner, make_config("/tmp/wt"));
-
-        wt.cleanup().await.unwrap();
-
-        let cmds = mock.captured_commands.lock().unwrap().clone();
-        assert_eq!(cmds.len(), 1, "cleanup should issue exactly one command");
-        assert!(
-            cmds[0].contains("worktree remove --force"),
-            "cleanup command should remove the worktree: {}",
-            cmds[0]
-        );
-    }
-
-    #[tokio::test]
-    async fn cleanup_emits_worktree_removed_event() {
-        let (inner, _mock) = make_mock();
-        let mut wt = WorktreeSandbox::new(inner, make_config("/tmp/wt"));
-
-        let removed_path: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let path_clone = Arc::clone(&removed_path);
-        wt.set_event_callback(Arc::new(move |event| {
-            if let WorktreeEvent::WorktreeRemoved { path } = event {
-                *path_clone.lock().unwrap() = Some(path);
-            }
-        }));
-
-        wt.cleanup().await.unwrap();
-
-        assert_eq!(*removed_path.lock().unwrap(), Some("/tmp/wt".to_string()));
-    }
-
-    #[tokio::test]
-    async fn cleanup_succeeds_even_if_worktree_remove_fails() {
-        let inner: Arc<dyn Sandbox> = Arc::new(MockSandbox {
-            exec_result: ExecResult {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 1, // non-zero, but cleanup should still succeed
-                timed_out: false,
-                duration_ms: 0,
-            },
-            ..MockSandbox::linux()
-        });
-        let wt = WorktreeSandbox::new(inner, make_config("/tmp/wt"));
-
-        let result = wt.cleanup().await;
-        assert!(result.is_ok(), "cleanup should succeed even if git fails");
-    }
 
     // -----------------------------------------------------------------------
     // working_directory()
