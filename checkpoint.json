@@ -1,30 +1,34 @@
 {
-  "timestamp": "2026-03-20T01:05:53.517291Z",
-  "current_node": "toolchain",
+  "timestamp": "2026-03-20T01:07:06.779300Z",
+  "current_node": "preflight_compile",
   "completed_nodes": [
     "start",
-    "toolchain"
+    "toolchain",
+    "preflight_compile"
   ],
   "node_retries": {
     "toolchain": 1,
-    "start": 1
+    "start": 1,
+    "preflight_compile": 1
   },
   "context_values": {
     "internal.run_id": "01KM4CDSHYC8PQ5NNEHKPJD4V0",
-    "current_node": "toolchain",
+    "current_node": "preflight_compile",
     "failure_signature": "",
     "graph.goal": "# Strip markdown headings and \"Plan:\" prefix from GOAL column in `fabro ps`\n\n## Context\nThe `GOAL` column in `fabro ps` output sometimes shows raw markdown heading markers (`#`, `##`, etc.) and a `Plan:` prefix, which is noisy. We want to strip these for cleaner output.\n\n## Change\n**File:** `lib/crates/fabro-cli/src/commands/runs.rs` — `truncate_goal` function (line 229)\n\nBefore truncating, add two stripping steps:\n1. Strip leading `#` characters and any whitespace after them (e.g. `## Fix bug` → `Fix bug`)\n2. Strip a leading `Plan:` prefix (case-sensitive)\n3. Trim whitespace after both strips\n\nCurrent code:\n```rust\nfn truncate_goal(goal: &str, max_len: usize) -> String {\n    let line = goal.lines().next().unwrap_or(\"\");\n    // ... truncation logic\n}\n```\n\nUpdated logic (inserted after extracting `line`, before truncation):\n```rust\nlet line = line.trim_start_matches('#').trim();\nlet line = line.strip_prefix(\"Plan:\").map(|s| s.trim()).unwrap_or(line);\n```\n\n## Verification\n- `cargo test -p fabro-cli` — run existing tests\n- `cargo clippy --workspace -- -D warnings` — lint check\n- Manual: `fabro ps -a` to confirm goals render without `#` or `Plan:` prefixes\n",
     "graph.rankdir": "LR",
     "graph.model_stylesheet": "\n            * { backend: api; model: claude-opus-4-6;}\n        ",
-    "internal.thread_id": "start",
-    "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n",
+    "internal.thread_id": "toolchain",
+    "command.output": "",
     "command.stderr": "",
     "internal.retry_count.toolchain": 1,
+    "internal.retry_count.preflight_compile": 1,
     "internal.retry_count.start": 1,
+    "thread.toolchain.current_node": "preflight_compile",
     "thread.start.current_node": "toolchain",
     "failure_class": "",
     "outcome": "success",
-    "current.preamble": "Goal: # Strip markdown headings and \"Plan:\" prefix from GOAL column in `fabro ps`\n\n## Context\nThe `GOAL` column in `fabro ps` output sometimes shows raw markdown heading markers (`#`, `##`, etc.) and a `Plan:` prefix, which is noisy. We want to strip these for cleaner output.\n\n## Change\n**File:** `lib/crates/fabro-cli/src/commands/runs.rs` — `truncate_goal` function (line 229)\n\nBefore truncating, add two stripping steps:\n1. Strip leading `#` characters and any whitespace after them (e.g. `## Fix bug` → `Fix bug`)\n2. Strip a leading `Plan:` prefix (case-sensitive)\n3. Trim whitespace after both strips\n\nCurrent code:\n```rust\nfn truncate_goal(goal: &str, max_len: usize) -> String {\n    let line = goal.lines().next().unwrap_or(\"\");\n    // ... truncation logic\n}\n```\n\nUpdated logic (inserted after extracting `line`, before truncation):\n```rust\nlet line = line.trim_start_matches('#').trim();\nlet line = line.strip_prefix(\"Plan:\").map(|s| s.trim()).unwrap_or(line);\n```\n\n## Verification\n- `cargo test -p fabro-cli` — run existing tests\n- `cargo clippy --workspace -- -D warnings` — lint check\n- Manual: `fabro ps -a` to confirm goals render without `#` or `Plan:` prefixes\n\n",
+    "current.preamble": "Goal: # Strip markdown headings and \"Plan:\" prefix from GOAL column in `fabro ps`\n\n## Context\nThe `GOAL` column in `fabro ps` output sometimes shows raw markdown heading markers (`#`, `##`, etc.) and a `Plan:` prefix, which is noisy. We want to strip these for cleaner output.\n\n## Change\n**File:** `lib/crates/fabro-cli/src/commands/runs.rs` — `truncate_goal` function (line 229)\n\nBefore truncating, add two stripping steps:\n1. Strip leading `#` characters and any whitespace after them (e.g. `## Fix bug` → `Fix bug`)\n2. Strip a leading `Plan:` prefix (case-sensitive)\n3. Trim whitespace after both strips\n\nCurrent code:\n```rust\nfn truncate_goal(goal: &str, max_len: usize) -> String {\n    let line = goal.lines().next().unwrap_or(\"\");\n    // ... truncation logic\n}\n```\n\nUpdated logic (inserted after extracting `line`, before truncation):\n```rust\nlet line = line.trim_start_matches('#').trim();\nlet line = line.strip_prefix(\"Plan:\").map(|s| s.trim()).unwrap_or(line);\n```\n\n## Verification\n- `cargo test -p fabro-cli` — run existing tests\n- `cargo clippy --workspace -- -D warnings` — lint check\n- Manual: `fabro ps -a` to confirm goals render without `#` or `Plan:` prefixes\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n",
     "internal.fidelity": "compact",
     "internal.node_visit_count": 1
   },
@@ -42,11 +46,21 @@
       },
       "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
       "duration_ms": 101
+    },
+    "preflight_compile": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: cargo check -q --workspace 2>&1",
+      "duration_ms": 70682
     }
   },
-  "next_node_id": "preflight_compile",
+  "next_node_id": "preflight_lint",
   "node_visits": {
     "toolchain": 1,
+    "preflight_compile": 1,
     "start": 1
   }
 }
