@@ -1458,10 +1458,8 @@ dependencies = [
 name = "fabro-github"
 version = "0.176.2"
 dependencies = [
- "async-trait",
  "base64",
  "chrono",
- "fabro-tracker",
  "jsonwebtoken",
  "mockito",
  "reqwest 0.12.28",
@@ -1512,20 +1510,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "fabro-linear"
-version = "0.176.2"
-dependencies = [
- "async-trait",
- "fabro-tracker",
- "mockito",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -1683,6 +1667,12 @@ name = "fabro-tracker"
 version = "0.176.2"
 dependencies = [
  "async-trait",
+ "fabro-github",
+ "mockito",
+ "reqwest 0.12.28",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

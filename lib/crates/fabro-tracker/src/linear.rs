@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
+use async_trait::async_trait;
 use serde_json::Value;
+
+use crate::{execute_graphql_request, BlockerRef, Issue, Tracker};
 
 pub const LINEAR_API_ENDPOINT: &str = "https://api.linear.app/graphql";
 
@@ -19,30 +22,6 @@ impl LinearConfig {
             endpoint: LINEAR_API_ENDPOINT.to_string(),
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct Issue {
-    pub id: String,
-    pub identifier: String,
-    pub title: String,
-    pub description: Option<String>,
-    pub priority: Option<i32>,
-    pub state: String,
-    pub branch_name: Option<String>,
-    pub url: String,
-    pub assignee_id: Option<String>,
-    pub labels: Vec<String>,
-    pub blocked_by: Vec<BlockerRef>,
-    pub created_at: Option<String>,
-    pub updated_at: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct BlockerRef {
-    pub id: String,
-    pub identifier: String,
-    pub state: String,
 }
 
 const ISSUE_FIELDS: &str = "
@@ -122,6 +101,7 @@ fn normalize_issue(node: &Value) -> Result<Issue, String> {
 
     Ok(Issue {
         id,
+        project_item_id: None,
         identifier,
         title,
         description,
@@ -143,150 +123,15 @@ async fn execute_graphql(
     query: &str,
     variables: Value,
 ) -> Result<Value, String> {
-    let body = serde_json::json!({
-        "query": query,
-        "variables": variables,
-    });
-
-    let resp = client
-        .post(&config.endpoint)
-        .header("Authorization", &config.api_key)
-        .header("Content-Type", "application/json")
-        .timeout(std::time::Duration::from_secs(30))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Linear API request failed: {e}"))?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body_text = resp.text().await.unwrap_or_default();
-        tracing::warn!(status = %status, "Linear API error");
-        return Err(format!("Linear API returned HTTP {status}: {body_text}"));
-    }
-
-    let response: Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse Linear API response: {e}"))?;
-
-    if let Some(errors) = response["errors"].as_array() {
-        if !errors.is_empty() {
-            let messages: Vec<&str> = errors
-                .iter()
-                .filter_map(|e| e["message"].as_str())
-                .collect();
-            return Err(format!("Linear GraphQL errors: {}", messages.join("; ")));
-        }
-    }
-
-    Ok(response)
-}
-
-pub async fn fetch_viewer_id(
-    client: &reqwest::Client,
-    config: &LinearConfig,
-) -> Result<String, String> {
-    tracing::debug!("Fetching viewer ID from Linear");
-    let query = "query { viewer { id } }";
-    let response = execute_graphql(client, config, query, serde_json::json!({})).await?;
-
-    response["data"]["viewer"]["id"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| "Missing viewer id in response".to_string())
-}
-
-pub async fn create_comment(
-    client: &reqwest::Client,
-    config: &LinearConfig,
-    issue_id: &str,
-    body: &str,
-) -> Result<(), String> {
-    tracing::debug!(issue_id, "Creating comment on Linear issue");
-    let query = r#"
-        mutation($issueId: String!, $body: String!) {
-            commentCreate(input: { issueId: $issueId, body: $body }) {
-                success
-            }
-        }
-    "#;
-
-    let variables = serde_json::json!({
-        "issueId": issue_id,
-        "body": body,
-    });
-
-    let response = execute_graphql(client, config, query, variables).await?;
-
-    let success = response["data"]["commentCreate"]["success"]
-        .as_bool()
-        .unwrap_or(false);
-    if !success {
-        return Err("Linear commentCreate returned success: false".to_string());
-    }
-
-    Ok(())
-}
-
-pub async fn update_issue_state(
-    client: &reqwest::Client,
-    config: &LinearConfig,
-    issue_id: &str,
-    state_name: &str,
-) -> Result<(), String> {
-    tracing::debug!(issue_id, state_name, "Updating Linear issue state");
-    // Step 1: Resolve state name to ID via the issue's team
-    let resolve_query = r#"
-        query($issueId: String!, $stateName: String!) {
-            issue(id: $issueId) {
-                team {
-                    states(filter: { name: { eq: $stateName } }) {
-                        nodes { id }
-                    }
-                }
-            }
-        }
-    "#;
-
-    let resolve_vars = serde_json::json!({
-        "issueId": issue_id,
-        "stateName": state_name,
-    });
-
-    let resolve_resp = execute_graphql(client, config, resolve_query, resolve_vars).await?;
-
-    let state_id = resolve_resp["data"]["issue"]["team"]["states"]["nodes"]
-        .as_array()
-        .and_then(|arr| arr.first())
-        .and_then(|node| node["id"].as_str())
-        .ok_or_else(|| format!("State '{state_name}' not found for issue {issue_id}"))?
-        .to_string();
-
-    // Step 2: Update the issue
-    let update_query = r#"
-        mutation($issueId: String!, $stateId: String!) {
-            issueUpdate(id: $issueId, input: { stateId: $stateId }) {
-                success
-            }
-        }
-    "#;
-
-    let update_vars = serde_json::json!({
-        "issueId": issue_id,
-        "stateId": state_id,
-    });
-
-    let update_resp = execute_graphql(client, config, update_query, update_vars).await?;
-
-    let success = update_resp["data"]["issueUpdate"]["success"]
-        .as_bool()
-        .unwrap_or(false);
-    if !success {
-        return Err("Linear issueUpdate returned success: false".to_string());
-    }
-
-    Ok(())
+    execute_graphql_request(
+        client,
+        &config.endpoint,
+        &config.api_key,
+        "Linear",
+        query,
+        variables,
+    )
+    .await
 }
 
 fn extract_issues(response: &Value) -> Result<Vec<Issue>, String> {
@@ -297,95 +142,202 @@ fn extract_issues(response: &Value) -> Result<Vec<Issue>, String> {
     nodes.iter().map(normalize_issue).collect()
 }
 
-pub async fn fetch_candidate_issues(
-    client: &reqwest::Client,
-    config: &LinearConfig,
-    project_slug: &str,
-    state_names: &[&str],
-) -> Result<Vec<Issue>, String> {
-    tracing::debug!(
-        project_slug,
-        ?state_names,
-        "Fetching candidate issues from Linear"
-    );
-
-    let query = format!(
-        r#"
-        query($slug: String!, $states: [String!]!, $cursor: String) {{
-            issues(
-                first: 50
-                after: $cursor
-                filter: {{
-                    project: {{ slugId: {{ eq: $slug }} }}
-                    state: {{ name: {{ in: $states }} }}
-                }}
-            ) {{
-                nodes {{ {ISSUE_FIELDS} }}
-                pageInfo {{ hasNextPage endCursor }}
-            }}
-        }}
-        "#
-    );
-
-    let mut all_issues = Vec::new();
-    let mut cursor: Option<String> = None;
-
-    loop {
-        let variables = serde_json::json!({
-            "slug": project_slug,
-            "states": state_names,
-            "cursor": cursor,
-        });
-
-        let response = execute_graphql(client, config, &query, variables).await?;
-
-        all_issues.extend(extract_issues(&response)?);
-
-        let page_info = &response["data"]["issues"]["pageInfo"];
-        if page_info["hasNextPage"].as_bool() == Some(true) {
-            cursor = page_info["endCursor"].as_str().map(|s| s.to_string());
-        } else {
-            break;
-        }
-    }
-
-    Ok(all_issues)
+/// A `Tracker` implementation backed by Linear.
+pub struct LinearTracker {
+    config: LinearConfig,
+    client: reqwest::Client,
+    project_slug: String,
 }
 
-pub async fn fetch_issues_by_ids(
-    client: &reqwest::Client,
-    config: &LinearConfig,
-    ids: &[&str],
-) -> Result<Vec<Issue>, String> {
-    if ids.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    tracing::debug!(count = ids.len(), "Fetching issues by ID from Linear");
-
-    let query = format!(
-        r#"
-        query($ids: [ID!]!) {{
-            issues(filter: {{ id: {{ in: $ids }} }}) {{
-                nodes {{ {ISSUE_FIELDS} }}
-            }}
-        }}
-        "#
-    );
-
-    let mut issue_map: HashMap<String, Issue> = HashMap::with_capacity(ids.len());
-
-    for batch in ids.chunks(50) {
-        let variables = serde_json::json!({ "ids": batch });
-        let response = execute_graphql(client, config, &query, variables).await?;
-
-        for issue in extract_issues(&response)? {
-            issue_map.insert(issue.id.clone(), issue);
+impl LinearTracker {
+    pub fn new(config: LinearConfig, client: reqwest::Client, project_slug: String) -> Self {
+        Self {
+            config,
+            client,
+            project_slug,
         }
     }
+}
 
-    // Return in the same order as the input IDs
-    Ok(ids.iter().filter_map(|id| issue_map.remove(*id)).collect())
+#[async_trait]
+impl Tracker for LinearTracker {
+    async fn fetch_viewer_id(&self) -> Result<String, String> {
+        tracing::debug!("Fetching viewer ID from Linear");
+        let query = "query { viewer { id } }";
+        let response =
+            execute_graphql(&self.client, &self.config, query, serde_json::json!({})).await?;
+
+        response["data"]["viewer"]["id"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "Missing viewer id in response".to_string())
+    }
+
+    async fn create_comment(&self, issue: &Issue, body: &str) -> Result<(), String> {
+        tracing::debug!(issue_id = %issue.id, "Creating comment on Linear issue");
+        let query = r#"
+            mutation($issueId: String!, $body: String!) {
+                commentCreate(input: { issueId: $issueId, body: $body }) {
+                    success
+                }
+            }
+        "#;
+
+        let variables = serde_json::json!({
+            "issueId": issue.id,
+            "body": body,
+        });
+
+        let response = execute_graphql(&self.client, &self.config, query, variables).await?;
+
+        let success = response["data"]["commentCreate"]["success"]
+            .as_bool()
+            .unwrap_or(false);
+        if !success {
+            return Err("Linear commentCreate returned success: false".to_string());
+        }
+
+        Ok(())
+    }
+
+    async fn update_issue_state(&self, issue: &Issue, state_name: &str) -> Result<(), String> {
+        tracing::debug!(issue_id = %issue.id, state_name, "Updating Linear issue state");
+        // Step 1: Resolve state name to ID via the issue's team
+        let resolve_query = r#"
+            query($issueId: String!, $stateName: String!) {
+                issue(id: $issueId) {
+                    team {
+                        states(filter: { name: { eq: $stateName } }) {
+                            nodes { id }
+                        }
+                    }
+                }
+            }
+        "#;
+
+        let resolve_vars = serde_json::json!({
+            "issueId": issue.id,
+            "stateName": state_name,
+        });
+
+        let resolve_resp =
+            execute_graphql(&self.client, &self.config, resolve_query, resolve_vars).await?;
+
+        let state_id = resolve_resp["data"]["issue"]["team"]["states"]["nodes"]
+            .as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|node| node["id"].as_str())
+            .ok_or_else(|| format!("State '{state_name}' not found for issue {}", issue.id))?
+            .to_string();
+
+        // Step 2: Update the issue
+        let update_query = r#"
+            mutation($issueId: String!, $stateId: String!) {
+                issueUpdate(id: $issueId, input: { stateId: $stateId }) {
+                    success
+                }
+            }
+        "#;
+
+        let update_vars = serde_json::json!({
+            "issueId": issue.id,
+            "stateId": state_id,
+        });
+
+        let update_resp =
+            execute_graphql(&self.client, &self.config, update_query, update_vars).await?;
+
+        let success = update_resp["data"]["issueUpdate"]["success"]
+            .as_bool()
+            .unwrap_or(false);
+        if !success {
+            return Err("Linear issueUpdate returned success: false".to_string());
+        }
+
+        Ok(())
+    }
+
+    async fn fetch_candidate_issues(&self, state_names: &[&str]) -> Result<Vec<Issue>, String> {
+        tracing::debug!(
+            project_slug = %self.project_slug,
+            ?state_names,
+            "Fetching candidate issues from Linear"
+        );
+
+        let query = format!(
+            r#"
+            query($slug: String!, $states: [String!]!, $cursor: String) {{
+                issues(
+                    first: 50
+                    after: $cursor
+                    filter: {{
+                        project: {{ slugId: {{ eq: $slug }} }}
+                        state: {{ name: {{ in: $states }} }}
+                    }}
+                ) {{
+                    nodes {{ {ISSUE_FIELDS} }}
+                    pageInfo {{ hasNextPage endCursor }}
+                }}
+            }}
+            "#
+        );
+
+        let mut all_issues = Vec::new();
+        let mut cursor: Option<String> = None;
+
+        loop {
+            let variables = serde_json::json!({
+                "slug": self.project_slug,
+                "states": state_names,
+                "cursor": cursor,
+            });
+
+            let response = execute_graphql(&self.client, &self.config, &query, variables).await?;
+
+            all_issues.extend(extract_issues(&response)?);
+
+            let page_info = &response["data"]["issues"]["pageInfo"];
+            if page_info["hasNextPage"].as_bool() == Some(true) {
+                cursor = page_info["endCursor"].as_str().map(|s| s.to_string());
+            } else {
+                break;
+            }
+        }
+
+        Ok(all_issues)
+    }
+
+    async fn fetch_issues_by_ids(&self, ids: &[&str]) -> Result<Vec<Issue>, String> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        tracing::debug!(count = ids.len(), "Fetching issues by ID from Linear");
+
+        let query = format!(
+            r#"
+            query($ids: [ID!]!) {{
+                issues(filter: {{ id: {{ in: $ids }} }}) {{
+                    nodes {{ {ISSUE_FIELDS} }}
+                }}
+            }}
+            "#
+        );
+
+        let mut issue_map: HashMap<String, Issue> = HashMap::with_capacity(ids.len());
+
+        for batch in ids.chunks(50) {
+            let variables = serde_json::json!({ "ids": batch });
+            let response = execute_graphql(&self.client, &self.config, &query, variables).await?;
+
+            for issue in extract_issues(&response)? {
+                issue_map.insert(issue.id.clone(), issue);
+            }
+        }
+
+        // Return in the same order as the input IDs
+        Ok(ids.iter().filter_map(|id| issue_map.remove(*id)).collect())
+    }
 }
 
 #[cfg(test)]
@@ -396,6 +348,25 @@ mod tests {
         LinearConfig {
             api_key: "lin_api_test123".to_string(),
             endpoint: format!("{server_url}/graphql"),
+        }
+    }
+
+    fn make_test_issue() -> Issue {
+        Issue {
+            id: "issue-1".to_string(),
+            project_item_id: None,
+            identifier: "T-1".to_string(),
+            title: "Test".to_string(),
+            description: None,
+            priority: None,
+            state: "Todo".to_string(),
+            branch_name: None,
+            url: "https://linear.app/t".to_string(),
+            assignee_id: None,
+            labels: vec![],
+            blocked_by: vec![],
+            created_at: None,
+            updated_at: None,
         }
     }
 
@@ -438,6 +409,7 @@ mod tests {
         let issue = normalize_issue(&node).unwrap();
 
         assert_eq!(issue.id, "issue-1");
+        assert!(issue.project_item_id.is_none());
         assert_eq!(issue.identifier, "ABC-123");
         assert_eq!(issue.title, "Fix the bug");
         assert_eq!(issue.description.as_deref(), Some("Detailed description"));
@@ -479,6 +451,7 @@ mod tests {
         let issue = normalize_issue(&node).unwrap();
 
         assert_eq!(issue.id, "issue-2");
+        assert!(issue.project_item_id.is_none());
         assert!(issue.description.is_none());
         assert!(issue.priority.is_none());
         assert!(issue.branch_name.is_none());
@@ -716,7 +689,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // fetch_viewer_id
+    // LinearTracker::fetch_viewer_id
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -731,8 +704,8 @@ mod tests {
             .create_async()
             .await;
 
-        let client = reqwest::Client::new();
-        let id = fetch_viewer_id(&client, &config).await.unwrap();
+        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let id = tracker.fetch_viewer_id().await.unwrap();
         assert_eq!(id, "user-abc");
     }
 
@@ -748,13 +721,13 @@ mod tests {
             .create_async()
             .await;
 
-        let client = reqwest::Client::new();
-        let err = fetch_viewer_id(&client, &config).await.unwrap_err();
+        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let err = tracker.fetch_viewer_id().await.unwrap_err();
         assert!(err.contains("401"), "got: {err}");
     }
 
     // -----------------------------------------------------------------------
-    // create_comment
+    // LinearTracker::create_comment
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -769,10 +742,9 @@ mod tests {
             .create_async()
             .await;
 
-        let client = reqwest::Client::new();
-        create_comment(&client, &config, "issue-1", "Hello world")
-            .await
-            .unwrap();
+        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let issue = make_test_issue();
+        tracker.create_comment(&issue, "Hello world").await.unwrap();
     }
 
     #[tokio::test]
@@ -787,15 +759,14 @@ mod tests {
             .create_async()
             .await;
 
-        let client = reqwest::Client::new();
-        let err = create_comment(&client, &config, "issue-1", "Hello")
-            .await
-            .unwrap_err();
+        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let issue = make_test_issue();
+        let err = tracker.create_comment(&issue, "Hello").await.unwrap_err();
         assert!(err.contains("success: false"), "got: {err}");
     }
 
     // -----------------------------------------------------------------------
-    // update_issue_state
+    // LinearTracker::update_issue_state
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -821,10 +792,9 @@ mod tests {
             .create_async()
             .await;
 
-        let client = reqwest::Client::new();
-        update_issue_state(&client, &config, "issue-1", "Done")
-            .await
-            .unwrap();
+        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let issue = make_test_issue();
+        tracker.update_issue_state(&issue, "Done").await.unwrap();
 
         resolve_mock.assert_async().await;
         update_mock.assert_async().await;
@@ -842,8 +812,10 @@ mod tests {
             .create_async()
             .await;
 
-        let client = reqwest::Client::new();
-        let err = update_issue_state(&client, &config, "issue-1", "Nonexistent")
+        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let issue = make_test_issue();
+        let err = tracker
+            .update_issue_state(&issue, "Nonexistent")
             .await
             .unwrap_err();
         assert!(err.contains("Nonexistent"), "got: {err}");
@@ -851,7 +823,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // fetch_candidate_issues
+    // LinearTracker::fetch_candidate_issues
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -876,13 +848,15 @@ mod tests {
             .create_async()
             .await;
 
-        let client = reqwest::Client::new();
-        let issues = fetch_candidate_issues(&client, &config, "my-project", &["In Progress"])
+        let tracker = LinearTracker::new(config, reqwest::Client::new(), "my-project".to_string());
+        let issues = tracker
+            .fetch_candidate_issues(&["In Progress"])
             .await
             .unwrap();
 
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].identifier, "ABC-123");
+        assert!(issues[0].project_item_id.is_none());
     }
 
     #[tokio::test]
@@ -937,10 +911,8 @@ mod tests {
             .create_async()
             .await;
 
-        let client = reqwest::Client::new();
-        let issues = fetch_candidate_issues(&client, &config, "proj", &["Todo"])
-            .await
-            .unwrap();
+        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let issues = tracker.fetch_candidate_issues(&["Todo"]).await.unwrap();
 
         assert_eq!(issues.len(), 2);
         assert_eq!(issues[0].identifier, "T-1");
@@ -968,16 +940,14 @@ mod tests {
             .create_async()
             .await;
 
-        let client = reqwest::Client::new();
-        let issues = fetch_candidate_issues(&client, &config, "proj", &["Todo"])
-            .await
-            .unwrap();
+        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let issues = tracker.fetch_candidate_issues(&["Todo"]).await.unwrap();
 
         assert!(issues.is_empty());
     }
 
     // -----------------------------------------------------------------------
-    // fetch_issues_by_ids
+    // LinearTracker::fetch_issues_by_ids
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -1012,8 +982,9 @@ mod tests {
             .create_async()
             .await;
 
-        let client = reqwest::Client::new();
-        let issues = fetch_issues_by_ids(&client, &config, &["id-a", "id-b"])
+        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let issues = tracker
+            .fetch_issues_by_ids(&["id-a", "id-b"])
             .await
             .unwrap();
 
@@ -1071,10 +1042,8 @@ mod tests {
             .create_async()
             .await;
 
-        let client = reqwest::Client::new();
-        let issues = fetch_issues_by_ids(&client, &config, &id_refs)
-            .await
-            .unwrap();
+        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let issues = tracker.fetch_issues_by_ids(&id_refs).await.unwrap();
 
         assert_eq!(issues.len(), 51);
         assert_eq!(issues[0].id, "id-0");
@@ -1083,9 +1052,9 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_issues_by_ids_empty() {
-        let client = reqwest::Client::new();
         let config = LinearConfig::new("unused".to_string());
-        let issues = fetch_issues_by_ids(&client, &config, &[]).await.unwrap();
+        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let issues = tracker.fetch_issues_by_ids(&[]).await.unwrap();
         assert!(issues.is_empty());
     }
 }
