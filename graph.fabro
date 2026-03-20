@@ -1,0 +1,20 @@
+digraph GhImplement {
+    graph [
+        goal="Implement a GitHub issue",
+        model_stylesheet="
+            * { model: claude-opus-4-6; }
+        "
+    ]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    plan [label="Plan", prompt="Fetch the GitHub issue from the goal using: gh issue view $goal --json title,body,labels,comments\n\nRead the issue title, description, and any comments carefully. Analyze what code changes are needed to resolve the issue.\n\nWrite a detailed implementation plan to plan.md that includes:\n- Summary of the issue\n- Files to create or modify\n- Step-by-step implementation approach\n- Test cases to add or update\n\nThe plan should be specific enough for another agent to implement without seeing the original issue.\n\nRespond with the location of the plan file (plan.md)."]
+
+    implement [label="Implement", shape=house, stack.child_workflow="fabro/workflows/implement/workflow.fabro", manager.max_cycles=100]
+
+    start -> plan
+    plan -> implement [fidelity="summary:high"]
+    implement -> exit
+}

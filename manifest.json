@@ -1,0 +1,13 @@
+{
+  "run_id": "01KM6S46Q7M6ZV6KP05576W499",
+  "workflow_name": "GhImplement",
+  "goal": "https://github.com/fabro-sh/fabro/issues/126",
+  "start_time": "2026-03-20T23:26:19.229155Z",
+  "node_count": 4,
+  "edge_count": 3,
+  "run_branch": "fabro/run/01KM6S46Q7M6ZV6KP05576W499",
+  "base_sha": "09809ad51c9552da09282788379c8f8b373c0e1b",
+  "base_branch": "main",
+  "workflow_slug": "gh-implement",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro"
+}
