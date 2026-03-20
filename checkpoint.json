@@ -1,39 +1,52 @@
 {
-  "timestamp": "2026-03-20T01:02:28.346381Z",
-  "current_node": "preflight_compile",
+  "timestamp": "2026-03-20T01:02:40.871840Z",
+  "current_node": "preflight_lint",
   "completed_nodes": [
     "start",
     "toolchain",
-    "preflight_compile"
+    "preflight_compile",
+    "preflight_lint"
   ],
   "node_retries": {
+    "preflight_lint": 1,
     "start": 1,
     "preflight_compile": 1,
     "toolchain": 1
   },
   "context_values": {
     "internal.retry_count.preflight_compile": 1,
-    "internal.thread_id": "toolchain",
+    "internal.thread_id": "preflight_compile",
     "internal.node_visit_count": 1,
     "outcome": "success",
     "failure_signature": "",
     "command.output": "",
     "internal.retry_count.start": 1,
     "internal.run_id": "01KM4C5NR7A6KVFNK6DDE3FP4R",
+    "thread.preflight_compile.current_node": "preflight_lint",
     "failure_class": "",
     "graph.model_stylesheet": "\n            * { backend: api; model: claude-opus-4-6;}\n        ",
     "thread.toolchain.current_node": "preflight_compile",
-    "current.preamble": "Goal: # Emit `StageStarted` on retry attempts\n\n## Context\n\nWhen a stage fails with a transient error and is retried, the CLI progress UI freezes because:\n\n1. `StageFailed` calls `finish_stage()`, removing the stage from `active_stages`\n2. The retry loop in the engine (`continue` at line 1198) re-enters handler execution **without emitting `StageStarted`**\n3. All subsequent agent events for the retry attempt silently drop (no matching entry in `active_stages`)\n\nThe `StageStarted` event already has `attempt` and `max_attempts` fields, so emitting it per-attempt is the intended design — it just wasn't wired up.\n\n## Changes\n\n### 1. Engine: emit `StageStarted` at the top of the retry loop\n\n**File:** `lib/crates/fabro-workflows/src/engine.rs`\n\nMove the `StageStarted` emission from before the loop (line 1852) to inside the loop, right after `for attempt in 1..=policy.max_attempts {` (line 1079). This way every attempt — including retries — emits the event with the correct `attempt` number.\n\nThe existing emission at line 1852 gets replaced, not duplicated. The `attempt` value comes directly from the loop variable (converted via `usize::try_from`).\n\n### 2. Engine: move StageStart hook inside the loop (or keep it outside)\n\nThe `StageStart` hook block (lines 1862-1895) currently runs once before the loop. It should stay outside — hooks shouldn't re-fire on retries. Only the `StageStarted` event emission moves inside.\n\n### 3. UI: no changes needed\n\n`on_stage_started` in `run_progress.rs` already handles being called for the same `node_id` — it inserts a fresh `ActiveStage` into the map, creating a new spinner. The `StageFailed` handler correctly finishes the old spinner. The natural event sequence becomes:\n\n```\nStageStarted  (attempt 1) → spinner created\nStageFailed   (will_retry) → spinner finished with ✗\nStageStarted  (attempt 2) → new spinner created\nAgent events  → attach to new spinner\nStageCompleted (attempt 2) → spinner finished with ✓\n```\n\n## Verification\n\n1. `cargo test -p fabro-workflows` — existing tests pass\n2. `cargo clippy --workspace -- -D warnings` — no warnings\n3. Manual: run a workflow that hits a transient LLM error (or mock one) and verify the CLI shows the retry spinner with tool calls\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n",
+    "current.preamble": "Goal: # Emit `StageStarted` on retry attempts\n\n## Context\n\nWhen a stage fails with a transient error and is retried, the CLI progress UI freezes because:\n\n1. `StageFailed` calls `finish_stage()`, removing the stage from `active_stages`\n2. The retry loop in the engine (`continue` at line 1198) re-enters handler execution **without emitting `StageStarted`**\n3. All subsequent agent events for the retry attempt silently drop (no matching entry in `active_stages`)\n\nThe `StageStarted` event already has `attempt` and `max_attempts` fields, so emitting it per-attempt is the intended design — it just wasn't wired up.\n\n## Changes\n\n### 1. Engine: emit `StageStarted` at the top of the retry loop\n\n**File:** `lib/crates/fabro-workflows/src/engine.rs`\n\nMove the `StageStarted` emission from before the loop (line 1852) to inside the loop, right after `for attempt in 1..=policy.max_attempts {` (line 1079). This way every attempt — including retries — emits the event with the correct `attempt` number.\n\nThe existing emission at line 1852 gets replaced, not duplicated. The `attempt` value comes directly from the loop variable (converted via `usize::try_from`).\n\n### 2. Engine: move StageStart hook inside the loop (or keep it outside)\n\nThe `StageStart` hook block (lines 1862-1895) currently runs once before the loop. It should stay outside — hooks shouldn't re-fire on retries. Only the `StageStarted` event emission moves inside.\n\n### 3. UI: no changes needed\n\n`on_stage_started` in `run_progress.rs` already handles being called for the same `node_id` — it inserts a fresh `ActiveStage` into the map, creating a new spinner. The `StageFailed` handler correctly finishes the old spinner. The natural event sequence becomes:\n\n```\nStageStarted  (attempt 1) → spinner created\nStageFailed   (will_retry) → spinner finished with ✗\nStageStarted  (attempt 2) → new spinner created\nAgent events  → attach to new spinner\nStageCompleted (attempt 2) → spinner finished with ✓\n```\n\n## Verification\n\n1. `cargo test -p fabro-workflows` — existing tests pass\n2. `cargo clippy --workspace -- -D warnings` — no warnings\n3. Manual: run a workflow that hits a transient LLM error (or mock one) and verify the CLI shows the retry spinner with tool calls\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n- **preflight_compile**: success\n  - Script: `cargo check -q --workspace 2>&1`\n  - Stdout: (empty)\n  - Stderr: (empty)\n",
     "graph.goal": "# Emit `StageStarted` on retry attempts\n\n## Context\n\nWhen a stage fails with a transient error and is retried, the CLI progress UI freezes because:\n\n1. `StageFailed` calls `finish_stage()`, removing the stage from `active_stages`\n2. The retry loop in the engine (`continue` at line 1198) re-enters handler execution **without emitting `StageStarted`**\n3. All subsequent agent events for the retry attempt silently drop (no matching entry in `active_stages`)\n\nThe `StageStarted` event already has `attempt` and `max_attempts` fields, so emitting it per-attempt is the intended design — it just wasn't wired up.\n\n## Changes\n\n### 1. Engine: emit `StageStarted` at the top of the retry loop\n\n**File:** `lib/crates/fabro-workflows/src/engine.rs`\n\nMove the `StageStarted` emission from before the loop (line 1852) to inside the loop, right after `for attempt in 1..=policy.max_attempts {` (line 1079). This way every attempt — including retries — emits the event with the correct `attempt` number.\n\nThe existing emission at line 1852 gets replaced, not duplicated. The `attempt` value comes directly from the loop variable (converted via `usize::try_from`).\n\n### 2. Engine: move StageStart hook inside the loop (or keep it outside)\n\nThe `StageStart` hook block (lines 1862-1895) currently runs once before the loop. It should stay outside — hooks shouldn't re-fire on retries. Only the `StageStarted` event emission moves inside.\n\n### 3. UI: no changes needed\n\n`on_stage_started` in `run_progress.rs` already handles being called for the same `node_id` — it inserts a fresh `ActiveStage` into the map, creating a new spinner. The `StageFailed` handler correctly finishes the old spinner. The natural event sequence becomes:\n\n```\nStageStarted  (attempt 1) → spinner created\nStageFailed   (will_retry) → spinner finished with ✗\nStageStarted  (attempt 2) → new spinner created\nAgent events  → attach to new spinner\nStageCompleted (attempt 2) → spinner finished with ✓\n```\n\n## Verification\n\n1. `cargo test -p fabro-workflows` — existing tests pass\n2. `cargo clippy --workspace -- -D warnings` — no warnings\n3. Manual: run a workflow that hits a transient LLM error (or mock one) and verify the CLI shows the retry spinner with tool calls\n",
     "internal.retry_count.toolchain": 1,
     "command.stderr": "",
     "thread.start.current_node": "toolchain",
-    "current_node": "preflight_compile",
+    "internal.retry_count.preflight_lint": 1,
+    "current_node": "preflight_lint",
     "graph.rankdir": "LR",
     "internal.fidelity": "compact"
   },
   "logs": [],
   "node_outcomes": {
+    "preflight_lint": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: cargo clippy -q --workspace -- -D warnings 2>&1",
+      "duration_ms": 10490
+    },
     "preflight_compile": {
       "status": "success",
       "context_updates": {
@@ -57,10 +70,11 @@
       "duration_ms": 147
     }
   },
-  "next_node_id": "preflight_lint",
+  "next_node_id": "implement",
   "node_visits": {
-    "start": 1,
+    "preflight_lint": 1,
     "toolchain": 1,
+    "start": 1,
     "preflight_compile": 1
   }
 }
