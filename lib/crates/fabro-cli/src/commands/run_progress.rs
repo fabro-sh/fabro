@@ -1856,4 +1856,108 @@ mod tests {
         ui.handle_json_line("");
         ui.handle_json_line("{}"); // no event field
     }
+
+    // ── Bug regression tests (post-rename JSONL field names) ─────────
+
+    // Bug 1: handle_json_line reads pre-rename field names but real JSONL
+    // uses post-rename names from rename_fields(). These tests use the
+    // actual JSONL format produced by the engine.
+
+    #[test]
+    fn bug1_stage_started_uses_node_label_not_name() {
+        // Real JSONL: rename_fields renames "name" → "node_label"
+        let mut ui = ProgressUI::new(true, false);
+        let started = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"plan","node_label":"Plan","stage_index":0,"script":null,"attempt":1,"max_attempts":1}"#;
+        ui.handle_json_line(started);
+
+        let stage = ui
+            .active_stages
+            .get("plan")
+            .expect("stage should be tracked");
+        assert_eq!(
+            stage.display_name, "Plan",
+            "display name should come from node_label field, not be '?'"
+        );
+    }
+
+    #[test]
+    fn bug1_agent_tool_call_uses_node_id_not_stage() {
+        // Real JSONL: rename_fields renames "stage" → "node_id" for Agent.* events
+        let mut ui = ProgressUI::new(false, true);
+
+        // First create the stage
+        let started = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"code","node_label":"Code","stage_index":0,"attempt":1,"max_attempts":1}"#;
+        ui.handle_json_line(started);
+        assert_eq!(ui.stage_counts.get("code").map(|c| c.1), Some(0));
+
+        // Tool call with post-rename field: "node_id" instead of "stage"
+        let tc_start = r#"{"ts":"2026-01-01T12:00:01Z","event":"Agent.ToolCallStarted","node_id":"code","node_label":"code","tool_name":"read_file","tool_call_id":"tc1","arguments":{"path":"src/main.rs"}}"#;
+        ui.handle_json_line(tc_start);
+
+        assert_eq!(
+            ui.stage_counts.get("code").map(|c| c.1),
+            Some(1),
+            "tool call count should increment using node_id field"
+        );
+    }
+
+    #[test]
+    fn bug1_agent_assistant_message_uses_node_id_not_stage() {
+        // Real JSONL: rename_fields renames "stage" → "node_id"
+        let mut ui = ProgressUI::new(false, true);
+
+        let started = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"code","node_label":"Code","stage_index":0,"attempt":1,"max_attempts":1}"#;
+        ui.handle_json_line(started);
+        assert_eq!(ui.stage_counts.get("code").map(|c| c.0), Some(0));
+
+        // AssistantMessage with post-rename field: "node_id" instead of "stage"
+        let msg = r#"{"ts":"2026-01-01T12:00:01Z","event":"Agent.AssistantMessage","node_id":"code","node_label":"code","model":"claude-sonnet-4-20250514"}"#;
+        ui.handle_json_line(msg);
+
+        assert_eq!(
+            ui.stage_counts.get("code").map(|c| c.0),
+            Some(1),
+            "turn count should increment using node_id field"
+        );
+    }
+
+    #[test]
+    fn bug1_parallel_branch_uses_node_id_not_branch() {
+        // Real JSONL: rename_fields renames "branch" → "node_id"
+        let mut ui = ProgressUI::new(true, false);
+
+        // Set up a parent stage and start parallel
+        let parent = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"fork","node_label":"Fork","stage_index":0,"attempt":1,"max_attempts":1}"#;
+        ui.handle_json_line(parent);
+        let par = r#"{"ts":"2026-01-01T12:00:01Z","event":"ParallelStarted","branch_count":2,"join_policy":"wait_all","error_policy":"continue"}"#;
+        ui.handle_json_line(par);
+        assert!(ui.parallel_parent.is_some());
+
+        // ParallelBranchStarted with post-rename field: "node_id" instead of "branch"
+        let branch = r#"{"ts":"2026-01-01T12:00:02Z","event":"ParallelBranchStarted","node_id":"lint","node_label":"lint","branch_index":0}"#;
+        ui.handle_json_line(branch);
+
+        // Branch should have been registered as a tool_call entry on the parent
+        let parent_stage = ui.active_stages.get("fork").unwrap();
+        assert!(
+            !parent_stage.tool_calls.is_empty(),
+            "parallel branch should be registered using node_id field"
+        );
+    }
+
+    // Bug 5: start_run should write Starting status before spawning engine
+    // (tested in start.rs)
+
+    // Bug 6: handle_json_line is missing devcontainer event dispatch
+
+    #[test]
+    fn bug6_devcontainer_lifecycle_started_dispatched() {
+        let mut ui = ProgressUI::new(false, false);
+        let event = r#"{"ts":"2026-01-01T12:00:00Z","event":"DevcontainerLifecycleStarted","phase":"postCreate","command_count":2}"#;
+        ui.handle_json_line(event);
+        assert_eq!(
+            ui.devcontainer_command_count, 2,
+            "devcontainer_command_count should be set by DevcontainerLifecycleStarted"
+        );
+    }
 }
