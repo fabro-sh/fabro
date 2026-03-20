@@ -527,3 +527,250 @@ fn detach_conflicts_with_resume() {
         .failure()
         .stderr(predicate::str::contains("cannot be used with"));
 }
+
+// == Bug regression: create/start/attach lifecycle ============================
+
+/// Helper: create a minimal run directory that `resolve_run` can find.
+/// Sets up manifest.json, status.json, spec.json, and progress.jsonl.
+fn setup_run_dir(
+    home: &std::path::Path,
+    run_id: &str,
+    spec_overrides: serde_json::Value,
+    progress_lines: &[&str],
+) -> std::path::PathBuf {
+    let run_dir = home.join(".fabro").join("runs").join(run_id);
+    std::fs::create_dir_all(&run_dir).unwrap();
+
+    // manifest.json for resolve_run
+    let manifest = serde_json::json!({
+        "run_id": run_id,
+        "workflow_name": "test",
+        "goal": "",
+        "start_time": "2026-01-01T00:00:00Z",
+        "node_count": 1,
+        "edge_count": 0
+    });
+    std::fs::write(
+        run_dir.join("manifest.json"),
+        serde_json::to_string(&manifest).unwrap(),
+    )
+    .unwrap();
+
+    // Merge spec defaults with overrides
+    let mut spec = serde_json::json!({
+        "run_id": run_id,
+        "workflow_path": "/tmp/test.fabro",
+        "dot_source": "digraph { start -> exit }",
+        "working_directory": "/tmp",
+        "goal": null,
+        "model": "test-model",
+        "provider": null,
+        "sandbox_provider": "local",
+        "labels": {},
+        "verbose": false,
+        "no_retro": true,
+        "ssh": false,
+        "preserve_sandbox": false,
+        "dry_run": true,
+        "auto_approve": true,
+        "resume": null,
+        "run_branch": null
+    });
+    if let (Some(base), Some(overrides)) = (spec.as_object_mut(), spec_overrides.as_object()) {
+        for (k, v) in overrides {
+            base.insert(k.clone(), v.clone());
+        }
+    }
+    std::fs::write(
+        run_dir.join("spec.json"),
+        serde_json::to_string(&spec).unwrap(),
+    )
+    .unwrap();
+
+    // progress.jsonl
+    std::fs::write(run_dir.join("progress.jsonl"), progress_lines.join("\n")).unwrap();
+
+    run_dir
+}
+
+// Bug 2: _run_engine should use cached graph.fabro, not spec.workflow_path.
+// When the original workflow file is deleted between create and start,
+// the engine should read the snapshot saved at create time.
+#[test]
+fn bug2_run_engine_uses_cached_graph_not_original_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let run_dir = dir.path().join("run");
+    std::fs::create_dir_all(&run_dir).unwrap();
+
+    let dot = "\
+digraph G {
+  start [shape=Mdiamond, label=\"Start\"]
+  exit  [shape=Msquare,  label=\"Exit\"]
+  start -> exit
+}";
+
+    // spec.json: workflow_path points to a file that no longer exists
+    let spec = serde_json::json!({
+        "run_id": "test-bug2",
+        "workflow_path": "/nonexistent/deleted-workflow.fabro",
+        "dot_source": dot,
+        "working_directory": run_dir.to_str().unwrap(),
+        "goal": null,
+        "model": "test-model",
+        "provider": null,
+        "sandbox_provider": "local",
+        "labels": {},
+        "verbose": false,
+        "no_retro": true,
+        "ssh": false,
+        "preserve_sandbox": false,
+        "dry_run": true,
+        "auto_approve": true,
+        "resume": null,
+        "run_branch": null
+    });
+    std::fs::write(
+        run_dir.join("spec.json"),
+        serde_json::to_string(&spec).unwrap(),
+    )
+    .unwrap();
+
+    // The cached graph snapshot saved by `fabro create`
+    std::fs::write(run_dir.join("graph.fabro"), dot).unwrap();
+
+    // _run_engine should use graph.fabro and never reference the deleted file.
+    // Bug: it reads spec.workflow_path → fails with file-not-found.
+    let output = arc()
+        .args(["_run_engine", "--run-dir", run_dir.to_str().unwrap()])
+        .env("NO_COLOR", "1")
+        .timeout(std::time::Duration::from_secs(15))
+        .output()
+        .expect("process should start");
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        !stderr.contains("deleted-workflow.fabro"),
+        "bug2: engine should use cached graph.fabro, not the original \
+         (deleted) workflow path.\nstderr: {stderr}"
+    );
+}
+
+// Bug 3: attach loop must delete interview_request.json after handling it
+// to prevent re-prompting the user on the next poll iteration.
+#[test]
+fn bug3_attach_cleans_up_interview_request_after_handling() {
+    let home = tempfile::tempdir().unwrap();
+
+    let run_dir = setup_run_dir(
+        home.path(),
+        "bug3-test",
+        serde_json::json!({}),
+        &[
+            r#"{"ts":"2026-01-01T00:00:01Z","run_id":"bug3","event":"StageStarted","node_id":"gate","name":"Gate","index":0,"attempt":1,"max_attempts":1}"#,
+        ],
+    );
+
+    // Status: running
+    std::fs::write(
+        run_dir.join("status.json"),
+        serde_json::json!({"status": "running", "updated_at": "2026-01-01T00:00:00Z"}).to_string(),
+    )
+    .unwrap();
+
+    // interview_request.json — a question the engine wrote
+    let question = serde_json::json!({
+        "text": "Approve?",
+        "question_type": "YesNo",
+        "options": [],
+        "allow_freeform": false,
+        "default": {"value": "Yes", "selected_option": null, "selected_options": [], "text": null},
+        "timeout_seconds": 1.0,
+        "stage": "gate",
+        "metadata": {}
+    });
+    std::fs::write(
+        run_dir.join("interview_request.json"),
+        serde_json::to_string(&question).unwrap(),
+    )
+    .unwrap();
+
+    // Dead engine so attach exits after one iteration
+    std::fs::write(run_dir.join("run.pid"), "99999999").unwrap();
+
+    // Pipe "y\n" so ConsoleInterviewer doesn't block on stdin
+    let _ = arc()
+        .env("HOME", home.path())
+        .env("NO_COLOR", "1")
+        .args(["attach", "bug3-test"])
+        .write_stdin("y\n")
+        .timeout(std::time::Duration::from_secs(5))
+        .output();
+
+    // Bug: interview_request.json is never deleted by the attach loop.
+    // After the fix it should be removed immediately after handling.
+    assert!(
+        !run_dir.join("interview_request.json").exists(),
+        "bug3: interview_request.json should be deleted after being handled by attach"
+    );
+}
+
+// Bug 4: attach should respect the verbose flag from spec.json.
+// Currently ProgressUI is created with verbose=false regardless of spec.
+#[test]
+fn bug4_attach_respects_verbose_from_spec() {
+    let home = tempfile::tempdir().unwrap();
+
+    // Use pre-rename field names so handle_json_line can parse them
+    // (isolates this test from bug 1). With 2 turns and 1 tool call,
+    // verbose mode should display "(2 turns, 1 tools, …)" in the output.
+    let run_dir = setup_run_dir(
+        home.path(),
+        "bug4-test",
+        serde_json::json!({"verbose": true}),
+        &[
+            r#"{"ts":"2026-01-01T12:00:00Z","run_id":"bug4","event":"StageStarted","node_id":"code","name":"Code","index":0,"attempt":1,"max_attempts":1}"#,
+            r#"{"ts":"2026-01-01T12:00:01Z","run_id":"bug4","event":"Agent.AssistantMessage","stage":"code","model":"claude-sonnet"}"#,
+            r#"{"ts":"2026-01-01T12:00:02Z","run_id":"bug4","event":"Agent.AssistantMessage","stage":"code","model":"claude-sonnet"}"#,
+            r#"{"ts":"2026-01-01T12:00:03Z","run_id":"bug4","event":"Agent.ToolCallStarted","stage":"code","tool_name":"read_file","tool_call_id":"tc1","arguments":{}}"#,
+            r#"{"ts":"2026-01-01T12:00:04Z","run_id":"bug4","event":"Agent.ToolCallCompleted","stage":"code","tool_name":"read_file","tool_call_id":"tc1","is_error":false}"#,
+            r#"{"ts":"2026-01-01T12:00:10Z","run_id":"bug4","event":"StageCompleted","node_id":"code","name":"Code","index":0,"duration_ms":10000,"status":"success","usage":{"input_tokens":1000,"output_tokens":500}}"#,
+        ],
+    );
+
+    // Succeeded status + conclusion so attach exits after reading events
+    std::fs::write(
+        run_dir.join("status.json"),
+        serde_json::json!({"status": "succeeded", "updated_at": "2026-01-01T12:00:10Z"})
+            .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        run_dir.join("conclusion.json"),
+        serde_json::json!({
+            "timestamp": "2026-01-01T12:00:10Z",
+            "status": "success",
+            "duration_ms": 10000,
+            "stages": [],
+            "total_retries": 0
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let output = arc()
+        .env("HOME", home.path())
+        .env("NO_COLOR", "1")
+        .args(["attach", "bug4-test"])
+        .timeout(std::time::Duration::from_secs(10))
+        .output()
+        .expect("process should start");
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+
+    // Bug: verbose is hardcoded false, so stats are suppressed.
+    // Fix: load spec.verbose and pass it to ProgressUI.
+    assert!(
+        stderr.contains("turns") && stderr.contains("tools"),
+        "bug4: attach should show verbose stats when spec.verbose=true.\nstderr: {stderr}"
+    );
+}

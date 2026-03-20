@@ -116,6 +116,7 @@ pub mod pull_request;
 pub mod run_fork;
 pub mod run_lookup;
 pub mod run_rewind;
+pub mod run_spec;
 pub mod run_status;
 pub mod sandbox_provider;
 pub mod sandbox_reconnect;
