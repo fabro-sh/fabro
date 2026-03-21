@@ -877,6 +877,7 @@ async fn probe_llm_provider(
         max_tokens: Some(16),
         stop_sequences: None,
         reasoning_effort: None,
+        speed: None,
         metadata: None,
         provider_options: None,
     };

@@ -15,6 +15,7 @@ fn make_request(model: &str) -> Request {
         max_tokens: Some(50),
         stop_sequences: None,
         reasoning_effort: None,
+        speed: None,
         metadata: None,
         provider_options: None,
     }
@@ -138,6 +139,7 @@ async fn run_multi_turn_cache_test(
             max_tokens: Some(100),
             stop_sequences: None,
             reasoning_effort: None,
+            speed: None,
             metadata: None,
             provider_options: None,
         };

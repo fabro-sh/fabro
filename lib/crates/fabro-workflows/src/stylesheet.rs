@@ -2,7 +2,8 @@ use fabro_graphviz::graph::{AttrValue, Graph};
 pub use fabro_graphviz::stylesheet::{parse_stylesheet, Declaration, Rule, Selector, Stylesheet};
 
 /// Recognized stylesheet properties.
-const STYLESHEET_PROPERTIES: &[&str] = &["model", "provider", "reasoning_effort", "backend"];
+const STYLESHEET_PROPERTIES: &[&str] =
+    &["model", "provider", "reasoning_effort", "speed", "backend"];
 
 /// Apply a stylesheet to a graph. Rules are applied by specificity order;
 /// higher specificity wins. Explicit node attributes are never overridden.
@@ -238,6 +239,19 @@ mod tests {
         assert_eq!(
             graph.nodes["a"].attrs.get("backend"),
             Some(&AttrValue::String("api".into()))
+        );
+    }
+
+    #[test]
+    fn apply_speed_property() {
+        let ss = parse_stylesheet("* { speed: fast; }").unwrap();
+        let mut graph = Graph::new("test");
+        graph.nodes.insert("a".into(), Node::new("a"));
+        apply_stylesheet(&ss, &mut graph);
+
+        assert_eq!(
+            graph.nodes["a"].attrs.get("speed"),
+            Some(&AttrValue::String("fast".into()))
         );
     }
 }

@@ -58,6 +58,8 @@ pub struct StageUsage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_tokens: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<f64>,
 }
 
@@ -70,6 +72,7 @@ impl From<&StageUsage> for fabro_llm::types::Usage {
             cache_read_tokens: u.cache_read_tokens,
             cache_write_tokens: u.cache_write_tokens,
             reasoning_tokens: u.reasoning_tokens,
+            speed: u.speed.clone(),
             raw: None,
         }
     }
@@ -378,6 +381,7 @@ mod tests {
             cache_read_tokens: Some(800),
             cache_write_tokens: Some(50),
             reasoning_tokens: Some(100),
+            speed: None,
             cost: None,
         };
         let json = serde_json::to_string(&usage).unwrap();
@@ -398,6 +402,7 @@ mod tests {
             cache_read_tokens: None,
             cache_write_tokens: None,
             reasoning_tokens: None,
+            speed: None,
             cost: None,
         };
         let json = serde_json::to_string(&usage).unwrap();
