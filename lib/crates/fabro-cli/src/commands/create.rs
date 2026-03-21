@@ -27,7 +27,10 @@ pub async fn create_run(
     let goal = prep.graph.goal();
 
     // Create run directory
-    let run_id = ulid::Ulid::new().to_string();
+    let run_id = args
+        .run_id
+        .clone()
+        .unwrap_or_else(|| ulid::Ulid::new().to_string());
     let run_dir = args
         .run_dir
         .clone()

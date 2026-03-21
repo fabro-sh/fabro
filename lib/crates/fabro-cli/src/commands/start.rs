@@ -5,8 +5,8 @@ use anyhow::{bail, Result};
 /// Spawn a detached engine process for the given run directory.
 ///
 /// The engine process reads `spec.json` from the run directory and executes the
-/// workflow. Returns the child process PID.
-pub fn start_run(run_dir: &Path) -> Result<u32> {
+/// workflow. Returns the child process handle (use `.id()` for the PID).
+pub fn start_run(run_dir: &Path) -> Result<std::process::Child> {
     // Validate status is Submitted
     let status_path = run_dir.join("status.json");
     match fabro_workflows::run_status::RunStatusRecord::load(&status_path) {
@@ -53,12 +53,11 @@ pub fn start_run(run_dir: &Path) -> Result<u32> {
     }
 
     let child = cmd.spawn()?;
-    let pid = child.id();
 
     // Write PID file
-    std::fs::write(run_dir.join("run.pid"), pid.to_string())?;
+    std::fs::write(run_dir.join("run.pid"), child.id().to_string())?;
 
-    Ok(pid)
+    Ok(child)
 }
 
 #[cfg(test)]

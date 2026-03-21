@@ -18,6 +18,7 @@ pub async fn attach_run(
     run_dir: &Path,
     kill_on_detach: bool,
     styles: &'static Styles,
+    mut engine_child: Option<std::process::Child>,
 ) -> Result<ExitCode> {
     let progress_path = run_dir.join("progress.jsonl");
     let conclusion_path = run_dir.join("conclusion.json");
@@ -127,19 +128,29 @@ pub async fn attach_run(
             break;
         }
 
-        // Check if engine process is still alive (cache PID after first read)
-        let engine_alive = match cached_pid {
-            Some(pid) => process_alive(pid),
-            None => {
-                if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
-                    if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                        cached_pid = Some(pid);
-                        process_alive(pid)
+        // Check if engine process is still alive
+        let engine_alive = if let Some(ref mut child) = engine_child {
+            // We own the child handle — use try_wait (safe, reaps zombies)
+            match child.try_wait() {
+                Ok(Some(_)) => false, // child exited
+                Ok(None) => true,     // still running
+                Err(_) => false,      // error, treat as dead
+            }
+        } else {
+            // Standalone attach — use kill-based check via PID file
+            match cached_pid {
+                Some(pid) => process_alive(pid),
+                None => {
+                    if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
+                        if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                            cached_pid = Some(pid);
+                            process_alive(pid)
+                        } else {
+                            true
+                        }
                     } else {
-                        true
+                        true // no PID file yet, assume alive
                     }
-                } else {
-                    true // no PID file yet, assume alive
                 }
             }
         };

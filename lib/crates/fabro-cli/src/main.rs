@@ -679,13 +679,14 @@ async fn main_inner() -> (String, Result<()>) {
                     #[cfg(feature = "sleep_inhibitor")]
                     let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep);
 
-                    commands::start::start_run(&run_dir)?;
+                    let child = commands::start::start_run(&run_dir)?;
 
                     if args.detach {
                         println!("{run_id}");
                     } else {
                         let exit_code =
-                            commands::attach::attach_run(&run_dir, true, styles).await?;
+                            commands::attach::attach_run(&run_dir, true, styles, Some(child))
+                                .await?;
                         commands::run::print_run_summary(&run_dir, &run_id, styles);
                         if exit_code != std::process::ExitCode::SUCCESS {
                             std::process::exit(1);
@@ -705,15 +706,16 @@ async fn main_inner() -> (String, Result<()>) {
             Command::Start { run } => {
                 let base = fabro_workflows::run_lookup::default_runs_base();
                 let run_info = fabro_workflows::run_lookup::resolve_run(&base, &run)?;
-                let pid = commands::start::start_run(&run_info.path)?;
-                eprintln!("Started engine process (PID {pid})");
+                let child = commands::start::start_run(&run_info.path)?;
+                eprintln!("Started engine process (PID {})", child.id());
             }
             Command::Attach { run } => {
                 let styles: &'static fabro_util::terminal::Styles =
                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
                 let base = fabro_workflows::run_lookup::default_runs_base();
                 let run_info = fabro_workflows::run_lookup::resolve_run(&base, &run)?;
-                let exit_code = commands::attach::attach_run(&run_info.path, false, styles).await?;
+                let exit_code =
+                    commands::attach::attach_run(&run_info.path, false, styles, None).await?;
                 if exit_code != std::process::ExitCode::SUCCESS {
                     std::process::exit(1);
                 }
@@ -739,9 +741,16 @@ async fn main_inner() -> (String, Result<()>) {
                     )
                 })?;
 
-                // Prefer the cached run.toml. prepare_workflow() falls back to the
-                // sibling graph snapshot for older detached runs that predate run.toml.
-                let workflow_path = commands::run::cached_run_config_path(&run_dir);
+                // Prefer the cached run.toml when present (workflow was a .toml
+                // config). For plain .fabro graphs, only graph.fabro exists.
+                let workflow_path = {
+                    let config_path = commands::run::cached_run_config_path(&run_dir);
+                    if config_path.exists() {
+                        config_path
+                    } else {
+                        commands::run::cached_graph_path(&run_dir)
+                    }
+                };
 
                 let run_args = commands::run::RunArgs {
                     workflow: Some(workflow_path),
