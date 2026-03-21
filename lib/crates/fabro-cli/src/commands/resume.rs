@@ -106,6 +106,8 @@ struct ResumeContext {
     setup_commands: Vec<String>,
     /// Original cwd to restore after engine run (git-branch path changes cwd to worktree).
     original_cwd: Option<PathBuf>,
+    sandbox_provider: SandboxProvider,
+    ssh_data_host: Option<String>,
 }
 
 /// Resume an interrupted workflow run.
@@ -186,6 +188,7 @@ async fn prepare_from_checkpoint(
         resolve_sandbox_provider(args.sandbox.map(Into::into), None, run_defaults)?
     };
 
+    let mut ssh_data_host: Option<String> = None;
     let sandbox: Arc<dyn Sandbox> = match sandbox_provider {
         SandboxProvider::Local => {
             local_sandbox_with_callback(original_cwd.clone(), Arc::clone(&emitter))
@@ -227,6 +230,7 @@ async fn prepare_from_checkpoint(
         SandboxProvider::Ssh => {
             let config = resolve_ssh_config(None, run_defaults)
                 .ok_or_else(|| anyhow::anyhow!("--sandbox ssh requires [sandbox.ssh] config"))?;
+            ssh_data_host = Some(config.destination.clone());
             let clone_params = resolve_ssh_clone_params(&original_cwd);
             let mut env = fabro_sandbox::ssh::SshSandbox::new(
                 config,
@@ -275,12 +279,16 @@ async fn prepare_from_checkpoint(
             .filter_map(|s| s.split_once('='))
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
-        checkpoint_exclude_globs: Vec::new(),
+        checkpoint_exclude_globs: run_defaults.checkpoint.exclude_globs.clone(),
         github_app: github_app.clone(),
         git_author,
         base_branch: None,
         pull_request: None,
-        asset_globs: Vec::new(),
+        asset_globs: run_defaults
+            .assets
+            .as_ref()
+            .map(|a| a.include.clone())
+            .unwrap_or_default(),
         workflow_slug: None,
     };
 
@@ -294,6 +302,8 @@ async fn prepare_from_checkpoint(
         config,
         setup_commands: Vec::new(),
         original_cwd: None,
+        sandbox_provider,
+        ssh_data_host,
     })
 }
 
@@ -401,6 +411,7 @@ async fn prepare_from_branch(
         (wt_sandbox, wt)
     };
 
+    let mut ssh_data_host: Option<String> = None;
     let (sandbox, _worktree_path): (Arc<dyn Sandbox>, Option<PathBuf>) = match sandbox_provider {
         SandboxProvider::Local => {
             let (wt_sandbox, wt) = setup_worktree_sandbox(&emitter);
@@ -451,6 +462,7 @@ async fn prepare_from_branch(
         SandboxProvider::Ssh => {
             let config = resolve_ssh_config(None, run_defaults)
                 .ok_or_else(|| anyhow::anyhow!("--sandbox ssh requires [sandbox.ssh] config"))?;
+            ssh_data_host = Some(config.destination.clone());
             let clone_params = resolve_ssh_clone_params(&original_cwd);
             let mut env = fabro_sandbox::ssh::SshSandbox::new(
                 config,
@@ -505,12 +517,16 @@ async fn prepare_from_branch(
             .filter_map(|s| s.split_once('='))
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
-        checkpoint_exclude_globs: Vec::new(),
+        checkpoint_exclude_globs: run_defaults.checkpoint.exclude_globs.clone(),
         github_app: github_app.clone(),
         git_author,
         base_branch: None,
         pull_request: None,
-        asset_globs: Vec::new(),
+        asset_globs: run_defaults
+            .assets
+            .as_ref()
+            .map(|a| a.include.clone())
+            .unwrap_or_default(),
         workflow_slug: None,
     };
 
@@ -524,6 +540,8 @@ async fn prepare_from_branch(
         config,
         setup_commands,
         original_cwd: Some(original_cwd),
+        sandbox_provider,
+        ssh_data_host,
     })
 }
 
@@ -544,6 +562,8 @@ async fn run_resumed(
         mut config,
         setup_commands,
         original_cwd,
+        sandbox_provider,
+        ssh_data_host,
     } = ctx;
 
     // Write run.pid + initial status so `fabro ps` / `fabro attach` can find this run
@@ -590,6 +610,68 @@ async fn run_resumed(
         emitter.on_event(move |event| {
             let mut ui = p.lock().expect("progress lock poisoned");
             ui.handle_event(event);
+        });
+    }
+
+    // Write sandbox.json when sandbox is initialized (mirrors run_command)
+    {
+        let run_dir_for_listener = run_dir.clone();
+        let progress_for_listener = Arc::clone(&progress_ui);
+        let cwd_for_listener = match &original_cwd {
+            Some(p) => p.to_string_lossy().to_string(),
+            // original_cwd is None only for checkpoint path where cwd hasn't changed
+            None => std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .to_string_lossy()
+                .to_string(),
+        };
+        let sandbox_for_listener = Arc::clone(&sandbox);
+        let provider = sandbox_provider;
+        let ssh_host = ssh_data_host.clone();
+        emitter.on_event(move |event| {
+            if let fabro_workflows::event::WorkflowRunEvent::SandboxInitialized {
+                working_directory,
+            } = event
+            {
+                progress_for_listener
+                    .lock()
+                    .expect("progress lock poisoned")
+                    .set_working_directory(working_directory.clone());
+
+                let sandbox_info_opt = {
+                    let info = sandbox_for_listener.sandbox_info();
+                    if info.is_empty() {
+                        None
+                    } else {
+                        Some(info)
+                    }
+                };
+
+                let is_docker = provider == SandboxProvider::Docker;
+                let record = fabro_workflows::sandbox_record::SandboxRecord {
+                    provider: provider.to_string(),
+                    working_directory: working_directory.clone(),
+                    identifier: sandbox_info_opt,
+                    host_working_directory: if is_docker {
+                        Some(cwd_for_listener.clone())
+                    } else {
+                        None
+                    },
+                    container_mount_point: if is_docker {
+                        Some(working_directory.clone())
+                    } else {
+                        None
+                    },
+                    data_host: if provider == SandboxProvider::Ssh {
+                        ssh_host.clone()
+                    } else {
+                        None
+                    },
+                };
+                if let Err(e) = record.save(&run_dir_for_listener.join("sandbox.json")) {
+                    tracing::warn!(error = %e, "Failed to save sandbox record");
+                }
+            }
         });
     }
 
