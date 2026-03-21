@@ -13,13 +13,14 @@ pub async fn create_run(
     args: &RunArgs,
     run_defaults: RunDefaults,
     styles: &Styles,
+    quiet: bool,
 ) -> anyhow::Result<(String, PathBuf)> {
     let workflow_path = args
         .workflow
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
 
-    let prep = prepare_workflow(args, run_defaults, styles)?;
+    let prep = prepare_workflow(args, run_defaults, styles, quiet)?;
 
     let goal = prep.graph.goal();
 

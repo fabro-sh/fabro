@@ -138,6 +138,8 @@ struct ApiRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     metadata: Option<std::collections::HashMap<String, String>>,
     store: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    include: Vec<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     stream: bool,
 }
@@ -391,6 +393,12 @@ fn build_api_request(request: &Request, stream: bool, codex_mode: bool) -> ApiRe
         .as_ref()
         .and_then(translate_response_format);
 
+    let include = if reasoning.is_some() {
+        vec!["reasoning.encrypted_content".to_string()]
+    } else {
+        Vec::new()
+    };
+
     let instructions = if codex_mode {
         Some(instructions.unwrap_or_default())
     } else {
@@ -414,7 +422,12 @@ fn build_api_request(request: &Request, stream: bool, codex_mode: bool) -> ApiRe
         text,
         stop: request.stop_sequences.clone(),
         metadata: request.metadata.clone(),
-        store: !codex_mode,
+        // store: false is required for non-Azure OpenAI endpoints. Reasoning
+        // items still round-trip correctly because we request encrypted_content
+        // via the `include` field, which embeds them in the response payload
+        // rather than relying on server-side storage.
+        store: false,
+        include,
         stream,
     }
 }
