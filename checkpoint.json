@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-03-21T16:14:07.130233Z",
-  "current_node": "simplify_gpt",
+  "timestamp": "2026-03-21T16:14:27.785549Z",
+  "current_node": "verify",
   "completed_nodes": [
     "start",
     "toolchain",
@@ -8,19 +8,22 @@
     "preflight_lint",
     "implement",
     "simplify_opus",
-    "simplify_gpt"
+    "simplify_gpt",
+    "verify"
   ],
   "node_retries": {
     "simplify_opus": 1,
     "preflight_compile": 1,
-    "simplify_gpt": 1,
     "implement": 1,
     "toolchain": 1,
-    "preflight_lint": 1,
-    "start": 1
+    "start": 1,
+    "simplify_gpt": 1,
+    "verify": 1,
+    "preflight_lint": 1
   },
   "context_values": {
-    "current.preamble": "Goal: # Fix: Workflow TOML config lost in detach mode\n\n## Context\n\nWhen running `fabro run -d implement-plan`, the `[pull_request]` config from `fabro.toml` / `cli.toml` / `workflow.toml` is silently dropped, so no PR is created despite `enabled = true` at all config levels.\n\n**Root cause chain**:\n1. `create.rs` tries to copy the workflow TOML as `run.toml`, but checks the **raw CLI arg** (`\"implement-plan\"` — no extension) instead of the resolved path. So `run.toml` is never saved.\n2. `RunEngine` always uses cached `graph.fabro` (a DOT file), so `prepare_workflow` returns `run_cfg = None`, losing all TOML-level config.\n3. `pull_request` and `asset_globs` in `RunConfig` only check `run_cfg` without falling back to `run_defaults`.\n\n## Fix 1: Serialize merged `run_cfg` to `run.toml` in create.rs\n\n**File**: `lib/crates/fabro-cli/src/commands/create.rs`\n\nReplace the raw-file-copy block (lines 53-58) with serialization of the already-merged `WorkflowRunConfig`:\n\n- Change `let prep = prepare_workflow(...)` to `let mut prep = ...`\n- Replace the extension check with:\n  ```rust\n  if let Some(mut cfg) = prep.run_cfg.take() {\n      cfg.graph = \"graph.fabro\".to_string();\n      let toml_str = toml::to_string_pretty(&cfg)\n          .context(\"Failed to serialize run config\")?;\n      tokio::fs::write(run_dir.join(\"run.toml\"), toml_str).await?;\n  }\n  ```\n- Add `use anyhow::Context;` if needed\n\n**Why serialize instead of copy**: The raw TOML's `graph` field (e.g. `\"workflow.fabro\"`) would point to a nonexistent file in the run dir. Serializing lets us rewrite `graph` to `\"graph.fabro\"` (the cached name). The serialized config also has all defaults merged, env vars resolved, and dockerfiles inlined — making the run dir self-contained.\n\n**Why `take()` not `clone()`**: `WorkflowRunConfig` doesn't derive `Clone`, and `prep.run_cfg` is unused after this point in `create.rs`.\n\n## Fix 2: Use `run.toml` in RunEngine path\n\n**File**: `lib/crates/fabro-cli/src/main.rs` (lines 727-733)\n\nReplace the workflow path resolution to use `run.toml`:\n\n```rust\nlet cached_toml = run_dir.join(\"run.toml\");\nlet workflow_path = if cached_toml.exists() {\n    cached_toml\n} else {\n    run_dir.join(\"graph.fabro\")\n};\n```\n\nWhen `run.toml` exists, `prepare_workflow` → `resolve_workflow` sees `.toml`, calls `load_run_config`, and `resolve_graph_path` resolves `\"graph.fabro\"` relative to the run dir — pointing to the cached graph that already exists there.\n\n## Fix 3: Add `run_defaults` fallbacks (defense-in-depth)\n\n**File**: `lib/crates/fabro-cli/src/commands/run.rs`\n\nEven with Fixes 1+2, bare `.fabro` files passed directly would still hit `run_cfg = None`. Add fallbacks matching the pattern already used elsewhere in the file:\n\n**3a. `pull_request`** (line 1424-1428):\n```rust\npull_request: run_cfg\n    .as_ref()\n    .and_then(|c| c.pull_request.as_ref())\n    .or(run_defaults.pull_request.as_ref())\n    .filter(|p| p.enabled)\n    .cloned(),\n```\n\n**3b. `asset_globs`** (line 1429-1433):\n```rust\nasset_globs: run_cfg\n    .as_ref()\n    .and_then(|c| c.assets.as_ref())\n    .or(run_defaults.assets.as_ref())\n    .map(|a| a.include.clone())\n    .unwrap_or_default(),\n```\n\n**3c. `devcontainer`** (line 969-973):\n```rust\nlet devcontainer_config = if run_cfg\n    .as_ref()\n    .and_then(|c| c.sandbox.as_ref())\n    .or(run_defaults.sandbox.as_ref())\n    .and_then(|s| s.devcontainer)\n    .unwrap_or(false)\n```\n\n**3d. `sandbox.env`** (line 1300-1306):\n```rust\nif let Some(toml_env) = run_cfg\n    .as_ref()\n    .and_then(|c| c.sandbox.as_ref())\n    .or(run_defaults.sandbox.as_ref())\n    .and_then(|s| s.env.clone())\n```\n\n## Verification\n\n1. `cargo build --workspace`\n2. `cargo test --workspace`\n3. `cargo clippy --workspace -- -D warnings`\n4. Manual: `fabro run -d implement-plan` with `[pull_request] enabled = true` in `fabro.toml` → verify `run.toml` in run dir has `graph = \"graph.fabro\"` and `[pull_request]` → verify PR created\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n- **preflight_compile**: success\n  - Script: `cargo check -q --workspace 2>&1`\n  - Stdout: (empty)\n  - Stderr: (empty)\n- **preflight_lint**: success\n  - Script: `cargo clippy -q --workspace -- -D warnings 2>&1`\n  - Stdout: (empty)\n  - Stderr: (empty)\n- **implement**: success\n  - Model: claude-opus-4-6, 20.7k tokens in / 5.3k out\n  - Files: /home/daytona/workspace/lib/crates/fabro-cli/src/commands/create.rs, /home/daytona/workspace/lib/crates/fabro-cli/src/commands/run.rs, /home/daytona/workspace/lib/crates/fabro-cli/src/main.rs\n- **simplify_opus**: success\n  - Model: claude-opus-4-6, 50.7k tokens in / 13.4k out\n  - Files: /home/daytona/workspace/lib/crates/fabro-cli/src/commands/run.rs\n",
+    "internal.retry_count.verify": 1,
+    "current.preamble": "Goal: # Fix: Workflow TOML config lost in detach mode\n\n## Context\n\nWhen running `fabro run -d implement-plan`, the `[pull_request]` config from `fabro.toml` / `cli.toml` / `workflow.toml` is silently dropped, so no PR is created despite `enabled = true` at all config levels.\n\n**Root cause chain**:\n1. `create.rs` tries to copy the workflow TOML as `run.toml`, but checks the **raw CLI arg** (`\"implement-plan\"` — no extension) instead of the resolved path. So `run.toml` is never saved.\n2. `RunEngine` always uses cached `graph.fabro` (a DOT file), so `prepare_workflow` returns `run_cfg = None`, losing all TOML-level config.\n3. `pull_request` and `asset_globs` in `RunConfig` only check `run_cfg` without falling back to `run_defaults`.\n\n## Fix 1: Serialize merged `run_cfg` to `run.toml` in create.rs\n\n**File**: `lib/crates/fabro-cli/src/commands/create.rs`\n\nReplace the raw-file-copy block (lines 53-58) with serialization of the already-merged `WorkflowRunConfig`:\n\n- Change `let prep = prepare_workflow(...)` to `let mut prep = ...`\n- Replace the extension check with:\n  ```rust\n  if let Some(mut cfg) = prep.run_cfg.take() {\n      cfg.graph = \"graph.fabro\".to_string();\n      let toml_str = toml::to_string_pretty(&cfg)\n          .context(\"Failed to serialize run config\")?;\n      tokio::fs::write(run_dir.join(\"run.toml\"), toml_str).await?;\n  }\n  ```\n- Add `use anyhow::Context;` if needed\n\n**Why serialize instead of copy**: The raw TOML's `graph` field (e.g. `\"workflow.fabro\"`) would point to a nonexistent file in the run dir. Serializing lets us rewrite `graph` to `\"graph.fabro\"` (the cached name). The serialized config also has all defaults merged, env vars resolved, and dockerfiles inlined — making the run dir self-contained.\n\n**Why `take()` not `clone()`**: `WorkflowRunConfig` doesn't derive `Clone`, and `prep.run_cfg` is unused after this point in `create.rs`.\n\n## Fix 2: Use `run.toml` in RunEngine path\n\n**File**: `lib/crates/fabro-cli/src/main.rs` (lines 727-733)\n\nReplace the workflow path resolution to use `run.toml`:\n\n```rust\nlet cached_toml = run_dir.join(\"run.toml\");\nlet workflow_path = if cached_toml.exists() {\n    cached_toml\n} else {\n    run_dir.join(\"graph.fabro\")\n};\n```\n\nWhen `run.toml` exists, `prepare_workflow` → `resolve_workflow` sees `.toml`, calls `load_run_config`, and `resolve_graph_path` resolves `\"graph.fabro\"` relative to the run dir — pointing to the cached graph that already exists there.\n\n## Fix 3: Add `run_defaults` fallbacks (defense-in-depth)\n\n**File**: `lib/crates/fabro-cli/src/commands/run.rs`\n\nEven with Fixes 1+2, bare `.fabro` files passed directly would still hit `run_cfg = None`. Add fallbacks matching the pattern already used elsewhere in the file:\n\n**3a. `pull_request`** (line 1424-1428):\n```rust\npull_request: run_cfg\n    .as_ref()\n    .and_then(|c| c.pull_request.as_ref())\n    .or(run_defaults.pull_request.as_ref())\n    .filter(|p| p.enabled)\n    .cloned(),\n```\n\n**3b. `asset_globs`** (line 1429-1433):\n```rust\nasset_globs: run_cfg\n    .as_ref()\n    .and_then(|c| c.assets.as_ref())\n    .or(run_defaults.assets.as_ref())\n    .map(|a| a.include.clone())\n    .unwrap_or_default(),\n```\n\n**3c. `devcontainer`** (line 969-973):\n```rust\nlet devcontainer_config = if run_cfg\n    .as_ref()\n    .and_then(|c| c.sandbox.as_ref())\n    .or(run_defaults.sandbox.as_ref())\n    .and_then(|s| s.devcontainer)\n    .unwrap_or(false)\n```\n\n**3d. `sandbox.env`** (line 1300-1306):\n```rust\nif let Some(toml_env) = run_cfg\n    .as_ref()\n    .and_then(|c| c.sandbox.as_ref())\n    .or(run_defaults.sandbox.as_ref())\n    .and_then(|s| s.env.clone())\n```\n\n## Verification\n\n1. `cargo build --workspace`\n2. `cargo test --workspace`\n3. `cargo clippy --workspace -- -D warnings`\n4. Manual: `fabro run -d implement-plan` with `[pull_request] enabled = true` in `fabro.toml` → verify `run.toml` in run dir has `graph = \"graph.fabro\"` and `[pull_request]` → verify PR created\n\n\n## Completed stages\n- **toolchain**: success\n  - Script: `command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1`\n  - Stdout:\n    ```\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    ```\n  - Stderr: (empty)\n- **preflight_compile**: success\n  - Script: `cargo check -q --workspace 2>&1`\n  - Stdout: (empty)\n  - Stderr: (empty)\n- **preflight_lint**: success\n  - Script: `cargo clippy -q --workspace -- -D warnings 2>&1`\n  - Stdout: (empty)\n  - Stderr: (empty)\n- **implement**: success\n  - Model: claude-opus-4-6, 20.7k tokens in / 5.3k out\n  - Files: /home/daytona/workspace/lib/crates/fabro-cli/src/commands/create.rs, /home/daytona/workspace/lib/crates/fabro-cli/src/commands/run.rs, /home/daytona/workspace/lib/crates/fabro-cli/src/main.rs\n- **simplify_opus**: success\n  - Model: claude-opus-4-6, 50.7k tokens in / 13.4k out\n  - Files: /home/daytona/workspace/lib/crates/fabro-cli/src/commands/run.rs\n- **simplify_gpt**: success\n  - Model: gpt-5.4, 2.6m tokens in / 20.8k out\n",
     "graph.goal": "# Fix: Workflow TOML config lost in detach mode\n\n## Context\n\nWhen running `fabro run -d implement-plan`, the `[pull_request]` config from `fabro.toml` / `cli.toml` / `workflow.toml` is silently dropped, so no PR is created despite `enabled = true` at all config levels.\n\n**Root cause chain**:\n1. `create.rs` tries to copy the workflow TOML as `run.toml`, but checks the **raw CLI arg** (`\"implement-plan\"` — no extension) instead of the resolved path. So `run.toml` is never saved.\n2. `RunEngine` always uses cached `graph.fabro` (a DOT file), so `prepare_workflow` returns `run_cfg = None`, losing all TOML-level config.\n3. `pull_request` and `asset_globs` in `RunConfig` only check `run_cfg` without falling back to `run_defaults`.\n\n## Fix 1: Serialize merged `run_cfg` to `run.toml` in create.rs\n\n**File**: `lib/crates/fabro-cli/src/commands/create.rs`\n\nReplace the raw-file-copy block (lines 53-58) with serialization of the already-merged `WorkflowRunConfig`:\n\n- Change `let prep = prepare_workflow(...)` to `let mut prep = ...`\n- Replace the extension check with:\n  ```rust\n  if let Some(mut cfg) = prep.run_cfg.take() {\n      cfg.graph = \"graph.fabro\".to_string();\n      let toml_str = toml::to_string_pretty(&cfg)\n          .context(\"Failed to serialize run config\")?;\n      tokio::fs::write(run_dir.join(\"run.toml\"), toml_str).await?;\n  }\n  ```\n- Add `use anyhow::Context;` if needed\n\n**Why serialize instead of copy**: The raw TOML's `graph` field (e.g. `\"workflow.fabro\"`) would point to a nonexistent file in the run dir. Serializing lets us rewrite `graph` to `\"graph.fabro\"` (the cached name). The serialized config also has all defaults merged, env vars resolved, and dockerfiles inlined — making the run dir self-contained.\n\n**Why `take()` not `clone()`**: `WorkflowRunConfig` doesn't derive `Clone`, and `prep.run_cfg` is unused after this point in `create.rs`.\n\n## Fix 2: Use `run.toml` in RunEngine path\n\n**File**: `lib/crates/fabro-cli/src/main.rs` (lines 727-733)\n\nReplace the workflow path resolution to use `run.toml`:\n\n```rust\nlet cached_toml = run_dir.join(\"run.toml\");\nlet workflow_path = if cached_toml.exists() {\n    cached_toml\n} else {\n    run_dir.join(\"graph.fabro\")\n};\n```\n\nWhen `run.toml` exists, `prepare_workflow` → `resolve_workflow` sees `.toml`, calls `load_run_config`, and `resolve_graph_path` resolves `\"graph.fabro\"` relative to the run dir — pointing to the cached graph that already exists there.\n\n## Fix 3: Add `run_defaults` fallbacks (defense-in-depth)\n\n**File**: `lib/crates/fabro-cli/src/commands/run.rs`\n\nEven with Fixes 1+2, bare `.fabro` files passed directly would still hit `run_cfg = None`. Add fallbacks matching the pattern already used elsewhere in the file:\n\n**3a. `pull_request`** (line 1424-1428):\n```rust\npull_request: run_cfg\n    .as_ref()\n    .and_then(|c| c.pull_request.as_ref())\n    .or(run_defaults.pull_request.as_ref())\n    .filter(|p| p.enabled)\n    .cloned(),\n```\n\n**3b. `asset_globs`** (line 1429-1433):\n```rust\nasset_globs: run_cfg\n    .as_ref()\n    .and_then(|c| c.assets.as_ref())\n    .or(run_defaults.assets.as_ref())\n    .map(|a| a.include.clone())\n    .unwrap_or_default(),\n```\n\n**3c. `devcontainer`** (line 969-973):\n```rust\nlet devcontainer_config = if run_cfg\n    .as_ref()\n    .and_then(|c| c.sandbox.as_ref())\n    .or(run_defaults.sandbox.as_ref())\n    .and_then(|s| s.devcontainer)\n    .unwrap_or(false)\n```\n\n**3d. `sandbox.env`** (line 1300-1306):\n```rust\nif let Some(toml_env) = run_cfg\n    .as_ref()\n    .and_then(|c| c.sandbox.as_ref())\n    .or(run_defaults.sandbox.as_ref())\n    .and_then(|s| s.env.clone())\n```\n\n## Verification\n\n1. `cargo build --workspace`\n2. `cargo test --workspace`\n3. `cargo clippy --workspace -- -D warnings`\n4. Manual: `fabro run -d implement-plan` with `[pull_request] enabled = true` in `fabro.toml` → verify `run.toml` in run dir has `graph = \"graph.fabro\"` and `[pull_request]` → verify PR created\n",
     "response.simplify_opus": "## Summary\n\n**Fixed one real issue, accepted pre-existing snapshots, skipped false positives:**\n\n### Fixed\n1. **`run.rs` raw TOML copy → merged serialization** (the main fix): `run.rs` line 701-704 was still copying the raw TOML file from disk (the old buggy behavior), while `create.rs` had been fixed to serialize the merged config. This meant `fabro run` (non-detached) would write a `run.toml` with the wrong `graph` path and without defaults merged. Now both `create.rs` and `run.rs` use the same approach: serialize the merged `WorkflowRunConfig` with `graph` rewritten to `\"graph.fabro\"`.\n\n2. **Accepted pre-existing snapshot updates**: 7 `fabro-model` catalog test snapshots needed updating for the new `effort` field in `ModelFeatures`. Removed the stale `.pending-snap` file.\n\n### Skipped (not worth addressing)\n- **Magic string constants for `\"graph.fabro\"`/`\"run.toml\"`**: Valid observation (18+ occurrences across 7+ files), but a cross-crate refactor beyond the scope of this fix.\n- **Extract `resolve_sandbox_config` helper**: The two inline `.or()` additions match the existing code pattern. Extracting a helper for two call sites is over-abstraction.\n- **No efficiency issues**: All three changes are on cold paths with negligible cost.",
     "internal.retry_count.toolchain": 1,
@@ -28,9 +31,9 @@
     "outcome": "success",
     "failure_class": "",
     "last_response": "Reviewed and cleaned up the detach-mode fix.\n\nWhat I changed\n- `lib/crates/fabro-cli/src/commands/run.rs`\n  - Added shared helpers/constants for cached run files:\n    - `RUN_GRAPH_FILE`\n    - `RUN_CON",
-    "internal.thread_id": "simplify_opus",
+    "internal.thread_id": "simplify_gpt",
     "command.stderr": "",
-    "command.output": "",
+    "command.output": "────────────\n Nextest run ID 56ce7aa0-dd01-423a-8d6c-5f6eca96bfb4 with nextest profile: default\n    Starting 3287 tests across 41 binaries (177 tests skipped)\n────────────\n     Summary [  17.059s] 3287 tests run: 3287 passed, 177 skipped\n",
     "graph.model_stylesheet": "\n            * { model: claude-opus-4-6; }\n        ",
     "internal.run_id": "01KM8HA16H7HVBT2P63W2FSWT5",
     "thread.preflight_lint.current_node": "implement",
@@ -38,10 +41,11 @@
     "thread.simplify_opus.current_node": "simplify_gpt",
     "internal.retry_count.simplify_gpt": 1,
     "last_stage": "simplify_gpt",
+    "thread.simplify_gpt.current_node": "verify",
     "graph.rankdir": "LR",
     "internal.fidelity": "compact",
     "internal.retry_count.preflight_lint": 1,
-    "current_node": "simplify_gpt",
+    "current_node": "verify",
     "internal.retry_count.preflight_compile": 1,
     "failure_signature": "",
     "thread.toolchain.current_node": "preflight_compile",
@@ -55,6 +59,10 @@
   },
   "logs": [],
   "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
     "simplify_gpt": {
       "status": "success",
       "context_updates": {
@@ -72,28 +80,6 @@
         "cost": 6.69431
       },
       "duration_ms": 641375
-    },
-    "preflight_compile": {
-      "status": "success",
-      "context_updates": {
-        "command.stderr": "",
-        "command.output": ""
-      },
-      "notes": "Script completed: cargo check -q --workspace 2>&1",
-      "duration_ms": 74289
-    },
-    "start": {
-      "status": "success",
-      "duration_ms": 0
-    },
-    "toolchain": {
-      "status": "success",
-      "context_updates": {
-        "command.stderr": "",
-        "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n"
-      },
-      "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
-      "duration_ms": 97
     },
     "implement": {
       "status": "success",
@@ -119,6 +105,24 @@
       ],
       "duration_ms": 294549
     },
+    "preflight_compile": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": ""
+      },
+      "notes": "Script completed: cargo check -q --workspace 2>&1",
+      "duration_ms": 74289
+    },
+    "toolchain": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n"
+      },
+      "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+      "duration_ms": 97
+    },
     "simplify_opus": {
       "status": "success",
       "context_updates": {
@@ -141,6 +145,15 @@
       ],
       "duration_ms": 521238
     },
+    "verify": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "────────────\n Nextest run ID 56ce7aa0-dd01-423a-8d6c-5f6eca96bfb4 with nextest profile: default\n    Starting 3287 tests across 41 binaries (177 tests skipped)\n────────────\n     Summary [  17.059s] 3287 tests run: 3287 passed, 177 skipped\n"
+      },
+      "notes": "Script completed: cargo clippy -q --workspace -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1",
+      "duration_ms": 18368
+    },
     "preflight_lint": {
       "status": "success",
       "context_updates": {
@@ -151,14 +164,15 @@
       "duration_ms": 13456
     }
   },
-  "next_node_id": "verify",
+  "next_node_id": "fmt",
   "node_visits": {
-    "simplify_gpt": 1,
+    "simplify_opus": 1,
+    "verify": 1,
     "start": 1,
     "preflight_lint": 1,
     "implement": 1,
     "toolchain": 1,
-    "preflight_compile": 1,
-    "simplify_opus": 1
+    "simplify_gpt": 1,
+    "preflight_compile": 1
   }
 }
