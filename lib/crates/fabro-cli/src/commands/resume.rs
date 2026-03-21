@@ -1,0 +1,604 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use anyhow::{bail, Context};
+use clap::Args;
+use fabro_agent::{Sandbox, WorktreeConfig, WorktreeSandbox};
+use fabro_config::run::RunDefaults;
+use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, Interviewer};
+use fabro_model::Provider;
+use fabro_util::terminal::Styles;
+use fabro_workflows::backend::{AgentApiBackend, AgentCliBackend, BackendRouter};
+use fabro_workflows::checkpoint::Checkpoint;
+use fabro_workflows::engine::RunConfig;
+use fabro_workflows::event::EventEmitter;
+use fabro_workflows::outcome::StageStatus;
+use fabro_workflows::sandbox_provider::SandboxProvider;
+use indicatif::HumanDuration;
+
+use super::run::{
+    apply_goal_override, generate_retro, local_sandbox_with_callback, print_assets,
+    print_final_output, resolve_cli_goal, resolve_sandbox_provider, resolve_ssh_clone_params,
+    resolve_ssh_config, write_finalize_commit, CliSandboxProvider,
+};
+use crate::commands::shared::{print_diagnostics, tilde_path};
+use fabro_config::project as project_config;
+use fabro_validate::Severity;
+
+#[derive(Debug, Args)]
+pub struct ResumeArgs {
+    /// Run ID, prefix, or branch (fabro/run/...)
+    #[arg(required_unless_present = "checkpoint")]
+    pub run: Option<String>,
+
+    /// Resume from a checkpoint file (requires --workflow)
+    #[arg(long)]
+    pub checkpoint: Option<PathBuf>,
+
+    /// Override workflow graph (required with --checkpoint)
+    #[arg(long)]
+    pub workflow: Option<PathBuf>,
+
+    /// Run output directory
+    #[arg(long)]
+    pub run_dir: Option<PathBuf>,
+
+    /// Execute with simulated LLM backend
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Auto-approve all human gates
+    #[arg(long)]
+    pub auto_approve: bool,
+
+    /// Override the workflow goal (exposed as $goal in prompts)
+    #[arg(long)]
+    pub goal: Option<String>,
+
+    /// Read the workflow goal from a file
+    #[arg(long, conflicts_with = "goal")]
+    pub goal_file: Option<PathBuf>,
+
+    /// Override default LLM model
+    #[arg(long)]
+    pub model: Option<String>,
+
+    /// Override default LLM provider
+    #[arg(long)]
+    pub provider: Option<String>,
+
+    /// Enable verbose output
+    #[arg(short, long)]
+    pub verbose: bool,
+
+    /// Sandbox for agent tools
+    #[arg(long, value_enum)]
+    pub sandbox: Option<CliSandboxProvider>,
+
+    /// Skip retro generation after the run
+    #[arg(long)]
+    pub no_retro: bool,
+
+    /// Create SSH access to the Daytona sandbox and print the connection command
+    #[arg(long)]
+    pub ssh: bool,
+
+    /// Keep the sandbox alive after the run finishes (for debugging)
+    #[arg(long)]
+    pub preserve_sandbox: bool,
+}
+
+/// Resume an interrupted workflow run.
+///
+/// # Errors
+///
+/// Returns an error if the run cannot be found, the checkpoint cannot be loaded,
+/// or the workflow cannot be resumed.
+pub async fn resume_command(
+    args: ResumeArgs,
+    run_defaults: RunDefaults,
+    styles: &'static Styles,
+    github_app: Option<fabro_github::GitHubAppCredentials>,
+    git_author: fabro_workflows::git::GitAuthor,
+) -> anyhow::Result<()> {
+    // Checkpoint-file path: load checkpoint and graph from files
+    if let Some(ref checkpoint_path) = args.checkpoint {
+        let workflow_path = args
+            .workflow
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("--workflow is required when using --checkpoint"))?;
+        let checkpoint = Checkpoint::load(checkpoint_path)?;
+        let (mut graph, diagnostics) = fabro_workflows::workflow::prepare_from_file(workflow_path)?;
+
+        let cli_goal = resolve_cli_goal(&args.goal, &args.goal_file)?;
+        apply_goal_override(&mut graph, cli_goal.as_deref(), None);
+
+        eprintln!(
+            "{} {} from checkpoint {}",
+            styles.bold.apply_to("Resuming workflow:"),
+            graph.name,
+            styles.dim.apply_to(checkpoint_path.display()),
+        );
+
+        print_diagnostics(&diagnostics, styles);
+        if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+            bail!("Validation failed");
+        }
+
+        let run_id = ulid::Ulid::new().to_string();
+        let run_dir = args.run_dir.unwrap_or_else(|| {
+            if args.dry_run {
+                std::env::temp_dir().join("fabro-dry-run").join(&run_id)
+            } else {
+                let base = dirs::home_dir()
+                    .expect("could not determine home directory")
+                    .join(".fabro")
+                    .join("runs");
+                base.join(format!(
+                    "{}-{}",
+                    chrono::Local::now().format("%Y%m%d"),
+                    run_id
+                ))
+            }
+        });
+        tokio::fs::create_dir_all(&run_dir).await?;
+        fabro_util::run_log::activate(&run_dir.join("cli.log"))
+            .context("Failed to activate per-run log")?;
+
+        let original_cwd = std::env::current_dir()?;
+        let emitter = Arc::new(EventEmitter::new());
+
+        let sandbox: Arc<dyn Sandbox> =
+            local_sandbox_with_callback(original_cwd.clone(), Arc::clone(&emitter));
+        let sandbox: Arc<dyn Sandbox> = Arc::new(fabro_agent::ReadBeforeWriteSandbox::new(sandbox));
+
+        let interviewer: Arc<dyn Interviewer> = if args.auto_approve {
+            Arc::new(AutoApproveInterviewer)
+        } else {
+            Arc::new(ConsoleInterviewer::new(styles))
+        };
+
+        let dry_run_mode = args.dry_run
+            || fabro_llm::client::Client::from_env()
+                .await
+                .map(|c| c.provider_names().is_empty())
+                .unwrap_or(true);
+
+        let model = args
+            .model
+            .unwrap_or_else(|| fabro_model::default_model_from_env().id);
+        let provider_enum = args
+            .provider
+            .as_deref()
+            .map(|s| s.parse::<Provider>())
+            .transpose()
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .unwrap_or_else(Provider::default_from_env);
+
+        let fallback_chain = Vec::new();
+
+        let registry = fabro_workflows::handler::default_registry(interviewer.clone(), || {
+            if dry_run_mode {
+                None
+            } else {
+                let api =
+                    AgentApiBackend::new(model.clone(), provider_enum, fallback_chain.clone());
+                let cli = AgentCliBackend::new(model.clone(), provider_enum);
+                Some(Box::new(BackendRouter::new(Box::new(api), cli)))
+            }
+        });
+        let mut engine = fabro_workflows::engine::WorkflowRunEngine::with_interviewer(
+            registry,
+            Arc::clone(&emitter),
+            interviewer,
+            Arc::clone(&sandbox),
+        );
+        if dry_run_mode {
+            engine.set_dry_run(true);
+        }
+
+        let mut config = RunConfig {
+            run_dir: run_dir.clone(),
+            cancel_token: None,
+            dry_run: dry_run_mode,
+            run_id: run_id.clone(),
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+            labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
+            github_app: github_app.clone(),
+            git_author,
+            base_branch: None,
+            pull_request: None,
+            asset_globs: Vec::new(),
+            workflow_slug: None,
+        };
+
+        let lifecycle = fabro_workflows::engine::LifecycleConfig {
+            setup_commands: Vec::new(),
+            setup_command_timeout_ms: 60_000,
+            devcontainer_phases: Vec::new(),
+        };
+
+        let run_start = Instant::now();
+        let engine_result = engine
+            .run_with_lifecycle(&graph, &mut config, lifecycle, Some(&checkpoint))
+            .await;
+        let run_duration_ms = run_start.elapsed().as_millis() as u64;
+
+        if !args.no_retro && project_config::is_retro_enabled() {
+            let failed = match &engine_result {
+                Ok(ref o) => o.status == StageStatus::Fail,
+                Err(_) => true,
+            };
+
+            let llm_client = if dry_run_mode {
+                None
+            } else {
+                fabro_llm::client::Client::from_env().await.ok()
+            };
+
+            generate_retro(
+                &config.run_id,
+                &graph.name,
+                graph.goal(),
+                &run_dir,
+                failed,
+                run_duration_ms,
+                dry_run_mode,
+                llm_client.as_ref(),
+                &sandbox,
+                provider_enum,
+                &model,
+                styles,
+                Some(Arc::clone(&emitter)),
+            )
+            .await;
+        }
+
+        let _ = engine
+            .cleanup_sandbox(&config.run_id, &graph.name, false)
+            .await;
+
+        let outcome = engine_result?;
+
+        eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="));
+        eprintln!("{}", styles.dim.apply_to(format!("Run:       {run_id}")));
+        let status_str = outcome.status.to_string().to_uppercase();
+        let status_color = match outcome.status {
+            StageStatus::Success | StageStatus::PartialSuccess => &styles.bold_green,
+            _ => &styles.bold_red,
+        };
+        eprintln!("Status:    {}", status_color.apply_to(&status_str));
+        eprintln!(
+            "Duration:  {}",
+            HumanDuration(Duration::from_millis(run_duration_ms))
+        );
+        eprintln!(
+            "{}",
+            styles
+                .dim
+                .apply_to(format!("Run:       {}", tilde_path(&run_dir)))
+        );
+
+        print_final_output(&run_dir, styles);
+        print_assets(&run_dir, styles);
+
+        fabro_util::run_log::deactivate();
+        match outcome.status {
+            StageStatus::Success | StageStatus::PartialSuccess => return Ok(()),
+            _ => std::process::exit(1),
+        }
+    }
+
+    // Run-ID path: resolve run_id and resume from git metadata
+    let run_arg = args.run.as_deref().expect("run is required");
+
+    let (run_id, run_branch) =
+        if let Some(stripped) = run_arg.strip_prefix(fabro_workflows::git::RUN_BRANCH_PREFIX) {
+            let id = stripped.to_string();
+            let branch = run_arg.to_string();
+            (id, branch)
+        } else {
+            let repo = git2::Repository::discover(".").context("not in a git repository")?;
+            let id = fabro_workflows::run_rewind::find_run_id_by_prefix(&repo, run_arg)?;
+            let branch = format!("{}{}", fabro_workflows::git::RUN_BRANCH_PREFIX, id);
+            (id, branch)
+        };
+
+    let original_cwd = std::env::current_dir()?;
+
+    // Read checkpoint from metadata branch
+    let checkpoint = fabro_workflows::git::MetadataStore::read_checkpoint(&original_cwd, &run_id)?
+        .ok_or_else(|| {
+            anyhow::anyhow!("no checkpoint found on metadata branch for run {run_id}")
+        })?;
+
+    // Read graph DOT from metadata branch
+    let source = fabro_workflows::git::MetadataStore::read_graph_dot(&original_cwd, &run_id)?
+        .ok_or_else(|| {
+            anyhow::anyhow!("no graph.fabro found on metadata branch for run {run_id}")
+        })?;
+
+    // If --workflow was also provided, use it instead (allows overriding)
+    let (mut graph, diagnostics) = if let Some(ref workflow_path) = args.workflow {
+        fabro_workflows::workflow::prepare_from_file(workflow_path)?
+    } else {
+        fabro_workflows::workflow::WorkflowBuilder::new().prepare(&source)?
+    };
+    let cli_goal = resolve_cli_goal(&args.goal, &args.goal_file)?;
+    apply_goal_override(&mut graph, cli_goal.as_deref(), None);
+
+    eprintln!(
+        "{} {} from branch {} ({})",
+        styles.bold.apply_to("Resuming workflow:"),
+        graph.name,
+        styles.dim.apply_to(&run_branch),
+        run_id,
+    );
+
+    print_diagnostics(&diagnostics, styles);
+    if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+        bail!("Validation failed");
+    }
+
+    // Set up logs directory
+    let run_dir = args.run_dir.unwrap_or_else(|| {
+        if args.dry_run {
+            std::env::temp_dir().join("fabro-dry-run").join(&run_id)
+        } else {
+            let base = dirs::home_dir()
+                .expect("could not determine home directory")
+                .join(".fabro")
+                .join("runs");
+            base.join(format!(
+                "{}-{}",
+                chrono::Local::now().format("%Y%m%d"),
+                run_id
+            ))
+        }
+    });
+    tokio::fs::create_dir_all(&run_dir).await?;
+    fabro_util::run_log::activate(&run_dir.join("cli.log"))
+        .context("Failed to activate per-run log")?;
+    tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
+
+    let base_sha = fabro_workflows::git::MetadataStore::read_manifest(&original_cwd, &run_id)?
+        .and_then(|m| m.base_sha);
+
+    // Resolve sandbox provider
+    let sandbox_provider = if args.dry_run {
+        SandboxProvider::Local
+    } else {
+        resolve_sandbox_provider(args.sandbox.map(Into::into), None, &run_defaults)?
+    };
+
+    let emitter = Arc::new(EventEmitter::new());
+    let (sandbox, _worktree_path): (Arc<dyn Sandbox>, Option<PathBuf>) = match sandbox_provider {
+        SandboxProvider::Local | SandboxProvider::Docker => {
+            // Re-attach worktree to the existing run branch via WorktreeSandbox.
+            let wt = run_dir.join("worktree");
+            let wt_str = wt.to_string_lossy().into_owned();
+
+            let inner = local_sandbox_with_callback(original_cwd.clone(), Arc::clone(&emitter));
+            let wt_config = WorktreeConfig {
+                branch_name: run_branch.clone(),
+                base_sha: base_sha.clone().unwrap_or_default(),
+                worktree_path: wt_str.clone(),
+                skip_branch_creation: true, // branch already exists on resume
+            };
+            let mut wt_sandbox = WorktreeSandbox::new(inner, wt_config);
+            wt_sandbox.set_event_callback(Arc::clone(&emitter).worktree_callback());
+
+            wt_sandbox
+                .initialize()
+                .await
+                .map_err(|e| anyhow::anyhow!("failed to attach worktree to {run_branch}: {e}"))?;
+            std::env::set_current_dir(&wt)?;
+            (Arc::new(wt_sandbox) as Arc<dyn Sandbox>, Some(wt))
+        }
+        #[cfg(feature = "exedev")]
+        SandboxProvider::Exe => {
+            let exe_config = super::run::resolve_exe_config(None, &run_defaults);
+            let clone_params = super::run::resolve_exe_clone_params(&original_cwd);
+            let mgmt_ssh = fabro_sandbox::exe::OpensshRunner::connect_raw("exe.dev")
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to connect to exe.dev: {e}"))?;
+            let config = exe_config.unwrap_or_default();
+            let mut env = fabro_sandbox::exe::ExeSandbox::new(
+                Box::new(mgmt_ssh),
+                config,
+                clone_params,
+                Some(run_id.clone()),
+                github_app.clone(),
+            );
+            let emitter_cb = Arc::clone(&emitter);
+            env.set_event_callback(Arc::new(move |event| {
+                emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
+            }));
+            (Arc::new(env), None)
+        }
+        SandboxProvider::Ssh => {
+            let config = resolve_ssh_config(None, &run_defaults)
+                .ok_or_else(|| anyhow::anyhow!("--sandbox ssh requires [sandbox.ssh] config"))?;
+            let clone_params = resolve_ssh_clone_params(&original_cwd);
+            let mut env = fabro_sandbox::ssh::SshSandbox::new(
+                config,
+                clone_params,
+                Some(run_id.clone()),
+                github_app.clone(),
+            );
+            let emitter_cb = Arc::clone(&emitter);
+            env.set_event_callback(Arc::new(move |event| {
+                emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
+            }));
+            (Arc::new(env), None)
+        }
+        SandboxProvider::Daytona => {
+            bail!("resume is not yet supported with --sandbox daytona");
+        }
+    };
+
+    // Wrap with ReadBeforeWriteSandbox to enforce read-before-write guard
+    let sandbox: Arc<dyn Sandbox> = Arc::new(fabro_agent::ReadBeforeWriteSandbox::new(sandbox));
+
+    // Let the sandbox provide any commands needed to resume on the existing run branch
+    let resume_setup_commands: Vec<String> = sandbox.resume_setup_commands(&run_branch);
+
+    // Build interviewer
+    let interviewer: Arc<dyn Interviewer> = if args.auto_approve {
+        Arc::new(AutoApproveInterviewer)
+    } else {
+        Arc::new(ConsoleInterviewer::new(styles))
+    };
+
+    // Build engine with a backend
+    let dry_run_mode = args.dry_run
+        || fabro_llm::client::Client::from_env()
+            .await
+            .map(|c| c.provider_names().is_empty())
+            .unwrap_or(true);
+
+    let model = args
+        .model
+        .unwrap_or_else(|| fabro_model::default_model_from_env().id);
+    let provider_enum = args
+        .provider
+        .as_deref()
+        .map(|s| s.parse::<Provider>())
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .unwrap_or_else(Provider::default_from_env);
+
+    // No fallback config available for branch resume; use empty chain.
+    let fallback_chain = Vec::new();
+
+    let registry = fabro_workflows::handler::default_registry(interviewer.clone(), || {
+        if dry_run_mode {
+            None
+        } else {
+            let api = AgentApiBackend::new(model.clone(), provider_enum, fallback_chain.clone());
+            let cli = AgentCliBackend::new(model.clone(), provider_enum);
+            Some(Box::new(BackendRouter::new(Box::new(api), cli)))
+        }
+    });
+    let mut engine = fabro_workflows::engine::WorkflowRunEngine::with_interviewer(
+        registry,
+        Arc::clone(&emitter),
+        interviewer,
+        Arc::clone(&sandbox),
+    );
+    if dry_run_mode {
+        engine.set_dry_run(true);
+    }
+
+    let meta_branch = Some(fabro_workflows::git::MetadataStore::branch_name(&run_id));
+    let mut config = RunConfig {
+        run_dir: run_dir.clone(),
+        cancel_token: None,
+        dry_run: dry_run_mode,
+        run_id: run_id.clone(),
+        git_checkpoint_enabled: true, // always true for resume (worktree or sandbox git is set up)
+        host_repo_path: Some(original_cwd.clone()),
+        base_sha,
+        run_branch: Some(run_branch.to_string()),
+        meta_branch,
+        labels: HashMap::new(),
+        checkpoint_exclude_globs: Vec::new(),
+        github_app: github_app.clone(),
+        git_author,
+        base_branch: None,
+        pull_request: None,
+        asset_globs: Vec::new(),
+        workflow_slug: None,
+    };
+
+    let lifecycle = fabro_workflows::engine::LifecycleConfig {
+        setup_commands: resume_setup_commands,
+        setup_command_timeout_ms: 60_000,
+        devcontainer_phases: Vec::new(),
+    };
+
+    let run_start = Instant::now();
+    let engine_result = engine
+        .run_with_lifecycle(&graph, &mut config, lifecycle, Some(&checkpoint))
+        .await;
+    let run_duration_ms = run_start.elapsed().as_millis() as u64;
+
+    // Restore cwd (worktree is kept for `fabro cp` access; pruned separately)
+    let _ = std::env::set_current_dir(&original_cwd);
+
+    // Auto-derive retro
+    if !args.no_retro && project_config::is_retro_enabled() {
+        let failed = match &engine_result {
+            Ok(ref o) => o.status == StageStatus::Fail,
+            Err(_) => true,
+        };
+
+        let llm_client = if dry_run_mode {
+            None
+        } else {
+            fabro_llm::client::Client::from_env().await.ok()
+        };
+
+        generate_retro(
+            &config.run_id,
+            &graph.name,
+            graph.goal(),
+            &run_dir,
+            failed,
+            run_duration_ms,
+            dry_run_mode,
+            llm_client.as_ref(),
+            &sandbox,
+            provider_enum,
+            &model,
+            styles,
+            Some(Arc::clone(&emitter)),
+        )
+        .await;
+    }
+
+    // Write finalize commit with retro.json + final node files (captures last diff.patch)
+    write_finalize_commit(&config, &run_dir).await;
+
+    // Cleanup sandbox via engine (fires SandboxCleanup hook)
+    let _ = engine
+        .cleanup_sandbox(&config.run_id, &graph.name, false)
+        .await;
+
+    let outcome = engine_result?;
+
+    eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="));
+    eprintln!("{}", styles.dim.apply_to(format!("Run:       {run_id}")));
+    let status_str = outcome.status.to_string().to_uppercase();
+    let status_color = match outcome.status {
+        StageStatus::Success | StageStatus::PartialSuccess => &styles.bold_green,
+        _ => &styles.bold_red,
+    };
+    eprintln!("Status:    {}", status_color.apply_to(&status_str));
+    eprintln!(
+        "Duration:  {}",
+        HumanDuration(Duration::from_millis(run_duration_ms))
+    );
+    eprintln!(
+        "{}",
+        styles
+            .dim
+            .apply_to(format!("Run:       {}", tilde_path(&run_dir)))
+    );
+
+    print_final_output(&run_dir, styles);
+    print_assets(&run_dir, styles);
+
+    fabro_util::run_log::deactivate();
+    match outcome.status {
+        StageStatus::Success | StageStatus::PartialSuccess => Ok(()),
+        _ => std::process::exit(1),
+    }
+}

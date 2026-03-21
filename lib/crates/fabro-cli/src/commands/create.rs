@@ -83,8 +83,6 @@ pub async fn create_run(
         preserve_sandbox: args.preserve_sandbox,
         dry_run: args.dry_run,
         auto_approve: args.auto_approve,
-        resume: args.resume.clone(),
-        run_branch: args.run_branch.clone(),
     };
     spec.save(&run_dir)?;
 

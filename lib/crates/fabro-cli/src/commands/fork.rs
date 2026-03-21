@@ -54,9 +54,8 @@ pub fn run(args: &ForkArgs, styles: &Styles) -> Result<()> {
         &new_run_id[..8.min(new_run_id.len())]
     );
     eprintln!(
-        "To resume: fabro run --run-branch {}{}",
-        fabro_workflows::git::RUN_BRANCH_PREFIX,
-        new_run_id
+        "To resume: fabro resume {}",
+        &new_run_id[..8.min(new_run_id.len())]
     );
 
     Ok(())

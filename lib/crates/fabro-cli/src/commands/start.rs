@@ -86,8 +86,6 @@ mod tests {
             preserve_sandbox: false,
             dry_run: false,
             auto_approve: true,
-            resume: None,
-            run_branch: None,
         }
     }
 

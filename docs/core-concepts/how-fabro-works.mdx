@@ -95,13 +95,13 @@ See [Observability](/execution/observability) for more on querying run data.
 Because Fabro checkpoints after every stage, interrupted runs can be resumed from where they left off:
 
 ```bash
-fabro run --resume path/to/checkpoint.json
+fabro resume <RUN_ID>
 ```
 
-Or resume from a git run branch:
+Or resume from a checkpoint file:
 
 ```bash
-fabro run --run-branch fabro/runs/abc123
+fabro resume --checkpoint path/to/checkpoint.json --workflow workflow.fabro
 ```
 
 The engine restores the full context, node visit counts, and retry state, then continues execution from the next node.
