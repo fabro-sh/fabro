@@ -1419,11 +1419,10 @@ impl ProgressUI {
             }
             AgentEvent::SubAgentSpawned { agent_id, task, .. } if self.verbose => {
                 let dim = Style::new().dim();
-                let short_id = &agent_id[..agent_id.len().min(8)];
                 self.insert_subagent_line_for_stage(
                     stage_node_id,
                     &dim.apply_to(format!(
-                        "\u{25b8} subagent[{short_id}] \"{}\"",
+                        "\u{25b8} subagent[{agent_id}] \"{}\"",
                         truncate(task, 50)
                     ))
                     .to_string(),
@@ -1435,11 +1434,10 @@ impl ProgressUI {
                 success,
                 ..
             } if self.verbose => {
-                let short_id = &agent_id[..agent_id.len().min(8)];
                 let glyph = if *success { green_check() } else { red_cross() };
                 self.insert_subagent_line_for_stage(
                     stage_node_id,
-                    &format!("{glyph} subagent[{short_id}] ({turns_used} turns)"),
+                    &format!("{glyph} subagent[{agent_id}] ({turns_used} turns)"),
                 );
             }
             _ => {}
