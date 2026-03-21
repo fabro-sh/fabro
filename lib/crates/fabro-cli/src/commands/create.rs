@@ -1,10 +1,9 @@
 use std::path::PathBuf;
 
-use chrono::Local;
 use fabro_config::run::RunDefaults;
 use fabro_workflows::run_spec::RunSpec;
 
-use super::run::{prepare_workflow, RunArgs};
+use super::run::{default_run_dir, prepare_workflow, RunArgs};
 use fabro_util::terminal::Styles;
 
 /// Create a workflow run: allocate run directory, persist spec, return (run_id, run_dir).
@@ -26,17 +25,10 @@ pub async fn create_run(
 
     // Create run directory
     let run_id = ulid::Ulid::new().to_string();
-    let run_dir = args.run_dir.clone().unwrap_or_else(|| {
-        if args.dry_run {
-            std::env::temp_dir().join("fabro-dry-run").join(&run_id)
-        } else {
-            let base = dirs::home_dir()
-                .expect("could not determine home directory")
-                .join(".fabro")
-                .join("runs");
-            base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
-        }
-    });
+    let run_dir = args
+        .run_dir
+        .clone()
+        .unwrap_or_else(|| default_run_dir(&run_id, args.dry_run));
     tokio::fs::create_dir_all(&run_dir).await?;
 
     // Write essential files

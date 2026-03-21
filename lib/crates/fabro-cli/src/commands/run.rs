@@ -177,6 +177,19 @@ pub(crate) fn apply_goal_override(
     }
 }
 
+/// Compute the default run directory when `--run-dir` is not provided.
+pub(crate) fn default_run_dir(run_id: &str, dry_run: bool) -> PathBuf {
+    if dry_run {
+        std::env::temp_dir().join("fabro-dry-run").join(run_id)
+    } else {
+        let base = dirs::home_dir()
+            .expect("could not determine home directory")
+            .join(".fabro")
+            .join("runs");
+        base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
+    }
+}
+
 /// Resolve model and provider through the full precedence chain:
 /// CLI flag > TOML config > run defaults > DOT graph attrs > provider-specific defaults.
 /// Then resolve through the catalog for alias expansion.
@@ -656,17 +669,9 @@ pub async fn run_command(
 
     // 3. Create logs directory
     let run_id = args.run_id.unwrap_or_else(|| ulid::Ulid::new().to_string());
-    let run_dir = args.run_dir.unwrap_or_else(|| {
-        if args.dry_run {
-            std::env::temp_dir().join("fabro-dry-run").join(&run_id)
-        } else {
-            let base = dirs::home_dir()
-                .expect("could not determine home directory")
-                .join(".fabro")
-                .join("runs");
-            base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
-        }
-    });
+    let run_dir = args
+        .run_dir
+        .unwrap_or_else(|| default_run_dir(&run_id, args.dry_run));
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
