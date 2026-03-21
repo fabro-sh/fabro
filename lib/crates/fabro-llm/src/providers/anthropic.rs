@@ -523,6 +523,18 @@ fn extract_thinking_config(
         .cloned()
 }
 
+/// Map a reasoning effort level to a thinking `budget_tokens` value for models
+/// that don't support the `output_config.effort` parameter (e.g. claude-sonnet-4-5).
+fn effort_to_budget_tokens(effort: &str, max_tokens: i64) -> i64 {
+    let budget = match effort {
+        "low" => max_tokens / 4,
+        "high" => max_tokens * 3 / 4,
+        _ => max_tokens / 2, // "medium" or unknown
+    };
+    // Anthropic requires budget_tokens >= 1024
+    budget.max(1024)
+}
+
 fn is_auto_cache_enabled(provider_options: Option<&serde_json::Value>) -> bool {
     provider_options
         .and_then(|opts| opts.get("anthropic"))
@@ -1072,22 +1084,48 @@ fn build_api_request(
         apply_cache_control_to_conversation_prefix(&mut api_messages);
     }
 
-    let thinking = extract_thinking_config(request.provider_options.as_ref());
+    let explicit_thinking = extract_thinking_config(request.provider_options.as_ref());
 
-    let output_config = request
-        .reasoning_effort
-        .as_ref()
-        .map(|effort| serde_json::json!({"effort": effort}));
+    // Check whether this model supports the `output_config.effort` parameter.
+    // Older reasoning models (e.g. claude-sonnet-4-5) need `thinking` with
+    // `budget_tokens` instead.
+    let model_info = fabro_model::get_model_info(&request.model);
+    let supports_effort = model_info.as_ref().is_none_or(|m| m.features.effort);
+
+    let mut resolved_max_tokens = request
+        .max_tokens
+        .or_else(|| model_info.as_ref().and_then(|m| m.limits.max_output))
+        .unwrap_or(65536);
+
+    let (thinking, output_config) = if let Some(effort) = &request.reasoning_effort {
+        if supports_effort {
+            (
+                explicit_thinking,
+                Some(serde_json::json!({"effort": effort})),
+            )
+        } else if explicit_thinking.is_none() {
+            // Convert effort level to a thinking budget for models that don't
+            // support the effort parameter (e.g. claude-sonnet-4-5).
+            let budget = effort_to_budget_tokens(effort, resolved_max_tokens);
+            if resolved_max_tokens <= budget {
+                resolved_max_tokens = budget + 1024;
+            }
+            (
+                Some(serde_json::json!({"type": "enabled", "budget_tokens": budget})),
+                None,
+            )
+        } else {
+            // thinking already configured via provider_options; skip output_config
+            (explicit_thinking, None)
+        }
+    } else {
+        (explicit_thinking, None)
+    };
 
     let api_request = ApiRequest {
         model: request.model.clone(),
         messages: api_messages,
-        max_tokens: request
-            .max_tokens
-            .or_else(|| {
-                fabro_model::get_model_info(&request.model).and_then(|m| m.limits.max_output)
-            })
-            .unwrap_or(65536),
+        max_tokens: resolved_max_tokens,
         system: system_value,
         temperature: request.temperature,
         top_p: request.top_p,

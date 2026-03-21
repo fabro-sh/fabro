@@ -16,7 +16,8 @@ use fabro_util::terminal::Styles;
 use fabro_model as catalog;
 
 use crate::generate::{self, GenerateParams};
-use crate::types::Message;
+use crate::tools::Tool;
+use crate::types::{ContentPart, Message};
 use fabro_model::ModelInfo;
 
 pub struct ServerConnection {
@@ -76,6 +77,10 @@ pub enum ModelsCommand {
         /// Test a specific model
         #[arg(short, long)]
         model: Option<String>,
+
+        /// Run a multi-turn tool-use test (catches reasoning round-trip bugs)
+        #[arg(long)]
+        deep: bool,
     },
 }
 
@@ -829,12 +834,97 @@ async fn test_model_via_server(
         .context("Failed to parse model test response from server")
 }
 
+fn build_deep_test_params(info: &ModelInfo) -> Option<GenerateParams> {
+    if !info.features.tools {
+        return None;
+    }
+
+    let add_tool = Tool::active(
+        "add",
+        "Add two integers and return the sum",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "a": { "type": "integer", "description": "First number" },
+                "b": { "type": "integer", "description": "Second number" }
+            },
+            "required": ["a", "b"]
+        }),
+        |args, _ctx| async move {
+            let a = args.get("a").and_then(|v| v.as_i64()).unwrap_or(0);
+            let b = args.get("b").and_then(|v| v.as_i64()).unwrap_or(0);
+            Ok(serde_json::json!(a + b))
+        },
+    );
+
+    let mut params = GenerateParams::new(&info.id)
+        .provider(&info.provider)
+        .prompt(
+            "I have three numbers: 15, 27, and 42. \
+             First use the add tool to compute 15 + 27, \
+             then use the add tool to add that result to 42. \
+             Finally, tell me whether the grand total is even or odd and why.",
+        )
+        .tools(vec![add_tool])
+        .max_tool_rounds(5)
+        .max_tokens(1024);
+
+    if info.features.reasoning {
+        params = params.reasoning_effort("high");
+    }
+
+    Some(params)
+}
+
+fn validate_deep_result(
+    result: &crate::types::GenerateResult,
+    info: &ModelInfo,
+) -> (cli_table::Color, String) {
+    // Check tool use: need at least 2 steps (tool call + follow-up)
+    if result.steps.len() < 2 {
+        return (
+            Color::Red,
+            "deep: fail (model did not call tool)".to_string(),
+        );
+    }
+
+    // Check that step 0 had tool results (tool was executed)
+    if result.steps[0].tool_results.is_empty() {
+        return (Color::Red, "deep: fail (tool not executed)".to_string());
+    }
+
+    // Check correctness: 15+27=42, 42+42=84 — final response should contain "84"
+    let final_text = result.response.text();
+    if !final_text.contains("84") {
+        return (Color::Red, "deep: fail (wrong answer)".to_string());
+    }
+
+    // Check reasoning if the model supports it
+    if info.features.reasoning {
+        let has_reasoning = result.steps.iter().any(|step| {
+            step.response.message.content.iter().any(|part| {
+                matches!(part, ContentPart::Thinking(_))
+                    || matches!(part, ContentPart::Other { kind, .. } if kind == ContentPart::OPENAI_REASONING)
+            })
+        });
+        if !has_reasoning {
+            return (Color::Yellow, "deep: ok (no reasoning)".to_string());
+        }
+    }
+
+    (Color::Green, "deep: ok".to_string())
+}
+
 async fn test_models_via_server(
     server: &ServerConnection,
     provider: Option<&str>,
     model: Option<&str>,
+    deep: bool,
     s: &Styles,
 ) -> Result<()> {
+    if deep {
+        eprintln!("Warning: --deep is not supported in server mode");
+    }
     let models_to_test = if let Some(model_id) = model {
         let all = fetch_models_from_server(&server.client, &server.base_url, None).await?;
         let found: Vec<_> = all.into_iter().filter(|m| m.id == model_id).collect();
@@ -932,12 +1022,17 @@ pub async fn run_models(
 
             print_models_table(&models, &styles);
         }
-        ModelsCommand::Test { provider, model } => match &server {
+        ModelsCommand::Test {
+            provider,
+            model,
+            deep,
+        } => match &server {
             Some(s) => {
-                test_models_via_server(s, provider.as_deref(), model.as_deref(), &styles).await?;
+                test_models_via_server(s, provider.as_deref(), model.as_deref(), deep, &styles)
+                    .await?;
             }
             None => {
-                test_models(provider.as_deref(), model.as_deref(), &styles).await?;
+                test_models(provider.as_deref(), model.as_deref(), deep, &styles).await?;
             }
         },
     }
@@ -945,7 +1040,44 @@ pub async fn run_models(
     Ok(())
 }
 
-async fn test_models(provider: Option<&str>, model: Option<&str>, s: &Styles) -> Result<()> {
+async fn test_one_model(info: &ModelInfo, deep: bool) -> (Color, String) {
+    if deep {
+        match build_deep_test_params(info) {
+            None => (Color::Yellow, "deep: skipped (no tool support)".to_string()),
+            Some(params) => {
+                let result =
+                    tokio::time::timeout(Duration::from_secs(90), generate::generate(params)).await;
+                match result {
+                    Ok(Ok(ref gen_result)) => validate_deep_result(gen_result, info),
+                    Ok(Err(e)) => (Color::Red, format!("deep: error: {e}")),
+                    Err(_) => (Color::Red, "deep: error: timeout (90s)".to_string()),
+                }
+            }
+        }
+    } else {
+        let params = GenerateParams::new(&info.id)
+            .provider(&info.provider)
+            .prompt("Say OK")
+            .max_tokens(16);
+
+        let result =
+            tokio::time::timeout(Duration::from_secs(30), generate::generate(params)).await;
+        match result {
+            Ok(Ok(_)) => (Color::Green, "ok".to_string()),
+            Ok(Err(e)) => (Color::Red, format!("error: {e}")),
+            Err(_) => (Color::Red, "error: timeout (30s)".to_string()),
+        }
+    }
+}
+
+async fn test_models(
+    provider: Option<&str>,
+    model: Option<&str>,
+    deep: bool,
+    s: &Styles,
+) -> Result<()> {
+    use rand::seq::SliceRandom;
+
     let models_to_test = if let Some(model_id) = model {
         match catalog::get_model_info(model_id) {
             Some(info) => vec![info],
@@ -959,40 +1091,55 @@ async fn test_models(provider: Option<&str>, model: Option<&str>, s: &Styles) ->
         bail!("No models found");
     }
 
+    let test_kind = if deep { "Deep testing" } else { "Testing" };
+    let pb = indicatif::ProgressBar::new(models_to_test.len() as u64);
+    pb.set_style(
+        indicatif::ProgressStyle::with_template(&format!(
+            "{{spinner:.green}} {test_kind} {{pos}}/{{len}} models {{wide_bar}} {{eta}}"
+        ))
+        .unwrap(),
+    );
+    pb.enable_steady_tick(Duration::from_millis(100));
+
+    // Build (original_index, model_info) pairs, then shuffle for provider spread
+    let mut indexed: Vec<(usize, &ModelInfo)> = models_to_test.iter().enumerate().collect();
+    indexed.shuffle(&mut rand::thread_rng());
+
+    // Run tests concurrently, 6 at a time
+    let results: Vec<(usize, Color, String)> = futures::stream::iter(indexed)
+        .map(|(idx, info)| {
+            let pb = pb.clone();
+            async move {
+                let (color, status) = test_one_model(info, deep).await;
+                pb.inc(1);
+                (idx, color, status)
+            }
+        })
+        .buffer_unordered(6)
+        .collect()
+        .await;
+
+    pb.finish_and_clear();
+
+    // Sort back to original catalog order
+    let mut sorted_results = results;
+    sorted_results.sort_by_key(|(idx, _, _)| *idx);
+
     let use_color = s.use_color;
     let mut title = models_title();
     title.push("RESULT".cell().bold(true));
 
     let mut rows: Vec<Vec<CellStruct>> = Vec::new();
     let mut failures = 0u32;
-    for info in &models_to_test {
-        eprint!("Testing {}...", info.id);
-        let params = GenerateParams::new(&info.id)
-            .provider(&info.provider)
-            .prompt("Say OK")
-            .max_tokens(16);
-
-        let result =
-            tokio::time::timeout(Duration::from_secs(30), generate::generate(params)).await;
-        eprintln!(" done");
-
-        let (result_color, status) = match result {
-            Ok(Ok(_)) => (Color::Green, "ok".to_string()),
-            Ok(Err(e)) => {
-                failures += 1;
-                (Color::Red, format!("error: {e}"))
-            }
-            Err(_) => {
-                failures += 1;
-                (Color::Red, "error: timeout (30s)".to_string())
-            }
-        };
-
-        let mut row = model_row(info, use_color);
+    for (idx, result_color, status) in &sorted_results {
+        if *result_color == Color::Red {
+            failures += 1;
+        }
+        let mut row = model_row(&models_to_test[*idx], use_color);
         row.push(
             status
                 .cell()
-                .foreground_color(color_if(use_color, result_color)),
+                .foreground_color(color_if(use_color, *result_color)),
         );
         rows.push(row);
     }

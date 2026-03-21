@@ -13,6 +13,12 @@ pub struct ModelFeatures {
     pub tools: bool,
     pub vision: bool,
     pub reasoning: bool,
+    /// Whether the model supports the `reasoning_effort` / `effort` parameter
+    /// directly (e.g. Anthropic `output_config.effort`, OpenAI `reasoning.effort`).
+    /// Models with `reasoning=true` but `effort=false` (e.g. claude-sonnet-4-5)
+    /// need the older `thinking` API with `budget_tokens` instead.
+    #[serde(default)]
+    pub effort: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
