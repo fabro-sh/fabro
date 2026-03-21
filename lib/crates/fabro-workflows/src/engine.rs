@@ -5740,9 +5740,13 @@ mod tests {
             "type".to_string(),
             AttrValue::String("fail_once".to_string()),
         );
-        // Allow 1 retry → 2 attempts total
+        // Allow 1 retry → 2 attempts total, use aggressive backoff (500ms) for fast tests
         work.attrs
             .insert("max_retries".to_string(), AttrValue::Integer(1));
+        work.attrs.insert(
+            "retry_policy".to_string(),
+            AttrValue::String("aggressive".to_string()),
+        );
         g.nodes.insert("work".to_string(), work);
 
         let mut exit = Node::new("exit");

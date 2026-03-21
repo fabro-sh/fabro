@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Rust
 - `cargo build --workspace` — build all crates
-- `cargo test --workspace` — run all tests
-- `cargo test -p fabro-api` — test a single crate
-- `cargo test -p fabro-workflows -- test_name` — run a single test
-- `set -a && source .env && set +a && cargo test --workspace -- --ignored` — run all E2E live tests (requires credentials in `.env`, see `.env.example`)
-- `set -a && source .env && set +a && cargo test -p fabro-llm -- --ignored` — run E2E tests for a single crate
+- `cargo nextest run --workspace` — run all unit tests
+- `cargo nextest run -p fabro-api` — test a single crate
+- `cargo nextest run -p fabro-workflows -- test_name` — run a single test
+- `set -a && source .env && set +a && cargo nextest run --workspace --profile e2e --run-ignored only` — run all E2E live tests (requires credentials in `.env`, see `.env.example`)
+- `set -a && source .env && set +a && cargo nextest run -p fabro-llm --profile e2e --run-ignored only` — run E2E tests for a single crate
 - `cargo fmt --check --all` — check formatting
 - `cargo clippy --workspace -- -D warnings` — lint
 
@@ -42,7 +42,7 @@ The OpenAPI spec at `docs/api-reference/fabro-api.yaml` is the source of truth f
 1. Edit `docs/api-reference/fabro-api.yaml`
 2. `cargo build -p fabro-types` — build.rs regenerates Rust types via typify
 3. Write/update handler in `lib/crates/fabro-api/src/server.rs`, add route to `build_router()`
-4. `cargo test -p fabro-api` — conformance test catches spec/router drift
+4. `cargo nextest run -p fabro-api` — conformance test catches spec/router drift
 5. `cd lib/packages/fabro-api-client && bun run generate` — regenerates TypeScript Axios client
 
 ## Architecture
