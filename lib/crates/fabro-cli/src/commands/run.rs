@@ -455,21 +455,14 @@ pub(crate) fn cached_run_config_path(run_dir: &Path) -> PathBuf {
     run_dir.join(RUN_CONFIG_FILE)
 }
 
-fn serialize_run_config_snapshot(run_cfg: &WorkflowRunConfig) -> anyhow::Result<String> {
-    let mut value = toml::Value::try_from(run_cfg).context("Failed to serialize run config")?;
-    let table = value
-        .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("Failed to serialize run config"))?;
-    table.insert(
-        "graph".to_string(),
-        toml::Value::String(RUN_GRAPH_FILE.to_string()),
-    );
-    toml::to_string_pretty(&value).context("Failed to serialize run config")
+fn serialize_run_config_snapshot(run_cfg: &mut WorkflowRunConfig) -> anyhow::Result<String> {
+    run_cfg.graph = RUN_GRAPH_FILE.to_string();
+    toml::to_string_pretty(run_cfg).context("Failed to serialize run config")
 }
 
 pub(crate) async fn write_run_config_snapshot(
     run_dir: &Path,
-    run_cfg: Option<&WorkflowRunConfig>,
+    run_cfg: Option<&mut WorkflowRunConfig>,
 ) -> anyhow::Result<()> {
     if let Some(cfg) = run_cfg {
         let toml_str = serialize_run_config_snapshot(cfg)?;
@@ -764,7 +757,7 @@ pub async fn run_command(
     // Serialize the merged run config so the run dir is self-contained.
     // env refs (${env.VARNAME}) are still unresolved at this point, so
     // plaintext secrets are never written to disk.
-    write_run_config_snapshot(&run_dir, run_cfg.as_ref()).await?;
+    write_run_config_snapshot(&run_dir, run_cfg.as_mut()).await?;
 
     // Now resolve ${env.VARNAME} references for runtime use.
     if let Some(ref mut cfg) = run_cfg {
@@ -2880,11 +2873,13 @@ mod tests {
             github: None,
         };
 
-        let serialized = serialize_run_config_snapshot(&cfg).unwrap();
+        let pr = cfg.pull_request.clone();
+        let mut cfg = cfg;
+        let serialized = serialize_run_config_snapshot(&mut cfg).unwrap();
         let reparsed = run_config::parse_run_config(&serialized).unwrap();
 
         assert_eq!(reparsed.graph, RUN_GRAPH_FILE);
-        assert_eq!(reparsed.pull_request, cfg.pull_request);
+        assert_eq!(reparsed.pull_request, pr);
     }
 
     #[test]

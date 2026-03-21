@@ -21,7 +21,7 @@ pub async fn create_run(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
 
-    let prep = prepare_workflow(args, run_defaults, styles, quiet)?;
+    let mut prep = prepare_workflow(args, run_defaults, styles, quiet)?;
 
     let goal = prep.graph.goal();
 
@@ -51,7 +51,7 @@ pub async fn create_run(
     );
 
     // Serialize the merged run config so the run dir is self-contained.
-    write_run_config_snapshot(&run_dir, prep.run_cfg.as_ref()).await?;
+    write_run_config_snapshot(&run_dir, prep.run_cfg.as_mut()).await?;
 
     // Build and save RunSpec
     let working_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
