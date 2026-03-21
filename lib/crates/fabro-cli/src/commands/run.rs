@@ -472,7 +472,7 @@ pub(crate) async fn write_run_config_snapshot(
 }
 
 fn is_missing_cached_run_config(path: &Path, error: &anyhow::Error) -> bool {
-    path.file_name() == Some(std::ffi::OsStr::new(RUN_CONFIG_FILE))
+    path.starts_with(fabro_workflows::run_lookup::default_runs_base())
         && error
             .root_cause()
             .downcast_ref::<std::io::Error>()
@@ -2884,7 +2884,10 @@ mod tests {
 
     #[test]
     fn resolve_workflow_source_falls_back_to_graph_for_missing_cached_run_config() {
-        let dir = tempfile::tempdir().unwrap();
+        // Place the test dir inside the runs base so the fallback is allowed.
+        let runs_base = fabro_workflows::run_lookup::default_runs_base();
+        std::fs::create_dir_all(&runs_base).unwrap();
+        let dir = tempfile::tempdir_in(&runs_base).unwrap();
         std::fs::write(dir.path().join(RUN_GRAPH_FILE), "digraph test {}").unwrap();
 
         let (dot_path, run_cfg) =
@@ -2892,6 +2895,15 @@ mod tests {
 
         assert_eq!(dot_path, dir.path().join(RUN_GRAPH_FILE));
         assert!(run_cfg.is_none());
+    }
+
+    #[test]
+    fn resolve_workflow_source_errors_for_missing_run_toml_outside_runs_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(RUN_GRAPH_FILE), "digraph test {}").unwrap();
+
+        let result = resolve_workflow_source(&dir.path().join(RUN_CONFIG_FILE));
+        assert!(result.is_err());
     }
 
     #[test]
