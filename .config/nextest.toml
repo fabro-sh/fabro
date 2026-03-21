@@ -1,3 +1,7 @@
 [profile.default]
-# Hard kill after 120s per test
-slow-timeout = { period = "60s", terminate-after = 2 }
+# Unit tests: flag SLOW after 2s, hard-kill after 4s
+slow-timeout = { period = "2s", terminate-after = 2 }
+
+[profile.e2e]
+# E2E (ignored) tests: flag SLOW after 10s, hard-kill after 30s
+slow-timeout = { period = "10s", terminate-after = 3 }
