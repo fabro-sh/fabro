@@ -1062,6 +1062,7 @@ impl EventEmitter {
         event.trace();
         // Clone the listener list so we don't hold the lock during dispatch.
         // This prevents deadlocks if a listener calls emit() reentrantly.
+        // Note: listeners added during this emit() won't receive the current event.
         let snapshot: Vec<EventListener> = self
             .listeners
             .lock()
