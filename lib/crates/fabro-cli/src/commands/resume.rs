@@ -363,7 +363,15 @@ async fn prepare_from_branch(
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
-    tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
+    if let Some(ref workflow_path) = args.workflow {
+        tokio::fs::write(
+            run_dir.join("graph.fabro"),
+            tokio::fs::read(workflow_path).await?,
+        )
+        .await?;
+    } else {
+        tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
+    }
 
     let base_sha = fabro_workflows::git::MetadataStore::read_manifest(&original_cwd, &run_id)?
         .and_then(|m| m.base_sha);
@@ -406,6 +414,10 @@ async fn prepare_from_branch(
         SandboxProvider::Docker => {
             tracing::warn!(
                 "--sandbox docker is not supported for branch resume; falling back to local worktree sandbox"
+            );
+            eprintln!(
+                "{} --sandbox docker is not supported for branch resume; falling back to local worktree sandbox.",
+                styles.yellow.apply_to("Warning:"),
             );
             let (wt_sandbox, wt) = setup_worktree_sandbox(&emitter);
             wt_sandbox
@@ -625,11 +637,27 @@ async fn run_resumed(
         ))
     };
 
-    let dry_run_mode = args.dry_run
-        || fabro_llm::client::Client::from_env()
-            .await
-            .map(|c| c.provider_names().is_empty())
-            .unwrap_or(true);
+    let dry_run_mode = if args.dry_run {
+        true
+    } else {
+        match fabro_llm::client::Client::from_env().await {
+            Ok(c) if c.provider_names().is_empty() => {
+                eprintln!(
+                    "{} No LLM providers configured. Running in dry-run mode.",
+                    styles.yellow.apply_to("Warning:"),
+                );
+                true
+            }
+            Ok(_) => false,
+            Err(e) => {
+                eprintln!(
+                    "{} Failed to initialize LLM client: {e}. Running in dry-run mode.",
+                    styles.yellow.apply_to("Warning:"),
+                );
+                true
+            }
+        }
+    };
     config.dry_run = dry_run_mode;
 
     let (model, provider) = resolve_model_provider(
