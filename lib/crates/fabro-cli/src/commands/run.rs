@@ -463,6 +463,7 @@ pub(crate) fn prepare_workflow(
     args: &RunArgs,
     mut run_defaults: RunDefaults,
     styles: &Styles,
+    quiet: bool,
 ) -> anyhow::Result<PreparedWorkflow> {
     let workflow_path = args
         .workflow
@@ -528,29 +529,31 @@ pub(crate) fn prepare_workflow(
         }
     }
 
-    eprintln!(
-        "{} {} {}",
-        styles.bold.apply_to("Workflow:"),
-        graph.name,
-        styles.dim.apply_to(format!(
-            "({} nodes, {} edges)",
-            graph.nodes.len(),
-            graph.edges.len()
-        )),
-    );
-    eprintln!(
-        "{} {}",
-        styles.dim.apply_to("Graph:"),
-        styles.dim.apply_to(relative_path(&dot_path)),
-    );
+    if !quiet {
+        eprintln!(
+            "{} {} {}",
+            styles.bold.apply_to("Workflow:"),
+            graph.name,
+            styles.dim.apply_to(format!(
+                "({} nodes, {} edges)",
+                graph.nodes.len(),
+                graph.edges.len()
+            )),
+        );
+        eprintln!(
+            "{} {}",
+            styles.dim.apply_to("Graph:"),
+            styles.dim.apply_to(relative_path(&dot_path)),
+        );
 
-    let goal = graph.goal();
-    if !goal.is_empty() {
-        let stripped = fabro_util::text::strip_goal_decoration(goal);
-        eprintln!("{} {stripped}\n", styles.bold.apply_to("Goal:"));
+        let goal = graph.goal();
+        if !goal.is_empty() {
+            let stripped = fabro_util::text::strip_goal_decoration(goal);
+            eprintln!("{} {stripped}\n", styles.bold.apply_to("Goal:"));
+        }
+
+        print_diagnostics(&diagnostics, styles);
     }
-
-    print_diagnostics(&diagnostics, styles);
 
     if diagnostics.iter().any(|d| d.severity == Severity::Error) {
         bail!("Validation failed");
@@ -612,7 +615,7 @@ pub async fn run_command(
         model,
         provider,
         run_defaults,
-    } = prepare_workflow(&args, run_defaults, styles)?;
+    } = prepare_workflow(&args, run_defaults, styles, false)?;
 
     // Extract workflow slug from the workflow path argument.
     // If bare name (no extension, e.g. "smoke"), use it directly.

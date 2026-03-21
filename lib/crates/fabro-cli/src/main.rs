@@ -653,7 +653,7 @@ async fn main_inner() -> (String, Result<()>) {
                 if args.detach {
                     // Detach mode: create + start + print run ID
                     let (run_id, run_dir) =
-                        commands::create::create_run(&args, cli_config.run_defaults, styles)
+                        commands::create::create_run(&args, cli_config.run_defaults, styles, true)
                             .await?;
                     commands::start::start_run(&run_dir)?;
                     println!("{run_id}");
@@ -683,7 +683,8 @@ async fn main_inner() -> (String, Result<()>) {
                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
                 let cli_config = cli_config::load_cli_config(None)?;
                 let (run_id, _run_dir) =
-                    commands::create::create_run(&args, cli_config.run_defaults, styles).await?;
+                    commands::create::create_run(&args, cli_config.run_defaults, styles, true)
+                        .await?;
                 println!("{run_id}");
             }
             Command::Start { run } => {
