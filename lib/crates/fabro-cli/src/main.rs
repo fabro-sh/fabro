@@ -757,7 +757,6 @@ async fn main_inner() -> (String, Result<()>) {
                         .map(|(k, v)| format!("{k}={v}"))
                         .collect(),
                     no_retro: spec.no_retro,
-                    ssh: spec.ssh,
                     preserve_sandbox: spec.preserve_sandbox,
                     detach: false,
                     run_id: Some(spec.run_id),

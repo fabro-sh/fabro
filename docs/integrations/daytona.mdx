@@ -114,17 +114,13 @@ for your organization.
 Connect to a running Daytona sandbox via SSH for live debugging:
 
 ```bash
-fabro run workflow.fabro --sandbox daytona --ssh
+fabro ssh <run-id>
 ```
 
-This creates temporary SSH credentials (valid for 60 minutes) and prints the connection command:
-
-```
-SSH access ready: ssh daytona@fabro-20260307-143022-a3f2.ssh.daytona.io
-```
+This creates temporary SSH credentials (valid for 60 minutes) and connects directly. Use `--print` to print the SSH command instead of connecting, or `--ttl` to set the credential expiry.
 
 <Note>
-SSH credentials cannot be refreshed during a run. To keep the sandbox alive after the run completes, combine `--ssh` with `--preserve-sandbox`.
+To keep the sandbox alive after the run completes, pass `--preserve-sandbox` to `fabro run`.
 </Note>
 
 ## Sandbox lifecycle

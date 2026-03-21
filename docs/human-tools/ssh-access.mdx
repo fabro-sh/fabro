@@ -24,29 +24,12 @@ fabro ssh <run-id> --print
 fabro ssh <run-id> --ttl 120
 ```
 
-## Enabling SSH access during `fabro run`
-
-Pass the `--ssh` flag to `fabro run` to create SSH credentials at the start of the run:
-
-```bash
-fabro run workflow.fabro --sandbox daytona --ssh
-```
-
-After the sandbox is created, Fabro generates temporary SSH credentials (valid for 60 minutes) and prints the connection command:
-
-```
-  Sandbox: daytona (fabro-20260307-143022-a3f2)
-             ssh daytona@fabro-20260307-143022-a3f2.ssh.daytona.io
-```
-
-Copy and run the `ssh` command in a separate terminal to connect.
-
 ## Keeping the sandbox alive
 
-By default, Daytona sandboxes are destroyed when the workflow finishes. To keep the sandbox running after the workflow completes — so you can continue debugging — combine `--ssh` with `--preserve-sandbox`:
+By default, Daytona sandboxes are destroyed when the workflow finishes. To keep the sandbox running after the workflow completes — so you can continue debugging — pass `--preserve-sandbox`:
 
 ```bash
-fabro run workflow.fabro --sandbox daytona --ssh --preserve-sandbox
+fabro run workflow.fabro --sandbox daytona --preserve-sandbox
 ```
 
 Without `--preserve-sandbox`, the SSH session is terminated when the run ends and the sandbox is cleaned up.
@@ -73,9 +56,9 @@ Once connected, you have a full shell inside the sandbox VM:
 
 ## Credential lifetime
 
-SSH credentials are temporary and expire after **60 minutes** by default. With `fabro ssh`, you can set a custom TTL with `--ttl <MINUTES>`. If your session expires, run `fabro ssh` again or start a new run with `--ssh` to get fresh credentials.
+SSH credentials are temporary and expire after **60 minutes** by default. With `fabro ssh`, you can set a custom TTL with `--ttl <MINUTES>`. If your session expires, run `fabro ssh` again to get fresh credentials.
 
 ## Limitations
 
-- SSH access is **Daytona-only**. Passing `--ssh` with other sandbox providers prints a warning and is ignored.
+- SSH access is **Daytona-only**.
 - SSH access is currently available only from the **CLI**. The API server and web UI do not yet expose an SSH endpoint.

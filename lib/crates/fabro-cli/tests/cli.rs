@@ -581,7 +581,7 @@ fn setup_run_dir(
         "labels": {},
         "verbose": false,
         "no_retro": true,
-        "ssh": false,
+
         "preserve_sandbox": false,
         "dry_run": true,
         "auto_approve": true
@@ -632,7 +632,7 @@ digraph G {
         "labels": {},
         "verbose": false,
         "no_retro": true,
-        "ssh": false,
+
         "preserve_sandbox": false,
         "dry_run": true,
         "auto_approve": true

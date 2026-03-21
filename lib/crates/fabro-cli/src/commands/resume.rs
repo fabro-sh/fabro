@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -83,10 +84,6 @@ pub struct ResumeArgs {
     #[arg(long)]
     pub no_retro: bool,
 
-    /// Create SSH access to the Daytona sandbox and print the connection command
-    #[arg(long)]
-    pub ssh: bool,
-
     /// Keep the sandbox alive after the run finishes (for debugging)
     #[arg(long)]
     pub preserve_sandbox: bool,
@@ -99,6 +96,8 @@ struct ResumeContext {
     run_id: String,
     run_dir: PathBuf,
     sandbox: Arc<dyn Sandbox>,
+    /// Kept as Arc so the sandbox event callbacks can emit through it. Listeners
+    /// that need to be added later (e.g. ProgressUI) are registered separately.
     emitter: Arc<EventEmitter>,
     config: RunConfig,
     setup_commands: Vec<String>,
@@ -120,7 +119,7 @@ pub async fn resume_command(
     git_author: fabro_workflows::git::GitAuthor,
 ) -> anyhow::Result<()> {
     let ctx = if args.checkpoint.is_some() {
-        prepare_from_checkpoint(&args, styles, &github_app, git_author).await?
+        prepare_from_checkpoint(&args, &run_defaults, styles, &github_app, git_author).await?
     } else {
         prepare_from_branch(&args, styles, &run_defaults, &github_app, git_author).await?
     };
@@ -128,9 +127,10 @@ pub async fn resume_command(
     run_resumed(ctx, args, run_defaults, styles).await
 }
 
-/// Checkpoint-file path: load checkpoint and graph from files, use a simple local sandbox.
+/// Checkpoint-file path: load checkpoint and graph from files, resolve sandbox from flags/config.
 async fn prepare_from_checkpoint(
     args: &ResumeArgs,
+    run_defaults: &RunDefaults,
     styles: &Styles,
     github_app: &Option<fabro_github::GitHubAppCredentials>,
     git_author: fabro_workflows::git::GitAuthor,
@@ -171,7 +171,58 @@ async fn prepare_from_checkpoint(
     let original_cwd = std::env::current_dir()?;
     let emitter = Arc::new(EventEmitter::new());
 
-    let sandbox: Arc<dyn Sandbox> = local_sandbox_with_callback(original_cwd, Arc::clone(&emitter));
+    // Resolve sandbox provider from CLI flag / config / defaults
+    let sandbox_provider = if args.dry_run {
+        SandboxProvider::Local
+    } else {
+        resolve_sandbox_provider(args.sandbox.map(Into::into), None, run_defaults)?
+    };
+
+    let sandbox: Arc<dyn Sandbox> = match sandbox_provider {
+        SandboxProvider::Local | SandboxProvider::Docker => {
+            local_sandbox_with_callback(original_cwd.clone(), Arc::clone(&emitter))
+        }
+        #[cfg(feature = "exedev")]
+        SandboxProvider::Exe => {
+            let exe_config = super::run::resolve_exe_config(None, run_defaults);
+            let clone_params = super::run::resolve_exe_clone_params(&original_cwd);
+            let mgmt_ssh = fabro_sandbox::exe::OpensshRunner::connect_raw("exe.dev")
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to connect to exe.dev: {e}"))?;
+            let config = exe_config.unwrap_or_default();
+            let mut env = fabro_sandbox::exe::ExeSandbox::new(
+                Box::new(mgmt_ssh),
+                config,
+                clone_params,
+                Some(run_id.clone()),
+                github_app.clone(),
+            );
+            let emitter_cb = Arc::clone(&emitter);
+            env.set_event_callback(Arc::new(move |event| {
+                emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
+            }));
+            Arc::new(env)
+        }
+        SandboxProvider::Ssh => {
+            let config = resolve_ssh_config(None, run_defaults)
+                .ok_or_else(|| anyhow::anyhow!("--sandbox ssh requires [sandbox.ssh] config"))?;
+            let clone_params = resolve_ssh_clone_params(&original_cwd);
+            let mut env = fabro_sandbox::ssh::SshSandbox::new(
+                config,
+                clone_params,
+                Some(run_id.clone()),
+                github_app.clone(),
+            );
+            let emitter_cb = Arc::clone(&emitter);
+            env.set_event_callback(Arc::new(move |event| {
+                emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
+            }));
+            Arc::new(env)
+        }
+        SandboxProvider::Daytona => {
+            bail!("resume from checkpoint is not yet supported with --sandbox daytona");
+        }
+    };
     let sandbox: Arc<dyn Sandbox> = Arc::new(fabro_agent::ReadBeforeWriteSandbox::new(sandbox));
 
     let config = RunConfig {
@@ -408,6 +459,20 @@ async fn run_resumed(
         original_cwd,
     } = ctx;
 
+    // Create progress UI (verbose mode shows detailed turn/tool counts and token usage)
+    let is_tty = std::io::stderr().is_terminal();
+    let progress_ui = Arc::new(std::sync::Mutex::new(super::run_progress::ProgressUI::new(
+        is_tty,
+        args.verbose,
+    )));
+    {
+        let p = Arc::clone(&progress_ui);
+        emitter.on_event(move |event| {
+            let mut ui = p.lock().expect("progress lock poisoned");
+            ui.handle_event(event);
+        });
+    }
+
     let interviewer: Arc<dyn Interviewer> = if args.auto_approve {
         Arc::new(AutoApproveInterviewer)
     } else {
@@ -468,6 +533,9 @@ async fn run_resumed(
         .await;
     let run_duration_ms = run_start.elapsed().as_millis() as u64;
 
+    // Finish progress bars before retro
+    progress_ui.lock().expect("progress lock poisoned").finish();
+
     // Restore cwd if we changed it (worktree is kept for `fabro cp` access; pruned separately)
     if let Some(ref cwd) = original_cwd {
         let _ = std::env::set_current_dir(cwd);
@@ -508,8 +576,10 @@ async fn run_resumed(
     write_finalize_commit(&config, &run_dir).await;
 
     // Cleanup sandbox via engine (fires SandboxCleanup hook)
+    use super::run::resolve_preserve_sandbox;
+    let preserve = resolve_preserve_sandbox(args.preserve_sandbox, None, &run_defaults);
     let _ = engine
-        .cleanup_sandbox(&config.run_id, &graph.name, false)
+        .cleanup_sandbox(&config.run_id, &graph.name, preserve)
         .await;
 
     let outcome = engine_result?;

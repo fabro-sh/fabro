@@ -553,7 +553,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         runs.get(&run_id).and_then(|r| r.event_tx.clone())
     };
 
-    let mut emitter = EventEmitter::new();
+    let emitter = EventEmitter::new();
     if let Some(tx_clone) = event_tx {
         emitter.on_event(move |event| {
             let _ = tx_clone.send(event.clone());

@@ -16,17 +16,16 @@ VS Code remote access requires [SSH access](/human-tools/ssh-access), which is o
 
 ## Connecting to a sandbox
 
-1. Start a workflow with SSH access and a preserved sandbox:
+1. Start a workflow with a preserved Daytona sandbox:
 
    ```bash
-   fabro run workflow.fabro --sandbox daytona --ssh --preserve-sandbox
+   fabro run workflow.fabro --sandbox daytona --preserve-sandbox
    ```
 
-2. Fabro prints the SSH connection command:
+2. Use `fabro ssh` to get the connection command:
 
-   ```
-     Sandbox: daytona (fabro-20260307-143022-a3f2)
-                ssh daytona@fabro-20260307-143022-a3f2.ssh.daytona.io
+   ```bash
+   fabro ssh <run-id> --print
    ```
 
 3. In VS Code, open the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`) and run **Remote-SSH: Connect to Host...**
@@ -51,4 +50,4 @@ Once connected, VS Code operates as if the sandbox filesystem were local:
 
 - **Use `--preserve-sandbox`** — Without it, the sandbox is destroyed when the workflow finishes and your VS Code session disconnects. Combine with `auto_stop_interval` in your [run config](/execution/run-configuration) to control idle timeout.
 - **Pair with human gates** — When a workflow pauses at a [human gate](/workflows/human-in-the-loop), connect via VS Code to review the agent's changes before approving.
-- **SSH credential lifetime** — Daytona SSH credentials expire after 60 minutes. If your VS Code session disconnects, you'll need to start a new run with `--ssh` to get fresh credentials.
+- **SSH credential lifetime** — Daytona SSH credentials expire after 60 minutes by default. If your VS Code session disconnects, run `fabro ssh <run-id>` again to get fresh credentials (use `--ttl` to set a custom expiry).
