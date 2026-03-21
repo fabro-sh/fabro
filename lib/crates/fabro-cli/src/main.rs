@@ -727,13 +727,9 @@ async fn main_inner() -> (String, Result<()>) {
                     )
                 })?;
 
-                // Use the cached graph snapshot instead of the original file
-                let cached_graph = run_dir.join("graph.fabro");
-                let workflow_path = if cached_graph.exists() {
-                    cached_graph
-                } else {
-                    spec.workflow_path
-                };
+                // Prefer the cached run.toml. prepare_workflow() falls back to the
+                // sibling graph snapshot for older detached runs that predate run.toml.
+                let workflow_path = commands::run::cached_run_config_path(&run_dir);
 
                 let run_args = commands::run::RunArgs {
                     workflow: Some(workflow_path),

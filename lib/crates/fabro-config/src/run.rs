@@ -299,6 +299,10 @@ impl RunDefaults {
 /// The `graph` path in the returned config is resolved relative to the
 /// TOML file's parent directory. Any `dockerfile = { path = "..." }` is
 /// resolved to inline content.
+///
+/// `${env.VARNAME}` references in `[sandbox.env]` are NOT resolved here —
+/// call [`resolve_sandbox_env`] separately after snapshotting, so that
+/// plaintext secrets are never written to disk.
 pub fn load_run_config(path: &Path) -> anyhow::Result<WorkflowRunConfig> {
     let contents = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read {}", path.display()))?;
@@ -306,7 +310,6 @@ pub fn load_run_config(path: &Path) -> anyhow::Result<WorkflowRunConfig> {
 
     let config_dir = path.parent().unwrap_or(Path::new("."));
     resolve_dockerfile(&mut config, config_dir)?;
-    resolve_sandbox_env(&mut config)?;
 
     Ok(config)
 }
@@ -315,7 +318,7 @@ pub fn load_run_config(path: &Path) -> anyhow::Result<WorkflowRunConfig> {
 ///
 /// Only whole-value references are supported (no partial interpolation).
 /// Missing host env vars produce a hard error.
-fn resolve_sandbox_env(config: &mut WorkflowRunConfig) -> anyhow::Result<()> {
+pub fn resolve_sandbox_env(config: &mut WorkflowRunConfig) -> anyhow::Result<()> {
     if let Some(env) = config.sandbox.as_mut().and_then(|s| s.env.as_mut()) {
         resolve_env_refs(env)?;
     }

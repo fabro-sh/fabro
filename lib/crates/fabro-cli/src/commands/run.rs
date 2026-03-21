@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -452,6 +452,62 @@ pub(crate) fn local_sandbox_with_callback(
     Arc::new(env)
 }
 
+pub(crate) const RUN_GRAPH_FILE: &str = "graph.fabro";
+pub(crate) const RUN_CONFIG_FILE: &str = "run.toml";
+
+pub(crate) fn cached_graph_path(run_dir: &Path) -> PathBuf {
+    run_dir.join(RUN_GRAPH_FILE)
+}
+
+pub(crate) fn cached_run_config_path(run_dir: &Path) -> PathBuf {
+    run_dir.join(RUN_CONFIG_FILE)
+}
+
+fn serialize_run_config_snapshot(run_cfg: &mut WorkflowRunConfig) -> anyhow::Result<String> {
+    run_cfg.graph = RUN_GRAPH_FILE.to_string();
+    toml::to_string_pretty(run_cfg).context("Failed to serialize run config")
+}
+
+pub(crate) async fn write_run_config_snapshot(
+    run_dir: &Path,
+    run_cfg: Option<&mut WorkflowRunConfig>,
+) -> anyhow::Result<()> {
+    if let Some(cfg) = run_cfg {
+        let toml_str = serialize_run_config_snapshot(cfg)?;
+        tokio::fs::write(cached_run_config_path(run_dir), toml_str).await?;
+    }
+    Ok(())
+}
+
+fn is_missing_cached_run_config(path: &Path, error: &anyhow::Error) -> bool {
+    path.starts_with(fabro_workflows::run_lookup::default_runs_base())
+        && error
+            .root_cause()
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
+}
+
+fn resolve_workflow_source(
+    workflow_path: &Path,
+) -> anyhow::Result<(PathBuf, Option<WorkflowRunConfig>)> {
+    let path = project_config::resolve_workflow_arg(workflow_path)?;
+    if path.extension().is_some_and(|ext| ext == "toml") {
+        match run_config::load_run_config(&path) {
+            Ok(cfg) => {
+                let dot = run_config::resolve_graph_path(&path, &cfg.graph);
+                Ok((dot, Some(cfg)))
+            }
+            // Backward compatibility for detached runs created before run.toml existed.
+            Err(err) if is_missing_cached_run_config(&path, &err) => {
+                Ok((path.with_file_name(RUN_GRAPH_FILE), None))
+            }
+            Err(err) => Err(err),
+        }
+    } else {
+        Ok((path, None))
+    }
+}
+
 /// Result of workflow preparation (shared between `create` and `run` commands).
 pub(crate) struct PreparedWorkflow {
     pub source: String,
@@ -488,7 +544,7 @@ pub(crate) fn prepare_workflow(
 
     // Resolve workflow arg, load run config if TOML, apply defaults
     let (dot_path, run_cfg) = {
-        let (dot, cfg) = project_config::resolve_workflow(workflow_path)?;
+        let (dot, cfg) = resolve_workflow_source(workflow_path)?;
         match cfg {
             Some(mut cfg) => {
                 cfg.apply_defaults(&run_defaults);
@@ -613,7 +669,7 @@ pub async fn run_command(
     let PreparedWorkflow {
         source,
         graph,
-        run_cfg,
+        mut run_cfg,
         sandbox_provider,
         model,
         provider,
@@ -675,7 +731,7 @@ pub async fn run_command(
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
-    tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
+    tokio::fs::write(cached_graph_path(&run_dir), &source).await?;
     tokio::fs::write(run_dir.join("run.pid"), std::process::id().to_string()).await?;
     fabro_workflows::run_status::write_run_status(
         &run_dir,
@@ -693,10 +749,14 @@ pub async fn run_command(
         );
     });
 
-    if workflow_path.extension().is_some_and(|ext| ext == "toml") {
-        if let Ok(toml_contents) = tokio::fs::read(workflow_path).await {
-            tokio::fs::write(run_dir.join("run.toml"), toml_contents).await?;
-        }
+    // Serialize the merged run config so the run dir is self-contained.
+    // env refs (${env.VARNAME}) are still unresolved at this point, so
+    // plaintext secrets are never written to disk.
+    write_run_config_snapshot(&run_dir, run_cfg.as_mut()).await?;
+
+    // Now resolve ${env.VARNAME} references for runtime use.
+    if let Some(ref mut cfg) = run_cfg {
+        run_config::resolve_sandbox_env(cfg)?;
     }
 
     // Create progress UI (used for both normal and verbose modes)
@@ -964,6 +1024,7 @@ pub async fn run_command(
     let devcontainer_config = if run_cfg
         .as_ref()
         .and_then(|c| c.sandbox.as_ref())
+        .or(run_defaults.sandbox.as_ref())
         .and_then(|s| s.devcontainer)
         .unwrap_or(false)
     {
@@ -1267,6 +1328,7 @@ pub async fn run_command(
         if let Some(toml_env) = run_cfg
             .as_ref()
             .and_then(|c| c.sandbox.as_ref())
+            .or(run_defaults.sandbox.as_ref())
             .and_then(|s| s.env.clone())
         {
             env.extend(toml_env);
@@ -1391,11 +1453,13 @@ pub async fn run_command(
         pull_request: run_cfg
             .as_ref()
             .and_then(|c| c.pull_request.as_ref())
+            .or(run_defaults.pull_request.as_ref())
             .filter(|p| p.enabled)
             .cloned(),
         asset_globs: run_cfg
             .as_ref()
             .and_then(|c| c.assets.as_ref())
+            .or(run_defaults.assets.as_ref())
             .map(|a| a.include.clone())
             .unwrap_or_default(),
         workflow_slug: workflow_slug.clone(),
@@ -2422,6 +2486,61 @@ pub(crate) fn build_event_envelope(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn serialize_run_config_snapshot_rewrites_graph_path() {
+        let cfg = run_config::WorkflowRunConfig {
+            version: 1,
+            goal: Some("test".to_string()),
+            graph: "workflow.fabro".to_string(),
+            work_dir: None,
+            llm: None,
+            setup: None,
+            sandbox: None,
+            vars: None,
+            hooks: Vec::new(),
+            checkpoint: Default::default(),
+            pull_request: Some(run_config::PullRequestConfig {
+                enabled: true,
+                ..Default::default()
+            }),
+            assets: None,
+            mcp_servers: Default::default(),
+            github: None,
+        };
+
+        let pr = cfg.pull_request.clone();
+        let mut cfg = cfg;
+        let serialized = serialize_run_config_snapshot(&mut cfg).unwrap();
+        let reparsed = run_config::parse_run_config(&serialized).unwrap();
+
+        assert_eq!(reparsed.graph, RUN_GRAPH_FILE);
+        assert_eq!(reparsed.pull_request, pr);
+    }
+
+    #[test]
+    fn resolve_workflow_source_falls_back_to_graph_for_missing_cached_run_config() {
+        // Place the test dir inside the runs base so the fallback is allowed.
+        let runs_base = fabro_workflows::run_lookup::default_runs_base();
+        std::fs::create_dir_all(&runs_base).unwrap();
+        let dir = tempfile::tempdir_in(&runs_base).unwrap();
+        std::fs::write(dir.path().join(RUN_GRAPH_FILE), "digraph test {}").unwrap();
+
+        let (dot_path, run_cfg) =
+            resolve_workflow_source(&dir.path().join(RUN_CONFIG_FILE)).unwrap();
+
+        assert_eq!(dot_path, dir.path().join(RUN_GRAPH_FILE));
+        assert!(run_cfg.is_none());
+    }
+
+    #[test]
+    fn resolve_workflow_source_errors_for_missing_run_toml_outside_runs_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(RUN_GRAPH_FILE), "digraph test {}").unwrap();
+
+        let result = resolve_workflow_source(&dir.path().join(RUN_CONFIG_FILE));
+        assert!(result.is_err());
+    }
 
     #[test]
     fn apply_goal_override_cli_wins_over_toml() {
