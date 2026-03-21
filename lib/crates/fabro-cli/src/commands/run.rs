@@ -610,7 +610,7 @@ pub async fn run_command(
     let PreparedWorkflow {
         source,
         graph,
-        run_cfg,
+        mut run_cfg,
         sandbox_provider,
         model,
         provider,
@@ -698,10 +698,11 @@ pub async fn run_command(
         );
     });
 
-    if workflow_path.extension().is_some_and(|ext| ext == "toml") {
-        if let Ok(toml_contents) = tokio::fs::read(workflow_path).await {
-            tokio::fs::write(run_dir.join("run.toml"), toml_contents).await?;
-        }
+    // Serialize the merged run config so the run dir is self-contained
+    if let Some(ref mut cfg) = run_cfg {
+        cfg.graph = "graph.fabro".to_string();
+        let toml_str = toml::to_string_pretty(&*cfg).context("Failed to serialize run config")?;
+        tokio::fs::write(run_dir.join("run.toml"), toml_str).await?;
     }
 
     // Create progress UI (used for both normal and verbose modes)
