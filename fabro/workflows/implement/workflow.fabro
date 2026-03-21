@@ -2,7 +2,7 @@ digraph ImplementAndSimplify {
     graph [
         goal="Implement and simplify",
         model_stylesheet="
-            * { backend: api; model: claude-opus-4-6;}
+            * { model: claude-opus-4-6; }
         "
     ]
     rankdir=LR

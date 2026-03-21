@@ -1,0 +1,4 @@
+version = 1
+
+[github]
+permissions = { issues = "read", pull_requests = "write" }
