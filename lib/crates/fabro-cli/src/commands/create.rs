@@ -1,11 +1,10 @@
 use std::path::PathBuf;
 
-use anyhow::Context;
 use chrono::Local;
 use fabro_config::run::RunDefaults;
 use fabro_workflows::run_spec::RunSpec;
 
-use super::run::{prepare_workflow, RunArgs};
+use super::run::{cached_graph_path, prepare_workflow, write_run_config_snapshot, RunArgs};
 use fabro_util::terminal::Styles;
 
 /// Create a workflow run: allocate run directory, persist spec, return (run_id, run_dir).
@@ -22,7 +21,7 @@ pub async fn create_run(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
 
-    let mut prep = prepare_workflow(args, run_defaults, styles, quiet)?;
+    let prep = prepare_workflow(args, run_defaults, styles, quiet)?;
 
     let goal = prep.graph.goal();
 
@@ -42,7 +41,7 @@ pub async fn create_run(
     tokio::fs::create_dir_all(&run_dir).await?;
 
     // Write essential files
-    tokio::fs::write(run_dir.join("graph.fabro"), &prep.source).await?;
+    tokio::fs::write(cached_graph_path(&run_dir), &prep.source).await?;
     tokio::fs::write(run_dir.join("id.txt"), &run_id).await?;
     std::fs::File::create(run_dir.join("progress.jsonl"))?;
     fabro_workflows::run_status::write_run_status(
@@ -51,12 +50,8 @@ pub async fn create_run(
         None,
     );
 
-    // Serialize the merged run config so the run dir is self-contained
-    if let Some(mut cfg) = prep.run_cfg.take() {
-        cfg.graph = "graph.fabro".to_string();
-        let toml_str = toml::to_string_pretty(&cfg).context("Failed to serialize run config")?;
-        tokio::fs::write(run_dir.join("run.toml"), toml_str).await?;
-    }
+    // Serialize the merged run config so the run dir is self-contained.
+    write_run_config_snapshot(&run_dir, prep.run_cfg.as_ref()).await?;
 
     // Build and save RunSpec
     let working_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
