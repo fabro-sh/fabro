@@ -340,11 +340,13 @@ async fn prepare_from_branch(
         bail!("Validation failed");
     }
 
-    // Set up logs directory
-    let run_dir = args
-        .run_dir
-        .clone()
-        .unwrap_or_else(|| default_run_dir(&run_id, args.dry_run));
+    // Set up logs directory — reuse existing run dir for this run_id to avoid
+    // "ambiguous prefix" errors when the resume happens on a different day.
+    let run_dir = if let Some(ref dir) = args.run_dir {
+        dir.clone()
+    } else {
+        find_existing_run_dir(&run_id).unwrap_or_else(|| default_run_dir(&run_id, args.dry_run))
+    };
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
@@ -498,6 +500,39 @@ async fn run_resumed(
         original_cwd,
     } = ctx;
 
+    // Write run.pid + initial status so `fabro ps` / `fabro attach` can find this run
+    tokio::fs::write(run_dir.join("run.pid"), std::process::id().to_string()).await?;
+    fabro_workflows::run_status::write_run_status(
+        &run_dir,
+        fabro_workflows::run_status::RunStatus::Starting,
+        Some(fabro_workflows::run_status::StatusReason::SandboxInitializing),
+    );
+
+    // Safety net: mark as failed if we exit before engine.run() completes
+    let status_run_dir = run_dir.clone();
+    let status_guard = scopeguard::guard((), move |()| {
+        fabro_workflows::run_status::write_run_status(
+            &status_run_dir,
+            fabro_workflows::run_status::RunStatus::Failed,
+            Some(fabro_workflows::run_status::StatusReason::SandboxInitFailed),
+        );
+    });
+
+    // Track the last git commit SHA from CheckpointCompleted events
+    let last_git_sha: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
+    {
+        let sha_clone = Arc::clone(&last_git_sha);
+        emitter.on_event(move |event| {
+            if let fabro_workflows::event::WorkflowRunEvent::CheckpointCompleted {
+                git_commit_sha: Some(sha),
+                ..
+            } = event
+            {
+                *sha_clone.lock().unwrap() = Some(sha.clone());
+            }
+        });
+    }
+
     // Create progress UI (verbose mode shows detailed turn/tool counts and token usage)
     let is_tty = std::io::stderr().is_terminal();
     let progress_ui = Arc::new(std::sync::Mutex::new(super::run_progress::ProgressUI::new(
@@ -572,7 +607,10 @@ async fn run_resumed(
         .map_err(|e| anyhow::anyhow!("{e}"))?
         .unwrap_or_else(Provider::default_from_env);
 
-    let fallback_chain = Vec::new();
+    let fallback_chain = match run_defaults.llm.as_ref().and_then(|l| l.fallbacks.as_ref()) {
+        Some(map) => fabro_model::build_fallback_chain(provider_enum.as_str(), &model, map),
+        None => Vec::new(),
+    };
 
     let registry = fabro_workflows::handler::default_registry(interviewer.clone(), || {
         if dry_run_mode {
@@ -605,12 +643,97 @@ async fn run_resumed(
         .await;
     let run_duration_ms = run_start.elapsed().as_millis() as u64;
 
+    // Defuse the status guard — we made it past engine.run()
+    scopeguard::ScopeGuard::into_inner(status_guard);
+
     // Finish progress bars before retro
     progress_ui.lock().expect("progress lock poisoned").finish();
 
     // Restore cwd if we changed it (worktree is kept for `fabro cp` access; pruned separately)
     if let Some(ref cwd) = original_cwd {
         let _ = std::env::set_current_dir(cwd);
+    }
+
+    // Build and save conclusion.json + final status (mirrors run_command)
+    {
+        let (status, failure_reason) = match &engine_result {
+            Ok(ref o) => (o.status.clone(), o.failure_reason().map(String::from)),
+            Err(e) => (StageStatus::Fail, Some(e.to_string())),
+        };
+
+        let (run_status, status_reason) = match &engine_result {
+            Ok(ref o) => match o.status {
+                StageStatus::Success | StageStatus::Skipped => (
+                    fabro_workflows::run_status::RunStatus::Succeeded,
+                    Some(fabro_workflows::run_status::StatusReason::Completed),
+                ),
+                StageStatus::PartialSuccess => (
+                    fabro_workflows::run_status::RunStatus::Succeeded,
+                    Some(fabro_workflows::run_status::StatusReason::PartialSuccess),
+                ),
+                StageStatus::Fail | StageStatus::Retry => (
+                    fabro_workflows::run_status::RunStatus::Failed,
+                    Some(fabro_workflows::run_status::StatusReason::WorkflowError),
+                ),
+            },
+            Err(fabro_workflows::error::FabroError::Cancelled) => (
+                fabro_workflows::run_status::RunStatus::Failed,
+                Some(fabro_workflows::run_status::StatusReason::Cancelled),
+            ),
+            Err(_) => (
+                fabro_workflows::run_status::RunStatus::Failed,
+                Some(fabro_workflows::run_status::StatusReason::WorkflowError),
+            ),
+        };
+
+        let checkpoint_loaded = Checkpoint::load(&run_dir.join("checkpoint.json")).ok();
+        let stage_durations = fabro_retro::retro::extract_stage_durations(&run_dir);
+
+        let (stages, total_cost, total_retries) = if let Some(ref cp) = checkpoint_loaded {
+            let mut stages = Vec::new();
+            let mut cost_sum: Option<f64> = None;
+            let mut retries_sum: u32 = 0;
+
+            for node_id in &cp.completed_nodes {
+                let outcome = cp.node_outcomes.get(node_id);
+                let retries = cp
+                    .node_retries
+                    .get(node_id)
+                    .copied()
+                    .unwrap_or(1)
+                    .saturating_sub(1);
+                retries_sum += retries;
+
+                let cost = outcome.and_then(|o| o.usage.as_ref()).and_then(|u| u.cost);
+                if let Some(c) = cost {
+                    *cost_sum.get_or_insert(0.0) += c;
+                }
+
+                stages.push(fabro_workflows::conclusion::StageSummary {
+                    stage_id: node_id.clone(),
+                    stage_label: node_id.clone(),
+                    duration_ms: stage_durations.get(node_id).copied().unwrap_or(0),
+                    cost,
+                    retries,
+                });
+            }
+            (stages, cost_sum, retries_sum)
+        } else {
+            (vec![], None, 0)
+        };
+
+        let conclusion = fabro_workflows::conclusion::Conclusion {
+            timestamp: chrono::Utc::now(),
+            status,
+            duration_ms: run_duration_ms,
+            failure_reason,
+            final_git_commit_sha: last_git_sha.lock().unwrap().clone(),
+            stages,
+            total_cost,
+            total_retries,
+        };
+        let _ = conclusion.save(&run_dir.join("conclusion.json"));
+        fabro_workflows::run_status::write_run_status(&run_dir, run_status, status_reason);
     }
 
     // Auto-derive retro
@@ -683,4 +806,18 @@ async fn run_resumed(
         StageStatus::Success | StageStatus::PartialSuccess => Ok(()),
         _ => std::process::exit(1),
     }
+}
+
+/// Scan `~/.fabro/runs/` for an existing directory whose name ends with `-{run_id}`.
+fn find_existing_run_dir(run_id: &str) -> Option<PathBuf> {
+    let base = dirs::home_dir()?.join(".fabro").join("runs");
+    let suffix = format!("-{run_id}");
+    let entries = std::fs::read_dir(&base).ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name.to_string_lossy().ends_with(&suffix) && entry.path().is_dir() {
+            return Some(entry.path());
+        }
+    }
+    None
 }

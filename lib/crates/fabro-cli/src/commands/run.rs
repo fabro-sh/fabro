@@ -373,7 +373,7 @@ pub(crate) fn resolve_ssh_clone_params(
 ///
 /// `apply_defaults` must be called on `run_cfg` before this — it merges
 /// `run_defaults.llm.fallbacks` into `run_cfg.llm.fallbacks` already.
-fn resolve_fallback_chain(
+pub(crate) fn resolve_fallback_chain(
     provider: Provider,
     model: &str,
     run_cfg: Option<&WorkflowRunConfig>,
