@@ -59,7 +59,6 @@ fabro run run.toml
 | `--goal <GOAL>` | Override the workflow goal (exposed as `$goal` in prompts) |
 | `--goal-file <FILE>` | Read the goal from a file instead of inline text |
 | `--no-retro` | Skip retro generation after the run |
-| `--ssh` | Create SSH access to the sandbox (Daytona or exe.dev) and print the connection command |
 | `--preserve-sandbox` | Keep the sandbox alive after the run finishes (for debugging) |
 | `-d, --detach` | Fork the workflow as a background process and print the run ID. Reconnect later with `fabro logs -f`. |
 
@@ -92,7 +91,6 @@ fabro resume --checkpoint path/to/checkpoint.json --workflow workflow.fabro
 | `--goal <GOAL>` | Override the workflow goal |
 | `--goal-file <FILE>` | Read the goal from a file |
 | `--no-retro` | Skip retro generation after the run |
-| `--ssh` | Create SSH access to the sandbox |
 | `--preserve-sandbox` | Keep the sandbox alive after the run finishes |
 
 ## `fabro ps`

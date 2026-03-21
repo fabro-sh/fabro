@@ -264,7 +264,7 @@ impl ProgressUI {
     }
 
     /// Register event handlers on the emitter.
-    pub fn register(progress: &Arc<Mutex<Self>>, emitter: &mut EventEmitter) {
+    pub fn register(progress: &Arc<Mutex<Self>>, emitter: &EventEmitter) {
         let p = Arc::clone(progress);
         emitter.on_event(move |event| {
             let mut ui = p.lock().expect("progress lock poisoned");
@@ -309,7 +309,7 @@ impl ProgressUI {
 
     // ── Event dispatch ──────────────────────────────────────────────────
 
-    fn handle_event(&mut self, event: &WorkflowRunEvent) {
+    pub(crate) fn handle_event(&mut self, event: &WorkflowRunEvent) {
         match event {
             WorkflowRunEvent::Sandbox {
                 event: sandbox_event,

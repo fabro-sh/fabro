@@ -75,6 +75,7 @@ impl From<SandboxProvider> for CliSandboxProvider {
 #[derive(Args)]
 pub struct RunArgs {
     /// Path to a .fabro workflow file or .toml task config
+    #[arg(required = true)]
     pub workflow: Option<PathBuf>,
 
     /// Run output directory
@@ -124,10 +125,6 @@ pub struct RunArgs {
     /// Skip retro generation after the run
     #[arg(long)]
     pub no_retro: bool,
-
-    /// Create SSH access to the Daytona sandbox and print the connection command
-    #[arg(long)]
-    pub ssh: bool,
 
     /// Keep the sandbox alive after the run finishes (for debugging)
     #[arg(long)]
@@ -717,7 +714,7 @@ pub async fn run_command(
     }
 
     // 3. Build event emitter
-    let mut emitter = EventEmitter::new();
+    let emitter = EventEmitter::new();
 
     // Track the last git commit SHA from CheckpointCompleted events
     let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -787,7 +784,7 @@ pub async fn run_command(
         });
     }
 
-    run_progress::ProgressUI::register(&progress_ui, &mut emitter);
+    run_progress::ProgressUI::register(&progress_ui, &emitter);
 
     // 4. Build interviewer
     let interviewer: Arc<dyn Interviewer> = if args.auto_approve {
@@ -1101,34 +1098,6 @@ pub async fn run_command(
                 };
                 if let Err(e) = record.save(&run_dir_for_listener.join("sandbox.json")) {
                     tracing::warn!(error = %e, "Failed to save sandbox record");
-                }
-            }
-        });
-    }
-
-    // Register SSH access listener
-    if args.ssh {
-        let deferred_sb_ssh = Arc::clone(&deferred_sandbox);
-        emitter.on_event(move |event| {
-            if let fabro_workflows::event::WorkflowRunEvent::SandboxInitialized { .. } = event {
-                if let Ok(rt) = tokio::runtime::Handle::try_current() {
-                    let sb_lock = deferred_sb_ssh.lock().unwrap();
-                    if let Some(ref sb) = *sb_lock {
-                        let sb = Arc::clone(sb);
-                        rt.spawn(async move {
-                            match sb.ssh_access_command().await {
-                                Ok(Some(ssh_command)) => {
-                                    // Note: we can't emit from here since emitter is shared;
-                                    // SSH access info is logged via tracing.
-                                    tracing::info!(ssh_command, "SSH access ready");
-                                }
-                                Ok(None) => {}
-                                Err(e) => {
-                                    tracing::warn!(error = %e, "Failed to create SSH access");
-                                }
-                            }
-                        });
-                    }
                 }
             }
         });

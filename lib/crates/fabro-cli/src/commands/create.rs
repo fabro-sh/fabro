@@ -72,7 +72,6 @@ pub async fn create_run(
             .collect(),
         verbose: args.verbose,
         no_retro: args.no_retro,
-        ssh: args.ssh,
         preserve_sandbox: args.preserve_sandbox,
         dry_run: args.dry_run,
         auto_approve: args.auto_approve,

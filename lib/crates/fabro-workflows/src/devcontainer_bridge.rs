@@ -378,7 +378,7 @@ mod tests {
 
     #[tokio::test]
     async fn emits_started_and_completed_events() {
-        let mut emitter = EventEmitter::new();
+        let emitter = EventEmitter::new();
         let events = Arc::new(Mutex::new(Vec::new()));
         let events_clone = Arc::clone(&events);
         emitter.on_event(move |event| {
@@ -410,7 +410,7 @@ mod tests {
 
     #[tokio::test]
     async fn failed_command_emits_failed_and_returns_error() {
-        let mut emitter = EventEmitter::new();
+        let emitter = EventEmitter::new();
         let events = Arc::new(Mutex::new(Vec::new()));
         let events_clone = Arc::clone(&events);
         emitter.on_event(move |event| {
@@ -430,7 +430,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_commands_is_noop() {
-        let mut emitter = EventEmitter::new();
+        let emitter = EventEmitter::new();
         let events = Arc::new(Mutex::new(Vec::new()));
         let events_clone = Arc::clone(&events);
         emitter.on_event(move |event| {

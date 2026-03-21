@@ -1300,7 +1300,7 @@ impl Handler for ContextSetterHandler {
     }
 }
 
-fn collect_events(emitter: &mut EventEmitter) -> Arc<std::sync::Mutex<Vec<WorkflowRunEvent>>> {
+fn collect_events(emitter: &EventEmitter) -> Arc<std::sync::Mutex<Vec<WorkflowRunEvent>>> {
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let events_clone = Arc::clone(&events);
     emitter.on_event(move |event| {
@@ -1857,8 +1857,8 @@ async fn event_streaming_lifecycle() {
     }"#;
     let graph = parse(input).expect("parse");
     let dir = tempfile::tempdir().unwrap();
-    let mut emitter = EventEmitter::new();
-    let events = collect_events(&mut emitter);
+    let emitter = EventEmitter::new();
+    let events = collect_events(&emitter);
     let engine = WorkflowRunEngine::new(make_linear_registry(), Arc::new(emitter), local_env());
     let config = RunConfig {
         run_dir: dir.path().to_path_buf(),
@@ -2376,8 +2376,8 @@ async fn scenario_ship_a_feature() {
 
     let interviewer = Arc::new(AutoApproveInterviewer);
     let dir = tempfile::tempdir().unwrap();
-    let mut emitter = EventEmitter::new();
-    let events = collect_events(&mut emitter);
+    let emitter = EventEmitter::new();
+    let events = collect_events(&emitter);
     let engine = WorkflowRunEngine::new(
         make_full_registry(interviewer),
         Arc::new(emitter),
@@ -3500,8 +3500,8 @@ async fn integration_smoke_plan_implement_review_done() {
     // Run pipeline
     let interviewer = Arc::new(AutoApproveInterviewer);
     let dir = tempfile::tempdir().unwrap();
-    let mut emitter = EventEmitter::new();
-    let events = collect_events(&mut emitter);
+    let emitter = EventEmitter::new();
+    let events = collect_events(&emitter);
     let engine = WorkflowRunEngine::new(
         make_full_registry(interviewer),
         Arc::new(emitter),
@@ -7427,8 +7427,8 @@ fn engine_with_hooks_and_events(
     Arc<std::sync::Mutex<Vec<WorkflowRunEvent>>>,
 ) {
     let registry = make_linear_registry();
-    let mut emitter = EventEmitter::new();
-    let events = collect_events(&mut emitter);
+    let emitter = EventEmitter::new();
+    let events = collect_events(&emitter);
     let sandbox = local_env();
     let mut engine = WorkflowRunEngine::new(registry, Arc::new(emitter), sandbox);
     if !hooks.is_empty() {
@@ -8885,8 +8885,8 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
 
-    let mut emitter = EventEmitter::new();
-    let events = collect_events(&mut emitter);
+    let emitter = EventEmitter::new();
+    let events = collect_events(&emitter);
     let engine = WorkflowRunEngine::new(registry, Arc::new(emitter), local_env());
     let config = RunConfig {
         run_dir: dir.path().to_path_buf(),
@@ -10640,8 +10640,8 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
 
     // 4. Set up event collection and engine
     let run_dir = tempfile::tempdir().unwrap();
-    let mut emitter = EventEmitter::new();
-    let events = collect_events(&mut emitter);
+    let emitter = EventEmitter::new();
+    let events = collect_events(&emitter);
 
     let env: Arc<dyn fabro_agent::Sandbox> =
         Arc::new(fabro_agent::LocalSandbox::new(worktree_path.clone()));
@@ -11025,8 +11025,8 @@ async fn parallel_git_branching_host_e2e() {
 
     // 4. Set up engine with FileWriterHandler for branches
     let run_dir = tempfile::tempdir().unwrap();
-    let mut emitter = EventEmitter::new();
-    let events = collect_events(&mut emitter);
+    let emitter = EventEmitter::new();
+    let events = collect_events(&emitter);
 
     let env: Arc<dyn fabro_agent::Sandbox> =
         Arc::new(fabro_agent::LocalSandbox::new(worktree_path.clone()));
@@ -11297,8 +11297,8 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
     graph.edges.push(Edge::new("work", "exit"));
 
     let run_dir = tempfile::tempdir().unwrap();
-    let mut emitter = EventEmitter::new();
-    let _events = collect_events(&mut emitter);
+    let emitter = EventEmitter::new();
+    let _events = collect_events(&emitter);
 
     let env: Arc<dyn fabro_agent::Sandbox> =
         Arc::new(fabro_agent::LocalSandbox::new(worktree_path.clone()));
@@ -12210,8 +12210,8 @@ async fn e2e_circuit_breaker_emits_events_before_abort() {
     let dir = tempfile::tempdir().unwrap();
     let graph = circuit_breaker_self_loop_graph(Some(3));
 
-    let mut emitter = EventEmitter::new();
-    let events = collect_events(&mut emitter);
+    let emitter = EventEmitter::new();
+    let events = collect_events(&emitter);
 
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
@@ -12832,7 +12832,7 @@ async fn e2e_stall_watchdog_triggers_from_dot_parsed_pipeline() {
 
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let events_clone = events.clone();
-    let mut emitter = EventEmitter::new();
+    let emitter = EventEmitter::new();
     emitter.on_event(move |event| {
         events_clone.lock().unwrap().push(format!("{event:?}"));
     });
@@ -13123,8 +13123,8 @@ async fn asset_collection_local_sandbox_success() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
 
-    let mut emitter = EventEmitter::new();
-    let events = collect_events(&mut emitter);
+    let emitter = EventEmitter::new();
+    let events = collect_events(&emitter);
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(emitter), sandbox.clone());
 

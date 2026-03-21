@@ -3228,7 +3228,7 @@ mod tests {
 
         let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let events_clone = events.clone();
-        let mut emitter = EventEmitter::new();
+        let emitter = EventEmitter::new();
         emitter.on_event(move |event| {
             events_clone.lock().unwrap().push(format!("{event:?}"));
         });
@@ -5514,7 +5514,7 @@ mod tests {
 
         let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::<WorkflowRunEvent>::new()));
         let events_clone = events.clone();
-        let mut emitter = EventEmitter::new();
+        let emitter = EventEmitter::new();
         emitter.on_event(move |event| {
             events_clone.lock().unwrap().push(event.clone());
         });
@@ -5604,7 +5604,7 @@ mod tests {
 
         let events = Arc::new(std::sync::Mutex::new(Vec::<WorkflowRunEvent>::new()));
         let events_clone = events.clone();
-        let mut emitter = EventEmitter::new();
+        let emitter = EventEmitter::new();
         emitter.on_event(move |event| {
             events_clone.lock().unwrap().push(event.clone());
         });
@@ -5635,7 +5635,7 @@ mod tests {
 
         let events = Arc::new(std::sync::Mutex::new(Vec::<WorkflowRunEvent>::new()));
         let events_clone = events.clone();
-        let mut emitter = EventEmitter::new();
+        let emitter = EventEmitter::new();
         emitter.on_event(move |event| {
             events_clone.lock().unwrap().push(event.clone());
         });
@@ -5757,7 +5757,7 @@ mod tests {
 
         let events = Arc::new(std::sync::Mutex::new(Vec::<WorkflowRunEvent>::new()));
         let events_clone = events.clone();
-        let mut emitter = EventEmitter::new();
+        let emitter = EventEmitter::new();
         emitter.on_event(move |event| {
             events_clone.lock().unwrap().push(event.clone());
         });
@@ -5800,7 +5800,7 @@ mod tests {
 
         let event_names = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let names_clone = event_names.clone();
-        let mut emitter = EventEmitter::new();
+        let emitter = EventEmitter::new();
         emitter.on_event(move |event| {
             let name = match event {
                 WorkflowRunEvent::SandboxInitialized { .. } => "SandboxInitialized",
