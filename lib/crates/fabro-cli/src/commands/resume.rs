@@ -21,10 +21,10 @@ use fabro_workflows::sandbox_provider::SandboxProvider;
 use indicatif::HumanDuration;
 
 use super::run::{
-    apply_goal_override, default_run_dir, generate_retro, local_sandbox_with_callback,
-    print_assets, print_final_output, resolve_cli_goal, resolve_model_provider,
-    resolve_sandbox_provider, resolve_ssh_clone_params, resolve_ssh_config, write_finalize_commit,
-    CliSandboxProvider,
+    apply_goal_override, build_event_envelope, default_run_dir, generate_retro,
+    local_sandbox_with_callback, print_assets, print_final_output, resolve_cli_goal,
+    resolve_daytona_config, resolve_model_provider, resolve_sandbox_provider,
+    resolve_ssh_clone_params, resolve_ssh_config, write_finalize_commit, CliSandboxProvider,
 };
 use crate::commands::shared::{print_diagnostics, tilde_path};
 use fabro_config::project as project_config;
@@ -220,7 +220,20 @@ async fn prepare_from_checkpoint(
             Arc::new(env)
         }
         SandboxProvider::Daytona => {
-            bail!("resume from checkpoint is not yet supported with --sandbox daytona");
+            let config = resolve_daytona_config(None, run_defaults).unwrap_or_default();
+            let mut env = fabro_sandbox::daytona::DaytonaSandbox::new(
+                config,
+                github_app.clone(),
+                Some(run_id.clone()),
+                None,
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let emitter_cb = Arc::clone(&emitter);
+            env.set_event_callback(Arc::new(move |event| {
+                emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
+            }));
+            Arc::new(env)
         }
     };
     let sandbox: Arc<dyn Sandbox> = Arc::new(fabro_agent::ReadBeforeWriteSandbox::new(sandbox));
@@ -396,7 +409,20 @@ async fn prepare_from_branch(
             (Arc::new(env), None)
         }
         SandboxProvider::Daytona => {
-            bail!("resume is not yet supported with --sandbox daytona");
+            let config = resolve_daytona_config(None, run_defaults).unwrap_or_default();
+            let mut env = fabro_sandbox::daytona::DaytonaSandbox::new(
+                config,
+                github_app.clone(),
+                Some(run_id.clone()),
+                Some(run_branch.clone()),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let emitter_cb = Arc::clone(&emitter);
+            env.set_event_callback(Arc::new(move |event| {
+                emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
+            }));
+            (Arc::new(env), None)
         }
     };
 
@@ -470,6 +496,39 @@ async fn run_resumed(
         emitter.on_event(move |event| {
             let mut ui = p.lock().expect("progress lock poisoned");
             ui.handle_event(event);
+        });
+    }
+
+    // JSONL progress log + live.json snapshot (mirrors run_command)
+    {
+        let jsonl_path = run_dir.join("progress.jsonl");
+        let live_path = run_dir.join("live.json");
+        let run_id_shared = Arc::new(std::sync::Mutex::new(run_id.clone()));
+        let run_id_clone = Arc::clone(&run_id_shared);
+        emitter.on_event(move |event| {
+            if let fabro_workflows::event::WorkflowRunEvent::WorkflowRunStarted { run_id, .. } =
+                event
+            {
+                *run_id_clone.lock().unwrap() = run_id.clone();
+            }
+            let envelope = build_event_envelope(event, &run_id_clone.lock().unwrap());
+            // Append to progress.jsonl
+            if let Ok(line) = serde_json::to_string(&envelope) {
+                let line = fabro_util::redact::redact_jsonl_line(&line);
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&jsonl_path)
+                {
+                    let _ = writeln!(f, "{line}");
+                }
+            }
+            // Overwrite live.json
+            if let Ok(pretty) = serde_json::to_string_pretty(&envelope) {
+                let pretty = fabro_util::redact::redact_jsonl_line(&pretty);
+                let _ = std::fs::write(&live_path, pretty);
+            }
         });
     }
 

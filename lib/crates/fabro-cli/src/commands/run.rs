@@ -294,7 +294,7 @@ fn resolve_worktree_mode(
 }
 
 /// Resolve daytona config: TOML config > run defaults.
-fn resolve_daytona_config(
+pub(crate) fn resolve_daytona_config(
     run_cfg: Option<&WorkflowRunConfig>,
     run_defaults: &RunDefaults,
 ) -> Option<fabro_sandbox::daytona::DaytonaConfig> {
@@ -2396,7 +2396,7 @@ pub(crate) async fn generate_retro(
     }
 }
 
-fn build_event_envelope(
+pub(crate) fn build_event_envelope(
     event: &fabro_workflows::event::WorkflowRunEvent,
     run_id: &str,
 ) -> serde_json::Value {
