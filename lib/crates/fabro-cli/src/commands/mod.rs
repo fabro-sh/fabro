@@ -11,6 +11,7 @@ pub mod parse;
 pub mod pr;
 pub mod preview;
 pub mod provider;
+pub mod resume;
 pub mod rewind;
 pub mod run;
 pub(crate) mod run_progress;

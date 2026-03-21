@@ -513,19 +513,31 @@ fn detach_creates_run_dir_with_detach_log() {
     );
 }
 
+// == Resume ===================================================================
+
 #[test]
-fn detach_conflicts_with_resume() {
+fn resume_help_shows_expected_args() {
     arc()
-        .args([
-            "run",
-            "--detach",
-            "--resume",
-            "/tmp/fake-checkpoint.json",
-            "../../../test/simple.fabro",
-        ])
+        .args(["resume", "--help"])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("cannot be used with"));
+        .success()
+        .stdout(predicate::str::contains("--checkpoint"))
+        .stdout(predicate::str::contains("--workflow"));
+}
+
+#[test]
+fn resume_requires_run_or_checkpoint() {
+    arc().args(["resume"]).assert().failure();
+}
+
+#[test]
+fn run_help_no_longer_shows_resume_or_run_branch() {
+    arc()
+        .args(["run", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--resume").not())
+        .stdout(predicate::str::contains("--run-branch").not());
 }
 
 // == Bug regression: create/start/attach lifecycle ============================
@@ -572,9 +584,7 @@ fn setup_run_dir(
         "ssh": false,
         "preserve_sandbox": false,
         "dry_run": true,
-        "auto_approve": true,
-        "resume": null,
-        "run_branch": null
+        "auto_approve": true
     });
     if let (Some(base), Some(overrides)) = (spec.as_object_mut(), spec_overrides.as_object()) {
         for (k, v) in overrides {
@@ -625,9 +635,7 @@ digraph G {
         "ssh": false,
         "preserve_sandbox": false,
         "dry_run": true,
-        "auto_approve": true,
-        "resume": null,
-        "run_branch": null
+        "auto_approve": true
     });
     std::fs::write(
         run_dir.join("spec.json"),

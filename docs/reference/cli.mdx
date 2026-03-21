@@ -42,18 +42,15 @@ Launch a workflow from a `.fabro` workflow file or `.toml` task config.
 ```bash
 fabro run <WORKFLOW>
 fabro run run.toml
-fabro run --run-branch fabro/run/abc123
 ```
 
 | Argument / Flag | Description |
 |---|---|
-| `<WORKFLOW>` | Path to a `.fabro` workflow file, `.toml` task config, or workflow name (resolved from `fabro/workflows/` in the project, then `~/.fabro/workflows/`). Not required when using `--run-branch`. |
+| `<WORKFLOW>` | Path to a `.fabro` workflow file, `.toml` task config, or workflow name (resolved from `fabro/workflows/` in the project, then `~/.fabro/workflows/`). |
 | `--run-dir <DIR>` | Run output directory |
 | `--dry-run` | Execute with a simulated LLM backend |
 | `--preflight` | Validate run configuration without executing |
 | `--auto-approve` | Auto-approve all human gates |
-| `--resume <FILE>` | Resume from a checkpoint file |
-| `--run-branch <BRANCH>` | Resume from a git run branch (reads checkpoint and graph from metadata branch) |
 | `--model <MODEL>` | Override default LLM model |
 | `--provider <PROVIDER>` | Override default LLM provider |
 | `-v, --verbose` | Enable verbose output |
@@ -67,8 +64,36 @@ fabro run --run-branch fabro/run/abc123
 | `-d, --detach` | Fork the workflow as a background process and print the run ID. Reconnect later with `fabro logs -f`. |
 
 <Note>
-`--preflight` conflicts with `--resume`, `--run-branch`, `--dry-run`, and `--detach`. `--run-branch` conflicts with `--resume`.
+`--preflight` conflicts with `--dry-run` and `--detach`.
 </Note>
+
+## `fabro resume`
+
+Resume an interrupted workflow run from its last checkpoint.
+
+```bash
+fabro resume <RUN_ID>
+fabro resume <RUN_ID> --workflow updated.fabro
+fabro resume --checkpoint path/to/checkpoint.json --workflow workflow.fabro
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<RUN_ID>` | Run ID, prefix, or branch (`fabro/run/...`). Not required when using `--checkpoint`. |
+| `--checkpoint <FILE>` | Resume from a checkpoint file (requires `--workflow`) |
+| `--workflow <FILE>` | Override workflow graph (required with `--checkpoint`) |
+| `--run-dir <DIR>` | Run output directory |
+| `--dry-run` | Execute with a simulated LLM backend |
+| `--auto-approve` | Auto-approve all human gates |
+| `--model <MODEL>` | Override default LLM model |
+| `--provider <PROVIDER>` | Override default LLM provider |
+| `-v, --verbose` | Enable verbose output |
+| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, `daytona`, `ssh`, or `exe` |
+| `--goal <GOAL>` | Override the workflow goal |
+| `--goal-file <FILE>` | Read the goal from a file |
+| `--no-retro` | Skip retro generation after the run |
+| `--ssh` | Create SSH access to the sandbox |
+| `--preserve-sandbox` | Keep the sandbox alive after the run finishes |
 
 ## `fabro ps`
 
@@ -399,7 +424,7 @@ fabro skill install --for user --dir claude
 
 ## `fabro rewind`
 
-Rewind a workflow run to an earlier checkpoint. This resets both the run branch and metadata branch refs so that `fabro run --run-branch` resumes from the target checkpoint.
+Rewind a workflow run to an earlier checkpoint. This resets both the run branch and metadata branch refs so that `fabro resume` continues from the target checkpoint.
 
 ```bash
 fabro rewind <RUN_ID> [TARGET]
@@ -424,7 +449,7 @@ Target formats:
 After rewinding, resume from the earlier point:
 
 ```bash
-fabro run --run-branch fabro/run/<RUN_ID>
+fabro resume <RUN_ID>
 ```
 
 See [Checkpoints](/execution/checkpoints#rewinding-to-an-earlier-checkpoint) for background on how checkpointing works.
@@ -448,7 +473,7 @@ fabro fork <RUN_ID> --list
 Target formats are the same as [`fabro rewind`](#fabro-rewind). After forking, resume the new run:
 
 ```bash
-fabro run --run-branch fabro/run/<NEW_RUN_ID>
+fabro resume <NEW_RUN_ID>
 ```
 
 See [Checkpoints — Forking a run](/execution/checkpoints#forking-a-run) for when to use fork vs. rewind.
