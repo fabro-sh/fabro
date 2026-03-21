@@ -653,24 +653,14 @@ async fn main_inner() -> (String, Result<()>) {
                 let cli_config = cli_config::load_cli_config(None)?;
                 args.verbose = args.verbose || cli_config.verbose;
 
-                if args.detach {
-                    // Detach mode: create + start + print run ID
-                    let (run_id, run_dir) =
-                        commands::create::create_run(&args, cli_config.run_defaults, styles, true)
-                            .await?;
-                    commands::start::start_run(&run_dir)?;
-                    println!("{run_id}");
-                } else {
-                    // Foreground mode: use existing run_command
+                if args.preflight {
+                    // Preflight validates config without creating a run dir.
+                    // Needs github_app for token validation, runs in-process.
                     let github_app = build_github_app_credentials(cli_config.app_id());
                     let git_author = fabro_workflows::git::GitAuthor::from_options(
                         cli_config.git_author().and_then(|a| a.name.clone()),
                         cli_config.git_author().and_then(|a| a.email.clone()),
                     );
-
-                    #[cfg(feature = "sleep_inhibitor")]
-                    let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep);
-
                     commands::run::run_command(
                         args,
                         cli_config.run_defaults,
@@ -679,6 +669,28 @@ async fn main_inner() -> (String, Result<()>) {
                         git_author,
                     )
                     .await?;
+                } else {
+                    // Unified path: create + start (+ attach for foreground)
+                    let quiet = args.detach;
+                    let (run_id, run_dir) =
+                        commands::create::create_run(&args, cli_config.run_defaults, styles, quiet)
+                            .await?;
+
+                    #[cfg(feature = "sleep_inhibitor")]
+                    let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep);
+
+                    commands::start::start_run(&run_dir)?;
+
+                    if args.detach {
+                        println!("{run_id}");
+                    } else {
+                        let exit_code =
+                            commands::attach::attach_run(&run_dir, true, styles).await?;
+                        commands::run::print_run_summary(&run_dir, &run_id, styles);
+                        if exit_code != std::process::ExitCode::SUCCESS {
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
             Command::Create(args) => {

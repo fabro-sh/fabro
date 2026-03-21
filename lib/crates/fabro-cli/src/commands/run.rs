@@ -1840,6 +1840,70 @@ pub async fn run_command(
     }
 }
 
+/// Print a summary of the completed run from `conclusion.json` and `pull_request.json`.
+///
+/// Used by the unified create+start+attach path in `main.rs` to display
+/// the same result block that `run_command` prints in-process.
+pub fn print_run_summary(run_dir: &Path, run_id: &str, styles: &Styles) {
+    let conclusion_path = run_dir.join("conclusion.json");
+    let Ok(conclusion) = fabro_workflows::conclusion::Conclusion::load(&conclusion_path) else {
+        return;
+    };
+
+    eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="));
+    eprintln!("{}", styles.dim.apply_to(format!("Run:       {run_id}")));
+
+    let status_str = conclusion.status.to_string().to_uppercase();
+    let status_color = match conclusion.status {
+        StageStatus::Success | StageStatus::PartialSuccess => &styles.bold_green,
+        _ => &styles.bold_red,
+    };
+    eprintln!("Status:    {}", status_color.apply_to(&status_str));
+    eprintln!(
+        "Duration:  {}",
+        HumanDuration(Duration::from_millis(conclusion.duration_ms))
+    );
+
+    if let Some(cost) = conclusion.total_cost {
+        if cost > 0.0 {
+            eprintln!(
+                "{}",
+                styles
+                    .dim
+                    .apply_to(format!("Cost:      {}", format_cost(cost)))
+            );
+        }
+    }
+
+    eprintln!(
+        "{}",
+        styles
+            .dim
+            .apply_to(format!("Run:       {}", tilde_path(run_dir)))
+    );
+
+    if let Some(ref failure) = conclusion.failure_reason {
+        eprintln!("Failure:   {}", styles.red.apply_to(failure));
+    }
+
+    // PR info from pull_request.json (saved by _run_engine)
+    if let Ok(content) = std::fs::read_to_string(run_dir.join("pull_request.json")) {
+        if let Ok(record) =
+            serde_json::from_str::<fabro_workflows::pull_request::PullRequestRecord>(&content)
+        {
+            eprintln!();
+            eprintln!(
+                "{} {}",
+                styles.bold.apply_to("Pull request:"),
+                record.html_url
+            );
+        }
+    }
+
+    print_final_output(run_dir, styles);
+    print_assets(run_dir, styles);
+}
+
 /// Print the final stage output from the checkpoint, if available.
 pub(crate) fn print_final_output(run_dir: &std::path::Path, styles: &Styles) {
     let Ok(checkpoint) = Checkpoint::load(&run_dir.join("checkpoint.json")) else {
