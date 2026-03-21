@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -9,7 +8,7 @@ use clap::Args;
 use fabro_agent::{DockerSandbox, DockerSandboxConfig, Sandbox, WorktreeConfig, WorktreeSandbox};
 use fabro_config::run::RunDefaults;
 use fabro_graphviz::graph::Graph;
-use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, Interviewer};
+use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, FileInterviewer, Interviewer};
 use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 use fabro_workflows::backend::{AgentApiBackend, AgentCliBackend, BackendRouter};
@@ -87,6 +86,10 @@ pub struct ResumeArgs {
     /// Keep the sandbox alive after the run finishes (for debugging)
     #[arg(long)]
     pub preserve_sandbox: bool,
+
+    /// Attach a label to this run (repeatable, format: KEY=VALUE)
+    #[arg(long = "label", value_name = "KEY=VALUE")]
+    pub label: Vec<String>,
 }
 
 /// Intermediate state produced by the two resolution paths (checkpoint-file vs. git-branch).
@@ -167,6 +170,11 @@ async fn prepare_from_checkpoint(
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
+    tokio::fs::write(
+        run_dir.join("graph.fabro"),
+        tokio::fs::read(workflow_path).await?,
+    )
+    .await?;
 
     let original_cwd = std::env::current_dir()?;
     let emitter = Arc::new(EventEmitter::new());
@@ -261,7 +269,12 @@ async fn prepare_from_checkpoint(
         base_sha: None,
         run_branch: None,
         meta_branch: None,
-        labels: HashMap::new(),
+        labels: args
+            .label
+            .iter()
+            .filter_map(|s| s.split_once('='))
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
         checkpoint_exclude_globs: Vec::new(),
         github_app: github_app.clone(),
         git_author,
@@ -363,22 +376,38 @@ async fn prepare_from_branch(
     };
 
     let emitter = Arc::new(EventEmitter::new());
+
+    let setup_worktree_sandbox = |emitter: &Arc<EventEmitter>| -> (WorktreeSandbox, PathBuf) {
+        let wt = run_dir.join("worktree");
+        let wt_str = wt.to_string_lossy().into_owned();
+
+        let inner = local_sandbox_with_callback(original_cwd.clone(), Arc::clone(emitter));
+        let wt_config = WorktreeConfig {
+            branch_name: run_branch.clone(),
+            base_sha: base_sha.clone().unwrap_or_default(),
+            worktree_path: wt_str.clone(),
+            skip_branch_creation: true, // branch already exists on resume
+        };
+        let mut wt_sandbox = WorktreeSandbox::new(inner, wt_config);
+        wt_sandbox.set_event_callback(Arc::clone(emitter).worktree_callback());
+        (wt_sandbox, wt)
+    };
+
     let (sandbox, _worktree_path): (Arc<dyn Sandbox>, Option<PathBuf>) = match sandbox_provider {
-        SandboxProvider::Local | SandboxProvider::Docker => {
-            // Re-attach worktree to the existing run branch via WorktreeSandbox.
-            let wt = run_dir.join("worktree");
-            let wt_str = wt.to_string_lossy().into_owned();
-
-            let inner = local_sandbox_with_callback(original_cwd.clone(), Arc::clone(&emitter));
-            let wt_config = WorktreeConfig {
-                branch_name: run_branch.clone(),
-                base_sha: base_sha.clone().unwrap_or_default(),
-                worktree_path: wt_str.clone(),
-                skip_branch_creation: true, // branch already exists on resume
-            };
-            let mut wt_sandbox = WorktreeSandbox::new(inner, wt_config);
-            wt_sandbox.set_event_callback(Arc::clone(&emitter).worktree_callback());
-
+        SandboxProvider::Local => {
+            let (wt_sandbox, wt) = setup_worktree_sandbox(&emitter);
+            wt_sandbox
+                .initialize()
+                .await
+                .map_err(|e| anyhow::anyhow!("failed to attach worktree to {run_branch}: {e}"))?;
+            std::env::set_current_dir(&wt)?;
+            (Arc::new(wt_sandbox) as Arc<dyn Sandbox>, Some(wt))
+        }
+        SandboxProvider::Docker => {
+            tracing::warn!(
+                "--sandbox docker is not supported for branch resume; falling back to local worktree sandbox"
+            );
+            let (wt_sandbox, wt) = setup_worktree_sandbox(&emitter);
             wt_sandbox
                 .initialize()
                 .await
@@ -458,7 +487,12 @@ async fn prepare_from_branch(
         base_sha,
         run_branch: Some(run_branch),
         meta_branch,
-        labels: HashMap::new(),
+        labels: args
+            .label
+            .iter()
+            .filter_map(|s| s.split_once('='))
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
         checkpoint_exclude_globs: Vec::new(),
         github_app: github_app.clone(),
         git_author,
@@ -582,8 +616,13 @@ async fn run_resumed(
 
     let interviewer: Arc<dyn Interviewer> = if args.auto_approve {
         Arc::new(AutoApproveInterviewer)
+    } else if !std::io::stdin().is_terminal() {
+        Arc::new(FileInterviewer::new(run_dir.clone()))
     } else {
-        Arc::new(ConsoleInterviewer::new(styles))
+        Arc::new(super::run_progress::ProgressAwareInterviewer::new(
+            ConsoleInterviewer::new(styles),
+            Arc::clone(&progress_ui),
+        ))
     };
 
     let dry_run_mode = args.dry_run
