@@ -21,13 +21,16 @@ use indicatif::HumanDuration;
 
 use super::run::{
     apply_goal_override, build_event_envelope, default_run_dir, generate_retro,
-    local_sandbox_with_callback, print_assets, print_final_output, resolve_cli_goal,
-    resolve_daytona_config, resolve_model_provider, resolve_sandbox_provider,
+    local_sandbox_with_callback, mint_github_token, print_assets, print_final_output,
+    resolve_cli_goal, resolve_daytona_config, resolve_model_provider, resolve_sandbox_provider,
     resolve_ssh_clone_params, resolve_ssh_config, write_finalize_commit, CliSandboxProvider,
 };
-use crate::commands::shared::{print_diagnostics, tilde_path};
+use crate::commands::shared::{print_diagnostics, read_workflow_file, tilde_path};
 use fabro_config::project as project_config;
+use fabro_config::run as run_config;
 use fabro_validate::Severity;
+use std::collections::HashMap;
+use tracing::debug;
 
 #[derive(Debug, Args)]
 pub struct ResumeArgs {
@@ -108,6 +111,7 @@ struct ResumeContext {
     original_cwd: Option<PathBuf>,
     sandbox_provider: SandboxProvider,
     ssh_data_host: Option<String>,
+    github_app: Option<fabro_github::GitHubAppCredentials>,
 }
 
 /// Resume an interrupted workflow run.
@@ -147,7 +151,17 @@ async fn prepare_from_checkpoint(
         .ok_or_else(|| anyhow::anyhow!("--workflow is required when using --checkpoint"))?;
 
     let checkpoint = Checkpoint::load(checkpoint_path)?;
-    let (mut graph, diagnostics) = fabro_workflows::workflow::prepare_from_file(workflow_path)?;
+
+    // Expand {{vars.xxx}} placeholders before parsing (mirrors run_command)
+    let source = read_workflow_file(workflow_path)?;
+    let vars = run_defaults.vars.as_ref();
+    let source = match vars {
+        Some(vars) => fabro_workflows::vars::expand_vars(&source, vars)?,
+        None => source,
+    };
+    let dot_dir = workflow_path.parent().unwrap_or(std::path::Path::new("."));
+    let (mut graph, diagnostics) = fabro_workflows::workflow::WorkflowBuilder::new()
+        .prepare_with_file_inlining(&source, dot_dir)?;
 
     let cli_goal = resolve_cli_goal(&args.goal, &args.goal_file)?;
     apply_goal_override(&mut graph, cli_goal.as_deref(), None);
@@ -304,6 +318,7 @@ async fn prepare_from_checkpoint(
         original_cwd: None,
         sandbox_provider,
         ssh_data_host,
+        github_app: github_app.clone(),
     })
 }
 
@@ -343,7 +358,16 @@ async fn prepare_from_branch(
 
     // If --workflow was also provided, use it instead (allows overriding)
     let (mut graph, diagnostics) = if let Some(ref workflow_path) = args.workflow {
-        fabro_workflows::workflow::prepare_from_file(workflow_path)?
+        // Expand {{vars.xxx}} placeholders before parsing (mirrors run_command)
+        let wf_source = read_workflow_file(workflow_path)?;
+        let vars = run_defaults.vars.as_ref();
+        let wf_source = match vars {
+            Some(vars) => fabro_workflows::vars::expand_vars(&wf_source, vars)?,
+            None => wf_source,
+        };
+        let dot_dir = workflow_path.parent().unwrap_or(std::path::Path::new("."));
+        fabro_workflows::workflow::WorkflowBuilder::new()
+            .prepare_with_file_inlining(&wf_source, dot_dir)?
     } else {
         fabro_workflows::workflow::WorkflowBuilder::new().prepare(&source)?
     };
@@ -387,7 +411,7 @@ async fn prepare_from_branch(
         .and_then(|m| m.base_sha);
 
     // Resolve sandbox provider
-    let sandbox_provider = if args.dry_run {
+    let mut sandbox_provider = if args.dry_run {
         SandboxProvider::Local
     } else {
         resolve_sandbox_provider(args.sandbox.map(Into::into), None, run_defaults)?
@@ -430,6 +454,7 @@ async fn prepare_from_branch(
                 "{} --sandbox docker is not supported for branch resume; falling back to local worktree sandbox.",
                 styles.yellow.apply_to("Warning:"),
             );
+            sandbox_provider = SandboxProvider::Local;
             let (wt_sandbox, wt) = setup_worktree_sandbox(&emitter);
             wt_sandbox
                 .initialize()
@@ -542,6 +567,7 @@ async fn prepare_from_branch(
         original_cwd: Some(original_cwd),
         sandbox_provider,
         ssh_data_host,
+        github_app: github_app.clone(),
     })
 }
 
@@ -564,6 +590,7 @@ async fn run_resumed(
         original_cwd,
         sandbox_provider,
         ssh_data_host,
+        github_app,
     } = ctx;
 
     // Write run.pid + initial status so `fabro ps` / `fabro attach` can find this run
@@ -761,13 +788,71 @@ async fn run_resumed(
         None => Vec::new(),
     };
 
-    let registry = fabro_workflows::handler::default_registry(interviewer.clone(), || {
-        if dry_run_mode {
-            None
-        } else {
-            let api = AgentApiBackend::new(model.clone(), provider_enum, fallback_chain.clone());
-            let cli = AgentCliBackend::new(model.clone(), provider_enum);
-            Some(Box::new(BackendRouter::new(Box::new(api), cli)))
+    // Build sandbox env from run defaults (mirrors run_command)
+    let sandbox_env: HashMap<String, String> = {
+        let mut env = HashMap::new();
+        if let Some(mut toml_env) = run_defaults.sandbox.as_ref().and_then(|s| s.env.clone()) {
+            run_config::resolve_env_refs(&mut toml_env)?;
+            env.extend(toml_env);
+        }
+        env
+    };
+
+    // Mint a GitHub App IAT and inject as GITHUB_TOKEN if [github] permissions are declared
+    let mut sandbox_env = sandbox_env;
+    let github_permissions = run_defaults.github.as_ref();
+    if let Some(gh_cfg) = github_permissions {
+        if !gh_cfg.permissions.is_empty() {
+            let origin_url = fabro_sandbox::daytona::detect_repo_info(
+                original_cwd
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new(".")),
+            )
+            .ok()
+            .map(|(url, _)| url);
+            if let (Some(ref creds), Some(ref url)) = (&github_app, &origin_url) {
+                match mint_github_token(creds, url, &gh_cfg.permissions).await {
+                    Ok(token) => {
+                        debug!("Minted GitHub IAT for sandbox GITHUB_TOKEN");
+                        sandbox_env.insert("GITHUB_TOKEN".to_string(), token);
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "{} Failed to mint GitHub token: {e}",
+                            styles.yellow.apply_to("Warning:"),
+                        );
+                    }
+                }
+            } else {
+                debug!("Skipping GitHub token: no GitHub App credentials or origin URL");
+            }
+        }
+    }
+
+    // Resolve MCP servers from run defaults
+    let mcp_servers: Vec<fabro_mcp::config::McpServerConfig> = run_defaults
+        .mcp_servers
+        .clone()
+        .into_iter()
+        .map(|(name, entry)| entry.into_config(name))
+        .collect();
+
+    let registry = fabro_workflows::handler::default_registry(interviewer.clone(), {
+        let sandbox_env = sandbox_env.clone();
+        let model = model.clone();
+        let mcp_servers = mcp_servers.clone();
+        move || {
+            if dry_run_mode {
+                None
+            } else {
+                let api =
+                    AgentApiBackend::new(model.clone(), provider_enum, fallback_chain.clone())
+                        .with_env(sandbox_env.clone())
+                        .with_mcp_servers(mcp_servers.clone());
+                let cli = AgentCliBackend::new(model.clone(), provider_enum)
+                    .with_env(sandbox_env.clone());
+                Some(Box::new(BackendRouter::new(Box::new(api), cli)))
+            }
         }
     });
     let mut engine = fabro_workflows::engine::WorkflowRunEngine::with_interviewer(
@@ -776,8 +861,22 @@ async fn run_resumed(
         interviewer,
         Arc::clone(&sandbox),
     );
+    if !sandbox_env.is_empty() {
+        engine.set_env(sandbox_env);
+    }
     if dry_run_mode {
         engine.set_dry_run(true);
+    }
+    // Wire up hook runner from run defaults (mirrors run_command)
+    {
+        let hooks = &run_defaults.hooks;
+        if !hooks.is_empty() {
+            let hook_config = fabro_hooks::HookConfig {
+                hooks: hooks.clone(),
+            };
+            let runner = fabro_hooks::HookRunner::new(hook_config);
+            engine.set_hook_runner(Arc::new(runner));
+        }
     }
 
     let lifecycle = fabro_workflows::engine::LifecycleConfig {

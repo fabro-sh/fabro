@@ -392,7 +392,7 @@ pub(crate) fn resolve_fallback_chain(
 ///
 /// Signs a JWT, resolves `owner/repo` from `origin_url`, and requests a
 /// scoped token. Returns the token string on success.
-async fn mint_github_token(
+pub(crate) async fn mint_github_token(
     creds: &fabro_github::GitHubAppCredentials,
     origin_url: &str,
     permissions: &HashMap<String, String>,
