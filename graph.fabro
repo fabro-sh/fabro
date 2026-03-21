@@ -1,0 +1,12 @@
+digraph Simple {
+    graph [goal="Run tests and report results"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    run_tests [label="Run Tests", prompt="Run the test suite and report results"]
+    report    [label="Report", prompt="Summarize the test results"]
+
+    start -> run_tests -> report -> exit
+}
