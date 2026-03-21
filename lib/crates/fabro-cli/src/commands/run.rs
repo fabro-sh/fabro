@@ -480,11 +480,10 @@ pub(crate) async fn write_run_config_snapshot(
 
 fn is_missing_cached_run_config(path: &Path, error: &anyhow::Error) -> bool {
     path.file_name() == Some(std::ffi::OsStr::new(RUN_CONFIG_FILE))
-        && error.chain().any(|cause| {
-            cause
-                .downcast_ref::<std::io::Error>()
-                .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
-        })
+        && error
+            .root_cause()
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
 }
 
 fn resolve_workflow_source(
@@ -674,7 +673,7 @@ pub async fn run_command(
     let PreparedWorkflow {
         source,
         graph,
-        run_cfg,
+        mut run_cfg,
         sandbox_provider,
         model,
         provider,
@@ -763,7 +762,14 @@ pub async fn run_command(
     });
 
     // Serialize the merged run config so the run dir is self-contained.
+    // env refs (${env.VARNAME}) are still unresolved at this point, so
+    // plaintext secrets are never written to disk.
     write_run_config_snapshot(&run_dir, run_cfg.as_ref()).await?;
+
+    // Now resolve ${env.VARNAME} references for runtime use.
+    if let Some(ref mut cfg) = run_cfg {
+        run_config::resolve_sandbox_env(cfg)?;
+    }
 
     // Create progress UI (used for both normal and verbose modes)
     let is_tty = std::io::stderr().is_terminal();
