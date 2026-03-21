@@ -969,6 +969,7 @@ pub async fn run_command(
     let devcontainer_config = if run_cfg
         .as_ref()
         .and_then(|c| c.sandbox.as_ref())
+        .or(run_defaults.sandbox.as_ref())
         .and_then(|s| s.devcontainer)
         .unwrap_or(false)
     {
@@ -1300,6 +1301,7 @@ pub async fn run_command(
         if let Some(toml_env) = run_cfg
             .as_ref()
             .and_then(|c| c.sandbox.as_ref())
+            .or(run_defaults.sandbox.as_ref())
             .and_then(|s| s.env.clone())
         {
             env.extend(toml_env);
@@ -1424,11 +1426,13 @@ pub async fn run_command(
         pull_request: run_cfg
             .as_ref()
             .and_then(|c| c.pull_request.as_ref())
+            .or(run_defaults.pull_request.as_ref())
             .filter(|p| p.enabled)
             .cloned(),
         asset_globs: run_cfg
             .as_ref()
             .and_then(|c| c.assets.as_ref())
+            .or(run_defaults.assets.as_ref())
             .map(|a| a.include.clone())
             .unwrap_or_default(),
         workflow_slug: workflow_slug.clone(),

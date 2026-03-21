@@ -724,12 +724,13 @@ async fn main_inner() -> (String, Result<()>) {
                     )
                 })?;
 
-                // Use the cached graph snapshot instead of the original file
-                let cached_graph = run_dir.join("graph.fabro");
-                let workflow_path = if cached_graph.exists() {
-                    cached_graph
+                // Prefer cached run.toml (carries full TOML config including
+                // pull_request, assets, etc.), fall back to bare graph snapshot.
+                let cached_toml = run_dir.join("run.toml");
+                let workflow_path = if cached_toml.exists() {
+                    cached_toml
                 } else {
-                    spec.workflow_path
+                    run_dir.join("graph.fabro")
                 };
 
                 let run_args = commands::run::RunArgs {
