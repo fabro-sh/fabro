@@ -471,14 +471,6 @@ pub(crate) async fn write_run_config_snapshot(
     Ok(())
 }
 
-fn is_missing_cached_run_config(path: &Path, error: &anyhow::Error) -> bool {
-    path.starts_with(fabro_workflows::run_lookup::default_runs_base())
-        && error
-            .root_cause()
-            .downcast_ref::<std::io::Error>()
-            .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
-}
-
 fn resolve_workflow_source(
     workflow_path: &Path,
 ) -> anyhow::Result<(PathBuf, Option<WorkflowRunConfig>)> {
@@ -490,7 +482,12 @@ fn resolve_workflow_source(
                 Ok((dot, Some(cfg)))
             }
             // Backward compatibility for detached runs created before run.toml existed.
-            Err(err) if is_missing_cached_run_config(&path, &err) => {
+            // Use path.exists() to distinguish a genuinely missing run.toml from one
+            // that exists but has a broken internal reference (e.g. missing Dockerfile).
+            Err(_)
+                if !path.exists()
+                    && path.starts_with(fabro_workflows::run_lookup::default_runs_base()) =>
+            {
                 Ok((path.with_file_name(RUN_GRAPH_FILE), None))
             }
             Err(err) => Err(err),
@@ -755,9 +752,17 @@ pub async fn run_command(
     });
 
     // Serialize the merged run config so the run dir is self-contained.
-    // env refs (${env.VARNAME}) are still unresolved at this point, so
-    // plaintext secrets are never written to disk.
-    write_run_config_snapshot(&run_dir, run_cfg.as_mut()).await?;
+    // Skip when the workflow path is already the cached run.toml (i.e. _run_engine
+    // restart) — create_run already wrote the correct snapshot and re-writing here
+    // would persist a double-applied config (apply_defaults ran again on load).
+    let is_cached_snapshot = workflow_path
+        .file_name()
+        .is_some_and(|f| f == RUN_CONFIG_FILE);
+    if !is_cached_snapshot {
+        // env refs (${env.VARNAME}) are still unresolved at this point, so
+        // plaintext secrets are never written to disk.
+        write_run_config_snapshot(&run_dir, run_cfg.as_mut()).await?;
+    }
 
     // Now resolve ${env.VARNAME} references for runtime use.
     if let Some(ref mut cfg) = run_cfg {
@@ -1358,12 +1363,17 @@ pub async fn run_command(
         } else {
             HashMap::new()
         };
-        if let Some(toml_env) = run_cfg
+        if let Some(mut toml_env) = run_cfg
             .as_ref()
             .and_then(|c| c.sandbox.as_ref())
             .or(run_defaults.sandbox.as_ref())
             .and_then(|s| s.env.clone())
         {
+            // When falling back to run_defaults (run_cfg is None, i.e. bare .fabro
+            // workflow), env refs haven't been resolved yet — resolve them now.
+            if run_cfg.is_none() {
+                run_config::resolve_env_refs(&mut toml_env)?;
+            }
             env.extend(toml_env);
         }
         env
