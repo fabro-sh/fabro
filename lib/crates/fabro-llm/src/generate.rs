@@ -69,6 +69,7 @@ fn build_request(
         max_tokens: params.max_tokens,
         stop_sequences: params.stop_sequences.clone(),
         reasoning_effort: params.reasoning_effort.clone(),
+        speed: params.speed.clone(),
         metadata: params.metadata.clone(),
         provider_options: params.provider_options.clone(),
     }
@@ -288,6 +289,7 @@ pub struct GenerateParams {
     pub max_tokens: Option<i64>,
     pub stop_sequences: Option<Vec<String>>,
     pub reasoning_effort: Option<String>,
+    pub speed: Option<String>,
     pub provider: Option<String>,
     pub provider_options: Option<serde_json::Value>,
     pub metadata: Option<std::collections::HashMap<String, String>>,
@@ -318,6 +320,7 @@ impl GenerateParams {
             max_tokens: None,
             stop_sequences: None,
             reasoning_effort: None,
+            speed: None,
             provider: None,
             provider_options: None,
             metadata: None,

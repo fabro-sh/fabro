@@ -706,6 +706,7 @@ impl CodergenBackend for AgentCliBackend {
             cache_read_tokens: None,
             cache_write_tokens: None,
             reasoning_tokens: None,
+            speed: None,
             cost: None,
         };
         stage_usage.cost = compute_stage_cost(&stage_usage);

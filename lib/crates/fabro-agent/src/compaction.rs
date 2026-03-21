@@ -112,6 +112,7 @@ function names, error messages, and exact values. Omit pleasantries and conversa
         max_tokens: Some(4096),
         stop_sequences: None,
         reasoning_effort: None,
+        speed: None,
         metadata: None,
         provider_options: None,
     };

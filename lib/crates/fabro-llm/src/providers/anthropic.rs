@@ -109,6 +109,8 @@ struct ApiRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     output_config: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    speed: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     metadata: Option<std::collections::HashMap<String, String>>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     stream: bool,
@@ -165,6 +167,8 @@ struct ApiUsage {
     cache_read_input_tokens: Option<i64>,
     #[serde(default)]
     cache_creation_input_tokens: Option<i64>,
+    #[serde(default)]
+    speed: Option<String>,
 }
 
 /// Estimate reasoning tokens from thinking content blocks.
@@ -508,6 +512,7 @@ fn convert_stream_event_for_json_schema(event: StreamEvent) -> StreamEvent {
 // --- Prompt caching helpers ---
 
 const CACHE_BETA_HEADER: &str = "prompt-caching-2024-07-31";
+const FAST_MODE_BETA_HEADER: &str = "fast-mode-2026-02-01";
 
 /// Check whether auto-caching is disabled via `provider_options`.
 ///
@@ -594,6 +599,7 @@ fn apply_cache_control_to_conversation_prefix(messages: &mut [ApiMessage]) {
 fn build_beta_header(
     provider_options: Option<&serde_json::Value>,
     include_cache_header: bool,
+    include_fast_mode_header: bool,
 ) -> Option<String> {
     let mut headers: Vec<String> = Vec::new();
 
@@ -614,6 +620,11 @@ fn build_beta_header(
     // Add prompt-caching header if caching is active and not already present
     if include_cache_header && !headers.iter().any(|h| h == CACHE_BETA_HEADER) {
         headers.push(CACHE_BETA_HEADER.to_string());
+    }
+
+    // Add fast-mode header if speed=fast and not already present
+    if include_fast_mode_header && !headers.iter().any(|h| h == FAST_MODE_BETA_HEADER) {
+        headers.push(FAST_MODE_BETA_HEADER.to_string());
     }
 
     if headers.is_empty() {
@@ -710,6 +721,10 @@ impl StreamAccumulator {
                 self.usage.cache_write_tokens = usage
                     .get("cache_creation_input_tokens")
                     .and_then(serde_json::Value::as_i64);
+                self.usage.speed = usage
+                    .get("speed")
+                    .and_then(serde_json::Value::as_str)
+                    .map(String::from);
             }
         }
         vec![StreamEvent::StreamStart]
@@ -1122,6 +1137,8 @@ fn build_api_request(
         (explicit_thinking, None)
     };
 
+    let is_fast = request.speed.as_deref() == Some("fast");
+
     let api_request = ApiRequest {
         model: request.model.clone(),
         messages: api_messages,
@@ -1134,6 +1151,7 @@ fn build_api_request(
         tool_choice: tool_choice_json,
         thinking,
         output_config,
+        speed: request.speed.clone(),
         metadata: request.metadata.clone(),
         stream,
     };
@@ -1150,7 +1168,9 @@ fn build_api_request(
             .header("x-api-key", &adapter.http.api_key)
             .header("anthropic-version", "2023-06-01");
 
-        if let Some(beta_str) = build_beta_header(request.provider_options.as_ref(), auto_cache) {
+        if let Some(beta_str) =
+            build_beta_header(request.provider_options.as_ref(), auto_cache, is_fast)
+        {
             req_builder = req_builder.header("anthropic-beta", beta_str);
         }
     } else {
@@ -1234,6 +1254,7 @@ impl ProviderAdapter for Adapter {
                 reasoning_tokens,
                 cache_read_tokens: api_resp.usage.cache_read_input_tokens,
                 cache_write_tokens: api_resp.usage.cache_creation_input_tokens,
+                speed: api_resp.usage.speed,
                 ..Usage::default()
             },
             raw: serde_json::from_str(&body).ok(),
@@ -1527,13 +1548,13 @@ mod tests {
 
     #[test]
     fn beta_header_includes_cache_header() {
-        let result = build_beta_header(None, true);
+        let result = build_beta_header(None, true, false);
         assert_eq!(result, Some(CACHE_BETA_HEADER.to_string()));
     }
 
     #[test]
     fn beta_header_no_cache_no_user_headers() {
-        let result = build_beta_header(None, false);
+        let result = build_beta_header(None, false, false);
         assert_eq!(result, None);
     }
 
@@ -1544,7 +1565,7 @@ mod tests {
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let result = build_beta_header(Some(&opts), true);
+        let result = build_beta_header(Some(&opts), true, false);
         assert_eq!(
             result,
             Some(format!(
@@ -1560,7 +1581,7 @@ mod tests {
                 "beta_headers": [CACHE_BETA_HEADER]
             }
         });
-        let result = build_beta_header(Some(&opts), true);
+        let result = build_beta_header(Some(&opts), true, false);
         // Should not duplicate the header
         assert_eq!(result, Some(CACHE_BETA_HEADER.to_string()));
     }
@@ -1572,7 +1593,7 @@ mod tests {
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let result = build_beta_header(Some(&opts), false);
+        let result = build_beta_header(Some(&opts), false, false);
         assert_eq!(result, Some("interleaved-thinking-2025-05-14".to_string()));
     }
 
@@ -1624,6 +1645,7 @@ mod tests {
             tool_choice: None,
             thinking: None,
             output_config: None,
+            speed: None,
             metadata: None,
             stream: false,
         };
@@ -1663,6 +1685,7 @@ mod tests {
             max_tokens: Some(128),
             stop_sequences: None,
             reasoning_effort: None,
+            speed: None,
             metadata: None,
             provider_options: None,
         }
@@ -1979,7 +2002,7 @@ mod tests {
         ];
 
         // No user headers — only cache header should appear
-        let header = build_beta_header(None, true).unwrap_or_default();
+        let header = build_beta_header(None, true, false).unwrap_or_default();
         for dep in &deprecated {
             assert!(
                 !header.contains(dep),
@@ -1993,7 +2016,7 @@ mod tests {
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let header = build_beta_header(Some(&opts), true).unwrap_or_default();
+        let header = build_beta_header(Some(&opts), true, false).unwrap_or_default();
         for dep in &deprecated {
             assert!(
                 !header.contains(dep),
@@ -2019,6 +2042,7 @@ mod tests {
             tool_choice: None,
             thinking: None,
             output_config: None,
+            speed: None,
             metadata: None,
             stream: false,
         };
@@ -2051,6 +2075,7 @@ mod tests {
             tool_choice: None,
             thinking: None,
             output_config: None,
+            speed: None,
             metadata: None,
             stream: false,
         };
@@ -2110,5 +2135,53 @@ mod tests {
 
         let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
         assert!(api_request.output_config.is_none());
+    }
+
+    #[test]
+    fn build_api_request_sets_speed() {
+        let adapter = Adapter::new("test-key");
+        let request = Request {
+            speed: Some("fast".to_string()),
+            ..make_base_request()
+        };
+
+        let (api_request, _req_builder) = build_api_request(&adapter, &request, false);
+        assert_eq!(api_request.speed, Some("fast".to_string()));
+    }
+
+    #[test]
+    fn build_api_request_injects_fast_mode_beta_header() {
+        let adapter = Adapter::new("test-key");
+        let request = Request {
+            speed: Some("fast".to_string()),
+            ..make_base_request()
+        };
+
+        let (_api_request, req_builder) = build_api_request(&adapter, &request, false);
+        let built = req_builder.build().expect("should build request");
+        let beta = built
+            .headers()
+            .get("anthropic-beta")
+            .expect("anthropic-beta header should be present")
+            .to_str()
+            .unwrap();
+        assert!(
+            beta.contains(FAST_MODE_BETA_HEADER),
+            "beta header should contain fast-mode header, got: {beta}"
+        );
+    }
+
+    #[test]
+    fn beta_header_includes_both_cache_and_fast_mode() {
+        let result = build_beta_header(None, true, true);
+        let header = result.expect("should produce a header");
+        assert!(
+            header.contains(CACHE_BETA_HEADER),
+            "should contain cache header"
+        );
+        assert!(
+            header.contains(FAST_MODE_BETA_HEADER),
+            "should contain fast-mode header"
+        );
     }
 }

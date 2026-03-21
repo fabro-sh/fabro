@@ -624,6 +624,7 @@ mod tests {
             cache_read_tokens: Some(80),
             cache_write_tokens: Some(10),
             reasoning_tokens: Some(20),
+            speed: None,
             raw: None,
         };
         let event = AgentEvent::AssistantMessage {

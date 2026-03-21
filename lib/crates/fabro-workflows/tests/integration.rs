@@ -6071,6 +6071,7 @@ mod real_llm {
                 max_tokens: Some(200),
                 stop_sequences: None,
                 reasoning_effort: None,
+                speed: None,
                 metadata: None,
                 provider_options: None,
             };
