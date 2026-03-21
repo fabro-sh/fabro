@@ -270,6 +270,7 @@ mod tests {
                 tools: true,
                 vision: true,
                 reasoning: true,
+                effort: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -349,6 +350,7 @@ mod tests {
                 tools: true,
                 vision: true,
                 reasoning: true,
+                effort: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -402,6 +404,7 @@ mod tests {
                 tools: true,
                 vision: true,
                 reasoning: false,
+                effort: false,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -460,6 +463,7 @@ mod tests {
                 tools: true,
                 vision: false,
                 reasoning: true,
+                effort: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -508,6 +512,7 @@ mod tests {
                 tools: true,
                 vision: true,
                 reasoning: true,
+                effort: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -554,6 +559,7 @@ mod tests {
                 tools: true,
                 vision: true,
                 reasoning: true,
+                effort: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -620,6 +626,7 @@ mod tests {
                 tools: true,
                 vision: false,
                 reasoning: true,
+                effort: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: None,
