@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context};
 use clap::Args;
-use fabro_agent::{Sandbox, WorktreeConfig, WorktreeSandbox};
+use fabro_agent::{DockerSandbox, DockerSandboxConfig, Sandbox, WorktreeConfig, WorktreeSandbox};
 use fabro_config::run::RunDefaults;
 use fabro_graphviz::graph::Graph;
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, Interviewer};
@@ -37,7 +37,7 @@ pub struct ResumeArgs {
     pub run: Option<String>,
 
     /// Resume from a checkpoint file (requires --workflow)
-    #[arg(long)]
+    #[arg(long, conflicts_with = "run", requires = "workflow")]
     pub checkpoint: Option<PathBuf>,
 
     /// Override workflow graph (required with --checkpoint)
@@ -179,8 +179,21 @@ async fn prepare_from_checkpoint(
     };
 
     let sandbox: Arc<dyn Sandbox> = match sandbox_provider {
-        SandboxProvider::Local | SandboxProvider::Docker => {
+        SandboxProvider::Local => {
             local_sandbox_with_callback(original_cwd.clone(), Arc::clone(&emitter))
+        }
+        SandboxProvider::Docker => {
+            let config = DockerSandboxConfig {
+                host_working_directory: original_cwd.to_string_lossy().to_string(),
+                ..DockerSandboxConfig::default()
+            };
+            let mut env = DockerSandbox::new(config)
+                .map_err(|e| anyhow::anyhow!("Failed to create Docker environment: {e}"))?;
+            let emitter_cb = Arc::clone(&emitter);
+            env.set_event_callback(Arc::new(move |event| {
+                emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
+            }));
+            Arc::new(env)
         }
         #[cfg(feature = "exedev")]
         SandboxProvider::Exe => {

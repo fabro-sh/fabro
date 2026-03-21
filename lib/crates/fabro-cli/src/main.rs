@@ -920,6 +920,8 @@ async fn main_inner() -> (String, Result<()>) {
                 let styles: &'static fabro_util::terminal::Styles =
                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
                 let cli_config = cli_config::load_cli_config(None)?;
+                #[cfg(feature = "sleep_inhibitor")]
+                let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep);
                 let github_app = build_github_app_credentials(cli_config.app_id());
                 let git_author = fabro_workflows::git::GitAuthor::from_options(
                     cli_config.git_author().and_then(|a| a.name.clone()),
