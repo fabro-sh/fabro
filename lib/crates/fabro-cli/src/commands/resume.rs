@@ -107,6 +107,8 @@ struct ResumeContext {
     emitter: Arc<EventEmitter>,
     config: RunConfig,
     setup_commands: Vec<String>,
+    /// Devcontainer lifecycle phases (on_create, post_create, post_start) resolved from config.
+    devcontainer_phases: Vec<(String, Vec<fabro_devcontainer::Command>)>,
     /// Original cwd to restore after engine run (git-branch path changes cwd to worktree).
     original_cwd: Option<PathBuf>,
     sandbox_provider: SandboxProvider,
@@ -194,6 +196,33 @@ async fn prepare_from_checkpoint(
 
     let original_cwd = std::env::current_dir()?;
     let emitter = Arc::new(EventEmitter::new());
+
+    // Resolve devcontainer if enabled (mirrors run_command)
+    let devcontainer_config = if run_defaults
+        .sandbox
+        .as_ref()
+        .and_then(|s| s.devcontainer)
+        .unwrap_or(false)
+    {
+        match fabro_devcontainer::DevcontainerResolver::resolve(&original_cwd).await {
+            Ok(dc) => Some(dc),
+            Err(e) => {
+                bail!("Failed to resolve devcontainer: {e}");
+            }
+        }
+    } else {
+        None
+    };
+
+    let devcontainer_phases = if let Some(ref dc) = devcontainer_config {
+        vec![
+            ("on_create".to_string(), dc.on_create_commands.clone()),
+            ("post_create".to_string(), dc.post_create_commands.clone()),
+            ("post_start".to_string(), dc.post_start_commands.clone()),
+        ]
+    } else {
+        Vec::new()
+    };
 
     // Resolve sandbox provider from CLI flag / config / defaults
     let sandbox_provider = if args.dry_run {
@@ -314,7 +343,12 @@ async fn prepare_from_checkpoint(
         sandbox,
         emitter,
         config,
-        setup_commands: Vec::new(),
+        setup_commands: run_defaults
+            .setup
+            .as_ref()
+            .map(|s| s.commands.clone())
+            .unwrap_or_default(),
+        devcontainer_phases,
         original_cwd: None,
         sandbox_provider,
         ssh_data_host,
@@ -389,10 +423,13 @@ async fn prepare_from_branch(
 
     // Set up logs directory — reuse existing run dir for this run_id to avoid
     // "ambiguous prefix" errors when the resume happens on a different day.
+    // Skip reuse when dry-running to avoid corrupting real run data.
     let run_dir = if let Some(ref dir) = args.run_dir {
         dir.clone()
+    } else if args.dry_run {
+        default_run_dir(&run_id, true)
     } else {
-        find_existing_run_dir(&run_id).unwrap_or_else(|| default_run_dir(&run_id, args.dry_run))
+        find_existing_run_dir(&run_id).unwrap_or_else(|| default_run_dir(&run_id, false))
     };
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
@@ -564,6 +601,7 @@ async fn prepare_from_branch(
         emitter,
         config,
         setup_commands,
+        devcontainer_phases: Vec::new(),
         original_cwd: Some(original_cwd),
         sandbox_provider,
         ssh_data_host,
@@ -587,6 +625,7 @@ async fn run_resumed(
         emitter,
         mut config,
         setup_commands,
+        devcontainer_phases,
         original_cwd,
         sandbox_provider,
         ssh_data_host,
@@ -881,8 +920,8 @@ async fn run_resumed(
 
     let lifecycle = fabro_workflows::engine::LifecycleConfig {
         setup_commands,
-        setup_command_timeout_ms: 60_000,
-        devcontainer_phases: Vec::new(),
+        setup_command_timeout_ms: 300_000,
+        devcontainer_phases,
     };
 
     let run_start = Instant::now();
