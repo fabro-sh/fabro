@@ -53,6 +53,7 @@
               "execution/environments",
               "execution/context",
               "execution/checkpoints",
+              "execution/outcomes",
               "execution/failures",
               "execution/retros",
               "execution/observability",

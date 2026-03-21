@@ -1,0 +1,130 @@
+---
+title: "Node Outcomes"
+description: "The five stage statuses and the attributes that control them"
+---
+
+Every node execution produces an **outcome** containing a status that drives edge routing, retry logic, and goal gate checks. This page defines the five statuses and the attributes that influence them.
+
+## The five statuses
+
+| Status | Meaning |
+|---|---|
+| `success` | The handler completed normally |
+| `fail` | The handler encountered an unrecoverable error |
+| `partial_success` | The handler did not fully succeed but produced usable results — typically from retries exhausted with `allow_partial=true` |
+| `retry` | The handler wants to re-execute — consumed by the [retry loop](#retry-loop) and never appears in edge conditions |
+| `skipped` | The node was not executed (e.g. a branch not taken in a parallel fan-out) |
+
+<Note>
+`retry` is internal to the engine. It triggers re-execution inside the retry loop and is never visible in edge `condition` expressions. The four externally-visible statuses are `success`, `fail`, `partial_success`, and `skipped`.
+</Note>
+
+## How handlers produce statuses
+
+Each node type has its own rules for which statuses it can return:
+
+| Handler | Produces | Conditions |
+|---|---|---|
+| **Command** | `success`, `fail` | `success` when exit code is 0; `fail` otherwise |
+| **Agent / Prompt** | `success`, `fail`, `partial_success`, `retry`, `skipped` | Defaults to `success`. The LLM can set any status via a [routing directive](/agents/outputs#routing-directives) JSON object in its response. Backend errors produce `retry` (if retryable) or `fail`. |
+| **Parallel** | `success`, `partial_success`, `fail` | Depends on the `join_policy`. `wait_all`: `success` if no failures, `partial_success` if some branches failed. `first_success` / `k_of_n` / `quorum`: `success` if threshold met, else `fail`. |
+| **Human** | `success` | Always succeeds — the user's selection becomes a routing signal via `preferred_label` |
+| **Conditional** | `success` | Always succeeds — routing is handled by the engine's edge selection |
+| **Start / Exit / Wait** | `success` | Always succeed |
+
+## Retry loop
+
+When a handler returns `retry` status, the engine enters the retry loop. If retry attempts remain (per the node's [retry policy](/execution/failures#retry-policies)), the handler re-executes after a backoff delay. If attempts are exhausted, the final status depends on `allow_partial`:
+
+```
+┌─────────────┐
+│ Run handler  │
+└──────┬──────┘
+       │
+       ▼
+  ┌──────────┐    success/fail/
+  │ Status?  │───partial_success/───▶ Done (use as-is)
+  └────┬─────┘    skipped
+       │ retry
+       ▼
+  ┌──────────────┐   yes    ┌──────────────┐
+  │ Attempts     │─────────▶│ Backoff +    │──┐
+  │ remain?      │          │ re-execute   │  │
+  └──────┬───────┘          └──────────────┘  │
+         │ no                                 │
+         ▼                         ┌──────────┘
+  ┌──────────────┐                 │
+  │allow_partial?│                 │ (loops back to
+  └──────┬───┬───┘                 │  "Run handler")
+    yes  │   │ no                  │
+         ▼   ▼
+  partial_   fail
+  success
+```
+
+Handler errors follow the same loop: retryable errors (transient infrastructure) re-execute if attempts remain; non-retryable errors (authentication, bad config) fail immediately without consuming retry attempts.
+
+## `allow_partial`
+
+When `allow_partial=true` and the retry loop exhausts all attempts on a `retry` status, the outcome is promoted to `partial_success` instead of `fail`. This lets the workflow continue past nodes that could not fully succeed.
+
+| Attribute | Type | Default |
+|---|---|---|
+| `allow_partial` | Boolean | `false` |
+
+```dot
+implement [
+    label="Implement",
+    retry_policy="standard",
+    allow_partial=true,
+    prompt="Implement the feature."
+]
+```
+
+In this example, if the agent returns `retry` and all 5 standard-policy attempts are used, the node finishes with `partial_success` rather than failing the run.
+
+See [Retry policies](/execution/failures#retry-policies) for the available presets and backoff settings.
+
+## `auto_status`
+
+When `auto_status=true`, any non-`success` and non-`skipped` status is silently overridden to `success` after the handler completes. This is applied after the retry loop, so retries still happen normally — only the final outcome is overridden.
+
+| Attribute | Type | Default |
+|---|---|---|
+| `auto_status` | Boolean | `false` |
+
+```dot
+scan [
+    label="Scan",
+    shape=parallelogram,
+    auto_status=true,
+    script="find . -name '*.log' | head -20"
+]
+```
+
+Use `auto_status` for nodes whose failure should never block the workflow — optional scans, best-effort cleanup steps, or informational commands where the output matters more than the exit code.
+
+## Goal gate interaction
+
+Nodes marked with `goal_gate=true` are checked when the workflow reaches the exit node. A goal gate is satisfied if its last outcome was `success` **or** `partial_success`. Any other status (`fail`, `skipped`) causes the workflow to fail, even though execution reached the exit.
+
+This means `allow_partial=true` on a goal gate node lets the gate pass even if the node exhausted its retries — the promoted `partial_success` counts as passing.
+
+See [Goal gates](/execution/failures#goal-gates) for retry target resolution and failure behavior.
+
+## Outcome in edge conditions
+
+The four externally-visible statuses can be used in edge `condition` expressions via the `outcome` key:
+
+```dot
+gate -> deploy  [label="Pass",    condition="outcome=success"]
+gate -> fix     [label="Fix",     condition="outcome=fail"]
+gate -> review  [label="Partial", condition="outcome=partial_success"]
+gate -> skip    [label="Skipped", condition="outcome=skipped"]
+
+// Common pattern: treat partial as passing
+gate -> deploy  [condition="outcome=success || outcome=partial_success"]
+gate -> fix     [condition="outcome=fail"]
+```
+
+See [Transitions](/workflows/transitions) for the full edge selection logic and operator reference.

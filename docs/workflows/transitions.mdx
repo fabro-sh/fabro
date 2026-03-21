@@ -7,7 +7,7 @@ After each node finishes, Fabro must decide which edge to follow to the next nod
 
 ## How transitions work
 
-When a node completes, it produces an **outcome** with a status (`success`, `fail`, `partial_success`) and optional signals like a preferred label or suggested next node. Fabro evaluates the outgoing edges in a fixed priority order:
+When a node completes, it produces an **outcome** with a [status](/execution/outcomes) (`success`, `fail`, `partial_success`, or `skipped`) and optional signals like a preferred label or suggested next node. Fabro evaluates the outgoing edges in a fixed priority order:
 
 1. **Condition match** — Edges with a `condition` attribute are evaluated first. If one or more conditions match, the edge with the highest `weight` wins (lexical tiebreak on target node ID).
 2. **Preferred label** — If the node's outcome includes a preferred label (e.g. from a human gate selection), the edge whose `label` matches is chosen.
@@ -37,7 +37,7 @@ gate -> implement [label="Fix", condition="outcome=fail"]
 
 | Key | Resolves to |
 |---|---|
-| `outcome` | The stage status: `success`, `fail`, or `partial_success` |
+| `outcome` | The stage status: `success`, `fail`, `partial_success`, or `skipped`. See [Node Outcomes](/execution/outcomes). |
 | `preferred_label` | The label selected by a human gate |
 | `context.KEY` | A value from the run context (e.g. `context.tests_passed`) |
 | `KEY` | Shorthand for context lookup (without the `context.` prefix) |

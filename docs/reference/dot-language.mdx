@@ -187,8 +187,9 @@ Start nodes can also be identified by ID (`start` or `Start`). Exit nodes can be
 | `max_retries` | Integer | Override default retry count |
 | `retry_policy` | String | Named preset: `none`, `standard`, `aggressive`, `linear`, `patient` |
 | `retry_target` | String | Node ID to jump to on retry |
-| `goal_gate` | Boolean | When `true`, workflow fails if this node doesn't succeed |
-| `auto_status` | Boolean | Auto-generate status updates |
+| `goal_gate` | Boolean | When `true`, workflow fails if this node didn't finish with `success` or `partial_success`. See [Node Outcomes](/execution/outcomes#goal-gate-interaction). |
+| `auto_status` | Boolean | When `true`, overrides any non-`success`/non-`skipped` status to `success` after the handler completes. See [Node Outcomes](/execution/outcomes#auto_status). |
+| `allow_partial` | Boolean | When `true` and retries are exhausted on a `retry` status, promotes the outcome to `partial_success` instead of `fail`. Default `false`. See [Node Outcomes](/execution/outcomes#allow_partial). |
 | `selection` | String | Edge tiebreaking strategy: `deterministic` (default) or `random` (weighted-random). Cannot be combined with conditional edges. |
 
 ### Agent and prompt nodes
@@ -257,7 +258,7 @@ Op         ::= '=' | '!=' | '>' | '<' | '>=' | '<='
 
 | Key | Resolves to |
 |---|---|
-| `outcome` | Stage status: `success`, `fail`, or `partial_success` |
+| `outcome` | Stage status: `success`, `fail`, `partial_success`, or `skipped`. See [Node Outcomes](/execution/outcomes#outcome-in-edge-conditions). |
 | `preferred_label` | Label selected by a human gate or LLM routing directive |
 | `context.KEY` | Value from the run context |
 | `KEY` | Shorthand for context lookup (without the `context.` prefix) |
