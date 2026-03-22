@@ -1,0 +1,62 @@
+{
+  "timestamp": "2026-03-22T20:12:53.732340Z",
+  "current_node": "draft",
+  "completed_nodes": [
+    "start",
+    "draft"
+  ],
+  "node_retries": {
+    "start": 1,
+    "draft": 1
+  },
+  "context_values": {
+    "outcome": "success",
+    "internal.fidelity": "compact",
+    "internal.retry_count.start": 1,
+    "graph.goal": "Test human gate with auto-approve",
+    "internal.retry_count.draft": 1,
+    "failure_signature": "",
+    "graph.rankdir": "LR",
+    "last_response": "# Greeting\n\nHello! 👋 \n\nWelcome to Fabro! I'm ready to help you test the human gate with auto-approve functionality. Feel free to share the workflow details, test case, or specific scenario you'd li",
+    "last_stage": "draft",
+    "internal.thread_id": "start",
+    "response.draft": "# Greeting\n\nHello! 👋 \n\nWelcome to Fabro! I'm ready to help you test the human gate with auto-approve functionality. Feel free to share the workflow details, test case, or specific scenario you'd like to work through, and I'll assist you with implementation, debugging, or documentation as needed.\n\nWhat would you like to explore first?",
+    "current.preamble": "Goal: Test human gate with auto-approve\n",
+    "thread.start.current_node": "draft",
+    "internal.node_visit_count": 1,
+    "current_node": "draft",
+    "internal.run_id": "01KMBJVE3Q1RQ8VAB3F9G8G0VD",
+    "failure_class": ""
+  },
+  "logs": [],
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
+    "draft": {
+      "status": "success",
+      "context_updates": {
+        "response.draft": "# Greeting\n\nHello! 👋 \n\nWelcome to Fabro! I'm ready to help you test the human gate with auto-approve functionality. Feel free to share the workflow details, test case, or specific scenario you'd like to work through, and I'll assist you with implementation, debugging, or documentation as needed.\n\nWhat would you like to explore first?",
+        "last_stage": "draft",
+        "last_response": "# Greeting\n\nHello! 👋 \n\nWelcome to Fabro! I'm ready to help you test the human gate with auto-approve functionality. Feel free to share the workflow details, test case, or specific scenario you'd li"
+      },
+      "notes": "Stage completed: draft",
+      "usage": {
+        "model": "claude-haiku-4-5",
+        "input_tokens": 2206,
+        "output_tokens": 142,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "reasoning_tokens": 59,
+        "cost": 0.0023328000000000003
+      },
+      "duration_ms": 1943
+    }
+  },
+  "next_node_id": "approve",
+  "node_visits": {
+    "start": 1,
+    "draft": 1
+  }
+}
