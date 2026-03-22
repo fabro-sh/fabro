@@ -1,0 +1,8 @@
+diff --git a/scenario_test.txt b/scenario_test.txt
+new file mode 100644
+index 00000000..b6fc4c62
+--- /dev/null
++++ b/scenario_test.txt
+@@ -0,0 +1 @@
++hello
+\ No newline at end of file
