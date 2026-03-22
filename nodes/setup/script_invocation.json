@@ -1,0 +1,5 @@
+{
+  "command": "mkdir -p /tmp/scenario_full && echo ready > /tmp/scenario_full/flag.txt",
+  "language": "shell",
+  "timeout_ms": null
+}

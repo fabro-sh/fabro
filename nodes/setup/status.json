@@ -1,0 +1,6 @@
+{
+  "status": "success",
+  "notes": "Script completed: mkdir -p /tmp/scenario_full && echo ready > /tmp/scenario_full/flag.txt",
+  "failure_reason": null,
+  "timestamp": "2026-03-22T20:12:53.846904+00:00"
+}
