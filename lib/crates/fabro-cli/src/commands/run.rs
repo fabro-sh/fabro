@@ -430,14 +430,14 @@ enum WorkdirStrategy {
 
 /// Accumulates token usage and cost across all workflow stages.
 #[derive(Default)]
-struct CostAccumulator {
-    total_input_tokens: i64,
-    total_output_tokens: i64,
-    total_cache_read_tokens: i64,
-    total_cache_write_tokens: i64,
-    total_reasoning_tokens: i64,
-    total_cost: f64,
-    has_pricing: bool,
+pub(crate) struct CostAccumulator {
+    pub total_input_tokens: i64,
+    pub total_output_tokens: i64,
+    pub total_cache_read_tokens: i64,
+    pub total_cache_write_tokens: i64,
+    pub total_reasoning_tokens: i64,
+    pub total_cost: f64,
+    pub has_pricing: bool,
 }
 
 /// Create a [`LocalSandbox`] wired to emit [`WorkflowRunEvent::Sandbox`] events.

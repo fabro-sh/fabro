@@ -109,6 +109,8 @@ struct ResumeContext {
     setup_commands: Vec<String>,
     /// Devcontainer lifecycle phases (on_create, post_create, post_start) resolved from config.
     devcontainer_phases: Vec<(String, Vec<fabro_devcontainer::Command>)>,
+    /// Devcontainer remoteEnv values to layer under sandbox_env.
+    devcontainer_env: HashMap<String, String>,
     /// Original cwd to restore after engine run (git-branch path changes cwd to worktree).
     original_cwd: Option<PathBuf>,
     sandbox_provider: SandboxProvider,
@@ -124,11 +126,19 @@ struct ResumeContext {
 /// or the workflow cannot be resumed.
 pub async fn resume_command(
     args: ResumeArgs,
-    run_defaults: RunDefaults,
+    mut run_defaults: RunDefaults,
     styles: &'static Styles,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     git_author: fabro_workflows::git::GitAuthor,
 ) -> anyhow::Result<()> {
+    // Apply project-level config overrides (fabro.toml) on top of CLI defaults (mirrors run_command).
+    if let Ok(Some((_config_path, project_config))) =
+        project_config::discover_project_config(&std::env::current_dir().unwrap_or_default())
+    {
+        tracing::debug!("Applying run defaults from fabro.toml");
+        run_defaults.merge_overlay(project_config.into_run_defaults());
+    }
+
     let ctx = if args.checkpoint.is_some() {
         prepare_from_checkpoint(&args, &run_defaults, styles, &github_app, git_author).await?
     } else {
@@ -326,7 +336,11 @@ async fn prepare_from_checkpoint(
         github_app: github_app.clone(),
         git_author,
         base_branch: None,
-        pull_request: None,
+        pull_request: run_defaults
+            .pull_request
+            .as_ref()
+            .filter(|p| p.enabled)
+            .cloned(),
         asset_globs: run_defaults
             .assets
             .as_ref()
@@ -334,6 +348,11 @@ async fn prepare_from_checkpoint(
             .unwrap_or_default(),
         workflow_slug: None,
     };
+
+    let devcontainer_env = devcontainer_config
+        .as_ref()
+        .map(|dc| dc.environment.clone())
+        .unwrap_or_default();
 
     Ok(ResumeContext {
         checkpoint,
@@ -349,6 +368,7 @@ async fn prepare_from_checkpoint(
             .map(|s| s.commands.clone())
             .unwrap_or_default(),
         devcontainer_phases,
+        devcontainer_env,
         original_cwd: None,
         sandbox_provider,
         ssh_data_host,
@@ -377,6 +397,9 @@ async fn prepare_from_branch(
         };
 
     let original_cwd = std::env::current_dir()?;
+    let detected_base_branch = fabro_sandbox::daytona::detect_repo_info(&original_cwd)
+        .map(|(_, branch)| branch)
+        .unwrap_or(None);
 
     // Read checkpoint from metadata branch
     let checkpoint = fabro_workflows::git::MetadataStore::read_checkpoint(&original_cwd, &run_id)?
@@ -615,8 +638,12 @@ async fn prepare_from_branch(
         checkpoint_exclude_globs: run_defaults.checkpoint.exclude_globs.clone(),
         github_app: github_app.clone(),
         git_author,
-        base_branch: None,
-        pull_request: None,
+        base_branch: detected_base_branch,
+        pull_request: run_defaults
+            .pull_request
+            .as_ref()
+            .filter(|p| p.enabled)
+            .cloned(),
         asset_globs: run_defaults
             .assets
             .as_ref()
@@ -624,6 +651,11 @@ async fn prepare_from_branch(
             .unwrap_or_default(),
         workflow_slug: None,
     };
+
+    let devcontainer_env = devcontainer_config
+        .as_ref()
+        .map(|dc| dc.environment.clone())
+        .unwrap_or_default();
 
     Ok(ResumeContext {
         checkpoint,
@@ -635,6 +667,7 @@ async fn prepare_from_branch(
         config,
         setup_commands,
         devcontainer_phases,
+        devcontainer_env,
         original_cwd: Some(original_cwd),
         sandbox_provider,
         ssh_data_host,
@@ -659,6 +692,7 @@ async fn run_resumed(
         mut config,
         setup_commands,
         devcontainer_phases,
+        devcontainer_env,
         original_cwd,
         sandbox_provider,
         ssh_data_host,
@@ -709,6 +743,29 @@ async fn run_resumed(
         emitter.on_event(move |event| {
             let mut ui = p.lock().expect("progress lock poisoned");
             ui.handle_event(event);
+        });
+    }
+
+    // Cost accumulator (mirrors run_command)
+    let accumulator = Arc::new(std::sync::Mutex::new(super::run::CostAccumulator::default()));
+    {
+        let acc_clone = Arc::clone(&accumulator);
+        emitter.on_event(move |event| {
+            if let fabro_workflows::event::WorkflowRunEvent::StageCompleted {
+                usage: Some(u), ..
+            } = event
+            {
+                let mut acc = acc_clone.lock().unwrap();
+                acc.total_input_tokens += u.input_tokens;
+                acc.total_output_tokens += u.output_tokens;
+                acc.total_cache_read_tokens += u.cache_read_tokens.unwrap_or(0);
+                acc.total_cache_write_tokens += u.cache_write_tokens.unwrap_or(0);
+                acc.total_reasoning_tokens += u.reasoning_tokens.unwrap_or(0);
+                if let Some(cost) = fabro_workflows::cost::compute_stage_cost(u) {
+                    acc.total_cost += cost;
+                    acc.has_pricing = true;
+                }
+            }
         });
     }
 
@@ -858,9 +915,9 @@ async fn run_resumed(
         None => Vec::new(),
     };
 
-    // Build sandbox env from run defaults (mirrors run_command)
+    // Build sandbox env: devcontainer env layered underneath TOML env (TOML wins on conflict, mirrors run_command)
     let sandbox_env: HashMap<String, String> = {
-        let mut env = HashMap::new();
+        let mut env = devcontainer_env;
         if let Some(mut toml_env) = run_defaults.sandbox.as_ref().and_then(|s| s.env.clone()) {
             run_config::resolve_env_refs(&mut toml_env)?;
             env.extend(toml_env);
@@ -1088,6 +1145,102 @@ async fn run_resumed(
     // Write finalize commit with retro.json + final node files (captures last diff.patch)
     write_finalize_commit(&config, &run_dir).await;
 
+    // Auto-create PR on successful completion (mirrors run_command)
+    let mut pushed_branch: Option<String> = None;
+    let mut pr_url: Option<String> = None;
+    if let Some(ref pr_cfg) = config.pull_request {
+        if config.dry_run {
+            debug!("Skipping PR creation: dry-run mode");
+        } else if let Err(ref e) = engine_result {
+            debug!(error = %e, "Skipping PR creation: engine returned an error");
+        } else if let Ok(ref outcome) = engine_result {
+            if !matches!(
+                outcome.status,
+                StageStatus::Success | StageStatus::PartialSuccess
+            ) {
+                debug!(status = ?outcome.status, "Skipping PR creation: run status is not success");
+            } else {
+                let origin_url = fabro_sandbox::daytona::detect_repo_info(
+                    original_cwd
+                        .as_deref()
+                        .unwrap_or_else(|| std::path::Path::new(".")),
+                )
+                .ok()
+                .map(|(url, _)| url);
+
+                let diff = tokio::fs::read_to_string(run_dir.join("final.patch"))
+                    .await
+                    .unwrap_or_default();
+                if let (
+                    Some(ref base_branch),
+                    Some(ref run_branch),
+                    Some(ref creds),
+                    Some(ref origin),
+                ) = (
+                    &config.base_branch,
+                    &config.run_branch,
+                    &github_app,
+                    &origin_url,
+                ) {
+                    if config.git_checkpoint_enabled {
+                        pushed_branch = Some(run_branch.clone());
+                    }
+
+                    let auto_merge = if pr_cfg.auto_merge {
+                        Some(fabro_workflows::pull_request::AutoMergeConfig {
+                            merge_strategy: pr_cfg.merge_strategy,
+                        })
+                    } else {
+                        None
+                    };
+
+                    match fabro_workflows::pull_request::maybe_open_pull_request(
+                        creds,
+                        origin,
+                        base_branch,
+                        run_branch,
+                        graph.goal(),
+                        &diff,
+                        &model,
+                        pr_cfg.draft,
+                        auto_merge,
+                        &run_dir,
+                    )
+                    .await
+                    {
+                        Ok(Some(record)) => {
+                            emitter.emit(
+                                &fabro_workflows::event::WorkflowRunEvent::PullRequestCreated {
+                                    pr_url: record.html_url.clone(),
+                                    pr_number: record.number,
+                                    draft: pr_cfg.draft,
+                                },
+                            );
+                            pr_url = Some(record.html_url.clone());
+                            if let Err(e) = record.save(&run_dir.join("pull_request.json")) {
+                                tracing::warn!(error = %e, "Failed to save pull_request.json");
+                            }
+                        }
+                        Ok(None) => {} // empty diff, logged at DEBUG
+                        Err(e) => {
+                            emitter.emit(
+                                &fabro_workflows::event::WorkflowRunEvent::PullRequestFailed {
+                                    error: e.to_string(),
+                                },
+                            );
+                            eprintln!(
+                                "{} PR creation failed: {e}",
+                                styles.yellow.apply_to("Warning:")
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        debug!("Skipping PR creation: pull_request not enabled in config");
+    }
+
     // Cleanup sandbox via engine (fires SandboxCleanup hook)
     use super::run::resolve_preserve_sandbox;
     let preserve = resolve_preserve_sandbox(args.preserve_sandbox, None, &run_defaults);
@@ -1128,12 +1281,72 @@ async fn run_resumed(
         "Duration:  {}",
         HumanDuration(Duration::from_millis(run_duration_ms))
     );
+
+    {
+        use crate::commands::shared::format_tokens_human;
+        use fabro_workflows::cost::format_cost;
+        let acc = accumulator.lock().unwrap();
+        let total_tokens = acc.total_input_tokens + acc.total_output_tokens;
+        if total_tokens > 0 {
+            if acc.has_pricing {
+                eprintln!(
+                    "{}",
+                    styles.dim.apply_to(format!(
+                        "Cost:      {} ({} toks)",
+                        format_cost(acc.total_cost),
+                        format_tokens_human(total_tokens)
+                    ))
+                );
+            } else {
+                eprintln!(
+                    "{}",
+                    styles
+                        .dim
+                        .apply_to(format!("Toks:      {}", format_tokens_human(total_tokens)))
+                );
+            }
+            if acc.total_cache_read_tokens > 0 {
+                eprintln!(
+                    "{}",
+                    styles.dim.apply_to(format!(
+                        "Cache:     {} read, {} write",
+                        format_tokens_human(acc.total_cache_read_tokens),
+                        format_tokens_human(acc.total_cache_write_tokens),
+                    )),
+                );
+            }
+            if acc.total_reasoning_tokens > 0 {
+                eprintln!(
+                    "{}",
+                    styles.dim.apply_to(format!(
+                        "Reasoning: {} tokens",
+                        format_tokens_human(acc.total_reasoning_tokens),
+                    )),
+                );
+            }
+        }
+    }
+
     eprintln!(
         "{}",
         styles
             .dim
             .apply_to(format!("Run:       {}", tilde_path(&run_dir)))
     );
+
+    if let Some(failure) = outcome.failure_reason() {
+        eprintln!("Failure:   {}", styles.red.apply_to(failure));
+    }
+
+    if pushed_branch.is_some() || pr_url.is_some() {
+        eprintln!();
+        if let Some(ref branch) = pushed_branch {
+            eprintln!("{} {branch}", styles.bold.apply_to("Pushed branch:"));
+        }
+        if let Some(ref url) = pr_url {
+            eprintln!("{} {url}", styles.bold.apply_to("Pull request:"));
+        }
+    }
 
     print_final_output(&run_dir, styles);
     print_assets(&run_dir, styles);
