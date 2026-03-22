@@ -1,0 +1,18 @@
+digraph HumanGate {
+    graph [goal="Test human gate with auto-approve"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    draft   [label="Draft", prompt="Write a short greeting message.", shape=tab]
+    approve [label="Approve?", shape=hexagon]
+    ship    [label="Ship", shape=parallelogram, script="echo shipped"]
+    revise  [label="Revise", prompt="Revise the greeting.", shape=tab]
+
+    start -> draft -> approve
+    approve -> ship   [label="[A] Approve"]
+    approve -> revise [label="[R] Revise"]
+    ship -> exit
+    revise -> draft
+}
