@@ -29,6 +29,7 @@ use crate::commands::shared::{print_diagnostics, read_workflow_file, tilde_path}
 use fabro_config::project as project_config;
 use fabro_config::run as run_config;
 use fabro_validate::Severity;
+use fabro_workflows::devcontainer_bridge;
 use std::collections::HashMap;
 use tracing::debug;
 
@@ -178,6 +179,19 @@ async fn prepare_from_checkpoint(
     let cli_goal = resolve_cli_goal(&args.goal, &args.goal_file)?;
     apply_goal_override(&mut graph, cli_goal.as_deref(), None);
 
+    // Inline @file references in the (possibly overridden) goal (mirrors run_command)
+    if let Some(fabro_graphviz::graph::AttrValue::String(goal)) = graph.attrs.get("goal") {
+        let fallback = dirs::home_dir().map(|h| h.join(".fabro"));
+        let resolved =
+            fabro_workflows::transform::resolve_file_ref(goal, dot_dir, fallback.as_deref());
+        if resolved != *goal {
+            graph.attrs.insert(
+                "goal".to_string(),
+                fabro_graphviz::graph::AttrValue::String(resolved),
+            );
+        }
+    }
+
     eprintln!(
         "{} {} from checkpoint {}",
         styles.bold.apply_to("Resuming workflow:"),
@@ -207,7 +221,16 @@ async fn prepare_from_checkpoint(
     let original_cwd = std::env::current_dir()?;
     let emitter = Arc::new(EventEmitter::new());
 
-    // Resolve devcontainer if enabled (mirrors run_command)
+    // Resolve sandbox provider from CLI flag / config / defaults
+    let sandbox_provider = if args.dry_run {
+        SandboxProvider::Local
+    } else {
+        resolve_sandbox_provider(args.sandbox.map(Into::into), None, run_defaults)?
+    };
+
+    // Resolve devcontainer BEFORE sandbox creation (mirrors run_command) so that
+    // the Daytona snapshot config can be overridden with the devcontainer Dockerfile.
+    let mut daytona_config = resolve_daytona_config(None, run_defaults);
     let devcontainer_config = if run_defaults
         .sandbox
         .as_ref()
@@ -215,7 +238,74 @@ async fn prepare_from_checkpoint(
         .unwrap_or(false)
     {
         match fabro_devcontainer::DevcontainerResolver::resolve(&original_cwd).await {
-            Ok(dc) => Some(dc),
+            Ok(dc) => {
+                let lifecycle_command_count = dc.on_create_commands.len()
+                    + dc.post_create_commands.len()
+                    + dc.post_start_commands.len();
+                emitter.emit(
+                    &fabro_workflows::event::WorkflowRunEvent::DevcontainerResolved {
+                        dockerfile_lines: dc.dockerfile.lines().count(),
+                        environment_count: dc.environment.len(),
+                        lifecycle_command_count,
+                        workspace_folder: dc.workspace_folder.clone(),
+                    },
+                );
+
+                // Override daytona_config with devcontainer dockerfile
+                let snapshot = devcontainer_bridge::devcontainer_to_snapshot_config(&dc);
+                let mut cfg = daytona_config.unwrap_or_default();
+                cfg.snapshot = Some(snapshot);
+                daytona_config = Some(cfg);
+
+                // Run initialize_commands on host (mirrors run_command)
+                let timeout = std::time::Duration::from_millis(300_000);
+                for cmd in &dc.initialize_commands {
+                    let shell_cmds = match cmd {
+                        fabro_devcontainer::Command::Shell(s) => vec![s.clone()],
+                        fabro_devcontainer::Command::Args(args) => {
+                            vec![args
+                                .iter()
+                                .map(|a| {
+                                    shlex::try_quote(a).unwrap_or_else(|_| a.into()).to_string()
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" ")]
+                        }
+                        fabro_devcontainer::Command::Parallel(map) => {
+                            map.values().cloned().collect()
+                        }
+                    };
+                    for shell_cmd in &shell_cmds {
+                        let fut = tokio::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(shell_cmd)
+                            .current_dir(&original_cwd)
+                            .output();
+                        let output = tokio::time::timeout(timeout, fut)
+                            .await
+                            .with_context(|| {
+                                format!("Devcontainer initializeCommand timed out: {shell_cmd}")
+                            })?
+                            .with_context(|| {
+                                format!(
+                                    "Failed to execute devcontainer initializeCommand: {shell_cmd}"
+                                )
+                            })?;
+                        if !output.status.success() {
+                            let code = output
+                                .status
+                                .code()
+                                .map_or("unknown".to_string(), |c| c.to_string());
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            bail!(
+                                "Devcontainer initializeCommand failed (exit code {code}): {shell_cmd}\n{stderr}"
+                            );
+                        }
+                    }
+                }
+
+                Some(dc)
+            }
             Err(e) => {
                 bail!("Failed to resolve devcontainer: {e}");
             }
@@ -232,13 +322,6 @@ async fn prepare_from_checkpoint(
         ]
     } else {
         Vec::new()
-    };
-
-    // Resolve sandbox provider from CLI flag / config / defaults
-    let sandbox_provider = if args.dry_run {
-        SandboxProvider::Local
-    } else {
-        resolve_sandbox_provider(args.sandbox.map(Into::into), None, run_defaults)?
     };
 
     let mut ssh_data_host: Option<String> = None;
@@ -298,7 +381,7 @@ async fn prepare_from_checkpoint(
             Arc::new(env)
         }
         SandboxProvider::Daytona => {
-            let config = resolve_daytona_config(None, run_defaults).unwrap_or_default();
+            let config = daytona_config.unwrap_or_default();
             let mut env = fabro_sandbox::daytona::DaytonaSandbox::new(
                 config,
                 github_app.clone(),
@@ -431,6 +514,26 @@ async fn prepare_from_branch(
     let cli_goal = resolve_cli_goal(&args.goal, &args.goal_file)?;
     apply_goal_override(&mut graph, cli_goal.as_deref(), None);
 
+    // Inline @file references in the (possibly overridden) goal (mirrors run_command)
+    {
+        let dot_dir = args
+            .workflow
+            .as_deref()
+            .and_then(|p| p.parent())
+            .unwrap_or(std::path::Path::new("."));
+        if let Some(fabro_graphviz::graph::AttrValue::String(goal)) = graph.attrs.get("goal") {
+            let fallback = dirs::home_dir().map(|h| h.join(".fabro"));
+            let resolved =
+                fabro_workflows::transform::resolve_file_ref(goal, dot_dir, fallback.as_deref());
+            if resolved != *goal {
+                graph.attrs.insert(
+                    "goal".to_string(),
+                    fabro_graphviz::graph::AttrValue::String(resolved),
+                );
+            }
+        }
+    }
+
     eprintln!(
         "{} {} from branch {} ({})",
         styles.bold.apply_to("Resuming workflow:"),
@@ -479,6 +582,102 @@ async fn prepare_from_branch(
     };
 
     let emitter = Arc::new(EventEmitter::new());
+
+    // Resolve devcontainer BEFORE sandbox creation (mirrors run_command) so that
+    // the Daytona snapshot config can be overridden with the devcontainer Dockerfile.
+    let mut daytona_config = resolve_daytona_config(None, run_defaults);
+    let devcontainer_config = if run_defaults
+        .sandbox
+        .as_ref()
+        .and_then(|s| s.devcontainer)
+        .unwrap_or(false)
+    {
+        match fabro_devcontainer::DevcontainerResolver::resolve(&original_cwd).await {
+            Ok(dc) => {
+                let lifecycle_command_count = dc.on_create_commands.len()
+                    + dc.post_create_commands.len()
+                    + dc.post_start_commands.len();
+                emitter.emit(
+                    &fabro_workflows::event::WorkflowRunEvent::DevcontainerResolved {
+                        dockerfile_lines: dc.dockerfile.lines().count(),
+                        environment_count: dc.environment.len(),
+                        lifecycle_command_count,
+                        workspace_folder: dc.workspace_folder.clone(),
+                    },
+                );
+
+                // Override daytona_config with devcontainer dockerfile
+                let snapshot = devcontainer_bridge::devcontainer_to_snapshot_config(&dc);
+                let mut cfg = daytona_config.unwrap_or_default();
+                cfg.snapshot = Some(snapshot);
+                daytona_config = Some(cfg);
+
+                // Run initialize_commands on host (mirrors run_command)
+                let timeout = std::time::Duration::from_millis(300_000);
+                for cmd in &dc.initialize_commands {
+                    let shell_cmds = match cmd {
+                        fabro_devcontainer::Command::Shell(s) => vec![s.clone()],
+                        fabro_devcontainer::Command::Args(args) => {
+                            vec![args
+                                .iter()
+                                .map(|a| {
+                                    shlex::try_quote(a).unwrap_or_else(|_| a.into()).to_string()
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" ")]
+                        }
+                        fabro_devcontainer::Command::Parallel(map) => {
+                            map.values().cloned().collect()
+                        }
+                    };
+                    for shell_cmd in &shell_cmds {
+                        let fut = tokio::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(shell_cmd)
+                            .current_dir(&original_cwd)
+                            .output();
+                        let output = tokio::time::timeout(timeout, fut)
+                            .await
+                            .with_context(|| {
+                                format!("Devcontainer initializeCommand timed out: {shell_cmd}")
+                            })?
+                            .with_context(|| {
+                                format!(
+                                    "Failed to execute devcontainer initializeCommand: {shell_cmd}"
+                                )
+                            })?;
+                        if !output.status.success() {
+                            let code = output
+                                .status
+                                .code()
+                                .map_or("unknown".to_string(), |c| c.to_string());
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            bail!(
+                                "Devcontainer initializeCommand failed (exit code {code}): {shell_cmd}\n{stderr}"
+                            );
+                        }
+                    }
+                }
+
+                Some(dc)
+            }
+            Err(e) => {
+                bail!("Failed to resolve devcontainer: {e}");
+            }
+        }
+    } else {
+        None
+    };
+
+    let devcontainer_phases = if let Some(ref dc) = devcontainer_config {
+        vec![
+            ("on_create".to_string(), dc.on_create_commands.clone()),
+            ("post_create".to_string(), dc.post_create_commands.clone()),
+            ("post_start".to_string(), dc.post_start_commands.clone()),
+        ]
+    } else {
+        Vec::new()
+    };
 
     let setup_worktree_sandbox = |emitter: &Arc<EventEmitter>| -> (WorktreeSandbox, PathBuf) {
         let wt = run_dir.join("worktree");
@@ -563,7 +762,7 @@ async fn prepare_from_branch(
             (Arc::new(env), None)
         }
         SandboxProvider::Daytona => {
-            let config = resolve_daytona_config(None, run_defaults).unwrap_or_default();
+            let config = daytona_config.unwrap_or_default();
             let mut env = fabro_sandbox::daytona::DaytonaSandbox::new(
                 config,
                 github_app.clone(),
@@ -582,33 +781,6 @@ async fn prepare_from_branch(
 
     // Wrap with ReadBeforeWriteSandbox to enforce read-before-write guard
     let sandbox: Arc<dyn Sandbox> = Arc::new(fabro_agent::ReadBeforeWriteSandbox::new(sandbox));
-
-    // Resolve devcontainer if enabled (mirrors prepare_from_checkpoint)
-    let devcontainer_config = if run_defaults
-        .sandbox
-        .as_ref()
-        .and_then(|s| s.devcontainer)
-        .unwrap_or(false)
-    {
-        match fabro_devcontainer::DevcontainerResolver::resolve(&original_cwd).await {
-            Ok(dc) => Some(dc),
-            Err(e) => {
-                bail!("Failed to resolve devcontainer: {e}");
-            }
-        }
-    } else {
-        None
-    };
-
-    let devcontainer_phases = if let Some(ref dc) = devcontainer_config {
-        vec![
-            ("on_create".to_string(), dc.on_create_commands.clone()),
-            ("post_create".to_string(), dc.post_create_commands.clone()),
-            ("post_start".to_string(), dc.post_start_commands.clone()),
-        ]
-    } else {
-        Vec::new()
-    };
 
     // User-configured setup commands first, then sandbox-specific resume commands
     let mut setup_commands: Vec<String> = run_defaults
@@ -1012,17 +1184,29 @@ async fn run_resumed(
         devcontainer_phases,
     };
 
+    // Defuse the status guard — engine.run() will write "running" and conclusion handles "concluded"
+    scopeguard::ScopeGuard::into_inner(status_guard);
+
+    // Safety net: if we panic or return early, best-effort cleanup via spawn (mirrors run_command).
+    let preserve = super::run::resolve_preserve_sandbox(args.preserve_sandbox, None, &run_defaults);
+    let sandbox_for_cleanup = Arc::clone(&sandbox);
+    let cleanup_guard = scopeguard::guard((), move |()| {
+        if preserve {
+            return;
+        }
+        let rt = tokio::runtime::Handle::try_current();
+        if let Ok(handle) = rt {
+            handle.spawn(async move {
+                let _ = sandbox_for_cleanup.cleanup().await;
+            });
+        }
+    });
+
     let run_start = Instant::now();
     let engine_result = engine
         .run_with_lifecycle(&graph, &mut config, lifecycle, Some(&checkpoint))
         .await;
     let run_duration_ms = run_start.elapsed().as_millis() as u64;
-
-    // Defuse the status guard — we made it past engine.run()
-    scopeguard::ScopeGuard::into_inner(status_guard);
-
-    // Finish progress bars before retro
-    progress_ui.lock().expect("progress lock poisoned").finish();
 
     // Restore cwd if we changed it (worktree is kept for `fabro cp` access; pruned separately)
     if let Some(ref cwd) = original_cwd {
@@ -1142,6 +1326,9 @@ async fn run_resumed(
         .await;
     }
 
+    // Finish progress bars after retro (retro stage uses the same ProgressUI)
+    progress_ui.lock().expect("progress lock poisoned").finish();
+
     // Write finalize commit with retro.json + final node files (captures last diff.patch)
     write_finalize_commit(&config, &run_dir).await;
 
@@ -1241,9 +1428,10 @@ async fn run_resumed(
         debug!("Skipping PR creation: pull_request not enabled in config");
     }
 
+    // Defuse the cleanup guard — we are about to do explicit cleanup
+    scopeguard::ScopeGuard::into_inner(cleanup_guard);
+
     // Cleanup sandbox via engine (fires SandboxCleanup hook)
-    use super::run::resolve_preserve_sandbox;
-    let preserve = resolve_preserve_sandbox(args.preserve_sandbox, None, &run_defaults);
     // Before cleanup, print preserve banner (mirrors run_command)
     if preserve {
         let info = sandbox.sandbox_info();
