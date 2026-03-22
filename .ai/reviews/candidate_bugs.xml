@@ -1,0 +1,82 @@
+<code_review>
+   <bug>
+      <title>Checkpoint-file resume disables git checkpointing (behavioral regression)</title>
+      <description>When using `fabro resume --checkpoint &lt;path&gt; --workflow &lt;path&gt;`, the RunConfig is constructed with `git_checkpoint_enabled: false`, `run_branch: None`, `meta_branch: None`, and `host_repo_path: None`. The resumed run will NOT create git checkpoints after each stage, so if it fails partway through the user cannot resume again. The old `fabro run --resume` flow configured a worktree and enabled git checkpointing, so chained resumes worked. The branch-resume path (`fabro resume &lt;run-id&gt;`) is unaffected.</description>
+      <location>
+         <file>lib/crates/fabro-cli/src/commands/resume.rs</file>
+         <start_line>319</start_line>
+         <end_line>350</end_line>
+      </location>
+      <severity>high</severity>
+   </bug>
+   <bug>
+      <title>Devcontainer Dockerfile not bridged to Daytona config on resume — wrong sandbox image</title>
+      <description>In `run.rs`, when devcontainer is enabled and the sandbox is Daytona, `devcontainer_bridge::devcontainer_to_snapshot_config()` converts the devcontainer Dockerfile into a Daytona snapshot config. In `resume.rs`, both prepare paths resolve the Daytona config with `resolve_daytona_config(None, run_defaults).unwrap_or_default()` — the devcontainer Dockerfile is never bridged. Resuming a Daytona + devcontainer run will spin up a sandbox with the default image instead of the custom devcontainer image.</description>
+      <location>
+         <file>lib/crates/fabro-cli/src/commands/resume.rs</file>
+         <start_line>300</start_line>
+         <end_line>315</end_line>
+      </location>
+      <severity>high</severity>
+   </bug>
+   <bug>
+      <title>Missing @file reference resolution in goal override</title>
+      <description>In `run.rs`, after `apply_goal_override`, `resolve_file_ref()` expands `@file` references in the goal text. In `resume.rs`, both `prepare_from_checkpoint` and `prepare_from_branch` call `apply_goal_override` but never resolve `@file` references. Passing `--goal '@goals/plan.md'` to `fabro resume` will use the literal string instead of the file contents.</description>
+      <location>
+         <file>lib/crates/fabro-cli/src/commands/resume.rs</file>
+         <start_line>178</start_line>
+         <end_line>179</end_line>
+      </location>
+      <severity>medium</severity>
+   </bug>
+   <bug>
+      <title>Progress UI finished before retro, suppressing retro progress display</title>
+      <description>`progress_ui.finish()` is called at line 1025 before the retro runs at line 1127. In `run.rs`, the comment says "Finish progress bars after retro (retro stage uses the same ProgressUI)" and `finish()` is called AFTER `generate_retro()`. Since the retro agent emits events handled by ProgressUI, finishing early means the user sees no progress indication during a multi-second LLM call — the CLI appears to hang.</description>
+      <location>
+         <file>lib/crates/fabro-cli/src/commands/resume.rs</file>
+         <start_line>1025</start_line>
+         <end_line>1025</end_line>
+      </location>
+      <severity>medium</severity>
+   </bug>
+   <bug>
+      <title>Missing sandbox cleanup guard — leaked remote resources on panic</title>
+      <description>In `run.rs`, a `cleanup_guard` ensures the sandbox is cleaned up if the function panics after sandbox creation. `resume.rs` has no equivalent guard. If `run_resumed()` panics between sandbox creation and the explicit `engine.cleanup_sandbox()` call at line 1259, remote sandboxes (Daytona VMs, SSH sessions, Exe instances) will be leaked indefinitely.</description>
+      <location>
+         <file>lib/crates/fabro-cli/src/commands/resume.rs</file>
+         <start_line>679</start_line>
+         <end_line>1268</end_line>
+      </location>
+      <severity>medium</severity>
+   </bug>
+   <bug>
+      <title>No backwards-compatible alias or helpful error for removed --resume and --run-branch flags</title>
+      <description>The `--resume` and `--run-branch` flags on `fabro run` were removed outright. User scripts, CI pipelines, or documentation using these flags will get a generic clap "unexpected argument" error with no guidance to use `fabro resume` instead.</description>
+      <location>
+         <file>lib/crates/fabro-cli/src/commands/run.rs</file>
+         <start_line>75</start_line>
+         <end_line>140</end_line>
+      </location>
+      <severity>medium</severity>
+   </bug>
+   <bug>
+      <title>Missing devcontainer initializeCommand execution on checkpoint-file resume</title>
+      <description>In `run.rs`, devcontainer `initialize_commands` are executed on the host before sandbox creation. In `resume.rs`, neither prepare path executes them. For branch-resume this is arguably fine (they ran originally), but for checkpoint-resume creating a fresh sandbox, missing these host-side prep commands (certificates, mount directories, etc.) can cause setup failures.</description>
+      <location>
+         <file>lib/crates/fabro-cli/src/commands/resume.rs</file>
+         <start_line>211</start_line>
+         <end_line>235</end_line>
+      </location>
+      <severity>medium</severity>
+   </bug>
+   <bug>
+      <title>Status guard writes misleading SandboxInitFailed for engine panics</title>
+      <description>The `status_guard` writes `SandboxInitFailed` on drop. In `run.rs` it is defused before `engine.run()` so it only fires for actual sandbox init failures. In `resume.rs` it spans the entire `engine.run_with_lifecycle()` and is defused after (line 1022). If the engine panics during workflow execution, `fabro ps` will show "SandboxInitFailed" instead of the actual failure reason.</description>
+      <location>
+         <file>lib/crates/fabro-cli/src/commands/resume.rs</file>
+         <start_line>710</start_line>
+         <end_line>718</end_line>
+      </location>
+      <severity>low</severity>
+   </bug>
+</code_review>
