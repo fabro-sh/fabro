@@ -9,7 +9,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 
 use fabro_agent::AgentEvent;
 use fabro_interview::{Answer, ConsoleInterviewer, Interviewer, Question};
-use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
+use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::outcome::StageStatus;
 
 use crate::commands::shared::{format_duration_ms, format_tokens_human, tilde_path};
@@ -626,6 +626,19 @@ impl ProgressUI {
                 let dur = format_duration_ms(*duration_ms);
                 self.finish_stage("retro", "Retro", red_cross(), &dur);
             }
+            WorkflowRunEvent::RunNotice {
+                level,
+                code,
+                message,
+            } => {
+                self.on_run_notice(*level, code, message);
+            }
+            WorkflowRunEvent::PullRequestCreated { pr_url, draft, .. } => {
+                self.on_pull_request_created(pr_url, *draft);
+            }
+            WorkflowRunEvent::PullRequestFailed { error } => {
+                self.on_pull_request_failed(error);
+            }
             _ => {}
         }
     }
@@ -880,6 +893,28 @@ impl ProgressUI {
             "RetroFailed" => {
                 let dur = format_duration_ms(u64_field("duration_ms"));
                 self.finish_stage("retro", "Retro", red_cross(), &dur);
+            }
+            "RunNotice" => {
+                let level = match str_field("level").unwrap_or("info") {
+                    "warn" => RunNoticeLevel::Warn,
+                    "error" => RunNoticeLevel::Error,
+                    _ => RunNoticeLevel::Info,
+                };
+                let code = str_field("code").unwrap_or("");
+                let message = str_field("message").unwrap_or("");
+                self.on_run_notice(level, code, message);
+            }
+            "PullRequestCreated" => {
+                let pr_url = str_field("pr_url").unwrap_or("?");
+                let draft = envelope
+                    .get("draft")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                self.on_pull_request_created(pr_url, draft);
+            }
+            "PullRequestFailed" => {
+                let error = str_field("error").unwrap_or("unknown error");
+                self.on_pull_request_failed(error);
             }
             "DevcontainerResolved" => {
                 let dockerfile_lines = u64_field("dockerfile_lines");
@@ -1585,6 +1620,32 @@ impl ProgressUI {
         }
     }
 
+    fn on_run_notice(&mut self, level: RunNoticeLevel, code: &str, message: &str) {
+        let dim = Style::new().dim();
+        let label = match level {
+            RunNoticeLevel::Info => Style::new().bold().apply_to("Info:"),
+            RunNoticeLevel::Warn => Style::new().yellow().apply_to("Warning:"),
+            RunNoticeLevel::Error => Style::new().red().apply_to("Error:"),
+        };
+        let code_suffix = if code.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", dim.apply_to(format!("[{code}]")))
+        };
+        self.insert_info_line(&format!("{label} {message}{code_suffix}"));
+    }
+
+    fn on_pull_request_created(&mut self, pr_url: &str, draft: bool) {
+        let label = if draft { "Draft PR:" } else { "PR:" };
+        let bold = Style::new().bold();
+        self.insert_info_line(&format!("{} {pr_url}", bold.apply_to(label)));
+    }
+
+    fn on_pull_request_failed(&mut self, error: &str) {
+        let red = Style::new().red();
+        self.insert_info_line(&format!("{} {error}", red.apply_to("PR failed:")));
+    }
+
     /// Insert a static info line for a subagent, indented deeper than tool calls.
     fn insert_subagent_line_for_stage(&mut self, stage_node_id: &str, message: &str) {
         match &self.renderer {
@@ -2044,5 +2105,19 @@ mod tests {
             ui.devcontainer_command_count, 2,
             "devcontainer_command_count should be set by DevcontainerLifecycleStarted"
         );
+    }
+
+    #[test]
+    fn handle_json_line_run_notice_warn() {
+        let mut ui = ProgressUI::new(false, false);
+        let event = r#"{"ts":"2026-01-01T12:00:00Z","event":"RunNotice","level":"warn","code":"sandbox_cleanup_failed","message":"sandbox cleanup failed: boom"}"#;
+        ui.handle_json_line(event);
+    }
+
+    #[test]
+    fn handle_json_line_pull_request_failed() {
+        let mut ui = ProgressUI::new(false, false);
+        let event = r#"{"ts":"2026-01-01T12:00:00Z","event":"PullRequestFailed","error":"auth token expired"}"#;
+        ui.handle_json_line(event);
     }
 }

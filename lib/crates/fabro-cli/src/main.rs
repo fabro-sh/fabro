@@ -313,6 +313,103 @@ pub(crate) fn build_github_app_credentials(
     })
 }
 
+async fn run_engine_entrypoint(
+    run_dir: PathBuf,
+    styles: &'static fabro_util::terminal::Styles,
+) -> Result<()> {
+    let cli_config = cli_config::load_cli_config(None)?;
+    let github_app = build_github_app_credentials(cli_config.app_id());
+    let git_author = fabro_workflows::git::GitAuthor::from_options(
+        cli_config.git_author().and_then(|a| a.name.clone()),
+        cli_config.git_author().and_then(|a| a.email.clone()),
+    );
+
+    let spec = match fabro_workflows::run_spec::RunSpec::load(&run_dir) {
+        Ok(spec) => spec,
+        Err(err) => {
+            let _ = commands::detached_support::persist_detached_failure(
+                &run_dir,
+                "bootstrap",
+                fabro_workflows::run_status::StatusReason::BootstrapFailed,
+                &err,
+            );
+            return Err(err);
+        }
+    };
+
+    if let Err(err) = std::env::set_current_dir(&spec.working_directory).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to set working directory to {}: {e}",
+            spec.working_directory.display()
+        )
+    }) {
+        let _ = commands::detached_support::persist_detached_failure(
+            &run_dir,
+            "bootstrap",
+            fabro_workflows::run_status::StatusReason::BootstrapFailed,
+            &err,
+        );
+        return Err(err);
+    }
+
+    let workflow_path = {
+        let config_path = commands::run::cached_run_config_path(&run_dir);
+        if config_path.exists() {
+            config_path
+        } else {
+            commands::run::cached_graph_path(&run_dir)
+        }
+    };
+
+    let run_args = commands::run::RunArgs {
+        workflow: Some(workflow_path),
+        run_dir: Some(run_dir.clone()),
+        dry_run: spec.dry_run,
+        preflight: false,
+        auto_approve: spec.auto_approve,
+        goal: spec.goal,
+        goal_file: None,
+        model: Some(spec.model),
+        provider: Some(spec.provider.unwrap_or_default()).filter(|s| !s.is_empty()),
+        verbose: spec.verbose,
+        sandbox: spec
+            .sandbox_provider
+            .parse::<fabro_workflows::sandbox_provider::SandboxProvider>()
+            .ok()
+            .map(commands::run::CliSandboxProvider::from),
+        label: spec
+            .labels
+            .into_iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect(),
+        no_retro: spec.no_retro,
+        preserve_sandbox: spec.preserve_sandbox,
+        detach: false,
+        run_id: Some(spec.run_id),
+    };
+
+    match commands::run::run_command(
+        run_args,
+        cli_config.run_defaults,
+        styles,
+        github_app,
+        git_author,
+    )
+    .await
+    {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            let _ = commands::detached_support::persist_detached_failure(
+                &run_dir,
+                "bootstrap",
+                fabro_workflows::run_status::StatusReason::SandboxInitFailed,
+                &err,
+            );
+            Err(err)
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     fabro_telemetry::panic::install_panic_hook();
@@ -723,70 +820,7 @@ async fn main_inner() -> (String, Result<()>) {
             Command::RunEngine { run_dir } => {
                 let styles: &'static fabro_util::terminal::Styles =
                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
-                let cli_config = cli_config::load_cli_config(None)?;
-                let github_app = build_github_app_credentials(cli_config.app_id());
-                let git_author = fabro_workflows::git::GitAuthor::from_options(
-                    cli_config.git_author().and_then(|a| a.name.clone()),
-                    cli_config.git_author().and_then(|a| a.email.clone()),
-                );
-
-                // Load spec and reconstruct RunArgs
-                let spec = fabro_workflows::run_spec::RunSpec::load(&run_dir)?;
-
-                // Restore the working directory captured at create time
-                std::env::set_current_dir(&spec.working_directory).map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to set working directory to {}: {e}",
-                        spec.working_directory.display()
-                    )
-                })?;
-
-                // Prefer the cached run.toml when present (workflow was a .toml
-                // config). For plain .fabro graphs, only graph.fabro exists.
-                let workflow_path = {
-                    let config_path = commands::run::cached_run_config_path(&run_dir);
-                    if config_path.exists() {
-                        config_path
-                    } else {
-                        commands::run::cached_graph_path(&run_dir)
-                    }
-                };
-
-                let run_args = commands::run::RunArgs {
-                    workflow: Some(workflow_path),
-                    run_dir: Some(run_dir),
-                    dry_run: spec.dry_run,
-                    preflight: false,
-                    auto_approve: spec.auto_approve,
-                    goal: spec.goal,
-                    goal_file: None,
-                    model: Some(spec.model),
-                    provider: Some(spec.provider.unwrap_or_default()).filter(|s| !s.is_empty()),
-                    verbose: spec.verbose,
-                    sandbox: spec
-                        .sandbox_provider
-                        .parse::<fabro_workflows::sandbox_provider::SandboxProvider>()
-                        .ok()
-                        .map(commands::run::CliSandboxProvider::from),
-                    label: spec
-                        .labels
-                        .into_iter()
-                        .map(|(k, v)| format!("{k}={v}"))
-                        .collect(),
-                    no_retro: spec.no_retro,
-                    preserve_sandbox: spec.preserve_sandbox,
-                    detach: false,
-                    run_id: Some(spec.run_id),
-                };
-
-                commands::run::run_command(
-                    run_args,
-                    cli_config.run_defaults,
-                    styles,
-                    github_app,
-                    git_author,
-                )
-                .await?;
+                run_engine_entrypoint(run_dir, styles).await?;
             }
             Command::Validate(args) => {
                 let styles = fabro_util::terminal::Styles::detect_stderr();

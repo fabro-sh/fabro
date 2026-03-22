@@ -14,16 +14,18 @@ use fabro_util::terminal::Styles;
 use fabro_workflows::backend::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::checkpoint::Checkpoint;
 use fabro_workflows::engine::RunConfig;
-use fabro_workflows::event::EventEmitter;
+use fabro_workflows::event::{EventEmitter, RunNoticeLevel};
 use fabro_workflows::manifest::Manifest;
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::sandbox_provider::SandboxProvider;
 use indicatif::HumanDuration;
 
+use super::detached_support::{DetachedRunBootstrapGuard, DetachedRunCompletionGuard};
 use super::run::{
-    build_event_envelope, default_run_dir, generate_retro, local_sandbox_with_callback,
-    mint_github_token, prepare_workflow_with_project_config, print_assets, print_final_output,
-    resolve_daytona_config, resolve_fallback_chain, resolve_model_provider,
+    build_conclusion, build_event_envelope, classify_engine_result, default_run_dir,
+    emit_run_notice, generate_retro, local_sandbox_with_callback, mint_github_token,
+    persist_terminal_outcome, prepare_workflow_with_project_config, print_assets,
+    print_final_output, resolve_daytona_config, resolve_fallback_chain, resolve_model_provider,
     resolve_sandbox_provider, resolve_ssh_clone_params, resolve_ssh_config, write_finalize_commit,
     write_run_config_snapshot, CliSandboxProvider, RunArgs,
 };
@@ -113,44 +115,7 @@ struct ResumeContext {
     sandbox_provider: SandboxProvider,
     ssh_data_host: Option<String>,
     github_app: Option<fabro_github::GitHubAppCredentials>,
-    status_guard: ResumeRunStatusGuard,
-}
-
-struct ResumeRunStatusGuard {
-    run_dir: PathBuf,
-    active: bool,
-}
-
-impl ResumeRunStatusGuard {
-    fn arm(run_dir: &std::path::Path) -> anyhow::Result<Self> {
-        std::fs::write(run_dir.join("run.pid"), std::process::id().to_string())
-            .with_context(|| format!("Failed to write {}", run_dir.join("run.pid").display()))?;
-        fabro_workflows::run_status::write_run_status(
-            run_dir,
-            fabro_workflows::run_status::RunStatus::Starting,
-            Some(fabro_workflows::run_status::StatusReason::SandboxInitializing),
-        );
-        Ok(Self {
-            run_dir: run_dir.to_path_buf(),
-            active: true,
-        })
-    }
-
-    fn defuse(&mut self) {
-        self.active = false;
-    }
-}
-
-impl Drop for ResumeRunStatusGuard {
-    fn drop(&mut self) {
-        if self.active {
-            fabro_workflows::run_status::write_run_status(
-                &self.run_dir,
-                fabro_workflows::run_status::RunStatus::Failed,
-                Some(fabro_workflows::run_status::StatusReason::SandboxInitFailed),
-            );
-        }
-    }
+    status_guard: DetachedRunBootstrapGuard,
 }
 
 fn resume_as_run_args(args: &ResumeArgs, workflow: PathBuf) -> RunArgs {
@@ -257,7 +222,7 @@ async fn prepare_from_checkpoint(
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
-    let status_guard = ResumeRunStatusGuard::arm(&run_dir)?;
+    let status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
     tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
     let mut run_cfg = run_cfg;
     write_run_config_snapshot(&run_dir, run_cfg.as_mut()).await?;
@@ -609,7 +574,7 @@ async fn prepare_from_branch(
     let run_dir = tokio::fs::canonicalize(&run_dir).await.unwrap_or(run_dir);
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
-    let status_guard = ResumeRunStatusGuard::arm(&run_dir)?;
+    let status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
     tokio::fs::write(run_dir.join("graph.fabro"), &graph_source).await?;
     let mut run_cfg = run_cfg;
     write_run_config_snapshot(&run_dir, run_cfg.as_mut()).await?;
@@ -1085,17 +1050,21 @@ async fn run_resumed(
     } else {
         match fabro_llm::client::Client::from_env().await {
             Ok(c) if c.provider_names().is_empty() => {
-                eprintln!(
-                    "{} No LLM providers configured. Running in dry-run mode.",
-                    styles.yellow.apply_to("Warning:"),
+                emit_run_notice(
+                    &emitter,
+                    RunNoticeLevel::Warn,
+                    "dry_run_no_llm",
+                    "No LLM providers configured. Running in dry-run mode.",
                 );
                 true
             }
             Ok(_) => false,
             Err(e) => {
-                eprintln!(
-                    "{} Failed to initialize LLM client: {e}. Running in dry-run mode.",
-                    styles.yellow.apply_to("Warning:"),
+                emit_run_notice(
+                    &emitter,
+                    RunNoticeLevel::Warn,
+                    "dry_run_llm_init_failed",
+                    format!("Failed to initialize LLM client: {e}. Running in dry-run mode."),
                 );
                 true
             }
@@ -1160,9 +1129,11 @@ async fn run_resumed(
                         sandbox_env.insert("GITHUB_TOKEN".to_string(), token);
                     }
                     Err(e) => {
-                        eprintln!(
-                            "{} Failed to mint GitHub token: {e}",
-                            styles.yellow.apply_to("Warning:"),
+                        emit_run_notice(
+                            &emitter,
+                            RunNoticeLevel::Warn,
+                            "github_token_failed",
+                            format!("Failed to mint GitHub token: {e}"),
                         );
                     }
                 }
@@ -1233,7 +1204,7 @@ async fn run_resumed(
         devcontainer_phases,
     };
 
-    // Defuse the status guard — engine.run() will write "running" and conclusion handles "concluded"
+    // Defuse the bootstrap guard — engine.run() has taken ownership of lifecycle status.
     status_guard.defuse();
 
     // Safety net: if we panic or return early, best-effort cleanup via spawn (mirrors run_command).
@@ -1260,115 +1231,22 @@ async fn run_resumed(
         .run_with_lifecycle(&graph, &mut config, lifecycle, Some(&checkpoint))
         .await;
     let run_duration_ms = run_start.elapsed().as_millis() as u64;
+    let mut completion_guard = DetachedRunCompletionGuard::arm(&run_dir);
 
     // Restore cwd if we changed it (worktree is kept for `fabro cp` access; pruned separately)
     if let Some(ref cwd) = original_cwd {
         let _ = std::env::set_current_dir(cwd);
     }
 
-    // Build and save conclusion.json + final status (mirrors run_command)
-    {
-        let (status, failure_reason) = match &engine_result {
-            Ok(ref o) => (o.status.clone(), o.failure_reason().map(String::from)),
-            Err(e) => (StageStatus::Fail, Some(e.to_string())),
-        };
-
-        let (run_status, status_reason) = match &engine_result {
-            Ok(ref o) => match o.status {
-                StageStatus::Success | StageStatus::Skipped => (
-                    fabro_workflows::run_status::RunStatus::Succeeded,
-                    Some(fabro_workflows::run_status::StatusReason::Completed),
-                ),
-                StageStatus::PartialSuccess => (
-                    fabro_workflows::run_status::RunStatus::Succeeded,
-                    Some(fabro_workflows::run_status::StatusReason::PartialSuccess),
-                ),
-                StageStatus::Fail | StageStatus::Retry => (
-                    fabro_workflows::run_status::RunStatus::Failed,
-                    Some(fabro_workflows::run_status::StatusReason::WorkflowError),
-                ),
-            },
-            Err(fabro_workflows::error::FabroError::Cancelled) => (
-                fabro_workflows::run_status::RunStatus::Failed,
-                Some(fabro_workflows::run_status::StatusReason::Cancelled),
-            ),
-            Err(_) => (
-                fabro_workflows::run_status::RunStatus::Failed,
-                Some(fabro_workflows::run_status::StatusReason::WorkflowError),
-            ),
-        };
-
-        let checkpoint_loaded = Checkpoint::load(&run_dir.join("checkpoint.json")).ok();
-        let stage_durations = fabro_retro::retro::extract_stage_durations(&run_dir);
-
-        let mut total_input_tokens: i64 = 0;
-        let mut total_output_tokens: i64 = 0;
-        let mut total_cache_read_tokens: i64 = 0;
-        let mut total_cache_write_tokens: i64 = 0;
-        let mut total_reasoning_tokens: i64 = 0;
-        let mut has_pricing = false;
-
-        let (stages, total_cost, total_retries) = if let Some(ref cp) = checkpoint_loaded {
-            let mut stages = Vec::new();
-            let mut cost_sum: Option<f64> = None;
-            let mut retries_sum: u32 = 0;
-
-            for node_id in &cp.completed_nodes {
-                let outcome = cp.node_outcomes.get(node_id);
-                let retries = cp
-                    .node_retries
-                    .get(node_id)
-                    .copied()
-                    .unwrap_or(1)
-                    .saturating_sub(1);
-                retries_sum += retries;
-
-                let cost = outcome.and_then(|o| o.usage.as_ref()).and_then(|u| u.cost);
-                if let Some(c) = cost {
-                    *cost_sum.get_or_insert(0.0) += c;
-                    has_pricing = true;
-                }
-
-                if let Some(usage) = outcome.and_then(|o| o.usage.as_ref()) {
-                    total_input_tokens += usage.input_tokens;
-                    total_output_tokens += usage.output_tokens;
-                    total_cache_read_tokens += usage.cache_read_tokens.unwrap_or(0);
-                    total_cache_write_tokens += usage.cache_write_tokens.unwrap_or(0);
-                    total_reasoning_tokens += usage.reasoning_tokens.unwrap_or(0);
-                }
-
-                stages.push(fabro_workflows::conclusion::StageSummary {
-                    stage_id: node_id.clone(),
-                    stage_label: node_id.clone(),
-                    duration_ms: stage_durations.get(node_id).copied().unwrap_or(0),
-                    cost,
-                    retries,
-                });
-            }
-            (stages, cost_sum, retries_sum)
-        } else {
-            (vec![], None, 0)
-        };
-
-        let conclusion = fabro_workflows::conclusion::Conclusion {
-            timestamp: chrono::Utc::now(),
-            status,
-            duration_ms: run_duration_ms,
-            failure_reason,
-            final_git_commit_sha: last_git_sha.lock().unwrap().clone(),
-            stages,
-            total_cost,
-            total_retries,
-            total_input_tokens,
-            total_output_tokens,
-            total_cache_read_tokens,
-            total_cache_write_tokens,
-            total_reasoning_tokens,
-            has_pricing,
-        };
-        let _ = conclusion.save(&run_dir.join("conclusion.json"));
-        fabro_workflows::run_status::write_run_status(&run_dir, run_status, status_reason);
-    }
+    let (final_status, failure_reason, run_status, status_reason) =
+        classify_engine_result(&engine_result);
+    let conclusion = build_conclusion(
+        &run_dir,
+        final_status.clone(),
+        failure_reason,
+        run_duration_ms,
+        last_git_sha.lock().unwrap().clone(),
+    );
 
     // Auto-derive retro
     if !args.no_retro && project_config::is_retro_enabled() {
@@ -1482,9 +1360,11 @@ async fn run_resumed(
                                     error: e.to_string(),
                                 },
                             );
-                            eprintln!(
-                                "{} PR creation failed: {e}",
-                                styles.yellow.apply_to("Warning:")
+                            emit_run_notice(
+                                &emitter,
+                                RunNoticeLevel::Warn,
+                                "pull_request_failed",
+                                format!("PR creation failed: {e}"),
                             );
                         }
                     }
@@ -1503,12 +1383,19 @@ async fn run_resumed(
     if preserve {
         let info = sandbox.sandbox_info();
         if !info.is_empty() {
-            eprintln!(
-                "\n{} sandbox preserved: {info}",
-                styles.bold.apply_to("Info:")
+            emit_run_notice(
+                &emitter,
+                RunNoticeLevel::Info,
+                "sandbox_preserved",
+                format!("sandbox preserved: {info}"),
             );
         } else {
-            eprintln!("\n{} sandbox preserved", styles.bold.apply_to("Info:"));
+            emit_run_notice(
+                &emitter,
+                RunNoticeLevel::Info,
+                "sandbox_preserved",
+                "sandbox preserved",
+            );
         }
     }
     if let Err(e) = engine
@@ -1516,18 +1403,21 @@ async fn run_resumed(
         .await
     {
         tracing::warn!(error = %e, "Sandbox cleanup failed");
-        eprintln!(
-            "\n{} sandbox cleanup failed: {e}",
-            styles.yellow.apply_to("Warning:")
+        emit_run_notice(
+            &emitter,
+            RunNoticeLevel::Warn,
+            "sandbox_cleanup_failed",
+            format!("sandbox cleanup failed: {e}"),
         );
     }
 
-    let outcome = engine_result?;
+    persist_terminal_outcome(&run_dir, &conclusion, run_status, status_reason);
+    completion_guard.defuse();
 
     eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="));
     eprintln!("{}", styles.dim.apply_to(format!("Run:       {run_id}")));
-    let status_str = outcome.status.to_string().to_uppercase();
-    let status_color = match outcome.status {
+    let status_str = final_status.to_string().to_uppercase();
+    let status_color = match final_status {
         StageStatus::Success | StageStatus::PartialSuccess => &styles.bold_green,
         _ => &styles.bold_red,
     };
@@ -1589,7 +1479,7 @@ async fn run_resumed(
             .apply_to(format!("Run:       {}", tilde_path(&run_dir)))
     );
 
-    if let Some(failure) = outcome.failure_reason() {
+    if let Some(failure) = conclusion.failure_reason.as_deref() {
         eprintln!("Failure:   {}", styles.red.apply_to(failure));
     }
 
@@ -1607,7 +1497,7 @@ async fn run_resumed(
     print_assets(&run_dir, styles);
 
     fabro_util::run_log::deactivate();
-    match outcome.status {
+    match final_status {
         StageStatus::Success | StageStatus::PartialSuccess => Ok(()),
         _ => std::process::exit(1),
     }
@@ -1672,11 +1562,11 @@ mod tests {
     }
 
     #[test]
-    fn resume_run_status_guard_marks_failed_on_drop() {
+    fn resume_bootstrap_guard_marks_failed_on_drop() {
         let dir = tempfile::tempdir().unwrap();
 
         {
-            let guard = ResumeRunStatusGuard::arm(dir.path()).unwrap();
+            let guard = DetachedRunBootstrapGuard::arm(dir.path()).unwrap();
             let record = RunStatusRecord::load(&dir.path().join("status.json")).unwrap();
             assert_eq!(record.status, RunStatus::Starting);
             assert_eq!(record.reason, Some(StatusReason::SandboxInitializing));
@@ -1690,14 +1580,29 @@ mod tests {
     }
 
     #[test]
-    fn resume_run_status_guard_does_not_overwrite_after_defuse() {
+    fn resume_bootstrap_guard_does_not_overwrite_after_defuse() {
         let dir = tempfile::tempdir().unwrap();
-        let mut guard = ResumeRunStatusGuard::arm(dir.path()).unwrap();
+        let mut guard = DetachedRunBootstrapGuard::arm(dir.path()).unwrap();
         guard.defuse();
         drop(guard);
 
         let record = RunStatusRecord::load(&dir.path().join("status.json")).unwrap();
         assert_eq!(record.status, RunStatus::Starting);
         assert_eq!(record.reason, Some(StatusReason::SandboxInitializing));
+    }
+
+    #[test]
+    fn resume_completion_guard_marks_failed_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("id.txt"), "run-resume").unwrap();
+
+        {
+            let _guard = DetachedRunCompletionGuard::arm(dir.path());
+        }
+
+        let record = RunStatusRecord::load(&dir.path().join("status.json")).unwrap();
+        assert_eq!(record.status, RunStatus::Failed);
+        assert_eq!(record.reason, Some(StatusReason::WorkflowError));
+        assert!(dir.path().join("conclusion.json").exists());
     }
 }

@@ -2,6 +2,7 @@ pub mod asset;
 pub mod attach;
 pub mod cp;
 pub mod create;
+pub(crate) mod detached_support;
 pub mod diff;
 pub mod fork;
 pub mod graph;

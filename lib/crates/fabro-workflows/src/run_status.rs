@@ -141,6 +141,8 @@ pub enum StatusReason {
     Terminated,
     TransientInfra,
     BudgetExhausted,
+    LaunchFailed,
+    BootstrapFailed,
     SandboxInitFailed,
     // Non-terminal reasons
     SandboxInitializing,
@@ -307,6 +309,22 @@ mod tests {
         let loaded = RunStatusRecord::load(&path).unwrap();
         assert_eq!(loaded.status, RunStatus::Succeeded);
         assert_eq!(loaded.reason, Some(StatusReason::Completed));
+    }
+
+    #[test]
+    fn launch_failed_reason_roundtrip() {
+        let record = RunStatusRecord::new(RunStatus::Failed, Some(StatusReason::LaunchFailed));
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: RunStatusRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.reason, Some(StatusReason::LaunchFailed));
+    }
+
+    #[test]
+    fn bootstrap_failed_reason_roundtrip() {
+        let record = RunStatusRecord::new(RunStatus::Failed, Some(StatusReason::BootstrapFailed));
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: RunStatusRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.reason, Some(StatusReason::BootstrapFailed));
     }
 
     #[test]

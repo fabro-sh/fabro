@@ -1,8 +1,10 @@
 # Fabro Events Strategy
 
-Fabro emits structured **workflow run events** during execution for observability. Events write to `progress.jsonl` (one JSON object per line) and `live.json` (latest event snapshot) inside the run's log directory. Events are the primary record of what happened during a run — they feed the retro system, CLI verbose output, and live monitoring.
+Fabro emits structured **workflow run events** during execution for observability. Events write to `progress.jsonl` (one JSON object per line) and `live.json` (latest event snapshot) inside the run's log directory. Events are the primary record of what happened during a run — they feed the retro system, CLI verbose output, `fabro attach`, `fabro logs`, and live monitoring.
 
 Events are distinct from tracing logs (see `logging-strategy.md`). Tracing is developer diagnostics; events are the structured audit trail consumed by tooling.
+
+Detached runs rely on this distinction. If a warning or error needs to be visible to users after reattach, emit a `WorkflowRunEvent` rather than only writing to stderr/`detach.log`.
 
 ## Architecture
 
@@ -36,6 +38,10 @@ Every line in `progress.jsonl` has three envelope fields, then the event's own f
 | `event` | string | Event name (matches Rust variant, dot-separated for wrapped types) |
 
 The envelope is built in `cli/run.rs`. Field names from the event that collide with envelope keys (`ts`, `run_id`, `event`) are dropped — the `run_id` from `WorkflowRunStarted` populates the envelope itself.
+
+## Run Completion Contract
+
+`status.json` is the authoritative completion signal for detached runs. Write a terminal `RunStatus` only after all post-run work is complete, including retro generation, finalize-commit work, pull request creation, and sandbox cleanup. `conclusion.json` should be written at that same final point so `attach`, `wait`, and summary rendering all agree on when the run is actually finished.
 
 ## Node Terminology
 
@@ -151,6 +157,7 @@ WorkflowRunEvent::MyNewEvent { node_id, duration_ms, .. } => {
 | `WorkflowRunStarted` | `workflow_name`, `run_id`, `base_sha`?, `run_branch`?, `worktree_dir`? |
 | `WorkflowRunCompleted` | `duration_ms`, `artifact_count`, `total_cost`?, `final_git_commit_sha`? |
 | `WorkflowRunFailed` | `error`, `duration_ms`, `git_commit_sha`? |
+| `RunNotice` | `level`, `code`, `message` |
 
 ### Stage execution
 

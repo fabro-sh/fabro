@@ -25,6 +25,24 @@ impl FileInterviewer {
     fn response_path(&self) -> PathBuf {
         self.run_dir.join("interview_response.json")
     }
+
+    fn claim_path(&self) -> PathBuf {
+        self.run_dir.join("interview_request.claim")
+    }
+
+    async fn write_request_atomically(&self, question: &Question) -> std::io::Result<()> {
+        let json = serde_json::to_string_pretty(question).expect("Question serialization failed");
+        let request_path = self.request_path();
+        let temp_path = request_path.with_extension("json.tmp");
+        tokio::fs::write(&temp_path, json).await?;
+        tokio::fs::rename(temp_path, request_path).await
+    }
+
+    async fn cleanup_ipc_files(&self) {
+        let _ = tokio::fs::remove_file(self.request_path()).await;
+        let _ = tokio::fs::remove_file(self.response_path()).await;
+        let _ = tokio::fs::remove_file(self.claim_path()).await;
+    }
 }
 
 #[async_trait]
@@ -34,9 +52,7 @@ impl Interviewer for FileInterviewer {
         let default_answer = question.default.clone();
 
         // Write the request file
-        let request_path = self.request_path();
-        let json = serde_json::to_string_pretty(&question).expect("Question serialization failed");
-        if let Err(e) = tokio::fs::write(&request_path, json).await {
+        if let Err(e) = self.write_request_atomically(&question).await {
             tracing::warn!(error = %e, "Failed to write interview request");
             return default_answer.unwrap_or_else(Answer::timeout);
         }
@@ -48,9 +64,7 @@ impl Interviewer for FileInterviewer {
                 match tokio::fs::read_to_string(&response_path).await {
                     Ok(data) => match serde_json::from_str::<Answer>(&data) {
                         Ok(answer) => {
-                            // Clean up both files
-                            let _ = tokio::fs::remove_file(&request_path).await;
-                            let _ = tokio::fs::remove_file(&response_path).await;
+                            self.cleanup_ipc_files().await;
                             return answer;
                         }
                         Err(e) => {
@@ -74,8 +88,7 @@ impl Interviewer for FileInterviewer {
             match tokio::time::timeout(duration, poll).await {
                 Ok(answer) => answer,
                 Err(_) => {
-                    // Clean up request file on timeout
-                    let _ = tokio::fs::remove_file(&self.request_path()).await;
+                    self.cleanup_ipc_files().await;
                     default_answer.unwrap_or_else(Answer::timeout)
                 }
             }
@@ -135,6 +148,7 @@ mod tests {
         // Both files should be cleaned up
         assert!(!request_path.exists());
         assert!(!response_path.exists());
+        assert!(!run_dir.join("interview_request.claim").exists());
     }
 
     #[tokio::test]

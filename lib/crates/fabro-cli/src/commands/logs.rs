@@ -299,6 +299,28 @@ pub fn format_event_pretty(line: &str, styles: &Styles) -> Option<String> {
                 styles.red.apply_to(error),
             ))
         }
+        "RunNotice" => {
+            let level = str_field(&envelope, "level").unwrap_or("info");
+            let code = str_field(&envelope, "code").unwrap_or("");
+            let message = str_field(&envelope, "message").unwrap_or("");
+            let label = match level {
+                "warn" => styles.yellow.apply_to("Warning:").to_string(),
+                "error" => styles.bold_red.apply_to("Error:").to_string(),
+                _ => styles.bold.apply_to("Info:").to_string(),
+            };
+            let code_suffix = if code.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", styles.dim.apply_to(format!("[{code}]")))
+            };
+            Some(format!(
+                "{} {} {}{}",
+                styles.dim.apply_to(&ts),
+                label,
+                message,
+                code_suffix,
+            ))
+        }
         "StageStarted" => {
             let label = str_field(&envelope, "node_label").unwrap_or("?");
             Some(format!(
@@ -884,6 +906,29 @@ mod tests {
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("PR failed:"), "got: {result}");
         assert!(result.contains("auth token expired"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_run_notice_warn() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"RunNotice","level":"warn","code":"sandbox_cleanup_failed","message":"sandbox cleanup failed: boom"}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("Warning:"), "got: {result}");
+        assert!(
+            result.contains("sandbox cleanup failed: boom"),
+            "got: {result}"
+        );
+        assert!(result.contains("[sandbox_cleanup_failed]"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_run_notice_error() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"RunNotice","level":"error","code":"launch_failed","message":"failed to start engine"}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("Error:"), "got: {result}");
+        assert!(result.contains("failed to start engine"), "got: {result}");
+        assert!(result.contains("[launch_failed]"), "got: {result}");
     }
 
     #[test]

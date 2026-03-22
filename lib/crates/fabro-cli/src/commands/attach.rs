@@ -1,15 +1,22 @@
-use std::io::{BufRead, BufReader, IsTerminal};
+use std::io::{BufRead, BufReader, IsTerminal, Write};
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 
 use fabro_interview::ConsoleInterviewer;
 use fabro_util::terminal::Styles;
+use fabro_workflows::run_status::{RunStatus, RunStatusRecord};
 
 use super::run_progress;
+
+#[cfg(test)]
+const ATTACH_STARTUP_GRACE: Duration = Duration::from_millis(200);
+#[cfg(not(test))]
+const ATTACH_STARTUP_GRACE: Duration = Duration::from_secs(3);
 
 /// Attach to a running (or finished) workflow run, rendering progress live.
 ///
@@ -22,6 +29,7 @@ pub async fn attach_run(
 ) -> Result<ExitCode> {
     let progress_path = run_dir.join("progress.jsonl");
     let conclusion_path = run_dir.join("conclusion.json");
+    let status_path = run_dir.join("status.json");
     let interview_request_path = run_dir.join("interview_request.json");
     let interview_response_path = run_dir.join("interview_response.json");
     let pid_path = run_dir.join("run.pid");
@@ -73,18 +81,23 @@ pub async fn attach_run(
     let mut reader = BufReader::new(file);
     let mut line = String::new();
     let mut cached_pid: Option<u32> = None;
+    let attach_started = Instant::now();
 
     loop {
         if cancelled.load(Ordering::Relaxed) {
             if kill_on_detach {
                 // Kill the engine process
                 kill_engine(&pid_path);
-                // Wait briefly for conclusion
+                // Wait briefly for a terminal status or conclusion
                 for _ in 0..20 {
-                    if conclusion_path.exists() {
+                    if conclusion_path.exists()
+                        || read_status_record(&status_path)
+                            .map(|record| record.status.is_terminal())
+                            .unwrap_or(false)
+                    {
                         break;
                     }
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             } else {
                 eprintln!("Detached from run (engine continues in background)");
@@ -106,11 +119,11 @@ pub async fn attach_run(
         }
 
         // Check for interview request
-        if interview_request_path.exists() {
+        if interview_request_path.exists()
+            && !interview_response_path.exists()
+            && try_claim_interview_request(run_dir)
+        {
             if let Ok(request_data) = std::fs::read_to_string(&interview_request_path) {
-                // Delete the request file immediately to prevent re-prompting
-                let _ = std::fs::remove_file(&interview_request_path);
-
                 if let Ok(question) =
                     serde_json::from_str::<fabro_interview::Question>(&request_data)
                 {
@@ -121,10 +134,7 @@ pub async fn attach_run(
                     let interviewer = ConsoleInterviewer::new(styles);
                     let answer = fabro_interview::Interviewer::ask(&interviewer, question).await;
 
-                    // Write response
-                    if let Ok(response_json) = serde_json::to_string_pretty(&answer) {
-                        let _ = std::fs::write(&interview_response_path, response_json);
-                    }
+                    let _ = write_interview_response_atomically(&interview_response_path, &answer);
 
                     // Show progress bars again
                     progress_ui.show_bars();
@@ -132,70 +142,58 @@ pub async fn attach_run(
             }
         }
 
-        // Check if run is complete
-        if conclusion_path.exists() {
-            // Drain any remaining lines
-            drain_remaining(&mut reader, &mut line, &mut progress_ui);
-            break;
-        }
+        let terminal_status = read_status_record(&status_path)
+            .map(|record| record.status)
+            .filter(|status| status.is_terminal());
 
-        // Check if engine process is still alive
-        let engine_alive = if let Some(ref mut child) = engine_child {
+        if let Some(ref mut child) = engine_child {
             // We own the child handle — use try_wait (safe, reaps zombies)
-            match child.try_wait() {
+            let child_alive = match child.try_wait() {
                 Ok(Some(_)) => false, // child exited
                 Ok(None) => true,     // still running
                 Err(_) => false,      // error, treat as dead
+            };
+            if !child_alive {
+                drain_remaining(&mut reader, &mut line, &mut progress_ui);
+                break;
             }
         } else {
-            // Standalone attach — use kill-based check via PID file
-            match cached_pid {
+            if terminal_status.is_some() {
+                drain_remaining(&mut reader, &mut line, &mut progress_ui);
+                break;
+            }
+
+            let engine_alive = match cached_pid {
                 Some(pid) => process_alive(pid),
                 None => {
-                    if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
-                        if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                            cached_pid = Some(pid);
-                            process_alive(pid)
-                        } else {
-                            true
-                        }
+                    if let Some(pid) = read_pid(&pid_path) {
+                        cached_pid = Some(pid);
+                        process_alive(pid)
+                    } else if attach_started.elapsed() >= ATTACH_STARTUP_GRACE
+                        && progress_file_is_empty(&progress_path)
+                    {
+                        false
                     } else {
-                        true // no PID file yet, assume alive
+                        true
                     }
                 }
+            };
+            if !engine_alive {
+                drain_remaining(&mut reader, &mut line, &mut progress_ui);
+                break;
             }
-        };
-        if !engine_alive && !conclusion_path.exists() {
-            drain_remaining(&mut reader, &mut line, &mut progress_ui);
-            break;
         }
 
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
     // Finish progress bars
     progress_ui.finish();
 
-    // Determine exit code from conclusion
-    if conclusion_path.exists() {
-        match fabro_workflows::conclusion::Conclusion::load(&conclusion_path) {
-            Ok(conclusion) => {
-                let success = matches!(
-                    conclusion.status,
-                    fabro_workflows::outcome::StageStatus::Success
-                        | fabro_workflows::outcome::StageStatus::PartialSuccess
-                );
-                Ok(if success {
-                    ExitCode::from(0)
-                } else {
-                    ExitCode::from(1)
-                })
-            }
-            Err(_) => Ok(ExitCode::from(1)),
-        }
-    } else {
-        Ok(ExitCode::from(1))
-    }
+    Ok(determine_exit_code(
+        &conclusion_path,
+        read_status_record(&status_path),
+    ))
 }
 
 fn drain_remaining(
@@ -215,6 +213,83 @@ fn drain_remaining(
             }
             Err(_) => break,
         }
+    }
+}
+
+fn read_status_record(path: &Path) -> Option<RunStatusRecord> {
+    RunStatusRecord::load(path).ok()
+}
+
+fn read_pid(pid_path: &Path) -> Option<u32> {
+    std::fs::read_to_string(pid_path)
+        .ok()
+        .and_then(|pid| pid.trim().parse::<u32>().ok())
+}
+
+fn progress_file_is_empty(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|meta| meta.len() == 0)
+        .unwrap_or(true)
+}
+
+fn interview_claim_path(run_dir: &Path) -> std::path::PathBuf {
+    run_dir.join("interview_request.claim")
+}
+
+fn try_claim_interview_request(run_dir: &Path) -> bool {
+    let claim_path = interview_claim_path(run_dir);
+    if let Ok(existing) = std::fs::read_to_string(&claim_path) {
+        if let Ok(pid) = existing.trim().parse::<u32>() {
+            if process_alive(pid) {
+                return pid == std::process::id();
+            }
+        }
+        let _ = std::fs::remove_file(&claim_path);
+    }
+
+    match std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&claim_path)
+    {
+        Ok(mut file) => {
+            let _ = writeln!(file, "{}", std::process::id());
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn write_interview_response_atomically(
+    response_path: &Path,
+    answer: &fabro_interview::Answer,
+) -> Result<()> {
+    let response_json = serde_json::to_string_pretty(answer)?;
+    let temp_path = response_path.with_extension("json.tmp");
+    std::fs::write(&temp_path, response_json)?;
+    std::fs::rename(temp_path, response_path)?;
+    Ok(())
+}
+
+fn determine_exit_code(conclusion_path: &Path, status_record: Option<RunStatusRecord>) -> ExitCode {
+    if conclusion_path.exists() {
+        if let Ok(conclusion) = fabro_workflows::conclusion::Conclusion::load(conclusion_path) {
+            let success = matches!(
+                conclusion.status,
+                fabro_workflows::outcome::StageStatus::Success
+                    | fabro_workflows::outcome::StageStatus::PartialSuccess
+            );
+            return if success {
+                ExitCode::from(0)
+            } else {
+                ExitCode::from(1)
+            };
+        }
+    }
+
+    match status_record.map(|record| record.status) {
+        Some(RunStatus::Succeeded) => ExitCode::from(0),
+        Some(_) | None => ExitCode::from(1),
     }
 }
 
@@ -239,5 +314,112 @@ fn process_alive(pid: u32) -> bool {
     {
         let _ = pid;
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use fabro_interview::{Answer, AnswerValue};
+    use fabro_util::terminal::Styles;
+    use fabro_workflows::conclusion::Conclusion;
+    use fabro_workflows::outcome::StageStatus;
+    use fabro_workflows::run_status::{write_run_status, StatusReason};
+
+    fn no_color_styles() -> &'static Styles {
+        Box::leak(Box::new(Styles::new(false)))
+    }
+
+    fn sample_conclusion(status: StageStatus) -> Conclusion {
+        Conclusion {
+            timestamp: Utc::now(),
+            status,
+            duration_ms: 0,
+            failure_reason: None,
+            final_git_commit_sha: None,
+            stages: Vec::new(),
+            total_cost: None,
+            total_retries: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_write_tokens: 0,
+            total_reasoning_tokens: 0,
+            has_pricing: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn attach_does_not_return_when_only_conclusion_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("progress.jsonl"), "").unwrap();
+        sample_conclusion(StageStatus::Success)
+            .save(&dir.path().join("conclusion.json"))
+            .unwrap();
+
+        let child = std::process::Command::new("sh")
+            .args(["-c", "sleep 0.35"])
+            .spawn()
+            .unwrap();
+        let started = Instant::now();
+
+        let exit = attach_run(dir.path(), false, no_color_styles(), Some(child))
+            .await
+            .unwrap();
+
+        assert_eq!(exit, ExitCode::from(0));
+        assert!(
+            started.elapsed() >= Duration::from_millis(250),
+            "attach returned before the owned child exited"
+        );
+    }
+
+    #[tokio::test]
+    async fn attach_missing_pid_and_failed_status_is_not_alive() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("progress.jsonl"), "").unwrap();
+        write_run_status(
+            dir.path(),
+            RunStatus::Failed,
+            Some(StatusReason::LaunchFailed),
+        );
+
+        let exit = attach_run(dir.path(), false, no_color_styles(), None)
+            .await
+            .unwrap();
+
+        assert_eq!(exit, ExitCode::from(1));
+    }
+
+    #[test]
+    fn try_claim_interview_request_reclaims_stale_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(interview_claim_path(dir.path()), "999999\n").unwrap();
+
+        assert!(try_claim_interview_request(dir.path()));
+        assert_eq!(
+            std::fs::read_to_string(interview_claim_path(dir.path())).unwrap(),
+            format!("{}\n", std::process::id())
+        );
+    }
+
+    #[test]
+    fn write_interview_response_atomically_persists_answer() {
+        let dir = tempfile::tempdir().unwrap();
+        let response_path = dir.path().join("interview_response.json");
+        let answer = Answer {
+            value: AnswerValue::Text("ship it".to_string()),
+            selected_option: None,
+            selected_options: Vec::new(),
+            text: Some("ship it".to_string()),
+        };
+
+        write_interview_response_atomically(&response_path, &answer).unwrap();
+
+        let saved: Answer =
+            serde_json::from_str(&std::fs::read_to_string(&response_path).unwrap()).unwrap();
+        assert_eq!(saved.text.as_deref(), Some("ship it"));
+        assert!(!response_path.with_extension("json.tmp").exists());
     }
 }

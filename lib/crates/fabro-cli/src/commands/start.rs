@@ -1,6 +1,9 @@
 use std::path::Path;
 
 use anyhow::{bail, Result};
+use fabro_workflows::run_status::{RunStatus, StatusReason};
+
+use super::detached_support::persist_detached_failure;
 
 /// Spawn a detached engine process for the given run directory.
 ///
@@ -10,7 +13,7 @@ pub fn start_run(run_dir: &Path) -> Result<std::process::Child> {
     // Validate status is Submitted
     let status_path = run_dir.join("status.json");
     match fabro_workflows::run_status::RunStatusRecord::load(&status_path) {
-        Ok(record) if record.status != fabro_workflows::run_status::RunStatus::Submitted => {
+        Ok(record) if record.status != RunStatus::Submitted => {
             bail!(
                 "Cannot start run: status is {:?}, expected Submitted",
                 record.status
@@ -24,19 +27,38 @@ pub fn start_run(run_dir: &Path) -> Result<std::process::Child> {
         .map_err(|e| anyhow::anyhow!("Cannot start run: failed to load spec.json: {e}"))?;
 
     // Write Starting status before spawning to prevent duplicate engines
-    fabro_workflows::run_status::write_run_status(
-        run_dir,
-        fabro_workflows::run_status::RunStatus::Starting,
-        None,
-    );
+    fabro_workflows::run_status::write_run_status(run_dir, RunStatus::Starting, None);
 
-    let log_file = std::fs::File::create(run_dir.join("detach.log"))?;
+    let log_file = match std::fs::File::create(run_dir.join("detach.log")) {
+        Ok(file) => file,
+        Err(err) => {
+            let err = err.into();
+            let _ = persist_detached_failure(run_dir, "launch", StatusReason::LaunchFailed, &err);
+            return Err(err);
+        }
+    };
 
-    let exe = std::env::current_exe()?;
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(err) => {
+            let err = err.into();
+            let _ = persist_detached_failure(run_dir, "launch", StatusReason::LaunchFailed, &err);
+            return Err(err);
+        }
+    };
+
     let mut cmd = std::process::Command::new(&exe);
+    let stdout_log = match log_file.try_clone() {
+        Ok(file) => file,
+        Err(err) => {
+            let err = err.into();
+            let _ = persist_detached_failure(run_dir, "launch", StatusReason::LaunchFailed, &err);
+            return Err(err);
+        }
+    };
     cmd.args(["_run_engine", "--run-dir"])
         .arg(run_dir)
-        .stdout(log_file.try_clone()?)
+        .stdout(stdout_log)
         .stderr(log_file)
         .stdin(std::process::Stdio::null());
 
@@ -52,19 +74,36 @@ pub fn start_run(run_dir: &Path) -> Result<std::process::Child> {
         }
     }
 
-    let child = cmd.spawn()?;
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            let err = err.into();
+            let _ = persist_detached_failure(run_dir, "launch", StatusReason::LaunchFailed, &err);
+            return Err(err);
+        }
+    };
 
     // Write PID file
-    std::fs::write(run_dir.join("run.pid"), child.id().to_string())?;
+    if let Err(err) = std::fs::write(run_dir.join("run.pid"), child.id().to_string()) {
+        kill_child_best_effort(&mut child);
+        let err = err.into();
+        let _ = persist_detached_failure(run_dir, "launch", StatusReason::LaunchFailed, &err);
+        return Err(err);
+    }
 
     Ok(child)
+}
+
+fn kill_child_best_effort(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use fabro_workflows::run_spec::RunSpec;
-    use fabro_workflows::run_status::{write_run_status, RunStatus, RunStatusRecord};
+    use fabro_workflows::run_status::{write_run_status, RunStatus, RunStatusRecord, StatusReason};
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -87,23 +126,24 @@ mod tests {
         }
     }
 
-    // Bug 5: start_run should write Starting status before spawning engine
-    // to prevent duplicate engine processes from concurrent start calls.
     #[test]
-    fn bug5_start_run_writes_starting_status_before_spawn() {
+    fn start_run_marks_failed_when_spawn_cannot_start_engine() {
         let dir = tempfile::tempdir().unwrap();
         write_run_status(dir.path(), RunStatus::Submitted, None);
         sample_spec().save(dir.path()).unwrap();
+        std::fs::create_dir(dir.path().join("detach.log")).unwrap();
 
-        // start_run may fail on spawn (test binary != fabro), but we only
-        // care about the status file being updated before the spawn attempt.
         let _ = start_run(dir.path());
 
         let record = RunStatusRecord::load(&dir.path().join("status.json")).unwrap();
         assert_eq!(
             record.status,
-            RunStatus::Starting,
-            "start_run should write Starting status before spawning to prevent duplicate engines"
+            RunStatus::Failed,
+            "start_run should persist a terminal failure on launch errors"
         );
+        assert_eq!(record.reason, Some(StatusReason::LaunchFailed));
+        assert!(dir.path().join("conclusion.json").exists());
+        let progress = std::fs::read_to_string(dir.path().join("progress.jsonl")).unwrap();
+        assert!(progress.contains("launch_failed"));
     }
 }

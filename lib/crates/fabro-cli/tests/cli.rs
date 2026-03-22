@@ -666,7 +666,7 @@ digraph G {
 // Bug 3: attach loop must delete interview_request.json after handling it
 // to prevent re-prompting the user on the next poll iteration.
 #[test]
-fn bug3_attach_cleans_up_interview_request_after_handling() {
+fn bug3_attach_leaves_interview_request_until_engine_consumes_response() {
     let home = tempfile::tempdir().unwrap();
 
     let run_dir = setup_run_dir(
@@ -714,12 +714,18 @@ fn bug3_attach_cleans_up_interview_request_after_handling() {
         .timeout(std::time::Duration::from_secs(5))
         .output();
 
-    // Bug: interview_request.json is never deleted by the attach loop.
-    // After the fix it should be removed immediately after handling.
+    // The attach loop should leave the request durable until the engine consumes
+    // the response, so a crashed attach can be retried safely.
     assert!(
-        !run_dir.join("interview_request.json").exists(),
-        "bug3: interview_request.json should be deleted after being handled by attach"
+        run_dir.join("interview_request.json").exists(),
+        "bug3: interview_request.json should stay present until the engine consumes the answer"
     );
+    assert!(
+        run_dir.join("interview_response.json").exists(),
+        "bug3: attach should write interview_response.json after handling the prompt"
+    );
+    let response = std::fs::read_to_string(run_dir.join("interview_response.json")).unwrap();
+    assert!(response.contains("\"value\": \"Yes\""));
 }
 
 // Bug 4: attach should respect the verbose flag from spec.json.

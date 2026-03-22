@@ -6,6 +6,14 @@ use serde::{Deserialize, Serialize};
 use crate::outcome::StageUsage;
 use fabro_agent::{AgentEvent, SandboxEvent, WorktreeEvent, WorktreeEventCallback};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RunNoticeLevel {
+    Info,
+    Warn,
+    Error,
+}
+
 /// Events emitted during workflow run execution for observability.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WorkflowRunEvent {
@@ -38,6 +46,11 @@ pub enum WorkflowRunEvent {
         duration_ms: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         git_commit_sha: Option<String>,
+    },
+    RunNotice {
+        level: RunNoticeLevel,
+        code: String,
+        message: String,
     },
     StageStarted {
         node_id: String,
@@ -340,6 +353,21 @@ impl WorkflowRunEvent {
             } => {
                 error!(error = %error, duration_ms, "Workflow run failed");
             }
+            Self::RunNotice {
+                level,
+                code,
+                message,
+            } => match level {
+                RunNoticeLevel::Info => {
+                    info!(code, message, "Run notice");
+                }
+                RunNoticeLevel::Warn => {
+                    warn!(code, message, "Run notice");
+                }
+                RunNoticeLevel::Error => {
+                    error!(code, message, "Run notice");
+                }
+            },
             Self::StageStarted {
                 node_id,
                 name,
@@ -2281,6 +2309,44 @@ mod tests {
         let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
         assert!(
             matches!(deserialized, WorkflowRunEvent::PullRequestFailed { error } if error == "auth failed")
+        );
+    }
+
+    #[test]
+    fn run_notice_event_serialization() {
+        let event = WorkflowRunEvent::RunNotice {
+            level: RunNoticeLevel::Warn,
+            code: "sandbox_cleanup_failed".to_string(),
+            message: "sandbox cleanup failed: boom".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("RunNotice"));
+        assert!(json.contains("\"level\":\"warn\""));
+
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            deserialized,
+            WorkflowRunEvent::RunNotice {
+                level: RunNoticeLevel::Warn,
+                code,
+                ..
+            } if code == "sandbox_cleanup_failed"
+        ));
+    }
+
+    #[test]
+    fn flatten_event_run_notice() {
+        let event = WorkflowRunEvent::RunNotice {
+            level: RunNoticeLevel::Error,
+            code: "bootstrap_failed".to_string(),
+            message: "working directory missing".to_string(),
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "RunNotice");
+        assert_eq!(fields.get("level").and_then(|v| v.as_str()), Some("error"));
+        assert_eq!(
+            fields.get("code").and_then(|v| v.as_str()),
+            Some("bootstrap_failed")
         );
     }
 
