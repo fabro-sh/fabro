@@ -1,0 +1,13 @@
+{
+  "run_id": "01KMBJVD8CGPGCTKSYSVJ4J0HG",
+  "workflow_name": "AgentLinear",
+  "goal": "Write hello to a file using an agent",
+  "start_time": "2026-03-22T20:12:53.406473Z",
+  "node_count": 3,
+  "edge_count": 2,
+  "run_branch": "fabro/run/01KMBJVD8CGPGCTKSYSVJ4J0HG",
+  "base_sha": "04320ff5f2f4a21a809ec9dc29c72c6bed3af156",
+  "base_branch": "issue-135",
+  "workflow_slug": "run",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-cli"
+}

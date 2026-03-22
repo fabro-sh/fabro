@@ -1,0 +1,11 @@
+digraph AgentLinear {
+    graph [goal="Write hello to a file using an agent"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    work [label="Work", prompt="Write the word 'hello' to a file called scenario_test.txt"]
+
+    start -> work -> exit
+}
