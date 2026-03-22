@@ -939,6 +939,13 @@ async fn run_resumed(
         args.verbose,
     )));
     {
+        let mut ui = progress_ui.lock().expect("progress lock poisoned");
+        ui.show_version();
+        ui.show_run_id(&run_id);
+        ui.show_time(&chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
+        ui.show_run_dir(&run_dir);
+    }
+    {
         let p = Arc::clone(&progress_ui);
         emitter.on_event(move |event| {
             let mut ui = p.lock().expect("progress lock poisoned");
