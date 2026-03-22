@@ -26,7 +26,7 @@ Output a report with all the bugs using this format:
    <bug>...</bug>
 </code_review>
 
-Write the report to: `.ai/reviews/candidate_bugs.xml`
+Write the report to: `.ai/tmp/candidate_bugs.xml`
 
 Notes:
 

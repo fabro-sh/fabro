@@ -8,7 +8,7 @@ To do this, follow these steps precisely:
 2. Use a Haiku agent to view the branch's diff, and ask the agent to return a summary of the change
 3. For each bug assess if it is a false positive based on the criteria below.
 
-Input: Read from `.ai/reviews/analyzed_bugs.xml`
+Input: Read from `.ai/tmp/analyzed_bugs.xml`
 
 Filter out the false positives. Examples of false positives:
 
@@ -23,8 +23,8 @@ Filter out the false positives. Examples of false positives:
 
 Ouput:
 
-1. Write to `.ai/reviews/valid_bugs.xml` in the same XML format with the false positives filtered out.
-2. Write to `.ai/reviews/false_positives.md` a summary of the false positives you filtered out and why.
+1. Write to `.ai/tmp/valid_bugs.xml` in the same XML format with the false positives filtered out.
+2. Write to `.ai/tmp/false_positives.md` a summary of the false positives you filtered out and why.
 
 Notes:
 

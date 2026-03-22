@@ -8,7 +8,7 @@ To do this, follow these steps precisely:
 2. View the branch's diff and understand the changes
 3. Then, launch 5 parallel Opus agents to independently assess the candidate bugs. For each bug, investigate it thoroughly in order to produce the report in the format below. If the candidate bug is not valid, then discard it.
 
-Input: Read from `.ai/reviews/candidate_bugs.xml`
+Input: Read from `.ai/tmp/candidate_bugs.xml`
 
 Output a report with all the bugs using this format:
 
@@ -102,7 +102,7 @@ Here is a real-world example:
 </bug>
 ```
 
-Write the output to `.ai/reviews/analyzed_bugs.xml`
+Write the output to `.ai/tmp/analyzed_bugs.xml`
 
 Notes:
 
