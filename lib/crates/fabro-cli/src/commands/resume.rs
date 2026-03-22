@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context};
 use clap::Args;
 use fabro_agent::{DockerSandbox, DockerSandboxConfig, Sandbox, WorktreeConfig, WorktreeSandbox};
-use fabro_config::run::RunDefaults;
+use fabro_config::run::{RunDefaults, WorkflowRunConfig};
 use fabro_graphviz::graph::Graph;
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, Interviewer};
 use fabro_model::Provider;
@@ -15,17 +15,19 @@ use fabro_workflows::backend::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::checkpoint::Checkpoint;
 use fabro_workflows::engine::RunConfig;
 use fabro_workflows::event::EventEmitter;
+use fabro_workflows::manifest::Manifest;
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::sandbox_provider::SandboxProvider;
 use indicatif::HumanDuration;
 
 use super::run::{
-    apply_goal_override, build_event_envelope, default_run_dir, generate_retro,
-    local_sandbox_with_callback, mint_github_token, print_assets, print_final_output,
-    resolve_cli_goal, resolve_daytona_config, resolve_model_provider, resolve_sandbox_provider,
-    resolve_ssh_clone_params, resolve_ssh_config, write_finalize_commit, CliSandboxProvider,
+    build_event_envelope, default_run_dir, generate_retro, local_sandbox_with_callback,
+    mint_github_token, prepare_workflow_with_project_config, print_assets, print_final_output,
+    resolve_daytona_config, resolve_fallback_chain, resolve_model_provider,
+    resolve_sandbox_provider, resolve_ssh_clone_params, resolve_ssh_config, write_finalize_commit,
+    write_run_config_snapshot, CliSandboxProvider, RunArgs,
 };
-use crate::commands::shared::{print_diagnostics, read_workflow_file, tilde_path};
+use crate::commands::shared::{print_diagnostics, tilde_path};
 use fabro_config::project as project_config;
 use fabro_config::run as run_config;
 use fabro_validate::Severity;
@@ -102,6 +104,7 @@ struct ResumeContext {
     graph: Graph,
     run_id: String,
     run_dir: PathBuf,
+    run_cfg: Option<WorkflowRunConfig>,
     sandbox: Arc<dyn Sandbox>,
     /// Kept as Arc so the sandbox event callbacks can emit through it. Listeners
     /// that need to be added later (e.g. ProgressUI) are registered separately.
@@ -114,9 +117,80 @@ struct ResumeContext {
     devcontainer_env: HashMap<String, String>,
     /// Original cwd to restore after engine run (git-branch path changes cwd to worktree).
     original_cwd: Option<PathBuf>,
+    origin_url: Option<String>,
     sandbox_provider: SandboxProvider,
     ssh_data_host: Option<String>,
     github_app: Option<fabro_github::GitHubAppCredentials>,
+    status_guard: ResumeRunStatusGuard,
+}
+
+struct ResumeRunStatusGuard {
+    run_dir: PathBuf,
+    active: bool,
+}
+
+impl ResumeRunStatusGuard {
+    fn arm(run_dir: &std::path::Path) -> anyhow::Result<Self> {
+        std::fs::write(run_dir.join("run.pid"), std::process::id().to_string())
+            .with_context(|| format!("Failed to write {}", run_dir.join("run.pid").display()))?;
+        fabro_workflows::run_status::write_run_status(
+            run_dir,
+            fabro_workflows::run_status::RunStatus::Starting,
+            Some(fabro_workflows::run_status::StatusReason::SandboxInitializing),
+        );
+        Ok(Self {
+            run_dir: run_dir.to_path_buf(),
+            active: true,
+        })
+    }
+
+    fn defuse(&mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for ResumeRunStatusGuard {
+    fn drop(&mut self) {
+        if self.active {
+            fabro_workflows::run_status::write_run_status(
+                &self.run_dir,
+                fabro_workflows::run_status::RunStatus::Failed,
+                Some(fabro_workflows::run_status::StatusReason::SandboxInitFailed),
+            );
+        }
+    }
+}
+
+fn resume_as_run_args(args: &ResumeArgs, workflow: PathBuf) -> RunArgs {
+    RunArgs {
+        workflow: Some(workflow),
+        run_dir: None,
+        dry_run: args.dry_run,
+        preflight: false,
+        auto_approve: args.auto_approve,
+        goal: args.goal.clone(),
+        goal_file: args.goal_file.clone(),
+        model: args.model.clone(),
+        provider: args.provider.clone(),
+        verbose: args.verbose,
+        sandbox: args.sandbox,
+        label: Vec::new(),
+        no_retro: args.no_retro,
+        preserve_sandbox: args.preserve_sandbox,
+        detach: false,
+        run_id: None,
+    }
+}
+
+fn preferred_resume_repo_path(
+    original_cwd: &std::path::Path,
+    manifest: Option<&Manifest>,
+) -> PathBuf {
+    manifest
+        .and_then(|m| m.host_repo_path.as_deref())
+        .map(PathBuf::from)
+        .filter(|path| path.exists())
+        .unwrap_or_else(|| original_cwd.to_path_buf())
 }
 
 /// Resume an interrupted workflow run.
@@ -164,33 +238,17 @@ async fn prepare_from_checkpoint(
         .ok_or_else(|| anyhow::anyhow!("--workflow is required when using --checkpoint"))?;
 
     let checkpoint = Checkpoint::load(checkpoint_path)?;
-
-    // Expand {{vars.xxx}} placeholders before parsing (mirrors run_command)
-    let source = read_workflow_file(workflow_path)?;
-    let vars = run_defaults.vars.as_ref();
-    let source = match vars {
-        Some(vars) => fabro_workflows::vars::expand_vars(&source, vars)?,
-        None => source,
-    };
-    let dot_dir = workflow_path.parent().unwrap_or(std::path::Path::new("."));
-    let (mut graph, diagnostics) = fabro_workflows::workflow::WorkflowBuilder::new()
-        .prepare_with_file_inlining(&source, dot_dir)?;
-
-    let cli_goal = resolve_cli_goal(&args.goal, &args.goal_file)?;
-    apply_goal_override(&mut graph, cli_goal.as_deref(), None);
-
-    // Inline @file references in the (possibly overridden) goal (mirrors run_command)
-    if let Some(fabro_graphviz::graph::AttrValue::String(goal)) = graph.attrs.get("goal") {
-        let fallback = dirs::home_dir().map(|h| h.join(".fabro"));
-        let resolved =
-            fabro_workflows::transform::resolve_file_ref(goal, dot_dir, fallback.as_deref());
-        if resolved != *goal {
-            graph.attrs.insert(
-                "goal".to_string(),
-                fabro_graphviz::graph::AttrValue::String(resolved),
-            );
-        }
-    }
+    let prepared = prepare_workflow_with_project_config(
+        &resume_as_run_args(args, workflow_path.clone()),
+        run_defaults.clone(),
+        styles,
+        true,
+        false,
+    )?;
+    let source = prepared.source;
+    let graph = prepared.graph;
+    let run_cfg = prepared.run_cfg;
+    let sandbox_provider = prepared.sandbox_provider;
 
     eprintln!(
         "{} {} from checkpoint {}",
@@ -198,11 +256,6 @@ async fn prepare_from_checkpoint(
         graph.name,
         styles.dim.apply_to(checkpoint_path.display()),
     );
-
-    print_diagnostics(&diagnostics, styles);
-    if diagnostics.iter().any(|d| d.severity == Severity::Error) {
-        bail!("Validation failed");
-    }
 
     let run_id = ulid::Ulid::new().to_string();
     let run_dir = args
@@ -212,28 +265,21 @@ async fn prepare_from_checkpoint(
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
-    tokio::fs::write(
-        run_dir.join("graph.fabro"),
-        tokio::fs::read(workflow_path).await?,
-    )
-    .await?;
+    let status_guard = ResumeRunStatusGuard::arm(&run_dir)?;
+    tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
+    let mut run_cfg = run_cfg;
+    write_run_config_snapshot(&run_dir, run_cfg.as_mut()).await?;
 
     let original_cwd = std::env::current_dir()?;
     let emitter = Arc::new(EventEmitter::new());
 
-    // Resolve sandbox provider from CLI flag / config / defaults
-    let sandbox_provider = if args.dry_run {
-        SandboxProvider::Local
-    } else {
-        resolve_sandbox_provider(args.sandbox.map(Into::into), None, run_defaults)?
-    };
-
     // Resolve devcontainer BEFORE sandbox creation (mirrors run_command) so that
     // the Daytona snapshot config can be overridden with the devcontainer Dockerfile.
-    let mut daytona_config = resolve_daytona_config(None, run_defaults);
-    let devcontainer_config = if run_defaults
-        .sandbox
+    let mut daytona_config = resolve_daytona_config(run_cfg.as_ref(), run_defaults);
+    let devcontainer_config = if run_cfg
         .as_ref()
+        .and_then(|c| c.sandbox.as_ref())
+        .or(run_defaults.sandbox.as_ref())
         .and_then(|s| s.devcontainer)
         .unwrap_or(false)
     {
@@ -344,7 +390,7 @@ async fn prepare_from_checkpoint(
         }
         #[cfg(feature = "exedev")]
         SandboxProvider::Exe => {
-            let exe_config = super::run::resolve_exe_config(None, run_defaults);
+            let exe_config = super::run::resolve_exe_config(run_cfg.as_ref(), run_defaults);
             let clone_params = super::run::resolve_exe_clone_params(&original_cwd);
             let mgmt_ssh = fabro_sandbox::exe::OpensshRunner::connect_raw("exe.dev")
                 .await
@@ -364,7 +410,7 @@ async fn prepare_from_checkpoint(
             Arc::new(env)
         }
         SandboxProvider::Ssh => {
-            let config = resolve_ssh_config(None, run_defaults)
+            let config = resolve_ssh_config(run_cfg.as_ref(), run_defaults)
                 .ok_or_else(|| anyhow::anyhow!("--sandbox ssh requires [sandbox.ssh] config"))?;
             ssh_data_host = Some(config.destination.clone());
             let clone_params = resolve_ssh_clone_params(&original_cwd);
@@ -415,18 +461,23 @@ async fn prepare_from_checkpoint(
             .filter_map(|s| s.split_once('='))
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
-        checkpoint_exclude_globs: run_defaults.checkpoint.exclude_globs.clone(),
+        checkpoint_exclude_globs: run_cfg
+            .as_ref()
+            .map(|cfg| cfg.checkpoint.exclude_globs.clone())
+            .unwrap_or_else(|| run_defaults.checkpoint.exclude_globs.clone()),
         github_app: github_app.clone(),
         git_author,
         base_branch: None,
-        pull_request: run_defaults
-            .pull_request
+        pull_request: run_cfg
             .as_ref()
+            .and_then(|cfg| cfg.pull_request.as_ref())
+            .or(run_defaults.pull_request.as_ref())
             .filter(|p| p.enabled)
             .cloned(),
-        asset_globs: run_defaults
-            .assets
+        asset_globs: run_cfg
             .as_ref()
+            .and_then(|cfg| cfg.assets.as_ref())
+            .or(run_defaults.assets.as_ref())
             .map(|a| a.include.clone())
             .unwrap_or_default(),
         workflow_slug: None,
@@ -436,26 +487,33 @@ async fn prepare_from_checkpoint(
         .as_ref()
         .map(|dc| dc.environment.clone())
         .unwrap_or_default();
+    let setup_commands = run_cfg
+        .as_ref()
+        .and_then(|cfg| cfg.setup.as_ref())
+        .or(run_defaults.setup.as_ref())
+        .map(|s| s.commands.clone())
+        .unwrap_or_default();
 
     Ok(ResumeContext {
         checkpoint,
         graph,
         run_id,
         run_dir,
+        run_cfg,
         sandbox,
         emitter,
         config,
-        setup_commands: run_defaults
-            .setup
-            .as_ref()
-            .map(|s| s.commands.clone())
-            .unwrap_or_default(),
+        setup_commands,
         devcontainer_phases,
         devcontainer_env,
         original_cwd: None,
+        origin_url: fabro_sandbox::daytona::detect_repo_info(&original_cwd)
+            .ok()
+            .map(|(url, _)| url),
         sandbox_provider,
         ssh_data_host,
         github_app: github_app.clone(),
+        status_guard,
     })
 }
 
@@ -480,59 +538,62 @@ async fn prepare_from_branch(
         };
 
     let original_cwd = std::env::current_dir()?;
-    let detected_base_branch = fabro_sandbox::daytona::detect_repo_info(&original_cwd)
-        .map(|(_, branch)| branch)
-        .unwrap_or(None);
-
-    // Read checkpoint from metadata branch
-    let checkpoint = fabro_workflows::git::MetadataStore::read_checkpoint(&original_cwd, &run_id)?
-        .ok_or_else(|| {
-            anyhow::anyhow!("no checkpoint found on metadata branch for run {run_id}")
-        })?;
-
-    // Read graph DOT from metadata branch
-    let source = fabro_workflows::git::MetadataStore::read_graph_dot(&original_cwd, &run_id)?
-        .ok_or_else(|| {
-            anyhow::anyhow!("no graph.fabro found on metadata branch for run {run_id}")
-        })?;
-
-    // If --workflow was also provided, use it instead (allows overriding)
-    let (mut graph, diagnostics) = if let Some(ref workflow_path) = args.workflow {
-        // Expand {{vars.xxx}} placeholders before parsing (mirrors run_command)
-        let wf_source = read_workflow_file(workflow_path)?;
-        let vars = run_defaults.vars.as_ref();
-        let wf_source = match vars {
-            Some(vars) => fabro_workflows::vars::expand_vars(&wf_source, vars)?,
-            None => wf_source,
-        };
-        let dot_dir = workflow_path.parent().unwrap_or(std::path::Path::new("."));
-        fabro_workflows::workflow::WorkflowBuilder::new()
-            .prepare_with_file_inlining(&wf_source, dot_dir)?
+    let manifest_hint = fabro_workflows::git::MetadataStore::read_manifest(&original_cwd, &run_id)?;
+    let resume_repo_path = preferred_resume_repo_path(&original_cwd, manifest_hint.as_ref());
+    let manifest = if resume_repo_path == original_cwd {
+        manifest_hint
     } else {
-        fabro_workflows::workflow::WorkflowBuilder::new().prepare(&source)?
+        fabro_workflows::git::MetadataStore::read_manifest(&resume_repo_path, &run_id)?
+            .or(manifest_hint)
     };
-    let cli_goal = resolve_cli_goal(&args.goal, &args.goal_file)?;
-    apply_goal_override(&mut graph, cli_goal.as_deref(), None);
+    let checkpoint =
+        fabro_workflows::git::MetadataStore::read_checkpoint(&resume_repo_path, &run_id)?
+            .ok_or_else(|| {
+                anyhow::anyhow!("no checkpoint found on metadata branch for run {run_id}")
+            })?;
+    let source = fabro_workflows::git::MetadataStore::read_graph_dot(&resume_repo_path, &run_id)?
+        .ok_or_else(|| {
+        anyhow::anyhow!("no graph.fabro found on metadata branch for run {run_id}")
+    })?;
 
-    // Inline @file references in the (possibly overridden) goal (mirrors run_command)
-    {
-        let dot_dir = args
-            .workflow
-            .as_deref()
-            .and_then(|p| p.parent())
-            .unwrap_or(std::path::Path::new("."));
-        if let Some(fabro_graphviz::graph::AttrValue::String(goal)) = graph.attrs.get("goal") {
-            let fallback = dirs::home_dir().map(|h| h.join(".fabro"));
-            let resolved =
-                fabro_workflows::transform::resolve_file_ref(goal, dot_dir, fallback.as_deref());
-            if resolved != *goal {
-                graph.attrs.insert(
-                    "goal".to_string(),
-                    fabro_graphviz::graph::AttrValue::String(resolved),
-                );
+    let repo_info = fabro_sandbox::daytona::detect_repo_info(&resume_repo_path).ok();
+    let origin_url = repo_info.as_ref().map(|(url, _)| url.clone());
+    let detected_base_branch = manifest
+        .as_ref()
+        .and_then(|m| m.base_branch.clone())
+        .or_else(|| repo_info.as_ref().and_then(|(_, branch)| branch.clone()));
+    let base_sha = manifest.as_ref().and_then(|m| m.base_sha.clone());
+
+    let (graph, graph_source, run_cfg, mut sandbox_provider) =
+        if let Some(ref workflow_path) = args.workflow {
+            let prepared = prepare_workflow_with_project_config(
+                &resume_as_run_args(args, workflow_path.clone()),
+                run_defaults.clone(),
+                styles,
+                true,
+                false,
+            )?;
+            (
+                prepared.graph,
+                prepared.source,
+                prepared.run_cfg,
+                prepared.sandbox_provider,
+            )
+        } else {
+            let (graph, diagnostics) =
+                fabro_workflows::workflow::WorkflowBuilder::new().prepare(&source)?;
+            print_diagnostics(&diagnostics, styles);
+            if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+                bail!("Validation failed");
             }
-        }
-    }
+
+            let sandbox_provider = if args.dry_run {
+                SandboxProvider::Local
+            } else {
+                resolve_sandbox_provider(args.sandbox.map(Into::into), None, run_defaults)?
+            };
+            (graph, source.clone(), None, sandbox_provider)
+        };
 
     eprintln!(
         "{} {} from branch {} ({})",
@@ -541,11 +602,6 @@ async fn prepare_from_branch(
         styles.dim.apply_to(&run_branch),
         run_id,
     );
-
-    print_diagnostics(&diagnostics, styles);
-    if diagnostics.iter().any(|d| d.severity == Severity::Error) {
-        bail!("Validation failed");
-    }
 
     // Set up logs directory — reuse existing run dir for this run_id to avoid
     // "ambiguous prefix" errors when the resume happens on a different day.
@@ -561,38 +617,24 @@ async fn prepare_from_branch(
     let run_dir = tokio::fs::canonicalize(&run_dir).await.unwrap_or(run_dir);
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
-    if let Some(ref workflow_path) = args.workflow {
-        tokio::fs::write(
-            run_dir.join("graph.fabro"),
-            tokio::fs::read(workflow_path).await?,
-        )
-        .await?;
-    } else {
-        tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
-    }
-
-    let base_sha = fabro_workflows::git::MetadataStore::read_manifest(&original_cwd, &run_id)?
-        .and_then(|m| m.base_sha);
-
-    // Resolve sandbox provider
-    let mut sandbox_provider = if args.dry_run {
-        SandboxProvider::Local
-    } else {
-        resolve_sandbox_provider(args.sandbox.map(Into::into), None, run_defaults)?
-    };
+    let status_guard = ResumeRunStatusGuard::arm(&run_dir)?;
+    tokio::fs::write(run_dir.join("graph.fabro"), &graph_source).await?;
+    let mut run_cfg = run_cfg;
+    write_run_config_snapshot(&run_dir, run_cfg.as_mut()).await?;
 
     let emitter = Arc::new(EventEmitter::new());
 
     // Resolve devcontainer BEFORE sandbox creation (mirrors run_command) so that
     // the Daytona snapshot config can be overridden with the devcontainer Dockerfile.
-    let mut daytona_config = resolve_daytona_config(None, run_defaults);
-    let devcontainer_config = if run_defaults
-        .sandbox
+    let mut daytona_config = resolve_daytona_config(run_cfg.as_ref(), run_defaults);
+    let devcontainer_config = if run_cfg
         .as_ref()
+        .and_then(|cfg| cfg.sandbox.as_ref())
+        .or(run_defaults.sandbox.as_ref())
         .and_then(|s| s.devcontainer)
         .unwrap_or(false)
     {
-        match fabro_devcontainer::DevcontainerResolver::resolve(&original_cwd).await {
+        match fabro_devcontainer::DevcontainerResolver::resolve(&resume_repo_path).await {
             Ok(dc) => {
                 let lifecycle_command_count = dc.on_create_commands.len()
                     + dc.post_create_commands.len()
@@ -634,7 +676,7 @@ async fn prepare_from_branch(
                         let fut = tokio::process::Command::new("sh")
                             .arg("-c")
                             .arg(shell_cmd)
-                            .current_dir(&original_cwd)
+                            .current_dir(&resume_repo_path)
                             .output();
                         let output = tokio::time::timeout(timeout, fut)
                             .await
@@ -683,7 +725,7 @@ async fn prepare_from_branch(
         let wt = run_dir.join("worktree");
         let wt_str = wt.to_string_lossy().into_owned();
 
-        let inner = local_sandbox_with_callback(original_cwd.clone(), Arc::clone(emitter));
+        let inner = local_sandbox_with_callback(resume_repo_path.clone(), Arc::clone(emitter));
         let wt_config = WorktreeConfig {
             branch_name: run_branch.clone(),
             base_sha: base_sha.clone().unwrap_or_default(),
@@ -725,8 +767,8 @@ async fn prepare_from_branch(
         }
         #[cfg(feature = "exedev")]
         SandboxProvider::Exe => {
-            let exe_config = super::run::resolve_exe_config(None, run_defaults);
-            let clone_params = super::run::resolve_exe_clone_params(&original_cwd);
+            let exe_config = super::run::resolve_exe_config(run_cfg.as_ref(), run_defaults);
+            let clone_params = super::run::resolve_exe_clone_params(&resume_repo_path);
             let mgmt_ssh = fabro_sandbox::exe::OpensshRunner::connect_raw("exe.dev")
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to connect to exe.dev: {e}"))?;
@@ -745,10 +787,10 @@ async fn prepare_from_branch(
             (Arc::new(env), None)
         }
         SandboxProvider::Ssh => {
-            let config = resolve_ssh_config(None, run_defaults)
+            let config = resolve_ssh_config(run_cfg.as_ref(), run_defaults)
                 .ok_or_else(|| anyhow::anyhow!("--sandbox ssh requires [sandbox.ssh] config"))?;
             ssh_data_host = Some(config.destination.clone());
-            let clone_params = resolve_ssh_clone_params(&original_cwd);
+            let clone_params = resolve_ssh_clone_params(&resume_repo_path);
             let mut env = fabro_sandbox::ssh::SshSandbox::new(
                 config,
                 clone_params,
@@ -783,9 +825,10 @@ async fn prepare_from_branch(
     let sandbox: Arc<dyn Sandbox> = Arc::new(fabro_agent::ReadBeforeWriteSandbox::new(sandbox));
 
     // User-configured setup commands first, then sandbox-specific resume commands
-    let mut setup_commands: Vec<String> = run_defaults
-        .setup
+    let mut setup_commands: Vec<String> = run_cfg
         .as_ref()
+        .and_then(|cfg| cfg.setup.as_ref())
+        .or(run_defaults.setup.as_ref())
         .map(|s| s.commands.clone())
         .unwrap_or_default();
     setup_commands.extend(sandbox.resume_setup_commands(&run_branch));
@@ -797,7 +840,7 @@ async fn prepare_from_branch(
         dry_run: args.dry_run,
         run_id: run_id.clone(),
         git_checkpoint_enabled: true,
-        host_repo_path: Some(original_cwd.clone()),
+        host_repo_path: Some(resume_repo_path.clone()),
         base_sha,
         run_branch: Some(run_branch),
         meta_branch,
@@ -807,18 +850,23 @@ async fn prepare_from_branch(
             .filter_map(|s| s.split_once('='))
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
-        checkpoint_exclude_globs: run_defaults.checkpoint.exclude_globs.clone(),
+        checkpoint_exclude_globs: run_cfg
+            .as_ref()
+            .map(|cfg| cfg.checkpoint.exclude_globs.clone())
+            .unwrap_or_else(|| run_defaults.checkpoint.exclude_globs.clone()),
         github_app: github_app.clone(),
         git_author,
         base_branch: detected_base_branch,
-        pull_request: run_defaults
-            .pull_request
+        pull_request: run_cfg
             .as_ref()
+            .and_then(|cfg| cfg.pull_request.as_ref())
+            .or(run_defaults.pull_request.as_ref())
             .filter(|p| p.enabled)
             .cloned(),
-        asset_globs: run_defaults
-            .assets
+        asset_globs: run_cfg
             .as_ref()
+            .and_then(|cfg| cfg.assets.as_ref())
+            .or(run_defaults.assets.as_ref())
             .map(|a| a.include.clone())
             .unwrap_or_default(),
         workflow_slug: None,
@@ -834,6 +882,7 @@ async fn prepare_from_branch(
         graph,
         run_id,
         run_dir,
+        run_cfg,
         sandbox,
         emitter,
         config,
@@ -841,9 +890,11 @@ async fn prepare_from_branch(
         devcontainer_phases,
         devcontainer_env,
         original_cwd: Some(original_cwd),
+        origin_url,
         sandbox_provider,
         ssh_data_host,
         github_app: github_app.clone(),
+        status_guard,
     })
 }
 
@@ -859,6 +910,7 @@ async fn run_resumed(
         graph,
         run_id,
         run_dir,
+        mut run_cfg,
         sandbox,
         emitter,
         mut config,
@@ -866,28 +918,12 @@ async fn run_resumed(
         devcontainer_phases,
         devcontainer_env,
         original_cwd,
+        origin_url,
         sandbox_provider,
         ssh_data_host,
         github_app,
+        mut status_guard,
     } = ctx;
-
-    // Write run.pid + initial status so `fabro ps` / `fabro attach` can find this run
-    tokio::fs::write(run_dir.join("run.pid"), std::process::id().to_string()).await?;
-    fabro_workflows::run_status::write_run_status(
-        &run_dir,
-        fabro_workflows::run_status::RunStatus::Starting,
-        Some(fabro_workflows::run_status::StatusReason::SandboxInitializing),
-    );
-
-    // Safety net: mark as failed if we exit before engine.run() completes
-    let status_run_dir = run_dir.clone();
-    let status_guard = scopeguard::guard((), move |()| {
-        fabro_workflows::run_status::write_run_status(
-            &status_run_dir,
-            fabro_workflows::run_status::RunStatus::Failed,
-            Some(fabro_workflows::run_status::StatusReason::SandboxInitFailed),
-        );
-    });
 
     // Track the last git commit SHA from CheckpointCompleted events
     let last_git_sha: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
@@ -1068,10 +1104,14 @@ async fn run_resumed(
     };
     config.dry_run = dry_run_mode;
 
+    if let Some(ref mut cfg) = run_cfg {
+        run_config::resolve_sandbox_env(cfg)?;
+    }
+
     let (model, provider) = resolve_model_provider(
         args.model.as_deref(),
         args.provider.as_deref(),
-        None,
+        run_cfg.as_ref(),
         &run_defaults,
         &graph,
     );
@@ -1082,15 +1122,24 @@ async fn run_resumed(
         .map_err(|e| anyhow::anyhow!("{e}"))?
         .unwrap_or_else(Provider::default_from_env);
 
-    let fallback_chain = match run_defaults.llm.as_ref().and_then(|l| l.fallbacks.as_ref()) {
-        Some(map) => fabro_model::build_fallback_chain(provider_enum.as_str(), &model, map),
-        None => Vec::new(),
+    let fallback_chain = if run_cfg.is_some() {
+        resolve_fallback_chain(provider_enum, &model, run_cfg.as_ref())
+    } else {
+        match run_defaults.llm.as_ref().and_then(|l| l.fallbacks.as_ref()) {
+            Some(map) => fabro_model::build_fallback_chain(provider_enum.as_str(), &model, map),
+            None => Vec::new(),
+        }
     };
 
     // Build sandbox env: devcontainer env layered underneath TOML env (TOML wins on conflict, mirrors run_command)
     let sandbox_env: HashMap<String, String> = {
         let mut env = devcontainer_env;
-        if let Some(mut toml_env) = run_defaults.sandbox.as_ref().and_then(|s| s.env.clone()) {
+        if let Some(mut toml_env) = run_cfg
+            .as_ref()
+            .and_then(|cfg| cfg.sandbox.as_ref())
+            .and_then(|s| s.env.clone())
+            .or_else(|| run_defaults.sandbox.as_ref().and_then(|s| s.env.clone()))
+        {
             run_config::resolve_env_refs(&mut toml_env)?;
             env.extend(toml_env);
         }
@@ -1099,16 +1148,12 @@ async fn run_resumed(
 
     // Mint a GitHub App IAT and inject as GITHUB_TOKEN if [github] permissions are declared
     let mut sandbox_env = sandbox_env;
-    let github_permissions = run_defaults.github.as_ref();
+    let github_permissions = run_cfg
+        .as_ref()
+        .and_then(|cfg| cfg.github.as_ref())
+        .or(run_defaults.github.as_ref());
     if let Some(gh_cfg) = github_permissions {
         if !gh_cfg.permissions.is_empty() {
-            let origin_url = fabro_sandbox::daytona::detect_repo_info(
-                original_cwd
-                    .as_deref()
-                    .unwrap_or_else(|| std::path::Path::new(".")),
-            )
-            .ok()
-            .map(|(url, _)| url);
             if let (Some(ref creds), Some(ref url)) = (&github_app, &origin_url) {
                 match mint_github_token(creds, url, &gh_cfg.permissions).await {
                     Ok(token) => {
@@ -1129,8 +1174,10 @@ async fn run_resumed(
     }
 
     // Resolve MCP servers from run defaults
-    let mcp_servers: Vec<fabro_mcp::config::McpServerConfig> = run_defaults
-        .mcp_servers
+    let mcp_servers: Vec<fabro_mcp::config::McpServerConfig> = run_cfg
+        .as_ref()
+        .map(|cfg| cfg.mcp_servers.clone())
+        .unwrap_or_else(|| run_defaults.mcp_servers.clone())
         .clone()
         .into_iter()
         .map(|(name, entry)| entry.into_config(name))
@@ -1168,7 +1215,10 @@ async fn run_resumed(
     }
     // Wire up hook runner from run defaults (mirrors run_command)
     {
-        let hooks = &run_defaults.hooks;
+        let hooks = run_cfg
+            .as_ref()
+            .map(|cfg| &cfg.hooks)
+            .unwrap_or(&run_defaults.hooks);
         if !hooks.is_empty() {
             let hook_config = fabro_hooks::HookConfig {
                 hooks: hooks.clone(),
@@ -1185,10 +1235,14 @@ async fn run_resumed(
     };
 
     // Defuse the status guard — engine.run() will write "running" and conclusion handles "concluded"
-    scopeguard::ScopeGuard::into_inner(status_guard);
+    status_guard.defuse();
 
     // Safety net: if we panic or return early, best-effort cleanup via spawn (mirrors run_command).
-    let preserve = super::run::resolve_preserve_sandbox(args.preserve_sandbox, None, &run_defaults);
+    let preserve = super::run::resolve_preserve_sandbox(
+        args.preserve_sandbox,
+        run_cfg.as_ref(),
+        &run_defaults,
+    );
     let sandbox_for_cleanup = Arc::clone(&sandbox);
     let cleanup_guard = scopeguard::guard((), move |()| {
         if preserve {
@@ -1347,14 +1401,6 @@ async fn run_resumed(
             ) {
                 debug!(status = ?outcome.status, "Skipping PR creation: run status is not success");
             } else {
-                let origin_url = fabro_sandbox::daytona::detect_repo_info(
-                    original_cwd
-                        .as_deref()
-                        .unwrap_or_else(|| std::path::Path::new(".")),
-                )
-                .ok()
-                .map(|(url, _)| url);
-
                 let diff = tokio::fs::read_to_string(run_dir.join("final.patch"))
                     .await
                     .unwrap_or_default();
@@ -1558,4 +1604,79 @@ fn find_existing_run_dir(run_id: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use fabro_workflows::run_status::{RunStatus, RunStatusRecord, StatusReason};
+
+    fn sample_manifest() -> Manifest {
+        Manifest {
+            run_id: "run-1".to_string(),
+            workflow_name: "resume".to_string(),
+            goal: "fix bug".to_string(),
+            start_time: Utc::now(),
+            node_count: 1,
+            edge_count: 0,
+            run_branch: Some("fabro/run/run-1".to_string()),
+            base_sha: Some("abc123".to_string()),
+            labels: HashMap::new(),
+            base_branch: Some("main".to_string()),
+            workflow_slug: None,
+            host_repo_path: None,
+        }
+    }
+
+    #[test]
+    fn preferred_resume_repo_path_uses_manifest_host_repo_path_when_present() {
+        let cwd = tempfile::tempdir().unwrap();
+        let host_repo = tempfile::tempdir().unwrap();
+        let mut manifest = sample_manifest();
+        manifest.host_repo_path = Some(host_repo.path().to_string_lossy().to_string());
+
+        let selected = preferred_resume_repo_path(cwd.path(), Some(&manifest));
+        assert_eq!(selected, host_repo.path());
+    }
+
+    #[test]
+    fn preferred_resume_repo_path_falls_back_when_manifest_path_is_missing() {
+        let cwd = tempfile::tempdir().unwrap();
+        let mut manifest = sample_manifest();
+        manifest.host_repo_path = Some(cwd.path().join("missing-repo").display().to_string());
+
+        let selected = preferred_resume_repo_path(cwd.path(), Some(&manifest));
+        assert_eq!(selected, cwd.path());
+    }
+
+    #[test]
+    fn resume_run_status_guard_marks_failed_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+
+        {
+            let guard = ResumeRunStatusGuard::arm(dir.path()).unwrap();
+            let record = RunStatusRecord::load(&dir.path().join("status.json")).unwrap();
+            assert_eq!(record.status, RunStatus::Starting);
+            assert_eq!(record.reason, Some(StatusReason::SandboxInitializing));
+            drop(guard);
+        }
+
+        let record = RunStatusRecord::load(&dir.path().join("status.json")).unwrap();
+        assert_eq!(record.status, RunStatus::Failed);
+        assert_eq!(record.reason, Some(StatusReason::SandboxInitFailed));
+        assert!(dir.path().join("run.pid").exists());
+    }
+
+    #[test]
+    fn resume_run_status_guard_does_not_overwrite_after_defuse() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut guard = ResumeRunStatusGuard::arm(dir.path()).unwrap();
+        guard.defuse();
+        drop(guard);
+
+        let record = RunStatusRecord::load(&dir.path().join("status.json")).unwrap();
+        assert_eq!(record.status, RunStatus::Starting);
+        assert_eq!(record.reason, Some(StatusReason::SandboxInitializing));
+    }
 }
