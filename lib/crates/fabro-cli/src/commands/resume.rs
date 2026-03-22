@@ -8,7 +8,7 @@ use clap::Args;
 use fabro_agent::{DockerSandbox, DockerSandboxConfig, Sandbox, WorktreeConfig, WorktreeSandbox};
 use fabro_config::run::RunDefaults;
 use fabro_graphviz::graph::Graph;
-use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, FileInterviewer, Interviewer};
+use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, Interviewer};
 use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 use fabro_workflows::backend::{AgentApiBackend, AgentCliBackend, BackendRouter};
@@ -809,8 +809,6 @@ async fn run_resumed(
 
     let interviewer: Arc<dyn Interviewer> = if args.auto_approve {
         Arc::new(AutoApproveInterviewer)
-    } else if !std::io::stdin().is_terminal() {
-        Arc::new(FileInterviewer::new(run_dir.clone()))
     } else {
         Arc::new(super::run_progress::ProgressAwareInterviewer::new(
             ConsoleInterviewer::new(styles),
