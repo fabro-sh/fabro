@@ -61,14 +61,6 @@ pub struct ResumeArgs {
     #[arg(long)]
     pub auto_approve: bool,
 
-    /// Override the workflow goal (exposed as $goal in prompts)
-    #[arg(long)]
-    pub goal: Option<String>,
-
-    /// Read the workflow goal from a file
-    #[arg(long, conflicts_with = "goal")]
-    pub goal_file: Option<PathBuf>,
-
     /// Override default LLM model
     #[arg(long)]
     pub model: Option<String>,
@@ -168,8 +160,8 @@ fn resume_as_run_args(args: &ResumeArgs, workflow: PathBuf) -> RunArgs {
         dry_run: args.dry_run,
         preflight: false,
         auto_approve: args.auto_approve,
-        goal: args.goal.clone(),
-        goal_file: args.goal_file.clone(),
+        goal: None,
+        goal_file: None,
         model: args.model.clone(),
         provider: args.provider.clone(),
         verbose: args.verbose,
