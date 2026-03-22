@@ -1,0 +1,13 @@
+{
+  "run_id": "01KMBCNF7JXF3485S94RX5AHYZ",
+  "workflow_name": "Smoke",
+  "goal": "Verify the sandbox can lint and test the project",
+  "start_time": "2026-03-22T18:24:44.912146Z",
+  "node_count": 3,
+  "edge_count": 2,
+  "run_branch": "fabro/run/01KMBCNF7JXF3485S94RX5AHYZ",
+  "base_sha": "04320ff5f2f4a21a809ec9dc29c72c6bed3af156",
+  "base_branch": "issue-135",
+  "workflow_slug": "20260322-01KMBCNF7JXF3485S94RX5AHYZ",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro"
+}
