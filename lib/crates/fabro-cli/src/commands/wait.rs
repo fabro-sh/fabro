@@ -155,6 +155,12 @@ mod tests {
             stages: vec![],
             total_cost: Some(0.42),
             total_retries: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_write_tokens: 0,
+            total_reasoning_tokens: 0,
+            has_pricing: false,
         };
         let json = build_json_output(RunStatus::Succeeded, "ABC123", Some(&conclusion));
         assert_eq!(json["run_id"], "ABC123");
@@ -189,6 +195,12 @@ mod tests {
             stages: vec![],
             total_cost: None,
             total_retries: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_write_tokens: 0,
+            total_reasoning_tokens: 0,
+            has_pricing: false,
         };
         let json = build_json_output(RunStatus::Failed, "JKL012", Some(&conclusion));
         assert!(json.get("total_cost").is_none());
@@ -207,6 +219,12 @@ mod tests {
             stages: vec![],
             total_cost: Some(0.15),
             total_retries: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_write_tokens: 0,
+            total_reasoning_tokens: 0,
+            has_pricing: false,
         };
         // Just verify no panic; actual stderr output is hard to capture
         print_human_output(RunStatus::Succeeded, "ABC123", Some(&conclusion), &styles);

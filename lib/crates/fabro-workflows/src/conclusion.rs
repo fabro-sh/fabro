@@ -31,6 +31,18 @@ pub struct Conclusion {
     pub total_cost: Option<f64>,
     #[serde(default)]
     pub total_retries: u32,
+    #[serde(default)]
+    pub total_input_tokens: i64,
+    #[serde(default)]
+    pub total_output_tokens: i64,
+    #[serde(default)]
+    pub total_cache_read_tokens: i64,
+    #[serde(default)]
+    pub total_cache_write_tokens: i64,
+    #[serde(default)]
+    pub total_reasoning_tokens: i64,
+    #[serde(default)]
+    pub has_pricing: bool,
 }
 
 impl Conclusion {
@@ -72,6 +84,12 @@ mod tests {
             ],
             total_cost: Some(0.15),
             total_retries: 1,
+            total_input_tokens: 5000,
+            total_output_tokens: 1500,
+            total_cache_read_tokens: 2000,
+            total_cache_write_tokens: 500,
+            total_reasoning_tokens: 300,
+            has_pricing: true,
         }
     }
 
@@ -127,6 +145,12 @@ mod tests {
             stages: vec![],
             total_cost: None,
             total_retries: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_write_tokens: 0,
+            total_reasoning_tokens: 0,
+            has_pricing: false,
         };
         conclusion.save(&path).unwrap();
 
@@ -152,6 +176,12 @@ mod tests {
             stages: vec![],
             total_cost: None,
             total_retries: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_write_tokens: 0,
+            total_reasoning_tokens: 0,
+            has_pricing: false,
         };
         conclusion.save(&path).unwrap();
         let loaded = Conclusion::load(&path).unwrap();
