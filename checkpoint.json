@@ -1,35 +1,54 @@
 {
-  "timestamp": "2026-03-22T20:12:53.732340Z",
-  "current_node": "draft",
+  "timestamp": "2026-03-22T20:12:56.068015Z",
+  "current_node": "approve",
   "completed_nodes": [
     "start",
-    "draft"
+    "draft",
+    "approve"
   ],
   "node_retries": {
     "start": 1,
+    "approve": 1,
     "draft": 1
   },
   "context_values": {
     "outcome": "success",
     "internal.fidelity": "compact",
     "internal.retry_count.start": 1,
+    "preferred_label": "[A] Approve",
     "graph.goal": "Test human gate with auto-approve",
+    "human.gate.label": "[A] Approve",
     "internal.retry_count.draft": 1,
     "failure_signature": "",
     "graph.rankdir": "LR",
     "last_response": "# Greeting\n\nHello! 👋 \n\nWelcome to Fabro! I'm ready to help you test the human gate with auto-approve functionality. Feel free to share the workflow details, test case, or specific scenario you'd li",
+    "human.gate.selected": "A",
     "last_stage": "draft",
-    "internal.thread_id": "start",
+    "internal.thread_id": "draft",
     "response.draft": "# Greeting\n\nHello! 👋 \n\nWelcome to Fabro! I'm ready to help you test the human gate with auto-approve functionality. Feel free to share the workflow details, test case, or specific scenario you'd like to work through, and I'll assist you with implementation, debugging, or documentation as needed.\n\nWhat would you like to explore first?",
-    "current.preamble": "Goal: Test human gate with auto-approve\n",
+    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.2k tokens in / 142 out\n",
     "thread.start.current_node": "draft",
+    "thread.draft.current_node": "approve",
+    "internal.retry_count.approve": 1,
     "internal.node_visit_count": 1,
-    "current_node": "draft",
+    "current_node": "approve",
     "internal.run_id": "01KMBJVE3Q1RQ8VAB3F9G8G0VD",
     "failure_class": ""
   },
   "logs": [],
   "node_outcomes": {
+    "approve": {
+      "status": "success",
+      "preferred_label": "[A] Approve",
+      "suggested_next_ids": [
+        "ship"
+      ],
+      "context_updates": {
+        "human.gate.selected": "A",
+        "human.gate.label": "[A] Approve"
+      },
+      "duration_ms": 0
+    },
     "start": {
       "status": "success",
       "duration_ms": 0
@@ -54,9 +73,10 @@
       "duration_ms": 1943
     }
   },
-  "next_node_id": "approve",
+  "next_node_id": "ship",
   "node_visits": {
     "start": 1,
-    "draft": 1
+    "draft": 1,
+    "approve": 1
   }
 }
