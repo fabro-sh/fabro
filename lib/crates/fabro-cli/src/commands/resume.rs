@@ -432,6 +432,7 @@ async fn prepare_from_branch(
         find_existing_run_dir(&run_id).unwrap_or_else(|| default_run_dir(&run_id, false))
     };
     tokio::fs::create_dir_all(&run_dir).await?;
+    let run_dir = tokio::fs::canonicalize(&run_dir).await.unwrap_or(run_dir);
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
     if let Some(ref workflow_path) = args.workflow {
@@ -559,8 +560,40 @@ async fn prepare_from_branch(
     // Wrap with ReadBeforeWriteSandbox to enforce read-before-write guard
     let sandbox: Arc<dyn Sandbox> = Arc::new(fabro_agent::ReadBeforeWriteSandbox::new(sandbox));
 
-    // Let the sandbox provide any commands needed to resume on the existing run branch
-    let setup_commands: Vec<String> = sandbox.resume_setup_commands(&run_branch);
+    // Resolve devcontainer if enabled (mirrors prepare_from_checkpoint)
+    let devcontainer_config = if run_defaults
+        .sandbox
+        .as_ref()
+        .and_then(|s| s.devcontainer)
+        .unwrap_or(false)
+    {
+        match fabro_devcontainer::DevcontainerResolver::resolve(&original_cwd).await {
+            Ok(dc) => Some(dc),
+            Err(e) => {
+                bail!("Failed to resolve devcontainer: {e}");
+            }
+        }
+    } else {
+        None
+    };
+
+    let devcontainer_phases = if let Some(ref dc) = devcontainer_config {
+        vec![
+            ("on_create".to_string(), dc.on_create_commands.clone()),
+            ("post_create".to_string(), dc.post_create_commands.clone()),
+            ("post_start".to_string(), dc.post_start_commands.clone()),
+        ]
+    } else {
+        Vec::new()
+    };
+
+    // User-configured setup commands first, then sandbox-specific resume commands
+    let mut setup_commands: Vec<String> = run_defaults
+        .setup
+        .as_ref()
+        .map(|s| s.commands.clone())
+        .unwrap_or_default();
+    setup_commands.extend(sandbox.resume_setup_commands(&run_branch));
 
     let meta_branch = Some(fabro_workflows::git::MetadataStore::branch_name(&run_id));
     let config = RunConfig {
@@ -601,7 +634,7 @@ async fn prepare_from_branch(
         emitter,
         config,
         setup_commands,
-        devcontainer_phases: Vec::new(),
+        devcontainer_phases,
         original_cwd: Some(original_cwd),
         sandbox_provider,
         ssh_data_host,
@@ -1060,9 +1093,28 @@ async fn run_resumed(
     // Cleanup sandbox via engine (fires SandboxCleanup hook)
     use super::run::resolve_preserve_sandbox;
     let preserve = resolve_preserve_sandbox(args.preserve_sandbox, None, &run_defaults);
-    let _ = engine
+    // Before cleanup, print preserve banner (mirrors run_command)
+    if preserve {
+        let info = sandbox.sandbox_info();
+        if !info.is_empty() {
+            eprintln!(
+                "\n{} sandbox preserved: {info}",
+                styles.bold.apply_to("Info:")
+            );
+        } else {
+            eprintln!("\n{} sandbox preserved", styles.bold.apply_to("Info:"));
+        }
+    }
+    if let Err(e) = engine
         .cleanup_sandbox(&config.run_id, &graph.name, preserve)
-        .await;
+        .await
+    {
+        tracing::warn!(error = %e, "Sandbox cleanup failed");
+        eprintln!(
+            "\n{} sandbox cleanup failed: {e}",
+            styles.yellow.apply_to("Warning:")
+        );
+    }
 
     let outcome = engine_result?;
 
