@@ -937,10 +937,11 @@ async fn main_inner() -> (String, Result<()>) {
                     commands::secret::set_command(&args)?;
                 }
             },
-            Command::Resume(args) => {
+            Command::Resume(mut args) => {
                 let styles: &'static fabro_util::terminal::Styles =
                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
                 let cli_config = cli_config::load_cli_config(None)?;
+                args.verbose = args.verbose || cli_config.verbose;
                 #[cfg(feature = "sleep_inhibitor")]
                 let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep);
                 let github_app = build_github_app_credentials(cli_config.app_id());

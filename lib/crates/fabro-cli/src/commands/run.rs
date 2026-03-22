@@ -373,7 +373,7 @@ pub(crate) fn resolve_ssh_clone_params(
 ///
 /// `apply_defaults` must be called on `run_cfg` before this — it merges
 /// `run_defaults.llm.fallbacks` into `run_cfg.llm.fallbacks` already.
-fn resolve_fallback_chain(
+pub(crate) fn resolve_fallback_chain(
     provider: Provider,
     model: &str,
     run_cfg: Option<&WorkflowRunConfig>,
@@ -392,7 +392,7 @@ fn resolve_fallback_chain(
 ///
 /// Signs a JWT, resolves `owner/repo` from `origin_url`, and requests a
 /// scoped token. Returns the token string on success.
-async fn mint_github_token(
+pub(crate) async fn mint_github_token(
     creds: &fabro_github::GitHubAppCredentials,
     origin_url: &str,
     permissions: &HashMap<String, String>,
@@ -430,14 +430,14 @@ enum WorkdirStrategy {
 
 /// Accumulates token usage and cost across all workflow stages.
 #[derive(Default)]
-struct CostAccumulator {
-    total_input_tokens: i64,
-    total_output_tokens: i64,
-    total_cache_read_tokens: i64,
-    total_cache_write_tokens: i64,
-    total_reasoning_tokens: i64,
-    total_cost: f64,
-    has_pricing: bool,
+pub(crate) struct CostAccumulator {
+    pub total_input_tokens: i64,
+    pub total_output_tokens: i64,
+    pub total_cache_read_tokens: i64,
+    pub total_cache_write_tokens: i64,
+    pub total_reasoning_tokens: i64,
+    pub total_cost: f64,
+    pub has_pricing: bool,
 }
 
 /// Create a [`LocalSandbox`] wired to emit [`WorkflowRunEvent::Sandbox`] events.
@@ -479,7 +479,7 @@ pub(crate) async fn write_run_config_snapshot(
     Ok(())
 }
 
-fn resolve_workflow_source(
+pub(crate) fn resolve_workflow_source(
     workflow_path: &Path,
 ) -> anyhow::Result<(PathBuf, Option<WorkflowRunConfig>)> {
     let path = project_config::resolve_workflow_arg(workflow_path)?;
@@ -522,21 +522,33 @@ pub(crate) struct PreparedWorkflow {
 /// `run_command` (which goes on to execute the workflow).
 pub(crate) fn prepare_workflow(
     args: &RunArgs,
+    run_defaults: RunDefaults,
+    styles: &Styles,
+    quiet: bool,
+) -> anyhow::Result<PreparedWorkflow> {
+    prepare_workflow_with_project_config(args, run_defaults, styles, quiet, true)
+}
+
+pub(crate) fn prepare_workflow_with_project_config(
+    args: &RunArgs,
     mut run_defaults: RunDefaults,
     styles: &Styles,
     quiet: bool,
+    apply_project_config: bool,
 ) -> anyhow::Result<PreparedWorkflow> {
     let workflow_path = args
         .workflow
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
 
-    // Apply project-level config overrides (fabro.toml) on top of CLI defaults.
-    if let Ok(Some((_config_path, project_config))) =
-        project_config::discover_project_config(&std::env::current_dir().unwrap_or_default())
-    {
-        tracing::debug!("Applying run defaults from fabro.toml");
-        run_defaults.merge_overlay(project_config.into_run_defaults());
+    if apply_project_config {
+        // Apply project-level config overrides (fabro.toml) on top of CLI defaults.
+        if let Ok(Some((_config_path, project_config))) =
+            project_config::discover_project_config(&std::env::current_dir().unwrap_or_default())
+        {
+            tracing::debug!("Applying run defaults from fabro.toml");
+            run_defaults.merge_overlay(project_config.into_run_defaults());
+        }
     }
 
     // Resolve workflow arg, load run config if TOML, apply defaults
@@ -2614,6 +2626,109 @@ mod tests {
 
         let result = resolve_workflow_source(&dir.path().join(RUN_CONFIG_FILE));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn prepare_workflow_with_project_config_resolves_workflow_toml_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("workflow.fabro"),
+            r#"digraph smoke {
+    start [shape=Mdiamond, label="Start"]
+    exit [shape=Msquare, label="Exit"]
+    work [label="Work", prompt="Do the work"]
+    start -> work -> exit
+}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("workflow.toml"),
+            r#"
+version = 1
+graph = "workflow.fabro"
+goal = "toml goal"
+
+[setup]
+commands = ["echo from toml"]
+
+[sandbox]
+provider = "docker"
+
+[llm]
+model = "gpt-5.2"
+provider = "openai"
+
+[pull_request]
+enabled = true
+
+[assets]
+include = ["*.md"]
+"#,
+        )
+        .unwrap();
+
+        let args = RunArgs {
+            workflow: Some(dir.path().join("workflow.toml")),
+            run_dir: None,
+            dry_run: false,
+            preflight: false,
+            auto_approve: false,
+            goal: None,
+            goal_file: None,
+            model: None,
+            provider: None,
+            verbose: false,
+            sandbox: None,
+            label: Vec::new(),
+            no_retro: false,
+            preserve_sandbox: false,
+            detach: false,
+            run_id: None,
+        };
+
+        let styles = Styles::new(false);
+        let prepared = prepare_workflow_with_project_config(
+            &args,
+            RunDefaults::default(),
+            &styles,
+            true,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(prepared.graph.name, "smoke");
+        assert_eq!(prepared.graph.goal(), "toml goal");
+        assert_eq!(prepared.sandbox_provider, SandboxProvider::Docker);
+        assert_eq!(prepared.model, "gpt-5.2");
+        assert_eq!(prepared.provider.as_deref(), Some("openai"));
+
+        let run_cfg = prepared
+            .run_cfg
+            .as_ref()
+            .expect("run config should be loaded");
+        assert_eq!(
+            run_cfg
+                .setup
+                .as_ref()
+                .expect("setup config should be preserved")
+                .commands,
+            vec!["echo from toml".to_string()]
+        );
+        assert!(
+            run_cfg
+                .pull_request
+                .as_ref()
+                .expect("pull request config should be preserved")
+                .enabled
+        );
+        assert_eq!(
+            run_cfg
+                .assets
+                .as_ref()
+                .expect("assets config should be preserved")
+                .include,
+            vec!["*.md".to_string()]
+        );
     }
 
     #[test]

@@ -8,3 +8,5 @@ evals/swe-bench/results/
 evals/swe-bench/dockerfiles/
 __pycache__
 .ai/plans
+.ai/comments
+.ai/tmp
