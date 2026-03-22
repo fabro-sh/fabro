@@ -1301,6 +1301,13 @@ async fn run_resumed(
         let checkpoint_loaded = Checkpoint::load(&run_dir.join("checkpoint.json")).ok();
         let stage_durations = fabro_retro::retro::extract_stage_durations(&run_dir);
 
+        let mut total_input_tokens: i64 = 0;
+        let mut total_output_tokens: i64 = 0;
+        let mut total_cache_read_tokens: i64 = 0;
+        let mut total_cache_write_tokens: i64 = 0;
+        let mut total_reasoning_tokens: i64 = 0;
+        let mut has_pricing = false;
+
         let (stages, total_cost, total_retries) = if let Some(ref cp) = checkpoint_loaded {
             let mut stages = Vec::new();
             let mut cost_sum: Option<f64> = None;
@@ -1319,6 +1326,15 @@ async fn run_resumed(
                 let cost = outcome.and_then(|o| o.usage.as_ref()).and_then(|u| u.cost);
                 if let Some(c) = cost {
                     *cost_sum.get_or_insert(0.0) += c;
+                    has_pricing = true;
+                }
+
+                if let Some(usage) = outcome.and_then(|o| o.usage.as_ref()) {
+                    total_input_tokens += usage.input_tokens;
+                    total_output_tokens += usage.output_tokens;
+                    total_cache_read_tokens += usage.cache_read_tokens.unwrap_or(0);
+                    total_cache_write_tokens += usage.cache_write_tokens.unwrap_or(0);
+                    total_reasoning_tokens += usage.reasoning_tokens.unwrap_or(0);
                 }
 
                 stages.push(fabro_workflows::conclusion::StageSummary {
@@ -1343,6 +1359,12 @@ async fn run_resumed(
             stages,
             total_cost,
             total_retries,
+            total_input_tokens,
+            total_output_tokens,
+            total_cache_read_tokens,
+            total_cache_write_tokens,
+            total_reasoning_tokens,
+            has_pricing,
         };
         let _ = conclusion.save(&run_dir.join("conclusion.json"));
         fabro_workflows::run_status::write_run_status(&run_dir, run_status, status_reason);

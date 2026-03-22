@@ -48,13 +48,24 @@ pub async fn attach_run(
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         wait_count += 1;
         if wait_count > 100 {
+            // Kill the engine to avoid orphaning it
+            if let Some(mut child) = engine_child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
             bail!(
                 "Timed out waiting for progress.jsonl to appear in {}",
                 run_dir.display()
             );
         }
         if cancelled.load(Ordering::Relaxed) {
-            return Ok(ExitCode::from(0));
+            if kill_on_detach {
+                if let Some(mut child) = engine_child {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
+            return Ok(ExitCode::from(1));
         }
     }
 

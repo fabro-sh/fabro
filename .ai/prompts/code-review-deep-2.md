@@ -17,7 +17,7 @@ Output a report with all the bugs using this format:
    <bug>
       <summary>up to 3 sentences</summary>
       <severity>important OR nit</severity>
-      <pre_exiting>yes OR no</pre_existing>
+      <pre_existing>yes OR no</pre_existing>
       <location>
          <file>lib/crates/fabro-cli/src/commands/resume.rs</file>
          <start_line>115</start_line>
@@ -49,7 +49,7 @@ Here is a real-world example:
         `prepare_from_checkpoint` unconditionally creates a `LocalSandbox` via `local_sandbox_with_callback`, completely ignoring the `--sandbox` flag and TOML config. A user running `fabro resume --checkpoint logs/checkpoint.json --workflow w.fabro --sandbox docker` will silently get a local sandbox instead of Docker; to fix this, call `resolve_sandbox_provider(args.sandbox.map(Into::into), None, run_defaults)` just as `prepare_from_branch` does.
     </summary>
     <severity>important</severity>
-    <pre_exiting>no</pre_existing>
+    <pre_existing>no</pre_existing>
     <location>
         <file>lib/crates/fabro-cli/src/commands/resume.rs</file>
         <start_line>208</start_line>
