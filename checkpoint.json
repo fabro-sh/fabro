@@ -1,0 +1,65 @@
+{
+  "timestamp": "2026-03-22T20:13:00.622002Z",
+  "current_node": "work",
+  "completed_nodes": [
+    "start",
+    "work"
+  ],
+  "node_retries": {
+    "work": 1,
+    "start": 1
+  },
+  "context_values": {
+    "internal.retry_count.start": 1,
+    "last_stage": "work",
+    "internal.node_visit_count": 1,
+    "current_node": "work",
+    "graph.goal": "Write hello to a file using an agent",
+    "thread.start.current_node": "work",
+    "outcome": "success",
+    "internal.run_id": "01KMBJVD8CGPGCTKSYSVJ4J0HG",
+    "internal.fidelity": "compact",
+    "failure_signature": "",
+    "current.preamble": "Goal: Write hello to a file using an agent\n",
+    "internal.thread_id": "start",
+    "response.work": "Perfect! The agent has successfully written 'hello' to scenario_test.txt. The file has been created at `/home/daytona/workspace/scenario_test.txt`.",
+    "failure_class": "",
+    "internal.retry_count.work": 1,
+    "graph.rankdir": "LR",
+    "last_response": "Perfect! The agent has successfully written 'hello' to scenario_test.txt. The file has been created at `/home/daytona/workspace/scenario_test.txt`."
+  },
+  "logs": [],
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
+    "work": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "work",
+        "last_response": "Perfect! The agent has successfully written 'hello' to scenario_test.txt. The file has been created at `/home/daytona/workspace/scenario_test.txt`.",
+        "response.work": "Perfect! The agent has successfully written 'hello' to scenario_test.txt. The file has been created at `/home/daytona/workspace/scenario_test.txt`."
+      },
+      "notes": "Stage completed: work",
+      "usage": {
+        "model": "claude-haiku-4-5",
+        "input_tokens": 760,
+        "output_tokens": 343,
+        "cache_read_tokens": 5213,
+        "cache_write_tokens": 10305,
+        "reasoning_tokens": 127,
+        "cost": 0.00198
+      },
+      "files_touched": [
+        "/home/daytona/workspace/scenario_test.txt"
+      ],
+      "duration_ms": 7205
+    }
+  },
+  "next_node_id": "exit",
+  "node_visits": {
+    "work": 1,
+    "start": 1
+  }
+}
