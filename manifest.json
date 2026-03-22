@@ -1,0 +1,13 @@
+{
+  "run_id": "01KMBJVDZAQHS05N3B6AQF67TG",
+  "workflow_name": "FullStack",
+  "goal": "Full-stack scenario: command, agent, human gate, and goal gate verification",
+  "start_time": "2026-03-22T20:12:53.747356Z",
+  "node_count": 7,
+  "edge_count": 7,
+  "run_branch": "fabro/run/01KMBJVDZAQHS05N3B6AQF67TG",
+  "base_sha": "04320ff5f2f4a21a809ec9dc29c72c6bed3af156",
+  "base_branch": "issue-135",
+  "workflow_slug": "run",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-cli"
+}
