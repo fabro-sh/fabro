@@ -232,9 +232,14 @@ impl Handler for HumanHandler {
             return Ok(Outcome::retry_classify("human gate timeout, no default"));
         }
 
-        // 5. Handle skipped
+        // 5. Handle unanswered / aborted interview sessions.
+        if answer.value == AnswerValue::Aborted {
+            return Ok(unanswered_human_gate(
+                "human interaction aborted before an answer was provided",
+            ));
+        }
         if answer.value == AnswerValue::Skipped {
-            return Ok(Outcome::fail_deterministic("human skipped interaction"));
+            return Ok(unanswered_human_gate("human skipped interaction"));
         }
 
         // Emit interview completed for successful interactions
@@ -294,6 +299,10 @@ fn make_choice_outcome(key: &str, label: &str, to: &str) -> Outcome {
     outcome
 }
 
+fn unanswered_human_gate(reason: impl Into<String>) -> Outcome {
+    Outcome::fail_deterministic(reason)
+}
+
 fn find_choice_match<'a>(answer: &Answer, choices: &'a [Choice]) -> Option<&'a Choice> {
     match &answer.value {
         AnswerValue::Selected(key) => choices.iter().find(|c| c.key == *key),
@@ -317,6 +326,7 @@ fn answer_text(answer: &Answer) -> String {
         AnswerValue::MultiSelected(keys) => keys.join(", "),
         AnswerValue::Yes => "yes".to_string(),
         AnswerValue::No => "no".to_string(),
+        AnswerValue::Aborted => "aborted".to_string(),
         AnswerValue::Skipped => "skipped".to_string(),
         AnswerValue::Timeout => "timeout".to_string(),
     }
@@ -326,7 +336,7 @@ fn answer_text(answer: &Answer) -> String {
 mod tests {
     use super::*;
     use fabro_graphviz::graph::{AttrValue, Edge};
-    use fabro_interview::{AutoApproveInterviewer, RecordingInterviewer};
+    use fabro_interview::{AutoApproveInterviewer, CallbackInterviewer, RecordingInterviewer};
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
@@ -430,6 +440,49 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
+    }
+
+    #[tokio::test]
+    async fn wait_human_aborted_returns_fail_without_routing_hints() {
+        let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::aborted()));
+        let handler = HumanHandler::new(interviewer);
+        let graph = build_graph_with_human_gate();
+        let node = graph.nodes.get("gate").unwrap();
+        let context = Context::new();
+        let run_dir = Path::new("/tmp/test");
+
+        let outcome = handler
+            .execute(node, &context, &graph, run_dir, &make_services())
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
+        assert!(outcome.preferred_label.is_none());
+        assert!(outcome.suggested_next_ids.is_empty());
+        assert_eq!(
+            outcome.failure_reason(),
+            Some("human interaction aborted before an answer was provided")
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_human_skipped_returns_fail_without_routing_hints() {
+        let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::skipped()));
+        let handler = HumanHandler::new(interviewer);
+        let graph = build_graph_with_human_gate();
+        let node = graph.nodes.get("gate").unwrap();
+        let context = Context::new();
+        let run_dir = Path::new("/tmp/test");
+
+        let outcome = handler
+            .execute(node, &context, &graph, run_dir, &make_services())
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
+        assert!(outcome.preferred_label.is_none());
+        assert!(outcome.suggested_next_ids.is_empty());
+        assert_eq!(outcome.failure_reason(), Some("human skipped interaction"));
     }
 
     #[tokio::test]

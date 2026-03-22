@@ -57,6 +57,16 @@ approve [shape=hexagon, label="Approve?", human.default_choice="approve"]
 
 If the timeout elapses without a response, the workflow continues to the default target rather than failing.
 
+### Unanswered gates fail closed
+
+Fabro does not treat missing input as approval. A human gate advances only when one of these happens:
+
+- A person explicitly answers the question
+- The gate times out and `human.default_choice` is set
+- The run uses `--auto-approve`
+
+If stdin is closed, a prompt is canceled, a web session disconnects, or no answer is otherwise captured, the gate is treated as unanswered. Fabro will not fall through to an unconditional approval edge. If you want to handle that case explicitly, add a failure route such as `condition="outcome=fail"` or a `retry_target`.
+
 ### Auto-approve
 
 For testing or fully automated runs, pass `--auto-approve` to skip all human gates:

@@ -25,6 +25,21 @@ implement -> fix       [condition="failure_class=transient_infra"]
 implement -> escalate  [condition="failure_class=deterministic"]
 ```
 
+## Human gates fail closed when unanswered
+
+Human approval gates are special: lack of an answer is treated as a failure, not as an implicit approval. If a prompt ends because stdin is closed, the user cancels it, a web session disconnects, or a test/replay interviewer has no answer available, the human stage returns a failure outcome instead of selecting an unconditional branch.
+
+That means an unanswered gate will only continue if you model that path explicitly, for example:
+
+```dot
+approve [shape=hexagon, label="Approve release?"]
+
+approve -> ship          [label="[A] Approve"]
+approve -> manual_review [condition="outcome=fail"]
+```
+
+If no `outcome=fail` edge or `retry_target` exists, the run stops rather than advancing past the approval gate.
+
 ## Retry layers
 
 Fabro retries failures at three levels: **LLM retries** handle transient API errors inside a single model call, **turn-level retries** recover from dropped streams mid-response, and **node retries** re-execute the entire node handler when the first two levels aren't enough. These layers are independent — a node retry re-runs the full handler, which gets its own fresh set of LLM and turn-level retries.

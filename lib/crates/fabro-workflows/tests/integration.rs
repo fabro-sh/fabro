@@ -7,8 +7,8 @@ use fabro_config::run::WorkflowRunConfig;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_graphviz::parser::parse;
 use fabro_interview::{
-    Answer, AnswerValue, AutoApproveInterviewer, Interviewer, QueueInterviewer,
-    RecordingInterviewer,
+    Answer, AnswerValue, AutoApproveInterviewer, CallbackInterviewer, Interviewer,
+    QueueInterviewer, RecordingInterviewer,
 };
 use fabro_llm::provider::Provider;
 use fabro_validate::{validate, validate_or_raise, Severity};
@@ -498,6 +498,221 @@ async fn end_to_end_human_gate_pipeline() {
     assert!(
         !checkpoint.completed_nodes.contains(&"approve".to_string()),
         "should NOT have traversed approve path"
+    );
+}
+
+#[tokio::test]
+async fn human_gate_aborted_input_fails_closed_without_fail_route() {
+    let mut graph = Graph::new("HumanGateAbortedClosed");
+
+    let mut start = Node::new("start");
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
+    graph.nodes.insert("start".to_string(), start);
+
+    let mut exit = Node::new("exit");
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
+    graph.nodes.insert("exit".to_string(), exit);
+
+    let mut gate = Node::new("gate");
+    gate.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("hexagon".to_string()),
+    );
+    gate.attrs
+        .insert("type".to_string(), AttrValue::String("human".to_string()));
+    gate.attrs.insert(
+        "label".to_string(),
+        AttrValue::String("Approve release?".to_string()),
+    );
+    graph.nodes.insert("gate".to_string(), gate);
+    graph
+        .nodes
+        .insert("approve".to_string(), Node::new("approve"));
+    graph
+        .nodes
+        .insert("revise".to_string(), Node::new("revise"));
+
+    graph.edges.push(Edge::new("start", "gate"));
+
+    let mut approve_edge = Edge::new("gate", "approve");
+    approve_edge.attrs.insert(
+        "label".to_string(),
+        AttrValue::String("[A] Approve".to_string()),
+    );
+    graph.edges.push(approve_edge);
+
+    let mut revise_edge = Edge::new("gate", "revise");
+    revise_edge.attrs.insert(
+        "label".to_string(),
+        AttrValue::String("[R] Revise".to_string()),
+    );
+    graph.edges.push(revise_edge);
+
+    graph.edges.push(Edge::new("approve", "exit"));
+    graph.edges.push(Edge::new("revise", "exit"));
+
+    let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::aborted()));
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut registry = HandlerRegistry::new(Box::new(StartHandler));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+    registry.register("human", Box::new(HumanHandler::new(interviewer)));
+
+    let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
+    let config = RunConfig {
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        dry_run: false,
+        run_id: "test-run".into(),
+        git_checkpoint_enabled: false,
+        host_repo_path: None,
+        base_sha: None,
+        run_branch: None,
+        meta_branch: None,
+        labels: std::collections::HashMap::new(),
+        checkpoint_exclude_globs: Vec::new(),
+        github_app: None,
+        git_author: fabro_workflows::git::GitAuthor::default(),
+        base_branch: None,
+        pull_request: None,
+        asset_globs: Vec::new(),
+        workflow_slug: None,
+    };
+
+    let error = engine
+        .run(&graph, &config)
+        .await
+        .expect_err("aborted human gate should fail closed");
+    assert!(
+        error
+            .to_string()
+            .contains("stage gate failed with no outgoing fail edge"),
+        "unexpected error: {error}"
+    );
+
+    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    assert!(
+        checkpoint.node_outcomes.contains_key("gate"),
+        "gate outcome should be checkpointed before termination"
+    );
+    assert!(
+        !checkpoint.completed_nodes.contains(&"approve".to_string()),
+        "approval path must not execute on aborted input"
+    );
+    assert!(
+        !checkpoint.completed_nodes.contains(&"revise".to_string()),
+        "other unconditional choice edges must not execute on aborted input"
+    );
+}
+
+#[tokio::test]
+async fn human_gate_aborted_input_routes_via_outcome_fail_condition() {
+    let mut graph = Graph::new("HumanGateAbortedFailRoute");
+
+    let mut start = Node::new("start");
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
+    graph.nodes.insert("start".to_string(), start);
+
+    let mut exit = Node::new("exit");
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
+    graph.nodes.insert("exit".to_string(), exit);
+
+    let mut gate = Node::new("gate");
+    gate.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("hexagon".to_string()),
+    );
+    gate.attrs
+        .insert("type".to_string(), AttrValue::String("human".to_string()));
+    gate.attrs.insert(
+        "label".to_string(),
+        AttrValue::String("Approve release?".to_string()),
+    );
+    graph.nodes.insert("gate".to_string(), gate);
+    graph
+        .nodes
+        .insert("approve".to_string(), Node::new("approve"));
+    graph
+        .nodes
+        .insert("manual_review".to_string(), Node::new("manual_review"));
+
+    graph.edges.push(Edge::new("start", "gate"));
+
+    let mut approve_edge = Edge::new("gate", "approve");
+    approve_edge.attrs.insert(
+        "label".to_string(),
+        AttrValue::String("[A] Approve".to_string()),
+    );
+    graph.edges.push(approve_edge);
+
+    let mut fail_edge = Edge::new("gate", "manual_review");
+    fail_edge.attrs.insert(
+        "condition".to_string(),
+        AttrValue::String("outcome=fail".to_string()),
+    );
+    graph.edges.push(fail_edge);
+
+    graph.edges.push(Edge::new("approve", "exit"));
+    graph.edges.push(Edge::new("manual_review", "exit"));
+
+    let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::aborted()));
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut registry = HandlerRegistry::new(Box::new(StartHandler));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+    registry.register("human", Box::new(HumanHandler::new(interviewer)));
+
+    let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
+    let config = RunConfig {
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        dry_run: false,
+        run_id: "test-run".into(),
+        git_checkpoint_enabled: false,
+        host_repo_path: None,
+        base_sha: None,
+        run_branch: None,
+        meta_branch: None,
+        labels: std::collections::HashMap::new(),
+        checkpoint_exclude_globs: Vec::new(),
+        github_app: None,
+        git_author: fabro_workflows::git::GitAuthor::default(),
+        base_branch: None,
+        pull_request: None,
+        asset_globs: Vec::new(),
+        workflow_slug: None,
+    };
+
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("aborted human gate should follow explicit fail route");
+    assert_eq!(outcome.status, StageStatus::Success);
+
+    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    assert!(
+        checkpoint
+            .completed_nodes
+            .contains(&"manual_review".to_string()),
+        "explicit fail route should handle unanswered human gates"
+    );
+    assert!(
+        !checkpoint.completed_nodes.contains(&"approve".to_string()),
+        "approval path must not execute on aborted input"
     );
 }
 

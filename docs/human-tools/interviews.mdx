@@ -36,7 +36,7 @@ Each question carries metadata beyond the prompt text:
 
 ## Answer values
 
-Answers are one of six variants:
+Answers are one of seven variants:
 
 | Value | Meaning |
 |---|---|
@@ -44,7 +44,8 @@ Answers are one of six variants:
 | `No` | Negative response |
 | `Selected(key)` | A specific option was chosen (carries the option key) |
 | `Text(string)` | Free-text input |
-| `Skipped` | The user dismissed the question without answering |
+| `Aborted` | No answer was obtained because the prompt ended early (EOF, cancel, disconnected session, exhausted replay/queue) |
+| `Skipped` | Legacy skip-style answer; not treated as approval by human gates |
 | `Timeout` | The question's timeout elapsed without a response |
 
 An answer can also carry a `selected_option` (the full `{key, label}` pair) and a `text` field for freeform input.
@@ -76,11 +77,15 @@ fabro run workflow.fabro
 # Select:
 ```
 
+If the console prompt is canceled or stdin is already closed, the interviewer returns `Aborted`. That does not count as approval.
+
 ### Web
 
 The default for API server runs. The web interviewer holds questions in a queue until answers are submitted externally — typically by the web UI or a REST API call. Each question gets a unique ID (e.g. `q-1`), and the `ask()` call blocks on a oneshot channel until `submit_answer(id, answer)` is called.
 
 This decoupling means the workflow engine and the user interface can run in different processes. The web UI polls for pending questions and posts answers back to the API.
+
+If the pending session disappears before an answer is submitted, the waiting question resolves as `Aborted`.
 
 ### Slack
 
@@ -100,6 +105,8 @@ Enable it with the `--auto-approve` flag:
 fabro run workflow.fabro --auto-approve
 ```
 
+`--auto-approve` is intentionally distinct from an unanswered prompt. Auto-approve is an explicit operator choice to advance human gates automatically.
+
 ## Timeouts
 
 Questions can have a `timeout_seconds` field. When set, Fabro wraps the interviewer call with a timeout:
@@ -113,3 +120,5 @@ The human handler then checks the node's `human.default_choice` attribute. If se
 ```dot
 approve [shape=hexagon, label="Approve?", human.default_choice="deploy"]
 ```
+
+Outside of timeout defaults, human gates fail closed: `Aborted` and `Skipped` answers do not fall through to ordinary approval edges. To model an explicit unanswered path, add an edge such as `condition="outcome=fail"` or configure a `retry_target`.

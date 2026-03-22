@@ -446,13 +446,21 @@ pub struct EdgeSelection<'a> {
     pub reason: &'static str,
 }
 
+fn blocks_unconditional_failure_fallthrough(node: &Node, outcome: &Outcome) -> bool {
+    node.handler_type() == Some("human")
+        && outcome.status == StageStatus::Fail
+        && outcome.preferred_label.is_none()
+        && outcome.suggested_next_ids.is_empty()
+}
+
 pub fn select_edge<'a>(
-    node_id: &str,
+    node: &Node,
     outcome: &Outcome,
     context: &Context,
     graph: &'a Graph,
     selection: &str,
 ) -> Option<EdgeSelection<'a>> {
+    let node_id = &node.id;
     let edges = graph.outgoing_edges(node_id);
     if edges.is_empty() {
         return None;
@@ -499,6 +507,10 @@ pub fn select_edge<'a>(
                 });
             }
         }
+    }
+
+    if blocks_unconditional_failure_fallthrough(node, outcome) {
+        return None;
     }
 
     // Step 4 & 5: Weight with lexical tiebreak (unconditional edges only)
@@ -2026,7 +2038,7 @@ impl WorkflowRunEngine {
                 });
                 (None, Some(target.clone()))
             } else {
-                let selection = select_edge(&node.id, &outcome, &context, graph, node.selection());
+                let selection = select_edge(node, &outcome, &context, graph, node.selection());
                 if let Some(sel) = &selection {
                     self.services.emitter.emit(&WorkflowRunEvent::EdgeSelected {
                         from_node: node.id.clone(),
@@ -2840,17 +2852,19 @@ mod tests {
     #[test]
     fn select_edge_no_edges() {
         let g = Graph::new("test");
+        let node = Node::new("a");
         let outcome = Outcome::success();
         let context = Context::new();
-        assert!(select_edge("a", &outcome, &context, &g, "deterministic").is_none());
+        assert!(select_edge(&node, &outcome, &context, &g, "deterministic").is_none());
     }
 
     #[test]
     fn select_edge_single_unconditional() {
         let g = make_graph_with_edges(vec![Edge::new("a", "b")]);
+        let node = g.nodes.get("a").unwrap();
         let outcome = Outcome::success();
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g, "deterministic").unwrap();
+        let sel = select_edge(node, &outcome, &context, &g, "deterministic").unwrap();
         assert_eq!(sel.edge.to, "b");
         assert_eq!(sel.reason, "unconditional");
     }
@@ -2868,9 +2882,10 @@ mod tests {
             AttrValue::String("outcome=success".to_string()),
         );
         let g = make_graph_with_edges(vec![e1, e2]);
+        let node = g.nodes.get("a").unwrap();
         let outcome = Outcome::success();
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g, "deterministic").unwrap();
+        let sel = select_edge(node, &outcome, &context, &g, "deterministic").unwrap();
         assert_eq!(sel.edge.to, "success_path");
         assert_eq!(sel.reason, "condition");
     }
@@ -2888,10 +2903,11 @@ mod tests {
             AttrValue::String("[F] Fix".to_string()),
         );
         let g = make_graph_with_edges(vec![e1, e2]);
+        let node = g.nodes.get("a").unwrap();
         let mut outcome = Outcome::success();
         outcome.preferred_label = Some("Fix".to_string());
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g, "deterministic").unwrap();
+        let sel = select_edge(node, &outcome, &context, &g, "deterministic").unwrap();
         assert_eq!(sel.edge.to, "fix");
         assert_eq!(sel.reason, "preferred_label");
     }
@@ -2901,10 +2917,11 @@ mod tests {
         let e1 = Edge::new("a", "path1");
         let e2 = Edge::new("a", "path2");
         let g = make_graph_with_edges(vec![e1, e2]);
+        let node = g.nodes.get("a").unwrap();
         let mut outcome = Outcome::success();
         outcome.suggested_next_ids = vec!["path2".to_string()];
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g, "deterministic").unwrap();
+        let sel = select_edge(node, &outcome, &context, &g, "deterministic").unwrap();
         assert_eq!(sel.edge.to, "path2");
         assert_eq!(sel.reason, "suggested_next");
     }
@@ -2917,9 +2934,10 @@ mod tests {
         e2.attrs
             .insert("weight".to_string(), AttrValue::Integer(10));
         let g = make_graph_with_edges(vec![e1, e2]);
+        let node = g.nodes.get("a").unwrap();
         let outcome = Outcome::success();
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g, "deterministic").unwrap();
+        let sel = select_edge(node, &outcome, &context, &g, "deterministic").unwrap();
         assert_eq!(sel.edge.to, "high");
         assert_eq!(sel.reason, "unconditional");
     }
@@ -2929,9 +2947,10 @@ mod tests {
         let e1 = Edge::new("a", "charlie");
         let e2 = Edge::new("a", "alpha");
         let g = make_graph_with_edges(vec![e1, e2]);
+        let node = g.nodes.get("a").unwrap();
         let outcome = Outcome::success();
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g, "deterministic").unwrap();
+        let sel = select_edge(node, &outcome, &context, &g, "deterministic").unwrap();
         assert_eq!(sel.edge.to, "alpha");
         assert_eq!(sel.reason, "unconditional");
     }
@@ -2945,9 +2964,10 @@ mod tests {
         );
         let e_uncond = Edge::new("a", "uncond_path");
         let g = make_graph_with_edges(vec![e_cond, e_uncond]);
+        let node = g.nodes.get("a").unwrap();
         let outcome = Outcome::success();
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g, "deterministic").unwrap();
+        let sel = select_edge(node, &outcome, &context, &g, "deterministic").unwrap();
         assert_eq!(sel.edge.to, "cond_path");
         assert_eq!(sel.reason, "condition");
     }
@@ -2957,9 +2977,10 @@ mod tests {
         let e1 = Edge::new("a", "b");
         let e2 = Edge::new("a", "c");
         let g = make_graph_with_edges(vec![e1, e2]);
+        let node = g.nodes.get("a").unwrap();
         let outcome = Outcome::success();
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g, "random").unwrap();
+        let sel = select_edge(node, &outcome, &context, &g, "random").unwrap();
         assert!(sel.edge.to == "b" || sel.edge.to == "c");
         assert_eq!(sel.reason, "unconditional");
     }
@@ -2973,12 +2994,54 @@ mod tests {
         );
         let e2 = Edge::new("a", "other");
         let g = make_graph_with_edges(vec![e1, e2]);
+        let node = g.nodes.get("a").unwrap();
         let mut outcome = Outcome::success();
         outcome.preferred_label = Some("Approve".to_string());
         let context = Context::new();
-        let sel = select_edge("a", &outcome, &context, &g, "random").unwrap();
+        let sel = select_edge(node, &outcome, &context, &g, "random").unwrap();
         assert_eq!(sel.edge.to, "approve");
         assert_eq!(sel.reason, "preferred_label");
+    }
+
+    #[test]
+    fn select_edge_failed_human_gate_does_not_fall_through_to_unconditional() {
+        let g = make_graph_with_edges(vec![
+            Edge::new("gate", "approve"),
+            Edge::new("gate", "skip"),
+        ]);
+        let mut node = g.nodes.get("gate").unwrap().clone();
+        node.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("hexagon".to_string()),
+        );
+        let outcome =
+            Outcome::fail_deterministic("human interaction aborted before an answer was provided");
+        let context = Context::new();
+
+        assert!(select_edge(&node, &outcome, &context, &g, "deterministic").is_none());
+    }
+
+    #[test]
+    fn select_edge_failed_human_gate_routes_via_fail_condition() {
+        let mut fail = Edge::new("gate", "retry");
+        fail.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("outcome=fail".to_string()),
+        );
+        let approve = Edge::new("gate", "approve");
+        let g = make_graph_with_edges(vec![fail, approve]);
+        let mut node = g.nodes.get("gate").unwrap().clone();
+        node.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("hexagon".to_string()),
+        );
+        let outcome =
+            Outcome::fail_deterministic("human interaction aborted before an answer was provided");
+        let context = Context::new();
+
+        let sel = select_edge(&node, &outcome, &context, &g, "deterministic").unwrap();
+        assert_eq!(sel.edge.to, "retry");
+        assert_eq!(sel.reason, "condition");
     }
 
     // --- check_goal_gates tests ---

@@ -77,6 +77,7 @@ impl Question {
 pub enum AnswerValue {
     Yes,
     No,
+    Aborted,
     Skipped,
     Timeout,
     Selected(String),
@@ -109,6 +110,16 @@ impl Answer {
     pub fn no() -> Self {
         Self {
             value: AnswerValue::No,
+            selected_option: None,
+            selected_options: Vec::new(),
+            text: None,
+        }
+    }
+
+    #[must_use]
+    pub fn aborted() -> Self {
+        Self {
+            value: AnswerValue::Aborted,
             selected_option: None,
             selected_options: Vec::new(),
             text: None,
@@ -257,6 +268,12 @@ mod tests {
     }
 
     #[test]
+    fn answer_aborted() {
+        let a = Answer::aborted();
+        assert_eq!(a.value, AnswerValue::Aborted);
+    }
+
+    #[test]
     fn answer_timeout() {
         let a = Answer::timeout();
         assert_eq!(a.value, AnswerValue::Timeout);
@@ -297,6 +314,7 @@ mod tests {
     fn answer_value_variants() {
         assert_ne!(AnswerValue::Yes, AnswerValue::No);
         assert_ne!(AnswerValue::Skipped, AnswerValue::Timeout);
+        assert_ne!(AnswerValue::Aborted, AnswerValue::Timeout);
         assert_eq!(
             AnswerValue::Selected("x".to_string()),
             AnswerValue::Selected("x".to_string())

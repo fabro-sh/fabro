@@ -159,6 +159,26 @@ pub(crate) fn append_progress_event(
     Ok(())
 }
 
+pub(crate) fn append_run_notice(
+    run_dir: &Path,
+    level: RunNoticeLevel,
+    code: &'static str,
+    message: impl Into<String>,
+) -> Result<()> {
+    let Some(run_id) = load_run_id(run_dir) else {
+        return Ok(());
+    };
+    append_progress_event(
+        run_dir,
+        &run_id,
+        &WorkflowRunEvent::RunNotice {
+            level,
+            code: code.to_string(),
+            message: message.into(),
+        },
+    )
+}
+
 pub(crate) fn persist_detached_failure(
     run_dir: &Path,
     phase: &'static str,
@@ -321,5 +341,23 @@ mod tests {
         let progress = std::fs::read_to_string(dir.path().join("progress.jsonl")).unwrap();
         assert!(progress.contains("bootstrap_failed"));
         assert!(dir.path().join("detached_failure.json").exists());
+    }
+
+    #[test]
+    fn append_run_notice_writes_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("id.txt"), "run-notice").unwrap();
+
+        append_run_notice(
+            dir.path(),
+            RunNoticeLevel::Warn,
+            "interview_unanswered",
+            "The run is still waiting for input.",
+        )
+        .unwrap();
+
+        let progress = std::fs::read_to_string(dir.path().join("progress.jsonl")).unwrap();
+        assert!(progress.contains("\"event\":\"RunNotice\""));
+        assert!(progress.contains("\"code\":\"interview_unanswered\""));
     }
 }

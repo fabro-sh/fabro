@@ -77,6 +77,7 @@ fn format_answer(answer: &Answer) -> String {
     match &answer.value {
         AnswerValue::Yes => "Yes".to_string(),
         AnswerValue::No => "No".to_string(),
+        AnswerValue::Aborted => "Aborted".to_string(),
         AnswerValue::Text(t) => t.clone(),
         AnswerValue::Selected(k) => {
             if let Some(opt) = &answer.selected_option {

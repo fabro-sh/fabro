@@ -1,5 +1,5 @@
 use std::io::{BufRead, BufReader, IsTerminal, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -7,16 +7,20 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 
-use fabro_interview::ConsoleInterviewer;
+use fabro_interview::{AnswerValue, ConsoleInterviewer};
 use fabro_util::terminal::Styles;
+use fabro_workflows::event::RunNoticeLevel;
 use fabro_workflows::run_status::{RunStatus, RunStatusRecord};
 
+use super::detached_support::append_run_notice;
 use super::run_progress;
 
 #[cfg(test)]
 const ATTACH_STARTUP_GRACE: Duration = Duration::from_millis(200);
 #[cfg(not(test))]
 const ATTACH_STARTUP_GRACE: Duration = Duration::from_secs(3);
+const INTERVIEW_UNANSWERED_MESSAGE: &str =
+    "Interview ended without an answer. The run is still waiting for input; reattach to answer it.";
 
 /// Attach to a running (or finished) workflow run, rendering progress live.
 ///
@@ -119,25 +123,36 @@ pub async fn attach_run(
         }
 
         // Check for interview request
-        if interview_request_path.exists()
-            && !interview_response_path.exists()
-            && try_claim_interview_request(run_dir)
-        {
-            if let Ok(request_data) = std::fs::read_to_string(&interview_request_path) {
-                if let Ok(question) =
-                    serde_json::from_str::<fabro_interview::Question>(&request_data)
-                {
-                    // Hide progress bars during interview
-                    progress_ui.hide_bars();
+        if interview_request_path.exists() && !interview_response_path.exists() {
+            if let Some(_claim_guard) = InterviewClaimGuard::acquire(run_dir) {
+                if let Ok(request_data) = std::fs::read_to_string(&interview_request_path) {
+                    if let Ok(question) =
+                        serde_json::from_str::<fabro_interview::Question>(&request_data)
+                    {
+                        // Hide progress bars during interview
+                        progress_ui.hide_bars();
 
-                    // Prompt user via ConsoleInterviewer
-                    let interviewer = ConsoleInterviewer::new(styles);
-                    let answer = fabro_interview::Interviewer::ask(&interviewer, question).await;
+                        // Prompt user via ConsoleInterviewer
+                        let interviewer = ConsoleInterviewer::new(styles);
+                        let answer =
+                            fabro_interview::Interviewer::ask(&interviewer, question).await;
 
-                    let _ = write_interview_response_atomically(&interview_response_path, &answer);
+                        // Show progress bars again before any return path.
+                        progress_ui.show_bars();
 
-                    // Show progress bars again
-                    progress_ui.show_bars();
+                        if answer_requires_reattach(&answer) {
+                            let _ = append_run_notice(
+                                run_dir,
+                                RunNoticeLevel::Warn,
+                                "interview_unanswered",
+                                INTERVIEW_UNANSWERED_MESSAGE,
+                            );
+                            eprintln!("{INTERVIEW_UNANSWERED_MESSAGE}");
+                            return Ok(ExitCode::from(1));
+                        }
+
+                        write_interview_response_atomically(&interview_response_path, &answer)?;
+                    }
                 }
             }
         }
@@ -236,6 +251,28 @@ fn interview_claim_path(run_dir: &Path) -> std::path::PathBuf {
     run_dir.join("interview_request.claim")
 }
 
+struct InterviewClaimGuard {
+    claim_path: PathBuf,
+}
+
+impl InterviewClaimGuard {
+    fn acquire(run_dir: &Path) -> Option<Self> {
+        if try_claim_interview_request(run_dir) {
+            Some(Self {
+                claim_path: interview_claim_path(run_dir),
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl Drop for InterviewClaimGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.claim_path);
+    }
+}
+
 fn try_claim_interview_request(run_dir: &Path) -> bool {
     let claim_path = interview_claim_path(run_dir);
     if let Ok(existing) = std::fs::read_to_string(&claim_path) {
@@ -258,6 +295,10 @@ fn try_claim_interview_request(run_dir: &Path) -> bool {
         }
         Err(_) => false,
     }
+}
+
+fn answer_requires_reattach(answer: &fabro_interview::Answer) -> bool {
+    matches!(answer.value, AnswerValue::Aborted | AnswerValue::Skipped)
 }
 
 fn write_interview_response_atomically(
@@ -402,6 +443,39 @@ mod tests {
             std::fs::read_to_string(interview_claim_path(dir.path())).unwrap(),
             format!("{}\n", std::process::id())
         );
+    }
+
+    #[test]
+    fn interview_claim_guard_releases_claim_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+
+        {
+            let _guard = InterviewClaimGuard::acquire(dir.path()).unwrap();
+            assert!(interview_claim_path(dir.path()).exists());
+        }
+
+        assert!(!interview_claim_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn answer_requires_reattach_for_aborted_and_skipped_answers() {
+        let aborted = Answer {
+            value: AnswerValue::Aborted,
+            selected_option: None,
+            selected_options: Vec::new(),
+            text: None,
+        };
+        let skipped = Answer {
+            value: AnswerValue::Skipped,
+            selected_option: None,
+            selected_options: Vec::new(),
+            text: None,
+        };
+        let answered = Answer::yes();
+
+        assert!(answer_requires_reattach(&aborted));
+        assert!(answer_requires_reattach(&skipped));
+        assert!(!answer_requires_reattach(&answered));
     }
 
     #[test]

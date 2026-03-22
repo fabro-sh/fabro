@@ -102,7 +102,7 @@ impl Interviewer for WebInterviewer {
         }
 
         // Block until answer arrives or sender is dropped
-        rx.await.unwrap_or_else(|_| Answer::skipped())
+        rx.await.unwrap_or_else(|_| Answer::aborted())
     }
 }
 
@@ -252,5 +252,36 @@ mod tests {
         handle.await.expect("task should complete");
 
         assert!(interviewer.pending_questions().is_empty());
+    }
+
+    #[tokio::test]
+    async fn ask_returns_aborted_when_pending_sender_is_dropped() {
+        let interviewer = Arc::new(WebInterviewer::new());
+        let interviewer_clone = Arc::clone(&interviewer);
+
+        let ask_handle = tokio::spawn(async move {
+            let q = Question::new("approve?", QuestionType::YesNo);
+            interviewer_clone.ask(q).await
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        {
+            let mut inner = interviewer
+                .inner
+                .lock()
+                .expect("web interviewer lock poisoned");
+            let pending_id = inner
+                .questions
+                .first()
+                .expect("question should be pending")
+                .id
+                .clone();
+            inner.pending.remove(&pending_id);
+            inner.questions.retain(|pq| pq.id != pending_id);
+        }
+
+        let answer = ask_handle.await.expect("task should complete");
+        assert_eq!(answer.value, AnswerValue::Aborted);
     }
 }
