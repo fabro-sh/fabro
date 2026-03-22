@@ -98,7 +98,7 @@ There are two ways to resume an interrupted run:
 Resume from a `checkpoint.json` saved in the run directory:
 
 ```bash
-fabro run workflow.fabro --resume path/to/logs/checkpoint.json
+fabro resume --checkpoint path/to/logs/checkpoint.json --workflow workflow.fabro
 ```
 
 Fabro loads the checkpoint, restores the context and execution state, and continues from the next node after the checkpoint.
@@ -108,7 +108,7 @@ Fabro loads the checkpoint, restores the context and execution state, and contin
 Resume from the Git branches created during a previous run:
 
 ```bash
-fabro run --run-branch fabro/run/01JKXYZ...
+fabro resume 01JKXYZ
 ```
 
 This reads the checkpoint, manifest, and Graphviz graph from the metadata branch (`fabro/meta/01JKXYZ...`), re-attaches a worktree to the existing run branch, and resumes execution. No workflow file argument is needed — everything is recovered from Git.
@@ -163,7 +163,7 @@ fabro rewind <RUN_ID> --list
 fabro rewind <RUN_ID> plan@2
 
 # Resume from the rewound point
-fabro run --run-branch fabro/run/<RUN_ID>
+fabro resume <RUN_ID>
 ```
 
 See [`fabro rewind`](/reference/cli#fabro-rewind) for the full command reference.
@@ -180,7 +180,7 @@ fabro fork <RUN_ID> --list
 fabro fork <RUN_ID> plan@2
 
 # Resume the forked run
-fabro run --run-branch fabro/run/<NEW_RUN_ID>
+fabro resume <NEW_RUN_ID>
 ```
 
 Use **rewind** when you want to redo a run from an earlier point (destructive — resets the original). Use **fork** when you want to try a different approach while keeping the original run as a reference.

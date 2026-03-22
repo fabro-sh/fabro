@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RunSpec {
     pub run_id: String,
     pub workflow_path: PathBuf,
@@ -16,12 +17,9 @@ pub struct RunSpec {
     pub labels: HashMap<String, String>,
     pub verbose: bool,
     pub no_retro: bool,
-    pub ssh: bool,
     pub preserve_sandbox: bool,
     pub dry_run: bool,
     pub auto_approve: bool,
-    pub resume: Option<PathBuf>,
-    pub run_branch: Option<String>,
 }
 
 impl RunSpec {
@@ -61,12 +59,9 @@ mod tests {
             labels,
             verbose: true,
             no_retro: false,
-            ssh: true,
             preserve_sandbox: false,
             dry_run: false,
             auto_approve: true,
-            resume: Some(PathBuf::from("/tmp/checkpoint")),
-            run_branch: Some("fabro/run/abc123".to_string()),
         }
     }
 

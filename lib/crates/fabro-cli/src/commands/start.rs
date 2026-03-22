@@ -82,12 +82,9 @@ mod tests {
             labels: HashMap::new(),
             verbose: false,
             no_retro: true,
-            ssh: false,
             preserve_sandbox: false,
             dry_run: false,
             auto_approve: true,
-            resume: None,
-            run_branch: None,
         }
     }
 

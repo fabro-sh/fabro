@@ -11,11 +11,7 @@ Previously, starting too many runs at once could overwhelm the machine. Now exce
 
 ## SSH access to running sandboxes
 
-Use `--ssh` to get SSH access into running Daytona sandboxes for live debugging while the workflow executes. When something goes wrong mid-run, you can drop into the sandbox, inspect the filesystem, and understand the problem without waiting for the run to finish.
-
-```bash
-fabro run start --ssh my-workflow.fabro
-```
+Use `fabro ssh <run-id>` to get SSH access into running Daytona sandboxes for live debugging while the workflow executes. When something goes wrong mid-run, you can drop into the sandbox, inspect the filesystem, and understand the problem without waiting for the run to finish.
 
 Use `--preserve-sandbox` to keep sandboxes alive after a run completes for post-mortem inspection.
 

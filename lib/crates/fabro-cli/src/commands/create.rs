@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
-use chrono::Local;
 use fabro_config::run::RunDefaults;
 use fabro_workflows::run_spec::RunSpec;
 
-use super::run::{cached_graph_path, prepare_workflow, write_run_config_snapshot, RunArgs};
+use super::run::{
+    cached_graph_path, default_run_dir, prepare_workflow, write_run_config_snapshot, RunArgs,
+};
 use fabro_util::terminal::Styles;
 
 /// Create a workflow run: allocate run directory, persist spec, return (run_id, run_dir).
@@ -27,17 +28,10 @@ pub async fn create_run(
 
     // Create run directory
     let run_id = ulid::Ulid::new().to_string();
-    let run_dir = args.run_dir.clone().unwrap_or_else(|| {
-        if args.dry_run {
-            std::env::temp_dir().join("fabro-dry-run").join(&run_id)
-        } else {
-            let base = dirs::home_dir()
-                .expect("could not determine home directory")
-                .join(".fabro")
-                .join("runs");
-            base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
-        }
-    });
+    let run_dir = args
+        .run_dir
+        .clone()
+        .unwrap_or_else(|| default_run_dir(&run_id, args.dry_run));
     tokio::fs::create_dir_all(&run_dir).await?;
 
     // Write essential files
@@ -76,12 +70,9 @@ pub async fn create_run(
             .collect(),
         verbose: args.verbose,
         no_retro: args.no_retro,
-        ssh: args.ssh,
         preserve_sandbox: args.preserve_sandbox,
         dry_run: args.dry_run,
         auto_approve: args.auto_approve,
-        resume: args.resume.clone(),
-        run_branch: args.run_branch.clone(),
     };
     spec.save(&run_dir)?;
 

@@ -46,9 +46,8 @@ pub fn run(args: &RewindArgs, styles: &Styles) -> Result<()> {
     fabro_workflows::run_rewind::execute_rewind(&store, &run_id, entry, !args.no_push)?;
 
     eprintln!(
-        "\nTo resume: fabro run --run-branch {}{}",
-        fabro_workflows::git::RUN_BRANCH_PREFIX,
-        run_id
+        "\nTo resume: fabro resume {}",
+        &run_id[..8.min(run_id.len())]
     );
 
     Ok(())

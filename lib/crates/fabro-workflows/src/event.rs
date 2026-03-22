@@ -1016,19 +1016,20 @@ fn epoch_millis() -> i64 {
 }
 
 /// Listener callback type for workflow run events.
-type EventListener = Box<dyn Fn(&WorkflowRunEvent) + Send + Sync>;
+type EventListener = Arc<dyn Fn(&WorkflowRunEvent) + Send + Sync>;
 
 /// Callback-based event emitter for workflow run events.
 pub struct EventEmitter {
-    listeners: Vec<EventListener>,
+    listeners: std::sync::Mutex<Vec<EventListener>>,
     /// Epoch milliseconds of the last `emit()` or `touch()` call. 0 until first event.
     last_event_at: AtomicI64,
 }
 
 impl std::fmt::Debug for EventEmitter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let count = self.listeners.lock().map(|l| l.len()).unwrap_or(0);
         f.debug_struct("EventEmitter")
-            .field("listener_count", &self.listeners.len())
+            .field("listener_count", &count)
             .field("last_event_at", &self.last_event_at.load(Ordering::Relaxed))
             .finish()
     }
@@ -1044,19 +1045,30 @@ impl EventEmitter {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            listeners: Vec::new(),
+            listeners: std::sync::Mutex::new(Vec::new()),
             last_event_at: AtomicI64::new(0),
         }
     }
 
-    pub fn on_event(&mut self, listener: impl Fn(&WorkflowRunEvent) + Send + Sync + 'static) {
-        self.listeners.push(Box::new(listener));
+    pub fn on_event(&self, listener: impl Fn(&WorkflowRunEvent) + Send + Sync + 'static) {
+        self.listeners
+            .lock()
+            .expect("listeners lock poisoned")
+            .push(Arc::new(listener));
     }
 
     pub fn emit(&self, event: &WorkflowRunEvent) {
         self.last_event_at.store(epoch_millis(), Ordering::Relaxed);
         event.trace();
-        for listener in &self.listeners {
+        // Clone the listener list so we don't hold the lock during dispatch.
+        // This prevents deadlocks if a listener calls emit() reentrantly.
+        // Note: listeners added during this emit() won't receive the current event.
+        let snapshot: Vec<EventListener> = self
+            .listeners
+            .lock()
+            .expect("listeners lock poisoned")
+            .clone();
+        for listener in &snapshot {
             listener(event);
         }
     }
@@ -1098,12 +1110,12 @@ mod tests {
     #[test]
     fn event_emitter_new_has_no_listeners() {
         let emitter = EventEmitter::new();
-        assert_eq!(emitter.listeners.len(), 0);
+        assert_eq!(emitter.listeners.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn event_emitter_calls_listener() {
-        let mut emitter = EventEmitter::new();
+        let emitter = EventEmitter::new();
         let received = Arc::new(Mutex::new(Vec::new()));
         let received_clone = Arc::clone(&received);
         emitter.on_event(move |event| {
@@ -1161,7 +1173,7 @@ mod tests {
     #[test]
     fn event_emitter_default() {
         let emitter = EventEmitter::default();
-        assert_eq!(emitter.listeners.len(), 0);
+        assert_eq!(emitter.listeners.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -2510,7 +2522,7 @@ mod tests {
 
     #[test]
     fn emitter_captures_retro_events() {
-        let mut emitter = EventEmitter::new();
+        let emitter = EventEmitter::new();
         let received = Arc::new(Mutex::new(Vec::new()));
         let r = Arc::clone(&received);
         emitter.on_event(move |event| {

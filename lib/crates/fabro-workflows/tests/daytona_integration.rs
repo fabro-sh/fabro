@@ -569,7 +569,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
 
     // Set up event collection
     let dir = tempfile::tempdir().unwrap();
-    let mut emitter = EventEmitter::new();
+    let emitter = EventEmitter::new();
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     {
         let events_clone = Arc::clone(&events);
@@ -754,7 +754,7 @@ async fn daytona_parallel_git_branching_e2e() {
     graph.edges.push(Edge::new("fan_in", "exit"));
 
     let run_tmp = tempfile::tempdir().unwrap();
-    let mut emitter = EventEmitter::new();
+    let emitter = EventEmitter::new();
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     {
         let events_clone = Arc::clone(&events);

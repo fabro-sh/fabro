@@ -164,6 +164,8 @@ enum Command {
         #[command(subcommand)]
         command: SecretCommand,
     },
+    /// Resume an interrupted workflow run
+    Resume(commands::resume::ResumeArgs),
     /// Rewind a workflow run to an earlier checkpoint
     Rewind(commands::rewind::RewindArgs),
     /// Fork a workflow run from an earlier checkpoint into a new run
@@ -435,6 +437,7 @@ async fn main_inner() -> (String, Result<()>) {
             SecretCommand::Rm(_) => "secret rm",
             SecretCommand::Set(_) => "secret set",
         },
+        Command::Resume(_) => "resume",
         Command::Rewind(_) => "rewind",
         Command::Fork(_) => "fork",
         Command::Wait(_) => "wait",
@@ -734,8 +737,6 @@ async fn main_inner() -> (String, Result<()>) {
                     dry_run: spec.dry_run,
                     preflight: false,
                     auto_approve: spec.auto_approve,
-                    resume: spec.resume,
-                    run_branch: spec.run_branch,
                     goal: spec.goal,
                     goal_file: None,
                     model: Some(spec.model),
@@ -752,7 +753,6 @@ async fn main_inner() -> (String, Result<()>) {
                         .map(|(k, v)| format!("{k}={v}"))
                         .collect(),
                     no_retro: spec.no_retro,
-                    ssh: spec.ssh,
                     preserve_sandbox: spec.preserve_sandbox,
                     detach: false,
                     run_id: Some(spec.run_id),
@@ -916,6 +916,27 @@ async fn main_inner() -> (String, Result<()>) {
                     commands::secret::set_command(&args)?;
                 }
             },
+            Command::Resume(mut args) => {
+                let styles: &'static fabro_util::terminal::Styles =
+                    Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
+                let cli_config = cli_config::load_cli_config(None)?;
+                args.verbose = args.verbose || cli_config.verbose;
+                #[cfg(feature = "sleep_inhibitor")]
+                let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep);
+                let github_app = build_github_app_credentials(cli_config.app_id());
+                let git_author = fabro_workflows::git::GitAuthor::from_options(
+                    cli_config.git_author().and_then(|a| a.name.clone()),
+                    cli_config.git_author().and_then(|a| a.email.clone()),
+                );
+                commands::resume::resume_command(
+                    args,
+                    cli_config.run_defaults,
+                    styles,
+                    github_app,
+                    git_author,
+                )
+                .await?;
+            }
             Command::Rewind(args) => {
                 let styles = fabro_util::terminal::Styles::detect_stderr();
                 commands::rewind::run(&args, &styles)?;
