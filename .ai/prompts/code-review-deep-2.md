@@ -5,7 +5,7 @@ We have a report of candidate bugs which you need to analyze.
 To do this, follow these steps precisely:
 
 1. Use Git to retrieve a list of modified files in this branch.
-2. Use a Haiku agent to view the branch's diff, and ask the agent to return a summary of the change
+2. View the branch's diff and understand the changes
 3. Then, launch 5 parallel Opus agents to independently assess the candidate bugs. For each bug, investigate it thoroughly in order to produce the report in the format below. If the candidate bug is not valid, then discard it.
 
 Input: Read from `.ai/reviews/candidate_bugs.xml`

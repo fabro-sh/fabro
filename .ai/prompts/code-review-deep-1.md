@@ -8,7 +8,7 @@ To do this, follow these steps precisely:
 4. Then, launch 5 parallel Opus agents to independently code review the change for production bugs and vulnerabilities.
    a. Agent #1: Read the git blame and history of the code modified, to identify any bugs in light of that historical context
    b. Agent #2: Read code comments in the modified files, and make sure the changes in the pull request comply with any guidance in the comments.
-   c. Agent #3-5: Read the file changes in this branch, then do a scan for bugs. Focus on bugs with production / end-user impact, and avoid small issues and nitpicks.
+   c. Agent #3-5: Read the file changes in this branch, then do a scan for potential bugs. Focus on bugs with production / end-user impact, and avoid small issues and nitpicks.
 
 Output a report with all the bugs using this format:
 
@@ -26,7 +26,10 @@ Output a report with all the bugs using this format:
    <bug>...</bug>
 </code_review>
 
+Write the report to: `.ai/reviews/candidate_bugs.xml`
+
 Notes:
 
 - Do not check build signal or attempt to build or typecheck the app. These will run separately, and are not relevant to your code review.
+- Include all potential bugs of all severity (critical/high/medium/low) that have production / end-user impact. (We will analyze them separately later.)
 - Make a todo list first
