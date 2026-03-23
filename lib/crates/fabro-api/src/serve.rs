@@ -9,7 +9,7 @@ use tracing::{error, info, warn};
 
 use clap::Args;
 
-use fabro_config::server::ServerConfig;
+use fabro_config::FabroConfig;
 
 use crate::jwt_auth::{AuthMode, AuthStrategy};
 use crate::server::build_router;
@@ -121,13 +121,14 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
 
     let (auth_mode, client_auth, max_concurrent_runs) = {
         let cfg = shared_config.read().expect("config lock poisoned");
-        let auth_mode =
-            crate::jwt_auth::resolve_auth_mode(&cfg.api, cfg.web.auth.allowed_usernames.clone());
-        let client_auth = cfg
-            .api
-            .tls
+        let api = cfg.api.clone().unwrap_or_default();
+        let allowed_usernames = cfg
+            .web
             .as_ref()
-            .map(|_| client_auth_from_mode(&auth_mode));
+            .map(|w| w.auth.allowed_usernames.clone())
+            .unwrap_or_default();
+        let auth_mode = crate::jwt_auth::resolve_auth_mode(&api, allowed_usernames);
+        let client_auth = api.tls.as_ref().map(|_| client_auth_from_mode(&auth_mode));
         let max_concurrent_runs = args
             .max_concurrent_runs
             .or(cfg.max_concurrent_runs)
@@ -137,14 +138,15 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
 
     let git_author = {
         let cfg = shared_config.read().expect("config lock poisoned");
+        let author = cfg.git_author();
         fabro_workflows::git::GitAuthor::from_options(
-            cfg.git.author.name.clone(),
-            cfg.git.author.email.clone(),
+            author.and_then(|a| a.name.clone()),
+            author.and_then(|a| a.email.clone()),
         )
     };
     let hooks = {
         let cfg = shared_config.read().expect("config lock poisoned");
-        cfg.run_defaults.hooks.clone()
+        cfg.hooks.clone()
     };
     let state = crate::server::create_app_state_with_options(
         db,
@@ -176,10 +178,10 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     // Optionally start webhook listener
     let webhook_app_id = {
         let cfg = shared_config.read().expect("config lock poisoned");
-        match (&cfg.git.webhooks, &cfg.git.app_id) {
-            (Some(_), Some(app_id)) => Some(app_id.clone()),
-            _ => None,
-        }
+        cfg.git
+            .as_ref()
+            .and_then(|g| g.webhooks.as_ref().and(g.app_id.as_ref()))
+            .cloned()
     };
     let webhook_manager = match webhook_app_id {
         Some(app_id) => {
@@ -242,8 +244,8 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         .read()
         .expect("config lock poisoned")
         .api
-        .tls
-        .clone();
+        .as_ref()
+        .and_then(|a| a.tls.clone());
     if let Some(ref tls_config) = tls_config {
         let client_auth = client_auth.unwrap();
 
@@ -267,21 +269,13 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
 
 /// Resolve model and provider from shared config, with CLI overrides taking precedence.
 fn resolve_model_provider(
-    shared_config: &RwLock<ServerConfig>,
+    shared_config: &RwLock<FabroConfig>,
     cli_model: Option<&str>,
     cli_provider: Option<&str>,
 ) -> (String, Provider) {
     let cfg = shared_config.read().expect("config lock poisoned");
-    let config_provider = cfg
-        .run_defaults
-        .llm
-        .as_ref()
-        .and_then(|l| l.provider.as_deref());
-    let config_model = cfg
-        .run_defaults
-        .llm
-        .as_ref()
-        .and_then(|l| l.model.as_deref());
+    let config_provider = cfg.llm.as_ref().and_then(|l| l.provider.as_deref());
+    let config_model = cfg.llm.as_ref().and_then(|l| l.model.as_deref());
 
     let provider_str = cli_provider.or(config_provider);
     let model = cli_model

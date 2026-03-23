@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use fabro_config::run::WorkflowRunConfig;
+use fabro_config::FabroConfig;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_graphviz::parser::parse;
 use fabro_interview::{
@@ -8345,7 +8345,7 @@ event = "run_complete"
 command = "echo done"
 "#;
 
-    let cfg: WorkflowRunConfig = toml::from_str(toml).unwrap();
+    let cfg: FabroConfig = toml::from_str(toml).unwrap();
     assert_eq!(cfg.hooks.len(), 2);
     assert_eq!(cfg.hooks[0].event, fabro_hooks::HookEvent::StageStart);
     assert_eq!(cfg.hooks[0].matcher.as_deref(), Some("agent_loop"));
@@ -8525,7 +8525,7 @@ max_tool_rounds = 10
 timeout_ms = 120000
 "#;
 
-    let cfg: WorkflowRunConfig = toml::from_str(toml).unwrap();
+    let cfg: FabroConfig = toml::from_str(toml).unwrap();
     assert_eq!(cfg.hooks.len(), 2);
 
     // Prompt hook

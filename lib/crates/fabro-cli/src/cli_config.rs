@@ -18,7 +18,7 @@ const DEFAULT_SERVER_URL: &str = "http://localhost:3000";
 pub fn resolve_mode(
     cli_mode: Option<ExecutionMode>,
     cli_server_url: Option<&str>,
-    config: &CliConfig,
+    config: &FabroConfig,
 ) -> ResolvedMode {
     let mode = cli_mode.or_else(|| config.mode.clone()).unwrap_or_default();
 
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn resolve_mode_defaults_to_standalone() {
-        let config = CliConfig::default();
+        let config = FabroConfig::default();
         let resolved = resolve_mode(None, None, &config);
         assert_eq!(resolved.mode, ExecutionMode::Standalone);
         assert_eq!(resolved.server_base_url, DEFAULT_SERVER_URL);
@@ -89,13 +89,13 @@ mod tests {
 
     #[test]
     fn resolve_mode_config_overrides_default() {
-        let config = CliConfig {
+        let config = FabroConfig {
             mode: Some(ExecutionMode::Server),
             server: Some(ServerDefaults {
                 base_url: Some("https://config.example.com".to_string()),
                 tls: None,
             }),
-            ..CliConfig::default()
+            ..FabroConfig::default()
         };
         let resolved = resolve_mode(None, None, &config);
         assert_eq!(resolved.mode, ExecutionMode::Server);
@@ -104,13 +104,13 @@ mod tests {
 
     #[test]
     fn resolve_mode_cli_overrides_config() {
-        let config = CliConfig {
+        let config = FabroConfig {
             mode: Some(ExecutionMode::Standalone),
             server: Some(ServerDefaults {
                 base_url: Some("https://config.example.com".to_string()),
                 tls: None,
             }),
-            ..CliConfig::default()
+            ..FabroConfig::default()
         };
         let resolved = resolve_mode(
             Some(ExecutionMode::Server),
@@ -123,12 +123,12 @@ mod tests {
 
     #[test]
     fn resolve_mode_cli_url_overrides_config_url() {
-        let config = CliConfig {
+        let config = FabroConfig {
             server: Some(ServerDefaults {
                 base_url: Some("https://config.example.com".to_string()),
                 tls: None,
             }),
-            ..CliConfig::default()
+            ..FabroConfig::default()
         };
         let resolved = resolve_mode(None, Some("https://cli.example.com"), &config);
         assert_eq!(resolved.server_base_url, "https://cli.example.com");
@@ -141,12 +141,12 @@ mod tests {
             key: PathBuf::from("key.pem"),
             ca: PathBuf::from("ca.pem"),
         };
-        let config = CliConfig {
+        let config = FabroConfig {
             server: Some(ServerDefaults {
                 base_url: None,
                 tls: Some(tls.clone()),
             }),
-            ..CliConfig::default()
+            ..FabroConfig::default()
         };
         let resolved = resolve_mode(None, None, &config);
         assert_eq!(resolved.tls, Some(tls));

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use chrono::Utc;
-use fabro_config::run::RunDefaults;
+use fabro_config::config::FabroConfig;
 use fabro_workflows::manifest::Manifest;
 use fabro_workflows::run_spec::RunSpec;
 
@@ -15,7 +15,7 @@ use fabro_util::terminal::Styles;
 /// This does NOT execute the workflow — it only prepares the run directory.
 pub async fn create_run(
     args: &RunArgs,
-    run_defaults: RunDefaults,
+    run_defaults: FabroConfig,
     styles: &Styles,
     quiet: bool,
 ) -> anyhow::Result<(String, PathBuf)> {
