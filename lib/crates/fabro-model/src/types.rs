@@ -38,6 +38,7 @@ pub struct Model {
     pub display_name: String,
     pub limits: ModelLimits,
     pub training: Option<String>,
+    pub knowledge_cutoff: Option<String>,
     pub features: ModelFeatures,
     pub costs: ModelCosts,
     pub estimated_output_tps: Option<f64>,
@@ -91,6 +92,10 @@ impl Model {
         self.training.as_deref()
     }
 
+    pub fn knowledge_cutoff(&self) -> Option<&str> {
+        self.knowledge_cutoff.as_deref()
+    }
+
     pub fn input_cost_per_mtok(&self) -> Option<f64> {
         self.costs.input_cost_per_mtok
     }
@@ -135,6 +140,7 @@ mod tests {
         assert!(info.supports_reasoning());
         assert!(info.supports_effort());
         assert_eq!(info.training(), Some("2025-08-01"));
+        assert_eq!(info.knowledge_cutoff(), Some("May 2025"));
         assert_eq!(info.input_cost_per_mtok(), Some(15.0));
         assert_eq!(info.output_cost_per_mtok(), Some(75.0));
         assert_eq!(info.cache_input_cost_per_mtok(), Some(1.5));

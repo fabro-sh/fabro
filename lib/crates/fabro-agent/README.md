@@ -40,7 +40,7 @@ User Input
 ### Key Components
 
 - **`Session`** -- Manages the full agentic loop: LLM calls, tool execution, steering, follow-ups, abort handling, and event emission.
-- **`ProviderProfile`** (trait) -- Defines how to build system prompts, which tools to register, and what capabilities a provider supports. Ships with `AnthropicProfile`, `OpenAiProfile`, and `GeminiProfile`.
+- **`AgentProfile`** (trait) -- Defines how to build system prompts, which tools to register, and what capabilities a provider supports. Ships with `AnthropicProfile`, `OpenAiProfile`, and `GeminiProfile`.
 - **`Sandbox`** (trait) -- Abstracts filesystem, shell, grep, and glob operations. `LocalSandbox` provides a real implementation; the trait enables sandboxing and testing.
 - **`ToolRegistry`** -- Maps tool names to definitions and async executor functions. Tools are registered per-profile.
 - **`History`** -- Ordered list of `Turn` variants (`User`, `Assistant`, `ToolResults`, `System`, `Steering`) that converts to LLM messages.
@@ -54,10 +54,10 @@ User Input
 
 The main entry point. Created with an LLM client, a provider profile, a sandbox, and a config.
 
-### `ProviderProfile`
+### `AgentProfile`
 
 ```rust
-pub trait ProviderProfile: Send + Sync {
+pub trait AgentProfile: Send + Sync {
     fn id(&self) -> String;
     fn model(&self) -> String;
     fn tool_registry(&self) -> &ToolRegistry;
@@ -68,7 +68,7 @@ pub trait ProviderProfile: Send + Sync {
         project_docs: &[String],
         user_instructions: Option<&str>,
     ) -> String;
-    fn capabilities(&self) -> ProfileCapabilities;
+    fn capabilities(&self) -> AgentProfile;
     fn knowledge_cutoff(&self) -> &str;
     // ... default methods for tools(), provider_options(), supports_*()
 }

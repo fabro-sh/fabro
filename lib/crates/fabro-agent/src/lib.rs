@@ -1,6 +1,7 @@
 #[cfg(feature = "docker")]
 pub mod docker_sandbox;
 
+pub mod agent_profile;
 pub mod cli;
 pub mod compaction;
 pub mod config;
@@ -13,7 +14,6 @@ pub mod loop_detection;
 pub mod mcp_integration;
 pub mod memory;
 pub mod profiles;
-pub mod provider_profile;
 pub mod read_before_write_sandbox;
 pub mod sandbox;
 pub mod session;
@@ -26,6 +26,7 @@ pub mod truncation;
 pub mod types;
 pub mod v4a_patch;
 
+pub use agent_profile::AgentProfile;
 pub use config::{SessionConfig, ToolApprovalAdapter, ToolHookCallback, ToolHookDecision};
 #[cfg(feature = "docker")]
 pub use docker_sandbox::{DockerSandbox, DockerSandboxConfig};
@@ -37,7 +38,6 @@ pub use local_sandbox::LocalSandbox;
 pub use loop_detection::detect_loop;
 pub use memory::discover_memory;
 pub use profiles::{AnthropicProfile, EnvContext, GeminiProfile, OpenAiProfile};
-pub use provider_profile::{ProfileCapabilities, ProviderProfile};
 pub use read_before_write_sandbox::ReadBeforeWriteSandbox;
 pub use sandbox::{
     format_lines_numbered, shell_quote, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,

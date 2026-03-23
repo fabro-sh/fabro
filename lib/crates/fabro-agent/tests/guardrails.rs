@@ -1,4 +1,4 @@
-use fabro_agent::{AnthropicProfile, GeminiProfile, OpenAiProfile, ProviderProfile};
+use fabro_agent::{AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile};
 use fabro_model::{Catalog, Provider};
 
 #[test]
@@ -10,7 +10,7 @@ fn profile_context_window_matches_catalog_for_default_models() {
             .unwrap_or_else(|| panic!("no default model for {:?} in catalog", provider));
         let model = &catalog_info.id;
 
-        let profile: Box<dyn ProviderProfile> = match provider {
+        let profile: Box<dyn AgentProfile> = match provider {
             Provider::OpenAi => Box::new(OpenAiProfile::new(model)),
             Provider::Kimi
             | Provider::Zai

@@ -6,6 +6,7 @@
     "display_name": "Claude Opus 4.6",
     "limits": { "context_window": 1000000, "max_output": 128000 },
     "training": "2025-08-01",
+    "knowledge_cutoff": "May 2025",
     "features": { "tools": true, "vision": true, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": 15.0,
@@ -22,6 +23,7 @@
     "display_name": "Claude Sonnet 4.5",
     "limits": { "context_window": 200000, "max_output": 64000 },
     "training": "2025-08-01",
+    "knowledge_cutoff": "May 2025",
     "features": { "tools": true, "vision": true, "reasoning": true },
     "costs": {
       "input_cost_per_mtok": 3.0,
@@ -38,6 +40,7 @@
     "display_name": "Claude Sonnet 4.6",
     "limits": { "context_window": 200000, "max_output": 64000 },
     "training": "2025-08-01",
+    "knowledge_cutoff": "May 2025",
     "features": { "tools": true, "vision": true, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": 3.0,
@@ -55,6 +58,7 @@
     "display_name": "Claude Haiku 4.5",
     "limits": { "context_window": 200000, "max_output": 8192 },
     "training": "2025-08-01",
+    "knowledge_cutoff": "May 2025",
     "features": { "tools": true, "vision": true, "reasoning": false },
     "costs": {
       "input_cost_per_mtok": 0.8,
@@ -71,6 +75,7 @@
     "display_name": "GPT-5.2",
     "limits": { "context_window": 1047576, "max_output": 128000 },
     "training": "2025-08-31",
+    "knowledge_cutoff": "April 2025",
     "features": { "tools": true, "vision": true, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": 1.75,
@@ -87,6 +92,7 @@
     "display_name": "GPT-5 Mini",
     "limits": { "context_window": 1047576, "max_output": 128000 },
     "training": "2025-08-31",
+    "knowledge_cutoff": "April 2025",
     "features": { "tools": true, "vision": true, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": 0.25,
@@ -103,6 +109,7 @@
     "display_name": "GPT-5.2 Codex",
     "limits": { "context_window": 1047576, "max_output": 128000 },
     "training": "2025-08-31",
+    "knowledge_cutoff": "April 2025",
     "features": { "tools": true, "vision": true, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": 1.75,
@@ -119,6 +126,7 @@
     "display_name": "GPT-5.3 Codex",
     "limits": { "context_window": 1047576, "max_output": 128000 },
     "training": "2025-08-31",
+    "knowledge_cutoff": "April 2025",
     "features": { "tools": true, "vision": true, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": 1.75,
@@ -135,6 +143,7 @@
     "display_name": "GPT-5.3 Codex Spark",
     "limits": { "context_window": 131072, "max_output": 128000 },
     "training": "2025-08-31",
+    "knowledge_cutoff": "April 2025",
     "features": { "tools": true, "vision": false, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": null,
@@ -151,6 +160,7 @@
     "display_name": "GPT-5.4",
     "limits": { "context_window": 1047576, "max_output": 128000 },
     "training": "2025-08-31",
+    "knowledge_cutoff": "April 2025",
     "features": { "tools": true, "vision": true, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": 2.5,
@@ -168,6 +178,7 @@
     "display_name": "GPT-5.4 Pro",
     "limits": { "context_window": 1047576, "max_output": 128000 },
     "training": "2025-08-31",
+    "knowledge_cutoff": "April 2025",
     "features": { "tools": true, "vision": true, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": 30.0,
@@ -184,6 +195,7 @@
     "display_name": "GPT-5.4 Mini",
     "limits": { "context_window": 400000, "max_output": 128000 },
     "training": "2025-08-31",
+    "knowledge_cutoff": "April 2025",
     "features": { "tools": true, "vision": true, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": 0.75,
@@ -200,6 +212,7 @@
     "display_name": "Gemini 3.1 Pro (Preview)",
     "limits": { "context_window": 1048576, "max_output": 65536 },
     "training": "2025-01-01",
+    "knowledge_cutoff": "January 2025",
     "features": { "tools": true, "vision": true, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": 2.0,
@@ -217,6 +230,7 @@
     "display_name": "Gemini 3.1 Pro Custom Tools (Preview)",
     "limits": { "context_window": 1048576, "max_output": 65536 },
     "training": "2025-01-01",
+    "knowledge_cutoff": "January 2025",
     "features": { "tools": true, "vision": true, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": 2.0,
@@ -233,6 +247,7 @@
     "display_name": "Gemini 3 Flash (Preview)",
     "limits": { "context_window": 1048576, "max_output": 65536 },
     "training": "2025-01-01",
+    "knowledge_cutoff": "January 2025",
     "features": { "tools": true, "vision": true, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": 0.5,
@@ -249,6 +264,7 @@
     "display_name": "Gemini 3.1 Flash Lite (Preview)",
     "limits": { "context_window": 1048576, "max_output": 65536 },
     "training": "2025-01-01",
+    "knowledge_cutoff": "January 2025",
     "features": { "tools": true, "vision": true, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": 0.25,
@@ -265,6 +281,7 @@
     "display_name": "Kimi K2.5",
     "limits": { "context_window": 262144, "max_output": 16000 },
     "training": "2025-10-01",
+    "knowledge_cutoff": "October 2025",
     "features": { "tools": true, "vision": true, "reasoning": false },
     "costs": {
       "input_cost_per_mtok": 0.6,
@@ -282,6 +299,7 @@
     "display_name": "GLM 4.7",
     "limits": { "context_window": 202752, "max_output": 16384 },
     "training": null,
+    "knowledge_cutoff": null,
     "features": { "tools": true, "vision": false, "reasoning": false },
     "costs": {
       "input_cost_per_mtok": 0.6,
@@ -299,6 +317,7 @@
     "display_name": "Minimax M2.5",
     "limits": { "context_window": 196608, "max_output": 16384 },
     "training": null,
+    "knowledge_cutoff": null,
     "features": { "tools": true, "vision": false, "reasoning": false },
     "costs": {
       "input_cost_per_mtok": 0.3,
@@ -316,6 +335,7 @@
     "display_name": "Mercury 2",
     "limits": { "context_window": 131072, "max_output": 50000 },
     "training": null,
+    "knowledge_cutoff": null,
     "features": { "tools": true, "vision": false, "reasoning": true, "effort": true },
     "costs": {
       "input_cost_per_mtok": 0.25,

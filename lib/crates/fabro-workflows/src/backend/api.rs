@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use fabro_agent::{
     subagent::{SessionFactory, SubAgentManager},
-    AgentEvent, AnthropicProfile, GeminiProfile, OpenAiProfile, ProviderProfile, Sandbox, Session,
+    AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session,
     SessionConfig, Turn,
 };
 use fabro_llm::client::Client;
@@ -20,7 +20,7 @@ use crate::handler::agent::{CodergenBackend, CodergenResult};
 use crate::outcome::StageUsage;
 use fabro_graphviz::graph::Node;
 
-fn build_profile(model: &str, provider: Provider) -> Box<dyn ProviderProfile> {
+fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
     match provider {
         Provider::OpenAi => Box::new(OpenAiProfile::new(model)),
         Provider::Kimi
@@ -214,7 +214,7 @@ impl AgentApiBackend {
         let factory_env = Arc::clone(sandbox);
         let factory_tool_env = env.clone();
         let factory: SessionFactory = Arc::new(move || {
-            let child_profile: Arc<dyn ProviderProfile> = match provider {
+            let child_profile: Arc<dyn AgentProfile> = match provider {
                 Provider::OpenAi => Arc::new(OpenAiProfile::new(&factory_model)),
                 Provider::Kimi
                 | Provider::Zai
@@ -239,7 +239,7 @@ impl AgentApiBackend {
         });
 
         profile.register_subagent_tools(manager, factory, 0);
-        let profile: Arc<dyn ProviderProfile> = Arc::from(profile);
+        let profile: Arc<dyn AgentProfile> = Arc::from(profile);
 
         let mut session = Session::new(client, profile, Arc::clone(sandbox), config);
         if !env.is_empty() {

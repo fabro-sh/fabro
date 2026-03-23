@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use fabro_agent::{
-    AnthropicProfile, GeminiProfile, OpenAiProfile, ProviderProfile, Sandbox, Session,
-    SessionConfig, SessionEvent, Turn,
+    AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session, SessionConfig,
+    SessionEvent, Turn,
 };
 use fabro_llm::client::Client;
 use fabro_llm::provider::Provider;
@@ -151,7 +151,7 @@ pub async fn run_retro_agent(
     };
     profile.tool_registry_mut().register(submit_tool);
 
-    let profile: Arc<dyn ProviderProfile> = Arc::from(profile);
+    let profile: Arc<dyn AgentProfile> = Arc::from(profile);
 
     let config = SessionConfig {
         max_tool_rounds_per_input: 20,
@@ -323,7 +323,7 @@ fn spawn_retro_event_forwarder(
     })
 }
 
-fn build_profile(provider: Provider, model: &str) -> Box<dyn ProviderProfile> {
+fn build_profile(provider: Provider, model: &str) -> Box<dyn AgentProfile> {
     match provider {
         Provider::OpenAi => Box::new(OpenAiProfile::new(model)),
         Provider::Kimi

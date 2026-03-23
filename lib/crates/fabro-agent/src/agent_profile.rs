@@ -7,18 +7,10 @@ use crate::subagent::{
 };
 use crate::tool_registry::ToolRegistry;
 use fabro_llm::types::ToolDefinition;
-use fabro_model::Provider;
+use fabro_model::{Catalog, Provider};
 use std::sync::Arc;
 
-/// Static capabilities of a provider profile.
-pub struct ProfileCapabilities {
-    pub supports_reasoning: bool,
-    pub supports_streaming: bool,
-    pub supports_parallel_tool_calls: bool,
-    pub context_window_size: usize,
-}
-
-pub trait ProviderProfile: Send + Sync {
+pub trait AgentProfile: Send + Sync {
     fn provider(&self) -> Provider;
     fn model(&self) -> &str;
     fn tool_registry(&self) -> &ToolRegistry;
@@ -31,31 +23,22 @@ pub trait ProviderProfile: Send + Sync {
         user_instructions: Option<&str>,
         skills: &[Skill],
     ) -> String;
-    fn capabilities(&self) -> ProfileCapabilities;
-    fn knowledge_cutoff(&self) -> &str;
 
     fn tools(&self) -> Vec<ToolDefinition> {
         self.tool_registry().definitions()
     }
 
-    fn provider_options(&self) -> Option<serde_json::Value> {
-        None
-    }
-
-    fn supports_reasoning(&self) -> bool {
-        self.capabilities().supports_reasoning
-    }
-
-    fn supports_streaming(&self) -> bool {
-        self.capabilities().supports_streaming
-    }
-
-    fn supports_parallel_tool_calls(&self) -> bool {
-        self.capabilities().supports_parallel_tool_calls
+    fn knowledge_cutoff(&self) -> Option<String> {
+        Catalog::builtin()
+            .get(self.model())
+            .and_then(|m| m.knowledge_cutoff().map(str::to_string))
     }
 
     fn context_window_size(&self) -> usize {
-        self.capabilities().context_window_size
+        Catalog::builtin()
+            .get(self.model())
+            .map(|m| m.context_window() as usize)
+            .unwrap_or(200_000)
     }
 
     fn register_subagent_tools(
@@ -92,11 +75,8 @@ mod tests {
     }
 
     #[test]
-    fn profile_capabilities() {
+    fn profile_context_window_defaults() {
         let profile = TestProfile::new();
-        assert!(!profile.supports_reasoning());
-        assert!(!profile.supports_streaming());
-        assert!(!profile.supports_parallel_tool_calls());
         assert_eq!(profile.context_window_size(), 200_000);
     }
 
@@ -117,12 +97,6 @@ mod tests {
         let ctx = EnvContext::default();
         let prompt = profile.build_system_prompt(&env, &ctx, &[], Some("Always use TDD"), &[]);
         assert!(prompt.contains("Always use TDD"));
-    }
-
-    #[test]
-    fn profile_provider_options_none() {
-        let profile = TestProfile::new();
-        assert!(profile.provider_options().is_none());
     }
 
     #[test]

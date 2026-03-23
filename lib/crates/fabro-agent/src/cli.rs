@@ -1,7 +1,7 @@
 use crate::config::ToolApprovalFn;
 use crate::{
     subagent::{SessionFactory, SubAgentManager},
-    AgentEvent, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile, ProviderProfile,
+    AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile,
     Session, SessionConfig, Turn,
 };
 use clap::{Args, Parser};
@@ -188,7 +188,7 @@ fn build_profile(
     provider: Provider,
     model: &str,
     llm_client: Option<Client>,
-) -> Box<dyn ProviderProfile> {
+) -> Box<dyn AgentProfile> {
     let summarizer = build_summarizer(provider, llm_client);
     match provider {
         Provider::OpenAi => Box::new(OpenAiProfile::with_summarizer(model, summarizer)),
@@ -436,7 +436,7 @@ pub async fn run_with_args_and_client(
     let factory_hooks = config.tool_hooks.clone();
     let factory: SessionFactory = Arc::new(move || {
         let child_summarizer = build_summarizer(provider, Some(factory_client.clone()));
-        let child_profile: Arc<dyn ProviderProfile> = match provider {
+        let child_profile: Arc<dyn AgentProfile> = match provider {
             Provider::OpenAi => Arc::new(OpenAiProfile::with_summarizer(
                 &factory_model,
                 child_summarizer,
@@ -469,7 +469,7 @@ pub async fn run_with_args_and_client(
         )
     });
     profile.register_subagent_tools(manager, factory, 0);
-    let profile: Arc<dyn ProviderProfile> = Arc::from(profile);
+    let profile: Arc<dyn AgentProfile> = Arc::from(profile);
 
     let mut session = Session::new(client, profile, env, config);
 

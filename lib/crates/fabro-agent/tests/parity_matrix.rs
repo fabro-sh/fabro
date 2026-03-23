@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use fabro_agent::{
-    AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile, ProviderProfile, Session,
+    AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile, Session,
     SessionConfig, SubAgentManager, WebFetchSummarizer,
 };
 use fabro_llm::client::Client;
@@ -38,7 +38,7 @@ fn build_summarizer(provider: Provider, client: &Client) -> WebFetchSummarizer {
     }
 }
 
-fn build_profile(provider: Provider, model: &str, client: &Client) -> Box<dyn ProviderProfile> {
+fn build_profile(provider: Provider, model: &str, client: &Client) -> Box<dyn AgentProfile> {
     let summarizer = Some(build_summarizer(provider, client));
     match provider {
         Provider::Anthropic => Box::new(AnthropicProfile::with_summarizer(model, summarizer)),
@@ -66,7 +66,7 @@ async fn make_session(provider: Provider, model: &str, cwd: &Path) -> Session {
     let factory_model: String = model.to_string();
     let factory_cwd = cwd.to_path_buf();
     let factory: fabro_agent::subagent::SessionFactory = Arc::new(move || {
-        let sub_profile: Arc<dyn ProviderProfile> = {
+        let sub_profile: Arc<dyn AgentProfile> = {
             let summarizer = Some(build_summarizer(provider, &factory_client));
             match provider {
                 Provider::Anthropic => Arc::new(AnthropicProfile::with_summarizer(
@@ -99,7 +99,7 @@ async fn make_session(provider: Provider, model: &str, cwd: &Path) -> Session {
     });
     profile.register_subagent_tools(manager, factory, 0);
 
-    let profile: Arc<dyn ProviderProfile> = Arc::from(profile);
+    let profile: Arc<dyn AgentProfile> = Arc::from(profile);
     let config = SessionConfig {
         max_turns: 20,
         ..SessionConfig::default()
@@ -115,7 +115,7 @@ async fn make_session_with_config(
 ) -> Session {
     dotenvy::dotenv().ok();
     let client = Client::from_env().await.expect("Client::from_env failed");
-    let profile: Arc<dyn ProviderProfile> = Arc::from(build_profile(provider, model, &client));
+    let profile: Arc<dyn AgentProfile> = Arc::from(build_profile(provider, model, &client));
     let env = Arc::new(LocalSandbox::new(cwd.to_path_buf()));
     Session::new(client, profile, env, config)
 }

@@ -596,10 +596,13 @@ fn apply_cache_control_to_conversation_prefix(messages: &mut [ApiMessage]) {
 
 /// Collect beta headers from `provider_options` and merge with the caching header
 /// when auto-caching is active.
+const CONTEXT_1M_BETA_HEADER: &str = "context-1m-2025-08-07";
+
 fn build_beta_header(
     provider_options: Option<&serde_json::Value>,
     include_cache_header: bool,
     include_fast_mode_header: bool,
+    include_1m_context: bool,
 ) -> Option<String> {
     let mut headers: Vec<String> = Vec::new();
 
@@ -625,6 +628,11 @@ fn build_beta_header(
     // Add fast-mode header if speed=fast and not already present
     if include_fast_mode_header && !headers.iter().any(|h| h == FAST_MODE_BETA_HEADER) {
         headers.push(FAST_MODE_BETA_HEADER.to_string());
+    }
+
+    // Add 1M context header for models with >= 1M context window
+    if include_1m_context && !headers.iter().any(|h| h == CONTEXT_1M_BETA_HEADER) {
+        headers.push(CONTEXT_1M_BETA_HEADER.to_string());
     }
 
     if headers.is_empty() {
@@ -1134,7 +1142,16 @@ fn build_api_request(
             (explicit_thinking, None)
         }
     } else {
-        (explicit_thinking, None)
+        // Auto-set adaptive thinking for known effort-capable models when no
+        // explicit thinking config or reasoning_effort is provided.
+        let thinking = explicit_thinking.or_else(|| {
+            if model_info.is_some_and(|m| m.features.effort) {
+                Some(serde_json::json!({"type": "adaptive"}))
+            } else {
+                None
+            }
+        });
+        (thinking, None)
     };
 
     let is_fast = request.speed.as_deref() == Some("fast");
@@ -1168,9 +1185,13 @@ fn build_api_request(
             .header("x-api-key", &adapter.http.api_key)
             .header("anthropic-version", "2023-06-01");
 
-        if let Some(beta_str) =
-            build_beta_header(request.provider_options.as_ref(), auto_cache, is_fast)
-        {
+        let include_1m_context = model_info.is_some_and(|m| m.context_window() >= 1_000_000);
+        if let Some(beta_str) = build_beta_header(
+            request.provider_options.as_ref(),
+            auto_cache,
+            is_fast,
+            include_1m_context,
+        ) {
             req_builder = req_builder.header("anthropic-beta", beta_str);
         }
     } else {
@@ -1548,13 +1569,13 @@ mod tests {
 
     #[test]
     fn beta_header_includes_cache_header() {
-        let result = build_beta_header(None, true, false);
+        let result = build_beta_header(None, true, false, false);
         assert_eq!(result, Some(CACHE_BETA_HEADER.to_string()));
     }
 
     #[test]
     fn beta_header_no_cache_no_user_headers() {
-        let result = build_beta_header(None, false, false);
+        let result = build_beta_header(None, false, false, false);
         assert_eq!(result, None);
     }
 
@@ -1565,7 +1586,7 @@ mod tests {
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let result = build_beta_header(Some(&opts), true, false);
+        let result = build_beta_header(Some(&opts), true, false, false);
         assert_eq!(
             result,
             Some(format!(
@@ -1581,7 +1602,7 @@ mod tests {
                 "beta_headers": [CACHE_BETA_HEADER]
             }
         });
-        let result = build_beta_header(Some(&opts), true, false);
+        let result = build_beta_header(Some(&opts), true, false, false);
         // Should not duplicate the header
         assert_eq!(result, Some(CACHE_BETA_HEADER.to_string()));
     }
@@ -1593,7 +1614,7 @@ mod tests {
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let result = build_beta_header(Some(&opts), false, false);
+        let result = build_beta_header(Some(&opts), false, false, false);
         assert_eq!(result, Some("interleaved-thinking-2025-05-14".to_string()));
     }
 
@@ -2002,7 +2023,7 @@ mod tests {
         ];
 
         // No user headers — only cache header should appear
-        let header = build_beta_header(None, true, false).unwrap_or_default();
+        let header = build_beta_header(None, true, false, false).unwrap_or_default();
         for dep in &deprecated {
             assert!(
                 !header.contains(dep),
@@ -2016,7 +2037,7 @@ mod tests {
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let header = build_beta_header(Some(&opts), true, false).unwrap_or_default();
+        let header = build_beta_header(Some(&opts), true, false, false).unwrap_or_default();
         for dep in &deprecated {
             assert!(
                 !header.contains(dep),
@@ -2173,7 +2194,7 @@ mod tests {
 
     #[test]
     fn beta_header_includes_both_cache_and_fast_mode() {
-        let result = build_beta_header(None, true, true);
+        let result = build_beta_header(None, true, true, false);
         let header = result.expect("should produce a header");
         assert!(
             header.contains(CACHE_BETA_HEADER),

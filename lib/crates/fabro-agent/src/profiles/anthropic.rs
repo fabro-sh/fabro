@@ -1,12 +1,12 @@
+use crate::agent_profile::AgentProfile;
 use crate::config::SessionConfig;
 use crate::profiles::assemble_system_prompt;
 use crate::profiles::BaseProfile;
-use crate::provider_profile::{ProfileCapabilities, ProviderProfile};
 use crate::sandbox::Sandbox;
 use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{make_edit_file_tool, register_core_tools, WebFetchSummarizer};
-use fabro_model::{Catalog, Provider};
+use fabro_model::Provider;
 
 use super::EnvContext;
 
@@ -52,7 +52,7 @@ impl AnthropicProfile {
     }
 }
 
-impl ProviderProfile for AnthropicProfile {
+impl AgentProfile for AnthropicProfile {
     fn provider(&self) -> Provider {
         self.base.provider
     }
@@ -162,49 +162,6 @@ in the project. Keep changes minimal and focused on the task.";
             skills,
         )
     }
-
-    fn capabilities(&self) -> ProfileCapabilities {
-        let context_window_size = Catalog::builtin()
-            .get(self.model())
-            .map(|info| info.context_window() as usize)
-            .unwrap_or_else(|| {
-                if self.model().contains("opus-4-6") {
-                    1_000_000
-                } else {
-                    200_000
-                }
-            });
-        ProfileCapabilities {
-            supports_reasoning: true,
-            supports_streaming: true,
-            supports_parallel_tool_calls: true,
-            context_window_size,
-        }
-    }
-
-    fn provider_options(&self) -> Option<serde_json::Value> {
-        let model = self.model();
-        if model.contains("opus-4-6") {
-            Some(serde_json::json!({
-                "anthropic": {
-                    "thinking": {"type": "adaptive"},
-                    "beta_headers": ["context-1m-2025-08-07"]
-                }
-            }))
-        } else if model.contains("sonnet-4-6") {
-            Some(serde_json::json!({
-                "anthropic": {
-                    "thinking": {"type": "adaptive"}
-                }
-            }))
-        } else {
-            None
-        }
-    }
-
-    fn knowledge_cutoff(&self) -> &'static str {
-        "May 2025"
-    }
 }
 
 #[cfg(test)]
@@ -220,18 +177,18 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_profile_capabilities() {
-        let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
-        assert!(profile.supports_reasoning());
-        assert!(profile.supports_streaming());
-        assert!(profile.supports_parallel_tool_calls());
+    fn anthropic_context_window_from_catalog() {
+        let profile = AnthropicProfile::new("claude-opus-4-6");
+        assert_eq!(profile.context_window_size(), 1_000_000);
+
+        let profile = AnthropicProfile::new("claude-sonnet-4-6");
         assert_eq!(profile.context_window_size(), 200_000);
     }
 
     #[test]
-    fn anthropic_opus_4_6_has_1m_context_window() {
+    fn anthropic_knowledge_cutoff_from_catalog() {
         let profile = AnthropicProfile::new("claude-opus-4-6");
-        assert_eq!(profile.context_window_size(), 1_000_000);
+        assert_eq!(profile.knowledge_cutoff(), Some("May 2025".to_string()));
     }
 
     #[test]
@@ -330,47 +287,6 @@ mod tests {
         assert!(names.contains(&"glob".to_string()));
         assert!(names.contains(&"web_search".to_string()));
         assert!(names.contains(&"web_fetch".to_string()));
-    }
-
-    #[test]
-    fn anthropic_provider_options_include_thinking_for_opus_4_6() {
-        let profile = AnthropicProfile::new("claude-opus-4-6");
-        let options = profile.provider_options();
-        assert!(options.is_some(), "provider_options should return Some");
-        let options = options.unwrap();
-        let thinking_type = options["anthropic"]["thinking"]["type"].as_str();
-        assert_eq!(
-            thinking_type,
-            Some("adaptive"),
-            "thinking type should be adaptive"
-        );
-        let beta_headers = options["anthropic"]["beta_headers"]
-            .as_array()
-            .expect("beta_headers should be an array");
-        assert_eq!(beta_headers[0].as_str(), Some("context-1m-2025-08-07"));
-    }
-
-    #[test]
-    fn anthropic_provider_options_include_thinking_for_sonnet_4_6() {
-        let profile = AnthropicProfile::new("claude-sonnet-4-6");
-        let options = profile.provider_options();
-        assert!(options.is_some(), "provider_options should return Some");
-        let options = options.unwrap();
-        let thinking_type = options["anthropic"]["thinking"]["type"].as_str();
-        assert_eq!(
-            thinking_type,
-            Some("adaptive"),
-            "thinking type should be adaptive"
-        );
-    }
-
-    #[test]
-    fn anthropic_provider_options_none_for_older_models() {
-        let profile = AnthropicProfile::new("claude-sonnet-4-5");
-        assert!(
-            profile.provider_options().is_none(),
-            "older models should not have provider_options"
-        );
     }
 
     #[test]

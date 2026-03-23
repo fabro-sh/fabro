@@ -439,6 +439,7 @@ fn build_api_request(request: &Request) -> serde_json::Value {
 
     let mut body = serde_json::to_value(&api_request).unwrap_or_default();
     merge_provider_options(&mut body, request.provider_options.as_ref());
+    apply_default_safety_settings(&mut body);
     body
 }
 
@@ -463,6 +464,22 @@ fn merge_provider_options(
 
     for (key, value) in gemini_map {
         body_map.insert(key.clone(), value.clone());
+    }
+}
+
+/// Apply default safety settings if none were provided via provider_options.
+fn apply_default_safety_settings(body: &mut serde_json::Value) {
+    if body.get("safety_settings").is_some() {
+        return;
+    }
+    if let Some(body_map) = body.as_object_mut() {
+        body_map.insert(
+            "safety_settings".to_string(),
+            serde_json::json!([{
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "threshold": "BLOCK_ONLY_HIGH"
+            }]),
+        );
     }
 }
 

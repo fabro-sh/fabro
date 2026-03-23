@@ -344,6 +344,7 @@ mod tests {
                 max_output: Some(4096),
             },
             training: None,
+            knowledge_cutoff: None,
             features: ModelFeatures {
                 tools: true,
                 vision: false,
@@ -448,6 +449,9 @@ mod tests {
             training: Some(
                 "2025-08-01",
             ),
+            knowledge_cutoff: Some(
+                "May 2025",
+            ),
             features: ModelFeatures {
                 tools: true,
                 vision: true,
@@ -515,6 +519,9 @@ mod tests {
             training: Some(
                 "2025-01-01",
             ),
+            knowledge_cutoff: Some(
+                "January 2025",
+            ),
             features: ModelFeatures {
                 tools: true,
                 vision: true,
@@ -568,6 +575,9 @@ mod tests {
             },
             training: Some(
                 "2025-10-01",
+            ),
+            knowledge_cutoff: Some(
+                "October 2025",
             ),
             features: ModelFeatures {
                 tools: true,
@@ -628,6 +638,7 @@ mod tests {
                 ),
             },
             training: None,
+            knowledge_cutoff: None,
             features: ModelFeatures {
                 tools: true,
                 vision: false,
@@ -677,6 +688,9 @@ mod tests {
             training: Some(
                 "2025-08-31",
             ),
+            knowledge_cutoff: Some(
+                "April 2025",
+            ),
             features: ModelFeatures {
                 tools: true,
                 vision: true,
@@ -723,6 +737,9 @@ mod tests {
             },
             training: Some(
                 "2025-08-31",
+            ),
+            knowledge_cutoff: Some(
+                "April 2025",
             ),
             features: ModelFeatures {
                 tools: true,
@@ -796,6 +813,9 @@ mod tests {
             },
             training: Some(
                 "2025-08-31",
+            ),
+            knowledge_cutoff: Some(
+                "April 2025",
             ),
             features: ModelFeatures {
                 tools: true,
