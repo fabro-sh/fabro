@@ -1,5 +1,5 @@
 use fabro_agent::{AnthropicProfile, GeminiProfile, OpenAiProfile, ProviderProfile};
-use fabro_model::{Catalog, LanguageModel, Provider};
+use fabro_model::{Catalog, Provider};
 
 #[test]
 fn profile_context_window_matches_catalog_for_default_models() {

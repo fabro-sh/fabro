@@ -11,12 +11,14 @@ use std::str::FromStr;
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
     Anthropic,
+    #[serde(rename = "openai", alias = "open_ai")]
     OpenAi,
     Gemini,
     Kimi,
     Zai,
     Minimax,
     Inception,
+    #[serde(rename = "openai_compatible", alias = "open_ai_compatible")]
     OpenAiCompatible,
 }
 

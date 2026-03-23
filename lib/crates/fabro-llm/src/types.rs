@@ -640,9 +640,9 @@ impl StreamEvent {
     }
 }
 
-// --- 2.9 ModelInfo (re-exported from fabro-model) ---
+// --- 2.9 Model (re-exported from fabro-model) ---
 
-pub use fabro_model::{ModelCosts, ModelFeatures, ModelInfo, ModelLimits};
+pub use fabro_model::{Model, ModelCosts, ModelFeatures, ModelLimits};
 
 // --- 4.7 Timeouts ---
 

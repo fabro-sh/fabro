@@ -197,7 +197,7 @@ let best_reasoner = get_latest_model("anthropic", Some("reasoning"));
 | `ToolChoice` | Auto, None, Required, or Named tool selection |
 | `Usage` | Token counts including input, output, reasoning, and cache tokens |
 | `RetryPolicy` | Configurable retry with exponential backoff, jitter, and max delay |
-| `ModelInfo` | Metadata about a model (context window, capabilities, costs) |
+| `Model` | Metadata about a model (context window, capabilities, costs) |
 
 ## Error handling
 

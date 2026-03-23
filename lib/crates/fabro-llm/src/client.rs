@@ -145,7 +145,7 @@ impl Client {
     fn resolve_provider(&self, request: &Request) -> Result<Arc<dyn ProviderAdapter>, SdkError> {
         let catalog_provider = fabro_model::Catalog::builtin()
             .get(&request.model)
-            .map(|info| info.provider.clone());
+            .map(|info| info.provider.to_string());
 
         let provider_name = request
             .provider

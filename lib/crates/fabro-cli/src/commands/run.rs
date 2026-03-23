@@ -263,7 +263,10 @@ pub(crate) fn resolve_model_provider(
 
     // Resolve model alias through catalog
     match Catalog::builtin().get(&model) {
-        Some(info) => (info.id.clone(), provider.or(Some(info.provider.clone()))),
+        Some(info) => (
+            info.id.clone(),
+            provider.or(Some(info.provider.to_string())),
+        ),
         None => (model, provider),
     }
 }
@@ -2314,7 +2317,7 @@ async fn run_preflight(
                 // Resolve through catalog to get canonical model ID and provider
                 let (resolved_model, resolved_provider) =
                     if let Some(info) = Catalog::builtin().get(node_model) {
-                        (info.id.clone(), info.provider.clone())
+                        (info.id.clone(), info.provider.to_string())
                     } else {
                         (node_model.to_string(), node_provider.to_string())
                     };
@@ -2333,7 +2336,7 @@ async fn run_preflight(
             if model_providers.is_empty() {
                 let (resolved_model, resolved_provider) =
                     if let Some(info) = Catalog::builtin().get(&model) {
-                        (info.id.clone(), info.provider.clone())
+                        (info.id.clone(), info.provider.to_string())
                     } else {
                         (model.clone(), default_provider.to_string())
                     };

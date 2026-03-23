@@ -6,7 +6,7 @@ use crate::sandbox::Sandbox;
 use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{make_edit_file_tool, register_core_tools, WebFetchSummarizer};
-use fabro_model::{Catalog, LanguageModel, Provider};
+use fabro_model::{Catalog, Provider};
 
 use super::EnvContext;
 

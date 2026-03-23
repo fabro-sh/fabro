@@ -1066,7 +1066,7 @@ async fn test_model(
     }
 
     let params = fabro_llm::generate::GenerateParams::new(&info.id)
-        .provider(&info.provider)
+        .provider(info.provider.as_str())
         .prompt("Say OK")
         .max_tokens(16);
 
@@ -1174,7 +1174,7 @@ async fn create_completion(
     // Resolve provider: explicit request > catalog > None
     let provider_name = req
         .provider
-        .or_else(|| catalog_info.map(|i| i.provider.clone()));
+        .or_else(|| catalog_info.map(|i| i.provider.to_string()));
 
     info!(model = %model_id, provider = ?provider_name, "Completion request received");
 

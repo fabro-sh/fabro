@@ -9,7 +9,7 @@ use crate::tools::{
     make_edit_file_tool, make_list_dir_tool, make_read_many_files_tool, register_core_tools,
     WebFetchSummarizer,
 };
-use fabro_model::{Catalog, LanguageModel, Provider};
+use fabro_model::{Catalog, Provider};
 
 use super::EnvContext;
 

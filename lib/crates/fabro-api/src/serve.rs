@@ -304,7 +304,7 @@ fn resolve_model_provider(
             info.id.clone(),
             provider_str
                 .map(|s| s.to_string())
-                .or(Some(info.provider.clone())),
+                .or(Some(info.provider.to_string())),
         ),
         None => (model, provider_str.map(|s| s.to_string())),
     };

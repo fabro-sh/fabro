@@ -907,7 +907,7 @@ impl Session {
             max_tokens: self.config.max_tokens.or_else(|| {
                 fabro_model::Catalog::builtin()
                     .get(self.provider_profile.model())
-                    .and_then(fabro_model::LanguageModel::max_output)
+                    .and_then(fabro_model::Model::max_output)
             }),
             stop_sequences: None,
             reasoning_effort: self.config.reasoning_effort.clone(),

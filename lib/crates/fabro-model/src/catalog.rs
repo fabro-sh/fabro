@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use crate::provider::Provider;
-use crate::types::ModelInfo;
+use crate::types::Model;
 
 /// Global singleton catalog parsed from embedded catalog.json.
 static GLOBAL_CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
-    let models: Vec<ModelInfo> = serde_json::from_str(include_str!("catalog.json"))
+    let models: Vec<Model> = serde_json::from_str(include_str!("catalog.json"))
         .expect("embedded catalog.json must be valid");
     Catalog { models }
 });
@@ -18,12 +18,12 @@ pub struct FallbackTarget {
     pub model: String,
 }
 
-/// Typed model catalog backed by a `Vec<ModelInfo>`.
+/// Typed model catalog backed by a `Vec<Model>`.
 ///
 /// Use [`Catalog::builtin()`] for the embedded catalog, or [`Catalog::from_models()`]
 /// for testing with custom model sets.
 pub struct Catalog {
-    models: Vec<ModelInfo>,
+    models: Vec<Model>,
 }
 
 impl Catalog {
@@ -35,13 +35,13 @@ impl Catalog {
 
     /// Create a catalog from a custom set of models (useful for testing).
     #[must_use]
-    pub fn from_models(models: Vec<ModelInfo>) -> Self {
+    pub fn from_models(models: Vec<Model>) -> Self {
         Self { models }
     }
 
     /// Look up a model by ID or alias.
     #[must_use]
-    pub fn get(&self, id: &str) -> Option<&ModelInfo> {
+    pub fn get(&self, id: &str) -> Option<&Model> {
         self.models
             .iter()
             .find(|m| m.id == id || m.aliases.iter().any(|a| a == id))
@@ -49,13 +49,10 @@ impl Catalog {
 
     /// List all models, optionally filtered by provider.
     #[must_use]
-    pub fn list(&self, provider: Option<Provider>) -> Vec<&ModelInfo> {
+    pub fn list(&self, provider: Option<Provider>) -> Vec<&Model> {
         match provider {
             None => self.models.iter().collect(),
-            Some(p) => {
-                let ps = p.as_str();
-                self.models.iter().filter(|m| m.provider == ps).collect()
-            }
+            Some(p) => self.models.iter().filter(|m| m.provider == p).collect(),
         }
     }
 
@@ -64,7 +61,7 @@ impl Catalog {
     /// # Panics
     /// Panics if the catalog contains no default model.
     #[must_use]
-    pub fn default_model(&self) -> &ModelInfo {
+    pub fn default_model(&self) -> &Model {
         self.models
             .iter()
             .find(|m| m.default)
@@ -73,15 +70,14 @@ impl Catalog {
 
     /// The default model for a specific provider.
     #[must_use]
-    pub fn default_for_provider(&self, p: Provider) -> Option<&ModelInfo> {
-        let ps = p.as_str();
-        self.models.iter().find(|m| m.provider == ps && m.default)
+    pub fn default_for_provider(&self, p: Provider) -> Option<&Model> {
+        self.models.iter().find(|m| m.provider == p && m.default)
     }
 
     /// Default model for the best-available provider (based on API keys),
     /// falling back to the global catalog default.
     #[must_use]
-    pub fn default_from_env(&self) -> &ModelInfo {
+    pub fn default_from_env(&self) -> &Model {
         let provider = Provider::default_from_env();
         self.default_for_provider(provider)
             .unwrap_or_else(|| self.default_model())
@@ -90,7 +86,7 @@ impl Catalog {
     /// Probe model for a provider — the cheapest model suitable for connectivity checks.
     /// Falls back to the provider's default when no explicit override is configured.
     #[must_use]
-    pub fn probe_for_provider(&self, p: Provider) -> Option<&ModelInfo> {
+    pub fn probe_for_provider(&self, p: Provider) -> Option<&Model> {
         let override_id: Option<&str> = match p {
             Provider::OpenAi => Some("gpt-5.4-mini"),
             _ => None,
@@ -108,12 +104,11 @@ impl Catalog {
     /// Hard-filters on `features.tools`, `features.vision`, and `features.reasoning`.
     /// Among matches, picks the closest by `costs.input_cost_per_mtok` (absolute diff).
     #[must_use]
-    pub fn closest(&self, target: Provider, reference: &ModelInfo) -> Option<&ModelInfo> {
-        let ps = target.as_str();
+    pub fn closest(&self, target: Provider, reference: &Model) -> Option<&Model> {
         self.models
             .iter()
             .filter(|m| {
-                m.provider == ps
+                m.provider == target
                     && m.features.tools == reference.features.tools
                     && m.features.vision == reference.features.vision
                     && m.features.reasoning == reference.features.reasoning
@@ -165,6 +160,7 @@ impl Catalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::Provider;
     use std::str::FromStr;
 
     // ---- Catalog struct tests ----
@@ -196,7 +192,7 @@ mod tests {
     fn builtin_list_by_provider() {
         let anthropic = Catalog::builtin().list(Some(Provider::Anthropic));
         assert!(!anthropic.is_empty());
-        assert!(anthropic.iter().all(|m| m.provider == "anthropic"));
+        assert!(anthropic.iter().all(|m| m.provider == Provider::Anthropic));
     }
 
     #[test]
@@ -336,11 +332,11 @@ mod tests {
 
     #[test]
     fn from_models_custom_catalog() {
-        use crate::types::{ModelCosts, ModelFeatures, ModelLimits};
+        use crate::types::{Model, ModelCosts, ModelFeatures, ModelLimits};
 
-        let models = vec![ModelInfo {
+        let models = vec![Model {
             id: "test-model".to_string(),
-            provider: "anthropic".to_string(),
+            provider: Provider::Anthropic,
             family: "test".to_string(),
             display_name: "Test Model".to_string(),
             limits: ModelLimits {
@@ -406,12 +402,13 @@ mod tests {
     }
 
     #[test]
-    fn catalog_provider_strings_roundtrip_through_provider() {
+    fn catalog_providers_roundtrip_through_as_str() {
         for model in Catalog::builtin().list(None) {
-            let parsed = Provider::from_str(&model.provider);
-            assert!(
-                parsed.is_ok(),
-                "catalog model '{}' has provider '{}' which does not parse as Provider",
+            let roundtripped = Provider::from_str(model.provider.as_str());
+            assert_eq!(
+                roundtripped,
+                Ok(model.provider),
+                "catalog model '{}' provider {:?} does not roundtrip through as_str",
                 model.id,
                 model.provider
             );
@@ -437,9 +434,9 @@ mod tests {
     fn get_model_info_by_id() {
         let info = Catalog::builtin().get("claude-opus-4-6").unwrap();
         insta::assert_debug_snapshot!(info, @r#"
-        ModelInfo {
+        Model {
             id: "claude-opus-4-6",
-            provider: "anthropic",
+            provider: Anthropic,
             family: "claude-4",
             display_name: "Claude Opus 4.6",
             limits: ModelLimits {
@@ -504,9 +501,9 @@ mod tests {
             .get("gemini-3.1-flash-lite-preview")
             .unwrap();
         insta::assert_debug_snapshot!(m, @r#"
-        ModelInfo {
+        Model {
             id: "gemini-3.1-flash-lite-preview",
-            provider: "gemini",
+            provider: Gemini,
             family: "gemini-3",
             display_name: "Gemini 3.1 Flash Lite (Preview)",
             limits: ModelLimits {
@@ -558,9 +555,9 @@ mod tests {
     fn kimi_k2_5_in_catalog() {
         let m = Catalog::builtin().get("kimi-k2.5").unwrap();
         insta::assert_debug_snapshot!(m, @r#"
-        ModelInfo {
+        Model {
             id: "kimi-k2.5",
-            provider: "kimi",
+            provider: Kimi,
             family: "kimi-k2",
             display_name: "Kimi K2.5",
             limits: ModelLimits {
@@ -606,22 +603,22 @@ mod tests {
     #[test]
     fn glm_4_7_in_catalog() {
         let m = Catalog::builtin().get("glm-4.7").unwrap();
-        assert_eq!(m.provider, "zai");
+        assert_eq!(m.provider, Provider::Zai);
     }
 
     #[test]
     fn minimax_m2_5_in_catalog() {
         let m = Catalog::builtin().get("minimax-m2.5").unwrap();
-        assert_eq!(m.provider, "minimax");
+        assert_eq!(m.provider, Provider::Minimax);
     }
 
     #[test]
     fn mercury_2_in_catalog() {
         let m = Catalog::builtin().get("mercury-2").unwrap();
         insta::assert_debug_snapshot!(m, @r#"
-        ModelInfo {
+        Model {
             id: "mercury-2",
-            provider: "inception",
+            provider: Inception,
             family: "mercury",
             display_name: "Mercury 2",
             limits: ModelLimits {
@@ -666,9 +663,9 @@ mod tests {
     fn gpt_5_4_in_catalog() {
         let m = Catalog::builtin().get("gpt-5.4").unwrap();
         insta::assert_debug_snapshot!(m, @r#"
-        ModelInfo {
+        Model {
             id: "gpt-5.4",
-            provider: "openai",
+            provider: OpenAi,
             family: "gpt-5",
             display_name: "GPT-5.4",
             limits: ModelLimits {
@@ -713,9 +710,9 @@ mod tests {
     fn gpt_5_4_pro_in_catalog() {
         let m = Catalog::builtin().get("gpt-5.4-pro").unwrap();
         insta::assert_debug_snapshot!(m, @r#"
-        ModelInfo {
+        Model {
             id: "gpt-5.4-pro",
-            provider: "openai",
+            provider: OpenAi,
             family: "gpt-5",
             display_name: "GPT-5.4 Pro",
             limits: ModelLimits {
@@ -786,9 +783,9 @@ mod tests {
     fn gpt_5_3_codex_spark_in_catalog() {
         let m = Catalog::builtin().get("gpt-5.3-codex-spark").unwrap();
         insta::assert_debug_snapshot!(m, @r#"
-        ModelInfo {
+        Model {
             id: "gpt-5.3-codex-spark",
-            provider: "openai",
+            provider: OpenAi,
             family: "gpt-5",
             display_name: "GPT-5.3 Codex Spark",
             limits: ModelLimits {

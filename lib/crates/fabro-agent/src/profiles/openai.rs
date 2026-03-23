@@ -7,7 +7,7 @@ use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{register_core_tools, WebFetchSummarizer};
 use crate::v4a_patch::make_apply_patch_tool;
-use fabro_model::{Catalog, LanguageModel, Provider};
+use fabro_model::{Catalog, Provider};
 
 use super::EnvContext;
 

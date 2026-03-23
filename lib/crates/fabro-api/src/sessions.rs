@@ -67,7 +67,7 @@ fn resolve_model(model_arg: Option<String>) -> (String, Option<String>) {
             .map_or_else(|| "claude-sonnet-4-5".to_string(), |m| m.id.clone())
     });
     match fabro_model::Catalog::builtin().get(&raw) {
-        Some(info) => (info.id.clone(), Some(info.provider.clone())),
+        Some(info) => (info.id.clone(), Some(info.provider.to_string())),
         None => (raw, None),
     }
 }

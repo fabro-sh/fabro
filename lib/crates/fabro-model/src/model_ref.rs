@@ -1,15 +1,15 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::language_model::LanguageModel;
 use crate::provider::Provider;
+use crate::types::Model;
 
-/// A reference to a model — either a fully resolved `LanguageModel` or a
+/// A reference to a model — either a fully resolved `Model` or a
 /// provider + model-name pair that hasn't been looked up yet.
 #[derive(Clone)]
 pub enum ModelRef {
     /// A model whose metadata has been resolved from the catalog.
-    Resolved(Arc<dyn LanguageModel>),
+    Resolved(Arc<Model>),
     /// An unresolved provider:model pair (e.g. from CLI input or config).
     ByName { provider: Provider, model: String },
 }
@@ -19,7 +19,7 @@ impl ModelRef {
     #[must_use]
     pub fn model_id(&self) -> &str {
         match self {
-            Self::Resolved(m) => m.id(),
+            Self::Resolved(m) => &m.id,
             Self::ByName { model, .. } => model,
         }
     }
@@ -28,7 +28,7 @@ impl ModelRef {
     #[must_use]
     pub fn provider(&self) -> Provider {
         match self {
-            Self::Resolved(m) => m.provider(),
+            Self::Resolved(m) => m.provider,
             Self::ByName { provider, .. } => *provider,
         }
     }
@@ -43,7 +43,7 @@ impl fmt::Display for ModelRef {
 impl fmt::Debug for ModelRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Resolved(m) => write!(f, "ModelRef::Resolved({:?})", m.id()),
+            Self::Resolved(m) => write!(f, "ModelRef::Resolved({:?})", m.id),
             Self::ByName { provider, model } => f
                 .debug_struct("ModelRef::ByName")
                 .field("provider", provider)
