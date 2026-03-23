@@ -129,7 +129,7 @@ impl Default for SessionConfig {
     fn default() -> Self {
         Self {
             max_turns: 0,
-            max_tool_rounds_per_input: 200,
+            max_tool_rounds_per_input: 0,
             default_command_timeout_ms: 10_000,
             max_command_timeout_ms: 600_000,
             max_tokens: None,

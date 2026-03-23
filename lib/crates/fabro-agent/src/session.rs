@@ -574,7 +574,9 @@ impl Session {
 
         loop {
             // Check max_tool_rounds_per_input
-            if round_count >= self.config.max_tool_rounds_per_input {
+            if self.config.max_tool_rounds_per_input > 0
+                && round_count >= self.config.max_tool_rounds_per_input
+            {
                 self.event_emitter.emit(
                     self.id.clone(),
                     AgentEvent::TurnLimitReached {
