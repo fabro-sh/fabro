@@ -1,32 +1,37 @@
 {
-  "timestamp": "2026-03-23T14:06:43.766256Z",
-  "current_node": "run_tests",
+  "timestamp": "2026-03-23T14:06:44.399143Z",
+  "current_node": "report",
   "completed_nodes": [
     "start",
-    "run_tests"
+    "run_tests",
+    "report"
   ],
   "node_retries": {
     "start": 1,
+    "report": 1,
     "run_tests": 1
   },
   "context_values": {
+    "response.report": "[Simulated] Response for stage: report",
     "internal.fidelity": "compact",
     "failure_signature": "",
     "internal.retry_count.run_tests": 1,
-    "current_node": "run_tests",
+    "current_node": "report",
     "internal.work_dir": "/Users/bhelmkamp/.fabro/runs/20260323-dry-run-01KMDG9XCXQDMXQ08TB82EQHD6/worktree",
     "graph.rankdir": "LR",
     "graph.goal": "Run tests and report results",
-    "internal.thread_id": "start",
+    "internal.thread_id": "run_tests",
     "failure_class": "",
     "response.run_tests": "[Simulated] Response for stage: run_tests",
-    "current.preamble": "Goal: Run tests and report results\n",
+    "current.preamble": "Goal: Run tests and report results\n\n## Completed stages\n- **run_tests**: success\n",
     "internal.run_id": "01KMDG9XCXQDMXQ08TB82EQHD6",
     "internal.retry_count.start": 1,
     "outcome": "success",
-    "last_response": "[Simulated] Response for stage: run_tests",
-    "last_stage": "run_tests",
+    "last_response": "[Simulated] Response for stage: report",
+    "thread.run_tests.current_node": "report",
+    "last_stage": "report",
     "thread.start.current_node": "run_tests",
+    "internal.retry_count.report": 1,
     "internal.node_visit_count": 1
   },
   "logs": [],
@@ -45,11 +50,22 @@
       "status": "success",
       "notes": "[Simulated] start",
       "duration_ms": 0
+    },
+    "report": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "report",
+        "last_response": "[Simulated] Response for stage: report",
+        "response.report": "[Simulated] Response for stage: report"
+      },
+      "notes": "[Simulated] report",
+      "duration_ms": 0
     }
   },
-  "next_node_id": "report",
+  "next_node_id": "exit",
   "node_visits": {
     "run_tests": 1,
+    "report": 1,
     "start": 1
   }
 }
