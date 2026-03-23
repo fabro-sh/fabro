@@ -233,9 +233,12 @@ impl SubAgentManager {
 
         // Phase 5: Store result in status and return clone
         let agent = self.agents.get_mut(agent_id).unwrap();
-        agent.status = SubAgentStatus::Finished(task_result.clone());
+        agent.status = SubAgentStatus::Finished(task_result);
 
-        task_result
+        match &agent.status {
+            SubAgentStatus::Finished(result) => result.clone(),
+            _ => unreachable!(),
+        }
     }
 
     pub fn close(&mut self, agent_id: &str) -> Result<(), AgentError> {

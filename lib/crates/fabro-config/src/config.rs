@@ -134,6 +134,18 @@ impl FabroConfig {
         self.git.as_ref().map(|g| &g.author)
     }
 
+    pub fn verbose_enabled(&self) -> bool {
+        self.verbose.unwrap_or(false)
+    }
+
+    pub fn prevent_idle_sleep_enabled(&self) -> bool {
+        self.prevent_idle_sleep.unwrap_or(false)
+    }
+
+    pub fn upgrade_check_enabled(&self) -> bool {
+        self.upgrade_check.unwrap_or(true)
+    }
+
     /// Merge an overlay on top of this base. The overlay takes precedence
     /// for simple fields; compound fields (vars, hooks, mcp_servers) are
     /// deep-merged with the overlay winning on collision.
@@ -246,7 +258,7 @@ impl FabroConfig {
         if !overlay.checkpoint.exclude_globs.is_empty() {
             self.checkpoint
                 .exclude_globs
-                .append(&mut overlay.checkpoint.exclude_globs.clone());
+                .extend(overlay.checkpoint.exclude_globs);
             self.checkpoint.exclude_globs.sort();
             self.checkpoint.exclude_globs.dedup();
         }
