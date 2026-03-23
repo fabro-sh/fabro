@@ -179,14 +179,26 @@ pub(crate) fn apply_goal_override(
 
 /// Compute the default run directory when `--run-dir` is not provided.
 pub(crate) fn default_run_dir(run_id: &str, dry_run: bool) -> PathBuf {
+    let base = fabro_workflows::run_lookup::default_runs_base();
     if dry_run {
-        std::env::temp_dir().join("fabro-dry-run").join(run_id)
+        base.join(format!(
+            "{}-dry-run-{}",
+            Local::now().format("%Y%m%d"),
+            run_id
+        ))
     } else {
-        let base = dirs::home_dir()
-            .expect("could not determine home directory")
-            .join(".fabro")
-            .join("runs");
         base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
+    }
+}
+
+pub(crate) fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
+    if workflow_path.extension().is_none() {
+        Some(workflow_path.to_string_lossy().into_owned())
+    } else {
+        workflow_path
+            .parent()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
     }
 }
 
@@ -692,14 +704,7 @@ pub async fn run_command(
     // If bare name (no extension, e.g. "smoke"), use it directly.
     // Otherwise derive from the parent directory of the resolved .toml path.
     let workflow_path = args.workflow.as_ref().unwrap(); // safe: prepare_workflow validated
-    let workflow_slug: Option<String> = if workflow_path.extension().is_none() {
-        Some(workflow_path.to_string_lossy().into_owned())
-    } else {
-        workflow_path
-            .parent()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-    };
+    let workflow_slug = workflow_slug_from_path(workflow_path);
 
     // Collect setup commands — they'll be run inside the sandbox
     let setup_commands: Vec<String> = run_cfg

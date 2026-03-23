@@ -603,6 +603,156 @@ fn setup_run_dir(
     run_dir
 }
 
+fn find_run_dir(home: &std::path::Path, run_id: &str) -> std::path::PathBuf {
+    let runs_dir = home.join(".fabro").join("runs");
+    std::fs::read_dir(&runs_dir)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.is_dir()
+                && path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().ends_with(run_id))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "expected run directory for {run_id} under {}",
+                runs_dir.display()
+            )
+        })
+}
+
+#[test]
+fn dry_run_create_start_attach_works_with_default_run_lookup() {
+    let home = tempfile::tempdir().unwrap();
+    let run_id = "drysplit-test-123";
+
+    arc()
+        .env("HOME", home.path())
+        .args([
+            "create",
+            "--dry-run",
+            "--auto-approve",
+            "--run-id",
+            run_id,
+            "../../../test/simple.fabro",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(run_id));
+
+    let run_dir = find_run_dir(home.path(), run_id);
+    assert!(
+        run_dir.join("manifest.json").exists(),
+        "create should persist manifest.json so the run is discoverable"
+    );
+
+    arc()
+        .env("HOME", home.path())
+        .args(["start", run_id])
+        .assert()
+        .success();
+
+    arc()
+        .env("HOME", home.path())
+        .args(["attach", run_id])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+
+    assert!(run_dir.join("conclusion.json").exists());
+}
+
+#[test]
+fn dry_run_detach_attach_works_with_default_run_lookup() {
+    let home = tempfile::tempdir().unwrap();
+    let run_id = "drydetach-test-123";
+
+    arc()
+        .env("HOME", home.path())
+        .args([
+            "run",
+            "--detach",
+            "--dry-run",
+            "--auto-approve",
+            "--run-id",
+            run_id,
+            "../../../test/simple.fabro",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(run_id));
+
+    arc()
+        .env("HOME", home.path())
+        .args(["attach", run_id])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+}
+
+#[test]
+fn start_by_workflow_name_prefers_newly_created_submitted_run() {
+    let home = tempfile::tempdir().unwrap();
+    let old_run_dir = home.path().join(".fabro").join("runs").join("old-smoke");
+    std::fs::create_dir_all(&old_run_dir).unwrap();
+    std::fs::write(
+        old_run_dir.join("manifest.json"),
+        serde_json::json!({
+            "run_id": "old-smoke",
+            "workflow_name": "Smoke",
+            "goal": "",
+            "start_time": "2026-01-01T00:00:00Z",
+            "node_count": 1,
+            "edge_count": 0
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        old_run_dir.join("status.json"),
+        serde_json::json!({"status": "succeeded", "updated_at": "2026-01-01T00:00:00Z"})
+            .to_string(),
+    )
+    .unwrap();
+
+    let run_id = "new-smoke-run-123";
+    arc()
+        .env("HOME", home.path())
+        .args([
+            "create",
+            "--dry-run",
+            "--auto-approve",
+            "--run-id",
+            run_id,
+            "smoke",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(run_id));
+
+    arc()
+        .env("HOME", home.path())
+        .args(["start", "smoke"])
+        .assert()
+        .success();
+
+    arc()
+        .env("HOME", home.path())
+        .args(["attach", run_id])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+
+    let new_run_dir = find_run_dir(home.path(), run_id);
+    let status = std::fs::read_to_string(new_run_dir.join("status.json")).unwrap();
+    assert!(
+        status.contains("\"status\": \"succeeded\""),
+        "expected the newly created Smoke run to be started and completed"
+    );
+}
+
 // Bug 2: _run_engine should use cached graph.fabro, not spec.workflow_path.
 // When the original workflow file is deleted between create and start,
 // the engine should read the snapshot saved at create time.
