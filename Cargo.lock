@@ -1404,6 +1404,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-core"
+version = "0.176.2"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "fabro-db"
 version = "0.176.2"
 dependencies = [
