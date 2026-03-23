@@ -45,7 +45,9 @@ pub use sandbox::{
 };
 pub use session::Session;
 pub use skills::Skill;
-pub use subagent::{SubAgent, SubAgentEventCallback, SubAgentManager, SubAgentResult};
+pub use subagent::{
+    SubAgent, SubAgentEventCallback, SubAgentManager, SubAgentResult, SubAgentStatus,
+};
 pub use tool_registry::ToolRegistry;
 pub use tools::{
     make_edit_file_tool, make_glob_tool, make_grep_tool, make_read_file_tool, make_shell_tool,
