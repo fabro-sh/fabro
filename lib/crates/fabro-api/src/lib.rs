@@ -6,6 +6,7 @@ pub mod serve;
 pub mod server;
 pub mod server_config {
     pub use fabro_config::server::*;
+    pub use fabro_config::FabroConfig;
 }
 pub mod sessions;
 pub mod tls;

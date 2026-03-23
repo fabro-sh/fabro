@@ -946,16 +946,22 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
     let server_config = fabro_config::server::load_server_config(None).unwrap_or_default();
 
     #[cfg(feature = "server")]
-    let api_status = ApiStatus {
-        base_url: server_config.api.base_url.clone(),
-        authentication_strategies: server_config.api.authentication_strategies.clone(),
+    let api_status = {
+        let api = server_config.api.unwrap_or_default();
+        ApiStatus {
+            base_url: api.base_url.clone(),
+            authentication_strategies: api.authentication_strategies.clone(),
+        }
     };
 
     #[cfg(feature = "server")]
-    let web_status = WebStatus {
-        url: server_config.web.url.clone(),
-        auth_provider: server_config.web.auth.provider.clone(),
-        allowed_usernames_count: server_config.web.auth.allowed_usernames.len(),
+    let web_status = {
+        let web = server_config.web.unwrap_or_default();
+        WebStatus {
+            url: web.url.clone(),
+            auth_provider: web.auth.provider.clone(),
+            allowed_usernames_count: web.auth.allowed_usernames.len(),
+        }
     };
 
     let git_app_id = cli_config.app_id().map(str::to_owned);

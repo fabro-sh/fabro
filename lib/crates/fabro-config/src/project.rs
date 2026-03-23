@@ -1,67 +1,14 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::hook::HookDefinition;
-use crate::mcp::McpServerEntry;
-use crate::run::{
-    AssetsConfig, CheckpointConfig, GitHubConfig, LlmConfig, PullRequestConfig, RunDefaults,
-    SetupConfig,
-};
-use crate::sandbox::SandboxConfig;
+use crate::config::FabroConfig;
 
 const CONFIG_FILENAME: &str = "fabro.toml";
 const SUPPORTED_VERSION: u32 = 1;
 
-#[derive(Debug, Default, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct ProjectConfig {
-    #[serde(default)]
-    pub version: u32,
-    #[serde(default)]
-    pub fabro: ProjectFabroConfig,
-    #[serde(default)]
-    pub features: ProjectFeatures,
-    #[serde(alias = "directory")]
-    pub work_dir: Option<String>,
-    pub llm: Option<LlmConfig>,
-    pub setup: Option<SetupConfig>,
-    pub sandbox: Option<SandboxConfig>,
-    pub vars: Option<HashMap<String, String>>,
-    #[serde(default)]
-    pub checkpoint: CheckpointConfig,
-    pub pull_request: Option<PullRequestConfig>,
-    pub assets: Option<AssetsConfig>,
-    #[serde(default)]
-    pub hooks: Vec<HookDefinition>,
-    #[serde(default)]
-    pub mcp_servers: HashMap<String, McpServerEntry>,
-    pub github: Option<GitHubConfig>,
-}
-
-impl ProjectConfig {
-    /// Convert project config fields into `RunDefaults`.
-    pub fn into_run_defaults(self) -> RunDefaults {
-        RunDefaults {
-            work_dir: self.work_dir,
-            llm: self.llm,
-            setup: self.setup,
-            sandbox: self.sandbox,
-            vars: self.vars,
-            checkpoint: self.checkpoint,
-            pull_request: self.pull_request,
-            assets: self.assets,
-            hooks: self.hooks,
-            mcp_servers: self.mcp_servers,
-            github: self.github,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ProjectFabroConfig {
     #[serde(default = "default_root")]
     pub root: String,
@@ -79,40 +26,35 @@ impl Default for ProjectFabroConfig {
     }
 }
 
-/// Feature flags for the project. All features default to `false` (opt-in).
-#[derive(Debug, Default, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct ProjectFeatures {
-    /// Experimental: enable automatic retro generation after workflow runs.
-    #[serde(default)]
-    pub retros: bool,
-}
-
 /// Parse a project config from a TOML string.
-pub fn parse_project_config(content: &str) -> anyhow::Result<ProjectConfig> {
-    let config: ProjectConfig =
-        toml::from_str(content).context("Failed to parse project config")?;
-    if config.version != SUPPORTED_VERSION {
+pub fn parse_project_config(content: &str) -> anyhow::Result<FabroConfig> {
+    let config: FabroConfig = toml::from_str(content).context("Failed to parse project config")?;
+    let version = config.version.unwrap_or(0);
+    if version != SUPPORTED_VERSION {
         bail!(
-            "Unsupported project config version: {}. Only version {SUPPORTED_VERSION} is supported.",
-            config.version,
+            "Unsupported project config version: {version}. Only version {SUPPORTED_VERSION} is supported.",
         );
     }
     Ok(config)
 }
 
 /// Load a project config from a file path.
-pub fn load_project_config(path: &Path) -> anyhow::Result<ProjectConfig> {
+pub fn load_project_config(path: &Path) -> anyhow::Result<FabroConfig> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read {}", path.display()))?;
     let config = parse_project_config(&content)?;
-    tracing::debug!(path = %path.display(), root = %config.fabro.root, "Loaded project config");
+    let root = config
+        .fabro
+        .as_ref()
+        .map(|f| f.root.as_str())
+        .unwrap_or(".");
+    tracing::debug!(path = %path.display(), root = %root, "Loaded project config");
     Ok(config)
 }
 
 /// Walk ancestor directories from `start` looking for `fabro.toml`.
 /// Returns the config file path and parsed config, or `None` if not found.
-pub fn discover_project_config(start: &Path) -> anyhow::Result<Option<(PathBuf, ProjectConfig)>> {
+pub fn discover_project_config(start: &Path) -> anyhow::Result<Option<(PathBuf, FabroConfig)>> {
     for ancestor in start.ancestors() {
         let candidate = ancestor.join(CONFIG_FILENAME);
         if candidate.is_file() {
@@ -327,9 +269,7 @@ fn find_closest_match(input: &str, candidates: &[String]) -> Option<String> {
 ///
 /// Calls `resolve_workflow_arg` first, then if the result is a `.toml` file,
 /// loads the run config and resolves the graph path within it.
-pub fn resolve_workflow(
-    arg: &Path,
-) -> anyhow::Result<(PathBuf, Option<crate::run::WorkflowRunConfig>)> {
+pub fn resolve_workflow(arg: &Path) -> anyhow::Result<(PathBuf, Option<FabroConfig>)> {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     resolve_workflow_from(arg, &start)
 }
@@ -337,11 +277,12 @@ pub fn resolve_workflow(
 fn resolve_workflow_from(
     arg: &Path,
     start_dir: &Path,
-) -> anyhow::Result<(PathBuf, Option<crate::run::WorkflowRunConfig>)> {
+) -> anyhow::Result<(PathBuf, Option<FabroConfig>)> {
     let path = resolve_workflow_arg_from(arg, start_dir)?;
     if path.extension().is_some_and(|ext| ext == "toml") {
         let cfg = crate::run::load_run_config(&path)?;
-        let dot = crate::run::resolve_graph_path(&path, &cfg.graph);
+        let dot =
+            crate::run::resolve_graph_path(&path, cfg.graph.as_deref().unwrap_or("workflow.fabro"));
         Ok((dot, Some(cfg)))
     } else {
         Ok((path, None))
@@ -354,18 +295,23 @@ fn resolve_workflow_from(
 pub fn is_retro_enabled() -> bool {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     match discover_project_config(&start) {
-        Ok(Some((_path, config))) => config.features.retros,
+        Ok(Some((_path, config))) => config.features.as_ref().map(|f| f.retros).unwrap_or(false),
         _ => false,
     }
 }
 
 /// Resolve the fabro root directory from a config file path and its config.
 /// The returned path is the directory containing `fabro.toml` joined with the `root` value.
-pub fn resolve_fabro_root(config_path: &Path, config: &ProjectConfig) -> PathBuf {
+pub fn resolve_fabro_root(config_path: &Path, config: &FabroConfig) -> PathBuf {
     let project_dir = config_path
         .parent()
         .expect("config_path should have a parent directory");
-    project_dir.join(&config.fabro.root)
+    let root = config
+        .fabro
+        .as_ref()
+        .map(|f| f.root.as_str())
+        .unwrap_or(".");
+    project_dir.join(root)
 }
 
 #[cfg(test)]
@@ -378,34 +324,29 @@ mod tests {
     #[test]
     fn parse_minimal_config() {
         let config = parse_project_config("version = 1\n").unwrap();
-        assert_eq!(
-            config,
-            ProjectConfig {
-                version: 1,
-                fabro: ProjectFabroConfig {
-                    root: ".".to_string(),
-                },
-                ..Default::default()
-            }
-        );
+        assert_eq!(config.version, Some(1));
+        assert_eq!(config.fabro, None,);
     }
 
     #[test]
     fn parse_full_config() {
         let config = parse_project_config("version = 1\n[fabro]\nroot = \"fabro/\"\n").unwrap();
-        assert_eq!(config.fabro.root, "fabro/");
+        assert_eq!(config.fabro.unwrap().root, "fabro/");
     }
 
     #[test]
     fn parse_retros_default_false() {
         let config = parse_project_config("version = 1\n").unwrap();
-        assert!(!config.features.retros);
+        assert_eq!(
+            config.features.as_ref().map(|f| f.retros).unwrap_or(false),
+            false
+        );
     }
 
     #[test]
     fn parse_retros_enabled() {
         let config = parse_project_config("version = 1\n[features]\nretros = true\n").unwrap();
-        assert!(config.features.retros);
+        assert!(config.features.unwrap().retros);
     }
 
     #[test]
@@ -424,7 +365,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             config.pull_request,
-            Some(PullRequestConfig {
+            Some(crate::run::PullRequestConfig {
                 enabled: true,
                 draft: false,
                 auto_merge: false,
@@ -487,40 +428,12 @@ model = "claude-sonnet-4-6"
     }
 
     #[test]
-    fn into_run_defaults_preserves_fields() {
-        let toml = r#"
-version = 1
-work_dir = "/ws"
-[llm]
-model = "m"
-[sandbox]
-provider = "daytona"
-"#;
-        let config = parse_project_config(toml).unwrap();
-        let defaults = config.into_run_defaults();
-        assert_eq!(defaults.work_dir.as_deref(), Some("/ws"));
-        assert_eq!(defaults.llm.unwrap().model.as_deref(), Some("m"));
-        assert_eq!(
-            defaults.sandbox.unwrap().provider.as_deref(),
-            Some("daytona")
-        );
-    }
-
-    #[test]
-    fn parse_unknown_field_rejected() {
-        let err = parse_project_config("version = 1\nfoo = \"bar\"\n").unwrap_err();
-        let chain = format!("{err:#}");
-        assert!(chain.contains("unknown field"), "got: {chain}");
-    }
-
-    #[test]
     fn load_from_disk() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("fabro.toml");
         fs::write(&path, "version = 1\n").unwrap();
         let config = load_project_config(&path).unwrap();
-        assert_eq!(config.version, 1);
-        assert_eq!(config.fabro.root, ".");
+        assert_eq!(config.version, Some(1));
     }
 
     #[test]
@@ -532,7 +445,7 @@ provider = "daytona"
 
         let (found_path, config) = discover_project_config(&sub).unwrap().unwrap();
         assert_eq!(found_path, tmp.path().join("fabro.toml"));
-        assert_eq!(config.version, 1);
+        assert_eq!(config.version, Some(1));
     }
 
     #[test]
@@ -545,12 +458,12 @@ provider = "daytona"
     #[test]
     fn resolve_fabro_root_with_subdirectory() {
         let config_path = Path::new("/repo/fabro.toml");
-        let config = ProjectConfig {
-            version: 1,
-            fabro: ProjectFabroConfig {
+        let config = FabroConfig {
+            version: Some(1),
+            fabro: Some(ProjectFabroConfig {
                 root: "fabro/".to_string(),
                 ..Default::default()
-            },
+            }),
             ..Default::default()
         };
         assert_eq!(
@@ -562,14 +475,24 @@ provider = "daytona"
     #[test]
     fn resolve_fabro_root_with_dot() {
         let config_path = Path::new("/repo/fabro.toml");
-        let config = ProjectConfig {
-            version: 1,
-            fabro: ProjectFabroConfig {
+        let config = FabroConfig {
+            version: Some(1),
+            fabro: Some(ProjectFabroConfig {
                 root: ".".to_string(),
                 ..Default::default()
-            },
+            }),
             ..Default::default()
         };
+        assert_eq!(
+            resolve_fabro_root(config_path, &config),
+            Path::new("/repo/.")
+        );
+    }
+
+    #[test]
+    fn resolve_fabro_root_without_fabro_section() {
+        let config_path = Path::new("/repo/fabro.toml");
+        let config = FabroConfig::default();
         assert_eq!(
             resolve_fabro_root(config_path, &config),
             Path::new("/repo/.")
@@ -642,20 +565,5 @@ permissions = { contents = "read" }
         let config = parse_project_config(toml).unwrap();
         let github = config.github.unwrap();
         assert_eq!(github.permissions["contents"], "read");
-    }
-
-    #[test]
-    fn into_run_defaults_preserves_github() {
-        let toml = r#"
-version = 1
-
-[github]
-permissions = { contents = "read", issues = "write" }
-"#;
-        let config = parse_project_config(toml).unwrap();
-        let defaults = config.into_run_defaults();
-        let github = defaults.github.unwrap();
-        assert_eq!(github.permissions["contents"], "read");
-        assert_eq!(github.permissions["issues"], "write");
     }
 }

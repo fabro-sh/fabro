@@ -388,15 +388,7 @@ async fn run_engine_entrypoint(
         run_id: Some(spec.run_id),
     };
 
-    match commands::run::run_command(
-        run_args,
-        cli_config.run_defaults,
-        styles,
-        github_app,
-        git_author,
-    )
-    .await
-    {
+    match commands::run::run_command(run_args, cli_config, styles, github_app, git_author).await {
         Ok(()) => Ok(()),
         Err(err) => {
             let _ = commands::detached_support::persist_detached_failure(
@@ -566,12 +558,18 @@ async fn main_inner() -> (String, Result<()>) {
         {
             if let Command::Serve(ref args) = cli.command {
                 match fabro_config::server::load_server_config(args.config.as_deref()) {
-                    Ok(server_config) => (server_config.log.level, false),
+                    Ok(server_config) => (
+                        server_config.log.as_ref().and_then(|l| l.level.clone()),
+                        false,
+                    ),
                     Err(err) => return (command_name, Err(err)),
                 }
             } else {
                 match fabro_config::cli::load_cli_config(None) {
-                    Ok(cli_config) => (cli_config.log.level, cli_config.upgrade_check),
+                    Ok(cli_config) => (
+                        cli_config.log.as_ref().and_then(|l| l.level.clone()),
+                        cli_config.upgrade_check.unwrap_or(true),
+                    ),
                     Err(err) => return (command_name, Err(err)),
                 }
             }
@@ -579,7 +577,10 @@ async fn main_inner() -> (String, Result<()>) {
         #[cfg(not(feature = "server"))]
         {
             match fabro_config::cli::load_cli_config(None) {
-                Ok(cli_config) => (cli_config.log.level, cli_config.upgrade_check),
+                Ok(cli_config) => (
+                    cli_config.log.as_ref().and_then(|l| l.level.clone()),
+                    cli_config.upgrade_check.unwrap_or(true),
+                ),
                 Err(err) => return (command_name, Err(err)),
             }
         }
@@ -614,7 +615,7 @@ async fn main_inner() -> (String, Result<()>) {
         match cli.command {
             Command::Llm { command } => {
                 let cli_config = cli_config::load_cli_config(None)?;
-                let llm_defaults = cli_config.run_defaults.llm.as_ref();
+                let llm_defaults = cli_config.llm.as_ref();
                 match command {
                     LlmCommand::Prompt(mut args) => {
                         if args.model.is_none() {
@@ -683,7 +684,8 @@ async fn main_inner() -> (String, Result<()>) {
             Command::Exec(mut args) => {
                 let cli_config = cli_config::load_cli_config(None)?;
                 #[cfg(feature = "sleep_inhibitor")]
-                let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep);
+                let _sleep_guard =
+                    fabro_beastie::guard(cli_config.prevent_idle_sleep.unwrap_or(false));
                 let exec_defaults = cli_config.exec.as_ref();
                 args.apply_cli_defaults(
                     exec_defaults.and_then(|a| a.provider.as_deref()),
@@ -695,10 +697,13 @@ async fn main_inner() -> (String, Result<()>) {
                 let resolved =
                     cli_config::resolve_mode(cli.mode, cli.server_url.as_deref(), &cli_config);
                 let mcp_servers: Vec<fabro_mcp::config::McpServerConfig> = cli_config
-                    .run_defaults
                     .mcp_servers
                     .into_iter()
-                    .map(|(name, entry)| entry.into_config(name))
+                    .map(
+                        |(name, entry): (String, fabro_config::mcp::McpServerEntry)| {
+                            entry.into_config(name)
+                        },
+                    )
                     .collect();
                 #[cfg(feature = "server")]
                 {
@@ -748,7 +753,7 @@ async fn main_inner() -> (String, Result<()>) {
                 let styles: &'static fabro_util::terminal::Styles =
                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
                 let cli_config = cli_config::load_cli_config(None)?;
-                args.verbose = args.verbose || cli_config.verbose;
+                args.verbose = args.verbose || cli_config.verbose.unwrap_or(false);
 
                 if args.preflight {
                     // Preflight validates config without creating a run dir.
@@ -758,23 +763,17 @@ async fn main_inner() -> (String, Result<()>) {
                         cli_config.git_author().and_then(|a| a.name.clone()),
                         cli_config.git_author().and_then(|a| a.email.clone()),
                     );
-                    commands::run::run_command(
-                        args,
-                        cli_config.run_defaults,
-                        styles,
-                        github_app,
-                        git_author,
-                    )
-                    .await?;
+                    commands::run::run_command(args, cli_config, styles, github_app, git_author)
+                        .await?;
                 } else {
                     // Unified path: create + start (+ attach for foreground)
                     let quiet = args.detach;
+                    let _prevent_idle_sleep = cli_config.prevent_idle_sleep;
                     let (run_id, run_dir) =
-                        commands::create::create_run(&args, cli_config.run_defaults, styles, quiet)
-                            .await?;
+                        commands::create::create_run(&args, cli_config, styles, quiet).await?;
 
                     #[cfg(feature = "sleep_inhibitor")]
-                    let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep);
+                    let _sleep_guard = fabro_beastie::guard(_prevent_idle_sleep.unwrap_or(false));
 
                     let child = commands::start::start_run(&run_dir)?;
 
@@ -796,8 +795,7 @@ async fn main_inner() -> (String, Result<()>) {
                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
                 let cli_config = cli_config::load_cli_config(None)?;
                 let (run_id, _run_dir) =
-                    commands::create::create_run(&args, cli_config.run_defaults, styles, true)
-                        .await?;
+                    commands::create::create_run(&args, cli_config, styles, true).await?;
                 println!("{run_id}");
             }
             Command::Start { run } => {
@@ -897,7 +895,7 @@ async fn main_inner() -> (String, Result<()>) {
             }
             Command::Doctor { verbose, dry_run } => {
                 let cli_config = cli_config::load_cli_config(None)?;
-                let verbose = verbose || cli_config.verbose;
+                let verbose = verbose || cli_config.verbose.unwrap_or(false);
                 let exit_code = doctor::run_doctor(verbose, !dry_run).await;
                 std::process::exit(exit_code);
             }
@@ -975,22 +973,17 @@ async fn main_inner() -> (String, Result<()>) {
                 let styles: &'static fabro_util::terminal::Styles =
                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
                 let cli_config = cli_config::load_cli_config(None)?;
-                args.verbose = args.verbose || cli_config.verbose;
+                args.verbose = args.verbose || cli_config.verbose.unwrap_or(false);
                 #[cfg(feature = "sleep_inhibitor")]
-                let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep);
+                let _sleep_guard =
+                    fabro_beastie::guard(cli_config.prevent_idle_sleep.unwrap_or(false));
                 let github_app = build_github_app_credentials(cli_config.app_id());
                 let git_author = fabro_workflows::git::GitAuthor::from_options(
                     cli_config.git_author().and_then(|a| a.name.clone()),
                     cli_config.git_author().and_then(|a| a.email.clone()),
                 );
-                commands::resume::resume_command(
-                    args,
-                    cli_config.run_defaults,
-                    styles,
-                    github_app,
-                    git_author,
-                )
-                .await?;
+                commands::resume::resume_command(args, cli_config, styles, github_app, git_author)
+                    .await?;
             }
             Command::Rewind(args) => {
                 let styles = fabro_util::terminal::Styles::detect_stderr();
