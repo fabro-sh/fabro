@@ -485,7 +485,7 @@ Fabro validates the run config when it loads:
 
 - **Version check** — Only `version = 1` is accepted. Other versions are rejected immediately.
 - **Required fields** — `version` and `graph` are required. `goal` is optional (can be provided via `--goal` or Graphviz graph attribute).
-- **Unknown fields** — Extra fields not listed above are rejected (`deny_unknown_fields`).
+- **Unknown fields** — Extra fields not listed above are silently ignored.
 - **Variable check** — Any `$variable` in the Graphviz file without a matching `[vars]` entry produces an error.
 
 Use `--preflight` to validate a run config without executing it:
