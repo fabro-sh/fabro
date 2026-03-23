@@ -6,8 +6,7 @@ use fabro_workflows::manifest::Manifest;
 use fabro_workflows::run_spec::RunSpec;
 
 use super::run::{
-    cached_graph_path, default_run_dir, prepare_workflow, workflow_slug_from_path,
-    write_run_config_snapshot, RunArgs,
+    cached_graph_path, default_run_dir, prepare_workflow, write_run_config_snapshot, RunArgs,
 };
 use fabro_util::terminal::Styles;
 
@@ -102,7 +101,7 @@ pub async fn create_run(
         base_sha: None,
         labels,
         base_branch,
-        workflow_slug: workflow_slug_from_path(workflow_path),
+        workflow_slug: prep.workflow_slug.clone(),
         host_repo_path: Some(working_directory.to_string_lossy().to_string()),
     };
     manifest.save(&run_dir.join("manifest.json"))?;

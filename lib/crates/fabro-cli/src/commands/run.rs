@@ -193,14 +193,21 @@ pub(crate) fn default_run_dir(run_id: &str, dry_run: bool) -> PathBuf {
 }
 
 pub(crate) fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
+    let file_name = workflow_path.file_name()?.to_string_lossy();
     if workflow_path.extension().is_none() {
-        Some(workflow_path.to_string_lossy().into_owned())
-    } else {
-        workflow_path
+        return Some(file_name.into_owned());
+    }
+
+    let file_stem = workflow_path.file_stem()?.to_string_lossy();
+    if file_stem == "workflow" {
+        return workflow_path
             .parent()
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned())
+            .or_else(|| Some(file_stem.into_owned()));
     }
+
+    Some(file_stem.into_owned())
 }
 
 fn is_cached_run_restart(workflow_path: &Path, run_dir: &Path) -> bool {
@@ -504,13 +511,13 @@ pub(crate) async fn write_run_config_snapshot(
 
 pub(crate) fn resolve_workflow_source(
     workflow_path: &Path,
-) -> anyhow::Result<(PathBuf, Option<WorkflowRunConfig>)> {
+) -> anyhow::Result<(PathBuf, PathBuf, Option<WorkflowRunConfig>)> {
     let path = project_config::resolve_workflow_arg(workflow_path)?;
     if path.extension().is_some_and(|ext| ext == "toml") {
         match run_config::load_run_config(&path) {
             Ok(cfg) => {
                 let dot = run_config::resolve_graph_path(&path, &cfg.graph);
-                Ok((dot, Some(cfg)))
+                Ok((path, dot, Some(cfg)))
             }
             // Backward compatibility for detached runs created before run.toml existed.
             // Use path.exists() to distinguish a genuinely missing run.toml from one
@@ -519,12 +526,12 @@ pub(crate) fn resolve_workflow_source(
                 if !path.exists()
                     && path.starts_with(fabro_workflows::run_lookup::default_runs_base()) =>
             {
-                Ok((path.with_file_name(RUN_GRAPH_FILE), None))
+                Ok((path.clone(), path.with_file_name(RUN_GRAPH_FILE), None))
             }
             Err(err) => Err(err),
         }
     } else {
-        Ok((path, None))
+        Ok((path.clone(), path, None))
     }
 }
 
@@ -536,6 +543,7 @@ pub(crate) struct PreparedWorkflow {
     pub sandbox_provider: SandboxProvider,
     pub model: String,
     pub provider: Option<String>,
+    pub workflow_slug: Option<String>,
     pub run_defaults: RunDefaults,
 }
 
@@ -575,16 +583,17 @@ pub(crate) fn prepare_workflow_with_project_config(
     }
 
     // Resolve workflow arg, load run config if TOML, apply defaults
-    let (dot_path, run_cfg) = {
-        let (dot, cfg) = resolve_workflow_source(workflow_path)?;
+    let (resolved_workflow_path, dot_path, run_cfg) = {
+        let (resolved, dot, cfg) = resolve_workflow_source(workflow_path)?;
         match cfg {
             Some(mut cfg) => {
                 cfg.apply_defaults(&run_defaults);
-                (dot, Some(cfg))
+                (resolved, dot, Some(cfg))
             }
-            None => (dot, None),
+            None => (resolved, dot, None),
         }
     };
+    let workflow_slug = workflow_slug_from_path(&resolved_workflow_path);
 
     let directory = run_cfg
         .as_ref()
@@ -682,6 +691,7 @@ pub(crate) fn prepare_workflow_with_project_config(
         sandbox_provider,
         model,
         provider,
+        workflow_slug,
         run_defaults,
     })
 }
@@ -705,6 +715,7 @@ pub async fn run_command(
         sandbox_provider,
         model,
         provider,
+        workflow_slug: prepared_workflow_slug,
         run_defaults,
     } = prepare_workflow(&args, run_defaults, styles, false)?;
 
@@ -756,10 +767,13 @@ pub async fn run_command(
     } else {
         None
     };
-    let workflow_slug = existing_manifest
-        .as_ref()
-        .and_then(|manifest| manifest.workflow_slug.clone())
-        .or_else(|| workflow_slug_from_path(workflow_path));
+    let workflow_slug = if cached_run_restart {
+        existing_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.workflow_slug.clone())
+    } else {
+        prepared_workflow_slug
+    };
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
     tokio::fs::write(cached_graph_path(&run_dir), &source).await?;
@@ -2730,7 +2744,7 @@ mod tests {
         let dir = tempfile::tempdir_in(&runs_base).unwrap();
         std::fs::write(dir.path().join(RUN_GRAPH_FILE), "digraph test {}").unwrap();
 
-        let (dot_path, run_cfg) =
+        let (_resolved_path, dot_path, run_cfg) =
             resolve_workflow_source(&dir.path().join(RUN_CONFIG_FILE)).unwrap();
 
         assert_eq!(dot_path, dir.path().join(RUN_GRAPH_FILE));
@@ -2744,6 +2758,42 @@ mod tests {
 
         let result = resolve_workflow_source(&dir.path().join(RUN_CONFIG_FILE));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn workflow_slug_from_path_uses_file_stem_for_standalone_files() {
+        assert_eq!(
+            workflow_slug_from_path(Path::new("/tmp/alpha.fabro")).as_deref(),
+            Some("alpha")
+        );
+        assert_eq!(
+            workflow_slug_from_path(Path::new("/tmp/beta.toml")).as_deref(),
+            Some("beta")
+        );
+    }
+
+    #[test]
+    fn workflow_slug_from_path_uses_parent_for_workflow_files() {
+        assert_eq!(
+            workflow_slug_from_path(Path::new("/tmp/sluggy/workflow.fabro")).as_deref(),
+            Some("sluggy")
+        );
+        assert_eq!(
+            workflow_slug_from_path(Path::new("/tmp/sluggy/workflow.toml")).as_deref(),
+            Some("sluggy")
+        );
+    }
+
+    #[test]
+    fn workflow_slug_from_path_uses_final_component_for_extensionless_inputs() {
+        assert_eq!(
+            workflow_slug_from_path(Path::new("implement-issue")).as_deref(),
+            Some("implement-issue")
+        );
+        assert_eq!(
+            workflow_slug_from_path(Path::new("nested/repl")).as_deref(),
+            Some("repl")
+        );
     }
 
     #[test]

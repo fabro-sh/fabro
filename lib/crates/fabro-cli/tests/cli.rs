@@ -688,6 +688,136 @@ digraph BarBaz {
 }
 
 #[test]
+fn standalone_file_run_uses_file_stem_slug_for_lookup() {
+    let home = tempfile::tempdir().unwrap();
+    let workflow_dir = tempfile::tempdir().unwrap();
+    let workflow_path = workflow_dir.path().join("alpha.fabro");
+    std::fs::write(
+        &workflow_path,
+        "\
+digraph FooWorkflow {
+  start [shape=Mdiamond, label=\"Start\"]
+  exit  [shape=Msquare, label=\"Exit\"]
+  start -> exit
+}
+",
+    )
+    .unwrap();
+
+    arc()
+        .env("HOME", home.path())
+        .args([
+            "create",
+            "--dry-run",
+            "--auto-approve",
+            "--run-id",
+            "opaque-run-alpha",
+            workflow_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    arc()
+        .env("HOME", home.path())
+        .args(["start", "alpha"])
+        .assert()
+        .success();
+
+    arc()
+        .env("HOME", home.path())
+        .args(["attach", "alpha"])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+
+    let run_dir = find_run_dir(home.path(), "opaque-run-alpha");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("manifest.json")).unwrap())
+            .unwrap();
+    assert_eq!(manifest["workflow_name"].as_str(), Some("FooWorkflow"));
+    assert_eq!(manifest["workflow_slug"].as_str(), Some("alpha"));
+}
+
+#[test]
+fn resumed_run_preserves_workflow_slug_for_lookup() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let workflow_dir = project.path().join("workflows").join("sluggy");
+    std::fs::create_dir_all(&workflow_dir).unwrap();
+    let workflow_path = workflow_dir.join("workflow.fabro");
+    std::fs::write(
+        &workflow_path,
+        "\
+digraph BarBaz {
+  start [shape=Mdiamond, label=\"Start\"]
+  exit  [shape=Msquare, label=\"Exit\"]
+  start -> exit
+}
+",
+    )
+    .unwrap();
+    let original_run_dir = project.path().join("original-run");
+
+    arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args([
+            "run",
+            "--dry-run",
+            "--auto-approve",
+            "--no-retro",
+            "--run-dir",
+            original_run_dir.to_str().unwrap(),
+            workflow_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args([
+            "resume",
+            "--checkpoint",
+            original_run_dir.join("checkpoint.json").to_str().unwrap(),
+            "--workflow",
+            workflow_path.to_str().unwrap(),
+            "--dry-run",
+            "--auto-approve",
+            "--no-retro",
+        ])
+        .assert()
+        .success();
+
+    arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args(["attach", "sluggy"])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+
+    let resumed_runs_dir = home.path().join(".fabro").join("runs");
+    let resumed_run_dir = std::fs::read_dir(&resumed_runs_dir)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.is_dir())
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a resumed run under {}",
+                resumed_runs_dir.display()
+            )
+        });
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(resumed_run_dir.join("manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["workflow_name"].as_str(), Some("BarBaz"));
+    assert_eq!(manifest["workflow_slug"].as_str(), Some("sluggy"));
+}
+
+#[test]
 fn dry_run_create_start_attach_works_with_default_run_lookup() {
     let home = tempfile::tempdir().unwrap();
     let run_id = "drysplit-test-123";

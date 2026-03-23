@@ -206,6 +206,7 @@ async fn prepare_from_checkpoint(
     let graph = prepared.graph;
     let run_cfg = prepared.run_cfg;
     let sandbox_provider = prepared.sandbox_provider;
+    let workflow_slug = prepared.workflow_slug;
 
     eprintln!(
         "{} {} from checkpoint {}",
@@ -437,7 +438,7 @@ async fn prepare_from_checkpoint(
             .or(run_defaults.assets.as_ref())
             .map(|a| a.include.clone())
             .unwrap_or_default(),
-        workflow_slug: None,
+        workflow_slug,
     };
 
     let devcontainer_env = devcontainer_config
@@ -521,7 +522,7 @@ async fn prepare_from_branch(
         .or_else(|| repo_info.as_ref().and_then(|(_, branch)| branch.clone()));
     let base_sha = manifest.as_ref().and_then(|m| m.base_sha.clone());
 
-    let (graph, graph_source, run_cfg, mut sandbox_provider) =
+    let (graph, graph_source, run_cfg, mut sandbox_provider, workflow_slug) =
         if let Some(ref workflow_path) = args.workflow {
             let prepared = prepare_workflow_with_project_config(
                 &resume_as_run_args(args, workflow_path.clone()),
@@ -535,6 +536,7 @@ async fn prepare_from_branch(
                 prepared.source,
                 prepared.run_cfg,
                 prepared.sandbox_provider,
+                prepared.workflow_slug,
             )
         } else {
             let (graph, diagnostics) =
@@ -549,7 +551,13 @@ async fn prepare_from_branch(
             } else {
                 resolve_sandbox_provider(args.sandbox.map(Into::into), None, run_defaults)?
             };
-            (graph, source.clone(), None, sandbox_provider)
+            (
+                graph,
+                source.clone(),
+                None,
+                sandbox_provider,
+                manifest.as_ref().and_then(|m| m.workflow_slug.clone()),
+            )
         };
 
     eprintln!(
@@ -826,7 +834,7 @@ async fn prepare_from_branch(
             .or(run_defaults.assets.as_ref())
             .map(|a| a.include.clone())
             .unwrap_or_default(),
-        workflow_slug: None,
+        workflow_slug,
     };
 
     let devcontainer_env = devcontainer_config
