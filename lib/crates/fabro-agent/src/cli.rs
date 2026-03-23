@@ -472,6 +472,7 @@ pub async fn run_with_args_and_client(
     let profile: Arc<dyn AgentProfile> = Arc::from(profile);
 
     let mut session = Session::new(client, profile, env, config);
+    session.set_subagent_manager(manager_for_callback.clone());
 
     // Wire subagent event callback to parent session's emitter
     manager_for_callback

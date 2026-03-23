@@ -242,6 +242,7 @@ impl AgentApiBackend {
         let profile: Arc<dyn AgentProfile> = Arc::from(profile);
 
         let mut session = Session::new(client, profile, Arc::clone(sandbox), config);
+        session.set_subagent_manager(manager_for_callback.clone());
         if !env.is_empty() {
             session.set_tool_env(env.clone());
         }
