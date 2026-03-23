@@ -90,6 +90,7 @@ pub enum SessionState {
 pub enum AgentEvent {
     SessionStarted,
     SessionEnded,
+    ProcessingEnd,
     UserInput {
         text: String,
     },
@@ -205,6 +206,9 @@ impl AgentEvent {
             }
             Self::SessionEnded => {
                 info!(session_id, "Agent session ended");
+            }
+            Self::ProcessingEnd => {
+                debug!(session_id, "Processing cycle finished, session idle");
             }
             Self::UserInput { text } => {
                 debug!(session_id, text_len = text.len(), "User input received");
