@@ -29,7 +29,7 @@ pub async fn attach_run(
     run_dir: &Path,
     kill_on_detach: bool,
     styles: &'static Styles,
-    mut engine_child: Option<std::process::Child>,
+    engine_child: Option<std::process::Child>,
 ) -> Result<ExitCode> {
     let progress_path = run_dir.join("progress.jsonl");
     let conclusion_path = run_dir.join("conclusion.json");
@@ -37,6 +37,8 @@ pub async fn attach_run(
     let interview_request_path = run_dir.join("interview_request.json");
     let interview_response_path = run_dir.join("interview_response.json");
     let pid_path = run_dir.join("run.pid");
+
+    let mut engine_guard = engine_child.map(EngineChildGuard::new);
 
     let is_tty = std::io::stderr().is_terminal();
     let verbose = fabro_workflows::run_spec::RunSpec::load(run_dir)
@@ -60,23 +62,20 @@ pub async fn attach_run(
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         wait_count += 1;
         if wait_count > 100 {
-            // Kill the engine to avoid orphaning it
-            if let Some(mut child) = engine_child {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
+            // Guard's Drop kills+waits on the engine child
+            drop(engine_guard.take());
             bail!(
                 "Timed out waiting for progress.jsonl to appear in {}",
                 run_dir.display()
             );
         }
         if cancelled.load(Ordering::Relaxed) {
-            if kill_on_detach {
-                if let Some(mut child) = engine_child {
-                    let _ = child.kill();
-                    let _ = child.wait();
+            if !kill_on_detach {
+                if let Some(guard) = engine_guard.as_mut() {
+                    guard.defuse();
                 }
             }
+            // Guard's Drop kills+waits when kill_on_detach is true
             return Ok(ExitCode::from(1));
         }
     }
@@ -104,6 +103,9 @@ pub async fn attach_run(
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             } else {
+                if let Some(guard) = engine_guard.as_mut() {
+                    guard.defuse();
+                }
                 eprintln!("Detached from run (engine continues in background)");
             }
             break;
@@ -147,6 +149,9 @@ pub async fn attach_run(
                                 "interview_unanswered",
                                 INTERVIEW_UNANSWERED_MESSAGE,
                             );
+                            if let Some(guard) = engine_guard.as_mut() {
+                                guard.defuse();
+                            }
                             eprintln!("{INTERVIEW_UNANSWERED_MESSAGE}");
                             return Ok(ExitCode::from(1));
                         }
@@ -161,13 +166,15 @@ pub async fn attach_run(
             .map(|record| record.status)
             .filter(|status| status.is_terminal());
 
-        if let Some(ref mut child) = engine_child {
-            // We own the child handle — use try_wait (safe, reaps zombies)
-            let child_alive = match child.try_wait() {
+        let child_alive_via_handle = engine_guard.as_mut().and_then(|guard| {
+            guard.inner().map(|child| match child.try_wait() {
                 Ok(Some(_)) => false, // child exited
                 Ok(None) => true,     // still running
                 Err(_) => false,      // error, treat as dead
-            };
+            })
+        });
+
+        if let Some(child_alive) = child_alive_via_handle {
             if !child_alive {
                 drain_remaining(&mut reader, &mut line, &mut progress_ui);
                 break;
@@ -184,12 +191,9 @@ pub async fn attach_run(
                     if let Some(pid) = read_pid(&pid_path) {
                         cached_pid = Some(pid);
                         process_alive(pid)
-                    } else if attach_started.elapsed() >= ATTACH_STARTUP_GRACE
-                        && progress_file_is_empty(&progress_path)
-                    {
-                        false
                     } else {
-                        true
+                        attach_started.elapsed() < ATTACH_STARTUP_GRACE
+                            || !progress_file_is_empty(&progress_path)
                     }
                 }
             };
@@ -270,6 +274,33 @@ impl InterviewClaimGuard {
 impl Drop for InterviewClaimGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.claim_path);
+    }
+}
+
+struct EngineChildGuard {
+    child: Option<std::process::Child>,
+}
+
+impl EngineChildGuard {
+    fn new(child: std::process::Child) -> Self {
+        Self { child: Some(child) }
+    }
+
+    fn inner(&mut self) -> Option<&mut std::process::Child> {
+        self.child.as_mut()
+    }
+
+    fn defuse(&mut self) {
+        self.child.take();
+    }
+}
+
+impl Drop for EngineChildGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 
@@ -476,6 +507,51 @@ mod tests {
         assert!(answer_requires_reattach(&aborted));
         assert!(answer_requires_reattach(&skipped));
         assert!(!answer_requires_reattach(&answered));
+    }
+
+    #[test]
+    fn engine_child_guard_kills_on_drop() {
+        let child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+
+        {
+            let _guard = EngineChildGuard::new(child);
+        }
+
+        // Process should be dead after guard is dropped
+        assert!(
+            !process_alive(pid),
+            "process should be dead after guard drop"
+        );
+    }
+
+    #[test]
+    fn engine_child_guard_defuse_keeps_alive() {
+        let child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+
+        {
+            let mut guard = EngineChildGuard::new(child);
+            guard.defuse();
+        }
+
+        // Process should still be alive after defused guard is dropped
+        assert!(
+            process_alive(pid),
+            "process should still be alive after defused guard drop"
+        );
+
+        // Clean up
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+        }
     }
 
     #[test]

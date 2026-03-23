@@ -1,8 +1,14 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use async_trait::async_trait;
 
 use crate::{Answer, Interviewer, Question};
+
+#[cfg(test)]
+const REATTACH_WINDOW: Duration = Duration::from_millis(300);
+#[cfg(not(test))]
+const REATTACH_WINDOW: Duration = Duration::from_secs(30);
 
 /// An interviewer that communicates via JSON files in the run directory.
 ///
@@ -58,8 +64,12 @@ impl Interviewer for FileInterviewer {
         }
 
         // Poll for response with optional timeout
+        let default_for_claim_timeout = default_answer.clone();
         let poll = async {
             let response_path = self.response_path();
+            let claim_path = self.claim_path();
+            let mut claim_was_seen = false;
+            let mut reattach_deadline: Option<tokio::time::Instant> = None;
             loop {
                 match tokio::fs::read_to_string(&response_path).await {
                     Ok(data) => match serde_json::from_str::<Answer>(&data) {
@@ -73,13 +83,29 @@ impl Interviewer for FileInterviewer {
                         }
                     },
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                        // Not written yet, poll again
+                        // Not written yet — check claim state below
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to read interview response, retrying");
                     }
                 }
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+                // Monitor claim file to detect attacher departure
+                if claim_path.exists() {
+                    claim_was_seen = true;
+                    reattach_deadline = None;
+                } else if claim_was_seen && reattach_deadline.is_none() {
+                    reattach_deadline = Some(tokio::time::Instant::now() + REATTACH_WINDOW);
+                }
+
+                if let Some(deadline) = reattach_deadline {
+                    if tokio::time::Instant::now() >= deadline {
+                        self.cleanup_ipc_files().await;
+                        return default_for_claim_timeout.unwrap_or_else(Answer::timeout);
+                    }
+                }
+
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         };
 
@@ -162,6 +188,130 @@ mod tests {
 
         let answer = interviewer.ask(question).await;
         assert_eq!(answer.value, AnswerValue::No);
+    }
+
+    #[tokio::test]
+    async fn claim_released_without_response_returns_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_dir = dir.path().to_path_buf();
+        let interviewer = FileInterviewer::new(run_dir.clone());
+
+        let question = Question::new("approve?", QuestionType::YesNo);
+
+        let ask_handle = tokio::spawn(async move { interviewer.ask(question).await });
+
+        // Wait for request file to appear
+        let request_path = run_dir.join("interview_request.json");
+        for _ in 0..50 {
+            if request_path.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(request_path.exists());
+
+        // Simulate attacher creating claim file
+        let claim_path = run_dir.join("interview_request.claim");
+        std::fs::write(&claim_path, "12345\n").unwrap();
+
+        // Let the poll loop see the claim
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        // Simulate attacher departing (deletes claim without writing response)
+        std::fs::remove_file(&claim_path).unwrap();
+
+        // Should return timeout within REATTACH_WINDOW
+        let started = tokio::time::Instant::now();
+        let answer = tokio::time::timeout(Duration::from_secs(2), ask_handle)
+            .await
+            .expect("should complete within 2s")
+            .unwrap();
+
+        assert_eq!(answer.value, AnswerValue::Timeout);
+        assert!(
+            started.elapsed() <= Duration::from_secs(1),
+            "should resolve well within the reattach window"
+        );
+    }
+
+    #[tokio::test]
+    async fn claim_released_without_response_returns_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_dir = dir.path().to_path_buf();
+        let interviewer = FileInterviewer::new(run_dir.clone());
+
+        let mut question = Question::new("approve?", QuestionType::YesNo);
+        question.default = Some(Answer::no());
+
+        let ask_handle = tokio::spawn(async move { interviewer.ask(question).await });
+
+        // Wait for request file
+        let request_path = run_dir.join("interview_request.json");
+        for _ in 0..50 {
+            if request_path.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(request_path.exists());
+
+        // Simulate attacher creating then deleting claim
+        let claim_path = run_dir.join("interview_request.claim");
+        std::fs::write(&claim_path, "12345\n").unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        std::fs::remove_file(&claim_path).unwrap();
+
+        let answer = tokio::time::timeout(Duration::from_secs(2), ask_handle)
+            .await
+            .expect("should complete within 2s")
+            .unwrap();
+
+        assert_eq!(answer.value, AnswerValue::No);
+    }
+
+    #[tokio::test]
+    async fn claim_released_then_new_attacher_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_dir = dir.path().to_path_buf();
+        let interviewer = FileInterviewer::new(run_dir.clone());
+
+        let question = Question::new("approve?", QuestionType::YesNo);
+
+        let run_dir2 = run_dir.clone();
+        let ask_handle = tokio::spawn(async move { interviewer.ask(question).await });
+
+        // Wait for request file
+        let request_path = run_dir.join("interview_request.json");
+        for _ in 0..50 {
+            if request_path.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(request_path.exists());
+
+        // First attacher creates then releases claim
+        let claim_path = run_dir.join("interview_request.claim");
+        std::fs::write(&claim_path, "12345\n").unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        std::fs::remove_file(&claim_path).unwrap();
+
+        // Second attacher picks up and answers before reattach window expires
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        std::fs::write(&claim_path, "12346\n").unwrap();
+
+        let answer = Answer::yes();
+        let response_json = serde_json::to_string_pretty(&answer).unwrap();
+        tokio::fs::write(run_dir2.join("interview_response.json"), response_json)
+            .await
+            .unwrap();
+
+        let result = tokio::time::timeout(Duration::from_secs(2), ask_handle)
+            .await
+            .expect("should complete within 2s")
+            .unwrap();
+
+        assert_eq!(result.value, AnswerValue::Yes);
     }
 
     #[tokio::test]
