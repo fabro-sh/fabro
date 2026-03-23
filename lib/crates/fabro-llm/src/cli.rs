@@ -869,7 +869,7 @@ fn build_deep_test_params(info: &Model) -> Option<GenerateParams> {
         .max_tokens(1024);
 
     if info.features.reasoning {
-        params = params.reasoning_effort("high");
+        params = params.reasoning_effort(crate::types::ReasoningEffort::High);
     }
 
     Some(params)

@@ -387,7 +387,7 @@ fn build_api_request(request: &Request, stream: bool, codex_mode: bool) -> ApiRe
     let reasoning = request
         .reasoning_effort
         .as_ref()
-        .map(|effort| serde_json::json!({"effort": effort}));
+        .map(|effort| serde_json::json!({"effort": effort.as_str()}));
     let text = request
         .response_format
         .as_ref()

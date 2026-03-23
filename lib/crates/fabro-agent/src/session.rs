@@ -455,7 +455,7 @@ impl Session {
         }
     }
 
-    pub fn set_reasoning_effort(&mut self, effort: Option<String>) {
+    pub fn set_reasoning_effort(&mut self, effort: Option<fabro_llm::types::ReasoningEffort>) {
         self.config.reasoning_effort = effort;
     }
 
@@ -1574,14 +1574,17 @@ mod tests {
         let mut session = Session::new(client, profile, env, SessionConfig::default());
 
         // Default reasoning_effort is None
-        session.set_reasoning_effort(Some("high".to_string()));
+        session.set_reasoning_effort(Some(fabro_llm::types::ReasoningEffort::High));
         session.process_input("test").await.unwrap();
 
         let captured = provider_ref.captured_request.lock().unwrap();
         let request = captured
             .as_ref()
             .expect("request should have been captured");
-        assert_eq!(request.reasoning_effort, Some("high".to_string()));
+        assert_eq!(
+            request.reasoning_effort,
+            Some(fabro_llm::types::ReasoningEffort::High)
+        );
     }
 
     #[tokio::test]

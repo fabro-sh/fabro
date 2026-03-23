@@ -1124,12 +1124,12 @@ fn build_api_request(
         if supports_effort {
             (
                 explicit_thinking,
-                Some(serde_json::json!({"effort": effort})),
+                Some(serde_json::json!({"effort": effort.as_str()})),
             )
         } else if explicit_thinking.is_none() {
             // Convert effort level to a thinking budget for models that don't
             // support the effort parameter (e.g. claude-sonnet-4-5).
-            let budget = effort_to_budget_tokens(effort, resolved_max_tokens);
+            let budget = effort_to_budget_tokens(effort.as_str(), resolved_max_tokens);
             if resolved_max_tokens <= budget {
                 resolved_max_tokens = budget + 1024;
             }
@@ -2138,7 +2138,7 @@ mod tests {
     fn build_api_request_maps_reasoning_effort_to_output_config() {
         let adapter = Adapter::new("test-key");
         let request = Request {
-            reasoning_effort: Some("medium".to_string()),
+            reasoning_effort: Some(crate::types::ReasoningEffort::Medium),
             ..make_base_request()
         };
 

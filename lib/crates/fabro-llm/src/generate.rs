@@ -4,9 +4,9 @@ use crate::provider::StreamEventStream;
 use crate::retry::retry;
 use crate::tools::{execute_all_tools_with_repair, RepairToolCallFn, Tool};
 use crate::types::{
-    FinishReason, GenerateResult, Message, ObjectStreamEvent, Request, Response, ResponseFormat,
-    ResponseFormatType, RetryPolicy, StepResult, StreamEvent, TimeoutConfig, ToolCall, ToolChoice,
-    ToolDefinition, Usage,
+    FinishReason, GenerateResult, Message, ObjectStreamEvent, ReasoningEffort, Request, Response,
+    ResponseFormat, ResponseFormatType, RetryPolicy, StepResult, StreamEvent, TimeoutConfig,
+    ToolCall, ToolChoice, ToolDefinition, Usage,
 };
 use futures::{Stream, StreamExt};
 use std::pin::Pin;
@@ -288,7 +288,7 @@ pub struct GenerateParams {
     pub top_p: Option<f64>,
     pub max_tokens: Option<i64>,
     pub stop_sequences: Option<Vec<String>>,
-    pub reasoning_effort: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
     pub speed: Option<String>,
     pub provider: Option<String>,
     pub provider_options: Option<serde_json::Value>,
@@ -412,8 +412,8 @@ impl GenerateParams {
     }
 
     #[must_use]
-    pub fn reasoning_effort(mut self, reasoning_effort: impl Into<String>) -> Self {
-        self.reasoning_effort = Some(reasoning_effort.into());
+    pub fn reasoning_effort(mut self, reasoning_effort: ReasoningEffort) -> Self {
+        self.reasoning_effort = Some(reasoning_effort);
         self
     }
 
@@ -1513,7 +1513,7 @@ mod tests {
             .top_p(0.9)
             .max_tokens(100)
             .stop_sequences(vec!["STOP".to_string()])
-            .reasoning_effort("high")
+            .reasoning_effort(ReasoningEffort::High)
             .provider("anthropic")
             .provider_options(serde_json::json!({"key": "value"}))
             .max_retries(5)
@@ -1532,7 +1532,7 @@ mod tests {
         assert_eq!(params.top_p, Some(0.9));
         assert_eq!(params.max_tokens, Some(100));
         assert_eq!(params.stop_sequences, Some(vec!["STOP".to_string()]));
-        assert_eq!(params.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(params.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(params.provider.as_deref(), Some("anthropic"));
         assert!(params.provider_options.is_some());
         assert_eq!(params.max_retries, 5);

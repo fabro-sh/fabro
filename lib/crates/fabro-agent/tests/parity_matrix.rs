@@ -430,7 +430,7 @@ macro_rules! reasoning_effort_tests {
             let tmp = tempfile::tempdir().expect("failed to create tempdir");
             let config = SessionConfig {
                 max_turns: 20,
-                reasoning_effort: Some("low".to_string()),
+                reasoning_effort: Some(fabro_llm::types::ReasoningEffort::Low),
                 ..SessionConfig::default()
             };
             let mut session = make_session_with_config($provider, $model, tmp.path(), config).await;

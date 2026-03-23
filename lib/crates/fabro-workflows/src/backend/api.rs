@@ -196,7 +196,7 @@ impl AgentApiBackend {
 
         let config = SessionConfig {
             max_tokens: node.max_tokens(),
-            reasoning_effort: Some(node.reasoning_effort().to_string()),
+            reasoning_effort: node.reasoning_effort().parse().ok(),
             speed: node.speed().map(String::from),
             tool_hooks,
             mcp_servers,
@@ -291,7 +291,7 @@ impl CodergenBackend for AgentApiBackend {
             model: model.to_string(),
             messages,
             provider,
-            reasoning_effort: Some(node.reasoning_effort().to_string()),
+            reasoning_effort: node.reasoning_effort().parse().ok(),
             speed: node.speed().map(String::from),
             tools: None,
             tool_choice: None,

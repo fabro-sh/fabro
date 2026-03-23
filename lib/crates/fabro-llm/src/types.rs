@@ -440,6 +440,46 @@ pub struct RateLimitInfo {
     pub reset_at: Option<String>,
 }
 
+// --- 3.8 ReasoningEffort ---
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    Low,
+    Medium,
+    High,
+}
+
+impl ReasoningEffort {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+}
+
+impl std::fmt::Display for ReasoningEffort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for ReasoningEffort {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "low" => Ok(Self::Low),
+            "medium" => Ok(Self::Medium),
+            "high" => Ok(Self::High),
+            other => Err(format!(
+                "invalid reasoning_effort: {other:?} (expected low, medium, or high)"
+            )),
+        }
+    }
+}
+
 // --- 3.6 Request ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -454,7 +494,7 @@ pub struct Request {
     pub top_p: Option<f64>,
     pub max_tokens: Option<i64>,
     pub stop_sequences: Option<Vec<String>>,
-    pub reasoning_effort: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
     pub speed: Option<String>,
     pub metadata: Option<HashMap<String, String>>,
     pub provider_options: Option<serde_json::Value>,
