@@ -1035,7 +1035,7 @@ fn bug3_attach_leaves_interview_request_until_engine_consumes_response() {
         "question_type": "YesNo",
         "options": [],
         "allow_freeform": false,
-        "default": {"value": "Yes", "selected_option": null, "selected_options": [], "text": null},
+        "default": {"value": "Yes", "selected_option": null, "text": null},
         "timeout_seconds": 1.0,
         "stage": "gate",
         "metadata": {}

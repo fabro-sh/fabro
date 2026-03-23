@@ -493,13 +493,11 @@ mod tests {
         let aborted = Answer {
             value: AnswerValue::Aborted,
             selected_option: None,
-            selected_options: Vec::new(),
             text: None,
         };
         let skipped = Answer {
             value: AnswerValue::Skipped,
             selected_option: None,
-            selected_options: Vec::new(),
             text: None,
         };
         let answered = Answer::yes();
@@ -561,7 +559,6 @@ mod tests {
         let answer = Answer {
             value: AnswerValue::Text("ship it".to_string()),
             selected_option: None,
-            selected_options: Vec::new(),
             text: Some("ship it".to_string()),
         };
 

@@ -452,7 +452,6 @@ async fn end_to_end_human_gate_pipeline() {
     let answers = VecDeque::from([Answer {
         value: AnswerValue::Selected("R".to_string()),
         selected_option: None,
-        selected_options: Vec::new(),
         text: None,
     }]);
     let interviewer = Arc::new(QueueInterviewer::new(answers));
@@ -2523,13 +2522,11 @@ async fn human_gate_loops_back() {
         Answer {
             value: AnswerValue::Selected("F".to_string()),
             selected_option: None,
-            selected_options: Vec::new(),
             text: None,
         },
         Answer {
             value: AnswerValue::Selected("A".to_string()),
             selected_option: None,
-            selected_options: Vec::new(),
             text: None,
         },
     ]);
@@ -7013,7 +7010,6 @@ async fn human_gate_freeform_with_fixed_choice_match() {
     let answers = VecDeque::from([Answer {
         value: AnswerValue::Selected("A".to_string()),
         selected_option: None,
-        selected_options: Vec::new(),
         text: None,
     }]);
     let interviewer = Arc::new(QueueInterviewer::new(answers));
@@ -7267,7 +7263,6 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
     let answers = VecDeque::from([Answer {
         value: AnswerValue::Selected("A".to_string()),
         selected_option: None,
-        selected_options: Vec::new(),
         text: None,
     }]);
     let inner = QueueInterviewer::new(answers);
@@ -7382,7 +7377,6 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
     let answers = VecDeque::from([Answer {
         value: AnswerValue::Selected("A".to_string()),
         selected_option: None,
-        selected_options: Vec::new(),
         text: None,
     }]);
     let inner = QueueInterviewer::new(answers);

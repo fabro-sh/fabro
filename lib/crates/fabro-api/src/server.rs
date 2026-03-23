@@ -858,18 +858,15 @@ async fn submit_answer(
             } else if !req.selected_option_keys.is_empty() {
                 let pending = interviewer.pending_questions();
                 let pq = pending.iter().find(|pq| pq.id == qid);
-                let mut options = Vec::new();
                 for key in &req.selected_option_keys {
-                    let opt = pq
-                        .and_then(|pq| pq.question.options.iter().find(|o| o.key == *key).cloned());
-                    match opt {
-                        Some(o) => options.push(o),
-                        None => {
-                            return ApiError::bad_request("Invalid option key.").into_response();
-                        }
+                    let valid = pq
+                        .and_then(|pq| pq.question.options.iter().find(|o| o.key == *key))
+                        .is_some();
+                    if !valid {
+                        return ApiError::bad_request("Invalid option key.").into_response();
                     }
                 }
-                Answer::multi_selected(req.selected_option_keys, options)
+                Answer::multi_selected(req.selected_option_keys)
             } else if let Some(v) = req.value {
                 Answer::text(v)
             } else {
