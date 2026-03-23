@@ -44,6 +44,7 @@ pub struct Session {
     system_prompt: String,
     file_tracker: FileTracker,
     tool_env: Option<std::collections::HashMap<String, String>>,
+    subagent_manager: Option<Arc<tokio::sync::Mutex<crate::subagent::SubAgentManager>>>,
 }
 
 impl Session {
@@ -73,11 +74,19 @@ impl Session {
             system_prompt: String::new(),
             file_tracker: FileTracker::default(),
             tool_env: None,
+            subagent_manager: None,
         }
     }
 
     pub fn set_tool_env(&mut self, env: std::collections::HashMap<String, String>) {
         self.tool_env = Some(env);
+    }
+
+    pub fn set_subagent_manager(
+        &mut self,
+        manager: Arc<tokio::sync::Mutex<crate::subagent::SubAgentManager>>,
+    ) {
+        self.subagent_manager = Some(manager);
     }
 
     /// Initialize session by discovering project docs and capturing environment context.
@@ -449,9 +458,15 @@ impl Session {
 
     pub fn close(&mut self) {
         if self.state != SessionState::Closed {
-            self.state = SessionState::Closed;
+            // Clean up subagents before emitting SessionEnded
+            if let Some(ref manager) = self.subagent_manager {
+                if let Ok(mut mgr) = manager.try_lock() {
+                    mgr.close_all();
+                }
+            }
             self.event_emitter
                 .emit(self.id.clone(), AgentEvent::SessionEnded);
+            self.state = SessionState::Closed;
         }
     }
 
@@ -2629,5 +2644,53 @@ mod tests {
         let turns = session.history().turns();
         assert_eq!(turns.len(), 2);
         assert!(matches!(&turns[1], Turn::Assistant { content, .. } if content == "Fast response"));
+    }
+
+    #[tokio::test]
+    async fn close_cleans_up_subagents_before_emitting_session_ended() {
+        use crate::subagent::SubAgentManager;
+
+        let mut session = make_session(vec![text_response("done")]).await;
+        let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(3)));
+
+        // Wire the manager's event callback to the session's emitter
+        manager
+            .lock()
+            .await
+            .set_event_callback(session.event_callback());
+
+        // Spawn a subagent
+        let child = make_session(vec![text_response("child done")]).await;
+        let agent_id = manager.lock().await.spawn(child, "task".into(), 0).unwrap();
+
+        session.set_subagent_manager(manager.clone());
+
+        // Collect events
+        let mut rx = session.subscribe();
+        session.close();
+
+        // The subagent should have been cleaned up
+        assert!(manager.lock().await.get(&agent_id).is_none());
+
+        // Verify event ordering: SubAgentClosed before SessionEnded
+        let mut events = Vec::new();
+        while let Ok(envelope) = rx.try_recv() {
+            events.push(envelope.event);
+        }
+        let closed_idx = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::SubAgentClosed { .. }));
+        let ended_idx = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::SessionEnded));
+        assert!(
+            closed_idx.is_some(),
+            "SubAgentClosed event should be emitted"
+        );
+        assert!(ended_idx.is_some(), "SessionEnded event should be emitted");
+        assert!(
+            closed_idx.unwrap() < ended_idx.unwrap(),
+            "SubAgentClosed must come before SessionEnded"
+        );
     }
 }
