@@ -401,7 +401,7 @@ impl Session {
             },
         );
         if is_auth_error(&err) {
-            self.state = SessionState::Closed;
+            self.transition(SessionState::Closed);
         }
         AgentError::Llm(err)
     }
@@ -450,8 +450,32 @@ impl Session {
         })
     }
 
-    pub fn close(&mut self) {
-        if self.state != SessionState::Closed {
+    /// Transition the session state machine, emitting events and running
+    /// cleanup as appropriate for each transition.
+    ///
+    /// Valid transitions (matches the Attractor spec):
+    /// - Idle → Processing
+    /// - Processing → Idle  (emits ProcessingEnd)
+    /// - Processing → Closed (emits SessionEnded)
+    /// - Idle → Closed (emits SessionEnded)
+    /// - any → Closed (abort/error — emits SessionEnded)
+    fn transition(&mut self, to: SessionState) {
+        let from = self.state;
+        if from == to {
+            return;
+        }
+
+        debug_assert!(
+            matches!(
+                (from, to),
+                (SessionState::Idle, SessionState::Processing)
+                    | (SessionState::Processing, SessionState::Idle)
+                    | (_, SessionState::Closed)
+            ),
+            "Invalid session state transition: {from:?} -> {to:?}"
+        );
+
+        if to == SessionState::Closed && from != SessionState::Closed {
             // Clean up subagents before emitting SessionEnded
             if let Some(ref manager) = self.subagent_manager {
                 if let Ok(mut mgr) = manager.try_lock() {
@@ -460,8 +484,18 @@ impl Session {
             }
             self.event_emitter
                 .emit(self.id.clone(), AgentEvent::SessionEnded);
-            self.state = SessionState::Closed;
         }
+
+        if from == SessionState::Processing && to == SessionState::Idle {
+            self.event_emitter
+                .emit(self.id.clone(), AgentEvent::ProcessingEnd);
+        }
+
+        self.state = to;
+    }
+
+    pub fn close(&mut self) {
+        self.transition(SessionState::Closed);
     }
 
     pub fn set_reasoning_effort(&mut self, effort: Option<fabro_llm::types::ReasoningEffort>) {
@@ -532,7 +566,7 @@ impl Session {
 
         // Only transition to Idle if the session wasn't closed by an error
         if self.state != SessionState::Closed {
-            self.state = SessionState::Idle;
+            self.transition(SessionState::Idle);
         }
 
         result
@@ -543,7 +577,7 @@ impl Session {
             return Err(AgentError::SessionClosed);
         }
 
-        self.state = SessionState::Processing;
+        self.transition(SessionState::Processing);
 
         // Expand skill references in input
         let expanded = if self.skills.is_empty() {
@@ -2701,6 +2735,28 @@ mod tests {
         assert!(
             closed_idx.unwrap() < ended_idx.unwrap(),
             "SubAgentClosed must come before SessionEnded"
+        );
+    }
+
+    #[tokio::test]
+    async fn process_input_emits_processing_end_on_idle_transition() {
+        let mut session = make_session(vec![text_response("Hello")]).await;
+        session.initialize().await;
+
+        let mut rx = session.subscribe();
+        session.process_input("Hi").await.unwrap();
+
+        assert_eq!(session.state(), SessionState::Idle);
+
+        let mut events = Vec::new();
+        while let Ok(envelope) = rx.try_recv() {
+            events.push(envelope.event);
+        }
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ProcessingEnd)),
+            "ProcessingEnd event should be emitted when returning to Idle"
         );
     }
 }
