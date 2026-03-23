@@ -68,9 +68,7 @@ pub trait AgentProfile: Send + Sync {
         project_docs: &[String],
         user_instructions: Option<&str>,
     ) -> String;
-    fn capabilities(&self) -> AgentProfile;
-    fn knowledge_cutoff(&self) -> &str;
-    // ... default methods for tools(), provider_options(), supports_*()
+    // ... default methods for tools(), knowledge_cutoff(), context_window_size()
 }
 ```
 
