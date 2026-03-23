@@ -406,7 +406,7 @@ pub(crate) fn resolve_ssh_clone_params(
 
 /// Resolve the fallback chain from config.
 ///
-/// `apply_defaults` must be called on `run_cfg` before this — it merges
+/// `merge_overlay` must be called before this — it merges
 /// `run_defaults.llm.fallbacks` into `run_cfg.llm.fallbacks` already.
 pub(crate) fn resolve_fallback_chain(
     provider: Provider,
@@ -792,7 +792,7 @@ pub async fn run_command(
     // Serialize the merged run config so the run dir is self-contained.
     // Skip when the workflow path is already the cached run.toml (i.e. _run_engine
     // restart) — create_run already wrote the correct snapshot and re-writing here
-    // would persist a double-applied config (apply_defaults ran again on load).
+    // would persist a double-merged config (merge_overlay ran again on load).
     let is_cached_snapshot = workflow_path
         .file_name()
         .is_some_and(|f| f == RUN_CONFIG_FILE);

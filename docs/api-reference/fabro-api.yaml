@@ -3990,7 +3990,7 @@ components:
     # ── Configuration Schemas ────────────────────────────────────────────
 
     RunConfiguration:
-      description: Structured run configuration mirroring WorkflowRunConfig.
+      description: Structured run configuration mirroring FabroConfig.
       type: object
       required:
         - version
@@ -4262,7 +4262,7 @@ components:
           description: Whether hook runs in sandbox.
 
     ServerConfiguration:
-      description: Structured server configuration mirroring ServerConfig.
+      description: Structured server configuration mirroring FabroConfig.
       type: object
       properties:
         data_dir:
