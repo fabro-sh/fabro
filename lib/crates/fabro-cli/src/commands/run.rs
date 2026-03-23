@@ -10,7 +10,7 @@ use clap::{Args, ValueEnum};
 use fabro_agent::{
     DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox, WorktreeConfig, WorktreeSandbox,
 };
-use fabro_config::run::{RunDefaults, WorkflowRunConfig};
+use fabro_config::config::FabroConfig;
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, FileInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
@@ -223,8 +223,8 @@ fn is_cached_run_restart(workflow_path: &Path, run_dir: &Path) -> bool {
 pub(crate) fn resolve_model_provider(
     cli_model: Option<&str>,
     cli_provider: Option<&str>,
-    run_cfg: Option<&WorkflowRunConfig>,
-    run_defaults: &RunDefaults,
+    run_cfg: Option<&FabroConfig>,
+    run_defaults: &FabroConfig,
     graph: &fabro_graphviz::graph::Graph,
 ) -> (String, Option<String>) {
     let toml_model = run_cfg
@@ -285,8 +285,8 @@ pub(crate) fn parse_sandbox_provider(
 /// Resolve sandbox provider: CLI flag > TOML config > run defaults > default.
 pub(crate) fn resolve_sandbox_provider(
     cli: Option<SandboxProvider>,
-    run_cfg: Option<&WorkflowRunConfig>,
-    run_defaults: &RunDefaults,
+    run_cfg: Option<&FabroConfig>,
+    run_defaults: &FabroConfig,
 ) -> anyhow::Result<SandboxProvider> {
     let toml = parse_sandbox_provider(run_cfg.and_then(|c| c.sandbox.as_ref()))?;
     let defaults = parse_sandbox_provider(run_defaults.sandbox.as_ref())?;
@@ -296,8 +296,8 @@ pub(crate) fn resolve_sandbox_provider(
 /// Resolve preserve-sandbox: CLI flag > TOML config > run defaults > false.
 pub(crate) fn resolve_preserve_sandbox(
     cli: bool,
-    run_cfg: Option<&WorkflowRunConfig>,
-    run_defaults: &RunDefaults,
+    run_cfg: Option<&FabroConfig>,
+    run_defaults: &FabroConfig,
 ) -> bool {
     if cli {
         return true;
@@ -311,8 +311,8 @@ pub(crate) fn resolve_preserve_sandbox(
 
 /// Resolve worktree mode: TOML config > run defaults > Clean.
 fn resolve_worktree_mode(
-    run_cfg: Option<&WorkflowRunConfig>,
-    run_defaults: &RunDefaults,
+    run_cfg: Option<&FabroConfig>,
+    run_defaults: &FabroConfig,
 ) -> sandbox_config::WorktreeMode {
     run_cfg
         .and_then(|c| c.sandbox.as_ref())
@@ -330,8 +330,8 @@ fn resolve_worktree_mode(
 
 /// Resolve daytona config: TOML config > run defaults.
 pub(crate) fn resolve_daytona_config(
-    run_cfg: Option<&WorkflowRunConfig>,
-    run_defaults: &RunDefaults,
+    run_cfg: Option<&FabroConfig>,
+    run_defaults: &FabroConfig,
 ) -> Option<fabro_sandbox::daytona::DaytonaConfig> {
     run_cfg
         .and_then(|c| c.sandbox.as_ref())
@@ -347,8 +347,8 @@ pub(crate) fn resolve_daytona_config(
 #[cfg(feature = "exedev")]
 /// Resolve exe.dev config: TOML config > run defaults.
 pub(crate) fn resolve_exe_config(
-    run_cfg: Option<&WorkflowRunConfig>,
-    run_defaults: &RunDefaults,
+    run_cfg: Option<&FabroConfig>,
+    run_defaults: &FabroConfig,
 ) -> Option<fabro_sandbox::exe::ExeConfig> {
     run_cfg
         .and_then(|c| c.sandbox.as_ref())
@@ -377,8 +377,8 @@ pub(crate) fn resolve_exe_clone_params(
 
 /// Resolve SSH sandbox config: TOML config > run defaults.
 pub(crate) fn resolve_ssh_config(
-    run_cfg: Option<&WorkflowRunConfig>,
-    run_defaults: &RunDefaults,
+    run_cfg: Option<&FabroConfig>,
+    run_defaults: &FabroConfig,
 ) -> Option<fabro_sandbox::ssh::SshConfig> {
     run_cfg
         .and_then(|c| c.sandbox.as_ref())
@@ -411,7 +411,7 @@ pub(crate) fn resolve_ssh_clone_params(
 pub(crate) fn resolve_fallback_chain(
     provider: Provider,
     model: &str,
-    run_cfg: Option<&WorkflowRunConfig>,
+    run_cfg: Option<&FabroConfig>,
 ) -> Vec<FallbackTarget> {
     let fallbacks = run_cfg
         .and_then(|c| c.llm.as_ref())
@@ -498,14 +498,14 @@ pub(crate) fn cached_run_config_path(run_dir: &Path) -> PathBuf {
     run_dir.join(RUN_CONFIG_FILE)
 }
 
-fn serialize_run_config_snapshot(run_cfg: &mut WorkflowRunConfig) -> anyhow::Result<String> {
-    run_cfg.graph = RUN_GRAPH_FILE.to_string();
+fn serialize_run_config_snapshot(run_cfg: &mut FabroConfig) -> anyhow::Result<String> {
+    run_cfg.graph = Some(RUN_GRAPH_FILE.to_string());
     toml::to_string_pretty(run_cfg).context("Failed to serialize run config")
 }
 
 pub(crate) async fn write_run_config_snapshot(
     run_dir: &Path,
-    run_cfg: Option<&mut WorkflowRunConfig>,
+    run_cfg: Option<&mut FabroConfig>,
 ) -> anyhow::Result<()> {
     if let Some(cfg) = run_cfg {
         let toml_str = serialize_run_config_snapshot(cfg)?;
@@ -516,12 +516,15 @@ pub(crate) async fn write_run_config_snapshot(
 
 pub(crate) fn resolve_workflow_source(
     workflow_path: &Path,
-) -> anyhow::Result<(PathBuf, PathBuf, Option<WorkflowRunConfig>)> {
+) -> anyhow::Result<(PathBuf, PathBuf, Option<FabroConfig>)> {
     let path = project_config::resolve_workflow_arg(workflow_path)?;
     if path.extension().is_some_and(|ext| ext == "toml") {
         match run_config::load_run_config(&path) {
             Ok(cfg) => {
-                let dot = run_config::resolve_graph_path(&path, &cfg.graph);
+                let dot = run_config::resolve_graph_path(
+                    &path,
+                    cfg.graph.as_deref().unwrap_or("workflow.fabro"),
+                );
                 Ok((path, dot, Some(cfg)))
             }
             // Backward compatibility for detached runs created before run.toml existed.
@@ -544,12 +547,12 @@ pub(crate) fn resolve_workflow_source(
 pub(crate) struct PreparedWorkflow {
     pub source: String,
     pub graph: fabro_graphviz::graph::Graph,
-    pub run_cfg: Option<WorkflowRunConfig>,
+    pub run_cfg: Option<FabroConfig>,
     pub sandbox_provider: SandboxProvider,
     pub model: String,
     pub provider: Option<String>,
     pub workflow_slug: Option<String>,
-    pub run_defaults: RunDefaults,
+    pub run_defaults: FabroConfig,
 }
 
 /// Resolve config, parse/validate the workflow graph, and resolve sandbox + model.
@@ -558,7 +561,7 @@ pub(crate) struct PreparedWorkflow {
 /// `run_command` (which goes on to execute the workflow).
 pub(crate) fn prepare_workflow(
     args: &RunArgs,
-    run_defaults: RunDefaults,
+    run_defaults: FabroConfig,
     styles: &Styles,
     quiet: bool,
 ) -> anyhow::Result<PreparedWorkflow> {
@@ -567,7 +570,7 @@ pub(crate) fn prepare_workflow(
 
 pub(crate) fn prepare_workflow_with_project_config(
     args: &RunArgs,
-    mut run_defaults: RunDefaults,
+    mut run_defaults: FabroConfig,
     styles: &Styles,
     quiet: bool,
     apply_project_config: bool,
@@ -583,17 +586,19 @@ pub(crate) fn prepare_workflow_with_project_config(
             project_config::discover_project_config(&std::env::current_dir().unwrap_or_default())
         {
             tracing::debug!("Applying run defaults from fabro.toml");
-            run_defaults.merge_overlay(project_config.into_run_defaults());
+            run_defaults.merge_overlay(project_config);
         }
     }
 
-    // Resolve workflow arg, load run config if TOML, apply defaults
+    // Resolve workflow arg, load run config if TOML, merge with defaults
     let (resolved_workflow_path, dot_path, run_cfg) = {
         let (resolved, dot, cfg) = resolve_workflow_source(workflow_path)?;
         match cfg {
-            Some(mut cfg) => {
-                cfg.apply_defaults(&run_defaults);
-                (resolved, dot, Some(cfg))
+            Some(cfg) => {
+                // run_defaults is the base; cfg (from workflow.toml) is the overlay that wins
+                let mut merged = run_defaults.clone();
+                merged.merge_overlay(cfg);
+                (resolved, dot, Some(merged))
             }
             None => (resolved, dot, None),
         }
@@ -708,7 +713,7 @@ pub(crate) fn prepare_workflow_with_project_config(
 /// Returns an error if the workflow cannot be read, parsed, validated, or executed.
 pub async fn run_command(
     args: RunArgs,
-    run_defaults: RunDefaults,
+    run_defaults: FabroConfig,
     styles: &'static Styles,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     git_author: fabro_workflows::git::GitAuthor,
@@ -1435,7 +1440,11 @@ pub async fn run_command(
         servers
             .clone()
             .into_iter()
-            .map(|(name, entry)| entry.into_config(name))
+            .map(
+                |(name, entry): (String, fabro_config::mcp::McpServerEntry)| {
+                    entry.into_config(name)
+                },
+            )
             .collect()
     };
     let registry = default_registry(interviewer.clone(), {
@@ -2122,9 +2131,9 @@ pub(crate) fn print_assets(run_dir: &std::path::Path, styles: &Styles) {
 #[allow(clippy::too_many_arguments)]
 async fn run_preflight(
     graph: &fabro_graphviz::graph::Graph,
-    run_cfg: &Option<run_config::WorkflowRunConfig>,
+    run_cfg: &Option<FabroConfig>,
     args: &RunArgs,
-    run_defaults: &RunDefaults,
+    run_defaults: &FabroConfig,
     git_status: GitSyncStatus,
     sandbox_provider: SandboxProvider,
     styles: &'static Styles,
@@ -2712,24 +2721,15 @@ mod tests {
 
     #[test]
     fn serialize_run_config_snapshot_rewrites_graph_path() {
-        let cfg = run_config::WorkflowRunConfig {
-            version: 1,
+        let cfg = FabroConfig {
+            version: Some(1),
             goal: Some("test".to_string()),
-            graph: "workflow.fabro".to_string(),
-            work_dir: None,
-            llm: None,
-            setup: None,
-            sandbox: None,
-            vars: None,
-            hooks: Vec::new(),
-            checkpoint: Default::default(),
+            graph: Some("workflow.fabro".to_string()),
             pull_request: Some(run_config::PullRequestConfig {
                 enabled: true,
                 ..Default::default()
             }),
-            assets: None,
-            mcp_servers: Default::default(),
-            github: None,
+            ..Default::default()
         };
 
         let pr = cfg.pull_request.clone();
@@ -2737,7 +2737,7 @@ mod tests {
         let serialized = serialize_run_config_snapshot(&mut cfg).unwrap();
         let reparsed = run_config::parse_run_config(&serialized).unwrap();
 
-        assert_eq!(reparsed.graph, RUN_GRAPH_FILE);
+        assert_eq!(reparsed.graph.as_deref(), Some(RUN_GRAPH_FILE));
         assert_eq!(reparsed.pull_request, pr);
     }
 
@@ -2862,7 +2862,7 @@ include = ["*.md"]
         let styles = Styles::new(false);
         let prepared = prepare_workflow_with_project_config(
             &args,
-            RunDefaults::default(),
+            FabroConfig::default(),
             &styles,
             true,
             false,
@@ -2964,7 +2964,7 @@ include = ["*.md"]
     #[test]
     fn resolve_model_provider_defaults() {
         let graph = fabro_graphviz::graph::Graph::new("test");
-        let defaults = RunDefaults::default();
+        let defaults = FabroConfig::default();
         let (model, provider) = resolve_model_provider(None, None, None, &defaults, &graph);
         assert_eq!(model, "claude-sonnet-4-6");
         // Catalog resolves anthropic as the provider for claude-sonnet-4-6
@@ -2974,26 +2974,17 @@ include = ["*.md"]
     #[test]
     fn resolve_model_provider_cli_overrides_toml() {
         let graph = fabro_graphviz::graph::Graph::new("test");
-        let defaults = RunDefaults::default();
-        let cfg = run_config::WorkflowRunConfig {
-            version: 1,
+        let defaults = FabroConfig::default();
+        let cfg = FabroConfig {
+            version: Some(1),
             goal: Some("test".to_string()),
-            graph: "test.fabro".to_string(),
-            work_dir: None,
+            graph: Some("test.fabro".to_string()),
             llm: Some(run_config::LlmConfig {
                 model: Some("toml-model".to_string()),
                 provider: Some("openai".to_string()),
                 fallbacks: None,
             }),
-            setup: None,
-            sandbox: None,
-            vars: None,
-            hooks: Vec::new(),
-            checkpoint: Default::default(),
-            pull_request: None,
-            assets: None,
-            mcp_servers: Default::default(),
-            github: None,
+            ..Default::default()
         };
         let (model, provider) = resolve_model_provider(
             Some("gpt-5.2"),
@@ -3019,26 +3010,17 @@ include = ["*.md"]
             AttrValue::String("gemini".to_string()),
         );
 
-        let defaults = RunDefaults::default();
-        let cfg = run_config::WorkflowRunConfig {
-            version: 1,
+        let defaults = FabroConfig::default();
+        let cfg = FabroConfig {
+            version: Some(1),
             goal: Some("test".to_string()),
-            graph: "test.fabro".to_string(),
-            work_dir: None,
+            graph: Some("test.fabro".to_string()),
             llm: Some(run_config::LlmConfig {
                 model: Some("toml-model".to_string()),
                 provider: Some("openai".to_string()),
                 fallbacks: None,
             }),
-            setup: None,
-            sandbox: None,
-            vars: None,
-            hooks: Vec::new(),
-            checkpoint: Default::default(),
-            pull_request: None,
-            assets: None,
-            mcp_servers: Default::default(),
-            github: None,
+            ..Default::default()
         };
         let (model, provider) = resolve_model_provider(None, None, Some(&cfg), &defaults, &graph);
         assert_eq!(model, "toml-model");
@@ -3058,7 +3040,7 @@ include = ["*.md"]
             AttrValue::String("openai".to_string()),
         );
 
-        let defaults = RunDefaults::default();
+        let defaults = FabroConfig::default();
         let (model, provider) = resolve_model_provider(None, None, None, &defaults, &graph);
         assert_eq!(model, "gpt-5.2");
         assert_eq!(provider, Some("openai".to_string()));
@@ -3067,7 +3049,7 @@ include = ["*.md"]
     #[test]
     fn resolve_model_provider_alias_expansion() {
         let graph = fabro_graphviz::graph::Graph::new("test");
-        let defaults = RunDefaults::default();
+        let defaults = FabroConfig::default();
         let (model, provider) = resolve_model_provider(Some("opus"), None, None, &defaults, &graph);
         assert_eq!(model, "claude-opus-4-6");
         assert_eq!(provider, Some("anthropic".to_string()));
@@ -3076,13 +3058,13 @@ include = ["*.md"]
     #[test]
     fn resolve_model_provider_run_defaults_used() {
         let graph = fabro_graphviz::graph::Graph::new("test");
-        let defaults = RunDefaults {
+        let defaults = FabroConfig {
             llm: Some(run_config::LlmConfig {
                 model: Some("default-model".to_string()),
                 provider: Some("openai".to_string()),
                 fallbacks: None,
             }),
-            ..RunDefaults::default()
+            ..FabroConfig::default()
         };
         let (model, provider) = resolve_model_provider(None, None, None, &defaults, &graph);
         assert_eq!(model, "default-model");
@@ -3092,33 +3074,24 @@ include = ["*.md"]
     #[test]
     fn resolve_model_provider_toml_overrides_run_defaults() {
         let graph = fabro_graphviz::graph::Graph::new("test");
-        let defaults = RunDefaults {
+        let defaults = FabroConfig {
             llm: Some(run_config::LlmConfig {
                 model: Some("default-model".to_string()),
                 provider: Some("anthropic".to_string()),
                 fallbacks: None,
             }),
-            ..RunDefaults::default()
+            ..FabroConfig::default()
         };
-        let cfg = run_config::WorkflowRunConfig {
-            version: 1,
+        let cfg = FabroConfig {
+            version: Some(1),
             goal: Some("test".to_string()),
-            graph: "test.fabro".to_string(),
-            work_dir: None,
+            graph: Some("test.fabro".to_string()),
             llm: Some(run_config::LlmConfig {
                 model: Some("toml-model".to_string()),
                 provider: Some("openai".to_string()),
                 fallbacks: None,
             }),
-            setup: None,
-            sandbox: None,
-            vars: None,
-            hooks: Vec::new(),
-            checkpoint: Default::default(),
-            pull_request: None,
-            assets: None,
-            mcp_servers: Default::default(),
-            github: None,
+            ..Default::default()
         };
         let (model, provider) = resolve_model_provider(None, None, Some(&cfg), &defaults, &graph);
         assert_eq!(model, "toml-model");
@@ -3127,85 +3100,61 @@ include = ["*.md"]
 
     #[test]
     fn resolve_preserve_sandbox_cli_wins() {
-        let cfg = run_config::WorkflowRunConfig {
-            version: 1,
-            goal: Some("test".to_string()),
-            graph: "w.fabro".into(),
-            work_dir: None,
-            llm: None,
-            setup: None,
+        let cfg = FabroConfig {
             sandbox: Some(sandbox_config::SandboxConfig {
                 provider: None,
                 preserve: Some(false),
                 ..Default::default()
             }),
-            vars: None,
-            hooks: Vec::new(),
-            checkpoint: Default::default(),
-            pull_request: None,
-            assets: None,
-            mcp_servers: Default::default(),
-            github: None,
+            ..Default::default()
         };
-        let defaults = RunDefaults::default();
+        let defaults = FabroConfig::default();
         assert!(resolve_preserve_sandbox(true, Some(&cfg), &defaults));
     }
 
     #[test]
     fn resolve_preserve_sandbox_toml_wins_over_defaults() {
-        let cfg = run_config::WorkflowRunConfig {
-            version: 1,
-            goal: Some("test".to_string()),
-            graph: "w.fabro".into(),
-            work_dir: None,
-            llm: None,
-            setup: None,
+        let cfg = FabroConfig {
             sandbox: Some(sandbox_config::SandboxConfig {
                 provider: None,
                 preserve: Some(true),
                 ..Default::default()
             }),
-            vars: None,
-            hooks: Vec::new(),
-            checkpoint: Default::default(),
-            pull_request: None,
-            assets: None,
-            mcp_servers: Default::default(),
-            github: None,
+            ..Default::default()
         };
-        let defaults = RunDefaults {
+        let defaults = FabroConfig {
             sandbox: Some(sandbox_config::SandboxConfig {
                 provider: None,
                 preserve: Some(false),
                 ..Default::default()
             }),
-            ..RunDefaults::default()
+            ..FabroConfig::default()
         };
         assert!(resolve_preserve_sandbox(false, Some(&cfg), &defaults));
     }
 
     #[test]
     fn resolve_preserve_sandbox_defaults_used() {
-        let defaults = RunDefaults {
+        let defaults = FabroConfig {
             sandbox: Some(sandbox_config::SandboxConfig {
                 provider: None,
                 preserve: Some(true),
                 ..Default::default()
             }),
-            ..RunDefaults::default()
+            ..FabroConfig::default()
         };
         assert!(resolve_preserve_sandbox(false, None, &defaults));
     }
 
     #[test]
     fn resolve_preserve_sandbox_defaults_to_false() {
-        let defaults = RunDefaults::default();
+        let defaults = FabroConfig::default();
         assert!(!resolve_preserve_sandbox(false, None, &defaults));
     }
 
     #[test]
     fn resolve_worktree_mode_defaults_to_clean() {
-        let defaults = RunDefaults::default();
+        let defaults = FabroConfig::default();
         assert_eq!(
             resolve_worktree_mode(None, &defaults),
             sandbox_config::WorktreeMode::Clean
@@ -3214,31 +3163,16 @@ include = ["*.md"]
 
     #[test]
     fn resolve_worktree_mode_from_toml() {
-        let cfg = run_config::WorkflowRunConfig {
-            version: 1,
-            goal: Some("test".into()),
-            graph: "w.fabro".into(),
-            work_dir: None,
-            llm: None,
-            setup: None,
+        let cfg = FabroConfig {
             sandbox: Some(sandbox_config::SandboxConfig {
-                provider: None,
-                preserve: None,
-                devcontainer: None,
                 local: Some(sandbox_config::LocalSandboxConfig {
                     worktree_mode: sandbox_config::WorktreeMode::Always,
                 }),
                 ..Default::default()
             }),
-            vars: None,
-            hooks: Vec::new(),
-            checkpoint: Default::default(),
-            pull_request: None,
-            assets: None,
-            mcp_servers: Default::default(),
-            github: None,
+            ..Default::default()
         };
-        let defaults = RunDefaults::default();
+        let defaults = FabroConfig::default();
         assert_eq!(
             resolve_worktree_mode(Some(&cfg), &defaults),
             sandbox_config::WorktreeMode::Always
@@ -3247,7 +3181,7 @@ include = ["*.md"]
 
     #[test]
     fn resolve_worktree_mode_from_defaults() {
-        let defaults = RunDefaults {
+        let defaults = FabroConfig {
             sandbox: Some(sandbox_config::SandboxConfig {
                 provider: None,
                 preserve: None,
@@ -3257,7 +3191,7 @@ include = ["*.md"]
                 }),
                 ..Default::default()
             }),
-            ..RunDefaults::default()
+            ..FabroConfig::default()
         };
         assert_eq!(
             resolve_worktree_mode(None, &defaults),
@@ -3267,31 +3201,16 @@ include = ["*.md"]
 
     #[test]
     fn resolve_worktree_mode_toml_overrides_defaults() {
-        let cfg = run_config::WorkflowRunConfig {
-            version: 1,
-            goal: Some("test".into()),
-            graph: "w.fabro".into(),
-            work_dir: None,
-            llm: None,
-            setup: None,
+        let cfg = FabroConfig {
             sandbox: Some(sandbox_config::SandboxConfig {
-                provider: None,
-                preserve: None,
-                devcontainer: None,
                 local: Some(sandbox_config::LocalSandboxConfig {
                     worktree_mode: sandbox_config::WorktreeMode::Never,
                 }),
                 ..Default::default()
             }),
-            vars: None,
-            hooks: Vec::new(),
-            checkpoint: Default::default(),
-            pull_request: None,
-            assets: None,
-            mcp_servers: Default::default(),
-            github: None,
+            ..Default::default()
         };
-        let defaults = RunDefaults {
+        let defaults = FabroConfig {
             sandbox: Some(sandbox_config::SandboxConfig {
                 provider: None,
                 preserve: None,
@@ -3301,7 +3220,7 @@ include = ["*.md"]
                 }),
                 ..Default::default()
             }),
-            ..RunDefaults::default()
+            ..FabroConfig::default()
         };
         assert_eq!(
             resolve_worktree_mode(Some(&cfg), &defaults),

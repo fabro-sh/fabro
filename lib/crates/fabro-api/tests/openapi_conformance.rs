@@ -236,20 +236,20 @@ fn compare_schema(
     }
 }
 
-/// Build a ServerConfig with every Option set to Some so all keys appear
+/// Build a FabroConfig with every Option set to Some so all keys appear
 /// in the serialized JSON.
-fn fully_populated_server_config() -> ServerConfig {
-    ServerConfig {
+fn fully_populated_server_config() -> FabroConfig {
+    FabroConfig {
         data_dir: Some("/data".into()),
         max_concurrent_runs: Some(10),
-        web: WebConfig {
+        web: Some(WebConfig {
             url: "https://example.com".into(),
             auth: AuthConfig {
                 provider: AuthProvider::Github,
                 allowed_usernames: vec!["user".into()],
             },
-        },
-        api: ApiConfig {
+        }),
+        api: Some(ApiConfig {
             base_url: "https://api.example.com".into(),
             authentication_strategies: vec![ApiAuthStrategy::Jwt],
             tls: Some(TlsConfig {
@@ -257,8 +257,8 @@ fn fully_populated_server_config() -> ServerConfig {
                 key: "k".into(),
                 ca: "ca".into(),
             }),
-        },
-        git: GitConfig {
+        }),
+        git: Some(GitConfig {
             provider: GitProvider::Github,
             app_id: Some("123".into()),
             client_id: Some("456".into()),
@@ -270,118 +270,129 @@ fn fully_populated_server_config() -> ServerConfig {
             webhooks: Some(WebhookConfig {
                 strategy: WebhookStrategy::TailscaleFunnel,
             }),
-        },
-        features: Features {
+        }),
+        features: Some(Features {
             session_sandboxes: true,
             retros: false,
-        },
-        log: LogConfig {
+        }),
+        log: Some(LogConfig {
             level: Some("debug".into()),
-        },
-        run_defaults: RunDefaults {
-            work_dir: Some("/work".into()),
-            llm: Some(LlmConfig {
-                model: Some("m".into()),
-                provider: Some("p".into()),
-                fallbacks: Some(Default::default()),
-            }),
-            setup: Some(SetupConfig {
-                commands: vec!["echo hi".into()],
-                timeout_ms: Some(5000),
-            }),
-            sandbox: Some(SandboxConfig {
-                provider: Some("daytona".into()),
-                preserve: Some(true),
-                devcontainer: None,
-                local: None,
-                daytona: Some(DaytonaConfig {
-                    auto_stop_interval: Some(60),
-                    labels: Some(Default::default()),
-                    snapshot: Some(DaytonaSnapshotConfig {
-                        name: "snap".into(),
-                        cpu: Some(2),
-                        memory: Some(4),
-                        disk: Some(10),
-                        dockerfile: Some(DockerfileSource::Inline("FROM x".into())),
-                    }),
-                    network: Some(DaytonaNetwork::Block),
-                    skip_clone: false,
+        }),
+        work_dir: Some("/work".into()),
+        llm: Some(LlmConfig {
+            model: Some("m".into()),
+            provider: Some("p".into()),
+            fallbacks: Some(Default::default()),
+        }),
+        setup: Some(SetupConfig {
+            commands: vec!["echo hi".into()],
+            timeout_ms: Some(5000),
+        }),
+        sandbox: Some(SandboxConfig {
+            provider: Some("daytona".into()),
+            preserve: Some(true),
+            devcontainer: None,
+            local: None,
+            daytona: Some(DaytonaConfig {
+                auto_stop_interval: Some(60),
+                labels: Some(Default::default()),
+                snapshot: Some(DaytonaSnapshotConfig {
+                    name: "snap".into(),
+                    cpu: Some(2),
+                    memory: Some(4),
+                    disk: Some(10),
+                    dockerfile: Some(DockerfileSource::Inline("FROM x".into())),
                 }),
-                exe: Some(fabro_sandbox::exe::ExeConfig { image: None }),
-                ssh: None,
-                env: Some(Default::default()),
+                network: Some(DaytonaNetwork::Block),
+                skip_clone: false,
             }),
-            vars: Some(Default::default()),
-            checkpoint: CheckpointConfig {
-                exclude_globs: vec![],
-            },
-            pull_request: Some(PullRequestConfig {
-                enabled: true,
-                draft: false,
-                auto_merge: false,
-                merge_strategy: MergeStrategy::Squash,
-            }),
-            assets: Some(AssetsConfig {
-                include: vec!["test-results/**".into()],
-            }),
-            // One hook per HookType variant so the key union covers all fields.
-            hooks: vec![
-                HookDefinition {
-                    name: Some("cmd".into()),
-                    event: HookEvent::RunStart,
-                    command: Some("echo".into()),
-                    hook_type: None,
-                    matcher: Some("*".into()),
-                    blocking: Some(true),
-                    timeout_ms: Some(5000),
-                    sandbox: Some(true),
-                },
-                HookDefinition {
-                    name: Some("http".into()),
-                    event: HookEvent::RunStart,
-                    command: None,
-                    hook_type: Some(HookType::Http {
-                        url: "http://x".into(),
-                        headers: Some(Default::default()),
-                        allowed_env_vars: vec!["X".into()],
-                        tls: TlsMode::Verify,
-                    }),
-                    matcher: None,
-                    blocking: None,
-                    timeout_ms: None,
-                    sandbox: None,
-                },
-                HookDefinition {
-                    name: Some("prompt".into()),
-                    event: HookEvent::RunStart,
-                    command: None,
-                    hook_type: Some(HookType::Prompt {
-                        prompt: "hi".into(),
-                        model: Some("m".into()),
-                    }),
-                    matcher: None,
-                    blocking: None,
-                    timeout_ms: None,
-                    sandbox: None,
-                },
-                HookDefinition {
-                    name: Some("agent".into()),
-                    event: HookEvent::RunStart,
-                    command: None,
-                    hook_type: Some(HookType::Agent {
-                        prompt: "hi".into(),
-                        model: Some("m".into()),
-                        max_tool_rounds: Some(5),
-                    }),
-                    matcher: None,
-                    blocking: None,
-                    timeout_ms: None,
-                    sandbox: None,
-                },
-            ],
-            mcp_servers: Default::default(),
-            github: None,
+            exe: Some(fabro_sandbox::exe::ExeConfig { image: None }),
+            ssh: None,
+            env: Some(Default::default()),
+        }),
+        vars: Some(Default::default()),
+        checkpoint: CheckpointConfig {
+            exclude_globs: vec!["**/node_modules/**".into()],
         },
+        pull_request: Some(PullRequestConfig {
+            enabled: true,
+            draft: false,
+            auto_merge: false,
+            merge_strategy: MergeStrategy::Squash,
+        }),
+        assets: Some(AssetsConfig {
+            include: vec!["test-results/**".into()],
+        }),
+        // One hook per HookType variant so the key union covers all fields.
+        hooks: vec![
+            HookDefinition {
+                name: Some("cmd".into()),
+                event: HookEvent::RunStart,
+                command: Some("echo".into()),
+                hook_type: None,
+                matcher: Some("*".into()),
+                blocking: Some(true),
+                timeout_ms: Some(5000),
+                sandbox: Some(true),
+            },
+            HookDefinition {
+                name: Some("http".into()),
+                event: HookEvent::RunStart,
+                command: None,
+                hook_type: Some(HookType::Http {
+                    url: "http://x".into(),
+                    headers: Some(Default::default()),
+                    allowed_env_vars: vec!["X".into()],
+                    tls: TlsMode::Verify,
+                }),
+                matcher: None,
+                blocking: None,
+                timeout_ms: None,
+                sandbox: None,
+            },
+            HookDefinition {
+                name: Some("prompt".into()),
+                event: HookEvent::RunStart,
+                command: None,
+                hook_type: Some(HookType::Prompt {
+                    prompt: "hi".into(),
+                    model: Some("m".into()),
+                }),
+                matcher: None,
+                blocking: None,
+                timeout_ms: None,
+                sandbox: None,
+            },
+            HookDefinition {
+                name: Some("agent".into()),
+                event: HookEvent::RunStart,
+                command: None,
+                hook_type: Some(HookType::Agent {
+                    prompt: "hi".into(),
+                    model: Some("m".into()),
+                    max_tool_rounds: Some(5),
+                }),
+                matcher: None,
+                blocking: None,
+                timeout_ms: None,
+                sandbox: None,
+            },
+        ],
+        mcp_servers: std::collections::HashMap::from([(
+            "test".into(),
+            fabro_config::mcp::McpServerEntry {
+                transport: fabro_config::mcp::McpTransport::Stdio {
+                    command: vec!["echo".into()],
+                    env: Default::default(),
+                },
+                startup_timeout_secs: fabro_config::mcp::default_startup_timeout_secs(),
+                tool_timeout_secs: fabro_config::mcp::default_tool_timeout_secs(),
+            },
+        )]),
+        github: Some(GitHubConfig {
+            permissions: std::collections::HashMap::from([("contents".into(), "read".into())]),
+        }),
+        ..Default::default()
     }
 }
 

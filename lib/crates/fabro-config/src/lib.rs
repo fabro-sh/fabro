@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod config;
 pub mod dotenv;
 pub mod hook;
 pub mod mcp;
@@ -7,6 +8,7 @@ pub mod run;
 pub mod sandbox;
 pub mod server;
 
+pub use config::FabroConfig;
 pub use fabro_util::path::expand_tilde;
 
 use std::path::Path;

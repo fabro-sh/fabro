@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context};
 use clap::Args;
 use fabro_agent::{DockerSandbox, DockerSandboxConfig, Sandbox, WorktreeConfig, WorktreeSandbox};
-use fabro_config::run::{RunDefaults, WorkflowRunConfig};
+use fabro_config::config::FabroConfig;
 use fabro_graphviz::graph::Graph;
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, Interviewer};
 use fabro_model::{Catalog, Provider};
@@ -98,7 +98,7 @@ struct ResumeContext {
     graph: Graph,
     run_id: String,
     run_dir: PathBuf,
-    run_cfg: Option<WorkflowRunConfig>,
+    run_cfg: Option<FabroConfig>,
     sandbox: Arc<dyn Sandbox>,
     /// Kept as Arc so the sandbox event callbacks can emit through it. Listeners
     /// that need to be added later (e.g. ProgressUI) are registered separately.
@@ -158,7 +158,7 @@ fn preferred_resume_repo_path(
 /// or the workflow cannot be resumed.
 pub async fn resume_command(
     args: ResumeArgs,
-    mut run_defaults: RunDefaults,
+    mut run_defaults: FabroConfig,
     styles: &'static Styles,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     git_author: fabro_workflows::git::GitAuthor,
@@ -168,7 +168,7 @@ pub async fn resume_command(
         project_config::discover_project_config(&std::env::current_dir().unwrap_or_default())
     {
         tracing::debug!("Applying run defaults from fabro.toml");
-        run_defaults.merge_overlay(project_config.into_run_defaults());
+        run_defaults.merge_overlay(project_config);
     }
 
     let ctx = if args.checkpoint.is_some() {
@@ -183,7 +183,7 @@ pub async fn resume_command(
 /// Checkpoint-file path: load checkpoint and graph from files, resolve sandbox from flags/config.
 async fn prepare_from_checkpoint(
     args: &ResumeArgs,
-    run_defaults: &RunDefaults,
+    run_defaults: &FabroConfig,
     styles: &Styles,
     github_app: &Option<fabro_github::GitHubAppCredentials>,
     git_author: fabro_workflows::git::GitAuthor,
@@ -225,7 +225,7 @@ async fn prepare_from_checkpoint(
         .context("Failed to activate per-run log")?;
     let status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
     tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
-    let mut run_cfg = run_cfg;
+    let mut run_cfg: Option<FabroConfig> = run_cfg;
     write_run_config_snapshot(&run_dir, run_cfg.as_mut()).await?;
 
     let original_cwd = std::env::current_dir()?;
@@ -479,7 +479,7 @@ async fn prepare_from_checkpoint(
 async fn prepare_from_branch(
     args: &ResumeArgs,
     styles: &Styles,
-    run_defaults: &RunDefaults,
+    run_defaults: &FabroConfig,
     github_app: &Option<fabro_github::GitHubAppCredentials>,
     git_author: fabro_workflows::git::GitAuthor,
 ) -> anyhow::Result<ResumeContext> {
@@ -584,7 +584,7 @@ async fn prepare_from_branch(
         .context("Failed to activate per-run log")?;
     let status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
     tokio::fs::write(run_dir.join("graph.fabro"), &graph_source).await?;
-    let mut run_cfg = run_cfg;
+    let mut run_cfg: Option<FabroConfig> = run_cfg;
     write_run_config_snapshot(&run_dir, run_cfg.as_mut()).await?;
 
     let emitter = Arc::new(EventEmitter::new());
@@ -867,7 +867,7 @@ async fn prepare_from_branch(
 async fn run_resumed(
     ctx: ResumeContext,
     args: ResumeArgs,
-    run_defaults: RunDefaults,
+    run_defaults: FabroConfig,
     styles: &'static Styles,
 ) -> anyhow::Result<()> {
     let ResumeContext {
@@ -1158,7 +1158,7 @@ async fn run_resumed(
         .unwrap_or_else(|| run_defaults.mcp_servers.clone())
         .clone()
         .into_iter()
-        .map(|(name, entry)| entry.into_config(name))
+        .map(|(name, entry): (String, fabro_config::mcp::McpServerEntry)| entry.into_config(name))
         .collect();
 
     let registry = fabro_workflows::handler::default_registry(interviewer.clone(), {
