@@ -568,7 +568,7 @@ async fn main_inner() -> (String, Result<()>) {
                 match fabro_config::cli::load_cli_config(None) {
                     Ok(cli_config) => (
                         cli_config.log.as_ref().and_then(|l| l.level.clone()),
-                        cli_config.upgrade_check.unwrap_or(true),
+                        cli_config.upgrade_check_enabled(),
                     ),
                     Err(err) => return (command_name, Err(err)),
                 }
@@ -579,7 +579,7 @@ async fn main_inner() -> (String, Result<()>) {
             match fabro_config::cli::load_cli_config(None) {
                 Ok(cli_config) => (
                     cli_config.log.as_ref().and_then(|l| l.level.clone()),
-                    cli_config.upgrade_check.unwrap_or(true),
+                    cli_config.upgrade_check_enabled(),
                 ),
                 Err(err) => return (command_name, Err(err)),
             }
@@ -684,8 +684,7 @@ async fn main_inner() -> (String, Result<()>) {
             Command::Exec(mut args) => {
                 let cli_config = cli_config::load_cli_config(None)?;
                 #[cfg(feature = "sleep_inhibitor")]
-                let _sleep_guard =
-                    fabro_beastie::guard(cli_config.prevent_idle_sleep.unwrap_or(false));
+                let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep_enabled());
                 let exec_defaults = cli_config.exec.as_ref();
                 args.apply_cli_defaults(
                     exec_defaults.and_then(|a| a.provider.as_deref()),
@@ -753,7 +752,7 @@ async fn main_inner() -> (String, Result<()>) {
                 let styles: &'static fabro_util::terminal::Styles =
                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
                 let cli_config = cli_config::load_cli_config(None)?;
-                args.verbose = args.verbose || cli_config.verbose.unwrap_or(false);
+                args.verbose = args.verbose || cli_config.verbose_enabled();
 
                 if args.preflight {
                     // Preflight validates config without creating a run dir.
@@ -768,12 +767,12 @@ async fn main_inner() -> (String, Result<()>) {
                 } else {
                     // Unified path: create + start (+ attach for foreground)
                     let quiet = args.detach;
-                    let _prevent_idle_sleep = cli_config.prevent_idle_sleep;
+                    let _prevent_idle_sleep = cli_config.prevent_idle_sleep_enabled();
                     let (run_id, run_dir) =
                         commands::create::create_run(&args, cli_config, styles, quiet).await?;
 
                     #[cfg(feature = "sleep_inhibitor")]
-                    let _sleep_guard = fabro_beastie::guard(_prevent_idle_sleep.unwrap_or(false));
+                    let _sleep_guard = fabro_beastie::guard(_prevent_idle_sleep);
 
                     let child = commands::start::start_run(&run_dir)?;
 
@@ -895,7 +894,7 @@ async fn main_inner() -> (String, Result<()>) {
             }
             Command::Doctor { verbose, dry_run } => {
                 let cli_config = cli_config::load_cli_config(None)?;
-                let verbose = verbose || cli_config.verbose.unwrap_or(false);
+                let verbose = verbose || cli_config.verbose_enabled();
                 let exit_code = doctor::run_doctor(verbose, !dry_run).await;
                 std::process::exit(exit_code);
             }
@@ -973,10 +972,9 @@ async fn main_inner() -> (String, Result<()>) {
                 let styles: &'static fabro_util::terminal::Styles =
                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
                 let cli_config = cli_config::load_cli_config(None)?;
-                args.verbose = args.verbose || cli_config.verbose.unwrap_or(false);
+                args.verbose = args.verbose || cli_config.verbose_enabled();
                 #[cfg(feature = "sleep_inhibitor")]
-                let _sleep_guard =
-                    fabro_beastie::guard(cli_config.prevent_idle_sleep.unwrap_or(false));
+                let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep_enabled());
                 let github_app = build_github_app_credentials(cli_config.app_id());
                 let git_author = fabro_workflows::git::GitAuthor::from_options(
                     cli_config.git_author().and_then(|a| a.name.clone()),
