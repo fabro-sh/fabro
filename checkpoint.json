@@ -1,35 +1,51 @@
 {
-  "timestamp": "2026-03-24T19:39:33.473713Z",
-  "current_node": "run_tests",
+  "timestamp": "2026-03-24T19:39:34.087289Z",
+  "current_node": "report",
   "completed_nodes": [
     "start",
-    "run_tests"
+    "run_tests",
+    "report"
   ],
   "node_retries": {
+    "report": 1,
     "start": 1,
     "run_tests": 1
   },
   "context_values": {
-    "internal.thread_id": "start",
-    "current.preamble": "Goal: Run tests and report results\n",
-    "last_response": "[Simulated] Response for stage: run_tests",
+    "internal.thread_id": "run_tests",
+    "current.preamble": "Goal: Run tests and report results\n\n## Completed stages\n- **run_tests**: success\n",
+    "last_response": "[Simulated] Response for stage: report",
     "thread.start.current_node": "run_tests",
     "response.run_tests": "[Simulated] Response for stage: run_tests",
-    "last_stage": "run_tests",
+    "last_stage": "report",
     "failure_class": "",
     "graph.rankdir": "LR",
     "internal.retry_count.start": 1,
     "graph.goal": "Run tests and report results",
     "internal.fidelity": "compact",
     "outcome": "success",
+    "internal.retry_count.report": 1,
     "failure_signature": "",
     "internal.retry_count.run_tests": 1,
     "internal.work_dir": "/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWge3pK/detached-run/worktree",
     "internal.node_visit_count": 1,
+    "thread.run_tests.current_node": "report",
+    "response.report": "[Simulated] Response for stage: report",
     "internal.run_id": "01KMGNR1KPSTASCBG1Q140MFK8",
-    "current_node": "run_tests"
+    "current_node": "report"
   },
   "node_outcomes": {
+    "report": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "report",
+        "last_response": "[Simulated] Response for stage: report",
+        "response.report": "[Simulated] Response for stage: report"
+      },
+      "notes": "[Simulated] report",
+      "usage": null,
+      "duration_ms": 0
+    },
     "run_tests": {
       "status": "success",
       "context_updates": {
@@ -48,8 +64,9 @@
       "duration_ms": 0
     }
   },
-  "next_node_id": "report",
+  "next_node_id": "exit",
   "node_visits": {
+    "report": 1,
     "run_tests": 1,
     "start": 1
   }
