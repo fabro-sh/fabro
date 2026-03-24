@@ -38,12 +38,7 @@ pub fn build_completed_stages(
 
     for node_id in &cp.completed_nodes {
         let outcome = cp.node_outcomes.get(node_id);
-        let retries = cp
-            .node_retries
-            .get(node_id)
-            .copied()
-            .unwrap_or(1)
-            .saturating_sub(1);
+        let retries = cp.node_retries.get(node_id).copied().unwrap_or(0);
 
         let status = outcome
             .map(|o| o.status.to_string())

@@ -2109,10 +2109,11 @@ impl WorkflowRunEngine {
                 .await?
             };
             // Gap #5: Track retry count per node
-            node_retries.insert(node.id.clone(), attempts_used);
+            let retry_count = attempts_used.saturating_sub(1);
+            node_retries.insert(node.id.clone(), retry_count);
             context.set(
                 context::keys::retry_count_key(&node.id),
-                serde_json::json!(attempts_used),
+                serde_json::json!(retry_count),
             );
 
             // Gap #1: Auto status -- when auto_status=true and outcome is non-success,

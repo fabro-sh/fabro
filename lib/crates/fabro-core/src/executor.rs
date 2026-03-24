@@ -195,6 +195,9 @@ impl<G: Graph + 'static> Executor<G> {
             };
 
             state.record(node.id(), &node_result);
+            self.lifecycle
+                .after_record(&node, &node_result, &state)
+                .await?;
 
             // Determine next step
             let last_outcome = state.node_outcomes.get(node.id()).unwrap();
@@ -1535,6 +1538,82 @@ mod tests {
             vec![
                 ("start".to_string(), Some("work".to_string())),
                 ("work".to_string(), Some("end".to_string())),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn executor_after_record_runs_after_record_and_before_edge_selection() {
+        use serde_json::json;
+
+        struct ContextWriter;
+        #[async_trait]
+        impl NodeHandler<TestGraph> for ContextWriter {
+            async fn execute(
+                &self,
+                node: &TestNode,
+                _context: &Context,
+                _g: &TestGraph,
+            ) -> Result<Outcome> {
+                let mut outcome = Outcome::success();
+                if node.id() == "start" {
+                    outcome
+                        .context_updates
+                        .insert("shared".into(), json!("hello"));
+                }
+                Ok(outcome)
+            }
+        }
+
+        let log = Arc::new(Mutex::new(Vec::<String>::new()));
+        struct RecordTracker(Arc<Mutex<Vec<String>>>);
+        #[async_trait]
+        impl RunLifecycle<TestGraph> for RecordTracker {
+            async fn after_record(
+                &self,
+                node: &TestNode,
+                _result: &NodeResult,
+                state: &RunState,
+            ) -> Result<()> {
+                let shared = state.context.get_string("shared", "missing");
+                let completed = state.completed_nodes.join(",");
+                self.0.lock().unwrap().push(format!(
+                    "after_record:{}:{}:{}",
+                    node.id(),
+                    completed,
+                    shared
+                ));
+                Ok(())
+            }
+
+            async fn on_edge_selected(
+                &self,
+                ctx: &EdgeContext<'_, TestGraph>,
+                state: &RunState,
+            ) -> Result<EdgeDecision> {
+                let shared = state.context.get_string("shared", "missing");
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(format!("on_edge_selected:{}:{}", ctx.from, shared));
+                Ok(EdgeDecision::Continue)
+            }
+        }
+
+        let g = linear_graph(&["start", "end"]);
+        let state = RunState::new(&g).unwrap();
+        let executor =
+            ExecutorBuilder::new(Arc::new(ContextWriter) as Arc<dyn NodeHandler<TestGraph>>)
+                .lifecycle(Box::new(RecordTracker(log.clone())))
+                .build();
+
+        executor.run(&g, state).await.unwrap();
+
+        assert_eq!(
+            *log.lock().unwrap(),
+            vec![
+                "after_record:start:start:hello".to_string(),
+                "on_edge_selected:start:hello".to_string(),
             ]
         );
     }

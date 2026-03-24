@@ -16,6 +16,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 
 use fabro_core::error::Result as CoreResult;
+use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{
     AttemptContext, AttemptResultContext, EdgeContext, EdgeDecision, NodeDecision, RunLifecycle,
 };
@@ -40,6 +41,7 @@ use self::event::EventLifecycle;
 use self::fidelity::FidelityLifecycle;
 use self::git::{GitCheckpointResult, GitLifecycle};
 use self::hook::HookLifecycle;
+use crate::outcome::OutcomeExt;
 
 type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
@@ -290,6 +292,56 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         self.hook.after_node(node, result, state).await?;
         self.disk.after_node(node, result, state).await?;
         self.artifact.after_node(node, result, state).await?;
+        Ok(())
+    }
+
+    async fn after_record(
+        &self,
+        node: &WorkflowNode,
+        result: &WfNodeResult,
+        state: &WfRunState,
+    ) -> CoreResult<()> {
+        let outcome = &result.outcome;
+        let retry_count = state.node_retries.get(node.id()).copied().unwrap_or(0);
+        let failure_class = crate::engine::classify_outcome(outcome);
+        let failure_signature = failure_class
+            .map(|category| {
+                let signature_hint = outcome
+                    .failure
+                    .as_ref()
+                    .and_then(|f| f.signature.as_deref());
+                crate::error::FailureSignature::new(
+                    node.id(),
+                    category,
+                    signature_hint,
+                    outcome.failure_reason(),
+                )
+                .to_string()
+            })
+            .unwrap_or_default();
+
+        state.context.set(
+            context::keys::retry_count_key(node.id()),
+            serde_json::json!(retry_count),
+        );
+        state.context.set(
+            context::keys::OUTCOME,
+            serde_json::json!(outcome.status.to_string()),
+        );
+        state.context.set(
+            context::keys::FAILURE_CLASS,
+            serde_json::json!(failure_class.map_or(String::new(), |fc| fc.to_string())),
+        );
+        state.context.set(
+            context::keys::FAILURE_SIGNATURE,
+            serde_json::json!(failure_signature),
+        );
+        if let Some(ref preferred_label) = outcome.preferred_label {
+            state.context.set(
+                context::keys::PREFERRED_LABEL,
+                serde_json::json!(preferred_label),
+            );
+        }
         Ok(())
     }
 
