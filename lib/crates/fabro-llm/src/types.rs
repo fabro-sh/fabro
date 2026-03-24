@@ -727,17 +727,14 @@ impl Default for AdapterTimeout {
 
 // --- 6.6 RetryPolicy ---
 
-/// Callback invoked before each retry attempt with (error, attempt, delay in seconds).
-pub type OnRetryCallback = Arc<dyn Fn(&SdkError, u32, f64) + Send + Sync>;
+/// Callback invoked before each retry attempt with (error, attempt, delay as Duration).
+pub type OnRetryCallback = Arc<dyn Fn(&SdkError, u32, std::time::Duration) + Send + Sync>;
 
 #[derive(Clone)]
 pub struct RetryPolicy {
     pub max_retries: u32,
-    pub base_delay: f64,
-    pub max_delay: f64,
-    pub backoff_multiplier: f64,
-    pub jitter: bool,
-    /// Called before each retry with (error, attempt number, delay in seconds).
+    pub backoff: fabro_util::backoff::BackoffPolicy,
+    /// Called before each retry with (error, attempt number, delay).
     pub on_retry: Option<OnRetryCallback>,
 }
 
@@ -745,10 +742,7 @@ impl std::fmt::Debug for RetryPolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RetryPolicy")
             .field("max_retries", &self.max_retries)
-            .field("base_delay", &self.base_delay)
-            .field("max_delay", &self.max_delay)
-            .field("backoff_multiplier", &self.backoff_multiplier)
-            .field("jitter", &self.jitter)
+            .field("backoff", &self.backoff)
             .field("on_retry", &self.on_retry.as_ref().map(|_| "..."))
             .finish()
     }
@@ -758,26 +752,13 @@ impl Default for RetryPolicy {
     fn default() -> Self {
         Self {
             max_retries: 2,
-            base_delay: 1.0,
-            max_delay: 60.0,
-            backoff_multiplier: 2.0,
-            jitter: true,
+            backoff: fabro_util::backoff::BackoffPolicy {
+                initial_delay: std::time::Duration::from_secs(1),
+                factor: 2.0,
+                max_delay: std::time::Duration::from_secs(60),
+                jitter: true,
+            },
             on_retry: None,
-        }
-    }
-}
-
-impl RetryPolicy {
-    #[must_use]
-    pub fn delay_for_attempt(&self, attempt: u32) -> f64 {
-        let delay = self.base_delay * self.backoff_multiplier.powi(attempt as i32);
-        let delay = delay.min(self.max_delay);
-
-        if self.jitter {
-            let jitter_factor = 0.5 + rand::random::<f64>(); // 0.5..1.5
-            delay * jitter_factor
-        } else {
-            delay
         }
     }
 }
@@ -1177,47 +1158,57 @@ mod tests {
 
     #[test]
     fn retry_policy_delay_no_jitter() {
+        use std::time::Duration;
         let policy = RetryPolicy {
             max_retries: 3,
-            base_delay: 1.0,
-            max_delay: 60.0,
-            backoff_multiplier: 2.0,
-            jitter: false,
+            backoff: fabro_util::backoff::BackoffPolicy {
+                initial_delay: Duration::from_secs(1),
+                factor: 2.0,
+                max_delay: Duration::from_secs(60),
+                jitter: false,
+            },
             ..Default::default()
         };
-        assert!((policy.delay_for_attempt(0) - 1.0).abs() < f64::EPSILON);
-        assert!((policy.delay_for_attempt(1) - 2.0).abs() < f64::EPSILON);
-        assert!((policy.delay_for_attempt(2) - 4.0).abs() < f64::EPSILON);
-        assert!((policy.delay_for_attempt(3) - 8.0).abs() < f64::EPSILON);
+        // BackoffPolicy is 1-indexed: attempt 1 = base, attempt 2 = base*factor, etc.
+        assert_eq!(policy.backoff.delay_for_attempt(1), Duration::from_secs(1));
+        assert_eq!(policy.backoff.delay_for_attempt(2), Duration::from_secs(2));
+        assert_eq!(policy.backoff.delay_for_attempt(3), Duration::from_secs(4));
+        assert_eq!(policy.backoff.delay_for_attempt(4), Duration::from_secs(8));
     }
 
     #[test]
     fn retry_policy_delay_respects_max() {
+        use std::time::Duration;
         let policy = RetryPolicy {
             max_retries: 10,
-            base_delay: 1.0,
-            max_delay: 5.0,
-            backoff_multiplier: 2.0,
-            jitter: false,
+            backoff: fabro_util::backoff::BackoffPolicy {
+                initial_delay: Duration::from_secs(1),
+                factor: 2.0,
+                max_delay: Duration::from_secs(5),
+                jitter: false,
+            },
             ..Default::default()
         };
-        assert!((policy.delay_for_attempt(5) - 5.0).abs() < f64::EPSILON);
+        assert_eq!(policy.backoff.delay_for_attempt(6), Duration::from_secs(5));
     }
 
     #[test]
     fn retry_policy_delay_with_jitter_in_range() {
+        use std::time::Duration;
         let policy = RetryPolicy {
             max_retries: 3,
-            base_delay: 1.0,
-            max_delay: 60.0,
-            backoff_multiplier: 2.0,
-            jitter: true,
+            backoff: fabro_util::backoff::BackoffPolicy {
+                initial_delay: Duration::from_secs(1),
+                factor: 2.0,
+                max_delay: Duration::from_secs(60),
+                jitter: true,
+            },
             ..Default::default()
         };
-        let delay = policy.delay_for_attempt(0);
-        // base * 0.5 to base * 1.5 => 0.5 to 1.5
-        assert!(delay >= 0.5);
-        assert!(delay <= 1.5);
+        let delay = policy.backoff.delay_for_attempt(1);
+        // base * 0.5 to base * 1.5 => 0.5s to 1.5s
+        assert!(delay >= Duration::from_millis(500));
+        assert!(delay <= Duration::from_millis(1500));
     }
 
     #[test]

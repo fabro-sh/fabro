@@ -460,14 +460,6 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
             _ => {}
         }
 
-        // Circuit breaker for loop_restart edges
-        if let Some(ref edge) = ctx.edge {
-            if edge.inner().loop_restart() {
-                // Check restart_failure_signatures limit
-                // (implemented in Phase 5 when full checkpoint resume is wired)
-            }
-        }
-
         Ok(EdgeDecision::Continue)
     }
 

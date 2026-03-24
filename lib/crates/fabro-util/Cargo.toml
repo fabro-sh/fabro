@@ -10,6 +10,7 @@ doctest = false
 
 [dependencies]
 console.workspace = true
+rand.workspace = true
 regex.workspace = true
 termimad.workspace = true
 aho-corasick.workspace = true

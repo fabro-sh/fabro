@@ -1408,7 +1408,7 @@ name = "fabro-core"
 version = "0.176.2"
 dependencies = [
  "async-trait",
- "rand 0.8.5",
+ "fabro-util",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1713,6 +1713,7 @@ dependencies = [
  "console 0.15.11",
  "dirs",
  "insta",
+ "rand 0.8.5",
  "regex",
  "serde",
  "serde_json",

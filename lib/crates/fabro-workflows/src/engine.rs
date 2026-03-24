@@ -3,10 +3,11 @@ use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use fabro_agent::Sandbox;
+use fabro_util::backoff::BackoffPolicy;
 use futures::FutureExt;
 use rand::Rng;
 use tokio_util::sync::CancellationToken;
@@ -67,60 +68,11 @@ struct LoopState {
 
 // --- Retry policy types ---
 
-/// Configuration for exponential backoff between retry attempts.
-#[derive(Debug, Clone)]
-pub struct BackoffConfig {
-    pub initial_delay_ms: u64,
-    pub backoff_factor: f64,
-    pub max_delay_ms: u64,
-    pub jitter: bool,
-}
-
-impl Default for BackoffConfig {
-    fn default() -> Self {
-        Self {
-            initial_delay_ms: 5_000,
-            backoff_factor: 2.0,
-            max_delay_ms: 60_000,
-            jitter: true,
-        }
-    }
-}
-
-impl BackoffConfig {
-    /// Calculate delay for a given attempt (1-indexed).
-    #[must_use]
-    pub fn delay_for_attempt(&self, attempt: u32) -> std::time::Duration {
-        let exponent = attempt.saturating_sub(1);
-        let initial = f64::from(u32::try_from(self.initial_delay_ms).unwrap_or(u32::MAX));
-        let max = f64::from(u32::try_from(self.max_delay_ms).unwrap_or(u32::MAX));
-        let exp_i32 = i32::try_from(exponent).unwrap_or(i32::MAX);
-        let delay_f64 = initial * self.backoff_factor.powi(exp_i32);
-        let capped = delay_f64.min(max);
-        let final_ms = if self.jitter {
-            let mut rng = rand::thread_rng();
-            let jitter_factor: f64 = rng.gen_range(0.5..1.5);
-            capped * jitter_factor
-        } else {
-            capped
-        };
-        // f64 -> u64: clamp to non-negative, truncate via string-free path
-        let ms = if final_ms <= 0.0 {
-            0u64
-        } else if final_ms >= f64::from(u32::MAX) {
-            u64::from(u32::MAX)
-        } else {
-            final_ms as u64
-        };
-        std::time::Duration::from_millis(ms)
-    }
-}
-
 /// Retry policy for node execution.
 #[derive(Clone, Debug)]
 pub struct RetryPolicy {
     pub max_attempts: u32,
-    pub backoff: BackoffConfig,
+    pub backoff: BackoffPolicy,
 }
 
 impl RetryPolicy {
@@ -129,19 +81,24 @@ impl RetryPolicy {
     pub fn none() -> Self {
         Self {
             max_attempts: 1,
-            backoff: BackoffConfig::default(),
+            backoff: BackoffPolicy {
+                initial_delay: Duration::from_millis(5_000),
+                factor: 2.0,
+                max_delay: Duration::from_millis(60_000),
+                jitter: true,
+            },
         }
     }
 
     /// Standard retry policy: 5 attempts, 5s initial, 2x factor.
     #[must_use]
-    pub const fn standard() -> Self {
+    pub fn standard() -> Self {
         Self {
             max_attempts: 5,
-            backoff: BackoffConfig {
-                initial_delay_ms: 5_000,
-                backoff_factor: 2.0,
-                max_delay_ms: 60_000,
+            backoff: BackoffPolicy {
+                initial_delay: Duration::from_millis(5_000),
+                factor: 2.0,
+                max_delay: Duration::from_millis(60_000),
                 jitter: true,
             },
         }
@@ -149,13 +106,13 @@ impl RetryPolicy {
 
     /// Aggressive retry: 5 attempts, 500ms initial, 2x factor.
     #[must_use]
-    pub const fn aggressive() -> Self {
+    pub fn aggressive() -> Self {
         Self {
             max_attempts: 5,
-            backoff: BackoffConfig {
-                initial_delay_ms: 500,
-                backoff_factor: 2.0,
-                max_delay_ms: 60_000,
+            backoff: BackoffPolicy {
+                initial_delay: Duration::from_millis(500),
+                factor: 2.0,
+                max_delay: Duration::from_millis(60_000),
                 jitter: true,
             },
         }
@@ -163,13 +120,13 @@ impl RetryPolicy {
 
     /// Linear retry: 3 attempts, 500ms fixed delay.
     #[must_use]
-    pub const fn linear() -> Self {
+    pub fn linear() -> Self {
         Self {
             max_attempts: 3,
-            backoff: BackoffConfig {
-                initial_delay_ms: 500,
-                backoff_factor: 1.0,
-                max_delay_ms: 60_000,
+            backoff: BackoffPolicy {
+                initial_delay: Duration::from_millis(500),
+                factor: 1.0,
+                max_delay: Duration::from_millis(60_000),
                 jitter: true,
             },
         }
@@ -177,13 +134,13 @@ impl RetryPolicy {
 
     /// Patient retry: 3 attempts, 2000ms initial, 3x factor.
     #[must_use]
-    pub const fn patient() -> Self {
+    pub fn patient() -> Self {
         Self {
             max_attempts: 3,
-            backoff: BackoffConfig {
-                initial_delay_ms: 2000,
-                backoff_factor: 3.0,
-                max_delay_ms: 60_000,
+            backoff: BackoffPolicy {
+                initial_delay: Duration::from_millis(2000),
+                factor: 3.0,
+                max_delay: Duration::from_millis(60_000),
                 jitter: true,
             },
         }
@@ -211,7 +168,12 @@ pub(crate) fn build_retry_policy(node: &Node, graph: &Graph) -> RetryPolicy {
     let max_attempts = u32::try_from(max_retries + 1).unwrap_or(1).max(1);
     RetryPolicy {
         max_attempts,
-        backoff: BackoffConfig::default(),
+        backoff: BackoffPolicy {
+            initial_delay: Duration::from_millis(5_000),
+            factor: 2.0,
+            max_delay: Duration::from_millis(60_000),
+            jitter: true,
+        },
     }
 }
 
@@ -1463,7 +1425,8 @@ impl WorkflowRunEngine {
         use fabro_core::state::RunState;
         use tokio_util::sync::CancellationToken;
 
-        let wf_graph = crate::core_adapter::WorkflowGraph(std::sync::Arc::new(graph.clone()));
+        let graph_arc = std::sync::Arc::new(graph.clone());
+        let wf_graph = crate::core_adapter::WorkflowGraph(Arc::clone(&graph_arc));
 
         // Build a shared EngineServices for the handler
         let shared_services = std::sync::Arc::new(EngineServices {
@@ -1487,7 +1450,7 @@ impl WorkflowRunEngine {
             self.services.emitter.clone(),
             self.services.hook_runner.clone(),
             self.services.sandbox.clone(),
-            std::sync::Arc::new(graph.clone()),
+            graph_arc,
             config.run_dir.clone(),
             config.run_id.clone(),
             config.dry_run,
@@ -2694,83 +2657,6 @@ mod tests {
         }
     }
 
-    // --- BackoffConfig tests ---
-
-    #[test]
-    fn backoff_no_jitter_first_attempt() {
-        let config = BackoffConfig {
-            initial_delay_ms: 200,
-            backoff_factor: 2.0,
-            max_delay_ms: 60_000,
-            jitter: false,
-        };
-        let delay = config.delay_for_attempt(1);
-        assert_eq!(delay.as_millis(), 200);
-    }
-
-    #[test]
-    fn backoff_no_jitter_second_attempt() {
-        let config = BackoffConfig {
-            initial_delay_ms: 200,
-            backoff_factor: 2.0,
-            max_delay_ms: 60_000,
-            jitter: false,
-        };
-        let delay = config.delay_for_attempt(2);
-        assert_eq!(delay.as_millis(), 400);
-    }
-
-    #[test]
-    fn backoff_no_jitter_third_attempt() {
-        let config = BackoffConfig {
-            initial_delay_ms: 200,
-            backoff_factor: 2.0,
-            max_delay_ms: 60_000,
-            jitter: false,
-        };
-        let delay = config.delay_for_attempt(3);
-        assert_eq!(delay.as_millis(), 800);
-    }
-
-    #[test]
-    fn backoff_respects_max_delay() {
-        let config = BackoffConfig {
-            initial_delay_ms: 10_000,
-            backoff_factor: 10.0,
-            max_delay_ms: 30_000,
-            jitter: false,
-        };
-        let delay = config.delay_for_attempt(5);
-        assert_eq!(delay.as_millis(), 30_000);
-    }
-
-    #[test]
-    fn backoff_with_jitter_is_in_range() {
-        let config = BackoffConfig {
-            initial_delay_ms: 1000,
-            backoff_factor: 1.0,
-            max_delay_ms: 60_000,
-            jitter: true,
-        };
-        let delay = config.delay_for_attempt(1);
-        // With jitter factor 0.5..1.5, delay should be 500..1500
-        assert!(delay.as_millis() >= 500);
-        assert!(delay.as_millis() <= 1500);
-    }
-
-    #[test]
-    fn backoff_linear_factor() {
-        let config = BackoffConfig {
-            initial_delay_ms: 500,
-            backoff_factor: 1.0,
-            max_delay_ms: 60_000,
-            jitter: false,
-        };
-        assert_eq!(config.delay_for_attempt(1).as_millis(), 500);
-        assert_eq!(config.delay_for_attempt(2).as_millis(), 500);
-        assert_eq!(config.delay_for_attempt(3).as_millis(), 500);
-    }
-
     // --- RetryPolicy preset tests ---
 
     #[test]
@@ -2783,28 +2669,28 @@ mod tests {
     fn retry_policy_standard() {
         let policy = RetryPolicy::standard();
         assert_eq!(policy.max_attempts, 5);
-        assert_eq!(policy.backoff.initial_delay_ms, 5_000);
+        assert_eq!(policy.backoff.initial_delay, Duration::from_millis(5_000));
     }
 
     #[test]
     fn retry_policy_aggressive() {
         let policy = RetryPolicy::aggressive();
         assert_eq!(policy.max_attempts, 5);
-        assert_eq!(policy.backoff.initial_delay_ms, 500);
+        assert_eq!(policy.backoff.initial_delay, Duration::from_millis(500));
     }
 
     #[test]
     fn retry_policy_linear() {
         let policy = RetryPolicy::linear();
         assert_eq!(policy.max_attempts, 3);
-        assert_eq!(policy.backoff.backoff_factor, 1.0);
+        assert_eq!(policy.backoff.factor, 1.0);
     }
 
     #[test]
     fn retry_policy_patient() {
         let policy = RetryPolicy::patient();
         assert_eq!(policy.max_attempts, 3);
-        assert_eq!(policy.backoff.initial_delay_ms, 2000);
+        assert_eq!(policy.backoff.initial_delay, Duration::from_millis(2000));
     }
 
     // --- build_retry_policy tests ---
@@ -2848,7 +2734,7 @@ mod tests {
         let graph = Graph::new("test");
         let policy = build_retry_policy(&node, &graph);
         assert_eq!(policy.max_attempts, 5);
-        assert_eq!(policy.backoff.initial_delay_ms, 500);
+        assert_eq!(policy.backoff.initial_delay, Duration::from_millis(500));
     }
 
     #[test]
@@ -2860,7 +2746,7 @@ mod tests {
         let policy = build_retry_policy(&node, &graph);
         assert_eq!(policy.max_attempts, 4); // 3 retries + 1 initial
                                             // Should use default backoff, not a preset's backoff
-        assert_eq!(policy.backoff.initial_delay_ms, 5_000);
+        assert_eq!(policy.backoff.initial_delay, Duration::from_millis(5_000));
     }
 
     #[test]
