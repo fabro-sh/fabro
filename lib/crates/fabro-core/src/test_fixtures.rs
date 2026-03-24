@@ -223,17 +223,10 @@ impl Graph for TestGraph {
                 if node.is_terminal() {
                     match outcomes.get(required_node) {
                         Some(o) if o.status == *required_status => {}
-                        Some(o) => {
-                            return Err(format!(
-                                "goal gate failed: {} requires {} to be {:?} but was {:?}",
-                                node.id, required_node, required_status, o.status
-                            ));
-                        }
-                        None => {
-                            return Err(format!(
-                                "goal gate failed: {} requires {} but it was not completed",
-                                node.id, required_node
-                            ));
+                        _ => {
+                            // Return the failed node id (the node whose gate is
+                            // checked), matching fabro-workflows convention
+                            return Err(required_node.clone());
                         }
                     }
                 }

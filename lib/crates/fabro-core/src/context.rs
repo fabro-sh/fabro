@@ -76,6 +76,13 @@ impl Context {
         }
     }
 
+    pub fn with_store_and_logs(
+        store: Arc<dyn ContextStore>,
+        logs: Arc<RwLock<Vec<String>>>,
+    ) -> Self {
+        Self { store, logs }
+    }
+
     pub fn set(&self, key: impl Into<String>, value: Value) {
         self.store.set(key.into(), value);
     }

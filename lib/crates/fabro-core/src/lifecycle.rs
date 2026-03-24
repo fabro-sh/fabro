@@ -50,7 +50,13 @@ pub trait RunLifecycle<G: Graph>: Send + Sync {
         Ok(())
     }
 
-    async fn on_terminal_reached(&self, _node: &G::Node, _state: &RunState) {}
+    async fn on_terminal_reached(
+        &self,
+        _node: &G::Node,
+        _goal_gates_passed: bool,
+        _state: &RunState,
+    ) {
+    }
 
     async fn before_node(&self, _node: &G::Node, _state: &RunState) -> Result<NodeDecision> {
         Ok(NodeDecision::Continue)
@@ -93,6 +99,7 @@ pub trait RunLifecycle<G: Graph>: Send + Sync {
         &self,
         _node: &G::Node,
         _result: &NodeResult,
+        _next_node_id: Option<&str>,
         _state: &RunState,
     ) -> Result<()> {
         Ok(())
@@ -128,9 +135,11 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
         Ok(())
     }
 
-    async fn on_terminal_reached(&self, node: &G::Node, state: &RunState) {
+    async fn on_terminal_reached(&self, node: &G::Node, goal_gates_passed: bool, state: &RunState) {
         for child in &self.children {
-            child.on_terminal_reached(node, state).await;
+            child
+                .on_terminal_reached(node, goal_gates_passed, state)
+                .await;
         }
     }
 
@@ -199,10 +208,13 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
         &self,
         node: &G::Node,
         result: &NodeResult,
+        next_node_id: Option<&str>,
         state: &RunState,
     ) -> Result<()> {
         for child in &self.children {
-            child.on_checkpoint(node, result, state).await?;
+            child
+                .on_checkpoint(node, result, next_node_id, state)
+                .await?;
         }
         Ok(())
     }
@@ -268,7 +280,12 @@ mod tests {
             Ok(())
         }
 
-        async fn on_terminal_reached(&self, _node: &TestNode, _state: &RunState) {
+        async fn on_terminal_reached(
+            &self,
+            _node: &TestNode,
+            _goal_gates_passed: bool,
+            _state: &RunState,
+        ) {
             self.log
                 .lock()
                 .unwrap()
@@ -351,6 +368,7 @@ mod tests {
             &self,
             _node: &TestNode,
             _result: &NodeResult,
+            _next_node_id: Option<&str>,
             _state: &RunState,
         ) -> Result<()> {
             self.log

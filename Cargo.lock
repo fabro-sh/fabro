@@ -1408,10 +1408,12 @@ name = "fabro-core"
 version = "0.176.2"
 dependencies = [
  "async-trait",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -1745,6 +1747,7 @@ dependencies = [
  "dotenvy",
  "fabro-agent",
  "fabro-config",
+ "fabro-core",
  "fabro-devcontainer",
  "fabro-git-storage",
  "fabro-github",

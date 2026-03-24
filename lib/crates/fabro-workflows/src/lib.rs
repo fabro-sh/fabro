@@ -101,6 +101,7 @@ pub mod checkpoint;
 pub mod conclusion;
 pub mod condition;
 pub mod context;
+pub mod core_adapter;
 pub mod cost;
 pub mod devcontainer_bridge;
 pub mod engine;
