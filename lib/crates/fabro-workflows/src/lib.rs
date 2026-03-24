@@ -31,7 +31,7 @@ pub fn build_completed_stages(
     cp: &checkpoint::Checkpoint,
     run_failed: bool,
 ) -> Vec<fabro_retro::retro::CompletedStage> {
-    use outcome::StageStatus;
+    use outcome::{OutcomeExt, StageStatus};
 
     let mut stages = Vec::new();
     let mut any_stage_failed = false;

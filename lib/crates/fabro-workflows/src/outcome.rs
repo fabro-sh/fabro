@@ -1,49 +1,8 @@
-use std::collections::HashMap;
-use std::fmt;
-use std::str::FromStr;
-
 use serde::{Deserialize, Serialize};
 
-use crate::error::{classify_failure_reason, FailureClass};
+pub use fabro_core::outcome::{FailureCategory, FailureDetail, OutcomeMeta, StageStatus};
 
-/// Status of a pipeline stage execution.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StageStatus {
-    Success,
-    Fail,
-    PartialSuccess,
-    Retry,
-    Skipped,
-}
-
-impl fmt::Display for StageStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Self::Success => "success",
-            Self::Fail => "fail",
-            Self::PartialSuccess => "partial_success",
-            Self::Retry => "retry",
-            Self::Skipped => "skipped",
-        };
-        write!(f, "{s}")
-    }
-}
-
-impl FromStr for StageStatus {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "success" => Ok(Self::Success),
-            "fail" => Ok(Self::Fail),
-            "partial_success" => Ok(Self::PartialSuccess),
-            "retry" => Ok(Self::Retry),
-            "skipped" => Ok(Self::Skipped),
-            other => Err(format!("unknown stage status: {other}")),
-        }
-    }
-}
+use crate::error::classify_failure_reason;
 
 /// Token usage from a single pipeline stage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,163 +37,82 @@ impl From<&StageUsage> for fabro_llm::types::Usage {
     }
 }
 
-/// Structured failure information carried through the pipeline.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FailureDetail {
-    pub message: String,
-    pub failure_class: FailureClass,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure_signature: Option<String>,
-}
+/// The workflow-specific Outcome type, parameterized with optional stage usage.
+pub type Outcome = fabro_core::Outcome<Option<StageUsage>>;
 
-impl FailureDetail {
-    pub fn new(message: impl Into<String>, failure_class: FailureClass) -> Self {
-        Self {
-            message: message.into(),
-            failure_class,
-            failure_signature: None,
-        }
-    }
-}
+/// Extension trait for workflow-specific Outcome factory methods and accessors.
+pub trait OutcomeExt: Sized {
+    /// Create a failed outcome with a deterministic failure category.
+    fn fail_deterministic(reason: impl Into<String>) -> Self;
 
-/// The result of executing a node handler.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Outcome {
-    pub status: StageStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preferred_label: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub suggested_next_ids: Vec<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub context_updates: HashMap<String, serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure: Option<FailureDetail>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<StageUsage>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub files_touched: Vec<String>,
-    /// When set, the engine bypasses edge selection and jumps directly to this node.
-    /// Used by the parallel handler to skip re-executing branch nodes.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub jump_to_node: Option<String>,
-    /// Wall-clock duration of the stage execution in milliseconds.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration_ms: Option<u64>,
-}
+    /// Create a failed outcome with the failure category inferred from the message via heuristics.
+    fn fail_classify(reason: impl Into<String>) -> Self;
 
-impl Outcome {
-    #[must_use]
-    pub fn success() -> Self {
-        Self {
-            status: StageStatus::Success,
-            preferred_label: None,
-            suggested_next_ids: Vec::new(),
-            context_updates: HashMap::new(),
-            notes: None,
-            failure: None,
-            usage: None,
-            files_touched: Vec::new(),
-            jump_to_node: None,
-            duration_ms: None,
-        }
-    }
-
-    /// Create a failed outcome with a deterministic failure class.
-    pub fn fail_deterministic(reason: impl Into<String>) -> Self {
-        Self {
-            status: StageStatus::Fail,
-            preferred_label: None,
-            suggested_next_ids: Vec::new(),
-            context_updates: HashMap::new(),
-            notes: None,
-            failure: Some(FailureDetail::new(reason, FailureClass::Deterministic)),
-            usage: None,
-            files_touched: Vec::new(),
-            jump_to_node: None,
-            duration_ms: None,
-        }
-    }
-
-    /// Create a failed outcome with the failure class inferred from the message via heuristics.
-    pub fn fail_classify(reason: impl Into<String>) -> Self {
-        let reason = reason.into();
-        let failure_class = classify_failure_reason(&reason);
-        Self {
-            status: StageStatus::Fail,
-            preferred_label: None,
-            suggested_next_ids: Vec::new(),
-            context_updates: HashMap::new(),
-            notes: None,
-            failure: Some(FailureDetail::new(reason, failure_class)),
-            usage: None,
-            files_touched: Vec::new(),
-            jump_to_node: None,
-            duration_ms: None,
-        }
-    }
-
-    /// Create a retry outcome with the failure class inferred from the message via heuristics.
-    pub fn retry_classify(reason: impl Into<String>) -> Self {
-        let reason = reason.into();
-        let failure_class = classify_failure_reason(&reason);
-        Self {
-            status: StageStatus::Retry,
-            preferred_label: None,
-            suggested_next_ids: Vec::new(),
-            context_updates: HashMap::new(),
-            notes: None,
-            failure: Some(FailureDetail::new(reason, failure_class)),
-            usage: None,
-            files_touched: Vec::new(),
-            jump_to_node: None,
-            duration_ms: None,
-        }
-    }
-
-    /// Set the failure signature on this outcome. Returns self for chaining.
-    #[must_use]
-    pub fn with_signature(mut self, sig: Option<impl Into<String>>) -> Self {
-        if let Some(ref mut f) = self.failure {
-            f.failure_signature = sig.map(Into::into);
-        }
-        self
-    }
-
-    #[must_use]
-    pub fn skipped() -> Self {
-        Self {
-            status: StageStatus::Skipped,
-            preferred_label: None,
-            suggested_next_ids: Vec::new(),
-            context_updates: HashMap::new(),
-            notes: None,
-            failure: None,
-            usage: None,
-            files_touched: Vec::new(),
-            jump_to_node: None,
-            duration_ms: None,
-        }
-    }
+    /// Create a retry outcome with the failure category inferred from the message via heuristics.
+    fn retry_classify(reason: impl Into<String>) -> Self;
 
     /// Create a simulated success outcome for dry-run mode.
-    #[must_use]
-    pub fn simulated(node_id: &str) -> Self {
+    fn simulated(node_id: &str) -> Self;
+
+    /// Set the failure signature on this outcome. Returns self for chaining.
+    fn with_signature(self, sig: Option<impl Into<String>>) -> Self;
+
+    /// Get the failure reason message, if any.
+    fn failure_reason(&self) -> Option<&str>;
+
+    /// Get the failure category, if this is a failed outcome.
+    fn failure_category(&self) -> Option<FailureCategory>;
+}
+
+impl OutcomeExt for Outcome {
+    fn fail_deterministic(reason: impl Into<String>) -> Self {
+        Self {
+            status: StageStatus::Fail,
+            failure: Some(FailureDetail::new(reason, FailureCategory::Deterministic)),
+            ..Self::default()
+        }
+    }
+
+    fn fail_classify(reason: impl Into<String>) -> Self {
+        let reason = reason.into();
+        let category = classify_failure_reason(&reason);
+        Self {
+            status: StageStatus::Fail,
+            failure: Some(FailureDetail::new(reason, category)),
+            ..Self::default()
+        }
+    }
+
+    fn retry_classify(reason: impl Into<String>) -> Self {
+        let reason = reason.into();
+        let category = classify_failure_reason(&reason);
+        Self {
+            status: StageStatus::Retry,
+            failure: Some(FailureDetail::new(reason, category)),
+            ..Self::default()
+        }
+    }
+
+    fn simulated(node_id: &str) -> Self {
         Self {
             notes: Some(format!("[Simulated] {node_id}")),
             ..Self::success()
         }
     }
 
-    /// Get the failure reason message, if any.
-    pub fn failure_reason(&self) -> Option<&str> {
+    fn with_signature(mut self, sig: Option<impl Into<String>>) -> Self {
+        if let Some(ref mut f) = self.failure {
+            f.signature = sig.map(Into::into);
+        }
+        self
+    }
+
+    fn failure_reason(&self) -> Option<&str> {
         self.failure.as_ref().map(|f| f.message.as_str())
     }
 
-    /// Get the failure class, if this is a failed outcome.
-    pub fn failure_class(&self) -> Option<FailureClass> {
-        self.failure.as_ref().map(|f| f.failure_class)
+    fn failure_category(&self) -> Option<FailureCategory> {
+        self.failure.as_ref().map(|f| f.category)
     }
 }
 
@@ -290,7 +168,7 @@ mod tests {
         let o = Outcome::fail_deterministic("something broke");
         assert_eq!(o.status, StageStatus::Fail);
         assert_eq!(o.failure_reason(), Some("something broke"));
-        assert_eq!(o.failure_class(), Some(FailureClass::Deterministic));
+        assert_eq!(o.failure_category(), Some(FailureCategory::Deterministic));
     }
 
     #[test]
@@ -298,7 +176,7 @@ mod tests {
         let o = Outcome::fail_classify("connection refused");
         assert_eq!(o.status, StageStatus::Fail);
         assert_eq!(o.failure_reason(), Some("connection refused"));
-        assert_eq!(o.failure_class(), Some(FailureClass::TransientInfra));
+        assert_eq!(o.failure_category(), Some(FailureCategory::TransientInfra));
     }
 
     #[test]
@@ -310,46 +188,46 @@ mod tests {
 
     #[test]
     fn outcome_skipped_factory() {
-        let o = Outcome::skipped();
+        let o = Outcome::skipped("");
         assert_eq!(o.status, StageStatus::Skipped);
         assert!(o.failure.is_none());
     }
 
     #[test]
     fn failure_detail_construction() {
-        let fd = FailureDetail::new("timeout", FailureClass::TransientInfra);
+        let fd = FailureDetail::new("timeout", FailureCategory::TransientInfra);
         assert_eq!(fd.message, "timeout");
-        assert_eq!(fd.failure_class, FailureClass::TransientInfra);
-        assert!(fd.failure_signature.is_none());
+        assert_eq!(fd.category, FailureCategory::TransientInfra);
+        assert!(fd.signature.is_none());
     }
 
     #[test]
     fn failure_detail_serde_roundtrip() {
         let fd = FailureDetail {
             message: "timeout".into(),
-            failure_class: FailureClass::TransientInfra,
-            failure_signature: Some("sig".into()),
+            category: FailureCategory::TransientInfra,
+            signature: Some("sig".into()),
         };
         let json = serde_json::to_string(&fd).unwrap();
         let deserialized: FailureDetail = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.message, "timeout");
-        assert_eq!(deserialized.failure_class, FailureClass::TransientInfra);
-        assert_eq!(deserialized.failure_signature.as_deref(), Some("sig"));
+        assert_eq!(deserialized.category, FailureCategory::TransientInfra);
+        assert_eq!(deserialized.signature.as_deref(), Some("sig"));
     }
 
     #[test]
     fn fail_classify_known_patterns() {
         assert_eq!(
-            Outcome::fail_classify("timeout").failure_class(),
-            Some(FailureClass::TransientInfra)
+            Outcome::fail_classify("timeout").failure_category(),
+            Some(FailureCategory::TransientInfra)
         );
         assert_eq!(
-            Outcome::fail_classify("context length exceeded").failure_class(),
-            Some(FailureClass::BudgetExhausted)
+            Outcome::fail_classify("context length exceeded").failure_category(),
+            Some(FailureCategory::BudgetExhausted)
         );
         assert_eq!(
-            Outcome::fail_classify("cancel").failure_class(),
-            Some(FailureClass::Canceled)
+            Outcome::fail_classify("cancel").failure_category(),
+            Some(FailureCategory::Canceled)
         );
     }
 
@@ -367,7 +245,7 @@ mod tests {
     fn with_signature_builder() {
         let o = Outcome::fail_deterministic("x").with_signature(Some("sig"));
         assert_eq!(
-            o.failure.as_ref().unwrap().failure_signature.as_deref(),
+            o.failure.as_ref().unwrap().signature.as_deref(),
             Some("sig")
         );
     }

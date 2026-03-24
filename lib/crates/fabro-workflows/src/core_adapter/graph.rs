@@ -4,10 +4,10 @@ use std::sync::Arc;
 use fabro_core::context::Context as CoreContext;
 use fabro_core::error::{CoreError, Result as CoreResult};
 use fabro_core::graph::{EdgeSelection, EdgeSpec, Graph, NodeSpec};
-use fabro_core::outcome::Outcome as CoreOutcome;
 use fabro_graphviz::graph::types::{Edge as GvEdge, Graph as GvGraph, Node as GvNode};
 
 use crate::engine;
+use crate::outcome::{Outcome, StageUsage};
 
 // ---- WorkflowNode ----
 
@@ -73,6 +73,7 @@ impl WorkflowGraph {
 impl Graph for WorkflowGraph {
     type Node = WorkflowNode;
     type Edge = WorkflowEdge;
+    type Meta = Option<StageUsage>;
 
     fn get_node(&self, id: &str) -> Option<Self::Node> {
         self.0
@@ -99,15 +100,14 @@ impl Graph for WorkflowGraph {
     fn select_edge(
         &self,
         node: &Self::Node,
-        outcome: &CoreOutcome,
+        outcome: &Outcome,
         _context: &CoreContext,
     ) -> Option<EdgeSelection<Self>> {
-        // Convert core outcome to workflow outcome for edge selection
-        let wf_outcome = super::outcome::core_to_wf_outcome(outcome);
+        // Outcome is now the wf type directly — no conversion needed
         let wf_context = crate::context::Context::new();
         let selection = engine::select_edge(
             node.inner(),
-            &wf_outcome,
+            outcome,
             &wf_context,
             self.inner(),
             node.inner().selection(),
@@ -120,13 +120,9 @@ impl Graph for WorkflowGraph {
 
     fn check_goal_gates(
         &self,
-        outcomes: &HashMap<String, CoreOutcome>,
+        outcomes: &HashMap<String, Outcome>,
     ) -> std::result::Result<(), String> {
-        let wf_outcomes: HashMap<String, crate::outcome::Outcome> = outcomes
-            .iter()
-            .map(|(k, v)| (k.clone(), super::outcome::core_to_wf_outcome(v)))
-            .collect();
-        engine::check_goal_gates(self.inner(), &wf_outcomes)
+        engine::check_goal_gates(self.inner(), outcomes)
     }
 
     fn get_retry_target(&self, failed_node_id: &str) -> Option<String> {

@@ -20,7 +20,7 @@ use fabro_workflows::event::EventEmitter;
 use fabro_workflows::handler::exit::ExitHandler;
 use fabro_workflows::handler::start::StartHandler;
 use fabro_workflows::handler::{Handler, HandlerRegistry};
-use fabro_workflows::outcome::{Outcome, StageStatus};
+use fabro_workflows::outcome::{Outcome, OutcomeExt, StageStatus};
 
 async fn create_env() -> DaytonaSandbox {
     let creds = load_github_app_credentials();

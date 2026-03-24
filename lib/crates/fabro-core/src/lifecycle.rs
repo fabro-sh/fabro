@@ -4,13 +4,13 @@ use async_trait::async_trait;
 
 use crate::error::Result;
 use crate::graph::Graph;
-use crate::outcome::{NodeResult, Outcome};
+use crate::outcome::{NodeResult, Outcome, OutcomeMeta};
 use crate::state::RunState;
 
 #[derive(Debug, Clone)]
-pub enum NodeDecision {
+pub enum NodeDecision<M: OutcomeMeta = ()> {
     Continue,
-    Skip(Box<Outcome>),
+    Skip(Box<Outcome<M>>),
     Block(String),
 }
 
@@ -29,7 +29,7 @@ pub struct AttemptContext<'a, G: Graph> {
 
 pub struct AttemptResultContext<'a, G: Graph> {
     pub node: &'a G::Node,
-    pub result: &'a NodeResult,
+    pub result: &'a NodeResult<G::Meta>,
     pub attempt: u32,
     pub will_retry: bool,
     pub backoff_delay: Option<Duration>,
@@ -40,13 +40,13 @@ pub struct EdgeContext<'a, G: Graph> {
     pub to: &'a str,
     pub edge: Option<G::Edge>,
     pub is_jump: bool,
-    pub outcome: &'a Outcome,
+    pub outcome: &'a Outcome<G::Meta>,
     pub reason: &'a str,
 }
 
 #[async_trait]
 pub trait RunLifecycle<G: Graph>: Send + Sync {
-    async fn on_run_start(&self, _graph: &G, _state: &RunState) -> Result<()> {
+    async fn on_run_start(&self, _graph: &G, _state: &RunState<G::Meta>) -> Result<()> {
         Ok(())
     }
 
@@ -54,26 +54,30 @@ pub trait RunLifecycle<G: Graph>: Send + Sync {
         &self,
         _node: &G::Node,
         _goal_gates_passed: bool,
-        _state: &RunState,
+        _state: &RunState<G::Meta>,
     ) {
     }
 
-    async fn before_node(&self, _node: &G::Node, _state: &RunState) -> Result<NodeDecision> {
+    async fn before_node(
+        &self,
+        _node: &G::Node,
+        _state: &RunState<G::Meta>,
+    ) -> Result<NodeDecision<G::Meta>> {
         Ok(NodeDecision::Continue)
     }
 
     async fn before_attempt(
         &self,
         _ctx: &AttemptContext<'_, G>,
-        _state: &RunState,
-    ) -> Result<NodeDecision> {
+        _state: &RunState<G::Meta>,
+    ) -> Result<NodeDecision<G::Meta>> {
         Ok(NodeDecision::Continue)
     }
 
     async fn after_attempt(
         &self,
         _ctx: &AttemptResultContext<'_, G>,
-        _state: &RunState,
+        _state: &RunState<G::Meta>,
     ) -> Result<()> {
         Ok(())
     }
@@ -81,8 +85,8 @@ pub trait RunLifecycle<G: Graph>: Send + Sync {
     async fn after_node(
         &self,
         _node: &G::Node,
-        _result: &mut NodeResult,
-        _state: &RunState,
+        _result: &mut NodeResult<G::Meta>,
+        _state: &RunState<G::Meta>,
     ) -> Result<()> {
         Ok(())
     }
@@ -90,7 +94,7 @@ pub trait RunLifecycle<G: Graph>: Send + Sync {
     async fn on_edge_selected(
         &self,
         _ctx: &EdgeContext<'_, G>,
-        _state: &RunState,
+        _state: &RunState<G::Meta>,
     ) -> Result<EdgeDecision> {
         Ok(EdgeDecision::Continue)
     }
@@ -98,14 +102,14 @@ pub trait RunLifecycle<G: Graph>: Send + Sync {
     async fn on_checkpoint(
         &self,
         _node: &G::Node,
-        _result: &NodeResult,
+        _result: &NodeResult<G::Meta>,
         _next_node_id: Option<&str>,
-        _state: &RunState,
+        _state: &RunState<G::Meta>,
     ) -> Result<()> {
         Ok(())
     }
 
-    async fn on_run_end(&self, _outcome: &Outcome, _state: &RunState) {}
+    async fn on_run_end(&self, _outcome: &Outcome<G::Meta>, _state: &RunState<G::Meta>) {}
 }
 
 /// No-op lifecycle that passes through everything.
@@ -128,14 +132,19 @@ impl<G: Graph> CompositeLifecycle<G> {
 
 #[async_trait]
 impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
-    async fn on_run_start(&self, graph: &G, state: &RunState) -> Result<()> {
+    async fn on_run_start(&self, graph: &G, state: &RunState<G::Meta>) -> Result<()> {
         for child in &self.children {
             child.on_run_start(graph, state).await?;
         }
         Ok(())
     }
 
-    async fn on_terminal_reached(&self, node: &G::Node, goal_gates_passed: bool, state: &RunState) {
+    async fn on_terminal_reached(
+        &self,
+        node: &G::Node,
+        goal_gates_passed: bool,
+        state: &RunState<G::Meta>,
+    ) {
         for child in &self.children {
             child
                 .on_terminal_reached(node, goal_gates_passed, state)
@@ -143,7 +152,11 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
         }
     }
 
-    async fn before_node(&self, node: &G::Node, state: &RunState) -> Result<NodeDecision> {
+    async fn before_node(
+        &self,
+        node: &G::Node,
+        state: &RunState<G::Meta>,
+    ) -> Result<NodeDecision<G::Meta>> {
         for child in &self.children {
             match child.before_node(node, state).await? {
                 NodeDecision::Continue => {}
@@ -156,8 +169,8 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
     async fn before_attempt(
         &self,
         ctx: &AttemptContext<'_, G>,
-        state: &RunState,
-    ) -> Result<NodeDecision> {
+        state: &RunState<G::Meta>,
+    ) -> Result<NodeDecision<G::Meta>> {
         for child in &self.children {
             match child.before_attempt(ctx, state).await? {
                 NodeDecision::Continue => {}
@@ -170,7 +183,7 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
     async fn after_attempt(
         &self,
         ctx: &AttemptResultContext<'_, G>,
-        state: &RunState,
+        state: &RunState<G::Meta>,
     ) -> Result<()> {
         for child in &self.children {
             child.after_attempt(ctx, state).await?;
@@ -181,8 +194,8 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
     async fn after_node(
         &self,
         node: &G::Node,
-        result: &mut NodeResult,
-        state: &RunState,
+        result: &mut NodeResult<G::Meta>,
+        state: &RunState<G::Meta>,
     ) -> Result<()> {
         for child in &self.children {
             child.after_node(node, result, state).await?;
@@ -193,7 +206,7 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
     async fn on_edge_selected(
         &self,
         ctx: &EdgeContext<'_, G>,
-        state: &RunState,
+        state: &RunState<G::Meta>,
     ) -> Result<EdgeDecision> {
         for child in &self.children {
             match child.on_edge_selected(ctx, state).await? {
@@ -207,9 +220,9 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
     async fn on_checkpoint(
         &self,
         node: &G::Node,
-        result: &NodeResult,
+        result: &NodeResult<G::Meta>,
         next_node_id: Option<&str>,
-        state: &RunState,
+        state: &RunState<G::Meta>,
     ) -> Result<()> {
         for child in &self.children {
             child
@@ -219,7 +232,7 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
         Ok(())
     }
 
-    async fn on_run_end(&self, outcome: &Outcome, state: &RunState) {
+    async fn on_run_end(&self, outcome: &Outcome<G::Meta>, state: &RunState<G::Meta>) {
         for child in &self.children {
             child.on_run_end(outcome, state).await;
         }

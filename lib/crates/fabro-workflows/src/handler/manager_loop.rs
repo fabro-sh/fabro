@@ -11,7 +11,7 @@ use crate::context::keys;
 use crate::context::Context;
 use crate::engine::{RunConfig, WorkflowRunEngine};
 use crate::error::FabroError;
-use crate::outcome::{Outcome, StageStatus};
+use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::workflow::{prepare_from_file, prepare_from_source};
 use fabro_graphviz::graph::{Graph, Node};
 
