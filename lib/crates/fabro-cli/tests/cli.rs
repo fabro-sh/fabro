@@ -3,7 +3,9 @@ use predicates::prelude::*;
 
 #[allow(deprecated)]
 fn arc() -> Command {
-    Command::cargo_bin("fabro").unwrap()
+    let mut cmd = Command::cargo_bin("fabro").unwrap();
+    cmd.arg("--no-upgrade-check");
+    cmd
 }
 
 // == LLM: prompt ==============================================================
