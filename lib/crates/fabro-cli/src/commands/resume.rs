@@ -209,6 +209,7 @@ async fn prepare_from_checkpoint(
     let prepared_model = prepared.model;
     let prepared_provider = prepared.provider;
     let prepared_run_defaults = prepared.run_defaults;
+    let workflow_toml_path = prepared.workflow_toml_path;
 
     eprintln!(
         "{} {} from checkpoint {}",
@@ -228,7 +229,7 @@ async fn prepare_from_checkpoint(
     let status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
     tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
     let run_cfg: Option<FabroConfig> = run_cfg;
-    write_run_config_snapshot(&run_dir, run_cfg.as_ref()).await?;
+    write_run_config_snapshot(&run_dir, workflow_toml_path.as_deref()).await?;
 
     // Write RunRecord for the resumed run
     {
@@ -653,7 +654,8 @@ async fn prepare_from_branch(
     let status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
     tokio::fs::write(run_dir.join("graph.fabro"), &graph_source).await?;
     let run_cfg: Option<FabroConfig> = run_cfg;
-    write_run_config_snapshot(&run_dir, run_cfg.as_ref()).await?;
+    // Git-branch resume: no original TOML available, skip debug snapshot.
+    write_run_config_snapshot(&run_dir, None).await?;
 
     // Write RunRecord for the resumed run
     {
