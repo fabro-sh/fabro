@@ -41,8 +41,8 @@ pub async fn attach_run(
     let mut engine_guard = engine_child.map(EngineChildGuard::new);
 
     let is_tty = std::io::stderr().is_terminal();
-    let verbose = fabro_workflows::run_spec::RunSpec::load(run_dir)
-        .map(|spec| spec.verbose)
+    let verbose = fabro_workflows::run_record::RunRecord::load(run_dir)
+        .map(|record| record.config.verbose_enabled())
         .unwrap_or(false);
     let mut progress_ui = run_progress::ProgressUI::new(is_tty, verbose);
 

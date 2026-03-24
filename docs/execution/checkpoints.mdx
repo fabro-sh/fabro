@@ -12,7 +12,7 @@ Each run creates two Git branches that work in tandem:
 | Branch | Ref format | Contains |
 |---|---|---|
 | **Run branch** | `fabro/run/{run_id}` | File changes made by agents and commands — the actual work product |
-| **Metadata branch** | `fabro/meta/{run_id}` | Checkpoint JSON, the workflow graph, a run manifest, and offloaded artifacts |
+| **Metadata branch** | `fabro/meta/{run_id}` | Checkpoint JSON, the workflow graph, run and start records, and offloaded artifacts |
 
 The run branch is a regular Git branch that grows one commit per completed node. The metadata branch is an orphan branch (no shared history with your code) that stores structured data using Git's object database directly — no working tree needed.
 
@@ -43,7 +43,8 @@ The `Fabro-Checkpoint` trailer links each run branch commit to its metadata bran
 
 The metadata branch (`fabro/meta/{run_id}`) is an orphan branch that stores structured run data using Git's object storage directly (via `git2`). It is initialized at run start with:
 
-- **`manifest.json`** — Run metadata: run ID, graph name, node/edge counts, base SHA, and branch name
+- **`run.json`** — Run record: run ID, created_at, config, graph, workflow slug, working directory, host repo path, base branch, labels
+- **`start.json`** — Start record: run ID, start time, run branch, base SHA
 - **`graph.fabro`** — The workflow Graphviz source as it was parsed
 
 After each node, the metadata branch is updated with:
@@ -110,11 +111,11 @@ Resume from the Git branches created during a previous run:
 fabro resume 01JKXYZ
 ```
 
-This reads the checkpoint, manifest, and Graphviz graph from the metadata branch (`fabro/meta/01JKXYZ...`), re-attaches a worktree to the existing run branch, and resumes execution. No workflow file argument is needed — everything is recovered from Git.
+This reads the checkpoint, run record, and Graphviz graph from the metadata branch (`fabro/meta/01JKXYZ...`), re-attaches a worktree to the existing run branch, and resumes execution. No workflow file argument is needed — everything is recovered from Git.
 
 <Accordion title="What happens during resume">
 1. Fabro reads `checkpoint.json` from the metadata branch
-2. Reads `manifest.json` and `graph.fabro` to reconstruct the workflow
+2. Reads `run.json` and `graph.fabro` to reconstruct the workflow
 3. Creates a fresh worktree attached to the existing run branch
 4. Restores the full context, completed node list, retry counts, and failure signatures
 5. If the checkpointed node used `full` fidelity, downgrades the first resumed node to `summary:high` (since the original conversation thread no longer exists in memory)

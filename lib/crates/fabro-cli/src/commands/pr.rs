@@ -325,8 +325,11 @@ async fn create_from(
 ) -> Result<()> {
     let run_dir = fabro_workflows::run_lookup::resolve_run(base, &args.run_id)?.path;
 
-    let manifest = fabro_workflows::manifest::Manifest::load(&run_dir.join("manifest.json"))
-        .context("Failed to load manifest.json")?;
+    let record = fabro_workflows::run_record::RunRecord::load(&run_dir)
+        .context("Failed to load run.json")?;
+
+    let start = fabro_workflows::start_record::StartRecord::load(&run_dir)
+        .context("Failed to load start.json")?;
 
     let conclusion =
         fabro_workflows::conclusion::Conclusion::load(&run_dir.join("conclusion.json"))
@@ -338,7 +341,7 @@ async fn create_from(
         status => bail!("Run status is '{status}', expected success or partial_success"),
     }
 
-    let run_branch = manifest
+    let run_branch = start
         .run_branch
         .as_deref()
         .context("Run has no run_branch — was it run with git push enabled?")?;
@@ -353,7 +356,7 @@ async fn create_from(
     let (origin_url, detected_branch) =
         fabro_sandbox::daytona::detect_repo_info(&cwd).map_err(|err| anyhow::anyhow!("{err}"))?;
 
-    let base_branch = manifest
+    let base_branch = record
         .base_branch
         .as_deref()
         .or(detected_branch.as_deref())
@@ -393,7 +396,7 @@ async fn create_from(
         &origin_url,
         base_branch,
         run_branch,
-        &manifest.goal,
+        record.goal(),
         &diff,
         &model,
         true,

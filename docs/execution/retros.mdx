@@ -101,7 +101,7 @@ Retro generation happens in two phases after a run completes:
 
 1. **Derive** — Fabro extracts stage durations from `progress.jsonl` and builds a retro from the checkpoint data. This is deterministic, fast, and produces the quantitative layer. The retro is saved immediately as `retro.json` in the run's directory.
 
-2. **Narrate** — An LLM agent session analyzes the run data. The agent has read access to `progress.jsonl`, `checkpoint.json`, and `manifest.json`. It uses grep and read tools to find interesting signals — failures, retries, errors, approach changes — then calls a `submit_retro` tool with its structured analysis. The narrative fields are merged into the existing retro and saved.
+2. **Narrate** — An LLM agent session analyzes the run data. The agent has read access to `progress.jsonl`, `checkpoint.json`, `run.json`, and `start.json`. It uses grep and read tools to find interesting signals — failures, retries, errors, approach changes — then calls a `submit_retro` tool with its structured analysis. The narrative fields are merged into the existing retro and saved.
 
 Both phases run automatically at the end of every CLI run. The API server derives the quantitative layer but does not currently run the narrative agent.
 

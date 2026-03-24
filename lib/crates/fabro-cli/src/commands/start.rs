@@ -7,7 +7,7 @@ use super::detached_support::persist_detached_failure;
 
 /// Spawn a detached engine process for the given run directory.
 ///
-/// The engine process reads `spec.json` from the run directory and executes the
+/// The engine process reads `run.json` from the run directory and executes the
 /// workflow. Returns the child process handle (use `.id()` for the PID).
 pub fn start_run(run_dir: &Path) -> Result<std::process::Child> {
     // Validate status is Submitted
@@ -22,9 +22,9 @@ pub fn start_run(run_dir: &Path) -> Result<std::process::Child> {
         _ => {} // No status file or Submitted — proceed
     }
 
-    // Validate spec.json is loadable
-    fabro_workflows::run_spec::RunSpec::load(run_dir)
-        .map_err(|e| anyhow::anyhow!("Cannot start run: failed to load spec.json: {e}"))?;
+    // Validate run.json is loadable
+    fabro_workflows::run_record::RunRecord::load(run_dir)
+        .map_err(|e| anyhow::anyhow!("Cannot start run: failed to load run.json: {e}"))?;
 
     // Write Starting status before spawning to prevent duplicate engines
     fabro_workflows::run_status::write_run_status(run_dir, RunStatus::Starting, None);
@@ -102,27 +102,28 @@ fn kill_child_best_effort(child: &mut std::process::Child) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabro_workflows::run_spec::RunSpec;
+    use chrono::Utc;
+    use fabro_config::config::FabroConfig;
+    use fabro_graphviz::graph::Graph;
+    use fabro_workflows::run_record::RunRecord;
     use fabro_workflows::run_status::{write_run_status, RunStatus, RunStatusRecord, StatusReason};
     use std::collections::HashMap;
     use std::path::PathBuf;
 
-    fn sample_spec() -> RunSpec {
-        RunSpec {
+    fn sample_record() -> RunRecord {
+        RunRecord {
             run_id: "run-test123".to_string(),
-            workflow_path: PathBuf::from("/tmp/test-workflow.toml"),
-            dot_source: "digraph { a -> b }".to_string(),
+            created_at: Utc::now(),
+            config: FabroConfig::default(),
+            graph: Graph {
+                name: "test".to_string(),
+                ..Default::default()
+            },
+            workflow_slug: None,
             working_directory: PathBuf::from("/tmp"),
-            goal: None,
-            model: "claude-sonnet-4-20250514".to_string(),
-            provider: Some("anthropic".to_string()),
-            sandbox_provider: "local".to_string(),
+            host_repo_path: None,
+            base_branch: None,
             labels: HashMap::new(),
-            verbose: false,
-            no_retro: true,
-            preserve_sandbox: false,
-            dry_run: false,
-            auto_approve: true,
         }
     }
 
@@ -130,7 +131,7 @@ mod tests {
     fn start_run_marks_failed_when_spawn_cannot_start_engine() {
         let dir = tempfile::tempdir().unwrap();
         write_run_status(dir.path(), RunStatus::Submitted, None);
-        sample_spec().save(dir.path()).unwrap();
+        sample_record().save(dir.path()).unwrap();
         std::fs::create_dir(dir.path().join("detach.log")).unwrap();
 
         let _ = start_run(dir.path());

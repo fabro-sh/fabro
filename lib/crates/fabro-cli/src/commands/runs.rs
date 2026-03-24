@@ -24,7 +24,7 @@ pub struct RunFilterArgs {
     #[arg(long = "label", value_name = "KEY=VALUE")]
     pub label: Vec<String>,
 
-    /// Include orphan directories (no manifest.json)
+    /// Include orphan directories (no run.json)
     #[arg(long)]
     pub orphans: bool,
 }

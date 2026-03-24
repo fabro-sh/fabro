@@ -7,6 +7,7 @@ use tracing::{debug, info};
 use fabro_github::{self as github_app, ssh_url_to_https, GitHubAppCredentials};
 
 use crate::conclusion::Conclusion;
+use crate::run_record::RunRecord;
 use fabro_retro::retro::Retro;
 
 /// Record of a pull request created for a workflow run.
@@ -117,8 +118,12 @@ fn format_retro_section(retro: &Retro) -> String {
 /// Format the Fabro Details section of the PR body.
 ///
 /// Renders a cost/duration table in a collapsible `<details>` block, and
-/// optionally a DOT graph in another `<details>` block.
-fn format_arc_details_section(conclusion: &Conclusion, dot_source: Option<&str>) -> String {
+/// optionally a workflow graph summary in another `<details>` block.
+fn format_arc_details_section(
+    conclusion: &Conclusion,
+    run_record: Option<&RunRecord>,
+    dot_source: Option<&str>,
+) -> String {
     let mut parts = Vec::new();
     parts.push("### Fabro Details".to_string());
     parts.push(String::new());
@@ -152,8 +157,27 @@ fn format_arc_details_section(conclusion: &Conclusion, dot_source: Option<&str>)
     parts.push(String::new());
     parts.push("</details>".to_string());
 
-    // DOT graph
-    if let Some(dot) = dot_source {
+    // Workflow graph summary — prefer RunRecord's graph, fall back to DOT parsing
+    if let Some(record) = run_record {
+        let graph_name = format!("{}.fabro", record.workflow_name());
+        let node_count = record.node_count();
+        let edge_count = record.edge_count();
+
+        parts.push(String::new());
+        parts.push(format!(
+            "<details>\n<summary>Ran <code>{graph_name}</code> ({node_count} {} and {edge_count} {})</summary>",
+            if node_count == 1 { "node" } else { "nodes" },
+            if edge_count == 1 { "edge" } else { "edges" }
+        ));
+        if let Some(dot) = dot_source {
+            parts.push(String::new());
+            parts.push("```dot".to_string());
+            parts.push(dot.to_string());
+            parts.push("```".to_string());
+        }
+        parts.push(String::new());
+        parts.push("</details>".to_string());
+    } else if let Some(dot) = dot_source {
         parts.push(String::new());
 
         // Extract graph name and count nodes/edges for the summary
@@ -277,6 +301,7 @@ pub async fn build_pr_body(
     let plan_text = read_plan_text(run_dir);
     let conclusion = Conclusion::load(&run_dir.join("conclusion.json")).ok();
     let retro = Retro::load(run_dir).ok();
+    let run_record = RunRecord::load(run_dir).ok();
     let dot_source = read_dot_source(run_dir);
 
     // Build LLM prompt
@@ -320,7 +345,7 @@ pub async fn build_pr_body(
     let retro_section = retro.as_ref().map(format_retro_section).unwrap_or_default();
     let arc_details_section = conclusion
         .as_ref()
-        .map(|c| format_arc_details_section(c, dot_source.as_deref()))
+        .map(|c| format_arc_details_section(c, run_record.as_ref(), dot_source.as_deref()))
         .unwrap_or_default();
 
     let body = assemble_pr_body(
@@ -603,7 +628,7 @@ mod tests {
     #[test]
     fn format_arc_details_cost_table() {
         let conclusion = make_test_conclusion();
-        let section = format_arc_details_section(&conclusion, None);
+        let section = format_arc_details_section(&conclusion, None, None);
 
         assert!(section.contains("### Fabro Details"));
         assert!(section.contains("Ran 3 stages in 2m 30s for $0.42"));
@@ -620,7 +645,7 @@ mod tests {
             stage.cost = None;
         }
         conclusion.total_cost = None;
-        let section = format_arc_details_section(&conclusion, None);
+        let section = format_arc_details_section(&conclusion, None, None);
 
         // En-dash for missing costs
         assert!(section.contains("| plan | 45s | \u{2013} | 0 |"));
@@ -631,7 +656,7 @@ mod tests {
     fn format_arc_details_with_dot_graph() {
         let conclusion = make_test_conclusion();
         let dot = "digraph implement {\n  plan [type=\"agent\"]\n  code [type=\"agent\"]\n  plan -> code\n}\n";
-        let section = format_arc_details_section(&conclusion, Some(dot));
+        let section = format_arc_details_section(&conclusion, None, Some(dot));
 
         assert!(section.contains("<code>implement.fabro</code>"));
         assert!(section.contains("2 nodes and 1 edge"));
@@ -738,7 +763,7 @@ mod tests {
     #[test]
     fn assemble_conclusion_without_retro() {
         let conclusion = make_test_conclusion();
-        let arc_details = format_arc_details_section(&conclusion, None);
+        let arc_details = format_arc_details_section(&conclusion, None, None);
         let body = assemble_pr_body("Narrative.", None, "", &arc_details);
 
         assert!(body.contains("### Fabro Details"));
@@ -751,7 +776,7 @@ mod tests {
         let conclusion = make_test_conclusion();
         let retro = make_test_retro();
         let retro_section = format_retro_section(&retro);
-        let arc_details = format_arc_details_section(&conclusion, None);
+        let arc_details = format_arc_details_section(&conclusion, None, None);
         let body = assemble_pr_body("Narrative.", None, &retro_section, &arc_details);
 
         assert!(body.contains("### Retro"));
