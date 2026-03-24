@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use fabro_agent::Sandbox;
 
 use crate::context::keys;
-use crate::context::Context;
+use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
 use crate::event::EventEmitter;
 use crate::outcome::{Outcome, OutcomeExt, StageUsage};

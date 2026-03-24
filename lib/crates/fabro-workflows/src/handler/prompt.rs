@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use fabro_model::Provider;
 
 use crate::context::keys;
-use crate::context::Context;
+use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
 use crate::outcome::Outcome;
 use fabro_graphviz::graph::{Graph, Node};

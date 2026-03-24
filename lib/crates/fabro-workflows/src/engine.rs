@@ -1664,7 +1664,7 @@ impl WorkflowRunEngine {
         match result {
             Ok((core_outcome, final_state)) => {
                 // Extract the executor's final context so callers see all state
-                let ctx = Context::from_values(final_state.context.snapshot());
+                let ctx = final_state.context.clone();
                 Ok((core_outcome, ctx))
             }
             Err(fabro_core::CoreError::StallTimeout { node_id }) => {
