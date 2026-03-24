@@ -101,10 +101,12 @@ impl Graph for WorkflowGraph {
         &self,
         node: &Self::Node,
         outcome: &Outcome,
-        _context: &CoreContext,
+        context: &CoreContext,
     ) -> Option<EdgeSelection<Self>> {
-        // Outcome is now the wf type directly — no conversion needed
-        let wf_context = crate::context::Context::new();
+        // Build a wf Context from the core context snapshot so edge conditions
+        // that read context values (e.g. `context.failure_class=budget_exhausted`)
+        // evaluate correctly.
+        let wf_context = crate::context::Context::from_values(context.snapshot());
         let selection = engine::select_edge(
             node.inner(),
             outcome,
