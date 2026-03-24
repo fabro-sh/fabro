@@ -37,8 +37,7 @@ impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
         _graph: &WorkflowGraph,
         _state: &WfRunState,
     ) -> fabro_core::error::Result<()> {
-        // Write manifest.json (legacy) and start.json
-        engine::write_manifest(&self.run_dir, &self.graph, &self.config);
+        // Write start.json
         engine::write_start_record(&self.run_dir, &self.config);
         // Write run status as Running
         crate::run_status::write_run_status(

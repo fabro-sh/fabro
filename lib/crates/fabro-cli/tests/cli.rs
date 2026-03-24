@@ -545,7 +545,7 @@ fn run_help_no_longer_shows_resume_or_run_branch() {
 // == Bug regression: create/start/attach lifecycle ============================
 
 /// Helper: create a minimal run directory that `resolve_run` can find.
-/// Sets up manifest.json, status.json, spec.json, and progress.jsonl.
+/// Sets up run.json, status.json, and progress.jsonl.
 fn setup_run_dir(
     home: &std::path::Path,
     run_id: &str,
@@ -555,68 +555,41 @@ fn setup_run_dir(
     let run_dir = home.join(".fabro").join("runs").join(run_id);
     std::fs::create_dir_all(&run_dir).unwrap();
 
-    // manifest.json for resolve_run
-    let manifest = serde_json::json!({
-        "run_id": run_id,
-        "workflow_name": "test",
-        "goal": "",
-        "start_time": "2026-01-01T00:00:00Z",
-        "node_count": 1,
-        "edge_count": 0
-    });
-    std::fs::write(
-        run_dir.join("manifest.json"),
-        serde_json::to_string(&manifest).unwrap(),
-    )
-    .unwrap();
-
-    // Merge spec defaults with overrides
-    let mut spec = serde_json::json!({
-        "run_id": run_id,
-        "workflow_path": "/tmp/test.fabro",
-        "dot_source": "digraph { start -> exit }",
-        "working_directory": "/tmp",
-        "goal": null,
-        "model": "test-model",
-        "provider": null,
-        "sandbox_provider": "local",
-        "labels": {},
-        "verbose": false,
-        "no_retro": true,
-
-        "preserve_sandbox": false,
-        "dry_run": true,
-        "auto_approve": true
-    });
-    if let (Some(base), Some(overrides)) = (spec.as_object_mut(), spec_overrides.as_object()) {
-        for (k, v) in overrides {
-            base.insert(k.clone(), v.clone());
-        }
-    }
-    std::fs::write(
-        run_dir.join("spec.json"),
-        serde_json::to_string(&spec).unwrap(),
-    )
-    .unwrap();
+    // Build defaults, then merge overrides
+    let overrides = spec_overrides;
+    let get_str = |key: &str, default: &str| -> serde_json::Value {
+        overrides
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| serde_json::json!(s))
+            .unwrap_or_else(|| serde_json::json!(default))
+    };
+    let get_bool = |key: &str, default: bool| -> serde_json::Value {
+        overrides
+            .get(key)
+            .and_then(|v| v.as_bool())
+            .map(|b| serde_json::json!(b))
+            .unwrap_or_else(|| serde_json::json!(default))
+    };
 
     // run.json (RunRecord) for resolve_run and run_engine_entrypoint
     let run_record = serde_json::json!({
         "run_id": run_id,
         "created_at": "2026-01-01T00:00:00Z",
         "config": {
-            "goal": spec.get("goal").and_then(|v| v.as_str()).map(String::from),
+            "goal": overrides.get("goal").and_then(|v| v.as_str()),
             "llm": {
-                "model": spec.get("model").and_then(|v| v.as_str()),
-                "provider": spec.get("provider").and_then(|v| v.as_str())
+                "model": get_str("model", "test-model"),
+                "provider": overrides.get("provider").and_then(|v| v.as_str())
             },
             "sandbox": {
-                "provider": spec.get("sandbox_provider").and_then(|v| v.as_str()),
-                "preserve": spec.get("preserve_sandbox").and_then(|v| v.as_bool())
+                "provider": get_str("sandbox_provider", "local"),
+                "preserve": get_bool("preserve_sandbox", false)
             },
-            "verbose": spec.get("verbose").and_then(|v| v.as_bool()),
-            "dry_run": spec.get("dry_run").and_then(|v| v.as_bool()),
-            "auto_approve": spec.get("auto_approve").and_then(|v| v.as_bool()),
-            "no_retro": spec.get("no_retro").and_then(|v| v.as_bool())
+            "verbose": get_bool("verbose", false),
+            "dry_run": get_bool("dry_run", true),
+            "auto_approve": get_bool("auto_approve", true),
+            "no_retro": get_bool("no_retro", true)
         },
         "graph": {
             "name": "test",
@@ -624,8 +597,8 @@ fn setup_run_dir(
             "edges": [],
             "attrs": {}
         },
-        "working_directory": spec.get("working_directory").and_then(|v| v.as_str()).unwrap_or("/tmp"),
-        "labels": spec.get("labels").cloned().unwrap_or(serde_json::json!({}))
+        "working_directory": overrides.get("working_directory").and_then(|v| v.as_str()).unwrap_or("/tmp"),
+        "labels": overrides.get("labels").cloned().unwrap_or(serde_json::json!({}))
     });
     std::fs::write(
         run_dir.join("run.json"),
@@ -716,11 +689,10 @@ digraph BarBaz {
         .success();
 
     let run_dir = find_run_dir(home.path(), "opaque-run-999");
-    let manifest: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(run_dir.join("manifest.json")).unwrap())
-            .unwrap();
-    assert_eq!(manifest["workflow_name"].as_str(), Some("BarBaz"));
-    assert_eq!(manifest["workflow_slug"].as_str(), Some("sluggy"));
+    let run_record: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("run.json")).unwrap()).unwrap();
+    assert_eq!(run_record["graph"]["name"].as_str(), Some("BarBaz"));
+    assert_eq!(run_record["workflow_slug"].as_str(), Some("sluggy"));
 }
 
 #[test]
@@ -767,11 +739,10 @@ digraph FooWorkflow {
         .success();
 
     let run_dir = find_run_dir(home.path(), "opaque-run-alpha");
-    let manifest: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(run_dir.join("manifest.json")).unwrap())
-            .unwrap();
-    assert_eq!(manifest["workflow_name"].as_str(), Some("FooWorkflow"));
-    assert_eq!(manifest["workflow_slug"].as_str(), Some("alpha"));
+    let run_record: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("run.json")).unwrap()).unwrap();
+    assert_eq!(run_record["graph"]["name"].as_str(), Some("FooWorkflow"));
+    assert_eq!(run_record["workflow_slug"].as_str(), Some("alpha"));
 }
 
 #[test]
@@ -927,14 +898,18 @@ fn start_by_workflow_name_prefers_newly_created_submitted_run() {
     let old_run_dir = home.path().join(".fabro").join("runs").join("old-smoke");
     std::fs::create_dir_all(&old_run_dir).unwrap();
     std::fs::write(
-        old_run_dir.join("manifest.json"),
+        old_run_dir.join("run.json"),
         serde_json::json!({
             "run_id": "old-smoke",
-            "workflow_name": "Smoke",
-            "goal": "",
-            "start_time": "2026-01-01T00:00:00Z",
-            "node_count": 1,
-            "edge_count": 0
+            "created_at": "2026-01-01T00:00:00Z",
+            "config": {},
+            "graph": {
+                "name": "Smoke",
+                "nodes": {},
+                "edges": [],
+                "attrs": {}
+            },
+            "working_directory": "/tmp"
         })
         .to_string(),
     )
@@ -982,7 +957,7 @@ fn start_by_workflow_name_prefers_newly_created_submitted_run() {
     );
 }
 
-// Bug 2: _run_engine should use cached graph.fabro, not spec.workflow_path.
+// Bug 2: _run_engine should use cached graph.fabro, not run.json working_directory.
 // When the original workflow file is deleted between create and start,
 // the engine should read the snapshot saved at create time.
 #[test]
@@ -998,27 +973,32 @@ digraph G {
   start -> exit
 }";
 
-    // spec.json: workflow_path points to a file that no longer exists
-    let spec = serde_json::json!({
+    // run.json: working_directory is valid but original workflow path no longer exists
+    let run_record = serde_json::json!({
         "run_id": "test-bug2",
-        "workflow_path": "/nonexistent/deleted-workflow.fabro",
-        "dot_source": dot,
+        "created_at": "2026-01-01T00:00:00Z",
+        "config": {
+            "dry_run": true,
+            "auto_approve": true,
+            "no_retro": true,
+            "llm": {
+                "model": "test-model"
+            },
+            "sandbox": {
+                "provider": "local"
+            }
+        },
+        "graph": {
+            "name": "G",
+            "nodes": {},
+            "edges": [],
+            "attrs": {}
+        },
         "working_directory": run_dir.to_str().unwrap(),
-        "goal": null,
-        "model": "test-model",
-        "provider": null,
-        "sandbox_provider": "local",
-        "labels": {},
-        "verbose": false,
-        "no_retro": true,
-
-        "preserve_sandbox": false,
-        "dry_run": true,
-        "auto_approve": true
     });
     std::fs::write(
-        run_dir.join("spec.json"),
-        serde_json::to_string(&spec).unwrap(),
+        run_dir.join("run.json"),
+        serde_json::to_string(&run_record).unwrap(),
     )
     .unwrap();
 
@@ -1026,7 +1006,6 @@ digraph G {
     std::fs::write(run_dir.join("graph.fabro"), dot).unwrap();
 
     // _run_engine should use graph.fabro and never reference the deleted file.
-    // Bug: it reads spec.workflow_path → fails with file-not-found.
     let output = arc()
         .args(["_run_engine", "--run-dir", run_dir.to_str().unwrap()])
         .env("NO_COLOR", "1")
@@ -1178,8 +1157,8 @@ fn attach_closed_stdin_keeps_interview_pending() {
     );
 }
 
-// Bug 4: attach should respect the verbose flag from spec.json.
-// Currently ProgressUI is created with verbose=false regardless of spec.
+// Bug 4: attach should respect the verbose flag from run.json.
+// Currently ProgressUI is created with verbose=false regardless of config.
 #[test]
 fn bug4_attach_respects_verbose_from_spec() {
     let home = tempfile::tempdir().unwrap();

@@ -56,13 +56,6 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             (&self.config.meta_branch, &self.config.host_repo_path)
         {
             let store = crate::git::MetadataStore::new(repo_path, &self.config.git_author);
-            let manifest_bytes = {
-                let manifest_path = self.run_dir.join("manifest.json");
-                std::fs::read(&manifest_path).unwrap_or_default()
-            };
-            let dot_source = std::fs::read(self.run_dir.join("graph.fabro"))
-                .or_else(|_| std::fs::read(self.run_dir.join("graph.dot")))
-                .unwrap_or_default();
             let run_json = std::fs::read(self.run_dir.join("run.json")).ok();
             let start_json = std::fs::read(self.run_dir.join("start.json")).ok();
             let sandbox_json = std::fs::read(self.run_dir.join("sandbox.json")).ok();
@@ -76,8 +69,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             if let Some(ref data) = sandbox_json {
                 extra_files.push(("sandbox.json", data));
             }
-            if let Err(e) = store.init_run(&self.run_id, &manifest_bytes, &dot_source, &extra_files)
-            {
+            if let Err(e) = store.init_run(&self.run_id, &[], &[], &extra_files) {
                 tracing::warn!(
                     run_id = %self.run_id,
                     error = %e,

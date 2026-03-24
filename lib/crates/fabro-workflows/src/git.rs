@@ -526,21 +526,6 @@ impl MetadataStore {
         }
     }
 
-    /// Read the manifest from the metadata branch. Returns `None` if not found.
-    pub fn read_manifest(
-        repo_path: &Path,
-        run_id: &str,
-    ) -> Result<Option<crate::manifest::Manifest>> {
-        match Self::read_file(repo_path, run_id, "manifest.json")? {
-            Some(bytes) => {
-                let manifest: crate::manifest::Manifest = serde_json::from_slice(&bytes)
-                    .map_err(|e| git_error(format!("manifest deserialize failed: {e}")))?;
-                Ok(Some(manifest))
-            }
-            None => Ok(None),
-        }
-    }
-
     /// Read the run record from the metadata branch. Returns `None` if not found.
     pub fn read_run_record(
         repo_path: &Path,
@@ -686,15 +671,17 @@ mod tests {
         init_repo(dir.path());
 
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        let manifest = br#"{"run_id":"RUN1","workflow_name":"test","goal":"g","start_time":"2025-01-01T00:00:00Z","node_count":2,"edge_count":1}"#;
+        let run_record = br#"{"run_id":"RUN1","created_at":"2025-01-01T00:00:00Z","config":{},"graph":{"name":"test","nodes":{},"edges":[],"attrs":{}},"working_directory":"/tmp"}"#;
         let dot = b"digraph { start -> end }";
-        store.init_run("RUN1", manifest, dot, &[]).unwrap();
+        store
+            .init_run("RUN1", &[], dot, &[("run.json", run_record)])
+            .unwrap();
 
-        let read_manifest = MetadataStore::read_manifest(dir.path(), "RUN1")
+        let read_record = MetadataStore::read_run_record(dir.path(), "RUN1")
             .unwrap()
             .unwrap();
-        assert_eq!(read_manifest.run_id, "RUN1");
-        assert_eq!(read_manifest.workflow_name, "test");
+        assert_eq!(read_record.run_id, "RUN1");
+        assert_eq!(read_record.workflow_name(), "test");
 
         let read_dot = MetadataStore::read_graph_dot(dir.path(), "RUN1")
             .unwrap()

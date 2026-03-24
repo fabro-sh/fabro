@@ -468,7 +468,7 @@ mod tests {
         bs.ensure_branch().unwrap();
 
         // init commit (should be skipped)
-        bs.write_entry("manifest.json", b"{}", "init run").unwrap();
+        bs.write_entry("run.json", b"{}", "init run").unwrap();
 
         // 3 checkpoint commits
         let cp1 = make_checkpoint_json("start", 1, Some("aaa"));
@@ -502,7 +502,7 @@ mod tests {
         let bs = BranchStore::new(&store, &branch, &sig);
         bs.ensure_branch().unwrap();
 
-        bs.write_entry("manifest.json", b"{}", "init run").unwrap();
+        bs.write_entry("run.json", b"{}", "init run").unwrap();
 
         let cp1 = make_checkpoint_json("start", 1, None);
         bs.write_entry("checkpoint.json", &cp1, "checkpoint")
@@ -705,7 +705,7 @@ mod tests {
         let bs = BranchStore::new(&store, &branch, &sig);
         bs.ensure_branch().unwrap();
 
-        bs.write_entry("manifest.json", b"{}", "init run").unwrap();
+        bs.write_entry("run.json", b"{}", "init run").unwrap();
 
         let cp1 = make_checkpoint_json("start", 1, None);
         let oid1 = bs
@@ -751,9 +751,7 @@ mod tests {
         let meta_branch = MetadataStore::branch_name("run-2");
         let meta_bs = BranchStore::new(&store, &meta_branch, &sig);
         meta_bs.ensure_branch().unwrap();
-        meta_bs
-            .write_entry("manifest.json", b"{}", "init run")
-            .unwrap();
+        meta_bs.write_entry("run.json", b"{}", "init run").unwrap();
 
         let cp1 = make_checkpoint_json("start", 1, Some(&run_c1.to_string()));
         meta_bs
@@ -783,7 +781,7 @@ mod tests {
         let bs = BranchStore::new(&store, &branch, &sig);
         bs.ensure_branch().unwrap();
 
-        bs.write_entry("manifest.json", b"{}", "init run").unwrap();
+        bs.write_entry("run.json", b"{}", "init run").unwrap();
 
         let cp1 = make_checkpoint_json("start", 1, None);
         let oid1 = bs

@@ -827,7 +827,7 @@ pub async fn run_command(
         write_run_config_snapshot(&run_dir, run_cfg.as_ref()).await?;
     }
 
-    // Write RunRecord (replaces spec.json + manifest.json)
+    // Write RunRecord
     if !cached_run_restart {
         let cli_flags = super::create::CliFlags {
             dry_run: dry_run_flag,
