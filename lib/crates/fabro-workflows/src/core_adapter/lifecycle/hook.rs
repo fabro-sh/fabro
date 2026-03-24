@@ -92,11 +92,10 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
         _state: &WfRunState,
     ) -> CoreResult<()> {
         let outcome = &result.outcome;
-        // Skip hooks for Skipped nodes
+        // Skipped nodes had no StageStarted, so skip hooks (engine.rs:2080)
         if outcome.status == StageStatus::Skipped {
             return Ok(());
         }
-
         let hook_event = if outcome.status == StageStatus::Fail {
             HookEvent::StageFailed
         } else {
@@ -130,6 +129,23 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
             }
             _ => Ok(EdgeDecision::Continue),
         }
+    }
+
+    async fn on_checkpoint(
+        &self,
+        node: &WorkflowNode,
+        _result: &WfNodeResult,
+        _next_node_id: Option<&str>,
+        _state: &WfRunState,
+    ) -> CoreResult<()> {
+        let mut hook_ctx = HookContext::new(
+            HookEvent::CheckpointSaved,
+            self.run_id.clone(),
+            self.graph_name.clone(),
+        );
+        hook_ctx.node_id = Some(node.inner().id.clone());
+        let _ = self.run_hook(&hook_ctx).await;
+        Ok(())
     }
 
     async fn on_run_end(&self, outcome: &Outcome, state: &WfRunState) {
