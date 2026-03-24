@@ -2,6 +2,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use tokio_util::sync::CancellationToken;
+
+use crate::context::Context;
 use crate::error::{CoreError, Result};
 use crate::graph::{EdgeSpec, Graph, NodeSpec};
 use crate::handler::NodeHandler;
@@ -15,6 +18,7 @@ use crate::state::RunState;
 #[derive(Default)]
 pub struct ExecutorSettings {
     pub cancel_token: Option<Arc<AtomicBool>>,
+    pub stall_token: Option<CancellationToken>,
     pub max_node_visits: Option<usize>,
 }
 
@@ -56,6 +60,11 @@ impl<G: Graph + 'static> ExecutorBuilder<G> {
         self
     }
 
+    pub fn stall_token(mut self, token: CancellationToken) -> Self {
+        self.settings.stall_token = Some(token);
+        self
+    }
+
     pub fn max_node_visits(mut self, limit: usize) -> Self {
         self.settings.max_node_visits = Some(limit);
         self
@@ -78,6 +87,7 @@ impl<G: Graph + 'static> Executor<G> {
             // Check cancellation
             if let Some(ref token) = self.settings.cancel_token {
                 if token.load(Ordering::Relaxed) {
+                    state.cancelled = true;
                     let outcome = Outcome::fail("run cancelled");
                     self.lifecycle.on_run_end(&outcome, &state).await;
                     return Err(CoreError::Cancelled);
@@ -90,38 +100,46 @@ impl<G: Graph + 'static> Executor<G> {
                     id: state.current_node_id.clone(),
                 })?;
 
-            // Terminal nodes: skip normal lifecycle, call on_terminal_reached, check goal gates
+            // Terminal nodes: skip normal lifecycle, check goal gates, call on_terminal_reached
             if node.is_terminal() {
-                self.lifecycle.on_terminal_reached(&node, &state).await;
                 match graph.check_goal_gates(&state.node_outcomes) {
                     Ok(()) => {
+                        self.lifecycle
+                            .on_terminal_reached(&node, true, &state)
+                            .await;
                         let outcome = Outcome::success();
                         self.lifecycle.on_run_end(&outcome, &state).await;
                         return Ok(outcome);
                     }
-                    Err(msg) => {
+                    Err(failed_node_id) => {
+                        self.lifecycle
+                            .on_terminal_reached(&node, false, &state)
+                            .await;
                         // Check if there's a retry target for goal gate failure
-                        if let Some(retry_target) = graph.get_retry_target(&state.current_node_id) {
+                        if let Some(retry_target) = graph.get_retry_target(&failed_node_id) {
                             tracing::debug!(
                                 node = %node.id(),
                                 retry_target = %retry_target,
-                                reason = %msg,
+                                failed_node = %failed_node_id,
                                 "Goal gate unsatisfied, retrying"
                             );
                             state.advance(&retry_target);
                             continue;
                         }
-                        let outcome = Outcome::fail(&msg);
+                        let outcome = Outcome::fail(&format!(
+                            "goal gate failed for node \"{}\"",
+                            failed_node_id
+                        ));
                         self.lifecycle.on_run_end(&outcome, &state).await;
                         return Ok(outcome);
                     }
                 }
             }
 
-            // Check visit limits
+            // Check visit limits (>= matches fabro-workflows semantics)
             let visits = state.increment_visits(node.id());
             if let Some(max) = node.max_visits() {
-                if visits > max {
+                if visits >= max {
                     return Err(CoreError::VisitLimitExceeded {
                         node_id: node.id().to_string(),
                         visits,
@@ -130,7 +148,7 @@ impl<G: Graph + 'static> Executor<G> {
                 }
             }
             if let Some(global_max) = self.settings.max_node_visits {
-                if visits > global_max {
+                if visits >= global_max {
                     return Err(CoreError::VisitLimitExceeded {
                         node_id: node.id().to_string(),
                         visits,
@@ -140,28 +158,39 @@ impl<G: Graph + 'static> Executor<G> {
             }
 
             // before_node lifecycle
-            match self.lifecycle.before_node(&node, &state).await? {
+            let node_result = match self.lifecycle.before_node(&node, &state).await? {
                 NodeDecision::Skip(outcome) => {
                     let mut result = NodeResult::from_skip(*outcome);
                     self.lifecycle
                         .after_node(&node, &mut result, &state)
                         .await?;
-                    state.record(node.id(), &result);
-                    self.lifecycle.on_checkpoint(&node, &result, &state).await?;
+                    result
                 }
                 NodeDecision::Block(msg) => {
                     return Err(CoreError::blocked(msg));
                 }
                 NodeDecision::Continue => {
-                    // Execute with retry
-                    let mut result = self.execute_with_retry(&node, &state, graph).await?;
+                    // Execute with retry, racing against stall token
+                    let mut result = if let Some(ref stall) = self.settings.stall_token {
+                        tokio::select! {
+                            r = self.execute_with_retry(&node, &state, graph) => r?,
+                            () = stall.cancelled() => {
+                                return Err(CoreError::StallTimeout {
+                                    node_id: node.id().to_string(),
+                                });
+                            }
+                        }
+                    } else {
+                        self.execute_with_retry(&node, &state, graph).await?
+                    };
                     self.lifecycle
                         .after_node(&node, &mut result, &state)
                         .await?;
-                    state.record(node.id(), &result);
-                    self.lifecycle.on_checkpoint(&node, &result, &state).await?;
+                    result
                 }
-            }
+            };
+
+            state.record(node.id(), &node_result);
 
             // Determine next step
             let last_outcome = state.node_outcomes.get(node.id()).unwrap();
@@ -169,12 +198,23 @@ impl<G: Graph + 'static> Executor<G> {
                 .resolve_next_step(&node, last_outcome, &state, graph)
                 .await?;
 
+            // Checkpoint AFTER edge selection so next_node_id is known
+            let next_node_id = match &next {
+                NextStep::Edge(target) | NextStep::Jump(target) | NextStep::LoopRestart(target) => {
+                    Some(target.as_str())
+                }
+                NextStep::End => None,
+            };
+            self.lifecycle
+                .on_checkpoint(&node, &node_result, next_node_id, &state)
+                .await?;
+
             match next {
                 NextStep::Edge(target) | NextStep::Jump(target) => {
                     state.advance(&target);
                 }
                 NextStep::LoopRestart(start_id) => {
-                    state.restart(&start_id);
+                    state.restart(&start_id, Some(Context::new()));
                     self.lifecycle.on_run_start(graph, &state).await?;
                 }
                 NextStep::End => {
@@ -328,8 +368,7 @@ impl<G: Graph + 'static> Executor<G> {
                 match self.lifecycle.on_edge_selected(&ctx, state).await? {
                     EdgeDecision::Continue => {
                         if is_restart {
-                            let start = graph.find_start_node()?;
-                            Ok(NextStep::LoopRestart(start.id().to_string()))
+                            Ok(NextStep::LoopRestart(target))
                         } else {
                             Ok(NextStep::Edge(target))
                         }
@@ -340,14 +379,12 @@ impl<G: Graph + 'static> Executor<G> {
             }
             None => {
                 // No edge found
-                if outcome.status == StageStatus::Success
-                    || outcome.status == StageStatus::PartialSuccess
-                {
-                    Ok(NextStep::End)
-                } else {
-                    // Fail with no outgoing edge → fail the run
-                    Ok(NextStep::End)
+                if outcome.status == StageStatus::Fail {
+                    if let Some(retry_target) = graph.get_retry_target(node.id()) {
+                        return Ok(NextStep::Edge(retry_target));
+                    }
                 }
+                Ok(NextStep::End)
             }
         }
     }
@@ -355,6 +392,7 @@ impl<G: Graph + 'static> Executor<G> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU32;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -445,7 +483,7 @@ mod tests {
     #[tokio::test]
     async fn executor_goal_gate_unsatisfied_with_retry() {
         // work → end (goal gate: work must be success)
-        // retry_target: end → work (so we go back to work)
+        // retry_target: work → work (retry the failed node)
         // First call fails, second succeeds
         let g = TestGraph::new(
             vec![
@@ -455,7 +493,7 @@ mod tests {
             vec![TestEdge::new("work", "end")],
             "work",
         )
-        .with_retry_target("end", "work");
+        .with_retry_target("work", "work");
 
         let handler = Arc::new(CountingHandler::new(vec![
             Ok(Outcome::fail("first attempt")),
@@ -514,7 +552,12 @@ mod tests {
                     .push(format!("after_node:{}", node.id()));
                 Ok(())
             }
-            async fn on_terminal_reached(&self, node: &TestNode, _s: &RunState) {
+            async fn on_terminal_reached(
+                &self,
+                node: &TestNode,
+                _goal_gates_passed: bool,
+                _s: &RunState,
+            ) {
                 self.0
                     .lock()
                     .unwrap()
@@ -544,7 +587,12 @@ mod tests {
         struct TerminalTracker(Arc<Mutex<Vec<String>>>);
         #[async_trait]
         impl RunLifecycle<TestGraph> for TerminalTracker {
-            async fn on_terminal_reached(&self, node: &TestNode, _s: &RunState) {
+            async fn on_terminal_reached(
+                &self,
+                node: &TestNode,
+                _goal_gates_passed: bool,
+                _s: &RunState,
+            ) {
                 self.0
                     .lock()
                     .unwrap()
@@ -563,10 +611,10 @@ mod tests {
 
     #[tokio::test]
     async fn executor_visit_limit_per_node() {
-        // Node with max_visits=1, but graph loops back to it
+        // Node with max_visits=2, loops back — fails on 2nd visit (>= semantics)
         let g = TestGraph::new(
             vec![
-                TestNode::new("loop_node").with_max_visits(1),
+                TestNode::new("loop_node").with_max_visits(2),
                 TestNode::new("other"),
                 TestNode::terminal("end"),
             ],
@@ -1298,6 +1346,7 @@ mod tests {
                 &self,
                 node: &TestNode,
                 _r: &NodeResult,
+                _next_node_id: Option<&str>,
                 _s: &RunState,
             ) -> Result<()> {
                 self.0.lock().unwrap().push(node.id().to_string());
@@ -1442,5 +1491,408 @@ mod tests {
                 .build();
         executor.run(&g, state).await.unwrap();
         assert_eq!(*log.lock().unwrap(), vec!["hello"]);
+    }
+
+    #[tokio::test]
+    async fn executor_checkpoint_called_after_edge_selection() {
+        // Verify on_checkpoint receives the resolved next_node_id
+        let log = Arc::new(Mutex::new(Vec::<(String, Option<String>)>::new()));
+        struct NextNodeTracker(Arc<Mutex<Vec<(String, Option<String>)>>>);
+        #[async_trait]
+        impl RunLifecycle<TestGraph> for NextNodeTracker {
+            async fn on_checkpoint(
+                &self,
+                node: &TestNode,
+                _r: &NodeResult,
+                next_node_id: Option<&str>,
+                _s: &RunState,
+            ) -> Result<()> {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((node.id().to_string(), next_node_id.map(String::from)));
+                Ok(())
+            }
+        }
+        let g = linear_graph(&["start", "work", "end"]);
+        let state = RunState::new(&g).unwrap();
+        let executor =
+            ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
+                .lifecycle(Box::new(NextNodeTracker(log.clone())))
+                .build();
+        executor.run(&g, state).await.unwrap();
+        let checkpoints = log.lock().unwrap().clone();
+        // "start" checkpoints with next="work", "work" checkpoints with next="end"
+        assert_eq!(
+            checkpoints,
+            vec![
+                ("start".to_string(), Some("work".to_string())),
+                ("work".to_string(), Some("end".to_string())),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn executor_terminal_reached_receives_goal_gate_result() {
+        let log = Arc::new(Mutex::new(Vec::<(String, bool)>::new()));
+        struct GateTracker(Arc<Mutex<Vec<(String, bool)>>>);
+        #[async_trait]
+        impl RunLifecycle<TestGraph> for GateTracker {
+            async fn on_terminal_reached(
+                &self,
+                node: &TestNode,
+                goal_gates_passed: bool,
+                _s: &RunState,
+            ) {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((node.id().to_string(), goal_gates_passed));
+            }
+        }
+
+        // Test 1: goal gates pass
+        let g = linear_graph(&["work", "end"]);
+        let state = RunState::new(&g).unwrap();
+        let executor =
+            ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
+                .lifecycle(Box::new(GateTracker(log.clone())))
+                .build();
+        executor.run(&g, state).await.unwrap();
+        assert_eq!(log.lock().unwrap().clone(), vec![("end".to_string(), true)]);
+
+        // Test 2: goal gates fail
+        let log2 = Arc::new(Mutex::new(Vec::<(String, bool)>::new()));
+        let g2 = TestGraph::new(
+            vec![
+                TestNode::new("work"),
+                TestNode::terminal("end").with_goal_gate("work", StageStatus::Success),
+            ],
+            vec![TestEdge::new("work", "end")],
+            "work",
+        );
+        let state2 = RunState::new(&g2).unwrap();
+        let executor2 = ExecutorBuilder::new(
+            Arc::new(AlwaysFailHandler::new("nope")) as Arc<dyn NodeHandler<TestGraph>>
+        )
+        .lifecycle(Box::new(GateTracker(log2.clone())))
+        .build();
+        executor2.run(&g2, state2).await.unwrap();
+        assert_eq!(
+            log2.lock().unwrap().clone(),
+            vec![("end".to_string(), false)]
+        );
+    }
+
+    #[tokio::test]
+    async fn executor_loop_restart_uses_edge_target() {
+        // loop_restart edge points to "mid" (not graph start "start")
+        // Verify execution resumes at "mid" after restart
+        let call_log = Arc::new(Mutex::new(Vec::<String>::new()));
+        let log_clone = call_log.clone();
+
+        struct LogHandler(Arc<Mutex<Vec<String>>>);
+        #[async_trait]
+        impl NodeHandler<TestGraph> for LogHandler {
+            async fn execute(
+                &self,
+                node: &TestNode,
+                _c: &Context,
+                _g: &TestGraph,
+            ) -> Result<Outcome> {
+                let mut log = self.0.lock().unwrap();
+                log.push(node.id().to_string());
+                // On first visit to "work", trigger the loop restart via preferred_label
+                if node.id() == "work" && log.iter().filter(|n| *n == "work").count() == 1 {
+                    let mut o = Outcome::success();
+                    o.preferred_label = Some("restart".into());
+                    return Ok(o);
+                }
+                Ok(Outcome::success())
+            }
+        }
+
+        let g = TestGraph::new(
+            vec![
+                TestNode::new("start"),
+                TestNode::new("mid"),
+                TestNode::new("work"),
+                TestNode::terminal("end"),
+            ],
+            vec![
+                TestEdge::new("start", "mid"),
+                TestEdge::new("mid", "work"),
+                TestEdge::new("work", "end"),
+                // loop_restart edge targets "mid", NOT "start"
+                TestEdge::new("work", "mid")
+                    .with_label("restart")
+                    .with_loop_restart(),
+            ],
+            "start",
+        );
+        let state = RunState::new(&g).unwrap();
+        let executor = ExecutorBuilder::new(
+            Arc::new(LogHandler(log_clone)) as Arc<dyn NodeHandler<TestGraph>>
+        )
+        .max_node_visits(5)
+        .build();
+        executor.run(&g, state).await.unwrap();
+        // After restart, execution resumes at "mid" (not "start")
+        let log = call_log.lock().unwrap().clone();
+        assert_eq!(log, vec!["start", "mid", "work", "mid", "work"]);
+    }
+
+    #[tokio::test]
+    async fn executor_loop_restart_resets_context() {
+        // Verify context is fresh after restart (no leaked keys from prior iteration)
+        struct ContextChecker {
+            log: Arc<Mutex<Vec<Option<serde_json::Value>>>>,
+        }
+        #[async_trait]
+        impl NodeHandler<TestGraph> for ContextChecker {
+            async fn execute(
+                &self,
+                node: &TestNode,
+                context: &Context,
+                _g: &TestGraph,
+            ) -> Result<Outcome> {
+                if node.id() == "work" {
+                    // Record whether "leaked_key" exists in context
+                    self.log.lock().unwrap().push(context.get("leaked_key"));
+                    // Set a key that should NOT survive restart
+                    let mut o = Outcome::success();
+                    o.context_updates
+                        .insert("leaked_key".into(), serde_json::json!("should_not_persist"));
+                    // First visit triggers restart
+                    let visits = self.log.lock().unwrap().len();
+                    if visits == 1 {
+                        o.preferred_label = Some("restart".into());
+                    }
+                    return Ok(o);
+                }
+                Ok(Outcome::success())
+            }
+        }
+
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let g = TestGraph::new(
+            vec![
+                TestNode::new("start"),
+                TestNode::new("work"),
+                TestNode::terminal("end"),
+            ],
+            vec![
+                TestEdge::new("start", "work"),
+                TestEdge::new("work", "end"),
+                TestEdge::new("work", "start")
+                    .with_label("restart")
+                    .with_loop_restart(),
+            ],
+            "start",
+        );
+        let state = RunState::new(&g).unwrap();
+        let executor = ExecutorBuilder::new(
+            Arc::new(ContextChecker { log: log.clone() }) as Arc<dyn NodeHandler<TestGraph>>
+        )
+        .max_node_visits(5)
+        .build();
+        executor.run(&g, state).await.unwrap();
+        let ctx_values = log.lock().unwrap().clone();
+        // First visit: no leaked_key yet
+        assert_eq!(ctx_values[0], None);
+        // Second visit (after restart): leaked_key should be gone (fresh context)
+        assert_eq!(ctx_values[1], None);
+    }
+
+    #[tokio::test]
+    async fn executor_goal_gate_retry_uses_failed_node_id() {
+        // Goal gate fails on node "work", retry target defined on "work"
+        // Verify retry goes there (not to terminal node "end")
+        let handler = Arc::new(CountingHandler::new(vec![
+            Ok(Outcome::fail("first attempt")),
+            Ok(Outcome::success()),
+        ]));
+        let g = TestGraph::new(
+            vec![
+                TestNode::new("work"),
+                TestNode::terminal("end").with_goal_gate("work", StageStatus::Success),
+            ],
+            vec![TestEdge::new("work", "end")],
+            "work",
+        )
+        .with_retry_target("work", "work");
+
+        let state = RunState::new(&g).unwrap();
+        let executor =
+            ExecutorBuilder::new(handler.clone() as Arc<dyn NodeHandler<TestGraph>>).build();
+        let result = executor.run(&g, state).await.unwrap();
+        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(handler.calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn executor_fail_no_edge_checks_retry_target() {
+        // Node fails with no outgoing edge, but retry_target is defined
+        let handler = Arc::new(CountingHandler::new(vec![
+            Ok(Outcome::fail("boom")),
+            Ok(Outcome::success()),
+        ]));
+        let g = TestGraph::new(
+            vec![
+                TestNode::new("work"),
+                TestNode::new("recovery"),
+                TestNode::terminal("end"),
+            ],
+            vec![
+                // "work" has only a "success" edge — fail won't match
+                TestEdge::new("work", "end").with_label("success"),
+                TestEdge::new("recovery", "end"),
+            ],
+            "work",
+        )
+        .with_retry_target("work", "recovery");
+
+        let state = RunState::new(&g).unwrap();
+        let executor = ExecutorBuilder::new(handler.clone() as Arc<dyn NodeHandler<TestGraph>>)
+            .max_node_visits(5)
+            .build();
+        let result = executor.run(&g, state).await.unwrap();
+        assert_eq!(result.status, StageStatus::Success);
+        assert_eq!(handler.calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn executor_stall_token_interrupts_handler() {
+        // stall token cancelled during handler execution returns StallTimeout
+        let stall = CancellationToken::new();
+        let stall_clone = stall.clone();
+
+        struct SlowHandler(CancellationToken);
+        #[async_trait]
+        impl NodeHandler<TestGraph> for SlowHandler {
+            async fn execute(
+                &self,
+                _n: &TestNode,
+                _c: &Context,
+                _g: &TestGraph,
+            ) -> Result<Outcome> {
+                // Cancel stall token while "running"
+                self.0.cancel();
+                // Simulate long work
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                Ok(Outcome::success())
+            }
+        }
+
+        let g = linear_graph(&["start", "end"]);
+        let state = RunState::new(&g).unwrap();
+        let executor = ExecutorBuilder::new(
+            Arc::new(SlowHandler(stall_clone)) as Arc<dyn NodeHandler<TestGraph>>
+        )
+        .stall_token(stall)
+        .build();
+        let result = executor.run(&g, state).await;
+        match result {
+            Err(CoreError::StallTimeout { ref node_id }) => {
+                assert_eq!(node_id, "start");
+            }
+            other => panic!("expected StallTimeout, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn executor_stall_token_interrupts_backoff_sleep() {
+        // stall token cancelled during retry backoff sleep returns StallTimeout
+        let stall = CancellationToken::new();
+        let stall_clone = stall.clone();
+
+        struct FailOnceHandler {
+            stall: CancellationToken,
+            calls: AtomicU32,
+        }
+        #[async_trait]
+        impl NodeHandler<TestGraph> for FailOnceHandler {
+            async fn execute(
+                &self,
+                _n: &TestNode,
+                _c: &Context,
+                _g: &TestGraph,
+            ) -> Result<Outcome> {
+                let c = self.calls.fetch_add(1, Ordering::Relaxed);
+                if c == 0 {
+                    // First call: fail with retryable, then cancel stall during backoff
+                    self.stall.cancel();
+                    Err(CoreError::handler(HandlerErrorDetail {
+                        message: "transient".into(),
+                        retryable: true,
+                        category: None,
+                        signature: None,
+                    }))
+                } else {
+                    Ok(Outcome::success())
+                }
+            }
+            fn retry_policy(&self, _n: &TestNode, _g: &TestGraph) -> RetryPolicy {
+                RetryPolicy {
+                    max_attempts: 3,
+                    backoff: BackoffPolicy {
+                        initial_delay: Duration::from_secs(60),
+                        factor: 1.0,
+                        max_delay: Duration::from_secs(60),
+                        jitter: false,
+                    },
+                }
+            }
+        }
+
+        let g = linear_graph(&["start", "end"]);
+        let state = RunState::new(&g).unwrap();
+        let executor = ExecutorBuilder::new(Arc::new(FailOnceHandler {
+            stall: stall_clone,
+            calls: AtomicU32::new(0),
+        }) as Arc<dyn NodeHandler<TestGraph>>)
+        .stall_token(stall)
+        .build();
+        let result = executor.run(&g, state).await;
+        assert!(
+            matches!(result, Err(CoreError::StallTimeout { .. })),
+            "expected StallTimeout, got {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn executor_stall_token_interrupts_before_attempt() {
+        // stall token cancelled during a slow before_attempt lifecycle callback
+        let stall = CancellationToken::new();
+        let stall_clone = stall.clone();
+
+        struct SlowBeforeAttempt(CancellationToken);
+        #[async_trait]
+        impl RunLifecycle<TestGraph> for SlowBeforeAttempt {
+            async fn before_attempt(
+                &self,
+                _ctx: &AttemptContext<'_, TestGraph>,
+                _s: &RunState,
+            ) -> Result<NodeDecision> {
+                self.0.cancel();
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                Ok(NodeDecision::Continue)
+            }
+        }
+
+        let g = linear_graph(&["start", "end"]);
+        let state = RunState::new(&g).unwrap();
+        let executor =
+            ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
+                .lifecycle(Box::new(SlowBeforeAttempt(stall_clone)))
+                .stall_token(stall)
+                .build();
+        let result = executor.run(&g, state).await;
+        assert!(
+            matches!(result, Err(CoreError::StallTimeout { .. })),
+            "expected StallTimeout, got {:?}",
+            result
+        );
     }
 }

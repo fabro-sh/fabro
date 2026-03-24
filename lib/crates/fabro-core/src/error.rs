@@ -1,5 +1,4 @@
 use std::fmt;
-use std::time::Duration;
 
 use crate::outcome::{FailureDetail, Outcome, StageStatus};
 
@@ -35,8 +34,8 @@ pub enum CoreError {
         visits: usize,
         limit: usize,
     },
-    #[error("stall timeout: no activity for {elapsed:?}")]
-    StallTimeout { elapsed: Duration },
+    #[error("stall timeout on node \"{node_id}\"")]
+    StallTimeout { node_id: String },
     #[error("{detail}")]
     Handler { detail: HandlerErrorDetail },
     #[error("{0}")]
@@ -109,10 +108,10 @@ mod tests {
         );
         assert_eq!(
             CoreError::StallTimeout {
-                elapsed: Duration::from_secs(30)
+                node_id: "work".into()
             }
             .to_string(),
-            "stall timeout: no activity for 30s"
+            "stall timeout on node \"work\""
         );
         assert_eq!(
             CoreError::Other("something broke".into()).to_string(),

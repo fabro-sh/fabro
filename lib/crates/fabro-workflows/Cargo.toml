@@ -14,6 +14,7 @@ doctest = false
 
 [features]
 default = []
+core-engine = []
 exedev = ["fabro-sandbox/exe", "fabro-config/exedev"]
 
 [dependencies]
@@ -34,6 +35,7 @@ fabro-git-storage = { path = "../fabro-git-storage" }
 fabro-llm = { path = "../fabro-llm" }
 fabro-model = { path = "../fabro-model" }
 fabro-retro = { path = "../fabro-retro" }
+fabro-core = { path = "../fabro-core" }
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
