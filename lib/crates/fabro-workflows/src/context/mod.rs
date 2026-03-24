@@ -118,6 +118,13 @@ impl Context {
 
     // --- Internal accessors for bridge code ---
 
+    pub(crate) fn from_values(values: HashMap<String, Value>) -> Self {
+        Self {
+            values: Arc::new(RwLock::new(values)),
+            logs: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
     pub(crate) fn values_arc(&self) -> Arc<RwLock<HashMap<String, Value>>> {
         self.values.clone()
     }
