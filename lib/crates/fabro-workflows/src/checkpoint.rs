@@ -17,7 +17,6 @@ pub struct Checkpoint {
     pub completed_nodes: Vec<String>,
     pub node_retries: HashMap<String, u32>,
     pub context_values: HashMap<String, Value>,
-    pub logs: Vec<String>,
     /// Persisted node outcomes for goal gate checks after resume.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub node_outcomes: HashMap<String, Outcome>,
@@ -58,7 +57,6 @@ impl Checkpoint {
             completed_nodes,
             node_retries,
             context_values: context.snapshot(),
-            logs: context.logs_snapshot(),
             node_outcomes,
             next_node_id,
             git_commit_sha: None,
@@ -97,7 +95,6 @@ mod tests {
     fn from_context_captures_state() {
         let ctx = Context::new();
         ctx.set("key", serde_json::json!("value"));
-        ctx.append_log("started");
 
         let cp = Checkpoint::from_context(
             &ctx,
@@ -119,8 +116,6 @@ mod tests {
             cp.context_values.get("key"),
             Some(&serde_json::json!("value"))
         );
-        assert_eq!(cp.logs.len(), 1);
-        assert_eq!(cp.logs[0], "started");
         assert!(cp.node_retries.is_empty());
         assert!(cp.node_outcomes.is_empty());
         assert!(cp.next_node_id.is_none());
@@ -133,7 +128,6 @@ mod tests {
 
         let ctx = Context::new();
         ctx.set("goal", serde_json::json!("test"));
-        ctx.append_log("log entry");
 
         let mut retries = HashMap::new();
         retries.insert("work".to_string(), 2u32);
@@ -161,7 +155,6 @@ mod tests {
             loaded.context_values.get("goal"),
             Some(&serde_json::json!("test"))
         );
-        assert_eq!(loaded.logs, vec!["log entry"]);
         assert_eq!(
             loaded.node_outcomes.get("start").map(|o| &o.status),
             Some(&crate::outcome::StageStatus::Success)
@@ -273,5 +266,38 @@ mod tests {
         let cp: Checkpoint = serde_json::from_str(json).unwrap();
         assert!(cp.loop_failure_signatures.is_empty());
         assert!(cp.restart_failure_signatures.is_empty());
+    }
+
+    #[test]
+    fn backward_compat_old_checkpoint_with_logs_ignored() {
+        // Old checkpoints that contain a `logs` field should deserialize fine (field is ignored)
+        let json = r#"{
+            "timestamp": "2025-01-01T00:00:00Z",
+            "current_node": "work",
+            "completed_nodes": ["start"],
+            "node_retries": {},
+            "context_values": {},
+            "logs": ["old entry 1", "old entry 2"]
+        }"#;
+        let cp: Checkpoint = serde_json::from_str(json).unwrap();
+        assert_eq!(cp.current_node, "work");
+    }
+
+    #[test]
+    fn new_checkpoint_does_not_serialize_logs() {
+        let ctx = Context::new();
+        let cp = Checkpoint::from_context(
+            &ctx,
+            "n1",
+            vec![],
+            HashMap::new(),
+            HashMap::new(),
+            None,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        );
+        let json = serde_json::to_string(&cp).unwrap();
+        assert!(!json.contains("\"logs\""));
     }
 }

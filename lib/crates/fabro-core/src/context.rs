@@ -52,7 +52,6 @@ impl ContextStore for InMemoryStore {
 #[derive(Clone)]
 pub struct Context {
     store: Arc<dyn ContextStore>,
-    logs: Arc<RwLock<Vec<String>>>,
 }
 
 impl Default for Context {
@@ -65,22 +64,11 @@ impl Context {
     pub fn new() -> Self {
         Self {
             store: Arc::new(InMemoryStore::new()),
-            logs: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
     pub fn with_store(store: Arc<dyn ContextStore>) -> Self {
-        Self {
-            store,
-            logs: Arc::new(RwLock::new(Vec::new())),
-        }
-    }
-
-    pub fn with_store_and_logs(
-        store: Arc<dyn ContextStore>,
-        logs: Arc<RwLock<Vec<String>>>,
-    ) -> Self {
-        Self { store, logs }
+        Self { store }
     }
 
     pub fn set(&self, key: impl Into<String>, value: Value) {
@@ -107,18 +95,9 @@ impl Context {
         self.store.snapshot()
     }
 
-    pub fn append_log(&self, entry: impl Into<String>) {
-        self.logs.write().unwrap().push(entry.into());
-    }
-
-    pub fn logs_snapshot(&self) -> Vec<String> {
-        self.logs.read().unwrap().clone()
-    }
-
     pub fn clone_context(&self) -> Self {
         Self {
             store: self.store.fork(),
-            logs: Arc::new(RwLock::new(self.logs.read().unwrap().clone())),
         }
     }
 
@@ -212,15 +191,6 @@ mod tests {
     }
 
     #[test]
-    fn context_append_and_snapshot_logs() {
-        let ctx = Context::new();
-        ctx.append_log("step 1");
-        ctx.append_log("step 2");
-        let logs = ctx.logs_snapshot();
-        assert_eq!(logs, vec!["step 1", "step 2"]);
-    }
-
-    #[test]
     fn context_with_custom_store() {
         struct CountingStore {
             inner: InMemoryStore,
@@ -257,14 +227,10 @@ mod tests {
     fn context_fork_is_independent() {
         let ctx = Context::new();
         ctx.set("shared", json!("original"));
-        ctx.append_log("log1");
         let forked = ctx.clone_context();
         forked.set("shared", json!("modified"));
-        forked.append_log("log2");
         assert_eq!(ctx.get("shared"), Some(json!("original")));
-        assert_eq!(ctx.logs_snapshot().len(), 1);
         assert_eq!(forked.get("shared"), Some(json!("modified")));
-        assert_eq!(forked.logs_snapshot().len(), 2);
     }
 
     #[test]

@@ -483,7 +483,6 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
             node_outcomes,
             node_retries: state.node_retries.clone(),
             context_values: state.context.snapshot(),
-            logs: state.context.logs_snapshot(),
             next_node_id: next_node_id.map(String::from),
             git_commit_sha: None,
             node_visits: state.node_visits.clone(),
@@ -494,9 +493,11 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         // Write checkpoint.json
         let checkpoint_path = self.run_dir.join("checkpoint.json");
         if let Err(e) = checkpoint.save(&checkpoint_path) {
-            state
-                .context
-                .append_log(format!("checkpoint save failed: {e}"));
+            self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                level: crate::event::RunNoticeLevel::Warn,
+                code: "checkpoint_disk_save_failed".to_string(),
+                message: format!("[node: {}] checkpoint save failed: {e}", node.id()),
+            });
         }
 
         // Emit CheckpointCompleted event

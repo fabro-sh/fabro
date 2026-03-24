@@ -2426,7 +2426,6 @@ components:
         - completed_nodes
         - node_retries
         - context_values
-        - logs
       properties:
         timestamp:
           type: string
@@ -2449,11 +2448,6 @@ components:
           type: object
           additionalProperties: true
           description: Key-value context map accumulated during execution.
-        logs:
-          type: array
-          items:
-            type: string
-          description: Log entries recorded during execution.
         node_outcomes:
           type: object
           additionalProperties: true

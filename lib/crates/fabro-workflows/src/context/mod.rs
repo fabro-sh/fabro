@@ -9,7 +9,6 @@ use serde_json::Value;
 #[derive(Debug, Clone)]
 pub struct Context {
     values: Arc<RwLock<HashMap<String, Value>>>,
-    logs: Arc<RwLock<Vec<String>>>,
 }
 
 impl Default for Context {
@@ -23,7 +22,6 @@ impl Context {
     pub fn new() -> Self {
         Self {
             values: Arc::new(RwLock::new(HashMap::new())),
-            logs: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -61,18 +59,6 @@ impl Context {
             .unwrap_or_else(|| default.to_string())
     }
 
-    /// Append a log entry.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
-    pub fn append_log(&self, entry: impl Into<String>) {
-        self.logs
-            .write()
-            .expect("context lock poisoned")
-            .push(entry.into());
-    }
-
     /// Return a snapshot (clone) of all current context values.
     ///
     /// # Panics
@@ -83,24 +69,12 @@ impl Context {
         self.values.read().expect("context lock poisoned").clone()
     }
 
-    /// Return a snapshot of the logs.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
-    #[must_use]
-    pub fn logs_snapshot(&self) -> Vec<String> {
-        self.logs.read().expect("context lock poisoned").clone()
-    }
-
     /// Deep copy for parallel branch isolation.
     #[must_use]
     pub fn clone_context(&self) -> Self {
         let values = self.snapshot();
-        let logs = self.logs_snapshot();
         Self {
             values: Arc::new(RwLock::new(values)),
-            logs: Arc::new(RwLock::new(logs)),
         }
     }
 
@@ -121,16 +95,11 @@ impl Context {
     pub(crate) fn from_values(values: HashMap<String, Value>) -> Self {
         Self {
             values: Arc::new(RwLock::new(values)),
-            logs: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
     pub(crate) fn values_arc(&self) -> Arc<RwLock<HashMap<String, Value>>> {
         self.values.clone()
-    }
-
-    pub(crate) fn logs_arc(&self) -> Arc<RwLock<Vec<String>>> {
-        self.logs.clone()
     }
 
     // --- Typed accessors ---
@@ -179,7 +148,6 @@ mod tests {
     fn new_context_is_empty() {
         let ctx = Context::new();
         assert!(ctx.snapshot().is_empty());
-        assert!(ctx.logs_snapshot().is_empty());
     }
 
     #[test]
@@ -216,17 +184,6 @@ mod tests {
     }
 
     #[test]
-    fn append_and_snapshot_logs() {
-        let ctx = Context::new();
-        ctx.append_log("first entry");
-        ctx.append_log("second entry");
-        let logs = ctx.logs_snapshot();
-        assert_eq!(logs.len(), 2);
-        assert_eq!(logs[0], "first entry");
-        assert_eq!(logs[1], "second entry");
-    }
-
-    #[test]
     fn snapshot_is_independent() {
         let ctx = Context::new();
         ctx.set("a", serde_json::json!(1));
@@ -241,19 +198,15 @@ mod tests {
     fn clone_context_is_independent() {
         let ctx = Context::new();
         ctx.set("shared", serde_json::json!("original"));
-        ctx.append_log("log1");
 
         let cloned = ctx.clone_context();
         cloned.set("shared", serde_json::json!("modified"));
-        cloned.append_log("log2");
 
         // original should be unchanged
         assert_eq!(ctx.get("shared"), Some(serde_json::json!("original")));
-        assert_eq!(ctx.logs_snapshot().len(), 1);
 
         // cloned has the modification
         assert_eq!(cloned.get("shared"), Some(serde_json::json!("modified")));
-        assert_eq!(cloned.logs_snapshot().len(), 2);
     }
 
     #[test]

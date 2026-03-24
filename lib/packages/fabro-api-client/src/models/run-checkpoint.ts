@@ -39,10 +39,6 @@ export interface RunCheckpoint {
      */
     'context_values': { [key: string]: any; };
     /**
-     * Log entries recorded during execution.
-     */
-    'logs': Array<string>;
-    /**
      * Map of node identifier to outcome data for goal gate checks after resume.
      */
     'node_outcomes'?: { [key: string]: any; };

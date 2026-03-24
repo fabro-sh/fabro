@@ -11,7 +11,7 @@ A DOT-based pipeline runner for multi-stage AI workflows. Define workflows as Gr
 - **Outcome** -- The result of executing a handler, carrying a `StageStatus` (Success, Fail, PartialSuccess, Retry, Skipped), optional routing hints (`preferred_label`, `suggested_next_ids`), and context updates.
 - **Context** -- A thread-safe key-value store shared across pipeline stages, supporting snapshots and isolated cloning for parallel branches.
 - **Interviewer** -- A trait for human-in-the-loop interactions. Implementations include `AutoApproveInterviewer`, `QueueInterviewer`, `CallbackInterviewer`, `ConsoleInterviewer`, and `RecordingInterviewer`.
-- **Checkpoint** -- A serializable snapshot of execution state (completed nodes, context values, logs) for crash recovery and resume.
+- **Checkpoint** -- A serializable snapshot of execution state (completed nodes, context values) for crash recovery and resume.
 
 ## Pipeline Definition
 
