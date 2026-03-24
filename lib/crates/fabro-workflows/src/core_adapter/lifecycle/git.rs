@@ -49,6 +49,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
     ) -> fabro_core::error::Result<()> {
         // Reset last_git_sha (diff base parity)
         *self.last_git_sha.lock().unwrap() = None;
+        *self.checkpoint_git_result.lock().unwrap() = None;
 
         // Init metadata branch (best-effort)
         if let (Some(_), Some(ref repo_path)) =
@@ -91,6 +92,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
 
         // Skip git checkpoint for the start node (always empty) or if git disabled
         if self.start_node_id.as_deref() == Some(node_id) || !self.config.git_checkpoint_enabled {
+            *self.checkpoint_git_result.lock().unwrap() = None;
             return Ok(());
         }
 
