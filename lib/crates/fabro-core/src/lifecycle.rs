@@ -91,6 +91,15 @@ pub trait RunLifecycle<G: Graph>: Send + Sync {
         Ok(())
     }
 
+    async fn after_record(
+        &self,
+        _node: &G::Node,
+        _result: &NodeResult<G::Meta>,
+        _state: &RunState<G::Meta>,
+    ) -> Result<()> {
+        Ok(())
+    }
+
     async fn on_edge_selected(
         &self,
         _ctx: &EdgeContext<'_, G>,
@@ -199,6 +208,18 @@ impl<G: Graph + 'static> RunLifecycle<G> for CompositeLifecycle<G> {
     ) -> Result<()> {
         for child in &self.children {
             child.after_node(node, result, state).await?;
+        }
+        Ok(())
+    }
+
+    async fn after_record(
+        &self,
+        node: &G::Node,
+        result: &NodeResult<G::Meta>,
+        state: &RunState<G::Meta>,
+    ) -> Result<()> {
+        for child in &self.children {
+            child.after_record(node, result, state).await?;
         }
         Ok(())
     }
@@ -357,6 +378,19 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("{}:after_node", self.name));
+            Ok(())
+        }
+
+        async fn after_record(
+            &self,
+            _node: &TestNode,
+            _result: &NodeResult,
+            _state: &RunState,
+        ) -> Result<()> {
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("{}:after_record", self.name));
             Ok(())
         }
 
@@ -628,6 +662,22 @@ mod tests {
         lc.after_node(&node, &mut result, &state).await.unwrap();
         let calls = log.lock().unwrap().clone();
         assert_eq!(calls, vec!["a:after_node", "b:after_node"]);
+    }
+
+    #[tokio::test]
+    async fn composite_after_record_calls_all() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let lc = CompositeLifecycle::new(vec![
+            Box::new(RecordingLifecycle::new("a", log.clone())),
+            Box::new(RecordingLifecycle::new("b", log.clone())),
+        ]);
+        let g = linear_graph(&["start", "end"]);
+        let state = RunState::new(&g).unwrap();
+        let node = g.get_node("start").unwrap();
+        let result = NodeResult::new(Outcome::success(), Duration::ZERO, 1, 1);
+        lc.after_record(&node, &result, &state).await.unwrap();
+        let calls = log.lock().unwrap().clone();
+        assert_eq!(calls, vec!["a:after_record", "b:after_record"]);
     }
 
     #[tokio::test]

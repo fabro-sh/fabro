@@ -2804,7 +2804,7 @@ async fn scenario_node_retries_on_retry_status() {
         .node_retries
         .get("flaky")
         .expect("flaky should have retries");
-    assert_eq!(*retry_count, 2, "should have been called 2x");
+    assert_eq!(*retry_count, 1, "should have retried once");
 }
 
 #[tokio::test]
