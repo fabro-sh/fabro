@@ -10,6 +10,7 @@ use fabro_core::state::RunState;
 
 use super::super::graph::WorkflowGraph;
 use super::super::WorkflowNode;
+use crate::engine;
 use crate::error::{FailureCategory, FailureSignature};
 use crate::outcome::{OutcomeExt, StageStatus, StageUsage};
 
@@ -68,7 +69,7 @@ impl RunLifecycle<WorkflowGraph> for CircuitBreakerLifecycle {
         let outcome = &result.outcome;
 
         let outcome_failure_category = if outcome.status == StageStatus::Fail {
-            outcome.failure.as_ref().map(|f| f.category)
+            engine::classify_outcome(outcome)
         } else {
             None
         };
@@ -116,10 +117,10 @@ impl RunLifecycle<WorkflowGraph> for CircuitBreakerLifecycle {
         let outcome = ctx.outcome;
 
         // Guard: only TransientInfra failures may trigger loop_restart
-        let failure_class = outcome.failure_category();
+        let failure_class = engine::classify_outcome(outcome);
         if let Some(fc) = failure_class {
             if fc != FailureCategory::TransientInfra {
-                return Err(CoreError::blocked(format!(
+                return Ok(EdgeDecision::Block(format!(
                     "loop_restart blocked: failure_class={fc} (requires transient_infra), failure_reason={}",
                     outcome.failure_reason().unwrap_or("none"),
                 )));
@@ -140,7 +141,7 @@ impl RunLifecycle<WorkflowGraph> for CircuitBreakerLifecycle {
                 *count += 1;
                 let limit = self.loop_restart_signature_limit;
                 if *count >= limit {
-                    return Err(CoreError::blocked(format!(
+                    return Ok(EdgeDecision::Block(format!(
                         "loop_restart circuit breaker: signature {sig} repeated {count} times (limit {limit})"
                     )));
                 }

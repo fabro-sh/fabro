@@ -11,7 +11,6 @@ use fabro_core::state::RunState;
 use super::super::graph::WorkflowGraph;
 use super::super::WorkflowNode;
 use crate::artifact::{offload_large_values, sync_artifacts_to_env, ArtifactStore};
-use crate::engine;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::outcome::StageUsage;
 use fabro_core::lifecycle::NodeDecision;
@@ -64,6 +63,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         // Swap in a fresh artifact store on restart (don't call clear() — preserves files on disk)
         let mut store = self.artifact_store.lock().unwrap();
         *store = ArtifactStore::new(self.artifact_base_dir.clone());
+        *self.attempt_start_epoch.lock().unwrap() = None;
         Ok(())
     }
 
@@ -92,7 +92,17 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         let epoch = self.attempt_start_epoch.lock().unwrap().unwrap_or(0.0);
         let node_id = ctx.node.id();
         let visit = state.node_visits.get(node_id).copied().unwrap_or(1);
-        let stage_dir = engine::node_dir(&self.run_dir, node_id, visit);
+        let node_slug = if visit <= 1 {
+            node_id.to_string()
+        } else {
+            format!("{node_id}-visit_{visit}")
+        };
+        let stage_dir = self
+            .run_dir
+            .join("artifacts")
+            .join("assets")
+            .join(node_slug)
+            .join(format!("retry_{}", ctx.attempt));
         let _ = std::fs::create_dir_all(&stage_dir);
 
         match crate::asset_snapshot::collect_assets(

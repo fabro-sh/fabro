@@ -13,7 +13,7 @@ use fabro_core::state::RunState;
 use super::super::graph::WorkflowGraph;
 use super::super::WorkflowNode;
 use crate::engine::set_hook_node;
-use crate::outcome::{Outcome, StageStatus, StageUsage};
+use crate::outcome::{Outcome, OutcomeExt, StageStatus, StageUsage};
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_sandbox::Sandbox;
 
@@ -25,7 +25,7 @@ type WfNodeDecision = NodeDecision<Option<StageUsage>>;
 pub struct HookLifecycle {
     pub hook_runner: Option<Arc<HookRunner>>,
     pub sandbox: Arc<dyn Sandbox>,
-    pub run_dir: PathBuf,
+    pub hook_work_dir: Option<PathBuf>,
     pub run_id: String,
     pub graph_name: String,
 }
@@ -36,7 +36,11 @@ impl HookLifecycle {
             return HookDecision::Proceed;
         };
         runner
-            .run(hook_ctx, self.sandbox.clone(), Some(&self.run_dir))
+            .run(
+                hook_ctx,
+                self.sandbox.clone(),
+                self.hook_work_dir.as_deref(),
+            )
             .await
     }
 }
@@ -68,13 +72,17 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
             self.run_id.clone(),
             self.graph_name.clone(),
         );
+        hook_ctx.cwd = self
+            .hook_work_dir
+            .as_ref()
+            .map(|path| path.display().to_string());
         set_hook_node(&mut hook_ctx, gv);
         hook_ctx.attempt = Some(ctx.attempt as usize);
         hook_ctx.max_attempts = Some(ctx.max_attempts as usize);
         let decision = self.run_hook(&hook_ctx).await;
         match decision {
             HookDecision::Skip { reason } => {
-                let msg = reason.unwrap_or_else(|| "skipped by hook".into());
+                let msg = reason.unwrap_or_else(|| "skipped by StageStart hook".into());
                 Ok(NodeDecision::Skip(Box::new(Outcome::skipped(&msg))))
             }
             HookDecision::Block { reason } => {
@@ -87,7 +95,7 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
 
     async fn after_node(
         &self,
-        _node: &WorkflowNode,
+        node: &WorkflowNode,
         result: &mut WfNodeResult,
         _state: &WfRunState,
     ) -> CoreResult<()> {
@@ -103,7 +111,9 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
         };
         let mut hook_ctx =
             HookContext::new(hook_event, self.run_id.clone(), self.graph_name.clone());
+        set_hook_node(&mut hook_ctx, node.inner());
         hook_ctx.status = Some(outcome.status.to_string());
+        hook_ctx.failure_reason = outcome.failure_reason().map(String::from);
         let _ = self.run_hook(&hook_ctx).await;
         Ok(())
     }
@@ -120,6 +130,10 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
         );
         hook_ctx.edge_from = Some(ctx.from.to_string());
         hook_ctx.edge_to = Some(ctx.to.to_string());
+        hook_ctx.edge_label = ctx
+            .edge
+            .as_ref()
+            .and_then(|edge| edge.inner().label().map(String::from));
         let decision = self.run_hook(&hook_ctx).await;
         match decision {
             HookDecision::Override { edge_to } => Ok(EdgeDecision::Override(edge_to)),
