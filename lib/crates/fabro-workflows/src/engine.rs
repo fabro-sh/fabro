@@ -1219,6 +1219,18 @@ impl WorkflowRunEngine {
         lifecycle: LifecycleConfig,
         checkpoint: Option<&Checkpoint>,
     ) -> Result<Outcome> {
+        self.prepare_sandbox(graph, config, lifecycle).await?;
+        self.execute_graph(graph, config, checkpoint).await
+    }
+
+    /// INITIALIZE: sandbox setup, git, setup commands, devcontainer.
+    /// Mutates config (fills base_sha, run_branch from sandbox git setup).
+    pub async fn prepare_sandbox(
+        &self,
+        graph: &Graph,
+        config: &mut RunConfig,
+        lifecycle: LifecycleConfig,
+    ) -> Result<()> {
         // 1. Initialize sandbox
         self.services
             .sandbox
@@ -1338,7 +1350,16 @@ impl WorkflowRunEngine {
             .map_err(|e| FabroError::engine(e.to_string()))?;
         }
 
-        // 7. Execute the workflow graph
+        Ok(())
+    }
+
+    /// EXECUTE: pure graph traversal. No sandbox setup.
+    pub async fn execute_graph(
+        &self,
+        graph: &Graph,
+        config: &RunConfig,
+        checkpoint: Option<&Checkpoint>,
+    ) -> Result<Outcome> {
         if let Some(cp) = checkpoint {
             self.run_from_checkpoint(graph, config, cp).await
         } else {
