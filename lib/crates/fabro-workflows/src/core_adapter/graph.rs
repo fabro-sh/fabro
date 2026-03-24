@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fabro_core::context::Context as CoreContext;
 use fabro_core::error::{CoreError, Result as CoreResult};
 use fabro_core::graph::{EdgeSelection, EdgeSpec, Graph, NodeSpec};
 use fabro_graphviz::graph::types::{Edge as GvEdge, Graph as GvGraph, Node as GvNode};
 
+use crate::context::Context;
 use crate::engine;
 use crate::outcome::{Outcome, StageUsage};
 
@@ -101,16 +101,12 @@ impl Graph for WorkflowGraph {
         &self,
         node: &Self::Node,
         outcome: &Outcome,
-        context: &CoreContext,
+        context: &Context,
     ) -> Option<EdgeSelection<Self>> {
-        // Build a wf Context from the core context snapshot so edge conditions
-        // that read context values (e.g. `context.failure_class=budget_exhausted`)
-        // evaluate correctly.
-        let wf_context = crate::context::Context::from_values(context.snapshot());
         let selection = engine::select_edge(
             node.inner(),
             outcome,
-            &wf_context,
+            context,
             self.inner(),
             node.inner().selection(),
         );

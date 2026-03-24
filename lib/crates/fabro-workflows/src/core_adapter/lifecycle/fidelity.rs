@@ -87,16 +87,13 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
         );
 
         // 4. Preamble building: if Full, empty preamble; otherwise build from context
-        let preamble = {
-            let wf_context = crate::context::Context::from_values(state.context.snapshot());
-            build_preamble(
-                fidelity,
-                &wf_context,
-                &self.graph,
-                &state.completed_nodes,
-                &state.node_outcomes,
-            )
-        };
+        let preamble = build_preamble(
+            fidelity,
+            &state.context,
+            &self.graph,
+            &state.completed_nodes,
+            &state.node_outcomes,
+        );
         state
             .context
             .set(keys::CURRENT_PREAMBLE, serde_json::json!(preamble));

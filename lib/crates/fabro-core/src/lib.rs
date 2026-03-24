@@ -12,7 +12,7 @@ pub mod state;
 #[cfg(test)]
 pub mod test_fixtures;
 
-pub use context::{Context, ContextStore, InMemoryStore};
+pub use context::Context;
 pub use error::{CoreError, HandlerErrorDetail, Result};
 pub use executor::{Executor, ExecutorBuilder, ExecutorSettings};
 pub use graph::{EdgeSelection, EdgeSpec, Graph, NodeSpec};

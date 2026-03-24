@@ -8,7 +8,7 @@ use async_trait::async_trait;
 
 use crate::condition::evaluate_condition;
 use crate::context::keys;
-use crate::context::Context;
+use crate::context::{Context, WorkflowContext};
 use crate::engine::{RunConfig, WorkflowRunEngine};
 use crate::error::FabroError;
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
@@ -161,7 +161,7 @@ impl Handler for SubWorkflowHandler {
         };
 
         // Clone parent context for child; inject parent preamble
-        let child_context = context.clone_context();
+        let child_context = context.fork();
         let parent_preamble = context.preamble();
         if !parent_preamble.is_empty() {
             child_context.set(

@@ -3,80 +3,28 @@ use std::sync::{Arc, RwLock};
 
 use serde_json::Value;
 
-pub trait ContextStore: Send + Sync {
-    fn set(&self, key: String, value: Value);
-    fn get(&self, key: &str) -> Option<Value>;
-    fn snapshot(&self) -> HashMap<String, Value>;
-    fn fork(&self) -> Arc<dyn ContextStore>;
-}
-
-pub struct InMemoryStore {
-    data: RwLock<HashMap<String, Value>>,
-}
-
-impl InMemoryStore {
-    pub fn new() -> Self {
-        Self {
-            data: RwLock::new(HashMap::new()),
-        }
-    }
-}
-
-impl Default for InMemoryStore {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ContextStore for InMemoryStore {
-    fn set(&self, key: String, value: Value) {
-        self.data.write().unwrap().insert(key, value);
-    }
-
-    fn get(&self, key: &str) -> Option<Value> {
-        self.data.read().unwrap().get(key).cloned()
-    }
-
-    fn snapshot(&self) -> HashMap<String, Value> {
-        self.data.read().unwrap().clone()
-    }
-
-    fn fork(&self) -> Arc<dyn ContextStore> {
-        let cloned = self.data.read().unwrap().clone();
-        Arc::new(InMemoryStore {
-            data: RwLock::new(cloned),
-        })
-    }
-}
-
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Context {
-    store: Arc<dyn ContextStore>,
-}
-
-impl Default for Context {
-    fn default() -> Self {
-        Self::new()
-    }
+    values: Arc<RwLock<HashMap<String, Value>>>,
 }
 
 impl Context {
     pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn from_values(values: HashMap<String, Value>) -> Self {
         Self {
-            store: Arc::new(InMemoryStore::new()),
+            values: Arc::new(RwLock::new(values)),
         }
     }
 
-    pub fn with_store(store: Arc<dyn ContextStore>) -> Self {
-        Self { store }
-    }
-
     pub fn set(&self, key: impl Into<String>, value: Value) {
-        self.store.set(key.into(), value);
+        self.values.write().unwrap().insert(key.into(), value);
     }
 
     pub fn get(&self, key: &str) -> Option<Value> {
-        self.store.get(key)
+        self.values.read().unwrap().get(key).cloned()
     }
 
     pub fn get_string(&self, key: &str, default: &str) -> String {
@@ -86,18 +34,21 @@ impl Context {
     }
 
     pub fn apply_updates(&self, updates: &HashMap<String, Value>) {
+        let mut values = self.values.write().unwrap();
         for (k, v) in updates {
-            self.store.set(k.clone(), v.clone());
+            values.insert(k.clone(), v.clone());
         }
     }
 
     pub fn snapshot(&self) -> HashMap<String, Value> {
-        self.store.snapshot()
+        self.values.read().unwrap().clone()
     }
 
-    pub fn clone_context(&self) -> Self {
+    /// Deep copy for parallel branch isolation.
+    /// `.clone()` shares state (Arc clone); `.fork()` creates an independent copy.
+    pub fn fork(&self) -> Self {
         Self {
-            store: self.store.fork(),
+            values: Arc::new(RwLock::new(self.snapshot())),
         }
     }
 
@@ -117,36 +68,6 @@ impl Context {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    #[test]
-    fn in_memory_store_set_and_get() {
-        let store = InMemoryStore::new();
-        store.set("k".into(), json!("v"));
-        assert_eq!(store.get("k"), Some(json!("v")));
-        assert_eq!(store.get("missing"), None);
-    }
-
-    #[test]
-    fn in_memory_store_snapshot_is_independent() {
-        let store = InMemoryStore::new();
-        store.set("a".into(), json!(1));
-        let snap = store.snapshot();
-        store.set("b".into(), json!(2));
-        assert!(!snap.contains_key("b"));
-        assert_eq!(snap.len(), 1);
-    }
-
-    #[test]
-    fn in_memory_store_fork() {
-        let store = InMemoryStore::new();
-        store.set("x".into(), json!(10));
-        let forked = store.fork();
-        forked.set("y".into(), json!(20));
-        assert!(store.get("y").is_none());
-        assert_eq!(forked.get("x"), Some(json!(10)));
-        assert_eq!(forked.get("y"), Some(json!(20)));
-    }
 
     #[test]
     fn context_set_and_get() {
@@ -181,56 +102,21 @@ mod tests {
     }
 
     #[test]
-    fn context_clone_is_independent() {
-        let ctx = Context::new();
-        ctx.set("x", json!(1));
-        let cloned = ctx.clone_context();
-        cloned.set("x", json!(2));
-        assert_eq!(ctx.get("x"), Some(json!(1)));
-        assert_eq!(cloned.get("x"), Some(json!(2)));
-    }
-
-    #[test]
-    fn context_with_custom_store() {
-        struct CountingStore {
-            inner: InMemoryStore,
-            set_count: AtomicUsize,
-        }
-        impl ContextStore for CountingStore {
-            fn set(&self, key: String, value: Value) {
-                self.set_count.fetch_add(1, Ordering::Relaxed);
-                self.inner.set(key, value);
-            }
-            fn get(&self, key: &str) -> Option<Value> {
-                self.inner.get(key)
-            }
-            fn snapshot(&self) -> HashMap<String, Value> {
-                self.inner.snapshot()
-            }
-            fn fork(&self) -> Arc<dyn ContextStore> {
-                self.inner.fork()
-            }
-        }
-
-        let store = Arc::new(CountingStore {
-            inner: InMemoryStore::new(),
-            set_count: AtomicUsize::new(0),
-        });
-        let ctx = Context::with_store(store.clone());
-        ctx.set("k", json!(1));
-        ctx.set("k2", json!(2));
-        assert_eq!(store.set_count.load(Ordering::Relaxed), 2);
-        assert_eq!(ctx.get("k"), Some(json!(1)));
-    }
-
-    #[test]
     fn context_fork_is_independent() {
         let ctx = Context::new();
         ctx.set("shared", json!("original"));
-        let forked = ctx.clone_context();
+        let forked = ctx.fork();
         forked.set("shared", json!("modified"));
         assert_eq!(ctx.get("shared"), Some(json!("original")));
         assert_eq!(forked.get("shared"), Some(json!("modified")));
+    }
+
+    #[test]
+    fn context_from_values() {
+        let mut vals = HashMap::new();
+        vals.insert("k".into(), json!("v"));
+        let ctx = Context::from_values(vals);
+        assert_eq!(ctx.get("k"), Some(json!("v")));
     }
 
     #[test]
