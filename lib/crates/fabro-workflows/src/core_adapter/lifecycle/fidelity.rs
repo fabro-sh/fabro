@@ -9,16 +9,18 @@ use fabro_core::state::RunState;
 use super::super::graph::WorkflowGraph;
 use super::super::WorkflowNode;
 use crate::context::keys;
+use crate::engine;
 use crate::outcome::StageUsage;
+use crate::preamble::build_preamble;
 
 type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeDecision = NodeDecision<Option<StageUsage>>;
 
-/// Data captured from an edge selection to pass to the next node's before_node.
+/// Graphviz edge captured from edge selection, passed to the next node's before_node
+/// for fidelity/thread resolution.
 #[derive(Debug, Clone)]
 struct IncomingEdgeData {
-    fidelity: Option<String>,
-    thread_id: Option<String>,
+    edge: Arc<fabro_graphviz::graph::types::Edge>,
 }
 
 /// Sub-lifecycle responsible for fidelity/thread resolution and context key setup.
@@ -63,7 +65,71 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
         let incoming = self.incoming_edge_data.lock().unwrap().take();
         let gv_node = node.inner();
 
-        // Set context keys for the current node
+        // 1. Fidelity resolution via resolve_fidelity: edge → node → graph default → Compact
+        let incoming_edge_ref = incoming.as_ref().map(|d| d.edge.as_ref());
+        let fidelity = engine::resolve_fidelity(incoming_edge_ref, gv_node, &self.graph);
+
+        // 2. Fidelity degradation on resume (full → summary:high)
+        let fidelity = {
+            let mut degrade = self.degrade_fidelity_on_resume.lock().unwrap();
+            if *degrade {
+                *degrade = false;
+                fidelity.degraded()
+            } else {
+                fidelity
+            }
+        };
+
+        // 3. Set INTERNAL_FIDELITY
+        state.context.set(
+            keys::INTERNAL_FIDELITY,
+            serde_json::json!(fidelity.to_string()),
+        );
+
+        // 4. Preamble building: if Full, empty preamble; otherwise build from context
+        let preamble = {
+            let wf_context = crate::context::Context::from_values(state.context.snapshot());
+            build_preamble(
+                fidelity,
+                &wf_context,
+                &self.graph,
+                &state.completed_nodes,
+                &state.node_outcomes,
+            )
+        };
+        state
+            .context
+            .set(keys::CURRENT_PREAMBLE, serde_json::json!(preamble));
+
+        // 5. Thread ID resolution via resolve_thread_id: edge → node → graph default → class → previous
+        let thread_id = engine::resolve_thread_id(
+            incoming_edge_ref,
+            gv_node,
+            &self.graph,
+            state.previous_node_id.as_deref(),
+        );
+
+        // 6. Set thread.{tid}.current_node
+        if let Some(ref tid) = thread_id {
+            let key = format!("thread.{tid}.current_node");
+            state.context.set(key, serde_json::json!(node.id()));
+        }
+
+        // 7. Set INTERNAL_THREAD_ID (or null)
+        match thread_id {
+            Some(tid) => {
+                state
+                    .context
+                    .set(keys::INTERNAL_THREAD_ID, serde_json::json!(tid));
+            }
+            None => {
+                state
+                    .context
+                    .set(keys::INTERNAL_THREAD_ID, serde_json::Value::Null);
+            }
+        }
+
+        // 8. Set INTERNAL_NODE_VISIT_COUNT and CURRENT_NODE
         let visits = state.node_visits.get(node.id()).copied().unwrap_or(0);
         state
             .context
@@ -71,47 +137,6 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
         state
             .context
             .set(keys::INTERNAL_NODE_VISIT_COUNT, serde_json::json!(visits));
-
-        // Fidelity resolution: edge → node → graph default → compact
-        let fidelity = if let Some(ref edge_data) = incoming {
-            edge_data
-                .fidelity
-                .as_deref()
-                .or(gv_node.fidelity())
-                .unwrap_or("compact")
-                .to_string()
-        } else {
-            gv_node.fidelity().unwrap_or("compact").to_string()
-        };
-
-        // Fidelity degradation on resume
-        let fidelity = {
-            let mut degrade = self.degrade_fidelity_on_resume.lock().unwrap();
-            if *degrade {
-                *degrade = false;
-                let parsed: keys::Fidelity = fidelity.parse().unwrap_or_default();
-                parsed.degraded().to_string()
-            } else {
-                fidelity
-            }
-        };
-
-        state
-            .context
-            .set(keys::INTERNAL_FIDELITY, serde_json::json!(fidelity));
-
-        // Thread ID resolution: edge → node → graph default → previous node
-        if let Some(ref edge_data) = incoming {
-            if let Some(ref tid) = edge_data.thread_id {
-                state
-                    .context
-                    .set(keys::INTERNAL_THREAD_ID, serde_json::json!(tid));
-            }
-        } else if let Some(tid) = gv_node.thread_id() {
-            state
-                .context
-                .set(keys::INTERNAL_THREAD_ID, serde_json::json!(tid));
-        }
 
         Ok(NodeDecision::Continue)
     }
@@ -125,8 +150,7 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
         if let Some(ref edge) = ctx.edge {
             let gv_edge = edge.inner();
             let edge_data = IncomingEdgeData {
-                fidelity: gv_edge.fidelity().map(String::from),
-                thread_id: gv_edge.thread_id().map(String::from),
+                edge: Arc::new(gv_edge.clone()),
             };
             *self.incoming_edge_data.lock().unwrap() = Some(edge_data);
         }

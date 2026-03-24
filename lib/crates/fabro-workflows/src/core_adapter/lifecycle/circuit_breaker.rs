@@ -4,14 +4,14 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 
 use fabro_core::error::{CoreError, Result as CoreResult};
-use fabro_core::lifecycle::RunLifecycle;
+use fabro_core::lifecycle::{EdgeContext, EdgeDecision, RunLifecycle};
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::RunState;
 
 use super::super::graph::WorkflowGraph;
 use super::super::WorkflowNode;
-use crate::error::FailureSignature;
-use crate::outcome::{StageStatus, StageUsage};
+use crate::error::{FailureCategory, FailureSignature};
+use crate::outcome::{OutcomeExt, StageStatus, StageUsage};
 
 type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
@@ -98,5 +98,55 @@ impl RunLifecycle<WorkflowGraph> for CircuitBreakerLifecycle {
         }
 
         Ok(())
+    }
+
+    async fn on_edge_selected(
+        &self,
+        ctx: &EdgeContext<'_, WorkflowGraph>,
+        _state: &WfRunState,
+    ) -> CoreResult<EdgeDecision> {
+        // Only guard loop_restart edges
+        let Some(ref edge) = ctx.edge else {
+            return Ok(EdgeDecision::Continue);
+        };
+        if !edge.inner().loop_restart() {
+            return Ok(EdgeDecision::Continue);
+        }
+
+        let outcome = ctx.outcome;
+
+        // Guard: only TransientInfra failures may trigger loop_restart
+        let failure_class = outcome.failure_category();
+        if let Some(fc) = failure_class {
+            if fc != FailureCategory::TransientInfra {
+                return Err(CoreError::blocked(format!(
+                    "loop_restart blocked: failure_class={fc} (requires transient_infra), failure_reason={}",
+                    outcome.failure_reason().unwrap_or("none"),
+                )));
+            }
+        }
+
+        // Circuit breaker: check restart failure signatures
+        if let Some(ref failure) = outcome.failure {
+            let sig = FailureSignature::new(
+                ctx.from,
+                failure.category,
+                failure.signature.as_deref(),
+                Some(failure.message.as_str()),
+            );
+            if failure.category.is_signature_tracked() {
+                let mut sigs = self.restart_failure_signatures.lock().unwrap();
+                let count = sigs.entry(sig.clone()).or_insert(0);
+                *count += 1;
+                let limit = self.loop_restart_signature_limit;
+                if *count >= limit {
+                    return Err(CoreError::blocked(format!(
+                        "loop_restart circuit breaker: signature {sig} repeated {count} times (limit {limit})"
+                    )));
+                }
+            }
+        }
+
+        Ok(EdgeDecision::Continue)
     }
 }
