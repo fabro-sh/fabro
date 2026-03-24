@@ -57,6 +57,10 @@ impl Context {
         self.get_string("current_node", "")
     }
 
+    /// Returns the raw stored node visit count.
+    ///
+    /// This is `0` when the workflow lifecycle has not yet seeded
+    /// `internal.node_visit_count` into the context.
     pub fn node_visit_count(&self) -> usize {
         self.get("internal.node_visit_count")
             .and_then(|v| v.as_u64())

@@ -288,9 +288,12 @@ pub fn node_dir(run_dir: &Path, node_id: &str, visit: usize) -> PathBuf {
     }
 }
 
-/// Read the visit count from context, defaulting to 1 if not set.
+/// Read the workflow visit ordinal from context.
+///
+/// The raw context value is `0` when unset; workflow execution code treats
+/// missing counts as the first visit for stage/log naming.
 pub fn visit_from_context(context: &Context) -> usize {
-    context.node_visit_count()
+    context.node_visit_count().max(1)
 }
 
 /// Write status.json for a completed node into {`run_dir}/nodes/{node_id}/status.json`.
@@ -2789,6 +2792,22 @@ mod tests {
         let policy = RetryPolicy::linear();
         assert_eq!(policy.max_attempts, 3);
         assert_eq!(policy.backoff.factor, 1.0);
+    }
+
+    #[test]
+    fn visit_from_context_defaults_to_first_visit() {
+        let ctx = Context::new();
+        assert_eq!(visit_from_context(&ctx), 1);
+    }
+
+    #[test]
+    fn visit_from_context_preserves_stored_visit() {
+        let ctx = Context::new();
+        ctx.set(
+            crate::context::keys::INTERNAL_NODE_VISIT_COUNT,
+            serde_json::json!(3),
+        );
+        assert_eq!(visit_from_context(&ctx), 3);
     }
 
     #[test]
