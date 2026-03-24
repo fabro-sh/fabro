@@ -2,6 +2,21 @@ use std::fmt;
 
 use crate::outcome::{FailureCategory, FailureDetail, Outcome, OutcomeMeta, StageStatus};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisitLimitSource {
+    Node,
+    Graph,
+}
+
+impl fmt::Display for VisitLimitSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Node => write!(f, "node"),
+            Self::Graph => write!(f, "graph"),
+        }
+    }
+}
+
 /// Structured failure data on handler errors. Maps to FabroError's
 /// is_retryable(), failure_class(), failure_signature_hint(), to_fail_outcome().
 #[derive(Debug, Clone)]
@@ -28,11 +43,12 @@ pub enum CoreError {
     Cancelled,
     #[error("blocked: {message}")]
     Blocked { message: String },
-    #[error("node \"{node_id}\" visited {visits} times (limit {limit})")]
+    #[error("node \"{node_id}\" visited {visits} times ({limit_source} limit {limit}); run is stuck in a cycle")]
     VisitLimitExceeded {
         node_id: String,
         visits: usize,
         limit: usize,
+        limit_source: VisitLimitSource,
     },
     #[error("stall timeout on node \"{node_id}\"")]
     StallTimeout { node_id: String },
@@ -101,10 +117,11 @@ mod tests {
             CoreError::VisitLimitExceeded {
                 node_id: "n1".into(),
                 visits: 5,
-                limit: 3
+                limit: 3,
+                limit_source: VisitLimitSource::Node,
             }
             .to_string(),
-            "node \"n1\" visited 5 times (limit 3)"
+            "node \"n1\" visited 5 times (node limit 3); run is stuck in a cycle"
         );
         assert_eq!(
             CoreError::StallTimeout {
