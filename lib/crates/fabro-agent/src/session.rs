@@ -670,7 +670,7 @@ impl Session {
                             provider: retry_provider.clone(),
                             model: retry_model.clone(),
                             attempt: attempt as usize,
-                            delay_secs: delay,
+                            delay_secs: delay.as_secs_f64(),
                             error: err.clone(),
                         },
                     );

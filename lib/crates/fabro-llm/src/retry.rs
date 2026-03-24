@@ -1,6 +1,7 @@
 use crate::error::SdkError;
 use crate::types::RetryPolicy;
 use std::future::Future;
+use std::time::Duration;
 use tracing::warn;
 
 /// Retry a fallible async operation according to the given policy (Section 6.6).
@@ -29,17 +30,19 @@ where
 
                 // Check Retry-After
                 let delay = if let Some(retry_after) = err.retry_after() {
-                    if retry_after > policy.max_delay {
+                    let retry_after_dur = Duration::from_secs_f64(retry_after);
+                    if retry_after_dur > policy.backoff.max_delay {
                         return Err(err);
                     }
-                    retry_after
+                    retry_after_dur
                 } else {
-                    policy.delay_for_attempt(attempt)
+                    // Convert from 0-indexed (fabro-llm convention) to 1-indexed (BackoffPolicy)
+                    policy.backoff.delay_for_attempt(attempt + 1)
                 };
 
                 warn!(
                     attempt = attempt,
-                    delay_secs = delay,
+                    delay_secs = delay.as_secs_f64(),
                     error = %err,
                     "LLM request failed, retrying"
                 );
@@ -48,7 +51,7 @@ where
                     on_retry(&err, attempt, delay);
                 }
 
-                tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
+                tokio::time::sleep(delay).await;
 
                 attempt += 1;
             }
@@ -60,14 +63,27 @@ where
 mod tests {
     use super::*;
     use crate::types::RetryPolicy;
+    use fabro_util::backoff::BackoffPolicy;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+
+    fn fast_backoff() -> BackoffPolicy {
+        BackoffPolicy {
+            initial_delay: Duration::from_micros(1),
+            factor: 2.0,
+            max_delay: Duration::from_secs(60),
+            jitter: false,
+        }
+    }
 
     #[tokio::test]
     async fn retry_succeeds_first_try() {
         let policy = RetryPolicy {
             max_retries: 2,
-            jitter: false,
+            backoff: BackoffPolicy {
+                jitter: false,
+                ..BackoffPolicy::default()
+            },
             ..Default::default()
         };
 
@@ -91,8 +107,7 @@ mod tests {
     async fn retry_succeeds_after_retries() {
         let policy = RetryPolicy {
             max_retries: 3,
-            base_delay: 0.001,
-            jitter: false,
+            backoff: fast_backoff(),
             ..Default::default()
         };
 
@@ -126,8 +141,7 @@ mod tests {
     async fn retry_gives_up_after_max_retries() {
         let policy = RetryPolicy {
             max_retries: 2,
-            base_delay: 0.001,
-            jitter: false,
+            backoff: fast_backoff(),
             ..Default::default()
         };
 
@@ -157,8 +171,7 @@ mod tests {
     async fn retry_does_not_retry_non_retryable() {
         let policy = RetryPolicy {
             max_retries: 3,
-            base_delay: 0.001,
-            jitter: false,
+            backoff: fast_backoff(),
             ..Default::default()
         };
 
@@ -188,9 +201,12 @@ mod tests {
     async fn retry_skips_when_retry_after_exceeds_max_delay() {
         let policy = RetryPolicy {
             max_retries: 3,
-            base_delay: 0.001,
-            max_delay: 5.0,
-            jitter: false,
+            backoff: BackoffPolicy {
+                initial_delay: Duration::from_micros(1),
+                factor: 2.0,
+                max_delay: Duration::from_secs(5),
+                jitter: false,
+            },
             ..Default::default()
         };
 
@@ -221,9 +237,12 @@ mod tests {
     async fn retry_uses_retry_after_when_within_limit() {
         let policy = RetryPolicy {
             max_retries: 1,
-            base_delay: 10.0, // base_delay is high, but retry_after is low
-            max_delay: 60.0,
-            jitter: false,
+            backoff: BackoffPolicy {
+                initial_delay: Duration::from_secs(10), // high, but retry_after is low
+                factor: 2.0,
+                max_delay: Duration::from_secs(60),
+                jitter: false,
+            },
             ..Default::default()
         };
 
@@ -265,12 +284,10 @@ mod tests {
 
         let policy = RetryPolicy {
             max_retries: 2,
-            base_delay: 0.001,
-            jitter: false,
+            backoff: fast_backoff(),
             on_retry: Some(Arc::new(move |_err, _attempt, _delay| {
                 retry_attempts_clone.fetch_add(1, Ordering::SeqCst);
             })),
-            ..Default::default()
         };
 
         let call_count = Arc::new(AtomicU32::new(0));

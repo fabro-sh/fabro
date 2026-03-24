@@ -109,8 +109,11 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
     };
     let retry_policy = RetryPolicy {
         max_retries: params.max_retries,
-        base_delay: 0.001,
-        jitter: false,
+        backoff: fabro_util::backoff::BackoffPolicy {
+            initial_delay: std::time::Duration::from_micros(1),
+            jitter: false,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -663,8 +666,11 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
     let tools = params.tools.clone();
     let retry_policy = RetryPolicy {
         max_retries: params.max_retries,
-        base_delay: 0.001,
-        jitter: false,
+        backoff: fabro_util::backoff::BackoffPolicy {
+            initial_delay: std::time::Duration::from_micros(1),
+            jitter: false,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
