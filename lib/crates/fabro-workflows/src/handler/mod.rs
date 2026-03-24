@@ -21,7 +21,7 @@ use crate::context::Context;
 use crate::engine::GitState;
 use crate::error::FabroError;
 use crate::event::EventEmitter;
-use crate::outcome::Outcome;
+use crate::outcome::{Outcome, OutcomeExt};
 use fabro_graphviz::graph::{shape_to_handler_type, Graph, Node};
 use fabro_hooks::{HookContext, HookDecision, HookRunner};
 use fabro_interview::Interviewer;

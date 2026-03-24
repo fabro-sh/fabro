@@ -8,7 +8,7 @@ use crate::context::keys;
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::EventEmitter;
-use crate::outcome::Outcome;
+use crate::outcome::{Outcome, OutcomeExt};
 use fabro_graphviz::graph::{Graph, Node};
 
 use super::agent::{CodergenBackend, CodergenResult};

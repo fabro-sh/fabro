@@ -80,7 +80,7 @@ impl<G: Graph + 'static> ExecutorBuilder<G> {
 }
 
 impl<G: Graph + 'static> Executor<G> {
-    pub async fn run(&self, graph: &G, mut state: RunState) -> Result<Outcome> {
+    pub async fn run(&self, graph: &G, mut state: RunState<G::Meta>) -> Result<Outcome<G::Meta>> {
         self.lifecycle.on_run_start(graph, &state).await?;
 
         loop {
@@ -229,9 +229,9 @@ impl<G: Graph + 'static> Executor<G> {
     async fn execute_with_retry(
         &self,
         node: &G::Node,
-        state: &RunState,
+        state: &RunState<G::Meta>,
         graph: &G,
-    ) -> Result<NodeResult> {
+    ) -> Result<NodeResult<G::Meta>> {
         let policy = self.handler.retry_policy(node, graph);
         let start = Instant::now();
 
@@ -330,8 +330,8 @@ impl<G: Graph + 'static> Executor<G> {
     async fn resolve_next_step(
         &self,
         node: &G::Node,
-        outcome: &Outcome,
-        state: &RunState,
+        outcome: &Outcome<G::Meta>,
+        state: &RunState<G::Meta>,
         graph: &G,
     ) -> Result<NextStep> {
         // Jump takes priority

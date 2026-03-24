@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::outcome::{FailureDetail, Outcome, StageStatus};
+use crate::outcome::{FailureCategory, FailureDetail, Outcome, OutcomeMeta, StageStatus};
 
 /// Structured failure data on handler errors. Maps to FabroError's
 /// is_retryable(), failure_class(), failure_signature_hint(), to_fail_outcome().
@@ -8,7 +8,7 @@ use crate::outcome::{FailureDetail, Outcome, StageStatus};
 pub struct HandlerErrorDetail {
     pub message: String,
     pub retryable: bool,
-    pub category: Option<String>,
+    pub category: Option<FailureCategory>,
     pub signature: Option<String>,
 }
 
@@ -57,13 +57,13 @@ impl CoreError {
         matches!(self, Self::Handler { detail } if detail.retryable)
     }
 
-    pub fn to_fail_outcome(&self) -> Outcome {
+    pub fn to_fail_outcome<M: OutcomeMeta>(&self) -> Outcome<M> {
         match self {
             Self::Handler { detail } => Outcome {
                 status: StageStatus::Fail,
                 failure: Some(FailureDetail {
                     message: detail.message.clone(),
-                    category: detail.category.clone(),
+                    category: detail.category.unwrap_or(FailureCategory::Deterministic),
                     signature: detail.signature.clone(),
                 }),
                 ..Outcome::default()
@@ -140,17 +140,18 @@ mod tests {
 
     #[test]
     fn core_error_handler_to_fail_outcome() {
+        use crate::outcome::FailureCategory;
         let err = CoreError::handler(HandlerErrorDetail {
             message: "api down".into(),
             retryable: true,
-            category: Some("transient".into()),
+            category: Some(FailureCategory::TransientInfra),
             signature: Some("sig123".into()),
         });
-        let outcome = err.to_fail_outcome();
+        let outcome: crate::outcome::Outcome = err.to_fail_outcome();
         assert_eq!(outcome.status, StageStatus::Fail);
         let failure = outcome.failure.unwrap();
         assert_eq!(failure.message, "api down");
-        assert_eq!(failure.category.as_deref(), Some("transient"));
+        assert_eq!(failure.category, FailureCategory::TransientInfra);
         assert_eq!(failure.signature.as_deref(), Some("sig123"));
     }
 

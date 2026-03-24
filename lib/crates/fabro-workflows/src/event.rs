@@ -1294,8 +1294,7 @@ mod tests {
 
     #[test]
     fn stage_completed_event_serialization_with_new_fields() {
-        use crate::error::FailureClass;
-        use crate::outcome::FailureDetail;
+        use crate::outcome::{FailureCategory, FailureDetail};
 
         let event = WorkflowRunEvent::StageCompleted {
             node_id: "plan".to_string(),
@@ -1308,7 +1307,7 @@ mod tests {
             usage: None,
             failure: Some(FailureDetail::new(
                 "lint errors remain",
-                FailureClass::Deterministic,
+                FailureCategory::Deterministic,
             )),
             notes: Some("fixed 3 of 5 issues".to_string()),
             files_touched: vec!["src/main.rs".to_string()],
@@ -1343,8 +1342,7 @@ mod tests {
 
     #[test]
     fn stage_failed_event_serialization() {
-        use crate::error::FailureClass;
-        use crate::outcome::FailureDetail;
+        use crate::outcome::{FailureCategory, FailureDetail};
 
         let event = WorkflowRunEvent::StageFailed {
             node_id: "plan".to_string(),
@@ -1352,8 +1350,8 @@ mod tests {
             index: 0,
             failure: FailureDetail {
                 message: "LLM request timed out".to_string(),
-                failure_class: FailureClass::TransientInfra,
-                failure_signature: None,
+                category: FailureCategory::TransientInfra,
+                signature: None,
             },
             will_retry: true,
         };
@@ -1364,14 +1362,14 @@ mod tests {
         let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
         assert!(matches!(
             deserialized,
-            WorkflowRunEvent::StageFailed { failure, .. } if failure.failure_class == FailureClass::TransientInfra
+            WorkflowRunEvent::StageFailed { failure, .. } if failure.category == FailureCategory::TransientInfra
         ));
 
         let event_terminal = WorkflowRunEvent::StageFailed {
             node_id: "plan".to_string(),
             name: "plan".to_string(),
             index: 0,
-            failure: FailureDetail::new("timeout", FailureClass::Deterministic),
+            failure: FailureDetail::new("timeout", FailureCategory::Deterministic),
             will_retry: false,
         };
         let json_terminal = serde_json::to_string(&event_terminal).unwrap();

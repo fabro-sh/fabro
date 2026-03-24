@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use crate::context::keys;
 use crate::context::Context;
 use crate::error::FabroError;
-use crate::outcome::Outcome;
+use crate::outcome::{Outcome, OutcomeExt};
 use fabro_graphviz::graph::{Graph, Node};
 
 use super::{EngineServices, Handler};

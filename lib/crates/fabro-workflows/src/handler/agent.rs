@@ -9,7 +9,7 @@ use crate::context::keys;
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::EventEmitter;
-use crate::outcome::{Outcome, StageUsage};
+use crate::outcome::{Outcome, OutcomeExt, StageUsage};
 use fabro_graphviz::graph::{Graph, Node};
 
 use super::{EngineServices, Handler};
@@ -170,7 +170,7 @@ pub(crate) fn extract_status_fields(text: &str, outcome: &mut Outcome) -> bool {
                 if let Some(reason) = obj.get("failure_reason").and_then(|v| v.as_str()) {
                     outcome.failure = Some(crate::outcome::FailureDetail::new(
                         reason,
-                        crate::error::FailureClass::Deterministic,
+                        crate::outcome::FailureCategory::Deterministic,
                     ));
                 }
             }
