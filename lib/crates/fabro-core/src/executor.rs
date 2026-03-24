@@ -131,8 +131,7 @@ impl<G: Graph + 'static> Executor<G> {
                             continue;
                         }
                         let outcome = Outcome::fail(&format!(
-                            "goal gate failed for node \"{}\"",
-                            failed_node_id
+                            "goal gate unsatisfied for node {failed_node_id} and no retry target"
                         ));
                         self.lifecycle.on_run_end(&outcome, &state).await;
                         return Ok((outcome, state));
@@ -148,6 +147,7 @@ impl<G: Graph + 'static> Executor<G> {
                         node_id: node.id().to_string(),
                         visits,
                         limit: max,
+                        limit_source: crate::error::VisitLimitSource::Node,
                     });
                 }
             }
@@ -157,6 +157,7 @@ impl<G: Graph + 'static> Executor<G> {
                         node_id: node.id().to_string(),
                         visits,
                         limit: global_max,
+                        limit_source: crate::error::VisitLimitSource::Graph,
                     });
                 }
             }
@@ -225,7 +226,13 @@ impl<G: Graph + 'static> Executor<G> {
                     self.lifecycle.on_run_start(graph, &state).await?;
                 }
                 NextStep::End => {
-                    let outcome = last_outcome.clone();
+                    let mut outcome = last_outcome.clone();
+                    if outcome.status == StageStatus::Fail {
+                        outcome = Outcome::fail(&format!(
+                            "stage {} failed with no outgoing fail edge",
+                            node.id()
+                        ));
+                    }
                     self.lifecycle.on_run_end(&outcome, &state).await;
                     return Ok((outcome, state));
                 }
@@ -317,17 +324,19 @@ impl<G: Graph + 'static> Executor<G> {
                     tokio::time::sleep(delay).await;
                 }
                 Err(e) => {
-                    let fail_result =
-                        NodeResult::from_error(&e, start.elapsed(), attempt, policy.max_attempts);
+                    // Convert handler error to fail outcome so routing continues
+                    let outcome = e.to_fail_outcome();
+                    let result =
+                        NodeResult::new(outcome, start.elapsed(), attempt, policy.max_attempts);
                     let ctx = AttemptResultContext {
                         node,
-                        result: &fail_result,
+                        result: &result,
                         attempt,
                         will_retry: false,
                         backoff_delay: None,
                     };
                     self.lifecycle.after_attempt(&ctx, state).await?;
-                    return Err(e);
+                    return Ok(result);
                 }
             }
         }
@@ -978,7 +987,8 @@ mod tests {
             handler.clone() as Arc<dyn NodeHandler<TestGraph>>,
         )
         .await;
-        assert!(result.is_err());
+        // Non-retryable errors become fail outcomes, routing continues through the linear graph
+        assert!(result.is_ok());
         assert_eq!(handler.calls(), 1);
     }
 
@@ -998,7 +1008,8 @@ mod tests {
             handler.clone() as Arc<dyn NodeHandler<TestGraph>>,
         )
         .await;
-        assert!(result.is_err());
+        // Errors become fail outcomes, routing continues through the linear graph
+        assert!(result.is_ok());
         assert_eq!(handler.calls(), 1);
     }
 

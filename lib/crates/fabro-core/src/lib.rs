@@ -13,7 +13,7 @@ pub mod state;
 pub mod test_fixtures;
 
 pub use context::Context;
-pub use error::{CoreError, HandlerErrorDetail, Result};
+pub use error::{CoreError, HandlerErrorDetail, Result, VisitLimitSource};
 pub use executor::{Executor, ExecutorBuilder, ExecutorSettings};
 pub use graph::{EdgeSelection, EdgeSpec, Graph, NodeSpec};
 pub use handler::NodeHandler;
