@@ -1,121 +1,36 @@
 use std::fmt;
-use std::str::FromStr;
 
 use fabro_llm::error::{ProviderErrorKind, SdkError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Classification of failure modes for pipeline edge conditions.
-///
-/// Pipeline authors can write edge conditions like `context.failure_class=budget_exhausted`
-/// to route execution based on the nature of the failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FailureClass {
-    /// Temporary infrastructure failure (rate limit, timeout, network, 5xx).
-    TransientInfra,
-    /// Permanent failure (auth, bad config, code bug).
-    Deterministic,
-    /// Context length, token/turn limit, quota exceeded.
-    BudgetExhausted,
-    /// Reserved for future loop detection.
-    CompilationLoop,
-    /// User/system cancellation.
-    Canceled,
-    /// Reserved for future scope enforcement.
-    Structural,
-}
+pub use fabro_core::outcome::FailureCategory;
 
-impl fmt::Display for FailureClass {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Self::TransientInfra => "transient_infra",
-            Self::Deterministic => "deterministic",
-            Self::BudgetExhausted => "budget_exhausted",
-            Self::CompilationLoop => "compilation_loop",
-            Self::Canceled => "canceled",
-            Self::Structural => "structural",
-        };
-        write!(f, "{s}")
-    }
-}
-
-impl FromStr for FailureClass {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let normalized = s.trim().to_lowercase();
-        Ok(match normalized.as_str() {
-            // Canonical names
-            "transient_infra" => Self::TransientInfra,
-            "deterministic" => Self::Deterministic,
-            "budget_exhausted" => Self::BudgetExhausted,
-            "compilation_loop" => Self::CompilationLoop,
-            "canceled" => Self::Canceled,
-            "structural" => Self::Structural,
-
-            // Aliases: transient_infra
-            "transient"
-            | "transient-infra"
-            | "infra_transient"
-            | "transient infra"
-            | "infrastructure_transient"
-            | "retryable"
-            | "toolchain_workspace_io"
-            | "toolchain-workspace-io"
-            | "toolchain_or_dependency_registry_unavailable"
-            | "toolchain-dependency-registry-unavailable" => Self::TransientInfra,
-
-            // Aliases: deterministic
-            "non_transient" | "non-transient" | "permanent" | "logic" | "product" => {
-                Self::Deterministic
-            }
-
-            // Aliases: canceled
-            "cancelled" => Self::Canceled,
-
-            // Aliases: budget_exhausted
-            "budget-exhausted" | "budget exhausted" | "budget" => Self::BudgetExhausted,
-
-            // Aliases: compilation_loop
-            "compilation-loop" | "compilation loop" | "compile_loop" | "compile-loop" => {
-                Self::CompilationLoop
-            }
-
-            // Aliases: structural
-            "structure" | "scope_violation" | "write_scope_violation" => Self::Structural,
-
-            // Unknown → fail-closed to Deterministic
-            _ => Self::Deterministic,
-        })
-    }
-}
-
-/// Classify an `SdkError` into a `FailureClass` based on its structure.
+/// Classify an `SdkError` into a `FailureCategory` based on its structure.
 #[must_use]
-pub fn classify_sdk_error(err: &SdkError) -> FailureClass {
+pub fn classify_sdk_error(err: &SdkError) -> FailureCategory {
     match err {
         SdkError::Provider { kind, .. } => match kind {
             ProviderErrorKind::RateLimit | ProviderErrorKind::Server => {
-                FailureClass::TransientInfra
+                FailureCategory::TransientInfra
             }
             ProviderErrorKind::ContextLength | ProviderErrorKind::QuotaExceeded => {
-                FailureClass::BudgetExhausted
+                FailureCategory::BudgetExhausted
             }
             ProviderErrorKind::Authentication
             | ProviderErrorKind::AccessDenied
             | ProviderErrorKind::NotFound
             | ProviderErrorKind::InvalidRequest
-            | ProviderErrorKind::ContentFilter => FailureClass::Deterministic,
+            | ProviderErrorKind::ContentFilter => FailureCategory::Deterministic,
         },
         SdkError::RequestTimeout { .. } | SdkError::Network { .. } | SdkError::Stream { .. } => {
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         }
-        SdkError::Abort { .. } => FailureClass::Canceled,
+        SdkError::Abort { .. } => FailureCategory::Canceled,
         SdkError::InvalidToolCall { .. }
         | SdkError::NoObjectGenerated { .. }
         | SdkError::Configuration { .. }
-        | SdkError::UnsupportedToolChoice { .. } => FailureClass::Deterministic,
+        | SdkError::UnsupportedToolChoice { .. } => FailureCategory::Deterministic,
     }
 }
 
@@ -186,32 +101,32 @@ const STRUCTURAL_HINTS: &[&str] = &[
 /// This is the fallback when structured error information is not available
 /// (e.g. for `Handler(String)` or `Engine(String)` errors).
 #[must_use]
-pub fn classify_failure_reason(reason: &str) -> FailureClass {
+pub fn classify_failure_reason(reason: &str) -> FailureCategory {
     let lower = reason.to_lowercase();
 
     if lower.contains("cancel") || lower.contains("abort") {
-        return FailureClass::Canceled;
+        return FailureCategory::Canceled;
     }
 
     if TRANSIENT_INFRA_HINTS
         .iter()
         .any(|hint| lower.contains(hint))
     {
-        return FailureClass::TransientInfra;
+        return FailureCategory::TransientInfra;
     }
 
     if BUDGET_EXHAUSTED_HINTS
         .iter()
         .any(|hint| lower.contains(hint))
     {
-        return FailureClass::BudgetExhausted;
+        return FailureCategory::BudgetExhausted;
     }
 
     if STRUCTURAL_HINTS.iter().any(|hint| lower.contains(hint)) {
-        return FailureClass::Structural;
+        return FailureCategory::Structural;
     }
 
-    FailureClass::Deterministic
+    FailureCategory::Deterministic
 }
 
 /// Normalize a failure reason for stable signature grouping.
@@ -261,7 +176,7 @@ impl FailureSignature {
     /// grouping keys.
     pub fn new(
         node_id: &str,
-        failure_class: FailureClass,
+        failure_class: FailureCategory,
         signature_hint: Option<&str>,
         failure_reason: Option<&str>,
     ) -> Self {
@@ -281,13 +196,6 @@ impl fmt::Display for FailureSignature {
     }
 }
 
-impl FailureClass {
-    /// Whether this failure class should be tracked by the cycle breaker.
-    pub fn is_signature_tracked(self) -> bool {
-        matches!(self, Self::Deterministic | Self::Structural)
-    }
-}
-
 #[derive(Error, Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum FabroError {
@@ -300,13 +208,13 @@ pub enum FabroError {
     #[error("Engine error: {message}")]
     Engine {
         message: String,
-        failure_class: FailureClass,
+        failure_class: FailureCategory,
     },
 
     #[error("Handler error: {message}")]
     Handler {
         message: String,
-        failure_class: FailureClass,
+        failure_class: FailureCategory,
     },
 
     #[error("LLM error: {0}")]
@@ -365,15 +273,15 @@ impl FabroError {
         }
     }
 
-    /// Classify this error into a `FailureClass`.
+    /// Classify this error into a `FailureCategory`.
     #[must_use]
-    pub fn failure_class(&self) -> FailureClass {
+    pub fn failure_category(&self) -> FailureCategory {
         match self {
-            Self::Cancelled => FailureClass::Canceled,
+            Self::Cancelled => FailureCategory::Canceled,
             Self::Llm(sdk_err) => classify_sdk_error(sdk_err),
-            Self::Io(_) => FailureClass::TransientInfra,
+            Self::Io(_) => FailureCategory::TransientInfra,
             Self::Parse(_) | Self::Validation(_) | Self::Stylesheet(_) | Self::Checkpoint(_) => {
-                FailureClass::Deterministic
+                FailureCategory::Deterministic
             }
             Self::Handler { failure_class, .. } | Self::Engine { failure_class, .. } => {
                 *failure_class
@@ -394,8 +302,8 @@ impl FabroError {
     pub fn to_fail_outcome(&self) -> crate::outcome::Outcome {
         let failure = crate::outcome::FailureDetail {
             message: self.to_string(),
-            failure_class: self.failure_class(),
-            failure_signature: self.failure_signature_hint(),
+            category: self.failure_category(),
+            signature: self.failure_signature_hint(),
         };
         crate::outcome::Outcome {
             status: crate::outcome::StageStatus::Fail,
@@ -437,6 +345,7 @@ pub type Result<T> = std::result::Result<T, FabroError>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::outcome::OutcomeExt;
     use fabro_llm::error::ProviderErrorDetail;
 
     #[test]
@@ -518,161 +427,164 @@ mod tests {
         assert!(FabroError::Io("connection reset".to_string()).is_retryable());
     }
 
-    // --- FailureClass Display/FromStr/serde tests ---
+    // --- FailureCategory Display/FromStr/serde tests ---
 
     #[test]
     fn failure_class_display_all_values() {
-        assert_eq!(FailureClass::TransientInfra.to_string(), "transient_infra");
-        assert_eq!(FailureClass::Deterministic.to_string(), "deterministic");
         assert_eq!(
-            FailureClass::BudgetExhausted.to_string(),
+            FailureCategory::TransientInfra.to_string(),
+            "transient_infra"
+        );
+        assert_eq!(FailureCategory::Deterministic.to_string(), "deterministic");
+        assert_eq!(
+            FailureCategory::BudgetExhausted.to_string(),
             "budget_exhausted"
         );
         assert_eq!(
-            FailureClass::CompilationLoop.to_string(),
+            FailureCategory::CompilationLoop.to_string(),
             "compilation_loop"
         );
-        assert_eq!(FailureClass::Canceled.to_string(), "canceled");
-        assert_eq!(FailureClass::Structural.to_string(), "structural");
+        assert_eq!(FailureCategory::Canceled.to_string(), "canceled");
+        assert_eq!(FailureCategory::Structural.to_string(), "structural");
     }
 
     #[test]
     fn failure_class_from_str_all_values() {
         assert_eq!(
-            "transient_infra".parse::<FailureClass>().unwrap(),
-            FailureClass::TransientInfra
+            "transient_infra".parse::<FailureCategory>().unwrap(),
+            FailureCategory::TransientInfra
         );
         assert_eq!(
-            "deterministic".parse::<FailureClass>().unwrap(),
-            FailureClass::Deterministic
+            "deterministic".parse::<FailureCategory>().unwrap(),
+            FailureCategory::Deterministic
         );
         assert_eq!(
-            "budget_exhausted".parse::<FailureClass>().unwrap(),
-            FailureClass::BudgetExhausted
+            "budget_exhausted".parse::<FailureCategory>().unwrap(),
+            FailureCategory::BudgetExhausted
         );
         assert_eq!(
-            "compilation_loop".parse::<FailureClass>().unwrap(),
-            FailureClass::CompilationLoop
+            "compilation_loop".parse::<FailureCategory>().unwrap(),
+            FailureCategory::CompilationLoop
         );
         assert_eq!(
-            "canceled".parse::<FailureClass>().unwrap(),
-            FailureClass::Canceled
+            "canceled".parse::<FailureCategory>().unwrap(),
+            FailureCategory::Canceled
         );
         assert_eq!(
-            "structural".parse::<FailureClass>().unwrap(),
-            FailureClass::Structural
+            "structural".parse::<FailureCategory>().unwrap(),
+            FailureCategory::Structural
         );
     }
 
     #[test]
     fn failure_class_from_str_invalid() {
         assert_eq!(
-            "unknown".parse::<FailureClass>().unwrap(),
-            FailureClass::Deterministic
+            "unknown".parse::<FailureCategory>().unwrap(),
+            FailureCategory::Deterministic
         );
     }
 
     #[test]
     fn failure_class_from_str_alias_retryable() {
         assert_eq!(
-            "retryable".parse::<FailureClass>().unwrap(),
-            FailureClass::TransientInfra
+            "retryable".parse::<FailureCategory>().unwrap(),
+            FailureCategory::TransientInfra
         );
     }
 
     #[test]
     fn failure_class_from_str_alias_transient() {
         assert_eq!(
-            "transient".parse::<FailureClass>().unwrap(),
-            FailureClass::TransientInfra
+            "transient".parse::<FailureCategory>().unwrap(),
+            FailureCategory::TransientInfra
         );
     }
 
     #[test]
     fn failure_class_from_str_alias_permanent() {
         assert_eq!(
-            "permanent".parse::<FailureClass>().unwrap(),
-            FailureClass::Deterministic
+            "permanent".parse::<FailureCategory>().unwrap(),
+            FailureCategory::Deterministic
         );
     }
 
     #[test]
     fn failure_class_from_str_alias_cancelled_british() {
         assert_eq!(
-            "cancelled".parse::<FailureClass>().unwrap(),
-            FailureClass::Canceled
+            "cancelled".parse::<FailureCategory>().unwrap(),
+            FailureCategory::Canceled
         );
     }
 
     #[test]
     fn failure_class_from_str_alias_budget() {
         assert_eq!(
-            "budget".parse::<FailureClass>().unwrap(),
-            FailureClass::BudgetExhausted
+            "budget".parse::<FailureCategory>().unwrap(),
+            FailureCategory::BudgetExhausted
         );
     }
 
     #[test]
     fn failure_class_from_str_alias_compile_loop() {
         assert_eq!(
-            "compile_loop".parse::<FailureClass>().unwrap(),
-            FailureClass::CompilationLoop
+            "compile_loop".parse::<FailureCategory>().unwrap(),
+            FailureCategory::CompilationLoop
         );
     }
 
     #[test]
     fn failure_class_from_str_alias_scope_violation() {
         assert_eq!(
-            "scope_violation".parse::<FailureClass>().unwrap(),
-            FailureClass::Structural
+            "scope_violation".parse::<FailureCategory>().unwrap(),
+            FailureCategory::Structural
         );
     }
 
     #[test]
     fn failure_class_from_str_unknown_defaults_deterministic() {
         assert_eq!(
-            "garbage_xyz".parse::<FailureClass>().unwrap(),
-            FailureClass::Deterministic
+            "garbage_xyz".parse::<FailureCategory>().unwrap(),
+            FailureCategory::Deterministic
         );
     }
 
     #[test]
     fn failure_class_from_str_case_insensitive() {
         assert_eq!(
-            "TRANSIENT_INFRA".parse::<FailureClass>().unwrap(),
-            FailureClass::TransientInfra
+            "TRANSIENT_INFRA".parse::<FailureCategory>().unwrap(),
+            FailureCategory::TransientInfra
         );
     }
 
     #[test]
     fn failure_class_from_str_trims_whitespace() {
         assert_eq!(
-            " transient_infra ".parse::<FailureClass>().unwrap(),
-            FailureClass::TransientInfra
+            " transient_infra ".parse::<FailureCategory>().unwrap(),
+            FailureCategory::TransientInfra
         );
     }
 
     #[test]
     fn failure_class_from_str_empty_defaults_deterministic() {
         assert_eq!(
-            "".parse::<FailureClass>().unwrap(),
-            FailureClass::Deterministic
+            "".parse::<FailureCategory>().unwrap(),
+            FailureCategory::Deterministic
         );
     }
 
     #[test]
     fn failure_class_serde_roundtrip() {
         let values = [
-            FailureClass::TransientInfra,
-            FailureClass::Deterministic,
-            FailureClass::BudgetExhausted,
-            FailureClass::CompilationLoop,
-            FailureClass::Canceled,
-            FailureClass::Structural,
+            FailureCategory::TransientInfra,
+            FailureCategory::Deterministic,
+            FailureCategory::BudgetExhausted,
+            FailureCategory::CompilationLoop,
+            FailureCategory::Canceled,
+            FailureCategory::Structural,
         ];
         for fc in values {
             let json = serde_json::to_string(&fc).unwrap();
-            let parsed: FailureClass = serde_json::from_str(&json).unwrap();
+            let parsed: FailureCategory = serde_json::from_str(&json).unwrap();
             assert_eq!(parsed, fc);
         }
     }
@@ -722,40 +634,40 @@ mod tests {
     #[test]
     fn failure_class_cancelled() {
         assert_eq!(
-            FabroError::Cancelled.failure_class(),
-            FailureClass::Canceled
+            FabroError::Cancelled.failure_category(),
+            FailureCategory::Canceled
         );
     }
 
     #[test]
     fn failure_class_io() {
         assert_eq!(
-            FabroError::Io("disk full".into()).failure_class(),
-            FailureClass::TransientInfra
+            FabroError::Io("disk full".into()).failure_category(),
+            FailureCategory::TransientInfra
         );
     }
 
     #[test]
     fn failure_class_parse() {
         assert_eq!(
-            FabroError::Parse("bad syntax".into()).failure_class(),
-            FailureClass::Deterministic
+            FabroError::Parse("bad syntax".into()).failure_category(),
+            FailureCategory::Deterministic
         );
     }
 
     #[test]
     fn failure_class_handler_with_timeout() {
         assert_eq!(
-            FabroError::handler("request timed out").failure_class(),
-            FailureClass::TransientInfra
+            FabroError::handler("request timed out").failure_category(),
+            FailureCategory::TransientInfra
         );
     }
 
     #[test]
     fn failure_class_handler_deterministic() {
         assert_eq!(
-            FabroError::handler("invalid configuration").failure_class(),
-            FailureClass::Deterministic
+            FabroError::handler("invalid configuration").failure_category(),
+            FailureCategory::Deterministic
         );
     }
 
@@ -765,7 +677,7 @@ mod tests {
             kind: ProviderErrorKind::RateLimit,
             detail: Box::new(ProviderErrorDetail::new("too fast", "openai")),
         });
-        assert_eq!(err.failure_class(), FailureClass::TransientInfra);
+        assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
     }
 
     #[test]
@@ -774,7 +686,7 @@ mod tests {
             kind: ProviderErrorKind::ContextLength,
             detail: Box::new(ProviderErrorDetail::new("too long", "openai")),
         });
-        assert_eq!(err.failure_class(), FailureClass::BudgetExhausted);
+        assert_eq!(err.failure_category(), FailureCategory::BudgetExhausted);
     }
 
     #[test]
@@ -783,7 +695,7 @@ mod tests {
             kind: ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
         });
-        assert_eq!(err.failure_class(), FailureClass::Deterministic);
+        assert_eq!(err.failure_category(), FailureCategory::Deterministic);
     }
 
     #[test]
@@ -791,7 +703,7 @@ mod tests {
         let err = FabroError::Llm(SdkError::Abort {
             message: "user cancelled".into(),
         });
-        assert_eq!(err.failure_class(), FailureClass::Canceled);
+        assert_eq!(err.failure_category(), FailureCategory::Canceled);
     }
 
     #[test]
@@ -800,7 +712,7 @@ mod tests {
             message: "timed out".into(),
             source: None,
         });
-        assert_eq!(err.failure_class(), FailureClass::TransientInfra);
+        assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
     }
 
     // --- classify_sdk_error tests ---
@@ -811,7 +723,7 @@ mod tests {
             kind: ProviderErrorKind::RateLimit,
             detail: Box::new(ProviderErrorDetail::new("too fast", "openai")),
         };
-        assert_eq!(classify_sdk_error(&err), FailureClass::TransientInfra);
+        assert_eq!(classify_sdk_error(&err), FailureCategory::TransientInfra);
     }
 
     #[test]
@@ -820,7 +732,7 @@ mod tests {
             kind: ProviderErrorKind::Server,
             detail: Box::new(ProviderErrorDetail::new("500", "openai")),
         };
-        assert_eq!(classify_sdk_error(&err), FailureClass::TransientInfra);
+        assert_eq!(classify_sdk_error(&err), FailureCategory::TransientInfra);
     }
 
     #[test]
@@ -829,7 +741,7 @@ mod tests {
             kind: ProviderErrorKind::ContextLength,
             detail: Box::new(ProviderErrorDetail::new("too long", "openai")),
         };
-        assert_eq!(classify_sdk_error(&err), FailureClass::BudgetExhausted);
+        assert_eq!(classify_sdk_error(&err), FailureCategory::BudgetExhausted);
     }
 
     #[test]
@@ -838,7 +750,7 @@ mod tests {
             kind: ProviderErrorKind::QuotaExceeded,
             detail: Box::new(ProviderErrorDetail::new("out of quota", "openai")),
         };
-        assert_eq!(classify_sdk_error(&err), FailureClass::BudgetExhausted);
+        assert_eq!(classify_sdk_error(&err), FailureCategory::BudgetExhausted);
     }
 
     #[test]
@@ -847,7 +759,7 @@ mod tests {
             kind: ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
         };
-        assert_eq!(classify_sdk_error(&err), FailureClass::Deterministic);
+        assert_eq!(classify_sdk_error(&err), FailureCategory::Deterministic);
     }
 
     #[test]
@@ -856,7 +768,7 @@ mod tests {
             message: "timed out".into(),
             source: None,
         };
-        assert_eq!(classify_sdk_error(&err), FailureClass::TransientInfra);
+        assert_eq!(classify_sdk_error(&err), FailureCategory::TransientInfra);
     }
 
     #[test]
@@ -864,7 +776,7 @@ mod tests {
         let err = SdkError::Abort {
             message: "cancelled".into(),
         };
-        assert_eq!(classify_sdk_error(&err), FailureClass::Canceled);
+        assert_eq!(classify_sdk_error(&err), FailureCategory::Canceled);
     }
 
     #[test]
@@ -872,7 +784,7 @@ mod tests {
         let err = SdkError::InvalidToolCall {
             message: "bad tool".into(),
         };
-        assert_eq!(classify_sdk_error(&err), FailureClass::Deterministic);
+        assert_eq!(classify_sdk_error(&err), FailureCategory::Deterministic);
     }
 
     // --- hints count guards ---
@@ -900,7 +812,7 @@ mod tests {
     fn classify_reason_cancel() {
         assert_eq!(
             classify_failure_reason("operation cancelled by user"),
-            FailureClass::Canceled
+            FailureCategory::Canceled
         );
     }
 
@@ -908,7 +820,7 @@ mod tests {
     fn classify_reason_abort() {
         assert_eq!(
             classify_failure_reason("aborted by signal"),
-            FailureClass::Canceled
+            FailureCategory::Canceled
         );
     }
 
@@ -918,7 +830,7 @@ mod tests {
     fn classify_reason_turn_limit() {
         assert_eq!(
             classify_failure_reason("exceeded turn limit of 10"),
-            FailureClass::BudgetExhausted
+            FailureCategory::BudgetExhausted
         );
     }
 
@@ -926,7 +838,7 @@ mod tests {
     fn classify_reason_token_limit() {
         assert_eq!(
             classify_failure_reason("token limit reached"),
-            FailureClass::BudgetExhausted
+            FailureCategory::BudgetExhausted
         );
     }
 
@@ -934,7 +846,7 @@ mod tests {
     fn classify_reason_context_length() {
         assert_eq!(
             classify_failure_reason("context length exceeded"),
-            FailureClass::BudgetExhausted
+            FailureCategory::BudgetExhausted
         );
     }
 
@@ -942,7 +854,7 @@ mod tests {
     fn classify_reason_budget() {
         assert_eq!(
             classify_failure_reason("budget exceeded for run"),
-            FailureClass::BudgetExhausted
+            FailureCategory::BudgetExhausted
         );
     }
 
@@ -950,7 +862,7 @@ mod tests {
     fn classify_reason_quota_exceeded() {
         assert_eq!(
             classify_failure_reason("quota exceeded"),
-            FailureClass::BudgetExhausted
+            FailureCategory::BudgetExhausted
         );
     }
 
@@ -958,7 +870,7 @@ mod tests {
     fn classify_reason_max_turns() {
         assert_eq!(
             classify_failure_reason("hit max_turns limit"),
-            FailureClass::BudgetExhausted
+            FailureCategory::BudgetExhausted
         );
     }
 
@@ -966,7 +878,7 @@ mod tests {
     fn classify_reason_max_turns_space() {
         assert_eq!(
             classify_failure_reason("max turns reached"),
-            FailureClass::BudgetExhausted
+            FailureCategory::BudgetExhausted
         );
     }
 
@@ -974,7 +886,7 @@ mod tests {
     fn classify_reason_max_tokens() {
         assert_eq!(
             classify_failure_reason("max_tokens exceeded"),
-            FailureClass::BudgetExhausted
+            FailureCategory::BudgetExhausted
         );
     }
 
@@ -982,7 +894,7 @@ mod tests {
     fn classify_reason_max_tokens_space() {
         assert_eq!(
             classify_failure_reason("max tokens reached"),
-            FailureClass::BudgetExhausted
+            FailureCategory::BudgetExhausted
         );
     }
 
@@ -990,7 +902,7 @@ mod tests {
     fn classify_reason_context_window_exceeded() {
         assert_eq!(
             classify_failure_reason("context window exceeded"),
-            FailureClass::BudgetExhausted
+            FailureCategory::BudgetExhausted
         );
     }
 
@@ -998,7 +910,7 @@ mod tests {
     fn classify_reason_budget_exhausted() {
         assert_eq!(
             classify_failure_reason("budget exhausted for this session"),
-            FailureClass::BudgetExhausted
+            FailureCategory::BudgetExhausted
         );
     }
 
@@ -1006,7 +918,7 @@ mod tests {
     fn classify_reason_token_limit_exceeded() {
         assert_eq!(
             classify_failure_reason("token limit exceeded"),
-            FailureClass::BudgetExhausted
+            FailureCategory::BudgetExhausted
         );
     }
 
@@ -1016,7 +928,7 @@ mod tests {
     fn classify_reason_scope_violation() {
         assert_eq!(
             classify_failure_reason("scope violation detected"),
-            FailureClass::Structural
+            FailureCategory::Structural
         );
     }
 
@@ -1026,7 +938,7 @@ mod tests {
     fn classify_reason_timeout() {
         assert_eq!(
             classify_failure_reason("request timed out after 30s"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1034,7 +946,7 @@ mod tests {
     fn classify_reason_rate_limit() {
         assert_eq!(
             classify_failure_reason("rate limited by provider"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1042,7 +954,7 @@ mod tests {
     fn classify_reason_connection_refused() {
         assert_eq!(
             classify_failure_reason("connection refused"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1050,7 +962,7 @@ mod tests {
     fn classify_reason_connection_reset() {
         assert_eq!(
             classify_failure_reason("connection reset by peer"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1058,7 +970,7 @@ mod tests {
     fn classify_reason_500() {
         assert_eq!(
             classify_failure_reason("HTTP 500 Internal Server Error"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1066,7 +978,7 @@ mod tests {
     fn classify_reason_502() {
         assert_eq!(
             classify_failure_reason("HTTP 502 Bad Gateway"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1074,7 +986,7 @@ mod tests {
     fn classify_reason_503() {
         assert_eq!(
             classify_failure_reason("HTTP 503 Service Unavailable"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1082,7 +994,7 @@ mod tests {
     fn classify_reason_504() {
         assert_eq!(
             classify_failure_reason("HTTP 504 Gateway Timeout"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1090,7 +1002,7 @@ mod tests {
     fn classify_reason_context_deadline_exceeded() {
         assert_eq!(
             classify_failure_reason("context deadline exceeded"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1098,7 +1010,7 @@ mod tests {
     fn classify_reason_could_not_resolve_host() {
         assert_eq!(
             classify_failure_reason("could not resolve host api.example.com"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1106,7 +1018,7 @@ mod tests {
     fn classify_reason_could_not_resolve_hostname() {
         assert_eq!(
             classify_failure_reason("could not resolve hostname"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1114,7 +1026,7 @@ mod tests {
     fn classify_reason_temporary_failure() {
         assert_eq!(
             classify_failure_reason("temporary failure"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1122,7 +1034,7 @@ mod tests {
     fn classify_reason_temporary_failure_in_name_resolution() {
         assert_eq!(
             classify_failure_reason("temporary failure in name resolution"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1130,7 +1042,7 @@ mod tests {
     fn classify_reason_network_is_unreachable() {
         assert_eq!(
             classify_failure_reason("network is unreachable"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1138,7 +1050,7 @@ mod tests {
     fn classify_reason_broken_pipe() {
         assert_eq!(
             classify_failure_reason("broken pipe"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1146,7 +1058,7 @@ mod tests {
     fn classify_reason_tls_handshake_timeout() {
         assert_eq!(
             classify_failure_reason("tls handshake timeout"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1154,7 +1066,7 @@ mod tests {
     fn classify_reason_io_timeout() {
         assert_eq!(
             classify_failure_reason("i/o timeout"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1162,7 +1074,7 @@ mod tests {
     fn classify_reason_no_route_to_host() {
         assert_eq!(
             classify_failure_reason("no route to host"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1170,7 +1082,7 @@ mod tests {
     fn classify_reason_temporarily_unavailable() {
         assert_eq!(
             classify_failure_reason("resource temporarily unavailable"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1178,7 +1090,7 @@ mod tests {
     fn classify_reason_try_again() {
         assert_eq!(
             classify_failure_reason("try again later"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1186,7 +1098,7 @@ mod tests {
     fn classify_reason_too_many_requests() {
         assert_eq!(
             classify_failure_reason("too many requests"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1194,7 +1106,7 @@ mod tests {
     fn classify_reason_service_unavailable() {
         assert_eq!(
             classify_failure_reason("service unavailable"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1202,7 +1114,7 @@ mod tests {
     fn classify_reason_gateway_timeout() {
         assert_eq!(
             classify_failure_reason("gateway timeout"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1210,7 +1122,7 @@ mod tests {
     fn classify_reason_econnrefused() {
         assert_eq!(
             classify_failure_reason("ECONNREFUSED"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1218,7 +1130,7 @@ mod tests {
     fn classify_reason_econnreset() {
         assert_eq!(
             classify_failure_reason("ECONNRESET"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1226,7 +1138,7 @@ mod tests {
     fn classify_reason_dial_tcp() {
         assert_eq!(
             classify_failure_reason("dial tcp 10.0.0.1:443: connect: connection refused"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1234,7 +1146,7 @@ mod tests {
     fn classify_reason_transport_is_closing() {
         assert_eq!(
             classify_failure_reason("transport is closing"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1242,7 +1154,7 @@ mod tests {
     fn classify_reason_stream_disconnected() {
         assert_eq!(
             classify_failure_reason("stream disconnected"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1250,7 +1162,7 @@ mod tests {
     fn classify_reason_stream_closed_before() {
         assert_eq!(
             classify_failure_reason("stream closed before completion"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1258,7 +1170,7 @@ mod tests {
     fn classify_reason_index_crates_io() {
         assert_eq!(
             classify_failure_reason("failed to fetch index.crates.io"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1266,7 +1178,7 @@ mod tests {
     fn classify_reason_download_config_json_failed() {
         assert_eq!(
             classify_failure_reason("download of config.json failed"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1274,7 +1186,7 @@ mod tests {
     fn classify_reason_toolchain_registry_unavailable() {
         assert_eq!(
             classify_failure_reason("toolchain_or_dependency_registry_unavailable"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1282,7 +1194,7 @@ mod tests {
     fn classify_reason_toolchain_dependency_network() {
         assert_eq!(
             classify_failure_reason("toolchain dependency resolution blocked by network"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1290,7 +1202,7 @@ mod tests {
     fn classify_reason_toolchain_workspace_io() {
         assert_eq!(
             classify_failure_reason("toolchain_workspace_io"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1298,7 +1210,7 @@ mod tests {
     fn classify_reason_cross_device_link() {
         assert_eq!(
             classify_failure_reason("cross-device link"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1306,7 +1218,7 @@ mod tests {
     fn classify_reason_invalid_cross_device_link() {
         assert_eq!(
             classify_failure_reason("invalid cross-device link"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1314,7 +1226,7 @@ mod tests {
     fn classify_reason_os_error_18() {
         assert_eq!(
             classify_failure_reason("os error 18"),
-            FailureClass::TransientInfra
+            FailureCategory::TransientInfra
         );
     }
 
@@ -1324,7 +1236,7 @@ mod tests {
     fn classify_reason_write_scope_violation_underscore() {
         assert_eq!(
             classify_failure_reason("write_scope_violation detected"),
-            FailureClass::Structural
+            FailureCategory::Structural
         );
     }
 
@@ -1332,7 +1244,7 @@ mod tests {
     fn classify_reason_write_scope_violation_space() {
         assert_eq!(
             classify_failure_reason("write scope violation detected"),
-            FailureClass::Structural
+            FailureCategory::Structural
         );
     }
 
@@ -1342,7 +1254,7 @@ mod tests {
     fn classify_reason_default_deterministic() {
         assert_eq!(
             classify_failure_reason("invalid configuration parameter"),
-            FailureClass::Deterministic
+            FailureCategory::Deterministic
         );
     }
 
@@ -1422,7 +1334,7 @@ mod tests {
     fn failure_signature_format() {
         let sig = FailureSignature::new(
             "verify",
-            FailureClass::Deterministic,
+            FailureCategory::Deterministic,
             None,
             Some("test failed"),
         );
@@ -1433,7 +1345,7 @@ mod tests {
     fn failure_signature_display() {
         let sig = FailureSignature::new(
             "build",
-            FailureClass::Structural,
+            FailureCategory::Structural,
             None,
             Some("scope violation"),
         );
@@ -1444,7 +1356,7 @@ mod tests {
     fn failure_signature_hint_takes_priority() {
         let sig = FailureSignature::new(
             "verify",
-            FailureClass::Deterministic,
+            FailureCategory::Deterministic,
             Some("custom hint"),
             Some("raw reason"),
         );
@@ -1453,7 +1365,7 @@ mod tests {
 
     #[test]
     fn failure_signature_missing_reason_falls_back_to_unknown() {
-        let sig = FailureSignature::new("node", FailureClass::Deterministic, None, None);
+        let sig = FailureSignature::new("node", FailureCategory::Deterministic, None, None);
         assert_eq!(sig.to_string(), "node|deterministic|unknown");
     }
 
@@ -1461,13 +1373,13 @@ mod tests {
     fn failure_signature_equality_and_hash() {
         let sig1 = FailureSignature::new(
             "verify",
-            FailureClass::Deterministic,
+            FailureCategory::Deterministic,
             None,
             Some("test failed"),
         );
         let sig2 = FailureSignature::new(
             "verify",
-            FailureClass::Deterministic,
+            FailureCategory::Deterministic,
             None,
             Some("test failed"),
         );
@@ -1482,16 +1394,16 @@ mod tests {
 
     #[test]
     fn is_signature_tracked_deterministic_and_structural() {
-        assert!(FailureClass::Deterministic.is_signature_tracked());
-        assert!(FailureClass::Structural.is_signature_tracked());
+        assert!(FailureCategory::Deterministic.is_signature_tracked());
+        assert!(FailureCategory::Structural.is_signature_tracked());
     }
 
     #[test]
     fn is_signature_tracked_false_for_others() {
-        assert!(!FailureClass::TransientInfra.is_signature_tracked());
-        assert!(!FailureClass::BudgetExhausted.is_signature_tracked());
-        assert!(!FailureClass::Canceled.is_signature_tracked());
-        assert!(!FailureClass::CompilationLoop.is_signature_tracked());
+        assert!(!FailureCategory::TransientInfra.is_signature_tracked());
+        assert!(!FailureCategory::BudgetExhausted.is_signature_tracked());
+        assert!(!FailureCategory::Canceled.is_signature_tracked());
+        assert!(!FailureCategory::CompilationLoop.is_signature_tracked());
     }
 
     // --- failure_signature_hint tests ---
@@ -1531,9 +1443,9 @@ mod tests {
         let outcome = err.to_fail_outcome();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
         let failure = outcome.failure.as_ref().unwrap();
-        assert_eq!(failure.failure_class, FailureClass::Deterministic);
+        assert_eq!(failure.category, FailureCategory::Deterministic);
         assert_eq!(
-            failure.failure_signature.as_deref(),
+            failure.signature.as_deref(),
             Some("api_deterministic|openai|authentication")
         );
     }
@@ -1544,8 +1456,8 @@ mod tests {
         let outcome = err.to_fail_outcome();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
         let failure = outcome.failure.as_ref().unwrap();
-        assert_eq!(failure.failure_class, FailureClass::TransientInfra);
-        assert!(failure.failure_signature.is_none());
+        assert_eq!(failure.category, FailureCategory::TransientInfra);
+        assert!(failure.signature.is_none());
     }
 
     #[test]
@@ -1576,7 +1488,7 @@ mod tests {
     #[test]
     fn handler_eager_classification() {
         let err = FabroError::handler("connection refused");
-        assert_eq!(err.failure_class(), FailureClass::TransientInfra);
+        assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
     }
 
     #[test]
@@ -1584,7 +1496,10 @@ mod tests {
         let err = FabroError::handler("connection refused");
         let json = serde_json::to_string(&err).unwrap();
         let deserialized: FabroError = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.failure_class(), FailureClass::TransientInfra);
+        assert_eq!(
+            deserialized.failure_category(),
+            FailureCategory::TransientInfra
+        );
     }
 
     #[test]
@@ -1596,7 +1511,7 @@ mod tests {
     #[test]
     fn engine_eager_classification() {
         let err = FabroError::engine("rate limit exceeded");
-        assert_eq!(err.failure_class(), FailureClass::TransientInfra);
+        assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
     }
 
     #[test]
@@ -1651,7 +1566,7 @@ mod tests {
         ];
         for msg in messages {
             assert_eq!(
-                FabroError::handler(msg).failure_class(),
+                FabroError::handler(msg).failure_category(),
                 classify_failure_reason(msg),
                 "mismatch for message: {msg}"
             );
@@ -1662,7 +1577,10 @@ mod tests {
     fn to_fail_outcome_preserves_class() {
         let err = FabroError::handler("timeout");
         let outcome = err.to_fail_outcome();
-        assert_eq!(outcome.failure_class(), Some(FailureClass::TransientInfra));
+        assert_eq!(
+            outcome.failure_category(),
+            Some(FailureCategory::TransientInfra)
+        );
     }
 
     // --- E2E error pipeline tests ---
@@ -1677,11 +1595,14 @@ mod tests {
             detail: Box::new(ProviderErrorDetail::new("too fast", "openai")),
         };
         let arc_err = FabroError::Llm(sdk_err);
-        assert_eq!(arc_err.failure_class(), FailureClass::TransientInfra);
+        assert_eq!(arc_err.failure_category(), FailureCategory::TransientInfra);
 
         // 2. FabroError → Outcome
         let outcome = arc_err.to_fail_outcome();
-        assert_eq!(outcome.failure_class(), Some(FailureClass::TransientInfra));
+        assert_eq!(
+            outcome.failure_category(),
+            Some(FailureCategory::TransientInfra)
+        );
 
         // 3. Outcome → StageFailed event
         let failure = outcome.failure.clone().unwrap();
@@ -1696,7 +1617,7 @@ mod tests {
         // 4. Verify classification survived all the way through
         match &event {
             WorkflowRunEvent::StageFailed { failure, .. } => {
-                assert_eq!(failure.failure_class, FailureClass::TransientInfra);
+                assert_eq!(failure.category, FailureCategory::TransientInfra);
             }
             _ => panic!("expected StageFailed"),
         }
@@ -1706,15 +1627,18 @@ mod tests {
     fn e2e_handler_error_classified_at_edge() {
         // handler smart constructor classifies eagerly
         let err = FabroError::handler("connection refused");
-        assert_eq!(err.failure_class(), FailureClass::TransientInfra);
+        assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
 
         // to_fail_outcome preserves
         let outcome = err.to_fail_outcome();
-        assert_eq!(outcome.failure_class(), Some(FailureClass::TransientInfra));
+        assert_eq!(
+            outcome.failure_category(),
+            Some(FailureCategory::TransientInfra)
+        );
 
         // event preserves
         let failure = outcome.failure.unwrap();
-        assert_eq!(failure.failure_class, FailureClass::TransientInfra);
+        assert_eq!(failure.category, FailureCategory::TransientInfra);
     }
 
     #[test]
@@ -1739,7 +1663,10 @@ mod tests {
 
         // Round-trip
         let deserialized: FabroError = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.failure_class(), FailureClass::TransientInfra);
+        assert_eq!(
+            deserialized.failure_category(),
+            FailureCategory::TransientInfra
+        );
     }
 
     #[test]
@@ -1770,9 +1697,9 @@ mod tests {
 
         let failure = deserialized.failure.unwrap();
         assert_eq!(failure.message, "rate limit exceeded");
-        assert_eq!(failure.failure_class, FailureClass::TransientInfra);
+        assert_eq!(failure.category, FailureCategory::TransientInfra);
         assert_eq!(
-            failure.failure_signature.as_deref(),
+            failure.signature.as_deref(),
             Some("api_transient|openai|rate_limited")
         );
     }

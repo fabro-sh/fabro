@@ -26,7 +26,7 @@ use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::git::GitSyncStatus;
 use fabro_workflows::handler::default_registry;
 use fabro_workflows::manifest::Manifest;
-use fabro_workflows::outcome::{Outcome, StageStatus};
+use fabro_workflows::outcome::{Outcome, OutcomeExt, StageStatus};
 use fabro_workflows::run_status::{RunStatus, StatusReason};
 use fabro_workflows::sandbox_provider::SandboxProvider;
 use fabro_workflows::workflow::WorkflowBuilder;

@@ -10,17 +10,16 @@ use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{
     AttemptContext, AttemptResultContext, EdgeContext, EdgeDecision, NodeDecision, RunLifecycle,
 };
-use fabro_core::outcome::{NodeResult, Outcome as CoreOutcome};
+use fabro_core::outcome::NodeResult;
 use fabro_core::state::RunState;
 
 use super::graph::WorkflowGraph;
-use super::outcome::{core_to_wf_outcome, core_to_wf_status};
 use super::WorkflowNode;
 use crate::checkpoint::Checkpoint;
 use crate::context::keys;
-use crate::error::{FailureClass, FailureSignature};
+use crate::error::{FailureCategory, FailureSignature};
 use crate::event::{EventEmitter, WorkflowRunEvent};
-use crate::outcome::StageStatus as WfStatus;
+use crate::outcome::{FailureDetail, Outcome, StageStatus, StageUsage};
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_sandbox::Sandbox;
 
@@ -102,9 +101,13 @@ impl WorkflowLifecycle {
     }
 }
 
+type WfRunState = RunState<Option<StageUsage>>;
+type WfNodeResult = NodeResult<Option<StageUsage>>;
+type WfNodeDecision = NodeDecision<Option<StageUsage>>;
+
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
-    async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &RunState) -> CoreResult<()> {
+    async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
         // Clear incoming edge data (reset stale fidelity/thread from prior iteration)
         *self.incoming_edge_data.lock().unwrap() = None;
 
@@ -137,7 +140,7 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         &self,
         node: &WorkflowNode,
         goal_gates_passed: bool,
-        state: &RunState,
+        state: &WfRunState,
     ) {
         if !goal_gates_passed {
             return;
@@ -171,13 +174,16 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         });
     }
 
-    async fn before_node(&self, node: &WorkflowNode, state: &RunState) -> CoreResult<NodeDecision> {
+    async fn before_node(
+        &self,
+        node: &WorkflowNode,
+        state: &WfRunState,
+    ) -> CoreResult<WfNodeDecision> {
         // Resolve fidelity from incoming edge data
         let incoming = self.incoming_edge_data.lock().unwrap().take();
         let gv_node = node.inner();
 
         // Set context keys for the current node
-        // Note: This operates on state.context which is the core context bridged to wf context
         let visits = state.node_visits.get(node.id()).copied().unwrap_or(0);
         state
             .context
@@ -220,8 +226,8 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
     async fn before_attempt(
         &self,
         ctx: &AttemptContext<'_, WorkflowGraph>,
-        state: &RunState,
-    ) -> CoreResult<NodeDecision> {
+        state: &WfRunState,
+    ) -> CoreResult<WfNodeDecision> {
         let gv = ctx.node.inner();
         let stage_index = state.stage_index;
 
@@ -235,7 +241,7 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         match decision {
             HookDecision::Skip { reason } => {
                 let msg = reason.unwrap_or_else(|| "skipped by hook".into());
-                return Ok(NodeDecision::Skip(Box::new(CoreOutcome::skipped(&msg))));
+                return Ok(NodeDecision::Skip(Box::new(Outcome::skipped(&msg))));
             }
             HookDecision::Block { reason } => {
                 let msg = reason.unwrap_or_else(|| "blocked by StageStart hook".into());
@@ -261,11 +267,11 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
     async fn after_attempt(
         &self,
         ctx: &AttemptResultContext<'_, WorkflowGraph>,
-        state: &RunState,
+        state: &WfRunState,
     ) -> CoreResult<()> {
         if ctx.will_retry {
             let gv = ctx.node.inner();
-            let wf_outcome = core_to_wf_outcome(&ctx.result.outcome);
+            let outcome = &ctx.result.outcome;
             let stage_index = state.stage_index;
 
             // Emit StageFailed event
@@ -273,11 +279,8 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
                 node_id: gv.id.clone(),
                 name: gv.label().to_string(),
                 index: stage_index,
-                failure: wf_outcome.failure.unwrap_or_else(|| {
-                    crate::outcome::FailureDetail::new(
-                        "handler failed",
-                        FailureClass::TransientInfra,
-                    )
+                failure: outcome.failure.clone().unwrap_or_else(|| {
+                    FailureDetail::new("handler failed", FailureCategory::TransientInfra)
                 }),
                 will_retry: true,
             });
@@ -298,42 +301,40 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
     async fn after_node(
         &self,
         node: &WorkflowNode,
-        result: &mut NodeResult,
-        state: &RunState,
+        result: &mut WfNodeResult,
+        state: &WfRunState,
     ) -> CoreResult<()> {
         let gv = node.inner();
         let stage_index = state.stage_index;
-        let mut wf_outcome = core_to_wf_outcome(&result.outcome);
+        let outcome = &mut result.outcome;
 
         // Auto-status override
         if gv.auto_status()
-            && wf_outcome.status != WfStatus::Success
-            && wf_outcome.status != WfStatus::Skipped
+            && outcome.status != StageStatus::Success
+            && outcome.status != StageStatus::Skipped
         {
-            wf_outcome.status = WfStatus::Success;
-            wf_outcome.notes =
+            outcome.status = StageStatus::Success;
+            outcome.notes =
                 Some("auto-status: handler completed without writing status".to_string());
-            result.outcome.status = fabro_core::outcome::StageStatus::Success;
-            result.outcome.notes = wf_outcome.notes.clone();
         }
 
         // Circuit breaker: classify + track failure signatures
-        let outcome_failure_class = if wf_outcome.status == WfStatus::Fail {
-            wf_outcome.failure.as_ref().map(|f| f.failure_class)
+        let outcome_failure_category = if outcome.status == StageStatus::Fail {
+            outcome.failure.as_ref().map(|f| f.category)
         } else {
             None
         };
 
-        if let Some(fc) = outcome_failure_class {
-            let sig_hint = wf_outcome
+        if let Some(fc) = outcome_failure_category {
+            let sig_hint = outcome
                 .failure
                 .as_ref()
-                .and_then(|f| f.failure_signature.as_deref());
+                .and_then(|f| f.signature.as_deref());
             let sig = FailureSignature::new(
                 &gv.id,
                 fc,
                 sig_hint,
-                wf_outcome.failure.as_ref().map(|f| f.message.as_str()),
+                outcome.failure.as_ref().map(|f| f.message.as_str()),
             );
             if fc.is_signature_tracked() {
                 let mut sigs = self.loop_failure_signatures.lock().unwrap();
@@ -350,16 +351,13 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
 
         // Emit StageCompleted or StageFailed event
         let duration_ms = result.duration.as_millis() as u64;
-        if wf_outcome.status == WfStatus::Fail {
+        if outcome.status == StageStatus::Fail {
             self.emitter.emit(&WorkflowRunEvent::StageFailed {
                 node_id: gv.id.clone(),
                 name: gv.label().to_string(),
                 index: stage_index,
-                failure: wf_outcome.failure.clone().unwrap_or_else(|| {
-                    crate::outcome::FailureDetail::new(
-                        "handler failed",
-                        FailureClass::Deterministic,
-                    )
+                failure: outcome.failure.clone().unwrap_or_else(|| {
+                    FailureDetail::new("handler failed", FailureCategory::Deterministic)
                 }),
                 will_retry: false,
             });
@@ -369,34 +367,34 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
                 name: gv.label().to_string(),
                 index: stage_index,
                 duration_ms,
-                status: wf_outcome.status.to_string(),
-                preferred_label: wf_outcome.preferred_label.clone(),
-                suggested_next_ids: wf_outcome.suggested_next_ids.clone(),
-                usage: wf_outcome.usage.clone(),
+                status: outcome.status.to_string(),
+                preferred_label: outcome.preferred_label.clone(),
+                suggested_next_ids: outcome.suggested_next_ids.clone(),
+                usage: outcome.usage.clone(),
                 failure: None,
-                notes: wf_outcome.notes.clone(),
-                files_touched: wf_outcome.files_touched.clone(),
+                notes: outcome.notes.clone(),
+                files_touched: outcome.files_touched.clone(),
                 attempt: result.attempts as usize,
                 max_attempts: result.max_attempts as usize,
             });
         }
 
         // StageComplete/StageFailed hook (non-blocking)
-        let hook_event = if wf_outcome.status == WfStatus::Fail {
+        let hook_event = if outcome.status == StageStatus::Fail {
             HookEvent::StageFailed
         } else {
             HookEvent::StageComplete
         };
         let mut hook_ctx =
             HookContext::new(hook_event, self.run_id.clone(), self.graph.name.clone());
-        hook_ctx.status = Some(wf_outcome.status.to_string());
+        hook_ctx.status = Some(outcome.status.to_string());
         let _ = self.run_hook(&hook_ctx).await;
 
         // Write node status
         let status_dir = self.run_dir.join("stages").join(&gv.id);
         let _ = std::fs::create_dir_all(&status_dir);
         let status_path = status_dir.join("status.json");
-        let _ = crate::save_json(&wf_outcome, &status_path, "node_status");
+        let _ = crate::save_json(outcome, &status_path, "node_status");
 
         Ok(())
     }
@@ -404,7 +402,7 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
     async fn on_edge_selected(
         &self,
         ctx: &EdgeContext<'_, WorkflowGraph>,
-        _state: &RunState,
+        _state: &WfRunState,
     ) -> CoreResult<EdgeDecision> {
         // Capture fidelity/thread from edge for next node
         if let Some(ref edge) = ctx.edge {
@@ -416,8 +414,7 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
             *self.incoming_edge_data.lock().unwrap() = Some(edge_data);
         }
 
-        // Compute outcome-derived fields for EdgeSelected event
-        let wf_outcome = core_to_wf_outcome(ctx.outcome);
+        let outcome = ctx.outcome;
 
         // Emit EdgeSelected event
         let label = ctx
@@ -434,9 +431,9 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
             label,
             condition,
             reason: ctx.reason.to_string(),
-            preferred_label: wf_outcome.preferred_label.clone(),
-            suggested_next_ids: wf_outcome.suggested_next_ids.clone(),
-            stage_status: wf_outcome.status.to_string(),
+            preferred_label: outcome.preferred_label.clone(),
+            suggested_next_ids: outcome.suggested_next_ids.clone(),
+            stage_status: outcome.status.to_string(),
             is_jump: ctx.is_jump,
         });
 
@@ -466,23 +463,18 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
     async fn on_checkpoint(
         &self,
         node: &WorkflowNode,
-        result: &NodeResult,
+        result: &WfNodeResult,
         next_node_id: Option<&str>,
-        state: &RunState,
+        state: &WfRunState,
     ) -> CoreResult<()> {
         if !self.checkpoint_enabled {
             return Ok(());
         }
 
-        // Build checkpoint from state
-        let wf_outcome = core_to_wf_outcome(&result.outcome);
-        let mut node_outcomes: HashMap<String, crate::outcome::Outcome> = state
-            .node_outcomes
-            .iter()
-            .map(|(k, v)| (k.clone(), core_to_wf_outcome(v)))
-            .collect();
+        // Build checkpoint from state — outcomes are already the wf type
+        let mut node_outcomes: HashMap<String, Outcome> = state.node_outcomes.clone();
         // Include current node's outcome
-        node_outcomes.insert(node.id().to_string(), wf_outcome);
+        node_outcomes.insert(node.id().to_string(), result.outcome.clone());
 
         let checkpoint = Checkpoint {
             timestamp: chrono::Utc::now(),
@@ -508,7 +500,7 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         }
 
         // Emit CheckpointCompleted event
-        let status = core_to_wf_status(&result.outcome.status).to_string();
+        let status = result.outcome.status.to_string();
         self.emitter.emit(&WorkflowRunEvent::CheckpointCompleted {
             node_id: node.id().to_string(),
             status,
@@ -518,21 +510,20 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         Ok(())
     }
 
-    async fn on_run_end(&self, outcome: &CoreOutcome, state: &RunState) {
+    async fn on_run_end(&self, outcome: &Outcome, state: &WfRunState) {
         // If cancelled, skip all events/hooks
         if state.cancelled {
             return;
         }
 
         let duration_ms = self.run_start.elapsed().as_millis() as u64;
-        let wf_outcome = core_to_wf_outcome(outcome);
 
-        if wf_outcome.status == WfStatus::Success || wf_outcome.status == WfStatus::PartialSuccess {
+        if outcome.status == StageStatus::Success || outcome.status == StageStatus::PartialSuccess {
             // Success path
             self.emitter.emit(&WorkflowRunEvent::WorkflowRunCompleted {
                 duration_ms,
                 artifact_count: 0,
-                status: wf_outcome.status.to_string(),
+                status: outcome.status.to_string(),
                 total_cost: None,
                 final_git_commit_sha: None,
                 usage: None,
@@ -547,7 +538,7 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
             let _ = self.run_hook(&hook_ctx).await;
         } else {
             // Failure path
-            let error_msg = wf_outcome
+            let error_msg = outcome
                 .failure
                 .as_ref()
                 .map(|f| f.message.clone())

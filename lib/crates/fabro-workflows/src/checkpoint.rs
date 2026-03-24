@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn signature_maps_roundtrip() {
-        use crate::error::{FailureClass, FailureSignature};
+        use crate::error::{FailureCategory, FailureSignature};
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("checkpoint.json");
@@ -217,7 +217,7 @@ mod tests {
         loop_sigs.insert(
             FailureSignature::new(
                 "verify",
-                FailureClass::Deterministic,
+                FailureCategory::Deterministic,
                 None,
                 Some("test failed"),
             ),
@@ -225,7 +225,12 @@ mod tests {
         );
         let mut restart_sigs = HashMap::new();
         restart_sigs.insert(
-            FailureSignature::new("build", FailureClass::Structural, None, Some("scope error")),
+            FailureSignature::new(
+                "build",
+                FailureCategory::Structural,
+                None,
+                Some("scope error"),
+            ),
             1,
         );
 
@@ -247,7 +252,7 @@ mod tests {
         assert_eq!(loaded.restart_failure_signatures.len(), 1);
         let sig = FailureSignature::new(
             "verify",
-            FailureClass::Deterministic,
+            FailureCategory::Deterministic,
             None,
             Some("test failed"),
         );

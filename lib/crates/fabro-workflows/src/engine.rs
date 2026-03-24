@@ -20,11 +20,11 @@ use crate::checkpoint::Checkpoint;
 use crate::condition::evaluate_condition;
 use crate::context;
 use crate::context::Context;
-use crate::error::{FabroError, FailureClass, FailureSignature, Result};
+use crate::error::{FabroError, FailureCategory, FailureSignature, Result};
 use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::handler::{EngineServices, HandlerRegistry};
 use crate::millis_u64;
-use crate::outcome::{Outcome, StageStatus};
+use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::preamble::build_preamble;
 use fabro_config::run::PullRequestConfig;
 use fabro_graphviz::graph::{Edge, Graph, Node};
@@ -46,12 +46,12 @@ pub(crate) fn set_hook_node(ctx: &mut HookContext, node: &Node) {
 /// 2. String heuristics on `failure_reason`
 /// 3. Default to `Deterministic`
 #[must_use]
-fn classify_outcome(outcome: &Outcome) -> Option<FailureClass> {
+fn classify_outcome(outcome: &Outcome) -> Option<FailureCategory> {
     match outcome.status {
         StageStatus::Success | StageStatus::PartialSuccess | StageStatus::Skipped => None,
         StageStatus::Fail | StageStatus::Retry => outcome
-            .failure_class()
-            .or(Some(FailureClass::Deterministic)),
+            .failure_category()
+            .or(Some(FailureCategory::Deterministic)),
     }
 }
 
@@ -991,9 +991,9 @@ impl WorkflowRunEngine {
                 let decision = self.run_hooks(&hook_ctx, hook_work_dir).await;
                 match decision {
                     HookDecision::Skip { reason } => {
-                        let mut outcome = Outcome::skipped();
-                        outcome.notes =
-                            Some(reason.unwrap_or_else(|| "skipped by StageStart hook".into()));
+                        let msg = reason.unwrap_or_else(|| "skipped by StageStart hook".into());
+                        let mut outcome = Outcome::skipped(&msg);
+                        outcome.notes = Some(msg);
                         return Ok((outcome, attempt));
                     }
                     HookDecision::Block { reason } => {
@@ -1115,8 +1115,8 @@ impl WorkflowRunEngine {
                             index: stage_index,
                             failure: crate::outcome::FailureDetail {
                                 message: e.to_string(),
-                                failure_class: e.failure_class(),
-                                failure_signature: e.failure_signature_hint(),
+                                category: e.failure_category(),
+                                signature: e.failure_signature_hint(),
                             },
                             will_retry: true,
                         });
@@ -1482,10 +1482,7 @@ impl WorkflowRunEngine {
             s.node_visits = cp.node_visits.clone();
             // Restore node outcomes
             for (k, v) in &cp.node_outcomes {
-                s.node_outcomes.insert(
-                    k.clone(),
-                    crate::core_adapter::outcome::wf_to_core_outcome(v),
-                );
+                s.node_outcomes.insert(k.clone(), v.clone());
             }
             // Set start node to the checkpoint's next_node_id
             if let Some(ref next) = cp.next_node_id {
@@ -1587,10 +1584,9 @@ impl WorkflowRunEngine {
         // Convert result
         match result {
             Ok(core_outcome) => {
-                let wf_outcome = crate::core_adapter::outcome::core_to_wf_outcome(&core_outcome);
-                // Return outcome + a fresh context (lifecycle manages the real context)
+                // Outcome is now the wf type directly — no conversion needed
                 let ctx = Context::new();
-                Ok((wf_outcome, ctx))
+                Ok((core_outcome, ctx))
             }
             Err(fabro_core::CoreError::StallTimeout { node_id }) => {
                 let stall_timeout = graph.stall_timeout().unwrap_or_default();
@@ -2066,7 +2062,7 @@ impl WorkflowRunEngine {
                 let sig_hint = outcome
                     .failure
                     .as_ref()
-                    .and_then(|f| f.failure_signature.as_deref());
+                    .and_then(|f| f.signature.as_deref());
                 let sig = FailureSignature::new(&node.id, fc, sig_hint, outcome.failure_reason());
                 if fc.is_signature_tracked() {
                     let count = loop_state
@@ -2095,7 +2091,10 @@ impl WorkflowRunEngine {
                     name: node.label().to_string(),
                     index: stage_index,
                     failure: outcome.failure.clone().unwrap_or_else(|| {
-                        crate::outcome::FailureDetail::new("unknown", FailureClass::Deterministic)
+                        crate::outcome::FailureDetail::new(
+                            "unknown",
+                            FailureCategory::Deterministic,
+                        )
                     }),
                     will_retry: false,
                 });
@@ -2428,7 +2427,7 @@ impl WorkflowRunEngine {
                                 "git checkpoint commit failed for node '{}': {e}",
                                 node.id
                             ),
-                            failure_class: FailureClass::Deterministic,
+                            failure_class: FailureCategory::Deterministic,
                         });
                     }
                 }
@@ -2502,7 +2501,7 @@ impl WorkflowRunEngine {
                     if edge.loop_restart() {
                         // Guard: only transient_infra failures may loop_restart (matches Kilroy)
                         if let Some(fc) = outcome_failure_class {
-                            if fc != FailureClass::TransientInfra {
+                            if fc != FailureCategory::TransientInfra {
                                 return Err(FabroError::engine(format!(
                                     "loop_restart blocked: failure_class={fc} (requires transient_infra), node={}, failure_reason={}",
                                     node.id,
@@ -4927,7 +4926,7 @@ mod tests {
 
     #[test]
     fn classify_outcome_returns_none_for_skipped() {
-        assert!(classify_outcome(&Outcome::skipped()).is_none());
+        assert!(classify_outcome(&Outcome::skipped("")).is_none());
     }
 
     #[test]
@@ -4943,10 +4942,10 @@ mod tests {
     fn classify_outcome_reads_failure_detail() {
         let mut outcome = Outcome::fail_classify("some error");
         // Override the FailureDetail's class directly
-        outcome.failure.as_mut().unwrap().failure_class = FailureClass::BudgetExhausted;
+        outcome.failure.as_mut().unwrap().category = FailureCategory::BudgetExhausted;
         assert_eq!(
             classify_outcome(&outcome),
-            Some(FailureClass::BudgetExhausted)
+            Some(FailureCategory::BudgetExhausted)
         );
     }
 
@@ -4955,7 +4954,7 @@ mod tests {
         let outcome = Outcome::fail_classify("rate limited by provider");
         assert_eq!(
             classify_outcome(&outcome),
-            Some(FailureClass::TransientInfra)
+            Some(FailureCategory::TransientInfra)
         );
     }
 
@@ -4964,7 +4963,7 @@ mod tests {
         let outcome = Outcome::fail_classify("something went wrong");
         assert_eq!(
             classify_outcome(&outcome),
-            Some(FailureClass::Deterministic)
+            Some(FailureCategory::Deterministic)
         );
     }
 
@@ -4977,7 +4976,7 @@ mod tests {
         };
         assert_eq!(
             classify_outcome(&outcome),
-            Some(FailureClass::Deterministic)
+            Some(FailureCategory::Deterministic)
         );
     }
 
@@ -4986,7 +4985,7 @@ mod tests {
         let outcome = Outcome::retry_classify("connection refused");
         assert_eq!(
             classify_outcome(&outcome),
-            Some(FailureClass::TransientInfra)
+            Some(FailureCategory::TransientInfra)
         );
     }
 

@@ -9,7 +9,7 @@ use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::millis_u64;
-use crate::outcome::Outcome;
+use crate::outcome::{Outcome, OutcomeExt};
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_interview::{Answer, AnswerValue, Interviewer, Question, QuestionOption, QuestionType};
 

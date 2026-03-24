@@ -139,6 +139,7 @@ impl TestGraph {
 impl Graph for TestGraph {
     type Node = TestNode;
     type Edge = TestEdge;
+    type Meta = ();
 
     fn get_node(&self, id: &str) -> Option<Self::Node> {
         self.nodes.iter().find(|n| n.id == id).cloned()

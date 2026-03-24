@@ -29,7 +29,7 @@ use fabro_workflows::handler::manager_loop::SubWorkflowHandler;
 use fabro_workflows::handler::start::StartHandler;
 use fabro_workflows::handler::wait::WaitHandler;
 use fabro_workflows::handler::{Handler, HandlerRegistry};
-use fabro_workflows::outcome::{Outcome, StageStatus};
+use fabro_workflows::outcome::{Outcome, OutcomeExt, StageStatus};
 use fabro_workflows::stylesheet::{apply_stylesheet, parse_stylesheet};
 use fabro_workflows::transform::{
     StylesheetApplicationTransform, Transform, VariableExpansionTransform,
@@ -11821,11 +11821,11 @@ fn e2e_normalize_failure_reason_strips_variable_data() {
 
 #[test]
 fn e2e_failure_signature_composite_key() {
-    use fabro_workflows::error::{FailureClass, FailureSignature};
+    use fabro_workflows::error::{FailureCategory, FailureSignature};
 
     let sig = FailureSignature::new(
         "verify",
-        FailureClass::Deterministic,
+        FailureCategory::Deterministic,
         None,
         Some("assertion failed at line 42"),
     );
@@ -11848,11 +11848,11 @@ fn e2e_failure_signature_composite_key() {
 
 #[test]
 fn e2e_failure_signature_hint_priority() {
-    use fabro_workflows::error::{FailureClass, FailureSignature};
+    use fabro_workflows::error::{FailureCategory, FailureSignature};
 
     let sig = FailureSignature::new(
         "build",
-        FailureClass::Deterministic,
+        FailureCategory::Deterministic,
         Some("custom-key-abc"),
         Some("raw error with line 123 and hash deadbeef"),
     );
@@ -11865,17 +11865,17 @@ fn e2e_failure_signature_hint_priority() {
 
 #[test]
 fn e2e_only_deterministic_and_structural_tracked() {
-    use fabro_workflows::error::FailureClass;
+    use fabro_workflows::error::FailureCategory;
 
     // These should be tracked
-    assert!(FailureClass::Deterministic.is_signature_tracked());
-    assert!(FailureClass::Structural.is_signature_tracked());
+    assert!(FailureCategory::Deterministic.is_signature_tracked());
+    assert!(FailureCategory::Structural.is_signature_tracked());
 
     // These should NOT be tracked (transient failures retry naturally)
-    assert!(!FailureClass::TransientInfra.is_signature_tracked());
-    assert!(!FailureClass::BudgetExhausted.is_signature_tracked());
-    assert!(!FailureClass::Canceled.is_signature_tracked());
-    assert!(!FailureClass::CompilationLoop.is_signature_tracked());
+    assert!(!FailureCategory::TransientInfra.is_signature_tracked());
+    assert!(!FailureCategory::BudgetExhausted.is_signature_tracked());
+    assert!(!FailureCategory::Canceled.is_signature_tracked());
+    assert!(!FailureCategory::CompilationLoop.is_signature_tracked());
 }
 
 // --- E2E Test: loop_restart_signature_limit graph attribute ---
@@ -12373,7 +12373,7 @@ fn e2e_checkpoint_backward_compat_no_signatures() {
 
 #[test]
 fn e2e_checkpoint_signatures_roundtrip() {
-    use fabro_workflows::error::{FailureClass, FailureSignature};
+    use fabro_workflows::error::{FailureCategory, FailureSignature};
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("cp.json");
@@ -12384,7 +12384,7 @@ fn e2e_checkpoint_signatures_roundtrip() {
     let mut loop_sigs = std::collections::HashMap::new();
     let sig1 = FailureSignature::new(
         "verify",
-        FailureClass::Deterministic,
+        FailureCategory::Deterministic,
         None,
         Some("assertion failed"),
     );
@@ -12393,7 +12393,7 @@ fn e2e_checkpoint_signatures_roundtrip() {
     let mut restart_sigs = std::collections::HashMap::new();
     let sig2 = FailureSignature::new(
         "build",
-        FailureClass::Structural,
+        FailureCategory::Structural,
         None,
         Some("scope violation"),
     );
@@ -12692,11 +12692,11 @@ impl Handler for ClassifiedFailHandler {
         if n >= self.succeed_on {
             return Ok(Outcome::success());
         }
-        let failure_class: fabro_workflows::error::FailureClass =
+        let failure_class: fabro_workflows::error::FailureCategory =
             self.failure_class.parse().unwrap();
         let mut outcome = Outcome::fail_classify("classified failure");
         if let Some(ref mut f) = outcome.failure {
-            f.failure_class = failure_class;
+            f.category = failure_class;
         }
         Ok(outcome)
     }

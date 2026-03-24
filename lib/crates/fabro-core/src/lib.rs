@@ -21,7 +21,7 @@ pub use lifecycle::{
     AttemptContext, AttemptResultContext, CompositeLifecycle, EdgeContext, EdgeDecision,
     NodeDecision, NoopLifecycle, RunLifecycle,
 };
-pub use outcome::{FailureDetail, NodeResult, Outcome, StageStatus};
+pub use outcome::{FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageStatus};
 pub use retry::{BackoffPolicy, RetryPolicy};
 pub use stall::{ActivityMonitor, StallGuard, StallWatchdog};
 pub use state::RunState;

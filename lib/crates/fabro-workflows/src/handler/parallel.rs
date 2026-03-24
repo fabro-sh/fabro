@@ -12,7 +12,7 @@ use crate::engine::set_hook_node;
 use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
 use crate::millis_u64;
-use crate::outcome::{Outcome, StageStatus};
+use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_hooks::{HookContext, HookEvent};
 
@@ -516,7 +516,7 @@ impl Handler for ParallelHandler {
             failure: if is_fail {
                 Some(crate::outcome::FailureDetail::new(
                     format!("Join policy not satisfied: {success_count}/{total} succeeded"),
-                    crate::error::FailureClass::Deterministic,
+                    crate::outcome::FailureCategory::Deterministic,
                 ))
             } else {
                 None
