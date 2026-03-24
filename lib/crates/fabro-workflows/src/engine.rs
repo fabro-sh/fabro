@@ -735,11 +735,12 @@ pub async fn git_push_host(
 }
 
 /// Run a git diff via the sandbox.
-async fn git_diff(sandbox: &dyn Sandbox, base: &str) -> Option<String> {
+async fn git_diff(sandbox: &dyn Sandbox, base: &str) -> std::result::Result<String, String> {
     let cmd = format!("{GIT_REMOTE} diff {base} HEAD");
     match sandbox.exec_command(&cmd, 30_000, None, None, None).await {
-        Ok(r) if r.exit_code == 0 => Some(r.stdout),
-        _ => None,
+        Ok(r) if r.exit_code == 0 => Ok(r.stdout),
+        Ok(r) => Err(format!("exit {}: {}", r.exit_code, r.stderr.trim())),
+        Err(e) => Err(e.to_string()),
     }
 }
 
@@ -1473,10 +1474,6 @@ impl WorkflowRunEngine {
             for (k, v) in &cp.context_values {
                 s.context.set(k.clone(), v.clone());
             }
-            // Restore logs
-            for log in &cp.logs {
-                s.context.append_log(log.clone());
-            }
             s.completed_nodes = cp.completed_nodes.clone();
             s.node_retries = cp.node_retries.clone();
             s.node_visits = cp.node_visits.clone();
@@ -1494,9 +1491,6 @@ impl WorkflowRunEngine {
             // Populate from seed context
             for (k, v) in seed.snapshot() {
                 s.context.set(k, v);
-            }
-            for log in seed.logs_snapshot() {
-                s.context.append_log(log);
             }
             s
         } else {
@@ -1738,9 +1732,6 @@ impl WorkflowRunEngine {
             context = Context::new();
             for (key, value) in &cp.context_values {
                 context.set(key.clone(), value.clone());
-            }
-            for log_entry in &cp.logs {
-                context.append_log(log_entry.clone());
             }
             completed_nodes = cp.completed_nodes.clone();
             // Use persisted node_visits; fall back to reconstruction for old checkpoints
@@ -2149,14 +2140,22 @@ impl WorkflowRunEngine {
 
             // Offload large context values to artifact store before recording
             if let Err(e) = offload_large_values(&mut outcome.context_updates, &artifact_store) {
-                context.append_log(format!("artifact offload failed: {e}"));
+                self.services.emitter.emit(&WorkflowRunEvent::RunNotice {
+                    level: crate::event::RunNoticeLevel::Warn,
+                    code: "artifact_offload_failed".to_string(),
+                    message: format!("[node: {}] artifact offload failed: {e}", node.id),
+                });
             }
 
             // Sync artifact files to the sandbox (no-op for local envs)
             if let Err(e) =
                 sync_artifacts_to_env(&mut outcome.context_updates, &*self.services.sandbox).await
             {
-                context.append_log(format!("artifact sync failed: {e}"));
+                self.services.emitter.emit(&WorkflowRunEvent::RunNotice {
+                    level: crate::event::RunNoticeLevel::Warn,
+                    code: "artifact_sync_failed".to_string(),
+                    message: format!("[node: {}] artifact sync failed: {e}", node.id),
+                });
             }
 
             // Step 3: Record completion
@@ -2276,7 +2275,11 @@ impl WorkflowRunEngine {
             );
             let checkpoint_path = config.run_dir.join("checkpoint.json");
             if let Err(e) = checkpoint.save(&checkpoint_path) {
-                context.append_log(format!("checkpoint save failed: {e}"));
+                self.services.emitter.emit(&WorkflowRunEvent::RunNotice {
+                    level: crate::event::RunNoticeLevel::Warn,
+                    code: "checkpoint_disk_save_failed".to_string(),
+                    message: format!("[node: {}] checkpoint save failed: {e}", node.id),
+                });
             }
 
             // Step 6b: Write shadow branch first, then run branch commit with trailer
@@ -2309,9 +2312,14 @@ impl WorkflowRunEngine {
                             match store.write_checkpoint(&config.run_id, &cp_json, &extra_refs) {
                                 Ok(sha) => Some(sha),
                                 Err(e) => {
-                                    context.append_log(format!(
-                                        "metadata checkpoint write failed: {e}"
-                                    ));
+                                    self.services.emitter.emit(&WorkflowRunEvent::RunNotice {
+                                        level: crate::event::RunNoticeLevel::Warn,
+                                        code: "checkpoint_metadata_write_failed".to_string(),
+                                        message: format!(
+                                            "[node: {}] metadata checkpoint write failed: {e}",
+                                            node.id
+                                        ),
+                                    });
                                     None
                                 }
                             }
@@ -2338,7 +2346,14 @@ impl WorkflowRunEngine {
                     Ok(sha) => {
                         checkpoint.git_commit_sha = Some(sha.clone());
                         if let Err(e) = checkpoint.save(&checkpoint_path) {
-                            context.append_log(format!("checkpoint re-save with SHA failed: {e}"));
+                            self.services.emitter.emit(&WorkflowRunEvent::RunNotice {
+                                level: crate::event::RunNoticeLevel::Warn,
+                                code: "checkpoint_resave_failed".to_string(),
+                                message: format!(
+                                    "[node: {}] checkpoint re-save with SHA failed: {e}",
+                                    node.id
+                                ),
+                            });
                         }
                         self.services
                             .emitter
@@ -2404,13 +2419,18 @@ impl WorkflowRunEngine {
                         let diff_dest =
                             node_dir(&config.run_dir, &node.id, visit).join("diff.patch");
 
-                        let diff_result = git_diff(&*self.services.sandbox, &diff_base).await;
-                        if let Some(patch) = diff_result {
-                            if !patch.is_empty() {
+                        match git_diff(&*self.services.sandbox, &diff_base).await {
+                            Ok(patch) if !patch.is_empty() => {
                                 let _ = std::fs::write(&diff_dest, patch);
                             }
-                        } else {
-                            context.append_log("git diff failed".to_string());
+                            Ok(_) => {} // empty diff, nothing to write
+                            Err(err) => {
+                                self.services.emitter.emit(&WorkflowRunEvent::RunNotice {
+                                    level: crate::event::RunNoticeLevel::Warn,
+                                    code: "git_diff_failed".to_string(),
+                                    message: format!("[node: {}] git diff failed: {err}", node.id),
+                                });
+                            }
                         }
 
                         last_git_sha = Some(sha);
@@ -2589,8 +2609,7 @@ impl WorkflowRunEngine {
         // Write final.patch: comprehensive diff from base_sha to HEAD
         if config.git_checkpoint_enabled {
             if let Some(ref base) = config.base_sha {
-                let patch = git_diff(&*self.services.sandbox, base).await;
-                if let Some(patch) = patch {
+                if let Ok(patch) = git_diff(&*self.services.sandbox, base).await {
                     if !patch.is_empty() {
                         let _ = std::fs::write(config.run_dir.join("final.patch"), patch);
                     }
