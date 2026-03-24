@@ -1,38 +1,54 @@
 {
-  "timestamp": "2026-03-24T19:32:43.407235Z",
-  "current_node": "run_tests",
+  "timestamp": "2026-03-24T19:32:44.009603Z",
+  "current_node": "report",
   "completed_nodes": [
     "start",
-    "run_tests"
+    "run_tests",
+    "report"
   ],
   "node_retries": {
     "run_tests": 1,
-    "start": 1
+    "start": 1,
+    "report": 1
   },
   "context_values": {
     "thread.start.current_node": "run_tests",
     "internal.fidelity": "compact",
-    "current.preamble": "Goal: Run tests and report results\n",
+    "current.preamble": "Goal: Run tests and report results\n\n## Completed stages\n- **run_tests**: success\n",
     "internal.node_visit_count": 1,
-    "last_response": "[Simulated] Response for stage: run_tests",
+    "last_response": "[Simulated] Response for stage: report",
     "response.run_tests": "[Simulated] Response for stage: run_tests",
     "internal.retry_count.run_tests": 1,
+    "internal.retry_count.report": 1,
     "outcome": "success",
-    "last_stage": "run_tests",
+    "last_stage": "report",
     "internal.run_id": "01KMGNBHTJD4QAENA0FGXZKQP5",
     "graph.rankdir": "LR",
-    "internal.thread_id": "start",
+    "internal.thread_id": "run_tests",
     "failure_signature": "",
+    "thread.run_tests.current_node": "report",
+    "response.report": "[Simulated] Response for stage: report",
     "internal.work_dir": "/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmp5SY6jb/run/worktree",
     "graph.goal": "Run tests and report results",
     "internal.retry_count.start": 1,
     "failure_class": "",
-    "current_node": "run_tests"
+    "current_node": "report"
   },
   "node_outcomes": {
     "start": {
       "status": "success",
       "notes": "[Simulated] start",
+      "usage": null,
+      "duration_ms": 0
+    },
+    "report": {
+      "status": "success",
+      "context_updates": {
+        "last_response": "[Simulated] Response for stage: report",
+        "last_stage": "report",
+        "response.report": "[Simulated] Response for stage: report"
+      },
+      "notes": "[Simulated] report",
       "usage": null,
       "duration_ms": 0
     },
@@ -48,8 +64,9 @@
       "duration_ms": 0
     }
   },
-  "next_node_id": "report",
+  "next_node_id": "exit",
   "node_visits": {
+    "report": 1,
     "run_tests": 1,
     "start": 1
   }
