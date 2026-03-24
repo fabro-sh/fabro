@@ -1,10 +1,9 @@
 use std::path::Path;
 
 use crate::error::FabroError;
-use crate::transform::{
-    FileInliningTransform, ModelResolutionTransform, StylesheetApplicationTransform, Transform,
-    VariableExpansionTransform,
-};
+use crate::pipeline;
+use crate::pipeline::types::TransformOptions;
+use crate::transform::Transform;
 use fabro_graphviz::graph::Graph;
 use fabro_validate::Diagnostic;
 
@@ -56,25 +55,22 @@ impl WorkflowBuilder {
         dot_source: &str,
         base_dir: Option<&Path>,
     ) -> Result<(Graph, Vec<Diagnostic>), FabroError> {
-        let mut graph = fabro_graphviz::parser::parse(dot_source)?;
+        let parsed = pipeline::parse(dot_source)?;
+        let mut transformed = pipeline::transform(
+            parsed,
+            &TransformOptions {
+                base_dir: base_dir.map(Path::to_path_buf),
+                custom_transforms: vec![],
+            },
+        );
 
-        // Built-in transforms (PreambleTransform moved to engine execution time)
-        VariableExpansionTransform.apply(&mut graph);
-        StylesheetApplicationTransform.apply(&mut graph);
-        ModelResolutionTransform.apply(&mut graph);
-
-        // File inlining when base_dir is provided
-        if let Some(dir) = base_dir {
-            let fallback = dirs::home_dir().map(|h| h.join(".fabro"));
-            FileInliningTransform::new(dir.to_path_buf(), fallback).apply(&mut graph);
+        // Apply WorkflowBuilder's own custom transforms
+        for t in &self.transforms {
+            t.apply(&mut transformed.graph);
         }
 
-        // Custom transforms
-        for transform in &self.transforms {
-            transform.apply(&mut graph);
-        }
-
-        let diagnostics = fabro_validate::validate(&graph, &[]);
+        let validated = pipeline::validate(transformed, &[]);
+        let (graph, _source, diagnostics) = validated.into_parts();
         Ok((graph, diagnostics))
     }
 }

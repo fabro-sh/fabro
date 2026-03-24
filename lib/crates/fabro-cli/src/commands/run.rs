@@ -15,7 +15,6 @@ use fabro_config::{project as project_config, run as run_config, sandbox as sand
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, FileInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_util::terminal::Styles;
-use fabro_validate::Severity;
 use fabro_workflows::backend::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::checkpoint::Checkpoint;
 use fabro_workflows::conclusion::Conclusion;
@@ -29,7 +28,6 @@ use fabro_workflows::manifest::Manifest;
 use fabro_workflows::outcome::{Outcome, OutcomeExt, StageStatus};
 use fabro_workflows::run_status::{RunStatus, StatusReason};
 use fabro_workflows::sandbox_provider::SandboxProvider;
-use fabro_workflows::workflow::WorkflowBuilder;
 use indicatif::HumanDuration;
 use std::time::Duration;
 use tracing::debug;
@@ -545,14 +543,24 @@ pub(crate) fn resolve_workflow_source(
 
 /// Result of workflow preparation (shared between `create` and `run` commands).
 pub(crate) struct PreparedWorkflow {
-    pub source: String,
-    pub graph: fabro_graphviz::graph::Graph,
+    pub validated: fabro_workflows::pipeline::Validated,
     pub run_cfg: Option<FabroConfig>,
     pub sandbox_provider: SandboxProvider,
     pub model: String,
     pub provider: Option<String>,
     pub workflow_slug: Option<String>,
     pub run_defaults: FabroConfig,
+}
+
+impl PreparedWorkflow {
+    /// Read-through to validated graph.
+    pub fn graph(&self) -> &fabro_graphviz::graph::Graph {
+        self.validated.graph()
+    }
+    /// Read-through to validated source.
+    pub fn source(&self) -> &str {
+        self.validated.source()
+    }
 }
 
 /// Resolve config, parse/validate the workflow graph, and resolve sandbox + model.
@@ -614,7 +622,7 @@ pub(crate) fn prepare_workflow_with_project_config(
             .map_err(|e| anyhow::anyhow!("Failed to set working directory to {dir}: {e}"))?;
     }
 
-    // Parse and validate workflow
+    // Parse and transform workflow using pipeline functions
     let source = read_workflow_file(&dot_path)?;
     let vars = run_cfg
         .as_ref()
@@ -625,34 +633,47 @@ pub(crate) fn prepare_workflow_with_project_config(
         None => source,
     };
     let dot_dir = dot_path.parent().unwrap_or(std::path::Path::new("."));
-    let (mut graph, diagnostics) =
-        WorkflowBuilder::new().prepare_with_file_inlining(&source, dot_dir)?;
+
+    let parsed = fabro_workflows::pipeline::parse(&source)?;
+    let mut transformed = fabro_workflows::pipeline::transform(
+        parsed,
+        &fabro_workflows::pipeline::TransformOptions {
+            base_dir: Some(dot_dir.to_path_buf()),
+            custom_transforms: vec![],
+        },
+    );
+
+    // Apply goal override on the mutable transformed graph
     let cli_goal = resolve_cli_goal(&args.goal, &args.goal_file)?;
     let toml_goal = run_cfg.as_ref().and_then(|c| c.goal.as_deref());
-    apply_goal_override(&mut graph, cli_goal.as_deref(), toml_goal);
+    apply_goal_override(&mut transformed.graph, cli_goal.as_deref(), toml_goal);
 
     // Inline @file references in the (possibly overridden) goal
-    if let Some(fabro_graphviz::graph::AttrValue::String(goal)) = graph.attrs.get("goal") {
+    if let Some(fabro_graphviz::graph::AttrValue::String(goal)) =
+        transformed.graph.attrs.get("goal")
+    {
         let fallback = dirs::home_dir().map(|h| h.join(".fabro"));
         let resolved =
             fabro_workflows::transform::resolve_file_ref(goal, dot_dir, fallback.as_deref());
         if resolved != *goal {
-            graph.attrs.insert(
+            transformed.graph.attrs.insert(
                 "goal".to_string(),
                 fabro_graphviz::graph::AttrValue::String(resolved),
             );
         }
     }
 
+    let validated = fabro_workflows::pipeline::validate(transformed, &[]);
+
     if !quiet {
         eprintln!(
             "{} {} {}",
             styles.bold.apply_to("Workflow:"),
-            graph.name,
+            validated.graph().name,
             styles.dim.apply_to(format!(
                 "({} nodes, {} edges)",
-                graph.nodes.len(),
-                graph.edges.len()
+                validated.graph().nodes.len(),
+                validated.graph().edges.len()
             )),
         );
         eprintln!(
@@ -661,16 +682,16 @@ pub(crate) fn prepare_workflow_with_project_config(
             styles.dim.apply_to(relative_path(&dot_path)),
         );
 
-        let goal = graph.goal();
+        let goal = validated.graph().goal();
         if !goal.is_empty() {
             let stripped = fabro_util::text::strip_goal_decoration(goal);
             eprintln!("{} {stripped}\n", styles.bold.apply_to("Goal:"));
         }
 
-        print_diagnostics(&diagnostics, styles);
+        print_diagnostics(validated.diagnostics(), styles);
     }
 
-    if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+    if validated.has_errors() {
         bail!("Validation failed");
     }
 
@@ -691,12 +712,11 @@ pub(crate) fn prepare_workflow_with_project_config(
         args.provider.as_deref(),
         run_cfg.as_ref(),
         &run_defaults,
-        &graph,
+        validated.graph(),
     );
 
     Ok(PreparedWorkflow {
-        source,
-        graph,
+        validated,
         run_cfg,
         sandbox_provider,
         model,
@@ -719,8 +739,7 @@ pub async fn run_command(
     git_author: fabro_workflows::git::GitAuthor,
 ) -> anyhow::Result<()> {
     let PreparedWorkflow {
-        source,
-        graph,
+        validated,
         mut run_cfg,
         sandbox_provider,
         model,
@@ -728,6 +747,7 @@ pub async fn run_command(
         workflow_slug: prepared_workflow_slug,
         run_defaults,
     } = prepare_workflow(&args, run_defaults, styles, false)?;
+    let (graph, source, _diagnostics) = validated.into_parts();
 
     let workflow_path = args.workflow.as_ref().unwrap(); // safe: prepare_workflow validated
 
@@ -2869,8 +2889,8 @@ include = ["*.md"]
         )
         .unwrap();
 
-        assert_eq!(prepared.graph.name, "smoke");
-        assert_eq!(prepared.graph.goal(), "toml goal");
+        assert_eq!(prepared.graph().name, "smoke");
+        assert_eq!(prepared.graph().goal(), "toml goal");
         assert_eq!(prepared.sandbox_provider, SandboxProvider::Docker);
         assert_eq!(prepared.model, "gpt-5.2");
         assert_eq!(prepared.provider.as_deref(), Some("openai"));
