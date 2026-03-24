@@ -5,6 +5,17 @@ use crate::error::Result;
 use crate::graph::{Graph, NodeSpec};
 use crate::outcome::{NodeResult, Outcome, OutcomeMeta};
 
+impl<M: OutcomeMeta> std::fmt::Debug for RunState<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunState")
+            .field("current_node_id", &self.current_node_id)
+            .field("completed_nodes", &self.completed_nodes)
+            .field("stage_index", &self.stage_index)
+            .field("cancelled", &self.cancelled)
+            .finish_non_exhaustive()
+    }
+}
+
 pub struct RunState<M: OutcomeMeta = ()> {
     pub context: Context,
     pub current_node_id: String,

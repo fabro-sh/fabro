@@ -80,7 +80,11 @@ impl<G: Graph + 'static> ExecutorBuilder<G> {
 }
 
 impl<G: Graph + 'static> Executor<G> {
-    pub async fn run(&self, graph: &G, mut state: RunState<G::Meta>) -> Result<Outcome<G::Meta>> {
+    pub async fn run(
+        &self,
+        graph: &G,
+        mut state: RunState<G::Meta>,
+    ) -> Result<(Outcome<G::Meta>, RunState<G::Meta>)> {
         self.lifecycle.on_run_start(graph, &state).await?;
 
         loop {
@@ -109,7 +113,7 @@ impl<G: Graph + 'static> Executor<G> {
                             .await;
                         let outcome = Outcome::success();
                         self.lifecycle.on_run_end(&outcome, &state).await;
-                        return Ok(outcome);
+                        return Ok((outcome, state));
                     }
                     Err(failed_node_id) => {
                         self.lifecycle
@@ -131,7 +135,7 @@ impl<G: Graph + 'static> Executor<G> {
                             failed_node_id
                         ));
                         self.lifecycle.on_run_end(&outcome, &state).await;
-                        return Ok(outcome);
+                        return Ok((outcome, state));
                     }
                 }
             }
@@ -220,7 +224,7 @@ impl<G: Graph + 'static> Executor<G> {
                 NextStep::End => {
                     let outcome = last_outcome.clone();
                     self.lifecycle.on_run_end(&outcome, &state).await;
-                    return Ok(outcome);
+                    return Ok((outcome, state));
                 }
             }
         }
@@ -413,7 +417,10 @@ mod tests {
         let g = linear_graph(node_ids);
         let state = RunState::new(&g)?;
         let executor = ExecutorBuilder::new(handler).build();
-        executor.run(&g, state).await
+        executor
+            .run(&g, state)
+            .await
+            .map(|(outcome, _state)| outcome)
     }
 
     // ---- Step 8: Linear happy path ----
@@ -476,7 +483,7 @@ mod tests {
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Success);
     }
 
@@ -502,7 +509,7 @@ mod tests {
         let state = RunState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(handler.clone() as Arc<dyn NodeHandler<TestGraph>>).build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Success);
         assert_eq!(handler.calls(), 2);
     }
@@ -523,7 +530,7 @@ mod tests {
             Arc::new(AlwaysFailHandler::new("nope")) as Arc<dyn NodeHandler<TestGraph>>
         )
         .build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Fail);
     }
 
@@ -673,7 +680,7 @@ mod tests {
             Arc::new(AlwaysFailHandler::new("oops")) as Arc<dyn NodeHandler<TestGraph>>
         )
         .build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         // Ends at "bad" terminal with success (goal gates pass since no gates defined)
         assert_eq!(result.status, StageStatus::Success);
     }
@@ -696,7 +703,7 @@ mod tests {
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Success);
     }
 
@@ -729,7 +736,7 @@ mod tests {
         let state = RunState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(Arc::new(JumpHandler) as Arc<dyn NodeHandler<TestGraph>>).build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Success);
     }
 
@@ -765,7 +772,7 @@ mod tests {
         let executor = ExecutorBuilder::new(handler.clone() as Arc<dyn NodeHandler<TestGraph>>)
             .max_node_visits(5)
             .build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Success);
         assert_eq!(handler.calls(), 4);
     }
@@ -829,7 +836,7 @@ mod tests {
             Arc::new(AlwaysFailHandler::new("boom")) as Arc<dyn NodeHandler<TestGraph>>
         )
         .build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Fail);
     }
 
@@ -841,7 +848,7 @@ mod tests {
         let executor =
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Success);
     }
 
@@ -1033,7 +1040,7 @@ mod tests {
         let executor =
             ExecutorBuilder::new(Arc::new(ExhaustedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::PartialSuccess);
     }
 
@@ -1171,7 +1178,7 @@ mod tests {
         let executor = ExecutorBuilder::new(handler.clone() as Arc<dyn NodeHandler<TestGraph>>)
             .lifecycle(Box::new(SkipOnSecondAttempt(call_count_clone)))
             .build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Success); // overall run succeeds via terminal
         assert_eq!(handler.calls(), 1); // handler only called once
         assert_eq!(call_count.load(Ordering::Relaxed), 2); // before_attempt called twice
@@ -1234,7 +1241,7 @@ mod tests {
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(SkipFirst(Mutex::new(false))))
                 .build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Success);
     }
 
@@ -1309,7 +1316,7 @@ mod tests {
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .lifecycle(Box::new(Redirector))
                 .build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Success);
     }
 
@@ -1725,7 +1732,7 @@ mod tests {
         let state = RunState::new(&g).unwrap();
         let executor =
             ExecutorBuilder::new(handler.clone() as Arc<dyn NodeHandler<TestGraph>>).build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Success);
         assert_eq!(handler.calls(), 2);
     }
@@ -1756,7 +1763,7 @@ mod tests {
         let executor = ExecutorBuilder::new(handler.clone() as Arc<dyn NodeHandler<TestGraph>>)
             .max_node_visits(5)
             .build();
-        let result = executor.run(&g, state).await.unwrap();
+        let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Success);
         assert_eq!(handler.calls(), 2);
     }

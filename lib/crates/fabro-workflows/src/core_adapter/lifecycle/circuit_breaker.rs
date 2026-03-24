@@ -1,0 +1,102 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use async_trait::async_trait;
+
+use fabro_core::error::{CoreError, Result as CoreResult};
+use fabro_core::lifecycle::RunLifecycle;
+use fabro_core::outcome::NodeResult;
+use fabro_core::state::RunState;
+
+use super::super::graph::WorkflowGraph;
+use super::super::WorkflowNode;
+use crate::error::FailureSignature;
+use crate::outcome::{StageStatus, StageUsage};
+
+type WfRunState = RunState<Option<StageUsage>>;
+type WfNodeResult = NodeResult<Option<StageUsage>>;
+
+/// Sub-lifecycle responsible for tracking failure signatures and tripping the
+/// circuit breaker when deterministic failure cycles are detected.
+pub struct CircuitBreakerLifecycle {
+    loop_failure_signatures: Mutex<HashMap<FailureSignature, usize>>,
+    restart_failure_signatures: Mutex<HashMap<FailureSignature, usize>>,
+    loop_restart_signature_limit: usize,
+}
+
+impl CircuitBreakerLifecycle {
+    pub fn new(loop_restart_signature_limit: usize) -> Self {
+        Self {
+            loop_failure_signatures: Mutex::new(HashMap::new()),
+            restart_failure_signatures: Mutex::new(HashMap::new()),
+            loop_restart_signature_limit,
+        }
+    }
+
+    /// Restore circuit breaker state from a checkpoint (for resume).
+    pub fn restore(
+        &self,
+        loop_sigs: HashMap<FailureSignature, usize>,
+        restart_sigs: HashMap<FailureSignature, usize>,
+    ) {
+        *self.loop_failure_signatures.lock().unwrap() = loop_sigs;
+        *self.restart_failure_signatures.lock().unwrap() = restart_sigs;
+    }
+
+    /// Snapshot current state for checkpoint building.
+    pub fn snapshot(
+        &self,
+    ) -> (
+        HashMap<FailureSignature, usize>,
+        HashMap<FailureSignature, usize>,
+    ) {
+        let loop_sigs = self.loop_failure_signatures.lock().unwrap().clone();
+        let restart_sigs = self.restart_failure_signatures.lock().unwrap().clone();
+        (loop_sigs, restart_sigs)
+    }
+}
+
+#[async_trait]
+impl RunLifecycle<WorkflowGraph> for CircuitBreakerLifecycle {
+    async fn after_node(
+        &self,
+        node: &WorkflowNode,
+        result: &mut WfNodeResult,
+        _state: &WfRunState,
+    ) -> CoreResult<()> {
+        let gv = node.inner();
+        let outcome = &result.outcome;
+
+        let outcome_failure_category = if outcome.status == StageStatus::Fail {
+            outcome.failure.as_ref().map(|f| f.category)
+        } else {
+            None
+        };
+
+        if let Some(fc) = outcome_failure_category {
+            let sig_hint = outcome
+                .failure
+                .as_ref()
+                .and_then(|f| f.signature.as_deref());
+            let sig = FailureSignature::new(
+                &gv.id,
+                fc,
+                sig_hint,
+                outcome.failure.as_ref().map(|f| f.message.as_str()),
+            );
+            if fc.is_signature_tracked() {
+                let mut sigs = self.loop_failure_signatures.lock().unwrap();
+                let count = sigs.entry(sig.clone()).or_insert(0);
+                *count += 1;
+                let limit = self.loop_restart_signature_limit;
+                if *count >= limit {
+                    return Err(CoreError::Other(format!(
+                        "deterministic failure cycle detected: signature {sig} repeated {count} times (limit {limit})"
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
