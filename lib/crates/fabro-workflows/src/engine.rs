@@ -46,7 +46,7 @@ pub(crate) fn set_hook_node(ctx: &mut HookContext, node: &Node) {
 /// 2. String heuristics on `failure_reason`
 /// 3. Default to `Deterministic`
 #[must_use]
-fn classify_outcome(outcome: &Outcome) -> Option<FailureCategory> {
+pub(crate) fn classify_outcome(outcome: &Outcome) -> Option<FailureCategory> {
     match outcome.status {
         StageStatus::Success | StageStatus::PartialSuccess | StageStatus::Skipped => None,
         StageStatus::Fail | StageStatus::Retry => outcome
@@ -57,6 +57,7 @@ fn classify_outcome(outcome: &Outcome) -> Option<FailureCategory> {
 
 /// Mutable state carried across loop restarts and recursive `run_internal` calls.
 #[derive(Default)]
+#[cfg_attr(feature = "core-engine", allow(dead_code))]
 struct LoopState {
     node_visits: HashMap<String, usize>,
     /// Tracks deterministic/structural failure signatures across main-loop stages.
@@ -542,7 +543,7 @@ pub(crate) fn is_terminal(node: &Node) -> bool {
     node.shape() == "Msquare" || node.handler_type() == Some("exit")
 }
 
-fn node_script(node: &Node) -> Option<String> {
+pub(crate) fn node_script(node: &Node) -> Option<String> {
     node.attrs
         .get("script")
         .or_else(|| node.attrs.get("tool_command"))
@@ -923,6 +924,7 @@ impl WorkflowRunEngine {
     }
 
     /// Fire a non-blocking RunFailed hook.
+    #[cfg_attr(feature = "core-engine", allow(dead_code))]
     async fn run_failed_hook(
         &self,
         run_id: &str,
@@ -940,6 +942,7 @@ impl WorkflowRunEngine {
     }
 
     /// Mirror graph-level attributes into the context.
+    #[cfg_attr(feature = "core-engine", allow(dead_code))]
     pub(crate) fn mirror_graph_attributes(graph: &Graph, context: &Context) {
         if !graph.goal().is_empty() {
             context.set(context::keys::GRAPH_GOAL, serde_json::json!(graph.goal()));
@@ -955,6 +958,7 @@ impl WorkflowRunEngine {
     /// Execute a node handler with retry policy.
     /// Returns `(outcome, attempts_used)` where `attempts_used` is the 1-indexed count.
     #[allow(clippy::too_many_arguments)]
+    #[cfg_attr(feature = "core-engine", allow(dead_code))]
     async fn execute_with_retry(
         &self,
         node: &Node,
@@ -1181,10 +1185,19 @@ impl WorkflowRunEngine {
     /// Returns an error if no start node is found, a node is missing, or a goal gate fails
     /// without a retry target.
     pub async fn run(&self, graph: &Graph, config: &RunConfig) -> Result<Outcome> {
-        let (outcome, _context) = self
-            .run_internal(graph, config, None, None, None, LoopState::default())
-            .await?;
-        Ok(outcome)
+        #[cfg(feature = "core-engine")]
+        {
+            let (outcome, _context) = self.run_via_core(graph, config, None, None).await?;
+            return Ok(outcome);
+        }
+
+        #[cfg(not(feature = "core-engine"))]
+        {
+            let (outcome, _context) = self
+                .run_internal(graph, config, None, None, None, LoopState::default())
+                .await?;
+            Ok(outcome)
+        }
     }
 
     /// Run a workflow with full sandbox lifecycle management.
@@ -1389,15 +1402,25 @@ impl WorkflowRunEngine {
         config: &RunConfig,
         seed_context: Context,
     ) -> Result<(Outcome, Context)> {
-        self.run_internal(
-            graph,
-            config,
-            None,
-            None,
-            Some(seed_context),
-            LoopState::default(),
-        )
-        .await
+        #[cfg(feature = "core-engine")]
+        {
+            return self
+                .run_via_core(graph, config, None, Some(seed_context))
+                .await;
+        }
+
+        #[cfg(not(feature = "core-engine"))]
+        {
+            self.run_internal(
+                graph,
+                config,
+                None,
+                None,
+                Some(seed_context),
+                LoopState::default(),
+            )
+            .await
+        }
     }
 
     /// Resume from a checkpoint. Restores context, completed nodes, and continues
@@ -1412,15 +1435,26 @@ impl WorkflowRunEngine {
         config: &RunConfig,
         checkpoint: &Checkpoint,
     ) -> Result<Outcome> {
-        let loop_state = LoopState {
-            node_visits: HashMap::new(),
-            loop_failure_signatures: checkpoint.loop_failure_signatures.clone(),
-            restart_failure_signatures: checkpoint.restart_failure_signatures.clone(),
-        };
-        let (outcome, _context) = self
-            .run_internal(graph, config, Some(checkpoint), None, None, loop_state)
-            .await?;
-        Ok(outcome)
+        #[cfg(feature = "core-engine")]
+        {
+            let (outcome, _context) = self
+                .run_via_core(graph, config, Some(checkpoint), None)
+                .await?;
+            return Ok(outcome);
+        }
+
+        #[cfg(not(feature = "core-engine"))]
+        {
+            let loop_state = LoopState {
+                node_visits: HashMap::new(),
+                loop_failure_signatures: checkpoint.loop_failure_signatures.clone(),
+                restart_failure_signatures: checkpoint.restart_failure_signatures.clone(),
+            };
+            let (outcome, _context) = self
+                .run_internal(graph, config, Some(checkpoint), None, None, loop_state)
+                .await?;
+            Ok(outcome)
+        }
     }
 
     /// Run the workflow through the fabro-core executor with full lifecycle management.
@@ -1660,6 +1694,7 @@ impl WorkflowRunEngine {
     }
 
     /// Internal run implementation supporting optional checkpoint resume and `start_at` override.
+    #[cfg_attr(feature = "core-engine", allow(dead_code))]
     async fn run_internal(
         &self,
         graph: &Graph,

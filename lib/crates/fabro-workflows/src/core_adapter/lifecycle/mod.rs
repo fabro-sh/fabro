@@ -115,7 +115,7 @@ impl WorkflowLifecycle {
         let hook = HookLifecycle {
             hook_runner,
             sandbox: Arc::clone(&sandbox),
-            run_dir: run_dir.clone(),
+            hook_work_dir: working_directory.clone().map(PathBuf::from),
             run_id: config.run_id.clone(),
             graph_name: graph.name.clone(),
         };

@@ -111,7 +111,7 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
 
         // 6. Set thread.{tid}.current_node
         if let Some(ref tid) = thread_id {
-            let key = format!("thread.{tid}.current_node");
+            let key = keys::thread_current_node_key(tid);
             state.context.set(key, serde_json::json!(node.id()));
         }
 
@@ -130,7 +130,7 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
         }
 
         // 8. Set INTERNAL_NODE_VISIT_COUNT and CURRENT_NODE
-        let visits = state.node_visits.get(node.id()).copied().unwrap_or(0);
+        let visits = state.node_visits.get(node.id()).copied().unwrap_or(1);
         state
             .context
             .set(keys::CURRENT_NODE, serde_json::json!(node.id()));

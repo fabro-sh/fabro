@@ -12,6 +12,7 @@ use super::super::graph::WorkflowGraph;
 use super::super::WorkflowNode;
 use super::git::GitCheckpointResult;
 use crate::artifact::ArtifactStore;
+use crate::engine;
 use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::outcome::{FailureCategory, FailureDetail, Outcome, StageStatus, StageUsage};
 
@@ -86,7 +87,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             name: gv.label().to_string(),
             index: stage_index,
             handler_type: gv.handler_type().map(String::from),
-            script: None,
+            script: engine::node_script(gv),
             attempt: 1,
             max_attempts: 1,
         });
@@ -118,7 +119,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             name: gv.label().to_string(),
             index: state.stage_index,
             handler_type: gv.handler_type().map(String::from),
-            script: None,
+            script: engine::node_script(gv),
             attempt: ctx.attempt as usize,
             max_attempts: ctx.max_attempts as usize,
         });
@@ -192,7 +193,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 preferred_label: outcome.preferred_label.clone(),
                 suggested_next_ids: outcome.suggested_next_ids.clone(),
                 usage: outcome.usage.clone(),
-                failure: None,
+                failure: outcome.failure.clone(),
                 notes: outcome.notes.clone(),
                 files_touched: outcome.files_touched.clone(),
                 attempt: result.attempts as usize,
@@ -240,7 +241,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         let status = result.outcome.status.to_string();
 
         // Read git checkpoint result (set by GitLifecycle)
-        let git_result = self.checkpoint_git_result.lock().unwrap().take();
+        let git_result = self.checkpoint_git_result.lock().unwrap().clone();
 
         let git_sha = git_result.as_ref().and_then(|r| r.commit_sha.clone());
 
@@ -276,15 +277,32 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         let duration_ms = self.run_start.lock().unwrap().elapsed().as_millis() as u64;
         let artifact_count = self.artifact_store.lock().unwrap().list().len();
         let last_sha = self.last_git_sha.lock().unwrap().clone();
+        let total_cost = {
+            let sum: f64 = state
+                .node_outcomes
+                .values()
+                .filter_map(|o| o.usage.as_ref()?.cost)
+                .sum();
+            if sum > 0.0 {
+                Some(sum)
+            } else {
+                None
+            }
+        };
+        let run_usage = state
+            .node_outcomes
+            .values()
+            .filter_map(|o| o.usage.as_ref().map(fabro_llm::types::Usage::from))
+            .reduce(|a, b| a + b);
 
         if outcome.status == StageStatus::Success || outcome.status == StageStatus::PartialSuccess {
             self.emitter.emit(&WorkflowRunEvent::WorkflowRunCompleted {
                 duration_ms,
                 artifact_count,
                 status: outcome.status.to_string(),
-                total_cost: None,
+                total_cost,
                 final_git_commit_sha: last_sha,
-                usage: None,
+                usage: run_usage,
             });
         } else {
             let error_msg = outcome
