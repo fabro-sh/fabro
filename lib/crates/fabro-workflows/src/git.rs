@@ -366,7 +366,7 @@ pub fn scan_node_files(run_dir: &Path) -> Vec<(String, Vec<u8>)> {
 
 /// Git-native metadata storage for pipeline runs.
 ///
-/// Stores checkpoint data, manifests, and graph DOT on an orphan branch
+/// Stores checkpoint data, run records, and metadata on an orphan branch
 /// (`fabro/meta/{run_id}`) so that runs can be resumed from git alone.
 pub struct MetadataStore {
     repo_path: std::path::PathBuf,
@@ -402,63 +402,18 @@ impl MetadataStore {
         Ok((store, sig))
     }
 
-    /// Initialize a run's metadata branch with manifest, graph DOT, and optional extra files.
-    pub fn init_run(
-        &self,
-        run_id: &str,
-        manifest_json: &[u8],
-        graph_dot: &[u8],
-        extra_files: &[(&str, &[u8])],
-    ) -> Result<()> {
-        self.init_run_inner(run_id, manifest_json, graph_dot, None, None, extra_files)
-    }
-
-    /// Initialize a run's metadata branch with manifest, graph DOT, run record, start record,
-    /// and optional extra files.
-    pub fn init_run_with_records(
-        &self,
-        run_id: &str,
-        manifest_json: &[u8],
-        graph_dot: &[u8],
-        run_record_json: &[u8],
-        start_record_json: &[u8],
-        extra_files: &[(&str, &[u8])],
-    ) -> Result<()> {
-        self.init_run_inner(
-            run_id,
-            manifest_json,
-            graph_dot,
-            Some(run_record_json),
-            Some(start_record_json),
-            extra_files,
-        )
-    }
-
-    fn init_run_inner(
-        &self,
-        run_id: &str,
-        manifest_json: &[u8],
-        graph_dot: &[u8],
-        run_record_json: Option<&[u8]>,
-        start_record_json: Option<&[u8]>,
-        extra_files: &[(&str, &[u8])],
-    ) -> Result<()> {
+    /// Initialize a run's metadata branch with the given files.
+    ///
+    /// Callers pass all files (run.json, start.json, sandbox.json, etc.)
+    /// via the `files` slice.
+    pub fn init_run(&self, run_id: &str, files: &[(&str, &[u8])]) -> Result<()> {
         let (store, sig) = self.open_store()?;
         let branch = Self::branch_name(run_id);
         let bs = BranchStore::new(&store, &branch, &sig);
         bs.ensure_branch()
             .map_err(|e| git_error(format!("ensure_branch failed: {e}")))?;
-        let mut entries: Vec<(&str, &[u8])> =
-            vec![("manifest.json", manifest_json), ("graph.fabro", graph_dot)];
-        if let Some(rr) = run_record_json {
-            entries.push(("run.json", rr));
-        }
-        if let Some(sr) = start_record_json {
-            entries.push(("start.json", sr));
-        }
-        entries.extend_from_slice(extra_files);
         let msg = self.commit_message("init run");
-        bs.write_entries(&entries, &msg)
+        bs.write_entries(files, &msg)
             .map_err(|e| git_error(format!("write_entries failed: {e}")))?;
         Ok(())
     }
@@ -674,7 +629,7 @@ mod tests {
         let run_record = br#"{"run_id":"RUN1","created_at":"2025-01-01T00:00:00Z","config":{},"graph":{"name":"test","nodes":{},"edges":[],"attrs":{}},"working_directory":"/tmp"}"#;
         let dot = b"digraph { start -> end }";
         store
-            .init_run("RUN1", &[], dot, &[("run.json", run_record)])
+            .init_run("RUN1", &[("run.json", run_record), ("graph.fabro", dot)])
             .unwrap();
 
         let read_record = MetadataStore::read_run_record(dir.path(), "RUN1")
@@ -695,7 +650,7 @@ mod tests {
         init_repo(dir.path());
 
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        store.init_run("RUN2", b"{}", b"digraph {}", &[]).unwrap();
+        store.init_run("RUN2", &[]).unwrap();
 
         let ctx = crate::context::Context::new();
         ctx.set("goal", serde_json::json!("test"));
@@ -731,7 +686,7 @@ mod tests {
         init_repo(dir.path());
 
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        store.init_run("RUN3", b"{}", b"digraph {}", &[]).unwrap();
+        store.init_run("RUN3", &[]).unwrap();
 
         let ctx = crate::context::Context::new();
         let cp1 = crate::checkpoint::Checkpoint::from_context(
@@ -784,7 +739,7 @@ mod tests {
         init_repo(dir.path());
 
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        store.init_run("RUN4", b"{}", b"digraph {}", &[]).unwrap();
+        store.init_run("RUN4", &[]).unwrap();
 
         let artifact_data = br#"{"large_output":"some data"}"#;
         let cp_json = b"{}"; // minimal checkpoint for the test
@@ -859,7 +814,8 @@ mod tests {
         init_repo(dir.path());
 
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        store.init_run("RUN5", b"{}", b"digraph {}", &[]).unwrap();
+        let run_record = br#"{"run_id":"RUN5","created_at":"2025-01-01T00:00:00Z","config":{},"graph":{"name":"test","nodes":{},"edges":[],"attrs":{}},"working_directory":"/tmp"}"#;
+        store.init_run("RUN5", &[("run.json", run_record)]).unwrap();
 
         store
             .write_files(
@@ -875,10 +831,10 @@ mod tests {
         assert_eq!(data, b"{\"status\":\"ok\"}");
 
         // Original files still present
-        let dot = MetadataStore::read_graph_dot(dir.path(), "RUN5")
+        let record = MetadataStore::read_run_record(dir.path(), "RUN5")
             .unwrap()
             .unwrap();
-        assert_eq!(dot, "digraph {}");
+        assert_eq!(record.run_id, "RUN5");
     }
 
     #[test]
@@ -888,12 +844,7 @@ mod tests {
 
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
         store
-            .init_run(
-                "RUN6",
-                b"{}",
-                b"digraph {}",
-                &[("sandbox.json", b"{\"type\":\"local\"}")],
-            )
+            .init_run("RUN6", &[("sandbox.json", b"{\"type\":\"local\"}")])
             .unwrap();
 
         let data = MetadataStore::read_file(dir.path(), "RUN6", "sandbox.json")

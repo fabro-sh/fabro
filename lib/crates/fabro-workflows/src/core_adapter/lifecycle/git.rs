@@ -59,17 +59,17 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             let run_json = std::fs::read(self.run_dir.join("run.json")).ok();
             let start_json = std::fs::read(self.run_dir.join("start.json")).ok();
             let sandbox_json = std::fs::read(self.run_dir.join("sandbox.json")).ok();
-            let mut extra_files: Vec<(&str, &[u8])> = Vec::new();
+            let mut files: Vec<(&str, &[u8])> = Vec::new();
             if let Some(ref data) = run_json {
-                extra_files.push(("run.json", data));
+                files.push(("run.json", data));
             }
             if let Some(ref data) = start_json {
-                extra_files.push(("start.json", data));
+                files.push(("start.json", data));
             }
             if let Some(ref data) = sandbox_json {
-                extra_files.push(("sandbox.json", data));
+                files.push(("sandbox.json", data));
             }
-            if let Err(e) = store.init_run(&self.run_id, &[], &[], &extra_files) {
+            if let Err(e) = store.init_run(&self.run_id, &files) {
                 tracing::warn!(
                     run_id = %self.run_id,
                     error = %e,
