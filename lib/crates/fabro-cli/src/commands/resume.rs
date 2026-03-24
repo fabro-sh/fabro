@@ -553,11 +553,6 @@ async fn prepare_from_branch(
             .ok_or_else(|| {
                 anyhow::anyhow!("no checkpoint found on metadata branch for run {run_id}")
             })?;
-    let source = fabro_workflows::git::MetadataStore::read_graph_dot(&resume_repo_path, &run_id)?
-        .ok_or_else(|| {
-        anyhow::anyhow!("no graph.fabro found on metadata branch for run {run_id}")
-    })?;
-
     let repo_info = fabro_sandbox::daytona::detect_repo_info(&resume_repo_path).ok();
     let origin_url = repo_info.as_ref().map(|(url, _)| url.clone());
     let detected_base_branch = record
@@ -585,7 +580,39 @@ async fn prepare_from_branch(
                     prepared.workflow_slug,
                 )
             }
+        } else if let Some(ref rec) = record {
+            // Use the fully transformed graph from the RunRecord
+            let graph = rec.graph.clone();
+            let source = String::new(); // no DOT source needed — graph is from RunRecord
+            let run_cfg = Some(rec.config.clone());
+            let sandbox_provider = if args.dry_run {
+                SandboxProvider::Local
+            } else {
+                let sp = rec
+                    .config
+                    .sandbox
+                    .as_ref()
+                    .and_then(|s| s.provider.as_deref())
+                    .and_then(|s| s.parse::<SandboxProvider>().ok())
+                    .unwrap_or_default();
+                args.sandbox.map(Into::into).unwrap_or(sp)
+            };
+            (
+                graph,
+                source,
+                run_cfg,
+                sandbox_provider,
+                rec.workflow_slug.clone(),
+            )
         } else {
+            // Fallback: read DOT source from metadata branch
+            let source =
+                fabro_workflows::git::MetadataStore::read_graph_dot(&resume_repo_path, &run_id)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "no run.json or graph.fabro found on metadata branch for run {run_id}"
+                        )
+                    })?;
             let (graph, diagnostics) =
                 fabro_workflows::workflow::WorkflowBuilder::new().prepare(&source)?;
             print_diagnostics(&diagnostics, styles);
@@ -598,13 +625,7 @@ async fn prepare_from_branch(
             } else {
                 resolve_sandbox_provider(args.sandbox.map(Into::into), None, run_defaults)?
             };
-            (
-                graph,
-                source.clone(),
-                None,
-                sandbox_provider,
-                record.as_ref().and_then(|r| r.workflow_slug.clone()),
-            )
+            (graph, source.clone(), None, sandbox_provider, None)
         };
 
     eprintln!(
