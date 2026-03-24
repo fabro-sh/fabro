@@ -10,6 +10,8 @@ use fabro_core::state::RunState;
 
 use super::super::graph::WorkflowGraph;
 use super::super::WorkflowNode;
+use super::git::GitCheckpointResult;
+use crate::artifact::ArtifactStore;
 use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::outcome::{FailureCategory, FailureDetail, Outcome, StageStatus, StageUsage};
 
@@ -29,6 +31,11 @@ pub struct EventLifecycle {
     pub run_branch: Option<String>,
     pub worktree_dir: Option<String>,
     pub goal: Option<String>,
+    // Shared swappable handle (same instance as orchestrator)
+    pub artifact_store: Arc<Mutex<ArtifactStore>>,
+    // Cross-lifecycle data
+    pub checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
+    pub last_git_sha: Arc<Mutex<Option<String>>>,
 }
 
 #[async_trait]
@@ -157,7 +164,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         state: &WfRunState,
     ) -> fabro_core::error::Result<()> {
         let outcome = &result.outcome;
-        // Skip events for Skipped nodes
+        // Skipped nodes had no StageStarted, so skip completion events (engine.rs:2080)
         if outcome.status == StageStatus::Skipped {
             return Ok(());
         }
@@ -231,11 +238,34 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         _state: &WfRunState,
     ) -> fabro_core::error::Result<()> {
         let status = result.outcome.status.to_string();
+
+        // Read git checkpoint result (set by GitLifecycle)
+        let git_result = self.checkpoint_git_result.lock().unwrap().take();
+
+        let git_sha = git_result.as_ref().and_then(|r| r.commit_sha.clone());
+
         self.emitter.emit(&WorkflowRunEvent::CheckpointCompleted {
             node_id: node.id().to_string(),
             status,
-            git_commit_sha: None,
+            git_commit_sha: git_sha.clone(),
         });
+
+        // Emit GitCommit + GitPush events if git produced results
+        if let Some(ref result) = git_result {
+            if let Some(ref sha) = result.commit_sha {
+                self.emitter.emit(&WorkflowRunEvent::GitCommit {
+                    node_id: Some(node.id().to_string()),
+                    sha: sha.clone(),
+                });
+            }
+            for (branch, success) in &result.push_results {
+                self.emitter.emit(&WorkflowRunEvent::GitPush {
+                    branch: branch.clone(),
+                    success: *success,
+                });
+            }
+        }
+
         Ok(())
     }
 
@@ -244,14 +274,16 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             return;
         }
         let duration_ms = self.run_start.lock().unwrap().elapsed().as_millis() as u64;
+        let artifact_count = self.artifact_store.lock().unwrap().list().len();
+        let last_sha = self.last_git_sha.lock().unwrap().clone();
 
         if outcome.status == StageStatus::Success || outcome.status == StageStatus::PartialSuccess {
             self.emitter.emit(&WorkflowRunEvent::WorkflowRunCompleted {
                 duration_ms,
-                artifact_count: 0,
+                artifact_count,
                 status: outcome.status.to_string(),
                 total_cost: None,
-                final_git_commit_sha: None,
+                final_git_commit_sha: last_sha,
                 usage: None,
             });
         } else {
@@ -263,7 +295,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             self.emitter.emit(&WorkflowRunEvent::WorkflowRunFailed {
                 error: crate::error::FabroError::engine(error_msg),
                 duration_ms,
-                git_commit_sha: None,
+                git_commit_sha: last_sha,
             });
         }
     }

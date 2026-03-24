@@ -241,7 +241,11 @@ pub fn resolve_thread_id(
 // --- Run directory helpers (spec 5.6) ---
 
 /// Write manifest.json at the start of a workflow run. Returns the manifest.
-fn write_manifest(run_dir: &Path, graph: &Graph, config: &RunConfig) -> crate::manifest::Manifest {
+pub(crate) fn write_manifest(
+    run_dir: &Path,
+    graph: &Graph,
+    config: &RunConfig,
+) -> crate::manifest::Manifest {
     let workflow_name = if graph.name.is_empty() {
         "unnamed".to_string()
     } else {
@@ -289,7 +293,7 @@ pub fn visit_from_context(context: &Context) -> usize {
 }
 
 /// Write status.json for a completed node into {`run_dir}/nodes/{node_id}/status.json`.
-fn write_node_status(run_dir: &Path, node_id: &str, visit: usize, outcome: &Outcome) {
+pub(crate) fn write_node_status(run_dir: &Path, node_id: &str, visit: usize, outcome: &Outcome) {
     let node_dir = node_dir(run_dir, node_id, visit);
     let _ = std::fs::create_dir_all(&node_dir);
     let status = serde_json::json!({
@@ -723,7 +727,10 @@ pub async fn git_push_host(
 }
 
 /// Run a git diff via the sandbox.
-async fn git_diff(sandbox: &dyn Sandbox, base: &str) -> std::result::Result<String, String> {
+pub(crate) async fn git_diff(
+    sandbox: &dyn Sandbox,
+    base: &str,
+) -> std::result::Result<String, String> {
     let cmd = format!("{GIT_REMOTE} diff {base} HEAD");
     match sandbox.exec_command(&cmd, 30_000, None, None, None).await {
         Ok(r) if r.exit_code == 0 => Ok(r.stdout),
@@ -777,6 +784,7 @@ pub async fn git_replace_worktree(sandbox: &dyn Sandbox, path: &str, branch: &st
 }
 
 /// Configuration for a workflow run.
+#[derive(Clone)]
 pub struct RunConfig {
     pub run_dir: PathBuf,
     pub cancel_token: Option<Arc<AtomicBool>>,
@@ -932,7 +940,7 @@ impl WorkflowRunEngine {
     }
 
     /// Mirror graph-level attributes into the context.
-    fn mirror_graph_attributes(graph: &Graph, context: &Context) {
+    pub(crate) fn mirror_graph_attributes(graph: &Graph, context: &Context) {
         if !graph.goal().is_empty() {
             context.set(context::keys::GRAPH_GOAL, serde_json::json!(graph.goal()));
         }
@@ -1467,23 +1475,29 @@ impl WorkflowRunEngine {
         });
 
         // Build lifecycle
+        let config_arc = std::sync::Arc::new(config.clone());
         let lifecycle = crate::core_adapter::WorkflowLifecycle::new(
             self.services.emitter.clone(),
             self.services.hook_runner.clone(),
             self.services.sandbox.clone(),
             graph_arc,
             config.run_dir.clone(),
-            config.run_id.clone(),
-            config.dry_run,
-            config.labels.clone(),
+            config_arc,
+            resume_checkpoint.is_some(),
         );
 
-        // Restore circuit breaker state from checkpoint
+        // Restore state from checkpoint
         if let Some(cp) = resume_checkpoint {
             lifecycle.restore_circuit_breaker(
                 cp.loop_failure_signatures.clone(),
                 cp.restart_failure_signatures.clone(),
             );
+            // Degrade fidelity on the first resumed node when prior fidelity was Full
+            if cp.context_values.get(context::keys::INTERNAL_FIDELITY)
+                == Some(&serde_json::json!(context::keys::Fidelity::Full.to_string()))
+            {
+                lifecycle.set_degrade_fidelity_on_resume(true);
+            }
         }
 
         // Build RunState

@@ -12,6 +12,7 @@ use super::super::graph::WorkflowGraph;
 use super::super::WorkflowNode;
 use super::circuit_breaker::CircuitBreakerLifecycle;
 use crate::checkpoint::Checkpoint;
+use crate::engine::{self, RunConfig};
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::outcome::StageUsage;
 
@@ -22,6 +23,8 @@ type WfNodeResult = NodeResult<Option<StageUsage>>;
 pub struct DiskLifecycle {
     pub run_dir: PathBuf,
     pub run_id: String,
+    pub graph: Arc<fabro_graphviz::graph::types::Graph>,
+    pub config: Arc<RunConfig>,
     pub emitter: Arc<EventEmitter>,
     pub circuit_breaker: Arc<CircuitBreakerLifecycle>,
     pub checkpoint_enabled: bool,
@@ -29,18 +32,31 @@ pub struct DiskLifecycle {
 
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
+    async fn on_run_start(
+        &self,
+        _graph: &WorkflowGraph,
+        _state: &WfRunState,
+    ) -> fabro_core::error::Result<()> {
+        // Write manifest.json
+        engine::write_manifest(&self.run_dir, &self.graph, &self.config);
+        // Write run status as Running
+        crate::run_status::write_run_status(
+            &self.run_dir,
+            crate::run_status::RunStatus::Running,
+            None,
+        );
+        Ok(())
+    }
+
     async fn after_node(
         &self,
         node: &WorkflowNode,
         result: &mut WfNodeResult,
-        _state: &WfRunState,
+        state: &WfRunState,
     ) -> fabro_core::error::Result<()> {
         let gv = node.inner();
-        let outcome = &result.outcome;
-        let status_dir = self.run_dir.join("stages").join(&gv.id);
-        let _ = std::fs::create_dir_all(&status_dir);
-        let status_path = status_dir.join("status.json");
-        let _ = crate::save_json(outcome, &status_path, "node_status");
+        let visit = state.node_visits.get(gv.id.as_str()).copied().unwrap_or(1);
+        engine::write_node_status(&self.run_dir, &gv.id, visit, &result.outcome);
         Ok(())
     }
 
