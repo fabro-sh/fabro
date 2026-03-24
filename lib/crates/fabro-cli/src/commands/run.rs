@@ -484,8 +484,8 @@ pub(crate) fn local_sandbox_with_callback(
     Arc::new(env)
 }
 
-pub(crate) const RUN_GRAPH_FILE: &str = "graph.fabro";
-pub(crate) const RUN_CONFIG_FILE: &str = "run.toml";
+pub(crate) const RUN_GRAPH_FILE: &str = "workflow.fabro";
+pub(crate) const RUN_CONFIG_FILE: &str = "workflow.toml";
 
 pub(crate) fn cached_graph_path(run_dir: &Path) -> PathBuf {
     run_dir.join(RUN_GRAPH_FILE)
@@ -495,19 +495,18 @@ pub(crate) fn cached_run_config_path(run_dir: &Path) -> PathBuf {
     run_dir.join(RUN_CONFIG_FILE)
 }
 
-fn serialize_run_config_snapshot(run_cfg: &FabroConfig) -> anyhow::Result<String> {
-    let mut snapshot = run_cfg.clone();
-    snapshot.graph = Some(RUN_GRAPH_FILE.to_string());
-    toml::to_string_pretty(&snapshot).context("Failed to serialize run config")
-}
-
+/// Copy the original workflow TOML into the run directory as a debug artifact.
+/// Nothing reads this programmatically — execution uses RunRecord.
 pub(crate) async fn write_run_config_snapshot(
     run_dir: &Path,
-    run_cfg: Option<&FabroConfig>,
+    workflow_toml_path: Option<&Path>,
 ) -> anyhow::Result<()> {
-    if let Some(cfg) = run_cfg {
-        let toml_str = serialize_run_config_snapshot(cfg)?;
-        tokio::fs::write(cached_run_config_path(run_dir), toml_str).await?;
+    if let Some(toml_path) = workflow_toml_path {
+        if toml_path.is_file() {
+            tokio::fs::copy(toml_path, cached_run_config_path(run_dir))
+                .await
+                .context("Failed to copy workflow TOML to run directory")?;
+        }
     }
     Ok(())
 }
@@ -550,6 +549,8 @@ pub(crate) struct PreparedWorkflow {
     pub provider: Option<String>,
     pub workflow_slug: Option<String>,
     pub run_defaults: FabroConfig,
+    /// Resolved TOML path (Some for TOML-based workflows, None for bare .fabro).
+    pub workflow_toml_path: Option<PathBuf>,
 }
 
 impl PreparedWorkflow {
@@ -715,6 +716,15 @@ pub(crate) fn prepare_workflow_with_project_config(
         validated.graph(),
     );
 
+    let workflow_toml_path = if resolved_workflow_path
+        .extension()
+        .is_some_and(|ext| ext == "toml")
+    {
+        Some(resolved_workflow_path)
+    } else {
+        None
+    };
+
     Ok(PreparedWorkflow {
         validated,
         run_cfg,
@@ -723,7 +733,97 @@ pub(crate) fn prepare_workflow_with_project_config(
         provider,
         workflow_slug,
         run_defaults,
+        workflow_toml_path,
     })
+}
+
+/// Pre-prepared run state, used to skip workflow preparation in `run_command_impl`.
+struct RecordBasedRun {
+    graph: fabro_graphviz::graph::Graph,
+    source: String,
+    run_cfg: Option<FabroConfig>,
+    sandbox_provider: SandboxProvider,
+    model: String,
+    provider: Option<String>,
+    workflow_slug: Option<String>,
+    run_defaults: FabroConfig,
+    /// Original TOML path for debug snapshot (None for record-based or bare .fabro runs).
+    workflow_toml_path: Option<PathBuf>,
+}
+
+/// Execute a workflow run from a saved RunRecord, bypassing workflow preparation.
+///
+/// Used by `run_engine_entrypoint` for detached runs that already have a RunRecord on disk.
+pub async fn run_from_record(
+    record: fabro_workflows::run_record::RunRecord,
+    run_dir: PathBuf,
+    run_defaults: FabroConfig,
+    styles: &'static Styles,
+    github_app: Option<fabro_github::GitHubAppCredentials>,
+    git_author: fabro_workflows::git::GitAuthor,
+) -> anyhow::Result<()> {
+    let sandbox_provider = record
+        .config
+        .sandbox
+        .as_ref()
+        .and_then(|s| s.provider.as_deref())
+        .unwrap_or("local")
+        .parse()
+        .unwrap_or(SandboxProvider::Local);
+    let model = record
+        .config
+        .llm
+        .as_ref()
+        .and_then(|l| l.model.clone())
+        .unwrap_or_default();
+    let provider = record
+        .config
+        .llm
+        .as_ref()
+        .and_then(|l| l.provider.clone())
+        .filter(|s| !s.is_empty());
+
+    let record_run = RecordBasedRun {
+        source: String::new(), // DOT source not needed — graph is already deserialized
+        graph: record.graph.clone(),
+        run_cfg: Some(record.config.clone()),
+        sandbox_provider,
+        model: model.clone(),
+        provider: provider.clone(),
+        workflow_slug: record.workflow_slug.clone(),
+        run_defaults,
+        workflow_toml_path: None, // No TOML to copy — config is in RunRecord
+    };
+
+    let args = RunArgs {
+        workflow: None,
+        run_dir: Some(run_dir),
+        dry_run: record.config.dry_run_enabled(),
+        preflight: false,
+        auto_approve: record.config.auto_approve_enabled(),
+        goal: record.config.goal.clone(),
+        goal_file: None,
+        model: Some(model),
+        provider,
+        verbose: record.config.verbose_enabled(),
+        sandbox: Some(CliSandboxProvider::from(sandbox_provider)),
+        label: record
+            .labels
+            .into_iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect(),
+        no_retro: record.config.no_retro_enabled(),
+        preserve_sandbox: record
+            .config
+            .sandbox
+            .as_ref()
+            .and_then(|s| s.preserve)
+            .unwrap_or(false),
+        detach: false,
+        run_id: Some(record.run_id),
+    };
+
+    run_command_impl(args, styles, github_app, git_author, Some(record_run)).await
 }
 
 /// Execute a full workflow run.
@@ -740,16 +840,65 @@ pub async fn run_command(
 ) -> anyhow::Result<()> {
     let PreparedWorkflow {
         validated,
+        run_cfg,
+        sandbox_provider,
+        model,
+        provider,
+        workflow_slug,
+        run_defaults,
+        workflow_toml_path,
+    } = prepare_workflow(&args, run_defaults, styles, false)?;
+    let (graph, source, _diagnostics) = validated.into_parts();
+
+    let record_run = RecordBasedRun {
+        graph,
+        source,
+        run_cfg,
+        sandbox_provider,
+        model,
+        provider,
+        workflow_slug,
+        run_defaults,
+        workflow_toml_path,
+    };
+
+    run_command_impl(args, styles, github_app, git_author, Some(record_run)).await
+}
+
+async fn run_command_impl(
+    args: RunArgs,
+    styles: &'static Styles,
+    github_app: Option<fabro_github::GitHubAppCredentials>,
+    git_author: fabro_workflows::git::GitAuthor,
+    record_run: Option<RecordBasedRun>,
+) -> anyhow::Result<()> {
+    let (
+        graph,
+        source,
         mut run_cfg,
         sandbox_provider,
         model,
         provider,
-        workflow_slug: prepared_workflow_slug,
+        prepared_workflow_slug,
         run_defaults,
-    } = prepare_workflow(&args, run_defaults, styles, false)?;
-    let (graph, source, _diagnostics) = validated.into_parts();
+        workflow_toml_path,
+    ) = match record_run {
+        Some(rr) => (
+            rr.graph,
+            rr.source,
+            rr.run_cfg,
+            rr.sandbox_provider,
+            rr.model,
+            rr.provider,
+            rr.workflow_slug,
+            rr.run_defaults,
+            rr.workflow_toml_path,
+        ),
+        None => unreachable!("run_command_impl always receives a RecordBasedRun"),
+    };
 
-    let workflow_path = args.workflow.as_ref().unwrap(); // safe: prepare_workflow validated
+    // For record-based runs from run_from_record, workflow is None (preparation was skipped).
+    let from_record = args.workflow.is_none();
 
     // Collect setup commands — they'll be run inside the sandbox
     let setup_commands: Vec<String> = run_cfg
@@ -798,7 +947,13 @@ pub async fn run_command(
         .run_dir
         .unwrap_or_else(|| default_run_dir(&run_id, dry_run_flag));
     tokio::fs::create_dir_all(&run_dir).await?;
-    let cached_run_restart = is_cached_run_restart(workflow_path, &run_dir);
+    let cached_run_restart = if from_record {
+        // Record-based runs already have RunRecord on disk — skip re-writing.
+        true
+    } else {
+        let workflow_path = args.workflow.as_ref().unwrap();
+        is_cached_run_restart(workflow_path, &run_dir)
+    };
     let existing_record = if cached_run_restart {
         fabro_workflows::run_record::RunRecord::load(&run_dir).ok()
     } else {
@@ -813,18 +968,15 @@ pub async fn run_command(
     };
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
-    tokio::fs::write(cached_graph_path(&run_dir), &source).await?;
+    if !from_record {
+        tokio::fs::write(cached_graph_path(&run_dir), &source).await?;
+    }
     let mut status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
 
-    // Serialize the merged run config so the run dir is self-contained (debug artifact).
-    // Skip when the workflow path is already the cached run.toml (i.e. _run_engine
-    // restart) — create_run already wrote the correct snapshot and re-writing here
-    // would persist a double-merged config (merge_overlay ran again on load).
-    let is_cached_snapshot = workflow_path
-        .file_name()
-        .is_some_and(|f| f == RUN_CONFIG_FILE);
-    if !is_cached_snapshot {
-        write_run_config_snapshot(&run_dir, run_cfg.as_ref()).await?;
+    // Copy the original workflow TOML as a debug artifact.
+    // Skip for record-based runs (already exists) and cached restarts.
+    if !from_record && !cached_run_restart {
+        write_run_config_snapshot(&run_dir, workflow_toml_path.as_deref()).await?;
     }
 
     // Write RunRecord
@@ -2779,26 +2931,28 @@ pub(crate) fn build_event_envelope(
 mod tests {
     use super::*;
 
-    #[test]
-    fn serialize_run_config_snapshot_rewrites_graph_path() {
-        let cfg = FabroConfig {
-            version: Some(1),
-            goal: Some("test".to_string()),
-            graph: Some("workflow.fabro".to_string()),
-            pull_request: Some(run_config::PullRequestConfig {
-                enabled: true,
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
+    #[tokio::test]
+    async fn write_run_config_snapshot_copies_toml_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let toml_content = "version = 1\ngoal = \"test\"\n";
+        let toml_path = dir.path().join("original.toml");
+        std::fs::write(&toml_path, toml_content).unwrap();
 
-        let pr = cfg.pull_request.clone();
-        let mut cfg = cfg;
-        let serialized = serialize_run_config_snapshot(&mut cfg).unwrap();
-        let reparsed = run_config::parse_run_config(&serialized).unwrap();
+        let run_dir = dir.path().join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        write_run_config_snapshot(&run_dir, Some(toml_path.as_path()))
+            .await
+            .unwrap();
 
-        assert_eq!(reparsed.graph.as_deref(), Some(RUN_GRAPH_FILE));
-        assert_eq!(reparsed.pull_request, pr);
+        let copied = std::fs::read_to_string(run_dir.join(RUN_CONFIG_FILE)).unwrap();
+        assert_eq!(copied, toml_content);
+    }
+
+    #[tokio::test]
+    async fn write_run_config_snapshot_skips_when_none() {
+        let dir = tempfile::tempdir().unwrap();
+        write_run_config_snapshot(dir.path(), None).await.unwrap();
+        assert!(!dir.path().join(RUN_CONFIG_FILE).exists());
     }
 
     #[test]

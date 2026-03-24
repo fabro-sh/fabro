@@ -97,8 +97,8 @@ pub async fn create_run(
         None,
     );
 
-    // Serialize the merged run config so the run dir is self-contained (debug artifact).
-    write_run_config_snapshot(&run_dir, prep.run_cfg.as_ref()).await?;
+    // Copy the original workflow TOML into the run dir as a debug artifact.
+    write_run_config_snapshot(&run_dir, prep.workflow_toml_path.as_deref()).await?;
 
     // Build normalized config and RunRecord
     let working_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));

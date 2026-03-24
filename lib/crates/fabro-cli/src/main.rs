@@ -353,59 +353,18 @@ async fn run_engine_entrypoint(
         return Err(err);
     }
 
-    let workflow_path = {
-        let config_path = commands::run::cached_run_config_path(&run_dir);
-        if config_path.exists() {
-            config_path
-        } else {
-            commands::run::cached_graph_path(&run_dir)
-        }
-    };
-
-    let sandbox_provider_str = record
-        .config
-        .sandbox
-        .as_ref()
-        .and_then(|s| s.provider.as_deref())
-        .unwrap_or("local");
-
-    let run_args = commands::run::RunArgs {
-        workflow: Some(workflow_path),
-        run_dir: Some(run_dir.clone()),
-        dry_run: record.config.dry_run_enabled(),
-        preflight: false,
-        auto_approve: record.config.auto_approve_enabled(),
-        goal: record.config.goal.clone(),
-        goal_file: None,
-        model: record.config.llm.as_ref().and_then(|l| l.model.clone()),
-        provider: record
-            .config
-            .llm
-            .as_ref()
-            .and_then(|l| l.provider.clone())
-            .filter(|s| !s.is_empty()),
-        verbose: record.config.verbose_enabled(),
-        sandbox: sandbox_provider_str
-            .parse::<fabro_workflows::sandbox_provider::SandboxProvider>()
-            .ok()
-            .map(commands::run::CliSandboxProvider::from),
-        label: record
-            .labels
-            .into_iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect(),
-        no_retro: record.config.no_retro_enabled(),
-        preserve_sandbox: record
-            .config
-            .sandbox
-            .as_ref()
-            .and_then(|s| s.preserve)
-            .unwrap_or(false),
-        detach: false,
-        run_id: Some(record.run_id),
-    };
-
-    match commands::run::run_command(run_args, cli_config, styles, github_app, git_author).await {
+    // Use run_from_record: loads config + graph directly from RunRecord,
+    // skipping prepare_workflow() entirely. No TOML/DOT re-parsing needed.
+    match commands::run::run_from_record(
+        record,
+        run_dir.clone(),
+        cli_config,
+        styles,
+        github_app,
+        git_author,
+    )
+    .await
+    {
         Ok(()) => Ok(()),
         Err(err) => {
             let _ = commands::detached_support::persist_detached_failure(
