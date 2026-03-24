@@ -128,7 +128,7 @@ impl Handler for SubWorkflowHandler {
         };
 
         // Build child RunConfig
-        let visit = context.node_visit_count() as u64;
+        let visit = crate::engine::visit_from_context(context) as u64;
         let child_logs = run_dir.join(format!("nodes/{}_{visit}/child", node.id));
         let _ = std::fs::create_dir_all(&child_logs);
 
@@ -300,6 +300,10 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("Child completed"));
+        assert!(
+            dir.path().join("nodes/manager_1/child").exists(),
+            "child logs should default to first-visit directory naming"
+        );
     }
 
     #[tokio::test]
