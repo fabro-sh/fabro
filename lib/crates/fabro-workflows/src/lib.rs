@@ -112,6 +112,7 @@ pub mod graph_render;
 pub mod handler;
 pub mod manifest;
 pub mod outcome;
+pub mod pipeline;
 pub mod preamble;
 pub mod pull_request;
 pub mod run_fork;

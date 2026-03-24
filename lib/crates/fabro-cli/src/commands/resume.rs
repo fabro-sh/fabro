@@ -202,8 +202,7 @@ async fn prepare_from_checkpoint(
         true,
         false,
     )?;
-    let source = prepared.source;
-    let graph = prepared.graph;
+    let (graph, source, _diagnostics) = prepared.validated.into_parts();
     let run_cfg = prepared.run_cfg;
     let sandbox_provider = prepared.sandbox_provider;
     let workflow_slug = prepared.workflow_slug;
@@ -531,13 +530,16 @@ async fn prepare_from_branch(
                 true,
                 false,
             )?;
-            (
-                prepared.graph,
-                prepared.source,
-                prepared.run_cfg,
-                prepared.sandbox_provider,
-                prepared.workflow_slug,
-            )
+            {
+                let (graph, source, _diagnostics) = prepared.validated.into_parts();
+                (
+                    graph,
+                    source,
+                    prepared.run_cfg,
+                    prepared.sandbox_provider,
+                    prepared.workflow_slug,
+                )
+            }
         } else {
             let (graph, diagnostics) =
                 fabro_workflows::workflow::WorkflowBuilder::new().prepare(&source)?;

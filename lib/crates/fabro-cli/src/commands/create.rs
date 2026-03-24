@@ -26,7 +26,16 @@ pub async fn create_run(
 
     let mut prep = prepare_workflow(args, run_defaults, styles, quiet)?;
 
-    let goal = prep.graph.goal();
+    // Collect graph-derived data before moving fields out of prep
+    let goal = prep.graph().goal().to_string();
+    let workflow_name = if prep.graph().name.is_empty() {
+        "unnamed".to_string()
+    } else {
+        prep.graph().name.clone()
+    };
+    let node_count = prep.graph().nodes.len();
+    let edge_count = prep.graph().edges.len();
+    let dot_source = prep.source().to_string();
 
     // Create run directory
     let run_id = args
@@ -40,7 +49,7 @@ pub async fn create_run(
     tokio::fs::create_dir_all(&run_dir).await?;
 
     // Write essential files
-    tokio::fs::write(cached_graph_path(&run_dir), &prep.source).await?;
+    tokio::fs::write(cached_graph_path(&run_dir), &dot_source).await?;
     tokio::fs::write(run_dir.join("id.txt"), &run_id).await?;
     std::fs::File::create(run_dir.join("progress.jsonl"))?;
     fabro_workflows::run_status::write_run_status(
@@ -63,12 +72,12 @@ pub async fn create_run(
     let spec = RunSpec {
         run_id: run_id.clone(),
         workflow_path: std::fs::canonicalize(workflow_path).unwrap_or(workflow_path.clone()),
-        dot_source: prep.source,
+        dot_source,
         working_directory: working_directory.clone(),
         goal: if goal.is_empty() {
             None
         } else {
-            Some(goal.to_string())
+            Some(goal.clone())
         },
         model: prep.model,
         provider: prep.provider,
@@ -82,21 +91,16 @@ pub async fn create_run(
     };
     spec.save(&run_dir)?;
 
-    let workflow_name = if prep.graph.name.is_empty() {
-        "unnamed".to_string()
-    } else {
-        prep.graph.name.clone()
-    };
     let base_branch = fabro_sandbox::daytona::detect_repo_info(&working_directory)
         .ok()
         .and_then(|(_, branch)| branch);
     let manifest = Manifest {
         run_id: run_id.clone(),
         workflow_name,
-        goal: goal.to_string(),
+        goal,
         start_time: Utc::now(),
-        node_count: prep.graph.nodes.len(),
-        edge_count: prep.graph.edges.len(),
+        node_count,
+        edge_count,
         run_branch: None,
         base_sha: None,
         labels,
