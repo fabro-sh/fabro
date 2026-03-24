@@ -5,7 +5,9 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
+use crate::run_record::RunRecord;
 use crate::run_status::{RunStatus, RunStatusRecord, StatusReason};
+use crate::start_record::StartRecord;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunInfo {
@@ -66,32 +68,30 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
         }
 
         let dir_name = entry.file_name().to_string_lossy().to_string();
-        let manifest_path = path.join("manifest.json");
 
-        if let Ok(manifest) = crate::manifest::Manifest::load(&manifest_path) {
-            let run_id = manifest.run_id;
-            let workflow_name = manifest.workflow_name;
-            let workflow_slug = manifest.workflow_slug;
-            let host_repo_path = manifest.host_repo_path;
-            let goal = manifest.goal;
-            let start_time_dt = manifest.start_time;
+        if let Ok(record) = RunRecord::load(&path) {
+            let created_at = record.created_at;
+            let start_time_dt = StartRecord::load(&path)
+                .map(|s| s.start_time)
+                .unwrap_or(created_at);
             let start_time = start_time_dt.to_rfc3339();
-            let labels = manifest.labels;
+            let workflow_name = record.workflow_name().to_string();
+            let goal = record.goal().to_string();
             let status_info = read_status(&path);
 
             runs.push(RunInfo {
-                run_id,
+                run_id: record.run_id,
                 dir_name,
                 workflow_name,
-                workflow_slug,
+                workflow_slug: record.workflow_slug,
                 status: status_info.status,
                 status_reason: status_info.reason,
                 start_time,
-                labels,
+                labels: record.labels,
                 duration_ms: status_info.duration_ms,
                 total_cost: status_info.total_cost,
-                host_repo_path,
-                start_time_dt: Some(start_time_dt),
+                host_repo_path: record.host_repo_path,
+                start_time_dt: Some(created_at),
                 end_time: status_info.end_time,
                 path,
                 goal,
@@ -115,7 +115,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 run_id,
                 dir_name,
                 workflow_name: if is_orphan {
-                    "[no manifest]"
+                    "[no run record]"
                 } else {
                     "[starting]"
                 }
@@ -137,7 +137,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
         }
     }
 
-    runs.sort_by(|a, b| b.start_time.cmp(&a.start_time));
+    runs.sort_by(|a, b| b.start_time_dt.cmp(&a.start_time_dt));
     Ok(runs)
 }
 

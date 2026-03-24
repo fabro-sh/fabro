@@ -99,9 +99,9 @@ impl Drop for DetachedRunCompletionGuard {
 }
 
 pub(crate) fn load_run_id(run_dir: &Path) -> Option<String> {
-    fabro_workflows::run_spec::RunSpec::load(run_dir)
+    fabro_workflows::run_record::RunRecord::load(run_dir)
         .ok()
-        .map(|spec| spec.run_id)
+        .map(|record| record.run_id)
         .filter(|run_id| !run_id.trim().is_empty())
         .or_else(|| {
             std::fs::read_to_string(run_dir.join("id.txt"))

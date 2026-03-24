@@ -54,7 +54,7 @@ pub struct GitHubConfig {
     pub permissions: HashMap<String, String>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct LlmConfig {
     pub model: Option<String>,
     pub provider: Option<String>,

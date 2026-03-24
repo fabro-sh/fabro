@@ -367,19 +367,22 @@ fn scenario_full_stack(sandbox: &str) {
         "duration_ms should be > 0"
     );
 
-    // Manifest should have key fields
+    // RunRecord should have key fields
+    let run_record = read_json(&run_dir.join("run.json"));
+    assert!(
+        run_record["run_id"].as_str().is_some(),
+        "run record should have run_id"
+    );
+    assert!(
+        run_record["graph"]["name"].as_str().is_some(),
+        "run record should have graph.name"
+    );
+
+    // Manifest should still be written (legacy)
     let manifest = read_json(&run_dir.join("manifest.json"));
     assert!(
         manifest["run_id"].as_str().is_some(),
         "manifest should have run_id"
-    );
-    assert!(
-        manifest["goal"].as_str().is_some(),
-        "manifest should have goal"
-    );
-    assert!(
-        manifest["workflow_name"].as_str().is_some(),
-        "manifest should have workflow_name"
     );
 
     // Progress events
@@ -722,15 +725,15 @@ fn local_run_lifecycle() {
         "workflow_name should be CommandPipeline"
     );
 
-    // 3. inspect <run_id> — JSON array with manifest and conclusion
+    // 3. inspect <run_id> — JSON array with run_record and conclusion
     let inspect_out = fabro_home(&["inspect", &run_id]).success();
     let inspect_stdout = String::from_utf8(inspect_out.get_output().stdout.clone()).unwrap();
     let items: Vec<Value> =
         serde_json::from_str(&inspect_stdout).expect("inspect should produce a JSON array");
     assert!(!items.is_empty(), "inspect should return at least one item");
     assert!(
-        items[0]["manifest"].is_object(),
-        "inspect should include manifest"
+        items[0]["run_record"].is_object(),
+        "inspect should include run_record"
     );
     assert!(
         items[0]["conclusion"].is_object(),

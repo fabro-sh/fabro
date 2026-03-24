@@ -48,10 +48,10 @@ async fn resolve_diff(run_dir: &Path, args: &DiffArgs) -> Result<String> {
         });
     }
 
-    let manifest = fabro_workflows::manifest::Manifest::load(&run_dir.join("manifest.json"))
-        .context("Failed to load manifest.json")?;
+    let start = fabro_workflows::start_record::StartRecord::load(run_dir)
+        .context("Failed to load start.json")?;
 
-    let base_sha = manifest
+    let base_sha = start
         .base_sha
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("This run was not git-checkpointed; no diff available"))?;

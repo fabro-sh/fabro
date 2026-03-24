@@ -24,7 +24,6 @@ use fabro_workflows::engine::{RunConfig, WorkflowRunEngine};
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::git::GitSyncStatus;
 use fabro_workflows::handler::default_registry;
-use fabro_workflows::manifest::Manifest;
 use fabro_workflows::outcome::{Outcome, OutcomeExt, StageStatus};
 use fabro_workflows::run_status::{RunStatus, StatusReason};
 use fabro_workflows::sandbox_provider::SandboxProvider;
@@ -496,14 +495,15 @@ pub(crate) fn cached_run_config_path(run_dir: &Path) -> PathBuf {
     run_dir.join(RUN_CONFIG_FILE)
 }
 
-fn serialize_run_config_snapshot(run_cfg: &mut FabroConfig) -> anyhow::Result<String> {
-    run_cfg.graph = Some(RUN_GRAPH_FILE.to_string());
-    toml::to_string_pretty(run_cfg).context("Failed to serialize run config")
+fn serialize_run_config_snapshot(run_cfg: &FabroConfig) -> anyhow::Result<String> {
+    let mut snapshot = run_cfg.clone();
+    snapshot.graph = Some(RUN_GRAPH_FILE.to_string());
+    toml::to_string_pretty(&snapshot).context("Failed to serialize run config")
 }
 
 pub(crate) async fn write_run_config_snapshot(
     run_dir: &Path,
-    run_cfg: Option<&mut FabroConfig>,
+    run_cfg: Option<&FabroConfig>,
 ) -> anyhow::Result<()> {
     if let Some(cfg) = run_cfg {
         let toml_str = serialize_run_config_snapshot(cfg)?;
@@ -786,21 +786,28 @@ pub async fn run_command(
     }
 
     // 3. Create logs directory
+    // Extract values from args before partial move
+    let dry_run_flag = args.dry_run;
+    let auto_approve_flag = args.auto_approve;
+    let no_retro_flag = args.no_retro;
+    let verbose_flag = args.verbose;
+    let preserve_sandbox_flag = args.preserve_sandbox;
+    let label_vec = args.label.clone();
     let run_id = args.run_id.unwrap_or_else(|| ulid::Ulid::new().to_string());
     let run_dir = args
         .run_dir
-        .unwrap_or_else(|| default_run_dir(&run_id, args.dry_run));
+        .unwrap_or_else(|| default_run_dir(&run_id, dry_run_flag));
     tokio::fs::create_dir_all(&run_dir).await?;
     let cached_run_restart = is_cached_run_restart(workflow_path, &run_dir);
-    let existing_manifest = if cached_run_restart {
-        Manifest::load(&run_dir.join("manifest.json")).ok()
+    let existing_record = if cached_run_restart {
+        fabro_workflows::run_record::RunRecord::load(&run_dir).ok()
     } else {
         None
     };
     let workflow_slug = if cached_run_restart {
-        existing_manifest
+        existing_record
             .as_ref()
-            .and_then(|manifest| manifest.workflow_slug.clone())
+            .and_then(|r| r.workflow_slug.clone())
     } else {
         prepared_workflow_slug
     };
@@ -809,7 +816,7 @@ pub async fn run_command(
     tokio::fs::write(cached_graph_path(&run_dir), &source).await?;
     let mut status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
 
-    // Serialize the merged run config so the run dir is self-contained.
+    // Serialize the merged run config so the run dir is self-contained (debug artifact).
     // Skip when the workflow path is already the cached run.toml (i.e. _run_engine
     // restart) — create_run already wrote the correct snapshot and re-writing here
     // would persist a double-merged config (merge_overlay ran again on load).
@@ -817,9 +824,43 @@ pub async fn run_command(
         .file_name()
         .is_some_and(|f| f == RUN_CONFIG_FILE);
     if !is_cached_snapshot {
-        // env refs (${env.VARNAME}) are still unresolved at this point, so
-        // plaintext secrets are never written to disk.
-        write_run_config_snapshot(&run_dir, run_cfg.as_mut()).await?;
+        write_run_config_snapshot(&run_dir, run_cfg.as_ref()).await?;
+    }
+
+    // Write RunRecord (replaces spec.json + manifest.json)
+    if !cached_run_restart {
+        let cli_flags = super::create::CliFlags {
+            dry_run: dry_run_flag,
+            auto_approve: auto_approve_flag,
+            no_retro: no_retro_flag,
+            verbose: verbose_flag,
+            preserve_sandbox: preserve_sandbox_flag,
+        };
+        let normalized_config = super::create::normalize_config(
+            run_cfg.as_ref(),
+            &run_defaults,
+            &model,
+            provider.as_deref(),
+            sandbox_provider,
+            &graph,
+            cli_flags,
+        );
+        let record = fabro_workflows::run_record::RunRecord {
+            run_id: run_id.clone(),
+            created_at: chrono::Utc::now(),
+            config: normalized_config,
+            graph: graph.clone(),
+            workflow_slug: workflow_slug.clone(),
+            working_directory: original_cwd.clone(),
+            host_repo_path: Some(original_cwd.to_string_lossy().to_string()),
+            base_branch: detected_base_branch.clone(),
+            labels: label_vec
+                .iter()
+                .filter_map(|s| s.split_once('='))
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        record.save(&run_dir)?;
     }
 
     // Now resolve ${env.VARNAME} references for runtime use.
@@ -831,7 +872,7 @@ pub async fn run_command(
     let is_tty = std::io::stderr().is_terminal();
     let progress_ui = Arc::new(Mutex::new(run_progress::ProgressUI::new(
         is_tty,
-        args.verbose,
+        verbose_flag,
     )));
     {
         let mut ui = progress_ui.lock().expect("progress lock poisoned");
@@ -915,7 +956,7 @@ pub async fn run_command(
     run_progress::ProgressUI::register(&progress_ui, &emitter);
 
     // 4. Build interviewer
-    let interviewer: Arc<dyn Interviewer> = if args.auto_approve {
+    let interviewer: Arc<dyn Interviewer> = if auto_approve_flag {
         Arc::new(AutoApproveInterviewer)
     } else if !std::io::stdin().is_terminal() {
         // Detached mode (stdin is /dev/null): use file-based IPC so the
@@ -982,7 +1023,7 @@ pub async fn run_command(
     }
 
     // Auto-push when the execution environment needs commits on the remote.
-    if !args.dry_run
+    if !dry_run_flag
         && matches!(
             workdir_strategy,
             WorkdirStrategy::LocalWorktree | WorkdirStrategy::Cloud
@@ -1362,7 +1403,7 @@ pub async fn run_command(
     *deferred_sandbox.lock().unwrap() = Some(Arc::clone(&sandbox));
 
     // 6. Resolve backend, model, and provider
-    let (dry_run_mode, llm_client) = if args.dry_run {
+    let (dry_run_mode, llm_client) = if dry_run_flag {
         (true, None)
     } else {
         match fabro_llm::client::Client::from_env().await {
@@ -1529,15 +1570,14 @@ pub async fn run_command(
         dry_run: dry_run_mode,
         run_id: run_id.clone(),
         git_checkpoint_enabled: worktree_path.is_some(),
-        host_repo_path: existing_manifest
+        host_repo_path: existing_record
             .as_ref()
-            .and_then(|manifest| manifest.host_repo_path.as_deref().map(PathBuf::from))
+            .and_then(|r| r.host_repo_path.as_deref().map(PathBuf::from))
             .or_else(|| Some(original_cwd.clone())),
         base_sha: worktree_base_sha,
         run_branch: worktree_branch,
         meta_branch,
-        labels: args
-            .label
+        labels: label_vec
             .iter()
             .filter_map(|s| s.split_once('='))
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -1545,9 +1585,9 @@ pub async fn run_command(
         checkpoint_exclude_globs,
         github_app: github_app.clone(),
         git_author,
-        base_branch: existing_manifest
+        base_branch: existing_record
             .as_ref()
-            .and_then(|manifest| manifest.base_branch.clone())
+            .and_then(|r| r.base_branch.clone())
             .or(detected_base_branch),
         pull_request: run_cfg
             .as_ref()
@@ -1617,7 +1657,7 @@ pub async fn run_command(
     );
 
     // Auto-derive retro (always, cheap) and optionally run retro agent
-    if !args.no_retro && project_config::is_retro_enabled() {
+    if !no_retro_flag && project_config::is_retro_enabled() {
         let failed = match &engine_result {
             Ok(ref o) => o.status == StageStatus::Fail,
             Err(_) => true,

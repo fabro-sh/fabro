@@ -410,6 +410,39 @@ impl MetadataStore {
         graph_dot: &[u8],
         extra_files: &[(&str, &[u8])],
     ) -> Result<()> {
+        self.init_run_inner(run_id, manifest_json, graph_dot, None, None, extra_files)
+    }
+
+    /// Initialize a run's metadata branch with manifest, graph DOT, run record, start record,
+    /// and optional extra files.
+    pub fn init_run_with_records(
+        &self,
+        run_id: &str,
+        manifest_json: &[u8],
+        graph_dot: &[u8],
+        run_record_json: &[u8],
+        start_record_json: &[u8],
+        extra_files: &[(&str, &[u8])],
+    ) -> Result<()> {
+        self.init_run_inner(
+            run_id,
+            manifest_json,
+            graph_dot,
+            Some(run_record_json),
+            Some(start_record_json),
+            extra_files,
+        )
+    }
+
+    fn init_run_inner(
+        &self,
+        run_id: &str,
+        manifest_json: &[u8],
+        graph_dot: &[u8],
+        run_record_json: Option<&[u8]>,
+        start_record_json: Option<&[u8]>,
+        extra_files: &[(&str, &[u8])],
+    ) -> Result<()> {
         let (store, sig) = self.open_store()?;
         let branch = Self::branch_name(run_id);
         let bs = BranchStore::new(&store, &branch, &sig);
@@ -417,6 +450,12 @@ impl MetadataStore {
             .map_err(|e| git_error(format!("ensure_branch failed: {e}")))?;
         let mut entries: Vec<(&str, &[u8])> =
             vec![("manifest.json", manifest_json), ("graph.fabro", graph_dot)];
+        if let Some(rr) = run_record_json {
+            entries.push(("run.json", rr));
+        }
+        if let Some(sr) = start_record_json {
+            entries.push(("start.json", sr));
+        }
         entries.extend_from_slice(extra_files);
         let msg = self.commit_message("init run");
         bs.write_entries(&entries, &msg)
@@ -497,6 +536,36 @@ impl MetadataStore {
                 let manifest: crate::manifest::Manifest = serde_json::from_slice(&bytes)
                     .map_err(|e| git_error(format!("manifest deserialize failed: {e}")))?;
                 Ok(Some(manifest))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Read the run record from the metadata branch. Returns `None` if not found.
+    pub fn read_run_record(
+        repo_path: &Path,
+        run_id: &str,
+    ) -> Result<Option<crate::run_record::RunRecord>> {
+        match Self::read_file(repo_path, run_id, "run.json")? {
+            Some(bytes) => {
+                let record: crate::run_record::RunRecord = serde_json::from_slice(&bytes)
+                    .map_err(|e| git_error(format!("run record deserialize failed: {e}")))?;
+                Ok(Some(record))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Read the start record from the metadata branch. Returns `None` if not found.
+    pub fn read_start_record(
+        repo_path: &Path,
+        run_id: &str,
+    ) -> Result<Option<crate::start_record::StartRecord>> {
+        match Self::read_file(repo_path, run_id, "start.json")? {
+            Some(bytes) => {
+                let record: crate::start_record::StartRecord = serde_json::from_slice(&bytes)
+                    .map_err(|e| git_error(format!("start record deserialize failed: {e}")))?;
+                Ok(Some(record))
             }
             None => Ok(None),
         }

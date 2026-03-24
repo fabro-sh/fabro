@@ -18,7 +18,8 @@ const RETRO_SYSTEM_PROMPT: &str = r#"You are a workflow run retrospective analys
 You have access to the run's data files:
 - `progress.jsonl` — the full event stream (stage starts/completions, agent tool calls, errors, retries)
 - `checkpoint.json` — final execution state with node outcomes
-- `manifest.json` — run metadata (if available)
+- `run.json` — run record with config, graph, and metadata (if available)
+- `start.json` — start record with start time and git info (if available)
 
 ## Your task
 
@@ -353,7 +354,12 @@ async fn upload_data_files(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create retro data dir: {e}"))?;
 
-    let files = ["progress.jsonl", "checkpoint.json", "manifest.json"];
+    let files = [
+        "progress.jsonl",
+        "checkpoint.json",
+        "run.json",
+        "start.json",
+    ];
     for filename in &files {
         let source = run_dir.join(filename);
         if source.exists() {

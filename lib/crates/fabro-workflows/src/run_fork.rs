@@ -5,6 +5,8 @@ use git2::{Oid, Signature};
 
 use crate::git::MetadataStore;
 use crate::manifest::Manifest;
+use crate::run_record::RunRecord;
+use crate::start_record::StartRecord;
 
 use crate::run_rewind::TimelineEntry;
 
@@ -48,17 +50,27 @@ pub fn execute_fork(
         .ensure_branch()
         .map_err(|e| anyhow::anyhow!("failed to create metadata branch: {e}"))?;
 
-    // Read manifest, graph, and sandbox from source in a single tree lookup
+    // Read manifest, run record, start record, graph, and sandbox from source
     let source_entries = source_bs
-        .read_entries(&["manifest.json", "graph.fabro", "sandbox.json"])
+        .read_entries(&[
+            "manifest.json",
+            "run.json",
+            "start.json",
+            "graph.fabro",
+            "sandbox.json",
+        ])
         .map_err(|e| anyhow::anyhow!("failed to read source metadata: {e}"))?;
 
     let mut manifest_bytes = None;
+    let mut run_record_bytes = None;
+    let mut start_record_bytes = None;
     let mut graph_bytes = None;
     let mut sandbox_bytes = None;
     for (path, data) in source_entries {
         match path {
             "manifest.json" => manifest_bytes = Some(data),
+            "run.json" => run_record_bytes = Some(data),
+            "start.json" => start_record_bytes = Some(data),
             "graph.fabro" => graph_bytes = Some(data),
             "sandbox.json" => sandbox_bytes = Some(data),
             _ => {}
@@ -69,13 +81,43 @@ pub fn execute_fork(
     let graph_bytes =
         graph_bytes.ok_or_else(|| anyhow::anyhow!("source run has no graph.fabro"))?;
 
+    let now = chrono::Utc::now();
+
+    // Update legacy manifest
     let mut manifest: Manifest =
         serde_json::from_slice(&manifest_bytes).context("failed to parse source manifest.json")?;
     manifest.run_id = new_run_id.clone();
     manifest.run_branch = Some(new_run_branch.clone());
-    manifest.start_time = chrono::Utc::now();
+    manifest.start_time = now;
     let new_manifest_bytes =
         serde_json::to_vec_pretty(&manifest).context("failed to serialize new manifest")?;
+
+    // Create new RunRecord for the forked run
+    let new_run_record_bytes = if let Some(ref rr_bytes) = run_record_bytes {
+        let mut run_record: RunRecord =
+            serde_json::from_slice(rr_bytes).context("failed to parse source run.json")?;
+        run_record.run_id = new_run_id.clone();
+        run_record.created_at = now;
+        Some(serde_json::to_vec_pretty(&run_record).context("failed to serialize new run.json")?)
+    } else {
+        None
+    };
+
+    // Create new StartRecord for the forked run
+    let new_start_record_bytes = if start_record_bytes.is_some() {
+        let start_record = StartRecord {
+            run_id: new_run_id.clone(),
+            start_time: now,
+            run_branch: Some(new_run_branch.clone()),
+            base_sha: None,
+        };
+        Some(
+            serde_json::to_vec_pretty(&start_record)
+                .context("failed to serialize new start.json")?,
+        )
+    } else {
+        None
+    };
 
     // Read checkpoint from the target metadata commit (not branch tip)
     let checkpoint_bytes = store
@@ -94,6 +136,12 @@ pub fn execute_fork(
         ("graph.fabro", &graph_bytes),
         ("checkpoint.json", &checkpoint_bytes),
     ];
+    if let Some(ref run_record) = new_run_record_bytes {
+        file_entries.push(("run.json", run_record));
+    }
+    if let Some(ref start_record) = new_start_record_bytes {
+        file_entries.push(("start.json", start_record));
+    }
     if let Some(ref sandbox) = sandbox_bytes {
         file_entries.push(("sandbox.json", sandbox));
     }
@@ -182,6 +230,38 @@ mod tests {
         serde_json::to_vec_pretty(&manifest).unwrap()
     }
 
+    fn make_run_record_json(run_id: &str) -> Vec<u8> {
+        let record = serde_json::json!({
+            "run_id": run_id,
+            "created_at": "2025-01-01T00:00:00Z",
+            "config": {},
+            "graph": {
+                "name": "test_workflow",
+                "nodes": {
+                    "start": {"id": "start", "attrs": {}},
+                    "build": {"id": "build", "attrs": {}},
+                    "test": {"id": "test", "attrs": {}}
+                },
+                "edges": [
+                    {"from": "start", "to": "build", "attrs": {}},
+                    {"from": "build", "to": "test", "attrs": {}}
+                ],
+                "attrs": {}
+            },
+            "working_directory": "/tmp/test",
+        });
+        serde_json::to_vec_pretty(&record).unwrap()
+    }
+
+    fn make_start_record_json(run_id: &str) -> Vec<u8> {
+        let record = serde_json::json!({
+            "run_id": run_id,
+            "start_time": "2025-01-01T00:00:00Z",
+            "run_branch": format!("{}{}",  crate::git::RUN_BRANCH_PREFIX, run_id),
+        });
+        serde_json::to_vec_pretty(&record).unwrap()
+    }
+
     /// Set up a source run with the given number of checkpoints.
     /// Returns (run_id, vec of run commit OIDs).
     fn setup_source_run(store: &Store, run_id: &str, nodes: &[&str]) -> Vec<Oid> {
@@ -216,11 +296,18 @@ mod tests {
         let bs = BranchStore::new(store, &meta_branch, &sig);
         bs.ensure_branch().unwrap();
 
-        // Write manifest and graph
+        // Write manifest, run record, start record, and graph
         let manifest = make_manifest_json(run_id);
+        let run_record = make_run_record_json(run_id);
+        let start_record = make_start_record_json(run_id);
         let graph = b"digraph { start -> build -> test }";
         bs.write_entries(
-            &[("manifest.json", &manifest), ("graph.fabro", graph)],
+            &[
+                ("manifest.json", &manifest),
+                ("run.json", &run_record),
+                ("start.json", &start_record),
+                ("graph.fabro", graph),
+            ],
             "init run",
         )
         .unwrap();
@@ -273,6 +360,20 @@ mod tests {
         assert_eq!(manifest.run_id, new_run_id);
         assert_eq!(
             manifest.run_branch.as_deref(),
+            Some(format!("{}{new_run_id}", crate::git::RUN_BRANCH_PREFIX).as_str())
+        );
+
+        // Check RunRecord has new run_id and updated created_at
+        let rr_bytes = bs.read_entry("run.json").unwrap().unwrap();
+        let run_record: RunRecord = serde_json::from_slice(&rr_bytes).unwrap();
+        assert_eq!(run_record.run_id, new_run_id);
+
+        // Check StartRecord has new run_id and updated run_branch
+        let sr_bytes = bs.read_entry("start.json").unwrap().unwrap();
+        let start_record: StartRecord = serde_json::from_slice(&sr_bytes).unwrap();
+        assert_eq!(start_record.run_id, new_run_id);
+        assert_eq!(
+            start_record.run_branch.as_deref(),
             Some(format!("{}{new_run_id}", crate::git::RUN_BRANCH_PREFIX).as_str())
         );
 

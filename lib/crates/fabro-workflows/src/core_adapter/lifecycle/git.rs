@@ -63,8 +63,16 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             let dot_source = std::fs::read(self.run_dir.join("graph.fabro"))
                 .or_else(|_| std::fs::read(self.run_dir.join("graph.dot")))
                 .unwrap_or_default();
+            let run_json = std::fs::read(self.run_dir.join("run.json")).ok();
+            let start_json = std::fs::read(self.run_dir.join("start.json")).ok();
             let sandbox_json = std::fs::read(self.run_dir.join("sandbox.json")).ok();
             let mut extra_files: Vec<(&str, &[u8])> = Vec::new();
+            if let Some(ref data) = run_json {
+                extra_files.push(("run.json", data));
+            }
+            if let Some(ref data) = start_json {
+                extra_files.push(("start.json", data));
+            }
             if let Some(ref data) = sandbox_json {
                 extra_files.push(("sandbox.json", data));
             }

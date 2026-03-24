@@ -115,7 +115,7 @@ The table shows run ID, status, workflow name, goal, and timing.
 | `--before <DATE>` | Only show runs started before this date (YYYY-MM-DD prefix match) |
 | `--workflow <NAME>` | Filter by workflow name (substring match) |
 | `--label <KEY=VALUE>` | Filter by label (repeatable, AND semantics) |
-| `--orphans` | Include orphan directories (no `manifest.json`) |
+| `--orphans` | Include orphan directories (no `run.json`) |
 | `--json` | Output as JSON |
 | `-q, --quiet` | Only display full run IDs, one per line (no headers or footers). Takes precedence over `--json`. |
 
@@ -149,7 +149,7 @@ fabro system prune --orphans --yes
 | `--before <DATE>` | Only prune runs started before this date (YYYY-MM-DD prefix match) |
 | `--workflow <NAME>` | Filter by workflow name (substring match) |
 | `--label <KEY=VALUE>` | Filter by label (repeatable, AND semantics) |
-| `--orphans` | Include orphan directories (no `manifest.json`) |
+| `--orphans` | Include orphan directories (no `run.json`) |
 | `--yes` | Actually delete (default is dry-run) |
 
 ---
@@ -306,7 +306,7 @@ Manage GitHub pull requests created by workflow runs. Requires a [GitHub App](/i
 
 ### `fabro pr create`
 
-Create a GitHub pull request from a completed workflow run. Uses the run's persisted manifest, conclusion, and diff.
+Create a GitHub pull request from a completed workflow run. Uses the run's persisted run record, conclusion, and diff.
 
 ```bash
 fabro pr create <run-id>
@@ -497,7 +497,7 @@ fabro logs -f my-workflow -p
 
 ## `fabro inspect`
 
-Show detailed JSON data for a workflow run, including its manifest, conclusion, checkpoint, and sandbox record.
+Show detailed JSON data for a workflow run, including its run record, start record, conclusion, checkpoint, and sandbox record.
 
 ```bash
 fabro inspect <RUN>

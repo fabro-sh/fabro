@@ -206,6 +206,9 @@ async fn prepare_from_checkpoint(
     let run_cfg = prepared.run_cfg;
     let sandbox_provider = prepared.sandbox_provider;
     let workflow_slug = prepared.workflow_slug;
+    let prepared_model = prepared.model;
+    let prepared_provider = prepared.provider;
+    let prepared_run_defaults = prepared.run_defaults;
 
     eprintln!(
         "{} {} from checkpoint {}",
@@ -224,14 +227,48 @@ async fn prepare_from_checkpoint(
         .context("Failed to activate per-run log")?;
     let status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
     tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
-    let mut run_cfg: Option<FabroConfig> = run_cfg;
-    write_run_config_snapshot(&run_dir, run_cfg.as_mut()).await?;
+    let run_cfg: Option<FabroConfig> = run_cfg;
+    write_run_config_snapshot(&run_dir, run_cfg.as_ref()).await?;
+
+    // Write RunRecord for the resumed run
+    {
+        let working_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let cli_flags = super::create::CliFlags {
+            dry_run: args.dry_run,
+            auto_approve: args.auto_approve,
+            no_retro: args.no_retro,
+            verbose: args.verbose,
+            preserve_sandbox: args.preserve_sandbox,
+        };
+        let normalized = super::create::normalize_config(
+            run_cfg.as_ref(),
+            &prepared_run_defaults,
+            &prepared_model,
+            prepared_provider.as_deref(),
+            sandbox_provider,
+            &graph,
+            cli_flags,
+        );
+        let record = fabro_workflows::run_record::RunRecord {
+            run_id: run_id.clone(),
+            created_at: chrono::Utc::now(),
+            config: normalized,
+            graph: graph.clone(),
+            workflow_slug: workflow_slug.clone(),
+            working_directory: working_directory.clone(),
+            host_repo_path: Some(working_directory.to_string_lossy().to_string()),
+            base_branch: None,
+            labels: std::collections::HashMap::new(),
+        };
+        let _ = record.save(&run_dir);
+    }
 
     let original_cwd = std::env::current_dir()?;
     let emitter = Arc::new(EventEmitter::new());
 
     // Resolve devcontainer BEFORE sandbox creation (mirrors run_command) so that
     // the Daytona snapshot config can be overridden with the devcontainer Dockerfile.
+    let run_defaults = &run_defaults;
     let mut daytona_config = resolve_daytona_config(run_cfg.as_ref(), run_defaults);
     let devcontainer_config = if run_cfg
         .as_ref()
@@ -586,8 +623,47 @@ async fn prepare_from_branch(
         .context("Failed to activate per-run log")?;
     let status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
     tokio::fs::write(run_dir.join("graph.fabro"), &graph_source).await?;
-    let mut run_cfg: Option<FabroConfig> = run_cfg;
-    write_run_config_snapshot(&run_dir, run_cfg.as_mut()).await?;
+    let run_cfg: Option<FabroConfig> = run_cfg;
+    write_run_config_snapshot(&run_dir, run_cfg.as_ref()).await?;
+
+    // Write RunRecord for the resumed run
+    {
+        let (model_str, provider_str) = resolve_model_provider(
+            args.model.as_deref(),
+            args.provider.as_deref(),
+            run_cfg.as_ref(),
+            run_defaults,
+            &graph,
+        );
+        let cli_flags = super::create::CliFlags {
+            dry_run: args.dry_run,
+            auto_approve: args.auto_approve,
+            no_retro: args.no_retro,
+            verbose: args.verbose,
+            preserve_sandbox: args.preserve_sandbox,
+        };
+        let normalized = super::create::normalize_config(
+            run_cfg.as_ref(),
+            run_defaults,
+            &model_str,
+            provider_str.as_deref(),
+            sandbox_provider,
+            &graph,
+            cli_flags,
+        );
+        let record = fabro_workflows::run_record::RunRecord {
+            run_id: run_id.clone(),
+            created_at: chrono::Utc::now(),
+            config: normalized,
+            graph: graph.clone(),
+            workflow_slug: workflow_slug.clone(),
+            working_directory: resume_repo_path.clone(),
+            host_repo_path: Some(resume_repo_path.to_string_lossy().to_string()),
+            base_branch: detected_base_branch.clone(),
+            labels: std::collections::HashMap::new(),
+        };
+        let _ = record.save(&run_dir);
+    }
 
     let emitter = Arc::new(EventEmitter::new());
 

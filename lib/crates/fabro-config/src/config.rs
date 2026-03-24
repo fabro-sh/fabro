@@ -87,6 +87,15 @@ pub struct FabroConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upgrade_check: Option<bool>,
 
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dry_run: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_approve: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_retro: Option<bool>,
+
     // --- Server config fields ---
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<PathBuf>,
@@ -144,6 +153,18 @@ impl FabroConfig {
 
     pub fn upgrade_check_enabled(&self) -> bool {
         self.upgrade_check.unwrap_or(true)
+    }
+
+    pub fn dry_run_enabled(&self) -> bool {
+        self.dry_run.unwrap_or(false)
+    }
+
+    pub fn auto_approve_enabled(&self) -> bool {
+        self.auto_approve.unwrap_or(false)
+    }
+
+    pub fn no_retro_enabled(&self) -> bool {
+        self.no_retro.unwrap_or(false)
     }
 
     /// Merge an overlay on top of this base. The overlay takes precedence
@@ -309,6 +330,15 @@ impl FabroConfig {
         }
         if overlay.upgrade_check.is_some() {
             self.upgrade_check = overlay.upgrade_check;
+        }
+        if overlay.dry_run.is_some() {
+            self.dry_run = overlay.dry_run;
+        }
+        if overlay.auto_approve.is_some() {
+            self.auto_approve = overlay.auto_approve;
+        }
+        if overlay.no_retro.is_some() {
+            self.no_retro = overlay.no_retro;
         }
 
         // --- Server config fields ---
