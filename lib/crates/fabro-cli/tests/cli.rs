@@ -599,6 +599,40 @@ fn setup_run_dir(
     )
     .unwrap();
 
+    // run.json (RunRecord) for resolve_run and run_engine_entrypoint
+    let run_record = serde_json::json!({
+        "run_id": run_id,
+        "created_at": "2026-01-01T00:00:00Z",
+        "config": {
+            "goal": spec.get("goal").and_then(|v| v.as_str()).map(String::from),
+            "llm": {
+                "model": spec.get("model").and_then(|v| v.as_str()),
+                "provider": spec.get("provider").and_then(|v| v.as_str())
+            },
+            "sandbox": {
+                "provider": spec.get("sandbox_provider").and_then(|v| v.as_str()),
+                "preserve": spec.get("preserve_sandbox").and_then(|v| v.as_bool())
+            },
+            "verbose": spec.get("verbose").and_then(|v| v.as_bool()),
+            "dry_run": spec.get("dry_run").and_then(|v| v.as_bool()),
+            "auto_approve": spec.get("auto_approve").and_then(|v| v.as_bool()),
+            "no_retro": spec.get("no_retro").and_then(|v| v.as_bool())
+        },
+        "graph": {
+            "name": "test",
+            "nodes": {},
+            "edges": [],
+            "attrs": {}
+        },
+        "working_directory": spec.get("working_directory").and_then(|v| v.as_str()).unwrap_or("/tmp"),
+        "labels": spec.get("labels").cloned().unwrap_or(serde_json::json!({}))
+    });
+    std::fs::write(
+        run_dir.join("run.json"),
+        serde_json::to_string(&run_record).unwrap(),
+    )
+    .unwrap();
+
     // progress.jsonl
     std::fs::write(run_dir.join("progress.jsonl"), progress_lines.join("\n")).unwrap();
 
@@ -811,12 +845,11 @@ digraph BarBaz {
                 resumed_runs_dir.display()
             )
         });
-    let manifest: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(resumed_run_dir.join("manifest.json")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(manifest["workflow_name"].as_str(), Some("BarBaz"));
-    assert_eq!(manifest["workflow_slug"].as_str(), Some("sluggy"));
+    let run_record: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(resumed_run_dir.join("run.json")).unwrap())
+            .unwrap();
+    assert_eq!(run_record["graph"]["name"].as_str(), Some("BarBaz"));
+    assert_eq!(run_record["workflow_slug"].as_str(), Some("sluggy"));
 }
 
 #[test]
@@ -840,8 +873,8 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
 
     let run_dir = find_run_dir(home.path(), run_id);
     assert!(
-        run_dir.join("manifest.json").exists(),
-        "create should persist manifest.json so the run is discoverable"
+        run_dir.join("run.json").exists(),
+        "create should persist run.json so the run is discoverable"
     );
 
     arc()

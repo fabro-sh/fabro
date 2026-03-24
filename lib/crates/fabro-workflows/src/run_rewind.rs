@@ -358,6 +358,9 @@ pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<String> 
 }
 
 /// Load the graph from the metadata branch and build the parallel interior map.
+///
+/// Tries `run.json` (RunRecord with embedded Graph) first, then falls back to
+/// parsing `graph.fabro` DOT source for backward compatibility.
 pub fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String> {
     let branch = MetadataStore::branch_name(run_id);
     let sig = match Signature::now("Fabro", "noreply@fabro.sh") {
@@ -365,6 +368,15 @@ pub fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String>
         Err(_) => return HashMap::new(),
     };
     let bs = BranchStore::new(store, &branch, &sig);
+
+    // Try run.json first (RunRecord with embedded Graph)
+    if let Ok(Some(run_bytes)) = bs.read_entry("run.json") {
+        if let Ok(record) = serde_json::from_slice::<crate::run_record::RunRecord>(&run_bytes) {
+            return detect_parallel_interior(&record.graph);
+        }
+    }
+
+    // Fallback: parse graph.fabro DOT
     let graph_bytes = match bs.read_entry("graph.fabro") {
         Ok(Some(bytes)) => bytes,
         _ => return HashMap::new(),

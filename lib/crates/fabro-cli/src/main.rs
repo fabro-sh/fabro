@@ -324,23 +324,24 @@ async fn run_engine_entrypoint(
         cli_config.git_author().and_then(|a| a.email.clone()),
     );
 
-    let spec = match fabro_workflows::run_spec::RunSpec::load(&run_dir) {
-        Ok(spec) => spec,
+    let record = match fabro_workflows::run_record::RunRecord::load(&run_dir) {
+        Ok(record) => record,
         Err(err) => {
+            let anyhow_err: anyhow::Error = anyhow::anyhow!("Failed to load run record: {err}");
             let _ = commands::detached_support::persist_detached_failure(
                 &run_dir,
                 "bootstrap",
                 fabro_workflows::run_status::StatusReason::BootstrapFailed,
-                &err,
+                &anyhow_err,
             );
-            return Err(err);
+            return Err(anyhow_err);
         }
     };
 
-    if let Err(err) = std::env::set_current_dir(&spec.working_directory).map_err(|e| {
+    if let Err(err) = std::env::set_current_dir(&record.working_directory).map_err(|e| {
         anyhow::anyhow!(
             "Failed to set working directory to {}: {e}",
-            spec.working_directory.display()
+            record.working_directory.display()
         )
     }) {
         let _ = commands::detached_support::persist_detached_failure(
@@ -361,31 +362,47 @@ async fn run_engine_entrypoint(
         }
     };
 
+    let sandbox_provider_str = record
+        .config
+        .sandbox
+        .as_ref()
+        .and_then(|s| s.provider.as_deref())
+        .unwrap_or("local");
+
     let run_args = commands::run::RunArgs {
         workflow: Some(workflow_path),
         run_dir: Some(run_dir.clone()),
-        dry_run: spec.dry_run,
+        dry_run: record.config.dry_run_enabled(),
         preflight: false,
-        auto_approve: spec.auto_approve,
-        goal: spec.goal,
+        auto_approve: record.config.auto_approve_enabled(),
+        goal: record.config.goal.clone(),
         goal_file: None,
-        model: Some(spec.model),
-        provider: Some(spec.provider.unwrap_or_default()).filter(|s| !s.is_empty()),
-        verbose: spec.verbose,
-        sandbox: spec
-            .sandbox_provider
+        model: record.config.llm.as_ref().and_then(|l| l.model.clone()),
+        provider: record
+            .config
+            .llm
+            .as_ref()
+            .and_then(|l| l.provider.clone())
+            .filter(|s| !s.is_empty()),
+        verbose: record.config.verbose_enabled(),
+        sandbox: sandbox_provider_str
             .parse::<fabro_workflows::sandbox_provider::SandboxProvider>()
             .ok()
             .map(commands::run::CliSandboxProvider::from),
-        label: spec
+        label: record
             .labels
             .into_iter()
             .map(|(k, v)| format!("{k}={v}"))
             .collect(),
-        no_retro: spec.no_retro,
-        preserve_sandbox: spec.preserve_sandbox,
+        no_retro: record.config.no_retro_enabled(),
+        preserve_sandbox: record
+            .config
+            .sandbox
+            .as_ref()
+            .and_then(|s| s.preserve)
+            .unwrap_or(false),
         detach: false,
-        run_id: Some(spec.run_id),
+        run_id: Some(record.run_id),
     };
 
     match commands::run::run_command(run_args, cli_config, styles, github_app, git_author).await {

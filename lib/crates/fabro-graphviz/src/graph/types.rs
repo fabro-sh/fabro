@@ -321,7 +321,7 @@ impl Edge {
 }
 
 /// The parsed workflow graph containing nodes, edges, and graph-level attributes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Graph {
     pub name: String,
     pub nodes: HashMap<String, Node>,

@@ -15,7 +15,8 @@ pub struct InspectOutput {
     pub run_id: String,
     pub run_dir: PathBuf,
     pub status: fabro_workflows::run_status::RunStatus,
-    pub manifest: Option<serde_json::Value>,
+    pub run_record: Option<serde_json::Value>,
+    pub start_record: Option<serde_json::Value>,
     pub conclusion: Option<serde_json::Value>,
     pub checkpoint: Option<serde_json::Value>,
     pub sandbox: Option<serde_json::Value>,
@@ -35,7 +36,10 @@ fn inspect_run_dir(
     run_dir: &Path,
     status: fabro_workflows::run_status::RunStatus,
 ) -> Result<InspectOutput> {
-    let manifest = fabro_workflows::manifest::Manifest::load(&run_dir.join("manifest.json"))
+    let run_record = fabro_workflows::run_record::RunRecord::load(run_dir)
+        .ok()
+        .and_then(|v| serde_json::to_value(v).ok());
+    let start_record = fabro_workflows::start_record::StartRecord::load(run_dir)
         .ok()
         .and_then(|v| serde_json::to_value(v).ok());
     let conclusion =
@@ -55,7 +59,8 @@ fn inspect_run_dir(
         run_id: run_id.to_string(),
         run_dir: run_dir.to_path_buf(),
         status,
-        manifest,
+        run_record,
+        start_record,
         conclusion,
         checkpoint,
         sandbox,

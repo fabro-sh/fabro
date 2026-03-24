@@ -199,7 +199,8 @@ Each run's directory contains a standard set of files:
 
 | File | Description |
 |---|---|
-| `manifest.json` | Run metadata — ID, workflow name, start time, labels |
+| `run.json` | Run record — ID, config, graph, workflow slug, labels |
+| `start.json` | Start record — run ID, start time, run branch, base SHA |
 | `progress.jsonl` | Full event stream |
 | `live.json` | Last event snapshot (overwritten during run) |
 | `checkpoint.json` | Final execution state |

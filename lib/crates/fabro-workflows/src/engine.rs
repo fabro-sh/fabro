@@ -259,6 +259,22 @@ pub(crate) fn write_manifest(
     manifest
 }
 
+/// Write start.json at the start of a workflow run. Returns the StartRecord.
+pub(crate) fn write_start_record(
+    run_dir: &Path,
+    config: &RunConfig,
+) -> crate::start_record::StartRecord {
+    let record = crate::start_record::StartRecord {
+        run_id: config.run_id.clone(),
+        start_time: Utc::now(),
+        run_branch: config.run_branch.clone(),
+        base_sha: config.base_sha.clone(),
+    };
+    let _ = std::fs::create_dir_all(run_dir);
+    let _ = record.save(run_dir);
+    record
+}
+
 /// Return the directory for a node's logs.
 ///
 /// First visit (`visit <= 1`): `{run_dir}/nodes/{node_id}`
