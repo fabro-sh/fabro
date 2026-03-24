@@ -1,7 +1,6 @@
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::FutureExt;
@@ -10,7 +9,7 @@ use fabro_core::context::Context as CoreContext;
 use fabro_core::error::{CoreError, HandlerErrorDetail, Result as CoreResult};
 use fabro_core::handler::NodeHandler;
 use fabro_core::outcome::Outcome as CoreOutcome;
-use fabro_core::retry::{BackoffPolicy, RetryPolicy as CoreRetryPolicy};
+use fabro_core::retry::RetryPolicy as CoreRetryPolicy;
 
 use super::graph::WorkflowGraph;
 use super::outcome::{wf_to_core_outcome, wf_to_core_status};
@@ -111,12 +110,7 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
         let wf_policy = engine::build_retry_policy(gv_node, &gv_graph);
         CoreRetryPolicy {
             max_attempts: wf_policy.max_attempts,
-            backoff: BackoffPolicy {
-                initial_delay: Duration::from_millis(wf_policy.backoff.initial_delay_ms),
-                factor: wf_policy.backoff.backoff_factor,
-                max_delay: Duration::from_millis(wf_policy.backoff.max_delay_ms),
-                jitter: wf_policy.backoff.jitter,
-            },
+            backoff: wf_policy.backoff,
         }
     }
 
