@@ -63,7 +63,7 @@ pub struct WorkflowLifecycle {
     /// Shared git checkpoint result (written by git, read by event)
     checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
     /// True when constructed with a checkpoint; cleared after first on_run_start.
-    /// Gates mirror_graph_attributes on initial resume.
+    /// Gates context seeding on initial resume.
     is_initial_resume: AtomicBool,
     // Config needed for context seeding
     graph: Arc<fabro_graphviz::graph::types::Graph>,
@@ -194,9 +194,9 @@ impl WorkflowLifecycle {
 impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
     async fn on_run_start(&self, graph: &WorkflowGraph, state: &WfRunState) -> CoreResult<()> {
         // Re-seed context keys (fires on initial start AND after every loop restart).
-        // mirror_graph_attributes: skip on initial checkpoint resume (context already has them)
+        // Skip on initial checkpoint resume (context already has them).
         if self.is_initial_resume.swap(false, Ordering::Relaxed) {
-            // First on_run_start after checkpoint resume — skip mirror_graph_attributes
+            // First on_run_start after checkpoint resume — skip context seeding
         } else {
             // Mirror graph-level attributes into the core context
             if !self.graph.goal().is_empty() {

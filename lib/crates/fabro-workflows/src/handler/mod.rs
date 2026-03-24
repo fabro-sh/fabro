@@ -33,7 +33,7 @@ pub struct EngineServices {
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
     /// Git state for the current run. Set via `set_git_state` at the start of
-    /// `run_internal` and read by parallel/fan-in handlers.
+    /// `run_via_core` and read by parallel/fan-in handlers.
     pub(crate) git_state: std::sync::RwLock<Option<Arc<GitState>>>,
     /// Hook runner for user-defined lifecycle hooks.
     pub hook_runner: Option<Arc<HookRunner>>,
