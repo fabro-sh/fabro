@@ -1,6 +1,6 @@
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 use futures::FutureExt;
@@ -14,8 +14,12 @@ use fabro_core::retry::RetryPolicy as CoreRetryPolicy;
 use super::graph::WorkflowGraph;
 use super::WorkflowNode;
 use crate::engine;
-use crate::handler::EngineServices;
+use crate::handler::{format_panic_message, EngineServices};
 use crate::outcome::{Outcome, StageStatus};
+
+/// Cached stub graph for handler dispatch (avoids allocating on every call).
+static STUB_GRAPH: LazyLock<fabro_graphviz::graph::types::Graph> =
+    LazyLock::new(|| fabro_graphviz::graph::types::Graph::new("stub"));
 
 /// Production node handler that bridges fabro-core's NodeHandler to the
 /// existing fabro-workflows Handler trait via EngineServices.
@@ -36,7 +40,6 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
         let handler = self.services.registry.resolve(gv_node);
 
         let wf_context = crate::context::Context::new();
-        let wf_graph = fabro_graphviz::graph::types::Graph::new("stub");
 
         // Timeout from the node
         let node_timeout = gv_node.timeout();
@@ -47,7 +50,7 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
             handler,
             gv_node,
             &wf_context,
-            &wf_graph,
+            &STUB_GRAPH,
             &run_dir,
             &self.services,
         );
@@ -81,13 +84,7 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
                 }))
             }
             Err(panic_payload) => {
-                let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
-                    format!("handler panicked: {s}")
-                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-                    format!("handler panicked: {s}")
-                } else {
-                    "handler panicked".to_string()
-                };
+                let msg = format_panic_message(panic_payload);
                 Err(CoreError::handler(HandlerErrorDetail {
                     message: msg,
                     retryable: false,
@@ -100,8 +97,7 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
 
     fn retry_policy(&self, node: &WorkflowNode, _graph: &WorkflowGraph) -> CoreRetryPolicy {
         let gv_node = node.inner();
-        let gv_graph = fabro_graphviz::graph::types::Graph::new("stub");
-        let wf_policy = engine::build_retry_policy(gv_node, &gv_graph);
+        let wf_policy = engine::build_retry_policy(gv_node, &STUB_GRAPH);
         CoreRetryPolicy {
             max_attempts: wf_policy.max_attempts,
             backoff: wf_policy.backoff,

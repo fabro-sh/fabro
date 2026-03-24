@@ -162,7 +162,7 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
             name: gv.label().to_string(),
             index: stage_index,
             duration_ms: 0,
-            status: "success".to_string(),
+            status: StageStatus::Success.to_string(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
             usage: None,

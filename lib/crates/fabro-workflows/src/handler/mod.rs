@@ -10,6 +10,7 @@ pub mod prompt;
 pub mod start;
 pub mod wait;
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -108,6 +109,17 @@ pub trait Handler: Send + Sync {
     /// Default implementation retries transient errors only.
     fn should_retry(&self, err: &FabroError) -> bool {
         err.is_retryable()
+    }
+}
+
+/// Extract a human-readable message from a panic payload.
+pub(crate) fn format_panic_message(payload: Box<dyn Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        format!("handler panicked: {s}")
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        format!("handler panicked: {s}")
+    } else {
+        "handler panicked".to_string()
     }
 }
 
