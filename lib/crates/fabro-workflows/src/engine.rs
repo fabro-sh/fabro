@@ -193,7 +193,7 @@ impl RetryPolicy {
 /// Build a retry policy from node and graph attributes.
 /// If the node has a `retry_policy` attribute naming a preset, use that.
 /// Otherwise, fall back to `max_retries` / graph default.
-fn build_retry_policy(node: &Node, graph: &Graph) -> RetryPolicy {
+pub(crate) fn build_retry_policy(node: &Node, graph: &Graph) -> RetryPolicy {
     if let Some(preset) = node.retry_policy() {
         match preset {
             "none" => return RetryPolicy::none(),
@@ -535,7 +535,7 @@ pub fn select_edge<'a>(
 
 /// Check if all goal gates have been satisfied.
 /// Returns Ok(()) if all gates passed, or Err with the failed node ID.
-fn check_goal_gates(
+pub(crate) fn check_goal_gates(
     graph: &Graph,
     node_outcomes: &HashMap<String, Outcome>,
 ) -> std::result::Result<(), String> {
@@ -553,7 +553,7 @@ fn check_goal_gates(
 }
 
 /// Resolve the retry target for a failed goal gate node.
-fn get_retry_target(failed_node_id: &str, graph: &Graph) -> Option<String> {
+pub(crate) fn get_retry_target(failed_node_id: &str, graph: &Graph) -> Option<String> {
     if let Some(node) = graph.nodes.get(failed_node_id) {
         // Node-level retry_target
         if let Some(target) = node.retry_target() {
@@ -584,7 +584,7 @@ fn get_retry_target(failed_node_id: &str, graph: &Graph) -> Option<String> {
 }
 
 /// Check whether a node is a terminal (exit) node.
-fn is_terminal(node: &Node) -> bool {
+pub(crate) fn is_terminal(node: &Node) -> bool {
     node.shape() == "Msquare" || node.handler_type() == Some("exit")
 }
 
@@ -1447,6 +1447,212 @@ impl WorkflowRunEngine {
             .run_internal(graph, config, Some(checkpoint), None, None, loop_state)
             .await?;
         Ok(outcome)
+    }
+
+    /// Run the workflow through the fabro-core executor with full lifecycle management.
+    #[cfg(feature = "core-engine")]
+    #[allow(dead_code)]
+    async fn run_via_core(
+        &self,
+        graph: &Graph,
+        config: &RunConfig,
+        resume_checkpoint: Option<&Checkpoint>,
+        seed_context: Option<Context>,
+    ) -> Result<(Outcome, Context)> {
+        use fabro_core::executor::ExecutorBuilder;
+        use fabro_core::state::RunState;
+        use tokio_util::sync::CancellationToken;
+
+        let wf_graph = crate::core_adapter::WorkflowGraph(std::sync::Arc::new(graph.clone()));
+
+        // Build a shared EngineServices for the handler
+        let shared_services = std::sync::Arc::new(EngineServices {
+            registry: Arc::clone(&self.services.registry),
+            emitter: Arc::clone(&self.services.emitter),
+            sandbox: Arc::clone(&self.services.sandbox),
+            git_state: std::sync::RwLock::new(None),
+            hook_runner: self.services.hook_runner.clone(),
+            env: self.services.env.clone(),
+            dry_run: self.services.dry_run,
+        });
+
+        // Build handler
+        let handler = std::sync::Arc::new(crate::core_adapter::WorkflowNodeHandler {
+            services: shared_services,
+            run_dir: config.run_dir.clone(),
+        });
+
+        // Build lifecycle
+        let lifecycle = crate::core_adapter::WorkflowLifecycle::new(
+            self.services.emitter.clone(),
+            self.services.hook_runner.clone(),
+            self.services.sandbox.clone(),
+            std::sync::Arc::new(graph.clone()),
+            config.run_dir.clone(),
+            config.run_id.clone(),
+            config.dry_run,
+            config.labels.clone(),
+        );
+
+        // Restore circuit breaker state from checkpoint
+        if let Some(cp) = resume_checkpoint {
+            lifecycle.restore_circuit_breaker(
+                cp.loop_failure_signatures.clone(),
+                cp.restart_failure_signatures.clone(),
+            );
+        }
+
+        // Build RunState
+        let state = if let Some(cp) = resume_checkpoint {
+            // Resume from checkpoint
+            let mut s = RunState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string()))?;
+            // Restore context values
+            for (k, v) in &cp.context_values {
+                s.context.set(k.clone(), v.clone());
+            }
+            // Restore logs
+            for log in &cp.logs {
+                s.context.append_log(log.clone());
+            }
+            s.completed_nodes = cp.completed_nodes.clone();
+            s.node_retries = cp.node_retries.clone();
+            s.node_visits = cp.node_visits.clone();
+            // Restore node outcomes
+            for (k, v) in &cp.node_outcomes {
+                s.node_outcomes.insert(
+                    k.clone(),
+                    crate::core_adapter::outcome::wf_to_core_outcome(v),
+                );
+            }
+            // Set start node to the checkpoint's next_node_id
+            if let Some(ref next) = cp.next_node_id {
+                s.current_node_id = next.clone();
+            }
+            s
+        } else if let Some(seed) = seed_context {
+            let s = RunState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string()))?;
+            // Populate from seed context
+            for (k, v) in seed.snapshot() {
+                s.context.set(k, v);
+            }
+            for log in seed.logs_snapshot() {
+                s.context.append_log(log);
+            }
+            s
+        } else {
+            RunState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string()))?
+        };
+
+        // Compute global visit limit
+        let graph_max = graph.max_node_visits();
+        let max_node_visits = if graph_max > 0 {
+            Some(graph_max as usize)
+        } else if config.dry_run {
+            Some(10)
+        } else {
+            None
+        };
+
+        // Set up stall watchdog
+        let stall_token = graph.stall_timeout().map(|_| CancellationToken::new());
+        let stall_shutdown =
+            if let (Some(stall_timeout), Some(ref token)) = (graph.stall_timeout(), &stall_token) {
+                let shutdown = CancellationToken::new();
+                let emitter = self.services.emitter.clone();
+                let token_clone = token.clone();
+                let shutdown_clone = shutdown.clone();
+                emitter.touch();
+                tokio::spawn(async move {
+                    loop {
+                        tokio::select! {
+                            _ = tokio::time::sleep(stall_timeout) => {
+                                if shutdown_clone.is_cancelled() {
+                                    return;
+                                }
+                                // Check if there's been recent activity
+                                let last = emitter.last_event_at();
+                                let now = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis() as i64;
+                                let idle_ms = now.saturating_sub(last);
+                                if idle_ms >= stall_timeout.as_millis() as i64 {
+                                    token_clone.cancel();
+                                    return;
+                                }
+                            }
+                            _ = shutdown_clone.cancelled() => {
+                                return;
+                            }
+                        }
+                    }
+                });
+                Some(shutdown)
+            } else {
+                None
+            };
+
+        // Build executor
+        let mut builder = ExecutorBuilder::new(
+            handler
+                as std::sync::Arc<
+                    dyn fabro_core::handler::NodeHandler<crate::core_adapter::WorkflowGraph>,
+                >,
+        )
+        .lifecycle(Box::new(lifecycle));
+
+        if let Some(ref cancel) = config.cancel_token {
+            builder = builder.cancel_token(cancel.clone());
+        }
+        if let Some(token) = stall_token.clone() {
+            builder = builder.stall_token(token);
+        }
+        if let Some(limit) = max_node_visits {
+            builder = builder.max_node_visits(limit);
+        }
+
+        let executor = builder.build();
+
+        // Run
+        let result = executor.run(&wf_graph, state).await;
+
+        // Shut down stall poller
+        if let Some(shutdown) = stall_shutdown {
+            shutdown.cancel();
+        }
+
+        // Convert result
+        match result {
+            Ok(core_outcome) => {
+                let wf_outcome = crate::core_adapter::outcome::core_to_wf_outcome(&core_outcome);
+                // Return outcome + a fresh context (lifecycle manages the real context)
+                let ctx = Context::new();
+                Ok((wf_outcome, ctx))
+            }
+            Err(fabro_core::CoreError::StallTimeout { node_id }) => {
+                let stall_timeout = graph.stall_timeout().unwrap_or_default();
+                let idle_secs = stall_timeout.as_secs();
+                self.services
+                    .emitter
+                    .emit(&WorkflowRunEvent::StallWatchdogTimeout {
+                        node: node_id.clone(),
+                        idle_seconds: idle_secs,
+                    });
+                Err(FabroError::engine(format!(
+                    "stall watchdog: node \"{node_id}\" had no activity for {idle_secs}s"
+                )))
+            }
+            Err(fabro_core::CoreError::Cancelled) => Err(FabroError::Cancelled),
+            Err(fabro_core::CoreError::Blocked { message }) => Err(FabroError::engine(message)),
+            Err(fabro_core::CoreError::VisitLimitExceeded {
+                node_id,
+                visits,
+                limit,
+            }) => Err(FabroError::engine(format!(
+                "node \"{node_id}\" visited {visits} times (limit {limit})"
+            ))),
+            Err(e) => Err(FabroError::engine(e.to_string())),
+        }
     }
 
     /// Internal run implementation supporting optional checkpoint resume and `start_at` override.

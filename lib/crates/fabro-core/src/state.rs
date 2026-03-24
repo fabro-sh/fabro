@@ -14,6 +14,7 @@ pub struct RunState {
     pub node_visits: HashMap<String, usize>,
     pub stage_index: usize,
     pub previous_node_id: Option<String>,
+    pub cancelled: bool,
 }
 
 impl RunState {
@@ -28,6 +29,7 @@ impl RunState {
             node_visits: HashMap::new(),
             stage_index: 0,
             previous_node_id: None,
+            cancelled: false,
         })
     }
 
@@ -48,13 +50,16 @@ impl RunState {
         self.current_node_id = next_node_id.to_string();
     }
 
-    pub fn restart(&mut self, start_node_id: &str) {
+    pub fn restart(&mut self, start_node_id: &str, new_context: Option<Context>) {
         self.current_node_id = start_node_id.to_string();
         self.completed_nodes.clear();
         self.node_outcomes.clear();
         self.node_retries.clear();
         self.stage_index = 0;
         self.previous_node_id = None;
+        if let Some(ctx) = new_context {
+            self.context = ctx;
+        }
         // node_visits is NOT cleared — preserves total visit counts across restarts
     }
 
@@ -142,7 +147,7 @@ mod tests {
         );
         state.advance("work");
 
-        state.restart("start");
+        state.restart("start", None);
 
         assert_eq!(state.current_node_id, "start");
         assert!(state.completed_nodes.is_empty());
@@ -170,5 +175,36 @@ mod tests {
         assert_eq!(state.increment_visits("start"), 1);
         assert_eq!(state.increment_visits("start"), 2);
         assert_eq!(state.increment_visits("other"), 1);
+    }
+
+    #[test]
+    fn run_state_restart_with_new_context() {
+        let g = linear_graph(&["start", "end"]);
+        let mut state = RunState::new(&g).unwrap();
+        state.context.set("key", json!("old_value"));
+        state.increment_visits("start");
+
+        let new_ctx = Context::new();
+        new_ctx.set("fresh", json!(true));
+        state.restart("start", Some(new_ctx));
+
+        // Old context key is gone
+        assert!(state.context.get("key").is_none());
+        // New context key is present
+        assert_eq!(state.context.get("fresh"), Some(json!(true)));
+        // Visits preserved
+        assert_eq!(state.node_visits["start"], 1);
+    }
+
+    #[test]
+    fn run_state_restart_without_context_preserves() {
+        let g = linear_graph(&["start", "end"]);
+        let mut state = RunState::new(&g).unwrap();
+        state.context.set("key", json!("value"));
+
+        state.restart("start", None);
+
+        // Context preserved when None passed
+        assert_eq!(state.context.get("key"), Some(json!("value")));
     }
 }

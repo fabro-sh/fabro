@@ -116,6 +116,16 @@ impl Context {
         }
     }
 
+    // --- Internal accessors for bridge code ---
+
+    pub(crate) fn values_arc(&self) -> Arc<RwLock<HashMap<String, Value>>> {
+        self.values.clone()
+    }
+
+    pub(crate) fn logs_arc(&self) -> Arc<RwLock<Vec<String>>> {
+        self.logs.clone()
+    }
+
     // --- Typed accessors ---
 
     #[must_use]
