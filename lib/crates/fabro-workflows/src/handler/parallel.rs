@@ -7,7 +7,7 @@ use fabro_agent::{Sandbox, WorktreeConfig, WorktreeSandbox};
 use tokio::sync::Semaphore;
 
 use crate::context::keys;
-use crate::context::Context;
+use crate::context::{Context, WorkflowContext};
 use crate::engine::set_hook_node;
 use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
@@ -73,7 +73,7 @@ impl Handler for ParallelHandler {
             let target_id = &edge.to;
             if let Some(target_node) = graph.nodes.get(target_id) {
                 let handler = services.registry.resolve(target_node);
-                let branch_context = context.clone_context();
+                let branch_context = context.fork();
                 let outcome = super::dispatch_handler(
                     handler,
                     target_node,
@@ -196,7 +196,7 @@ impl Handler for ParallelHandler {
         let mut branch_setups: Vec<BranchSetup> = Vec::new();
         for (branch_index, edge) in branches.iter().enumerate() {
             let target_id = edge.to.clone();
-            let branch_context = context.clone_context();
+            let branch_context = context.fork();
 
             let (branch_sandbox, worktree_path): (Arc<dyn Sandbox>, Option<PathBuf>) = if let (
                 Some(ref gs),

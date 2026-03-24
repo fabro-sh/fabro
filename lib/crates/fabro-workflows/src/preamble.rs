@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::artifact::{artifact_path, format_artifact_reference};
 use crate::context::keys;
-use crate::context::Context;
+use crate::context::{Context, WorkflowContext};
 use crate::outcome::Outcome;
 use crate::outcome::OutcomeExt;
 use fabro_graphviz::graph::{is_llm_handler_type, Graph, Node};

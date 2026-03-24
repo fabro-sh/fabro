@@ -5,11 +5,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::FutureExt;
 
-use fabro_core::context::Context as CoreContext;
 use fabro_core::error::{CoreError, HandlerErrorDetail, Result as CoreResult};
 use fabro_core::handler::NodeHandler;
 use fabro_core::outcome::FailureCategory;
 use fabro_core::retry::RetryPolicy as CoreRetryPolicy;
+
+use crate::context::Context;
 
 use super::graph::WorkflowGraph;
 use super::WorkflowNode;
@@ -20,8 +21,8 @@ use crate::outcome::{Outcome, StageStatus};
 /// Production node handler that bridges fabro-core's NodeHandler to the
 /// existing fabro-workflows Handler trait via EngineServices.
 ///
-/// On each `execute()` call, snapshots the CoreContext into a WfContext,
-/// runs the handler, then diffs and applies changes back.
+/// On each `execute()` call, forks the context, runs the handler,
+/// then diffs and applies changes back.
 pub struct WorkflowNodeHandler {
     pub services: Arc<EngineServices>,
     pub run_dir: PathBuf,
@@ -33,16 +34,15 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
     async fn execute(
         &self,
         node: &WorkflowNode,
-        context: &CoreContext,
+        context: &Context,
         _graph: &WorkflowGraph,
     ) -> CoreResult<Outcome> {
         let gv_node = node.inner();
         let handler = self.services.registry.resolve(gv_node);
 
-        // Per-call snapshot/apply context bridge:
-        // 1. Snapshot the CoreContext into a WfContext
+        // Fork the context so handler writes don't leak back unless we diff+apply.
         let snapshot = context.snapshot();
-        let wf_context = crate::context::Context::from_values(snapshot.clone());
+        let wf_context = context.fork();
 
         // Timeout from the node
         let node_timeout = gv_node.timeout();
@@ -75,8 +75,8 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
             panic_safe.await
         };
 
-        // 2. After handler returns, diff the WfContext against the snapshot
-        //    and apply changes back to the CoreContext
+        // 2. After handler returns, diff the forked context against the snapshot
+        //    and apply changes back to the original context
         let new_values = wf_context.snapshot();
         for (k, v) in &new_values {
             if snapshot.get(k) != Some(v) {
@@ -154,7 +154,7 @@ mod tests {
         async fn execute(
             &self,
             _node: &WorkflowNode,
-            _context: &CoreContext,
+            _context: &Context,
             _graph: &WorkflowGraph,
         ) -> CoreResult<Outcome> {
             Ok(Outcome::success())
