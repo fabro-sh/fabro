@@ -1432,12 +1432,28 @@ impl WorkflowRunEngine {
         let graph_arc = std::sync::Arc::new(graph.clone());
         let wf_graph = crate::core_adapter::WorkflowGraph(Arc::clone(&graph_arc));
 
+        // Populate git_state for handlers (parallel, fan_in) when checkpointing is active
+        let git_state = if config.git_checkpoint_enabled {
+            config.base_sha.as_ref().map(|base_sha| {
+                Arc::new(GitState {
+                    run_id: config.run_id.clone(),
+                    base_sha: base_sha.clone(),
+                    run_branch: config.run_branch.clone(),
+                    meta_branch: config.meta_branch.clone(),
+                    checkpoint_exclude_globs: config.checkpoint_exclude_globs.clone(),
+                    git_author: config.git_author.clone(),
+                })
+            })
+        } else {
+            None
+        };
+
         // Build a shared EngineServices for the handler
         let shared_services = std::sync::Arc::new(EngineServices {
             registry: Arc::clone(&self.services.registry),
             emitter: Arc::clone(&self.services.emitter),
             sandbox: Arc::clone(&self.services.sandbox),
-            git_state: std::sync::RwLock::new(None),
+            git_state: std::sync::RwLock::new(git_state),
             hook_runner: self.services.hook_runner.clone(),
             env: self.services.env.clone(),
             dry_run: self.services.dry_run,
@@ -1447,6 +1463,7 @@ impl WorkflowRunEngine {
         let handler = std::sync::Arc::new(crate::core_adapter::WorkflowNodeHandler {
             services: shared_services,
             run_dir: config.run_dir.clone(),
+            graph: Arc::clone(&graph_arc),
         });
 
         // Build lifecycle
@@ -1479,14 +1496,30 @@ impl WorkflowRunEngine {
             }
             s.completed_nodes = cp.completed_nodes.clone();
             s.node_retries = cp.node_retries.clone();
-            s.node_visits = cp.node_visits.clone();
+            // Restore node_visits; reconstruct from completed_nodes for old checkpoints
+            if cp.node_visits.is_empty() {
+                for id in &cp.completed_nodes {
+                    *s.node_visits.entry(id.clone()).or_insert(0) += 1;
+                }
+            } else {
+                s.node_visits = cp.node_visits.clone();
+            }
             // Restore node outcomes
             for (k, v) in &cp.node_outcomes {
                 s.node_outcomes.insert(k.clone(), v.clone());
             }
-            // Set start node to the checkpoint's next_node_id
+            // Set stage_index to number of completed nodes
+            s.stage_index = cp.completed_nodes.len();
+            // Use stored next_node_id if available, otherwise fall back
             if let Some(ref next) = cp.next_node_id {
                 s.current_node_id = next.clone();
+            } else {
+                let edges = graph.outgoing_edges(&cp.current_node);
+                if let Some(edge) = edges.first() {
+                    s.current_node_id = edge.to.clone();
+                } else {
+                    s.current_node_id = cp.current_node.clone();
+                }
             }
             s
         } else if let Some(seed) = seed_context {
@@ -1581,9 +1614,9 @@ impl WorkflowRunEngine {
 
         // Convert result
         match result {
-            Ok(core_outcome) => {
-                // Outcome is now the wf type directly — no conversion needed
-                let ctx = Context::new();
+            Ok((core_outcome, final_state)) => {
+                // Extract the executor's final context so callers see all state
+                let ctx = Context::from_values(final_state.context.snapshot());
                 Ok((core_outcome, ctx))
             }
             Err(fabro_core::CoreError::StallTimeout { node_id }) => {

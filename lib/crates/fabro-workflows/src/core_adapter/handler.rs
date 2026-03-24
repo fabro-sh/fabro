@@ -1,6 +1,6 @@
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::FutureExt;
@@ -17,15 +17,15 @@ use crate::engine;
 use crate::handler::{format_panic_message, EngineServices};
 use crate::outcome::{Outcome, StageStatus};
 
-/// Cached stub graph for handler dispatch (avoids allocating on every call).
-static STUB_GRAPH: LazyLock<fabro_graphviz::graph::types::Graph> =
-    LazyLock::new(|| fabro_graphviz::graph::types::Graph::new("stub"));
-
 /// Production node handler that bridges fabro-core's NodeHandler to the
 /// existing fabro-workflows Handler trait via EngineServices.
+///
+/// On each `execute()` call, snapshots the CoreContext into a WfContext,
+/// runs the handler, then diffs and applies changes back.
 pub struct WorkflowNodeHandler {
     pub services: Arc<EngineServices>,
     pub run_dir: PathBuf,
+    pub graph: Arc<fabro_graphviz::graph::types::Graph>,
 }
 
 #[async_trait]
@@ -33,13 +33,16 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
     async fn execute(
         &self,
         node: &WorkflowNode,
-        _context: &CoreContext,
+        context: &CoreContext,
         _graph: &WorkflowGraph,
     ) -> CoreResult<Outcome> {
         let gv_node = node.inner();
         let handler = self.services.registry.resolve(gv_node);
 
-        let wf_context = crate::context::Context::new();
+        // Per-call snapshot/apply context bridge:
+        // 1. Snapshot the CoreContext into a WfContext
+        let snapshot = context.snapshot();
+        let wf_context = crate::context::Context::from_values(snapshot.clone());
 
         // Timeout from the node
         let node_timeout = gv_node.timeout();
@@ -50,7 +53,7 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
             handler,
             gv_node,
             &wf_context,
-            &STUB_GRAPH,
+            &self.graph,
             &run_dir,
             &self.services,
         );
@@ -71,6 +74,15 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
         } else {
             panic_safe.await
         };
+
+        // 2. After handler returns, diff the WfContext against the snapshot
+        //    and apply changes back to the CoreContext
+        let new_values = wf_context.snapshot();
+        for (k, v) in &new_values {
+            if snapshot.get(k) != Some(v) {
+                context.set(k.clone(), v.clone());
+            }
+        }
 
         match timed_result {
             Ok(Ok(wf_outcome)) => Ok(wf_outcome),
@@ -97,7 +109,7 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
 
     fn retry_policy(&self, node: &WorkflowNode, _graph: &WorkflowGraph) -> CoreRetryPolicy {
         let gv_node = node.inner();
-        let wf_policy = engine::build_retry_policy(gv_node, &STUB_GRAPH);
+        let wf_policy = engine::build_retry_policy(gv_node, &self.graph);
         CoreRetryPolicy {
             max_attempts: wf_policy.max_attempts,
             backoff: wf_policy.backoff,
@@ -178,7 +190,7 @@ mod tests {
         let executor = ExecutorBuilder::new(handler)
             .lifecycle(Box::new(NoopLifecycle))
             .build();
-        let result = executor.run(&wf_graph, state).await.unwrap();
+        let (result, _) = executor.run(&wf_graph, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Success);
     }
 }
