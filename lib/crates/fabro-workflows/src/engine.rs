@@ -226,39 +226,6 @@ pub fn resolve_thread_id(
 
 // --- Run directory helpers (spec 5.6) ---
 
-/// Write manifest.json at the start of a workflow run. Returns the manifest.
-pub(crate) fn write_manifest(
-    run_dir: &Path,
-    graph: &Graph,
-    config: &RunConfig,
-) -> crate::manifest::Manifest {
-    let workflow_name = if graph.name.is_empty() {
-        "unnamed".to_string()
-    } else {
-        graph.name.clone()
-    };
-    let manifest = crate::manifest::Manifest {
-        run_id: config.run_id.clone(),
-        workflow_name,
-        goal: graph.goal().to_string(),
-        start_time: Utc::now(),
-        node_count: graph.nodes.len(),
-        edge_count: graph.edges.len(),
-        run_branch: config.run_branch.clone(),
-        base_sha: config.base_sha.clone(),
-        labels: config.labels.clone(),
-        base_branch: config.base_branch.clone(),
-        workflow_slug: config.workflow_slug.clone(),
-        host_repo_path: config
-            .host_repo_path
-            .as_ref()
-            .map(|p| p.to_string_lossy().to_string()),
-    };
-    let _ = std::fs::create_dir_all(run_dir);
-    let _ = manifest.save(&run_dir.join("manifest.json"));
-    manifest
-}
-
 /// Write start.json at the start of a workflow run. Returns the StartRecord.
 pub(crate) fn write_start_record(
     run_dir: &Path,
@@ -2483,10 +2450,10 @@ mod tests {
         );
     }
 
-    // --- manifest.json and node status tests ---
+    // --- start.json and node status tests ---
 
     #[tokio::test]
-    async fn engine_writes_manifest_json() {
+    async fn engine_writes_start_json() {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
         let engine =
@@ -2499,6 +2466,38 @@ mod tests {
             git_checkpoint_enabled: false,
             host_repo_path: None,
             base_sha: None,
+            run_branch: Some("fabro/run/test-run".into()),
+            meta_branch: None,
+            labels: HashMap::new(),
+            checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
+            git_author: crate::git::GitAuthor::default(),
+            base_branch: None,
+            pull_request: None,
+            asset_globs: Vec::new(),
+            workflow_slug: None,
+        };
+        engine.run(&g, &config).await.unwrap();
+
+        let start = crate::start_record::StartRecord::load(dir.path()).unwrap();
+        assert_eq!(start.run_id, "test-run");
+        assert_eq!(start.run_branch.as_deref(), Some("fabro/run/test-run"));
+    }
+
+    #[tokio::test]
+    async fn start_record_includes_base_sha() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = simple_graph();
+        let engine =
+            WorkflowRunEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let config = RunConfig {
+            run_dir: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "sha-run".into(),
+            git_checkpoint_enabled: false,
+            host_repo_path: None,
+            base_sha: Some("abc123".into()),
             run_branch: None,
             meta_branch: None,
             labels: HashMap::new(),
@@ -2512,17 +2511,12 @@ mod tests {
         };
         engine.run(&g, &config).await.unwrap();
 
-        let manifest_path = dir.path().join("manifest.json");
-        assert!(manifest_path.exists());
-        let manifest = crate::manifest::Manifest::load(&manifest_path).unwrap();
-        assert_eq!(manifest.workflow_name, "test_pipeline");
-        assert_eq!(manifest.goal, "Run tests");
-        assert!(manifest.node_count > 0);
-        assert!(manifest.edge_count > 0);
+        let start = crate::start_record::StartRecord::load(dir.path()).unwrap();
+        assert_eq!(start.base_sha.as_deref(), Some("abc123"));
     }
 
     #[tokio::test]
-    async fn manifest_includes_labels_when_present() {
+    async fn start_record_omits_optional_fields_when_empty() {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
         let engine =
@@ -2531,38 +2525,7 @@ mod tests {
             run_dir: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
-            run_id: "labels-run".into(),
-            git_checkpoint_enabled: false,
-            host_repo_path: None,
-            base_sha: None,
-            run_branch: None,
-            meta_branch: None,
-            labels: HashMap::from([("env".into(), "test".into())]),
-            checkpoint_exclude_globs: Vec::new(),
-            github_app: None,
-            git_author: crate::git::GitAuthor::default(),
-            base_branch: None,
-            pull_request: None,
-            asset_globs: Vec::new(),
-            workflow_slug: None,
-        };
-        engine.run(&g, &config).await.unwrap();
-
-        let manifest = crate::manifest::Manifest::load(&dir.path().join("manifest.json")).unwrap();
-        assert_eq!(manifest.labels.get("env").map(String::as_str), Some("test"));
-    }
-
-    #[tokio::test]
-    async fn manifest_omits_labels_when_empty() {
-        let dir = tempfile::tempdir().unwrap();
-        let g = simple_graph();
-        let engine =
-            WorkflowRunEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
-        let config = RunConfig {
-            run_dir: dir.path().to_path_buf(),
-            cancel_token: None,
-            dry_run: false,
-            run_id: "no-labels-run".into(),
+            run_id: "no-optional-run".into(),
             git_checkpoint_enabled: false,
             host_repo_path: None,
             base_sha: None,
@@ -2579,8 +2542,9 @@ mod tests {
         };
         engine.run(&g, &config).await.unwrap();
 
-        let manifest = crate::manifest::Manifest::load(&dir.path().join("manifest.json")).unwrap();
-        assert!(manifest.labels.is_empty());
+        let start = crate::start_record::StartRecord::load(dir.path()).unwrap();
+        assert!(start.run_branch.is_none());
+        assert!(start.base_sha.is_none());
     }
 
     #[tokio::test]
@@ -2798,10 +2762,10 @@ mod tests {
         assert_eq!(resolve_thread_id(None, &node, &graph, None), None);
     }
 
-    // --- Gap #15: Manifest goal field test ---
+    // --- Gap #15: StartRecord run_id field test ---
 
     #[tokio::test]
-    async fn engine_manifest_includes_goal() {
+    async fn engine_start_record_has_run_id() {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
         let engine =
@@ -2827,13 +2791,12 @@ mod tests {
         };
         engine.run(&g, &config).await.unwrap();
 
-        let manifest_path = dir.path().join("manifest.json");
-        let manifest = crate::manifest::Manifest::load(&manifest_path).unwrap();
-        assert_eq!(manifest.goal, "Run tests");
+        let start = crate::start_record::StartRecord::load(dir.path()).unwrap();
+        assert_eq!(start.run_id, "test-run");
     }
 
     #[tokio::test]
-    async fn engine_manifest_goal_empty_when_unset() {
+    async fn engine_start_record_run_branch_none_when_unset() {
         let dir = tempfile::tempdir().unwrap();
         let mut g = Graph::new("no_goal");
         let mut start = Node::new("start");
@@ -2873,9 +2836,8 @@ mod tests {
         };
         engine.run(&g, &config).await.unwrap();
 
-        let manifest_path = dir.path().join("manifest.json");
-        let manifest = crate::manifest::Manifest::load(&manifest_path).unwrap();
-        assert_eq!(manifest.goal, "");
+        let start = crate::start_record::StartRecord::load(dir.path()).unwrap();
+        assert!(start.run_branch.is_none());
     }
 
     // --- Gap #1: Auto status tests ---

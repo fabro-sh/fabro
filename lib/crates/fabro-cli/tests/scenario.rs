@@ -378,13 +378,6 @@ fn scenario_full_stack(sandbox: &str) {
         "run record should have graph.name"
     );
 
-    // Manifest should still be written (legacy)
-    let manifest = read_json(&run_dir.join("manifest.json"));
-    assert!(
-        manifest["run_id"].as_str().is_some(),
-        "manifest should have run_id"
-    );
-
     // Progress events
     assert!(
         has_event(&run_dir, "WorkflowRunStarted"),

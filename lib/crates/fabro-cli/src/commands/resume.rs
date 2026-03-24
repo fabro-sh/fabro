@@ -15,8 +15,8 @@ use fabro_workflows::backend::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::checkpoint::Checkpoint;
 use fabro_workflows::engine::RunConfig;
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel};
-use fabro_workflows::manifest::Manifest;
 use fabro_workflows::outcome::StageStatus;
+use fabro_workflows::run_record::RunRecord;
 use fabro_workflows::sandbox_provider::SandboxProvider;
 use indicatif::HumanDuration;
 
@@ -141,10 +141,10 @@ fn resume_as_run_args(args: &ResumeArgs, workflow: PathBuf) -> RunArgs {
 
 fn preferred_resume_repo_path(
     original_cwd: &std::path::Path,
-    manifest: Option<&Manifest>,
+    record: Option<&RunRecord>,
 ) -> PathBuf {
-    manifest
-        .and_then(|m| m.host_repo_path.as_deref())
+    record
+        .and_then(|r| r.host_repo_path.as_deref())
         .map(PathBuf::from)
         .filter(|path| path.exists())
         .unwrap_or_else(|| original_cwd.to_path_buf())
@@ -532,14 +532,22 @@ async fn prepare_from_branch(
         };
 
     let original_cwd = std::env::current_dir()?;
-    let manifest_hint = fabro_workflows::git::MetadataStore::read_manifest(&original_cwd, &run_id)?;
-    let resume_repo_path = preferred_resume_repo_path(&original_cwd, manifest_hint.as_ref());
-    let manifest = if resume_repo_path == original_cwd {
-        manifest_hint
+    let record_hint = fabro_workflows::git::MetadataStore::read_run_record(&original_cwd, &run_id)
+        .ok()
+        .flatten();
+    let resume_repo_path = preferred_resume_repo_path(&original_cwd, record_hint.as_ref());
+    let record = if resume_repo_path == original_cwd {
+        record_hint
     } else {
-        fabro_workflows::git::MetadataStore::read_manifest(&resume_repo_path, &run_id)?
-            .or(manifest_hint)
+        fabro_workflows::git::MetadataStore::read_run_record(&resume_repo_path, &run_id)
+            .ok()
+            .flatten()
+            .or(record_hint)
     };
+    let start_record =
+        fabro_workflows::git::MetadataStore::read_start_record(&resume_repo_path, &run_id)
+            .ok()
+            .flatten();
     let checkpoint =
         fabro_workflows::git::MetadataStore::read_checkpoint(&resume_repo_path, &run_id)?
             .ok_or_else(|| {
@@ -552,11 +560,11 @@ async fn prepare_from_branch(
 
     let repo_info = fabro_sandbox::daytona::detect_repo_info(&resume_repo_path).ok();
     let origin_url = repo_info.as_ref().map(|(url, _)| url.clone());
-    let detected_base_branch = manifest
+    let detected_base_branch = record
         .as_ref()
-        .and_then(|m| m.base_branch.clone())
+        .and_then(|r| r.base_branch.clone())
         .or_else(|| repo_info.as_ref().and_then(|(_, branch)| branch.clone()));
-    let base_sha = manifest.as_ref().and_then(|m| m.base_sha.clone());
+    let base_sha = start_record.as_ref().and_then(|s| s.base_sha.clone());
 
     let (graph, graph_source, run_cfg, mut sandbox_provider, workflow_slug) =
         if let Some(ref workflow_path) = args.workflow {
@@ -595,7 +603,7 @@ async fn prepare_from_branch(
                 source.clone(),
                 None,
                 sandbox_provider,
-                manifest.as_ref().and_then(|m| m.workflow_slug.clone()),
+                record.as_ref().and_then(|r| r.workflow_slug.clone()),
             )
         };
 
@@ -1624,41 +1632,41 @@ mod tests {
     use chrono::Utc;
     use fabro_workflows::run_status::{RunStatus, RunStatusRecord, StatusReason};
 
-    fn sample_manifest() -> Manifest {
-        Manifest {
+    fn sample_run_record() -> RunRecord {
+        RunRecord {
             run_id: "run-1".to_string(),
-            workflow_name: "resume".to_string(),
-            goal: "fix bug".to_string(),
-            start_time: Utc::now(),
-            node_count: 1,
-            edge_count: 0,
-            run_branch: Some("fabro/run/run-1".to_string()),
-            base_sha: Some("abc123".to_string()),
-            labels: HashMap::new(),
-            base_branch: Some("main".to_string()),
+            created_at: Utc::now(),
+            config: fabro_config::config::FabroConfig::default(),
+            graph: fabro_graphviz::graph::Graph {
+                name: "resume".to_string(),
+                ..Default::default()
+            },
             workflow_slug: None,
+            working_directory: std::path::PathBuf::from("/tmp"),
             host_repo_path: None,
+            base_branch: Some("main".to_string()),
+            labels: HashMap::new(),
         }
     }
 
     #[test]
-    fn preferred_resume_repo_path_uses_manifest_host_repo_path_when_present() {
+    fn preferred_resume_repo_path_uses_record_host_repo_path_when_present() {
         let cwd = tempfile::tempdir().unwrap();
         let host_repo = tempfile::tempdir().unwrap();
-        let mut manifest = sample_manifest();
-        manifest.host_repo_path = Some(host_repo.path().to_string_lossy().to_string());
+        let mut record = sample_run_record();
+        record.host_repo_path = Some(host_repo.path().to_string_lossy().to_string());
 
-        let selected = preferred_resume_repo_path(cwd.path(), Some(&manifest));
+        let selected = preferred_resume_repo_path(cwd.path(), Some(&record));
         assert_eq!(selected, host_repo.path());
     }
 
     #[test]
-    fn preferred_resume_repo_path_falls_back_when_manifest_path_is_missing() {
+    fn preferred_resume_repo_path_falls_back_when_record_path_is_missing() {
         let cwd = tempfile::tempdir().unwrap();
-        let mut manifest = sample_manifest();
-        manifest.host_repo_path = Some(cwd.path().join("missing-repo").display().to_string());
+        let mut record = sample_run_record();
+        record.host_repo_path = Some(cwd.path().join("missing-repo").display().to_string());
 
-        let selected = preferred_resume_repo_path(cwd.path(), Some(&manifest));
+        let selected = preferred_resume_repo_path(cwd.path(), Some(&record));
         assert_eq!(selected, cwd.path());
     }
 

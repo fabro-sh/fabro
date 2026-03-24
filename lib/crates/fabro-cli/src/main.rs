@@ -84,7 +84,7 @@ enum Command {
         /// Run ID prefix or workflow name
         run: String,
     },
-    /// Internal: run the engine process (reads spec.json from run dir)
+    /// Internal: run the engine process (reads run.json from run dir)
     #[command(name = "_run_engine", hide = true)]
     RunEngine {
         /// Path to the run directory
