@@ -76,17 +76,19 @@ pub struct RetryPolicy {
 }
 
 impl RetryPolicy {
+    const DEFAULT_BACKOFF: BackoffPolicy = BackoffPolicy {
+        initial_delay: Duration::from_millis(5_000),
+        factor: 2.0,
+        max_delay: Duration::from_millis(60_000),
+        jitter: true,
+    };
+
     /// No retries -- fail immediately.
     #[must_use]
     pub fn none() -> Self {
         Self {
             max_attempts: 1,
-            backoff: BackoffPolicy {
-                initial_delay: Duration::from_millis(5_000),
-                factor: 2.0,
-                max_delay: Duration::from_millis(60_000),
-                jitter: true,
-            },
+            backoff: Self::DEFAULT_BACKOFF,
         }
     }
 
@@ -95,12 +97,7 @@ impl RetryPolicy {
     pub fn standard() -> Self {
         Self {
             max_attempts: 5,
-            backoff: BackoffPolicy {
-                initial_delay: Duration::from_millis(5_000),
-                factor: 2.0,
-                max_delay: Duration::from_millis(60_000),
-                jitter: true,
-            },
+            backoff: Self::DEFAULT_BACKOFF,
         }
     }
 
@@ -111,9 +108,7 @@ impl RetryPolicy {
             max_attempts: 5,
             backoff: BackoffPolicy {
                 initial_delay: Duration::from_millis(500),
-                factor: 2.0,
-                max_delay: Duration::from_millis(60_000),
-                jitter: true,
+                ..Self::DEFAULT_BACKOFF
             },
         }
     }
@@ -126,8 +121,7 @@ impl RetryPolicy {
             backoff: BackoffPolicy {
                 initial_delay: Duration::from_millis(500),
                 factor: 1.0,
-                max_delay: Duration::from_millis(60_000),
-                jitter: true,
+                ..Self::DEFAULT_BACKOFF
             },
         }
     }
@@ -140,8 +134,7 @@ impl RetryPolicy {
             backoff: BackoffPolicy {
                 initial_delay: Duration::from_millis(2000),
                 factor: 3.0,
-                max_delay: Duration::from_millis(60_000),
-                jitter: true,
+                ..Self::DEFAULT_BACKOFF
             },
         }
     }
@@ -168,12 +161,7 @@ pub(crate) fn build_retry_policy(node: &Node, graph: &Graph) -> RetryPolicy {
     let max_attempts = u32::try_from(max_retries + 1).unwrap_or(1).max(1);
     RetryPolicy {
         max_attempts,
-        backoff: BackoffPolicy {
-            initial_delay: Duration::from_millis(5_000),
-            factor: 2.0,
-            max_delay: Duration::from_millis(60_000),
-            jitter: true,
-        },
+        backoff: RetryPolicy::DEFAULT_BACKOFF,
     }
 }
 
@@ -1048,13 +1036,7 @@ impl WorkflowRunEngine {
                 match timed_result {
                     Ok(r) => r,
                     Err(panic_payload) => {
-                        let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
-                            format!("handler panicked: {s}")
-                        } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-                            format!("handler panicked: {s}")
-                        } else {
-                            "handler panicked".to_string()
-                        };
+                        let msg = crate::handler::format_panic_message(panic_payload);
                         let panic_dir = node_dir(run_dir, &node.id, visit);
                         let _ = std::fs::create_dir_all(&panic_dir);
                         let _ = std::fs::write(panic_dir.join("panic.txt"), &msg);
@@ -1529,9 +1511,10 @@ impl WorkflowRunEngine {
         };
 
         // Set up stall watchdog
-        let stall_token = graph.stall_timeout().map(|_| CancellationToken::new());
+        let stall_timeout_opt = graph.stall_timeout();
+        let stall_token = stall_timeout_opt.map(|_| CancellationToken::new());
         let stall_shutdown =
-            if let (Some(stall_timeout), Some(ref token)) = (graph.stall_timeout(), &stall_token) {
+            if let (Some(stall_timeout), Some(ref token)) = (stall_timeout_opt, &stall_token) {
                 let shutdown = CancellationToken::new();
                 let emitter = self.services.emitter.clone();
                 let token_clone = token.clone();
