@@ -1,0 +1,51 @@
+{
+  "timestamp": "2026-03-24T21:52:25.162660Z",
+  "current_node": "run_tests",
+  "completed_nodes": [
+    "start",
+    "run_tests"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "internal.work_dir": "/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmp5JL95f/run/worktree",
+    "thread.start.current_node": "run_tests",
+    "failure_class": "",
+    "last_stage": "run_tests",
+    "graph.goal": "Run tests and report results",
+    "last_response": "[Simulated] Response for stage: run_tests",
+    "internal.run_id": "01KMGXBASP9391GGSHN6ECJG2J",
+    "failure_signature": "",
+    "response.run_tests": "[Simulated] Response for stage: run_tests",
+    "outcome": "success",
+    "graph.rankdir": "LR",
+    "internal.node_visit_count": 1,
+    "internal.thread_id": "start",
+    "current_node": "run_tests",
+    "current.preamble": "Goal: Run tests and report results\n",
+    "internal.fidelity": "compact",
+    "internal.retry_count.run_tests": 0,
+    "internal.retry_count.start": 0
+  },
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "notes": "[Simulated] start",
+      "usage": null
+    },
+    "run_tests": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "run_tests",
+        "response.run_tests": "[Simulated] Response for stage: run_tests",
+        "last_response": "[Simulated] Response for stage: run_tests"
+      },
+      "notes": "[Simulated] run_tests",
+      "usage": null
+    }
+  },
+  "next_node_id": "report",
+  "node_visits": {
+    "run_tests": 1,
+    "start": 1
+  }
+}
