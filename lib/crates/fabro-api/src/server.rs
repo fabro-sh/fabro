@@ -525,7 +525,7 @@ async fn start_run(
 /// Execute a single run: transitions queued → starting → running → completed/failed/cancelled.
 async fn execute_run(state: Arc<AppState>, run_id: String) {
     // Transition to Starting and set up cancel infrastructure
-    let (cancel_rx, graph) = {
+    let (cancel_rx, graph, created_at) = {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = match runs.get_mut(&run_id) {
             Some(r) if r.status == RunStatus::Queued => r,
@@ -541,7 +541,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         managed_run.cancel_token = Some(Arc::clone(&cancel_token));
         managed_run.event_tx = Some(event_tx);
 
-        (cancel_rx, managed_run.graph.clone())
+        (cancel_rx, managed_run.graph.clone(), managed_run.created_at)
     };
 
     // Create interviewer, sandbox, engine (this is the "provisioning" phase)
@@ -610,6 +610,32 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
 
     let run_dir = std::env::temp_dir().join(format!("fabro-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&run_dir).expect("failed to create run directory");
+
+    // Write RunRecord for observability (enables `fabro ps` / `fabro inspect` for API runs).
+    {
+        let record_config = fabro_config::config::FabroConfig {
+            dry_run: Some(state.dry_run),
+            sandbox: Some(fabro_config::sandbox::SandboxConfig {
+                provider: Some("local".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let run_record = fabro_workflows::run_record::RunRecord {
+            run_id: run_id.clone(),
+            created_at,
+            config: record_config,
+            graph: graph.clone(),
+            workflow_slug: None,
+            working_directory: std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            host_repo_path: None,
+            base_branch: None,
+            labels: std::collections::HashMap::new(),
+        };
+        let _ = run_record.save(&run_dir);
+    }
+
     let config = RunConfig {
         run_dir,
         cancel_token: Some(cancel_token),
