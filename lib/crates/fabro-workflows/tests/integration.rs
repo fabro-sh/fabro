@@ -1375,9 +1375,6 @@ fn checkpoint_save_and_resume_roundtrip() {
     let ctx = Context::new();
     ctx.set("goal", serde_json::json!("Test checkpoint"));
     ctx.set("progress", serde_json::json!(42));
-    ctx.append_log("started");
-    ctx.append_log("step_1 completed");
-
     let mut retries = std::collections::HashMap::new();
     retries.insert("step_1".to_string(), 1u32);
     let checkpoint = Checkpoint::from_context(
@@ -1408,7 +1405,6 @@ fn checkpoint_save_and_resume_roundtrip() {
         loaded.context_values.get("progress"),
         Some(&serde_json::json!(42))
     );
-    assert_eq!(loaded.logs.len(), 2);
 }
 
 // ---------------------------------------------------------------------------

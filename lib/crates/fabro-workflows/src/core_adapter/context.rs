@@ -40,13 +40,13 @@ impl ContextStore for WfContextStore {
     }
 }
 
-/// Create a fabro_core::Context that shares the same underlying values and logs
+/// Create a fabro_core::Context that shares the same underlying values
 /// as the given wf::Context. Writes through either are visible to both.
 pub fn bridge_context(wf_ctx: &WfContext) -> CoreContext {
     let store = Arc::new(WfContextStore {
         values: wf_ctx.values_arc(),
     });
-    CoreContext::with_store_and_logs(store, wf_ctx.logs_arc())
+    CoreContext::with_store(store)
 }
 
 /// Extension trait providing typed domain accessors on a fabro_core::Context.
@@ -95,20 +95,6 @@ mod tests {
         // Set via core, read via wf
         core.set("key2", json!("from_core"));
         assert_eq!(wf.get("key2"), Some(json!("from_core")));
-    }
-
-    #[test]
-    fn bridge_shares_logs() {
-        let wf = WfContext::new();
-        let core = bridge_context(&wf);
-
-        // Append via wf, read via core
-        wf.append_log("wf_log");
-        assert_eq!(core.logs_snapshot(), vec!["wf_log"]);
-
-        // Append via core, read via wf
-        core.append_log("core_log");
-        assert_eq!(wf.logs_snapshot(), vec!["wf_log", "core_log"]);
     }
 
     #[test]

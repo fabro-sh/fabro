@@ -65,7 +65,6 @@ The `checkpoint.json` captures everything needed to resume a run:
 | `node_retries` | How many retry attempts each node has used |
 | `node_outcomes` | Full outcome (status, context updates, usage) for each completed node |
 | `context_values` | Snapshot of the entire [run context](/execution/context) |
-| `logs` | Internal log entries |
 | `git_commit_sha` | SHA of the run branch commit at this checkpoint |
 | `loop_failure_signatures` | Failure signature counts for loop detection |
 | `restart_failure_signatures` | Failure signature counts across loop-restart edges |
@@ -131,7 +130,7 @@ Here's the full sequence that runs after every node completes:
 3. **Commit to run branch** — Stage all file changes, commit with structured trailers linking to the shadow commit SHA
 4. **Update checkpoint** — Re-save `checkpoint.json` with the `git_commit_sha` field set
 
-Steps 2-4 are best-effort — if any Git operation fails, the run continues and logs a warning. The disk checkpoint from step 1 is always available as a fallback.
+Steps 2-4 are best-effort — if any Git operation fails, the run continues and emits a `RunNotice` warning event. The disk checkpoint from step 1 is always available as a fallback.
 
 ## Inspecting run history
 
