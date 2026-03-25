@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::{bail, Context};
-use chrono::{Local, Utc};
+use chrono::Local;
 use clap::{Args, ValueEnum};
 use fabro_agent::{
     DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox, WorktreeConfig, WorktreeSandbox,
@@ -17,15 +17,13 @@ use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_util::terminal::Styles;
 use fabro_workflows::backend::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::checkpoint::Checkpoint;
-use fabro_workflows::conclusion::Conclusion;
 use fabro_workflows::cost::{compute_stage_cost, format_cost};
 use fabro_workflows::devcontainer_bridge;
 use fabro_workflows::engine::{GitCheckpointSettings, RunSettings, WorkflowRunEngine};
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::git::GitSyncStatus;
 use fabro_workflows::handler::default_registry;
-use fabro_workflows::outcome::{Outcome, OutcomeExt, StageStatus};
-use fabro_workflows::run_status::{RunStatus, StatusReason};
+use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::sandbox_provider::SandboxProvider;
 use indicatif::HumanDuration;
 use std::time::Duration;
@@ -35,6 +33,10 @@ use super::detached_support::{self, DetachedRunBootstrapGuard, DetachedRunComple
 use super::run_progress;
 use crate::commands::shared::{
     format_tokens_human, print_diagnostics, read_workflow_file, relative_path, tilde_path,
+};
+
+pub(crate) use fabro_workflows::pipeline::{
+    build_conclusion, classify_engine_result, persist_terminal_outcome, write_finalize_commit,
 };
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -2066,128 +2068,6 @@ pub(crate) fn emit_run_notice(
     });
 }
 
-pub(crate) fn classify_engine_result(
-    engine_result: &Result<Outcome, fabro_workflows::error::FabroError>,
-) -> (StageStatus, Option<String>, RunStatus, Option<StatusReason>) {
-    match engine_result {
-        Ok(outcome) => {
-            let status = outcome.status.clone();
-            let failure_reason = outcome.failure_reason().map(String::from);
-            let (run_status, status_reason) = match status {
-                StageStatus::Success | StageStatus::Skipped => {
-                    (RunStatus::Succeeded, Some(StatusReason::Completed))
-                }
-                StageStatus::PartialSuccess => {
-                    (RunStatus::Succeeded, Some(StatusReason::PartialSuccess))
-                }
-                StageStatus::Fail | StageStatus::Retry => {
-                    (RunStatus::Failed, Some(StatusReason::WorkflowError))
-                }
-            };
-            (status, failure_reason, run_status, status_reason)
-        }
-        Err(fabro_workflows::error::FabroError::Cancelled) => (
-            StageStatus::Fail,
-            Some("Cancelled".to_string()),
-            RunStatus::Failed,
-            Some(StatusReason::Cancelled),
-        ),
-        Err(err) => (
-            StageStatus::Fail,
-            Some(err.to_string()),
-            RunStatus::Failed,
-            Some(StatusReason::WorkflowError),
-        ),
-    }
-}
-
-pub(crate) fn build_conclusion(
-    run_dir: &Path,
-    status: StageStatus,
-    failure_reason: Option<String>,
-    run_duration_ms: u64,
-    final_git_commit_sha: Option<String>,
-) -> Conclusion {
-    let checkpoint = Checkpoint::load(&run_dir.join("checkpoint.json")).ok();
-    let stage_durations = fabro_retro::retro::extract_stage_durations(run_dir);
-
-    let mut total_input_tokens: i64 = 0;
-    let mut total_output_tokens: i64 = 0;
-    let mut total_cache_read_tokens: i64 = 0;
-    let mut total_cache_write_tokens: i64 = 0;
-    let mut total_reasoning_tokens: i64 = 0;
-    let mut has_pricing = false;
-
-    let (stages, total_cost, total_retries) = if let Some(ref cp) = checkpoint {
-        let mut stages = Vec::new();
-        let mut cost_sum: Option<f64> = None;
-        let mut retries_sum: u32 = 0;
-
-        for node_id in &cp.completed_nodes {
-            let outcome = cp.node_outcomes.get(node_id);
-            let retries = cp
-                .node_retries
-                .get(node_id)
-                .copied()
-                .unwrap_or(1)
-                .saturating_sub(1);
-            retries_sum += retries;
-
-            let cost = outcome.and_then(|o| o.usage.as_ref()).and_then(|u| u.cost);
-            if let Some(c) = cost {
-                *cost_sum.get_or_insert(0.0) += c;
-                has_pricing = true;
-            }
-
-            if let Some(usage) = outcome.and_then(|o| o.usage.as_ref()) {
-                total_input_tokens += usage.input_tokens;
-                total_output_tokens += usage.output_tokens;
-                total_cache_read_tokens += usage.cache_read_tokens.unwrap_or(0);
-                total_cache_write_tokens += usage.cache_write_tokens.unwrap_or(0);
-                total_reasoning_tokens += usage.reasoning_tokens.unwrap_or(0);
-            }
-
-            stages.push(fabro_workflows::conclusion::StageSummary {
-                stage_id: node_id.clone(),
-                stage_label: node_id.clone(),
-                duration_ms: stage_durations.get(node_id).copied().unwrap_or(0),
-                cost,
-                retries,
-            });
-        }
-        (stages, cost_sum, retries_sum)
-    } else {
-        (vec![], None, 0)
-    };
-
-    Conclusion {
-        timestamp: Utc::now(),
-        status,
-        duration_ms: run_duration_ms,
-        failure_reason,
-        final_git_commit_sha,
-        stages,
-        total_cost,
-        total_retries,
-        total_input_tokens,
-        total_output_tokens,
-        total_cache_read_tokens,
-        total_cache_write_tokens,
-        total_reasoning_tokens,
-        has_pricing,
-    }
-}
-
-pub(crate) fn persist_terminal_outcome(
-    run_dir: &Path,
-    conclusion: &Conclusion,
-    run_status: RunStatus,
-    status_reason: Option<StatusReason>,
-) {
-    let _ = conclusion.save(&run_dir.join("conclusion.json"));
-    fabro_workflows::run_status::write_run_status(run_dir, run_status, status_reason);
-}
-
 /// Print a summary of the completed run from `conclusion.json` and `pull_request.json`.
 ///
 /// Used by the unified create+start+attach path in `main.rs` to display
@@ -2677,43 +2557,6 @@ async fn run_preflight(
     }
 }
 
-/// Write a finalize commit to the shadow branch with retro.json and final node files.
-///
-/// This captures the last diff.patch (written after the final checkpoint) and retro.json.
-/// Best-effort: errors are logged as warnings.
-pub(crate) async fn write_finalize_commit(config: &RunSettings, run_dir: &std::path::Path) {
-    let (Some(meta_branch), Some(repo_path)) = (
-        config.git.as_ref().and_then(|g| g.meta_branch.as_ref()),
-        config.host_repo_path.as_ref(),
-    ) else {
-        return;
-    };
-
-    let store = fabro_workflows::git::MetadataStore::new(repo_path, &config.git_author);
-    let mut entries = fabro_workflows::git::scan_node_files(run_dir);
-    if let Ok(retro_bytes) = std::fs::read(run_dir.join("retro.json")) {
-        entries.push(("retro.json".to_string(), retro_bytes));
-    }
-    let refs: Vec<(&str, &[u8])> = entries
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_slice()))
-        .collect();
-    if let Err(e) = store.write_files(&config.run_id, &refs, "finalize run") {
-        tracing::warn!(error = %e, "Failed to write finalize commit to metadata branch");
-        return;
-    }
-
-    // Push the finalize commit
-    let refspec = format!("refs/heads/{meta_branch}");
-    fabro_workflows::engine::git_push_host(
-        repo_path,
-        &refspec,
-        &config.github_app,
-        "finalize metadata",
-    )
-    .await;
-}
-
 /// Generate a retro report for a completed workflow run.
 ///
 /// Derives a basic retro from the checkpoint, then optionally runs the retro agent
@@ -2734,185 +2577,85 @@ pub(crate) async fn generate_retro(
     styles: &'static Styles,
     emitter: Option<Arc<EventEmitter>>,
 ) {
-    let cp = match Checkpoint::load(&run_dir.join("checkpoint.json")) {
-        Ok(cp) => cp,
-        Err(e) => {
-            eprintln!(
-                "{} Could not load checkpoint, skipping retro: {e}",
-                styles.yellow.apply_to("Warning:"),
-            );
-            return;
-        }
-    };
-
-    let completed_stages = fabro_workflows::build_completed_stages(&cp, failed);
-    let stage_durations = fabro_retro::retro::extract_stage_durations(run_dir);
-    let mut retro = fabro_retro::retro::derive_retro(
-        run_id,
-        workflow_name,
-        goal,
-        completed_stages,
-        run_duration_ms,
-        &stage_durations,
-    );
-
-    match retro.save(run_dir) {
-        Ok(()) => {}
-        Err(e) => {
-            eprintln!(
-                "{} Failed to save initial retro: {e}",
-                styles.yellow.apply_to("Warning:"),
-            );
-        }
-    }
-
-    // Run retro agent session
     eprintln!("\n{}", styles.bold.apply_to("=== Retro ==="));
-
-    let retro_start = std::time::Instant::now();
-    if let Some(ref em) = emitter {
-        em.emit(&fabro_workflows::event::WorkflowRunEvent::RetroStarted);
-    } else {
+    if emitter.is_none() {
         eprintln!(
             "{}",
             styles.dim.apply_to(format!("Running retro ({model})..."))
         );
     }
 
-    let narrative_result = if dry_run_mode {
-        Ok(fabro_retro::retro_agent::dry_run_narrative())
-    } else if let Some(client) = llm_client {
-        let emitter_clone = emitter.clone();
-        let event_callback: Option<Arc<dyn Fn(fabro_agent::SessionEvent) + Send + Sync>> =
-            emitter_clone.map(
-                |em| -> Arc<dyn Fn(fabro_agent::SessionEvent) + Send + Sync> {
-                    Arc::new(move |event: fabro_agent::SessionEvent| {
-                        em.touch();
+    let retro_start = std::time::Instant::now();
+    let retro = fabro_workflows::pipeline::run_retro(&fabro_workflows::pipeline::RetroOptions {
+        run_id: run_id.to_string(),
+        workflow_name: workflow_name.to_string(),
+        goal: goal.to_string(),
+        run_dir: run_dir.to_path_buf(),
+        sandbox: Arc::clone(sandbox),
+        emitter,
+        failed,
+        run_duration_ms,
+        enabled: true,
+        dry_run: dry_run_mode,
+        llm_client: llm_client.cloned(),
+        provider: provider_enum,
+        model: model.to_string(),
+    })
+    .await;
 
-                        if !matches!(
-                            &event.event,
-                            fabro_agent::AgentEvent::SessionStarted
-                                | fabro_agent::AgentEvent::SessionEnded
-                                | fabro_agent::AgentEvent::AssistantTextStart
-                                | fabro_agent::AgentEvent::AssistantOutputReplace { .. }
-                                | fabro_agent::AgentEvent::TextDelta { .. }
-                                | fabro_agent::AgentEvent::ReasoningDelta { .. }
-                                | fabro_agent::AgentEvent::ToolCallOutputDelta { .. }
-                                | fabro_agent::AgentEvent::SkillExpanded { .. }
-                        ) {
-                            em.emit(&fabro_workflows::event::WorkflowRunEvent::Agent {
-                                stage: "retro".to_string(),
-                                event: event.event.clone(),
-                            });
-                        }
-                    })
-                },
-            );
-        fabro_retro::retro_agent::run_retro_agent(
-            sandbox,
-            run_dir,
-            client,
-            provider_enum,
-            model,
-            event_callback,
-        )
-        .await
+    let retro_dur = run_progress::format_duration_short(retro_start.elapsed());
+    if let Some(retro) = retro {
+        let smoothness_str = retro
+            .smoothness
+            .as_ref()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        let outcome_str = retro.outcome.as_deref().unwrap_or("No outcome recorded");
+        let line1_content = format!("Retro: {smoothness_str} \u{2014} {outcome_str}");
+        let term_width = console::Term::stderr().size().1 as usize;
+        let dur_len = retro_dur.len();
+        let pad1 = term_width.saturating_sub(line1_content.len() + dur_len);
+        eprintln!(
+            "{} {}{:pad1$}{}",
+            styles.bold.apply_to("Retro:"),
+            styles
+                .dim
+                .apply_to(format!("{smoothness_str} \u{2014} {outcome_str}")),
+            "",
+            styles.dim.apply_to(&retro_dur),
+        );
+
+        let friction_count = retro.friction_points.as_ref().map(|v| v.len()).unwrap_or(0);
+        let open_count = retro.open_items.as_ref().map(|v| v.len()).unwrap_or(0);
+        if friction_count > 0 || open_count > 0 {
+            let mut parts = Vec::new();
+            if friction_count > 0 {
+                let noun = if friction_count == 1 {
+                    "friction point"
+                } else {
+                    "friction points"
+                };
+                parts.push(format!("{friction_count} {noun}"));
+            }
+            if open_count > 0 {
+                let noun = if open_count == 1 {
+                    "open item"
+                } else {
+                    "open items"
+                };
+                parts.push(format!("{open_count} {noun}"));
+            }
+            eprintln!("  {}", styles.dim.apply_to(parts.join(" \u{00b7} ")));
+        }
+
+        let retro_path = format!("{}/retro.json", tilde_path(run_dir));
+        eprintln!(
+            "  {} {}",
+            styles.dim.apply_to("Retro saved to"),
+            styles.underline.apply_to(&retro_path),
+        );
     } else {
-        Err(anyhow::anyhow!("No LLM client available"))
-    };
-    let retro_dur_elapsed = retro_start.elapsed();
-
-    if let Some(ref em) = emitter {
-        match &narrative_result {
-            Ok(_) => {
-                em.emit(&fabro_workflows::event::WorkflowRunEvent::RetroCompleted {
-                    duration_ms: retro_dur_elapsed.as_millis() as u64,
-                });
-            }
-            Err(e) => {
-                em.emit(&fabro_workflows::event::WorkflowRunEvent::RetroFailed {
-                    error: e.to_string(),
-                    duration_ms: retro_dur_elapsed.as_millis() as u64,
-                });
-            }
-        }
-    }
-
-    let retro_dur = run_progress::format_duration_short(retro_dur_elapsed);
-
-    match narrative_result {
-        Ok(narrative) => {
-            retro.apply_narrative(narrative);
-            match retro.save(run_dir) {
-                Ok(()) => {
-                    // Line 1: smoothness + outcome with right-aligned duration
-                    let smoothness_str = retro
-                        .smoothness
-                        .as_ref()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| "unknown".to_string());
-                    let outcome_str = retro.outcome.as_deref().unwrap_or("No outcome recorded");
-                    let line1_content = format!("Retro: {smoothness_str} \u{2014} {outcome_str}");
-                    let term_width = console::Term::stderr().size().1 as usize;
-                    let dur_len = retro_dur.len();
-                    let pad1 = term_width.saturating_sub(line1_content.len() + dur_len);
-                    eprintln!(
-                        "{} {}{:pad1$}{}",
-                        styles.bold.apply_to("Retro:"),
-                        styles
-                            .dim
-                            .apply_to(format!("{smoothness_str} \u{2014} {outcome_str}")),
-                        "",
-                        styles.dim.apply_to(&retro_dur),
-                    );
-
-                    // Line 2: friction + open items (only if non-zero)
-                    let friction_count =
-                        retro.friction_points.as_ref().map(|v| v.len()).unwrap_or(0);
-                    let open_count = retro.open_items.as_ref().map(|v| v.len()).unwrap_or(0);
-                    if friction_count > 0 || open_count > 0 {
-                        let mut parts = Vec::new();
-                        if friction_count > 0 {
-                            let noun = if friction_count == 1 {
-                                "friction point"
-                            } else {
-                                "friction points"
-                            };
-                            parts.push(format!("{friction_count} {noun}"));
-                        }
-                        if open_count > 0 {
-                            let noun = if open_count == 1 {
-                                "open item"
-                            } else {
-                                "open items"
-                            };
-                            parts.push(format!("{open_count} {noun}"));
-                        }
-                        eprintln!("  {}", styles.dim.apply_to(parts.join(" \u{00b7} ")));
-                    }
-
-                    // Line 3: file path
-                    let retro_path = format!("{}/retro.json", tilde_path(run_dir));
-                    eprintln!(
-                        "  {} {}",
-                        styles.dim.apply_to("Retro saved to"),
-                        styles.underline.apply_to(&retro_path),
-                    );
-                }
-                Err(e) => {
-                    eprintln!(
-                        "{} Failed to save retro with narrative: {e}",
-                        styles.yellow.apply_to("Warning:"),
-                    );
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!(
-                "{}",
-                styles.dim.apply_to(format!("Retro agent skipped: {e}")),
-            );
-        }
+        eprintln!("{}", styles.dim.apply_to("Retro unavailable"));
     }
 }
 
