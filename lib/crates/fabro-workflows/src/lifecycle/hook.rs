@@ -12,7 +12,7 @@ use fabro_core::state::RunState;
 
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::graph_ops::set_hook_node;
+use crate::hook_context::set_hook_node;
 use crate::outcome::{Outcome, OutcomeExt, StageStatus, StageUsage};
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_sandbox::Sandbox;

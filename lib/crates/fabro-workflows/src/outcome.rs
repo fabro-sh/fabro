@@ -62,6 +62,13 @@ pub trait OutcomeExt: Sized {
 
     /// Get the failure category, if this is a failed outcome.
     fn failure_category(&self) -> Option<FailureCategory>;
+
+    /// Resolve the effective failure category for this outcome.
+    ///
+    /// Returns `None` for success, partial success, and skipped outcomes.
+    /// Failed and retry outcomes default to `Deterministic` when no
+    /// structured failure category is present.
+    fn classified_failure_category(&self) -> Option<FailureCategory>;
 }
 
 impl OutcomeExt for Outcome {
@@ -113,6 +120,15 @@ impl OutcomeExt for Outcome {
 
     fn failure_category(&self) -> Option<FailureCategory> {
         self.failure.as_ref().map(|f| f.category)
+    }
+
+    fn classified_failure_category(&self) -> Option<FailureCategory> {
+        match self.status {
+            StageStatus::Success | StageStatus::PartialSuccess | StageStatus::Skipped => None,
+            StageStatus::Fail | StageStatus::Retry => self
+                .failure_category()
+                .or(Some(FailureCategory::Deterministic)),
+        }
     }
 }
 
@@ -271,6 +287,75 @@ mod tests {
         assert_eq!(
             o.failure.as_ref().unwrap().signature.as_deref(),
             Some("sig")
+        );
+    }
+
+    #[test]
+    fn classified_failure_category_returns_none_for_success() {
+        assert!(Outcome::success().classified_failure_category().is_none());
+    }
+
+    #[test]
+    fn classified_failure_category_returns_none_for_skipped() {
+        assert!(Outcome::skipped("").classified_failure_category().is_none());
+    }
+
+    #[test]
+    fn classified_failure_category_returns_none_for_partial_success() {
+        let outcome = Outcome {
+            status: StageStatus::PartialSuccess,
+            ..Outcome::success()
+        };
+        assert!(outcome.classified_failure_category().is_none());
+    }
+
+    #[test]
+    fn classified_failure_category_reads_failure_detail() {
+        let mut outcome = Outcome::fail_classify("some error");
+        outcome.failure.as_mut().unwrap().category = FailureCategory::BudgetExhausted;
+        assert_eq!(
+            outcome.classified_failure_category(),
+            Some(FailureCategory::BudgetExhausted)
+        );
+    }
+
+    #[test]
+    fn classified_failure_category_uses_failure_reason_heuristics() {
+        let outcome = Outcome::fail_classify("rate limited by provider");
+        assert_eq!(
+            outcome.classified_failure_category(),
+            Some(FailureCategory::TransientInfra)
+        );
+    }
+
+    #[test]
+    fn classified_failure_category_defaults_to_deterministic() {
+        let outcome = Outcome::fail_classify("something went wrong");
+        assert_eq!(
+            outcome.classified_failure_category(),
+            Some(FailureCategory::Deterministic)
+        );
+    }
+
+    #[test]
+    fn classified_failure_category_fail_no_reason_is_deterministic() {
+        let outcome = Outcome {
+            status: StageStatus::Fail,
+            failure: None,
+            ..Outcome::success()
+        };
+        assert_eq!(
+            outcome.classified_failure_category(),
+            Some(FailureCategory::Deterministic)
+        );
+    }
+
+    #[test]
+    fn classified_failure_category_retry_status_uses_heuristics() {
+        let outcome = Outcome::retry_classify("connection refused");
+        assert_eq!(
+            outcome.classified_failure_category(),
+            Some(FailureCategory::TransientInfra)
         );
     }
 

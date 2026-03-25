@@ -5,11 +5,11 @@ use async_trait::async_trait;
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{EdgeContext, NodeDecision, RunLifecycle};
 use fabro_core::state::RunState;
+use fabro_graphviz::graph::types::{Edge as GvEdge, Graph as GvGraph, Node as GvNode};
 
 use crate::context::keys;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::graph_ops::{resolve_fidelity, resolve_thread_id};
 use crate::handler::llm::preamble::build_preamble;
 use crate::outcome::StageUsage;
 
@@ -20,19 +20,19 @@ type WfNodeDecision = NodeDecision<Option<StageUsage>>;
 /// for fidelity/thread resolution.
 #[derive(Debug, Clone)]
 struct IncomingEdgeData {
-    edge: Arc<fabro_graphviz::graph::types::Edge>,
+    edge: Arc<GvEdge>,
 }
 
 /// Sub-lifecycle responsible for fidelity/thread resolution and context key setup.
 pub struct FidelityLifecycle {
-    pub graph: Arc<fabro_graphviz::graph::types::Graph>,
+    pub graph: Arc<GvGraph>,
     incoming_edge_data: Mutex<Option<IncomingEdgeData>>,
     /// True on the first node after checkpoint resume when prior fidelity was Full.
     degrade_fidelity_on_resume: Mutex<bool>,
 }
 
 impl FidelityLifecycle {
-    pub fn new(graph: Arc<fabro_graphviz::graph::types::Graph>) -> Self {
+    pub fn new(graph: Arc<GvGraph>) -> Self {
         Self {
             graph,
             incoming_edge_data: Mutex::new(None),
@@ -152,5 +152,267 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
             *self.incoming_edge_data.lock().unwrap() = Some(edge_data);
         }
         Ok(fabro_core::lifecycle::EdgeDecision::Continue)
+    }
+}
+
+/// Resolve the context fidelity for a node, following the precedence:
+/// 1. Incoming edge `fidelity` attribute
+/// 2. Target node `fidelity` attribute
+/// 3. Graph `default_fidelity` attribute
+/// 4. Default: Compact
+fn resolve_fidelity(
+    incoming_edge: Option<&GvEdge>,
+    node: &GvNode,
+    graph: &GvGraph,
+) -> keys::Fidelity {
+    let (resolved, source) = if let Some(f) = incoming_edge
+        .and_then(|e| e.fidelity())
+        .and_then(|s| s.parse().ok())
+    {
+        (f, "edge")
+    } else if let Some(f) = node.fidelity().and_then(|s| s.parse().ok()) {
+        (f, "node")
+    } else if let Some(f) = graph.default_fidelity().and_then(|s| s.parse().ok()) {
+        (f, "graph")
+    } else {
+        (keys::Fidelity::default(), "default")
+    };
+
+    tracing::debug!(
+        node = %node.id,
+        fidelity = %resolved,
+        source = source,
+        "Fidelity resolved"
+    );
+
+    resolved
+}
+
+/// Resolve the thread ID for a node, following the precedence:
+/// 1. Incoming edge `thread_id` attribute
+/// 2. Target node `thread_id` attribute
+/// 3. Graph-level default thread
+/// 4. Derived class from enclosing subgraph (first class from the node's classes list)
+/// 5. Fallback to previous node ID
+fn resolve_thread_id(
+    incoming_edge: Option<&GvEdge>,
+    node: &GvNode,
+    graph: &GvGraph,
+    previous_node_id: Option<&str>,
+) -> Option<String> {
+    if let Some(edge) = incoming_edge {
+        if let Some(tid) = edge.thread_id() {
+            return Some(tid.to_string());
+        }
+    }
+    if let Some(tid) = node.thread_id() {
+        return Some(tid.to_string());
+    }
+    if let Some(tid) = graph.default_thread() {
+        return Some(tid.to_string());
+    }
+    if let Some(first_class) = node.classes.first() {
+        return Some(first_class.clone());
+    }
+    previous_node_id.map(String::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
+
+    use super::*;
+    use crate::context::keys::Fidelity;
+
+    #[test]
+    fn fidelity_defaults_to_compact() {
+        let node = Node::new("work");
+        let graph = Graph::new("test");
+        assert_eq!(resolve_fidelity(None, &node, &graph), Fidelity::Compact);
+    }
+
+    #[test]
+    fn fidelity_from_graph_default() {
+        let node = Node::new("work");
+        let mut graph = Graph::new("test");
+        graph.attrs.insert(
+            "default_fidelity".to_string(),
+            AttrValue::String("truncate".to_string()),
+        );
+        assert_eq!(resolve_fidelity(None, &node, &graph), Fidelity::Truncate);
+    }
+
+    #[test]
+    fn fidelity_from_node_overrides_graph() {
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "fidelity".to_string(),
+            AttrValue::String("full".to_string()),
+        );
+        let mut graph = Graph::new("test");
+        graph.attrs.insert(
+            "default_fidelity".to_string(),
+            AttrValue::String("truncate".to_string()),
+        );
+        assert_eq!(resolve_fidelity(None, &node, &graph), Fidelity::Full);
+    }
+
+    #[test]
+    fn fidelity_from_edge_overrides_node() {
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "fidelity".to_string(),
+            AttrValue::String("full".to_string()),
+        );
+        let mut edge = Edge::new("a", "work");
+        edge.attrs.insert(
+            "fidelity".to_string(),
+            AttrValue::String("summary:high".to_string()),
+        );
+        let graph = Graph::new("test");
+        assert_eq!(
+            resolve_fidelity(Some(&edge), &node, &graph),
+            Fidelity::SummaryHigh
+        );
+    }
+
+    #[test]
+    fn thread_id_from_node_attribute() {
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "thread_id".to_string(),
+            AttrValue::String("main-thread".to_string()),
+        );
+        let graph = Graph::new("test");
+        assert_eq!(
+            resolve_thread_id(None, &node, &graph, Some("prev")),
+            Some("main-thread".to_string())
+        );
+    }
+
+    #[test]
+    fn thread_id_from_edge_attribute() {
+        let node = Node::new("work");
+        let mut edge = Edge::new("prev", "work");
+        edge.attrs.insert(
+            "thread_id".to_string(),
+            AttrValue::String("edge-thread".to_string()),
+        );
+        let graph = Graph::new("test");
+        assert_eq!(
+            resolve_thread_id(Some(&edge), &node, &graph, Some("prev")),
+            Some("edge-thread".to_string())
+        );
+    }
+
+    #[test]
+    fn thread_id_node_used_when_no_edge_thread() {
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "thread_id".to_string(),
+            AttrValue::String("node-thread".to_string()),
+        );
+        let edge = Edge::new("prev", "work");
+        let graph = Graph::new("test");
+        assert_eq!(
+            resolve_thread_id(Some(&edge), &node, &graph, Some("prev")),
+            Some("node-thread".to_string())
+        );
+    }
+
+    #[test]
+    fn thread_id_edge_overrides_node() {
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "thread_id".to_string(),
+            AttrValue::String("node-thread".to_string()),
+        );
+        let mut edge = Edge::new("prev", "work");
+        edge.attrs.insert(
+            "thread_id".to_string(),
+            AttrValue::String("edge-thread".to_string()),
+        );
+        let graph = Graph::new("test");
+        assert_eq!(
+            resolve_thread_id(Some(&edge), &node, &graph, Some("prev")),
+            Some("edge-thread".to_string()),
+            "edge thread_id should override node thread_id"
+        );
+    }
+
+    #[test]
+    fn thread_id_from_graph_default_thread() {
+        let node = Node::new("work");
+        let mut graph = Graph::new("test");
+        graph.attrs.insert(
+            "default_thread".to_string(),
+            AttrValue::String("shared-thread".to_string()),
+        );
+        assert_eq!(
+            resolve_thread_id(None, &node, &graph, Some("prev")),
+            Some("shared-thread".to_string())
+        );
+    }
+
+    #[test]
+    fn thread_id_edge_overrides_graph_default() {
+        let node = Node::new("work");
+        let mut edge = Edge::new("prev", "work");
+        edge.attrs.insert(
+            "thread_id".to_string(),
+            AttrValue::String("edge-thread".to_string()),
+        );
+        let mut graph = Graph::new("test");
+        graph.attrs.insert(
+            "default_thread".to_string(),
+            AttrValue::String("shared-thread".to_string()),
+        );
+        assert_eq!(
+            resolve_thread_id(Some(&edge), &node, &graph, Some("prev")),
+            Some("edge-thread".to_string())
+        );
+    }
+
+    #[test]
+    fn thread_id_graph_default_overrides_class() {
+        let mut node = Node::new("work");
+        node.classes = vec!["planning".to_string()];
+        let mut graph = Graph::new("test");
+        graph.attrs.insert(
+            "default_thread".to_string(),
+            AttrValue::String("shared-thread".to_string()),
+        );
+        assert_eq!(
+            resolve_thread_id(None, &node, &graph, Some("prev")),
+            Some("shared-thread".to_string())
+        );
+    }
+
+    #[test]
+    fn thread_id_from_node_class() {
+        let mut node = Node::new("work");
+        node.classes = vec!["planning".to_string(), "review".to_string()];
+        let graph = Graph::new("test");
+        assert_eq!(
+            resolve_thread_id(None, &node, &graph, Some("prev")),
+            Some("planning".to_string())
+        );
+    }
+
+    #[test]
+    fn thread_id_fallback_to_previous_node() {
+        let node = Node::new("work");
+        let graph = Graph::new("test");
+        assert_eq!(
+            resolve_thread_id(None, &node, &graph, Some("prev_node")),
+            Some("prev_node".to_string())
+        );
+    }
+
+    #[test]
+    fn thread_id_none_when_no_sources() {
+        let node = Node::new("start");
+        let graph = Graph::new("test");
+        assert_eq!(resolve_thread_id(None, &node, &graph, None), None);
     }
 }

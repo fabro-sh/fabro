@@ -16,7 +16,8 @@ use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::handler::{format_panic_message, EngineServices};
 use crate::outcome::{Outcome, StageStatus};
-use crate::{graph_ops, run_dir};
+use crate::retry::build_retry_policy;
+use crate::run_dir;
 
 /// Production node handler that bridges fabro-core's NodeHandler to the
 /// existing fabro-workflows Handler trait via EngineServices.
@@ -113,11 +114,7 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
 
     fn retry_policy(&self, node: &WorkflowNode, _graph: &WorkflowGraph) -> CoreRetryPolicy {
         let gv_node = node.inner();
-        let wf_policy = graph_ops::build_retry_policy(gv_node, &self.graph);
-        CoreRetryPolicy {
-            max_attempts: wf_policy.max_attempts,
-            backoff: wf_policy.backoff,
-        }
+        build_retry_policy(gv_node, &self.graph)
     }
 
     fn on_retries_exhausted(&self, node: &WorkflowNode, last_outcome: Outcome) -> Outcome {

@@ -11,7 +11,6 @@ use fabro_core::state::RunState;
 use crate::error::{FailureCategory, FailureSignature};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::graph_ops::classify_outcome;
 use crate::outcome::{OutcomeExt, StageStatus, StageUsage};
 
 type WfRunState = RunState<Option<StageUsage>>;
@@ -69,7 +68,7 @@ impl RunLifecycle<WorkflowGraph> for CircuitBreakerLifecycle {
         let outcome = &result.outcome;
 
         let outcome_failure_category = if outcome.status == StageStatus::Fail {
-            classify_outcome(outcome)
+            outcome.classified_failure_category()
         } else {
             None
         };
@@ -117,7 +116,7 @@ impl RunLifecycle<WorkflowGraph> for CircuitBreakerLifecycle {
         let outcome = ctx.outcome;
 
         // Guard: only TransientInfra failures may trigger loop_restart
-        let failure_class = classify_outcome(outcome);
+        let failure_class = outcome.classified_failure_category();
         if let Some(fc) = failure_class {
             if fc != FailureCategory::TransientInfra {
                 return Ok(EdgeDecision::Block(format!(

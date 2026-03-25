@@ -307,7 +307,7 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
     ) -> CoreResult<()> {
         let outcome = &result.outcome;
         let retry_count = state.node_retries.get(node.id()).copied().unwrap_or(0);
-        let failure_class = crate::graph_ops::classify_outcome(outcome);
+        let failure_class = outcome.classified_failure_category();
         let failure_signature = failure_class
             .map(|category| {
                 let signature_hint = outcome
