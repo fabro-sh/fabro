@@ -60,7 +60,7 @@ pub fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
     let validated = fabro_workflows::operations::create_from_file(&dot_path)?;
     let diagnostics = validated.diagnostics();
 
-    print_diagnostics(&diagnostics, styles);
+    print_diagnostics(diagnostics, styles);
 
     if diagnostics.iter().any(|d| d.severity == Severity::Error) {
         bail!("Validation failed");
