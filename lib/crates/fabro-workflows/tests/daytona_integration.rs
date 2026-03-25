@@ -897,8 +897,8 @@ async fn daytona_parallel_git_branching_e2e() {
 // CLI Backend on Daytona — real CLI tools via exec_command
 // ---------------------------------------------------------------------------
 
-use fabro_workflows::handler::llm::AgentCliBackend;
 use fabro_workflows::handler::agent::{CodergenBackend, CodergenResult};
+use fabro_workflows::handler::llm::AgentCliBackend;
 
 /// Helper: run a real CLI backend test on Daytona.
 ///
