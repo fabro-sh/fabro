@@ -8,7 +8,7 @@ export default defineConfig({
     "/discord": {
       status: 302,
       destination:
-        "https://discord.gg/KE6w49Vg",
+        "https://discord.gg/PxwJ8DQHNE",
     },
     "/docs": {
       status: 302,
