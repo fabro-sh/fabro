@@ -6,8 +6,8 @@ use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{EdgeContext, NodeDecision, RunLifecycle};
 use fabro_core::state::RunState;
 
-use super::super::graph::WorkflowGraph;
-use super::super::WorkflowNode;
+use crate::graph::WorkflowGraph;
+use crate::graph::WorkflowNode;
 use crate::context::keys;
 use crate::graph_ops::{resolve_fidelity, resolve_thread_id};
 use crate::outcome::StageUsage;

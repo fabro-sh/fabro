@@ -8,8 +8,8 @@ use fabro_core::lifecycle::{AttemptContext, AttemptResultContext, EdgeContext, R
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::RunState;
 
-use super::super::graph::WorkflowGraph;
-use super::super::WorkflowNode;
+use crate::graph::WorkflowGraph;
+use crate::graph::WorkflowNode;
 use super::git::GitCheckpointResult;
 use crate::artifact::ArtifactStore;
 use crate::event::{EventEmitter, WorkflowRunEvent};

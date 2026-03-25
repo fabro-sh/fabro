@@ -12,8 +12,8 @@ use fabro_core::retry::RetryPolicy as CoreRetryPolicy;
 
 use crate::context::Context;
 
-use super::graph::WorkflowGraph;
-use super::WorkflowNode;
+use crate::graph::WorkflowGraph;
+use crate::graph::WorkflowNode;
 use crate::handler::{format_panic_message, EngineServices};
 use crate::outcome::{Outcome, StageStatus};
 use crate::{graph_ops, run_dir};
@@ -147,7 +147,7 @@ mod tests {
     use fabro_graphviz::graph::types::{Edge, Graph, Node};
     use fabro_graphviz::graph::AttrValue;
 
-    use super::super::graph::WorkflowGraph;
+    use crate::graph::WorkflowGraph;
     use super::*;
 
     /// Minimal spike handler that always succeeds — proves the trait plumbing.

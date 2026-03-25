@@ -6,7 +6,9 @@ use fabro_core::state::RunState;
 use tokio_util::sync::CancellationToken;
 
 use crate::context::{self, Context};
-use crate::core_adapter::{WorkflowGraph, WorkflowLifecycle, WorkflowNodeHandler};
+use crate::graph::WorkflowGraph;
+use crate::lifecycle::WorkflowLifecycle;
+use crate::node_handler::WorkflowNodeHandler;
 use crate::error::FabroError;
 use crate::handler::EngineServices;
 use crate::outcome::{Outcome, StageStatus};
