@@ -9,10 +9,11 @@ use async_trait::async_trait;
 use crate::condition::evaluate_condition;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
-use crate::engine::WorkflowRunEngine;
 use crate::error::FabroError;
 use crate::operations::{create, create_from_file, CreateOptions};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
+use crate::pipeline;
+use crate::pipeline::types::Initialized;
 use crate::run_settings::RunSettings;
 use fabro_graphviz::graph::{Graph, Node};
 
@@ -171,12 +172,30 @@ impl Handler for SubWorkflowHandler {
         }
         let before_snapshot = context.snapshot();
 
+        let emitter = Arc::clone(&services.emitter);
+        let sandbox = Arc::clone(&services.sandbox);
+        let registry = Arc::clone(&services.registry);
+        let hook_runner = services.hook_runner.clone();
+        let env = services.env.clone();
+        let dry_run = services.dry_run;
+
         // Spawn child engine
-        let engine = WorkflowRunEngine::from_services(services);
         let mut child_handle = tokio::spawn(async move {
-            engine
-                .run_with_context(&child_graph, &child_config, child_context)
-                .await
+            let initialized = Initialized {
+                graph: child_graph,
+                source: String::new(),
+                settings: child_config,
+                checkpoint: None,
+                seed_context: Some(child_context),
+                emitter,
+                sandbox,
+                registry,
+                hook_runner,
+                env,
+                dry_run,
+            };
+            let executed = pipeline::execute(initialized).await;
+            Ok::<_, FabroError>((executed.outcome?, executed.final_context))
         });
 
         // Poll loop

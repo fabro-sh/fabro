@@ -41,7 +41,7 @@ digraph MyPipeline {
 ### Parsing and Validating a Pipeline
 
 ```rust
-use arc_workflows::pipeline::prepare_pipeline;
+use fabro_workflows::operations::{create, CreateOptions};
 
 let dot_source = r#"digraph Simple {
     graph [goal="Run tests"]
@@ -51,49 +51,24 @@ let dot_source = r#"digraph Simple {
     start -> work -> exit
 }"#;
 
-let graph = prepare_pipeline(dot_source)
-    .expect("pipeline should parse and validate");
+let validated = create(dot_source, CreateOptions::default())
+    .expect("pipeline should parse");
+validated.raise_on_errors().expect("pipeline should validate");
+let (graph, _, _) = validated.into_parts();
 assert_eq!(graph.name, "Simple");
 assert_eq!(graph.goal(), "Run tests");
 ```
 
-`prepare_pipeline` parses the DOT source, applies built-in transforms (variable expansion, stylesheet application, preamble injection), and validates the graph against 14 built-in lint rules.
+`operations::create` parses the DOT source, applies built-in transforms (variable expansion, stylesheet application, preamble injection), and returns diagnostics through `Validated`.
 
 ### Running a Pipeline
 
 ```rust
-use arc_workflows::engine::{PipelineEngine, RunSettings};
-use arc_workflows::event::EventEmitter;
-use arc_workflows::handler::HandlerRegistry;
-use arc_workflows::handler::start::StartHandler;
-use arc_workflows::handler::exit::ExitHandler;
-use arc_workflows::handler::agent::AgentHandler;
-use arc_workflows::pipeline::prepare_pipeline;
+use fabro_workflows::operations::start;
+use fabro_workflows::pipeline;
 
-let graph = prepare_pipeline(dot_source).unwrap();
-
-let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
-registry.register("start", Box::new(StartHandler));
-registry.register("exit", Box::new(ExitHandler));
-registry.register("agent", Box::new(AgentHandler::new(None)));
-
-let engine = PipelineEngine::new(registry, EventEmitter::new());
-let config = RunSettings {
-    config: fabro_config::FabroConfig::default(),
-    run_dir: "/tmp/pipeline-run".into(),
-    cancel_token: None,
-    dry_run: false,
-    run_id: "example-run".into(),
-    labels: std::collections::HashMap::new(),
-    git_author: fabro_workflows::git::GitAuthor::default(),
-    workflow_slug: None,
-    github_app: None,
-    base_branch: None,
-    host_repo_path: None,
-    git: None,
-};
-
-// engine.run(&graph, &config).await
+// Use `operations::start(...)` for the full initialize -> execute -> retro -> finalize flow.
+// Use `pipeline::initialize(...)` + `pipeline::execute(...)` when you need partial lifecycle control.
 ```
 
 ### Custom Handlers
