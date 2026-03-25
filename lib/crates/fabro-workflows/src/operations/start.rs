@@ -509,4 +509,40 @@ mod tests {
         assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
         assert!(started.retro.is_none());
     }
+
+    #[tokio::test]
+    async fn start_runs_loaded_persisted_workflow() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        let wrong_run_dir = temp.path().join("wrong-run-dir");
+        let emitter = Arc::new(EventEmitter::new());
+        let registry = Arc::new(test_registry());
+        let sandbox: Arc<dyn Sandbox> =
+            Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
+
+        persisted_workflow(MINIMAL_DOT, &run_dir);
+        let loaded = Persisted::load(&run_dir).unwrap();
+
+        let started = start(
+            loaded,
+            test_start_options(
+                &wrong_run_dir,
+                sandbox,
+                emitter,
+                registry,
+                LifecycleConfig {
+                    setup_commands: vec![],
+                    setup_command_timeout_ms: 1_000,
+                    devcontainer_phases: vec![],
+                },
+                true,
+            ),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
+        assert!(run_dir.join("conclusion.json").exists());
+        assert!(!wrong_run_dir.join("conclusion.json").exists());
+    }
 }
