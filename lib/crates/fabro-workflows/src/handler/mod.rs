@@ -1,10 +1,10 @@
 pub mod agent;
 pub mod command;
-pub mod llm;
 pub mod conditional;
 pub mod exit;
 pub mod fan_in;
 pub mod human;
+pub mod llm;
 pub mod manager_loop;
 pub mod parallel;
 pub mod prompt;

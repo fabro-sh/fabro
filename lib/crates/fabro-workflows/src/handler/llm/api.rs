@@ -12,11 +12,11 @@ use fabro_llm::client::Client;
 use fabro_model::FallbackTarget;
 use fabro_model::Provider;
 
+use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::{Context, WorkflowContext};
 use crate::cost::compute_stage_cost;
 use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
-use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::outcome::StageUsage;
 use fabro_graphviz::graph::Node;
 

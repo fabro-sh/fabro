@@ -8,9 +8,9 @@ use fabro_core::lifecycle::{EdgeContext, EdgeDecision, RunLifecycle};
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::RunState;
 
+use crate::error::{FailureCategory, FailureSignature};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::error::{FailureCategory, FailureSignature};
 use crate::graph_ops::classify_outcome;
 use crate::outcome::{OutcomeExt, StageStatus, StageUsage};
 

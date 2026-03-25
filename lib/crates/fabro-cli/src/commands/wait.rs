@@ -64,7 +64,7 @@ pub fn run(args: WaitArgs, styles: &Styles) -> Result<()> {
     };
 
     let conclusion_path = run_info.path.join("conclusion.json");
-    let conclusion = fabro_workflows::conclusion::Conclusion::load(&conclusion_path).ok();
+    let conclusion = fabro_workflows::records::Conclusion::load(&conclusion_path).ok();
 
     if args.json {
         let json_value = build_json_output(final_status, &run_info.run_id, conclusion.as_ref());
@@ -85,7 +85,7 @@ pub fn run(args: WaitArgs, styles: &Styles) -> Result<()> {
 fn build_json_output(
     status: RunStatus,
     run_id: &str,
-    conclusion: Option<&fabro_workflows::conclusion::Conclusion>,
+    conclusion: Option<&fabro_workflows::records::Conclusion>,
 ) -> serde_json::Value {
     let mut value = serde_json::json!({
         "run_id": run_id,
@@ -103,7 +103,7 @@ fn build_json_output(
 fn print_human_output(
     status: RunStatus,
     run_id: &str,
-    conclusion: Option<&fabro_workflows::conclusion::Conclusion>,
+    conclusion: Option<&fabro_workflows::records::Conclusion>,
     styles: &Styles,
 ) {
     let (style, label) = match status {
@@ -137,7 +137,7 @@ fn print_human_output(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabro_workflows::conclusion::Conclusion;
+    use fabro_workflows::records::Conclusion;
     use fabro_workflows::outcome::StageStatus;
 
     fn no_color_styles() -> Styles {

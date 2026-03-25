@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
-use fabro_workflows::conclusion::Conclusion;
+use fabro_workflows::records::Conclusion;
 use fabro_workflows::event::{RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::run_status::{self, RunStatus, StatusReason};
@@ -331,7 +331,7 @@ mod tests {
         assert_eq!(record.status, RunStatus::Failed);
         assert_eq!(record.reason, Some(StatusReason::BootstrapFailed));
         let conclusion =
-            fabro_workflows::conclusion::Conclusion::load(&dir.path().join("conclusion.json"))
+            fabro_workflows::records::Conclusion::load(&dir.path().join("conclusion.json"))
                 .unwrap();
         assert_eq!(conclusion.status, StageStatus::Fail);
         assert_eq!(

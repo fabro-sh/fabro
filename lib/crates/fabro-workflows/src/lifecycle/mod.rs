@@ -23,11 +23,11 @@ use fabro_core::lifecycle::{
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::RunState;
 
-use crate::graph::WorkflowGraph;
-use crate::graph::WorkflowNode;
 use crate::artifact::ArtifactStore;
 use crate::context;
 use crate::event::EventEmitter;
+use crate::graph::WorkflowGraph;
+use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageUsage};
 use crate::run_settings::RunSettings;
 use fabro_hooks::HookRunner;

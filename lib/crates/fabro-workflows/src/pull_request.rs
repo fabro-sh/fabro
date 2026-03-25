@@ -6,7 +6,7 @@ use tracing::{debug, info};
 
 use fabro_github::{self as github_app, ssh_url_to_https, GitHubAppCredentials};
 
-use crate::conclusion::Conclusion;
+use crate::records::Conclusion;
 use crate::run_record::RunRecord;
 use fabro_retro::retro::Retro;
 
@@ -452,7 +452,7 @@ pub async fn maybe_open_pull_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::conclusion::StageSummary;
+    use crate::records::StageSummary;
     use chrono::Utc;
     use fabro_retro::retro::{
         AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,

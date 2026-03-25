@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::checkpoint::Checkpoint;
-use crate::conclusion::Conclusion;
+use crate::records::Conclusion;
 use crate::error::FabroError;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
@@ -106,7 +106,7 @@ pub fn build_conclusion(
                 total_reasoning_tokens += usage.reasoning_tokens.unwrap_or(0);
             }
 
-            stages.push(crate::conclusion::StageSummary {
+            stages.push(crate::records::StageSummary {
                 stage_id: node_id.clone(),
                 stage_label: node_id.clone(),
                 duration_ms: stage_durations.get(node_id).copied().unwrap_or(0),

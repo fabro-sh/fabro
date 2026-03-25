@@ -6,12 +6,12 @@ use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{EdgeContext, NodeDecision, RunLifecycle};
 use fabro_core::state::RunState;
 
+use crate::context::keys;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::context::keys;
 use crate::graph_ops::{resolve_fidelity, resolve_thread_id};
+use crate::handler::llm::preamble::build_preamble;
 use crate::outcome::StageUsage;
-use crate::preamble::build_preamble;
 
 type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeDecision = NodeDecision<Option<StageUsage>>;

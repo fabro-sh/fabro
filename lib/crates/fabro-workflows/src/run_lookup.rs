@@ -165,7 +165,7 @@ fn read_status(run_dir: &Path) -> StatusInfo {
     if let Ok(record) = RunStatusRecord::load(&run_dir.join("status.json")) {
         if record.status.is_terminal() {
             if let Ok(conclusion) =
-                crate::conclusion::Conclusion::load(&run_dir.join("conclusion.json"))
+                crate::records::Conclusion::load(&run_dir.join("conclusion.json"))
             {
                 return StatusInfo {
                     status: record.status,

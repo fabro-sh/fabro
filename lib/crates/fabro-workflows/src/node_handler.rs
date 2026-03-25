@@ -147,8 +147,8 @@ mod tests {
     use fabro_graphviz::graph::types::{Edge, Graph, Node};
     use fabro_graphviz::graph::AttrValue;
 
-    use crate::graph::WorkflowGraph;
     use super::*;
+    use crate::graph::WorkflowGraph;
 
     /// Minimal spike handler that always succeeds — proves the trait plumbing.
     pub struct SpikeHandler;
