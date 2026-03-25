@@ -648,8 +648,20 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         }
     }
 
-    let run_record = fabro_workflows::run_record::RunRecord::load(&run_dir)
-        .expect("RunRecord must exist — written by start_run");
+    let run_record = match fabro_workflows::run_record::RunRecord::load(&run_dir) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(run_id = %run_id, error = %e, "Failed to load RunRecord");
+            let mut runs = state.runs.lock().expect("runs lock poisoned");
+            if let Some(managed_run) = runs.get_mut(&run_id) {
+                managed_run.status = RunStatus::Failed;
+                managed_run.error = Some(format!("Failed to load run record: {e}"));
+                managed_run.event_tx = None;
+            }
+            state.scheduler_notify.notify_one();
+            return;
+        }
+    };
     let config = RunSettings {
         config: run_record.config,
         run_dir,

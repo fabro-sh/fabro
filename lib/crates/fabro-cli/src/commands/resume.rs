@@ -937,7 +937,7 @@ async fn run_resumed(
         mut run_cfg,
         sandbox,
         emitter,
-        settings: mut config,
+        mut settings,
         setup_commands,
         devcontainer_phases,
         devcontainer_env,
@@ -1137,7 +1137,7 @@ async fn run_resumed(
             }
         }
     };
-    config.dry_run = dry_run_mode;
+    settings.dry_run = dry_run_mode;
 
     if let Some(ref mut cfg) = run_cfg {
         run_config::resolve_sandbox_env(cfg)?;
@@ -1295,7 +1295,7 @@ async fn run_resumed(
 
     let run_start = Instant::now();
     let engine_result = engine
-        .run_with_lifecycle(&graph, &mut config, lifecycle, Some(&checkpoint))
+        .run_with_lifecycle(&graph, &mut settings, lifecycle, Some(&checkpoint))
         .await;
     let run_duration_ms = run_start.elapsed().as_millis() as u64;
     let mut completion_guard = DetachedRunCompletionGuard::arm(&run_dir);
@@ -1329,7 +1329,7 @@ async fn run_resumed(
         };
 
         generate_retro(
-            &config.run_id,
+            &settings.run_id,
             &graph.name,
             graph.goal(),
             &run_dir,
@@ -1350,13 +1350,13 @@ async fn run_resumed(
     progress_ui.lock().expect("progress lock poisoned").finish();
 
     // Write finalize commit with retro.json + final node files (captures last diff.patch)
-    write_finalize_commit(&config, &run_dir).await;
+    write_finalize_commit(&settings, &run_dir).await;
 
     // Auto-create PR on successful completion (mirrors run_command)
     let mut pushed_branch: Option<String> = None;
     let mut pr_url: Option<String> = None;
-    if let Some(pr_cfg) = config.pull_request() {
-        if config.dry_run {
+    if let Some(pr_cfg) = settings.pull_request() {
+        if settings.dry_run {
             debug!("Skipping PR creation: dry-run mode");
         } else if let Err(ref e) = engine_result {
             debug!(error = %e, "Skipping PR creation: engine returned an error");
@@ -1376,12 +1376,12 @@ async fn run_resumed(
                     Some(ref creds),
                     Some(ref origin),
                 ) = (
-                    &config.base_branch,
-                    config.git.as_ref().and_then(|g| g.run_branch.as_ref()),
+                    &settings.base_branch,
+                    settings.git.as_ref().and_then(|g| g.run_branch.as_ref()),
                     &github_app,
                     &origin_url,
                 ) {
-                    if config.git.is_some() {
+                    if settings.git.is_some() {
                         pushed_branch = Some(run_branch.to_string());
                     }
 
@@ -1466,7 +1466,7 @@ async fn run_resumed(
         }
     }
     if let Err(e) = engine
-        .cleanup_sandbox(&config.run_id, &graph.name, preserve)
+        .cleanup_sandbox(&settings.run_id, &graph.name, preserve)
         .await
     {
         tracing::warn!(error = %e, "Sandbox cleanup failed");
