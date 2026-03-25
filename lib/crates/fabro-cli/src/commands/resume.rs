@@ -18,7 +18,7 @@ use fabro_workflows::operations::{
 };
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::pipeline::{
-    build_conclusion, classify_engine_result, persist_terminal_outcome,
+    build_conclusion, classify_engine_result, persist_terminal_outcome, PersistOptions, Persisted,
 };
 use fabro_workflows::records::Checkpoint;
 use fabro_workflows::records::RunRecord;
@@ -97,7 +97,7 @@ pub struct ResumeArgs {
 /// Intermediate state produced by the two resolution paths (checkpoint-file vs. git-branch).
 struct ResumeContext {
     checkpoint: Checkpoint,
-    validated: fabro_workflows::pipeline::Validated,
+    persisted: Persisted,
     run_id: String,
     run_dir: PathBuf,
     run_cfg: Option<FabroConfig>,
@@ -227,47 +227,55 @@ async fn prepare_from_checkpoint(
         .run_dir
         .clone()
         .unwrap_or_else(|| default_run_dir(&run_id, args.dry_run));
+    let labels = args
+        .label
+        .iter()
+        .filter_map(|s| s.split_once('='))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    let working_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let cli_flags = super::create::CliFlags {
+        dry_run: args.dry_run,
+        auto_approve: args.auto_approve,
+        no_retro: args.no_retro,
+        verbose: args.verbose,
+        preserve_sandbox: args.preserve_sandbox,
+    };
+    let normalized = super::create::normalize_config(
+        run_cfg.as_ref(),
+        &prepared_run_defaults,
+        &prepared_model,
+        prepared_provider.as_deref(),
+        sandbox_provider,
+        &graph,
+        cli_flags,
+    );
+    let persisted = fabro_workflows::pipeline::persist(
+        validated,
+        PersistOptions {
+            run_dir: run_dir.clone(),
+            run_record: fabro_workflows::records::RunRecord {
+                run_id: run_id.clone(),
+                created_at: chrono::Utc::now(),
+                config: normalized,
+                graph: graph.clone(),
+                workflow_slug: workflow_slug.clone(),
+                working_directory: working_directory.clone(),
+                host_repo_path: Some(working_directory.to_string_lossy().to_string()),
+                base_branch: None,
+                labels,
+            },
+        },
+    )?;
+    let run_cfg: Option<FabroConfig> = Some(persisted.run_record().config.clone());
+    let settings_config = persisted.run_record().config.clone();
+
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
     let status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
     tokio::fs::write(cached_graph_path(&run_dir), &source).await?;
-    let run_cfg: Option<FabroConfig> = run_cfg;
     write_run_config_snapshot(&run_dir, workflow_toml_path.as_deref()).await?;
-
-    // Write RunRecord for the resumed run
-    let settings_config = {
-        let working_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let cli_flags = super::create::CliFlags {
-            dry_run: args.dry_run,
-            auto_approve: args.auto_approve,
-            no_retro: args.no_retro,
-            verbose: args.verbose,
-            preserve_sandbox: args.preserve_sandbox,
-        };
-        let normalized = super::create::normalize_config(
-            run_cfg.as_ref(),
-            &prepared_run_defaults,
-            &prepared_model,
-            prepared_provider.as_deref(),
-            sandbox_provider,
-            &graph,
-            cli_flags,
-        );
-        let record = fabro_workflows::records::RunRecord {
-            run_id: run_id.clone(),
-            created_at: chrono::Utc::now(),
-            config: normalized.clone(),
-            graph: graph.clone(),
-            workflow_slug: workflow_slug.clone(),
-            working_directory: working_directory.clone(),
-            host_repo_path: Some(working_directory.to_string_lossy().to_string()),
-            base_branch: None,
-            labels: std::collections::HashMap::new(),
-        };
-        let _ = record.save(&run_dir);
-        normalized
-    };
 
     let original_cwd = std::env::current_dir()?;
     let emitter = Arc::new(EventEmitter::new());
@@ -482,7 +490,7 @@ async fn prepare_from_checkpoint(
 
     Ok(ResumeContext {
         checkpoint,
-        validated,
+        persisted,
         run_id,
         run_dir,
         run_cfg,
@@ -553,7 +561,7 @@ async fn prepare_from_branch(
         .or_else(|| repo_info.as_ref().and_then(|(_, branch)| branch.clone()));
     let base_sha = start_record.as_ref().and_then(|s| s.base_sha.clone());
 
-    let (validated, graph_source, run_cfg, mut sandbox_provider, workflow_slug) =
+    let (mut validated, mut graph_source, mut run_cfg, mut sandbox_provider, mut workflow_slug) =
         if let Some(ref workflow_path) = args.workflow {
             let prepared = prepare_workflow_with_project_config(
                 &resume_as_run_args(args, workflow_path.clone()),
@@ -596,15 +604,6 @@ async fn prepare_from_branch(
         } else {
             bail!("no run.json found on metadata branch for run {run_id}");
         };
-    let graph = validated.graph().clone();
-
-    eprintln!(
-        "{} {} from branch {} ({})",
-        styles.bold.apply_to("Resuming workflow:"),
-        graph.name,
-        styles.dim.apply_to(&run_branch),
-        run_id,
-    );
 
     // Set up logs directory — reuse existing run dir for this run_id to avoid
     // "ambiguous prefix" errors when the resume happens on a different day.
@@ -618,55 +617,93 @@ async fn prepare_from_branch(
     };
     tokio::fs::create_dir_all(&run_dir).await?;
     let run_dir = tokio::fs::canonicalize(&run_dir).await.unwrap_or(run_dir);
+    if args.workflow.is_none() {
+        if let Ok(loaded) = Persisted::load(&run_dir) {
+            graph_source = loaded.source().to_string();
+            run_cfg = Some(loaded.run_record().config.clone());
+            workflow_slug = loaded.run_record().workflow_slug.clone();
+            validated = create_from_graph(loaded.graph().clone(), loaded.source().to_string());
+            if !args.dry_run {
+                if let Some(provider) = loaded
+                    .run_record()
+                    .config
+                    .sandbox
+                    .as_ref()
+                    .and_then(|s| s.provider.as_deref())
+                    .and_then(|s| s.parse::<SandboxProvider>().ok())
+                {
+                    sandbox_provider = args.sandbox.map(Into::into).unwrap_or(provider);
+                }
+            }
+        }
+    }
+
+    let graph = validated.graph().clone();
+
+    eprintln!(
+        "{} {} from branch {} ({})",
+        styles.bold.apply_to("Resuming workflow:"),
+        graph.name,
+        styles.dim.apply_to(&run_branch),
+        run_id,
+    );
+
+    let (model_str, provider_str) = resolve_model_provider(
+        args.model.as_deref(),
+        args.provider.as_deref(),
+        run_cfg.as_ref(),
+        run_defaults,
+        &graph,
+    );
+    let cli_flags = super::create::CliFlags {
+        dry_run: args.dry_run,
+        auto_approve: args.auto_approve,
+        no_retro: args.no_retro,
+        verbose: args.verbose,
+        preserve_sandbox: args.preserve_sandbox,
+    };
+    let normalized = super::create::normalize_config(
+        run_cfg.as_ref(),
+        run_defaults,
+        &model_str,
+        provider_str.as_deref(),
+        sandbox_provider,
+        &graph,
+        cli_flags,
+    );
+    let persisted = fabro_workflows::pipeline::persist(
+        validated,
+        PersistOptions {
+            run_dir: run_dir.clone(),
+            run_record: fabro_workflows::records::RunRecord {
+                run_id: run_id.clone(),
+                created_at: chrono::Utc::now(),
+                config: normalized,
+                graph: graph.clone(),
+                workflow_slug: workflow_slug.clone(),
+                working_directory: resume_repo_path.clone(),
+                host_repo_path: Some(resume_repo_path.to_string_lossy().to_string()),
+                base_branch: detected_base_branch.clone(),
+                labels: args
+                    .label
+                    .iter()
+                    .filter_map(|s| s.split_once('='))
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            },
+        },
+    )?;
+    let run_cfg: Option<FabroConfig> = Some(persisted.run_record().config.clone());
+    let settings_config = persisted.run_record().config.clone();
+
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
     let status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
     if !graph_source.is_empty() {
         tokio::fs::write(cached_graph_path(&run_dir), &graph_source).await?;
     }
-    let run_cfg: Option<FabroConfig> = run_cfg;
     // Git-branch resume: no original TOML available, skip debug snapshot.
     write_run_config_snapshot(&run_dir, None).await?;
-
-    // Write RunRecord for the resumed run
-    let settings_config = {
-        let (model_str, provider_str) = resolve_model_provider(
-            args.model.as_deref(),
-            args.provider.as_deref(),
-            run_cfg.as_ref(),
-            run_defaults,
-            &graph,
-        );
-        let cli_flags = super::create::CliFlags {
-            dry_run: args.dry_run,
-            auto_approve: args.auto_approve,
-            no_retro: args.no_retro,
-            verbose: args.verbose,
-            preserve_sandbox: args.preserve_sandbox,
-        };
-        let normalized = super::create::normalize_config(
-            run_cfg.as_ref(),
-            run_defaults,
-            &model_str,
-            provider_str.as_deref(),
-            sandbox_provider,
-            &graph,
-            cli_flags,
-        );
-        let record = fabro_workflows::records::RunRecord {
-            run_id: run_id.clone(),
-            created_at: chrono::Utc::now(),
-            config: normalized.clone(),
-            graph: graph.clone(),
-            workflow_slug: workflow_slug.clone(),
-            working_directory: resume_repo_path.clone(),
-            host_repo_path: Some(resume_repo_path.to_string_lossy().to_string()),
-            base_branch: detected_base_branch.clone(),
-            labels: std::collections::HashMap::new(),
-        };
-        let _ = record.save(&run_dir);
-        normalized
-    };
 
     let emitter = Arc::new(EventEmitter::new());
 
@@ -914,7 +951,7 @@ async fn prepare_from_branch(
 
     Ok(ResumeContext {
         checkpoint,
-        validated,
+        persisted,
         run_id,
         run_dir,
         run_cfg,
@@ -942,7 +979,7 @@ async fn run_resumed(
 ) -> anyhow::Result<()> {
     let ResumeContext {
         checkpoint,
-        validated,
+        persisted,
         run_id,
         run_dir,
         mut run_cfg,
@@ -959,7 +996,7 @@ async fn run_resumed(
         github_app,
         mut status_guard,
     } = ctx;
-    let graph = validated.graph().clone();
+    let graph = persisted.graph().clone();
 
     // Create progress UI (verbose mode shows detailed turn/tool counts and token usage)
     let is_tty = std::io::stderr().is_terminal();
@@ -1256,11 +1293,10 @@ async fn run_resumed(
         settings.pull_request().cloned()
     };
     let started = start(
-        validated,
+        persisted,
         StartOptions {
             init: fabro_workflows::pipeline::InitOptions {
                 run_id: run_id.clone(),
-                run_dir: run_dir.clone(),
                 dry_run: dry_run_mode,
                 emitter: Arc::clone(&emitter),
                 sandbox: Arc::clone(&sandbox),

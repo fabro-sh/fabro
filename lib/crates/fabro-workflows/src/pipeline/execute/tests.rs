@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use fabro_agent::Sandbox;
 use fabro_config::config::FabroConfig;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
@@ -18,11 +19,10 @@ use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::handler::default_registry;
 use crate::handler::start::StartHandler;
 use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
-use crate::operations::create_from_graph;
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline::initialize;
-use crate::pipeline::types::{InitOptions, Validated};
-use crate::records::Checkpoint;
+use crate::pipeline::types::{InitOptions, Persisted};
+use crate::records::{Checkpoint, RunRecord};
 use crate::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
 use crate::test_support::run_graph;
 
@@ -106,6 +106,31 @@ fn simple_validated_graph() -> (Graph, String) {
     (graph, source)
 }
 
+fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: &str) -> Persisted {
+    Persisted::new(
+        graph.clone(),
+        source,
+        vec![],
+        run_dir.to_path_buf(),
+        RunRecord {
+            run_id: run_id.to_string(),
+            created_at: Utc::now(),
+            config: FabroConfig::default(),
+            graph,
+            workflow_slug: Some("test".to_string()),
+            working_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            host_repo_path: Some(
+                std::env::current_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .display()
+                    .to_string(),
+            ),
+            base_branch: Some("main".to_string()),
+            labels: HashMap::new(),
+        },
+    )
+}
+
 fn test_lifecycle(setup_commands: Vec<String>) -> LifecycleConfig {
     LifecycleConfig {
         setup_commands,
@@ -118,12 +143,12 @@ fn test_lifecycle(setup_commands: Vec<String>) -> LifecycleConfig {
 async fn execute_runs_start_to_exit_and_returns_final_context() {
     let temp = tempfile::tempdir().unwrap();
     let run_dir = temp.path().join("run");
+    std::fs::create_dir_all(&run_dir).unwrap();
     let (graph, source) = simple_validated_graph();
     let initialized = initialize(
-        Validated::new(graph, source, vec![]),
+        persisted_workflow(graph, source, &run_dir, "run-test"),
         InitOptions {
             run_id: "run-test".to_string(),
-            run_dir: run_dir.clone(),
             dry_run: false,
             emitter: Arc::new(crate::event::EventEmitter::new()),
             sandbox: Arc::new(fabro_agent::LocalSandbox::new(
@@ -169,12 +194,11 @@ async fn run_with_lifecycle(
 ) -> Result<Outcome, FabroError> {
     let run_dir = settings.run_dir.clone();
     let run_id = settings.run_id.clone();
-    let validated = create_from_graph(graph.clone(), String::new());
+    std::fs::create_dir_all(&run_dir).unwrap();
     let initialized = initialize(
-        validated,
+        persisted_workflow(graph.clone(), String::new(), &run_dir, &run_id),
         InitOptions {
             run_id,
-            run_dir,
             dry_run: settings.dry_run,
             emitter,
             sandbox,

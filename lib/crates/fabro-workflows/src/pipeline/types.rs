@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fabro_agent::Sandbox;
@@ -12,8 +12,7 @@ use crate::error::FabroError;
 use crate::event::EventEmitter;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
-use crate::records::Checkpoint;
-use crate::records::Conclusion;
+use crate::records::{Checkpoint, Conclusion, RunRecord};
 use crate::run_settings::{LifecycleConfig, RunSettings};
 use fabro_validate::Severity;
 
@@ -94,10 +93,104 @@ impl Validated {
     }
 }
 
+/// Options for the PERSIST phase.
+pub struct PersistOptions {
+    pub run_dir: PathBuf,
+    pub run_record: RunRecord,
+}
+
+/// Output of the PERSIST phase. Run directory created, run.json and graph.fabro written.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct Persisted {
+    graph: Graph,
+    source: String,
+    diagnostics: Vec<Diagnostic>,
+    run_dir: PathBuf,
+    run_record: RunRecord,
+}
+
+impl Persisted {
+    /// Create a new `Persisted` from its parts.
+    pub(crate) fn new(
+        graph: Graph,
+        source: String,
+        diagnostics: Vec<Diagnostic>,
+        run_dir: PathBuf,
+        run_record: RunRecord,
+    ) -> Self {
+        Self {
+            graph,
+            source,
+            diagnostics,
+            run_dir,
+            run_record,
+        }
+    }
+
+    pub fn graph(&self) -> &Graph {
+        &self.graph
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+
+    pub fn run_dir(&self) -> &Path {
+        &self.run_dir
+    }
+
+    pub fn run_record(&self) -> &RunRecord {
+        &self.run_record
+    }
+
+    /// True if any diagnostic has Error severity.
+    #[must_use]
+    pub fn has_errors(&self) -> bool {
+        self.diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error)
+    }
+
+    /// Returns `Err(FabroError::Validation)` if any Error-severity diagnostics exist.
+    pub fn raise_on_errors(&self) -> Result<(), FabroError> {
+        if self.has_errors() {
+            let message = self
+                .diagnostics
+                .iter()
+                .filter(|d| d.severity == Severity::Error)
+                .map(|d| d.message.as_str())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(FabroError::Validation(message));
+        }
+        Ok(())
+    }
+
+    /// Consume into owned graph, source, diagnostics, run dir, and run record.
+    pub fn into_parts(self) -> (Graph, String, Vec<Diagnostic>, PathBuf, RunRecord) {
+        (
+            self.graph,
+            self.source,
+            self.diagnostics,
+            self.run_dir,
+            self.run_record,
+        )
+    }
+
+    /// Load a previously persisted run from disk.
+    pub fn load(run_dir: &Path) -> Result<Self, FabroError> {
+        super::persist::load(run_dir)
+    }
+}
+
 /// Options for the INITIALIZE phase.
 pub struct InitOptions {
     pub run_id: String,
-    pub run_dir: PathBuf,
     pub dry_run: bool,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,

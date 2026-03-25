@@ -2,6 +2,7 @@ mod execute;
 mod finalize;
 mod initialize;
 mod parse;
+mod persist;
 mod retro;
 mod transform;
 pub mod types;
@@ -14,6 +15,7 @@ pub use finalize::{
 };
 pub use initialize::initialize;
 pub use parse::parse;
+pub use persist::persist;
 pub use retro::{retro, run_retro};
 pub use transform::transform;
 pub use types::*;
