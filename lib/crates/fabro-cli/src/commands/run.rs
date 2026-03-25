@@ -1406,7 +1406,7 @@ async fn run_command_impl(
                 });
 
                 let is_docker = provider == SandboxProvider::Docker;
-                let record = fabro_workflows::records::SandboxRecord {
+                let record = fabro_sandbox::SandboxRecord {
                     provider: provider.to_string(),
                     working_directory: working_directory.clone(),
                     identifier: sandbox_info_opt,

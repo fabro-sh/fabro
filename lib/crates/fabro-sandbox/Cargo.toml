@@ -19,6 +19,7 @@ test-support = []
 doctest = false
 
 [dependencies]
+anyhow.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

@@ -1608,6 +1608,7 @@ dependencies = [
 name = "fabro-sandbox"
 version = "0.176.2"
 dependencies = [
+ "anyhow",
  "async-trait",
  "base64",
  "bollard",

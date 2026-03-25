@@ -105,12 +105,12 @@ async fn load_sandbox(
     let run_dir = fabro_workflows::run_lookup::resolve_run(base, run_prefix)?.path;
     let sandbox_json = run_dir.join("sandbox.json");
     debug!(path = %sandbox_json.display(), "Loading sandbox record");
-    let record = fabro_workflows::records::SandboxRecord::load(&sandbox_json).context(
+    let record = fabro_sandbox::SandboxRecord::load(&sandbox_json).context(
         "Failed to load sandbox.json — was this run started with a recent version of arc?",
     )?;
 
     info!(run_id = %run_prefix, provider = %record.provider, "Connecting to sandbox");
-    fabro_workflows::sandbox_reconnect::reconnect(&record).await
+    fabro_sandbox::reconnect::reconnect(&record).await
 }
 
 async fn download_recursive(
