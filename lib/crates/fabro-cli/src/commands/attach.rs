@@ -345,7 +345,7 @@ fn write_interview_response_atomically(
 
 fn determine_exit_code(conclusion_path: &Path, status_record: Option<RunStatusRecord>) -> ExitCode {
     if conclusion_path.exists() {
-        if let Ok(conclusion) = fabro_workflows::conclusion::Conclusion::load(conclusion_path) {
+        if let Ok(conclusion) = fabro_workflows::records::Conclusion::load(conclusion_path) {
             let success = matches!(
                 conclusion.status,
                 fabro_workflows::outcome::StageStatus::Success
@@ -395,7 +395,7 @@ mod tests {
     use chrono::Utc;
     use fabro_interview::{Answer, AnswerValue};
     use fabro_util::terminal::Styles;
-    use fabro_workflows::conclusion::Conclusion;
+    use fabro_workflows::records::Conclusion;
     use fabro_workflows::outcome::StageStatus;
     use fabro_workflows::run_status::{write_run_status, StatusReason};
 

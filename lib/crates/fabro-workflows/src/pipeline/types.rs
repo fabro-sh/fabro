@@ -8,7 +8,7 @@ use fabro_hooks::HookRunner;
 use fabro_validate::Diagnostic;
 
 use crate::checkpoint::Checkpoint;
-use crate::conclusion::Conclusion;
+use crate::records::Conclusion;
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::EventEmitter;

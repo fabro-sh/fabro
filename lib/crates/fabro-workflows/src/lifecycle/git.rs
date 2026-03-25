@@ -9,10 +9,10 @@ use fabro_core::lifecycle::RunLifecycle;
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::RunState;
 
-use crate::graph::WorkflowGraph;
-use crate::graph::WorkflowNode;
 use crate::artifact::ArtifactStore;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
+use crate::graph::WorkflowGraph;
+use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageStatus, StageUsage};
 use crate::run_dir::node_dir;
 use crate::run_settings::RunSettings;

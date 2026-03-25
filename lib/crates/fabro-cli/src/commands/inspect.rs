@@ -43,7 +43,7 @@ fn inspect_run_dir(
         .ok()
         .and_then(|v| serde_json::to_value(v).ok());
     let conclusion =
-        fabro_workflows::conclusion::Conclusion::load(&run_dir.join("conclusion.json"))
+        fabro_workflows::records::Conclusion::load(&run_dir.join("conclusion.json"))
             .ok()
             .and_then(|v| serde_json::to_value(v).ok());
     let checkpoint =

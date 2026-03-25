@@ -1852,7 +1852,7 @@ pub(crate) fn emit_run_notice(
 /// the same result block that `run_command` prints in-process.
 pub fn print_run_summary(run_dir: &Path, run_id: &str, styles: &Styles) {
     let conclusion_path = run_dir.join("conclusion.json");
-    let Ok(conclusion) = fabro_workflows::conclusion::Conclusion::load(&conclusion_path) else {
+    let Ok(conclusion) = fabro_workflows::records::Conclusion::load(&conclusion_path) else {
         return;
     };
 
@@ -1879,7 +1879,7 @@ pub fn print_run_summary(run_dir: &Path, run_id: &str, styles: &Styles) {
 }
 
 pub(crate) fn print_run_conclusion(
-    conclusion: &fabro_workflows::conclusion::Conclusion,
+    conclusion: &fabro_workflows::records::Conclusion,
     run_id: &str,
     run_dir: &Path,
     pushed_branch: Option<&str>,
