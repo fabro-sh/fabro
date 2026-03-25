@@ -23,7 +23,7 @@ pub fn start_run(run_dir: &Path) -> Result<std::process::Child> {
     }
 
     // Validate run.json is loadable
-    fabro_workflows::run_record::RunRecord::load(run_dir)
+    fabro_workflows::records::RunRecord::load(run_dir)
         .map_err(|e| anyhow::anyhow!("Cannot start run: failed to load run.json: {e}"))?;
 
     // Write Starting status before spawning to prevent duplicate engines
@@ -105,7 +105,7 @@ mod tests {
     use chrono::Utc;
     use fabro_config::config::FabroConfig;
     use fabro_graphviz::graph::Graph;
-    use fabro_workflows::run_record::RunRecord;
+    use fabro_workflows::records::RunRecord;
     use fabro_workflows::run_status::{write_run_status, RunStatus, RunStatusRecord, StatusReason};
     use std::collections::HashMap;
     use std::path::PathBuf;

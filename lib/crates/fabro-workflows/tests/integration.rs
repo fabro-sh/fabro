@@ -12,7 +12,7 @@ use fabro_interview::{
 };
 use fabro_llm::provider::Provider;
 use fabro_validate::{validate, validate_or_raise, Severity};
-use fabro_workflows::checkpoint::Checkpoint;
+use fabro_workflows::records::Checkpoint;
 use fabro_workflows::context::Context;
 use fabro_workflows::error::FabroError;
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
@@ -5967,7 +5967,7 @@ mod real_llm {
     use super::local_env;
     use fabro_graphviz::graph::{AttrValue, Edge, Graph};
     use fabro_interview::AutoApproveInterviewer;
-    use fabro_workflows::checkpoint::Checkpoint;
+    use fabro_workflows::records::Checkpoint;
     use fabro_workflows::event::EventEmitter;
     use fabro_workflows::handler::exit::ExitHandler;
     use fabro_workflows::handler::human::HumanHandler;
@@ -8716,7 +8716,7 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
 
     // The checkpoint context should contain an artifact pointer, not the full value
     let checkpoint =
-        fabro_workflows::checkpoint::Checkpoint::load(&dir.path().join("checkpoint.json"))
+        fabro_workflows::records::Checkpoint::load(&dir.path().join("checkpoint.json"))
             .expect("checkpoint should load");
     let pointer_value = checkpoint
         .context_values

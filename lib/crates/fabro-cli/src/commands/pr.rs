@@ -325,10 +325,10 @@ async fn create_from(
 ) -> Result<()> {
     let run_dir = fabro_workflows::run_lookup::resolve_run(base, &args.run_id)?.path;
 
-    let record = fabro_workflows::run_record::RunRecord::load(&run_dir)
+    let record = fabro_workflows::records::RunRecord::load(&run_dir)
         .context("Failed to load run.json")?;
 
-    let start = fabro_workflows::start_record::StartRecord::load(&run_dir)
+    let start = fabro_workflows::records::StartRecord::load(&run_dir)
         .context("Failed to load start.json")?;
 
     let conclusion = fabro_workflows::records::Conclusion::load(&run_dir.join("conclusion.json"))

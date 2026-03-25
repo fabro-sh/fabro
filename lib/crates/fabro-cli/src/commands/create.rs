@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use chrono::Utc;
 use fabro_config::config::FabroConfig;
-use fabro_workflows::run_record::RunRecord;
+use fabro_workflows::records::RunRecord;
 use fabro_workflows::sandbox_provider::SandboxProvider;
 
 use super::run::{

@@ -7,7 +7,7 @@ use tracing::{debug, info};
 use fabro_github::{self as github_app, ssh_url_to_https, GitHubAppCredentials};
 
 use crate::records::Conclusion;
-use crate::run_record::RunRecord;
+use crate::records::RunRecord;
 use fabro_retro::retro::Retro;
 
 /// Record of a pull request created for a workflow run.

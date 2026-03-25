@@ -15,7 +15,7 @@ use fabro_config::{project as project_config, run as run_config, sandbox as sand
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, FileInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_util::terminal::Styles;
-use fabro_workflows::checkpoint::Checkpoint;
+use fabro_workflows::records::Checkpoint;
 use fabro_workflows::cost::{compute_stage_cost, format_cost};
 use fabro_workflows::devcontainer_bridge;
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
@@ -761,7 +761,7 @@ struct RecordBasedRun {
 ///
 /// Used by `run_engine_entrypoint` for detached runs that already have a RunRecord on disk.
 pub async fn run_from_record(
-    record: fabro_workflows::run_record::RunRecord,
+    record: fabro_workflows::records::RunRecord,
     run_dir: PathBuf,
     run_defaults: FabroConfig,
     styles: &'static Styles,
@@ -962,7 +962,7 @@ async fn run_command_impl(
         is_cached_run_restart(workflow_path, &run_dir)
     };
     let existing_record = if cached_run_restart {
-        fabro_workflows::run_record::RunRecord::load(&run_dir).ok()
+        fabro_workflows::records::RunRecord::load(&run_dir).ok()
     } else {
         None
     };
@@ -1004,7 +1004,7 @@ async fn run_command_impl(
             &graph,
             cli_flags,
         );
-        let record = fabro_workflows::run_record::RunRecord {
+        let record = fabro_workflows::records::RunRecord {
             run_id: run_id.clone(),
             created_at: chrono::Utc::now(),
             config: normalized_config.clone(),
@@ -1404,7 +1404,7 @@ async fn run_command_impl(
                 });
 
                 let is_docker = provider == SandboxProvider::Docker;
-                let record = fabro_workflows::sandbox_record::SandboxRecord {
+                let record = fabro_workflows::records::SandboxRecord {
                     provider: provider.to_string(),
                     working_directory: working_directory.clone(),
                     identifier: sandbox_info_opt,

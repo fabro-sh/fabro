@@ -4,8 +4,8 @@ use fabro_git_storage::gitobj::Store;
 use git2::{Oid, Signature};
 
 use crate::git::MetadataStore;
-use crate::run_record::RunRecord;
-use crate::start_record::StartRecord;
+use crate::records::RunRecord;
+use crate::records::StartRecord;
 
 use super::rewind::TimelineEntry;
 

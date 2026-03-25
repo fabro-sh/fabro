@@ -16,7 +16,7 @@ use crate::sandbox_git::GitState;
 
 use super::types::{Executed, Initialized};
 
-fn seed_context_from_checkpoint(checkpoint: Option<&crate::checkpoint::Checkpoint>) -> Context {
+fn seed_context_from_checkpoint(checkpoint: Option<&crate::records::Checkpoint>) -> Context {
     let context = Context::new();
     if let Some(cp) = checkpoint {
         for (k, v) in &cp.context_values {

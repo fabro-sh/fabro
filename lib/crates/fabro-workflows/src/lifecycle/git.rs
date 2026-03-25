@@ -172,7 +172,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
 
                 // Re-save checkpoint.json with SHA
                 let checkpoint_path = self.run_dir.join("checkpoint.json");
-                if let Ok(mut cp) = crate::checkpoint::Checkpoint::load(&checkpoint_path) {
+                if let Ok(mut cp) = crate::records::Checkpoint::load(&checkpoint_path) {
                     cp.git_commit_sha = Some(sha.clone());
                     if let Err(e) = cp.save(&checkpoint_path) {
                         self.emitter.emit(&WorkflowRunEvent::RunNotice {

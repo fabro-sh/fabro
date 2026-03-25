@@ -7,7 +7,7 @@ use fabro_graphviz::graph::Graph;
 use fabro_hooks::HookRunner;
 use fabro_validate::Diagnostic;
 
-use crate::checkpoint::Checkpoint;
+use crate::records::Checkpoint;
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::EventEmitter;

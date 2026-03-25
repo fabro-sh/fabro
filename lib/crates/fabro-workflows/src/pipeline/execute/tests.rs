@@ -12,7 +12,7 @@ use fabro_hooks::HookConfig;
 use fabro_interview::AutoApproveInterviewer;
 
 use super::*;
-use crate::checkpoint::Checkpoint;
+use crate::records::Checkpoint;
 use crate::context::{self, Context};
 use crate::error::FabroError;
 use crate::event::{EventEmitter, WorkflowRunEvent};
@@ -497,7 +497,7 @@ async fn execute_writes_start_json_and_node_status() {
     .await
     .unwrap();
 
-    let start = crate::start_record::StartRecord::load(dir.path()).unwrap();
+    let start = crate::records::StartRecord::load(dir.path()).unwrap();
     assert_eq!(start.run_id, "test-run");
     assert_eq!(start.run_branch.as_deref(), Some("fabro/run/test-run"));
     assert_eq!(start.base_sha.as_deref(), Some("abc123"));

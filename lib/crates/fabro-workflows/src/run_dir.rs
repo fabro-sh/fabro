@@ -10,9 +10,9 @@ use crate::run_settings::RunSettings;
 pub(crate) fn write_start_record(
     run_dir: &Path,
     settings: &RunSettings,
-) -> crate::start_record::StartRecord {
+) -> crate::records::StartRecord {
     let git_state = settings.git.as_ref();
-    let record = crate::start_record::StartRecord {
+    let record = crate::records::StartRecord {
         run_id: settings.run_id.clone(),
         start_time: Utc::now(),
         run_branch: git_state.and_then(|g| g.run_branch.clone()),

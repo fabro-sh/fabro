@@ -99,7 +99,7 @@ impl Drop for DetachedRunCompletionGuard {
 }
 
 pub(crate) fn load_run_id(run_dir: &Path) -> Option<String> {
-    fabro_workflows::run_record::RunRecord::load(run_dir)
+    fabro_workflows::records::RunRecord::load(run_dir)
         .ok()
         .map(|record| record.run_id)
         .filter(|run_id| !run_id.trim().is_empty())
