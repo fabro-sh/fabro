@@ -48,7 +48,7 @@ async fn resolve_diff(run_dir: &Path, args: &DiffArgs) -> Result<String> {
         });
     }
 
-    let start = fabro_workflows::start_record::StartRecord::load(run_dir)
+    let start = fabro_workflows::records::StartRecord::load(run_dir)
         .context("Failed to load start.json")?;
 
     let base_sha = start
@@ -71,7 +71,7 @@ async fn resolve_diff(run_dir: &Path, args: &DiffArgs) -> Result<String> {
 
     debug!("No final.patch found; attempting live diff from sandbox");
     let sandbox_json = run_dir.join("sandbox.json");
-    let record = fabro_workflows::sandbox_record::SandboxRecord::load(&sandbox_json).context(
+    let record = fabro_workflows::records::SandboxRecord::load(&sandbox_json).context(
         "Failed to load sandbox.json — was this run started with a recent version of arc?",
     )?;
 

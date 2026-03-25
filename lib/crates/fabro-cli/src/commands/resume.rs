@@ -10,7 +10,7 @@ use fabro_config::config::FabroConfig;
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, Interviewer};
 use fabro_model::{Catalog, Provider};
 use fabro_util::terminal::Styles;
-use fabro_workflows::checkpoint::Checkpoint;
+use fabro_workflows::records::Checkpoint;
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel};
 use fabro_workflows::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::operations::{
@@ -20,7 +20,7 @@ use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::pipeline::{
     build_conclusion, classify_engine_result, persist_terminal_outcome,
 };
-use fabro_workflows::run_record::RunRecord;
+use fabro_workflows::records::RunRecord;
 use fabro_workflows::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
 use fabro_workflows::sandbox_provider::SandboxProvider;
 
@@ -254,7 +254,7 @@ async fn prepare_from_checkpoint(
             &graph,
             cli_flags,
         );
-        let record = fabro_workflows::run_record::RunRecord {
+        let record = fabro_workflows::records::RunRecord {
             run_id: run_id.clone(),
             created_at: chrono::Utc::now(),
             config: normalized.clone(),
@@ -649,7 +649,7 @@ async fn prepare_from_branch(
             &graph,
             cli_flags,
         );
-        let record = fabro_workflows::run_record::RunRecord {
+        let record = fabro_workflows::records::RunRecord {
             run_id: run_id.clone(),
             created_at: chrono::Utc::now(),
             config: normalized.clone(),
@@ -1032,7 +1032,7 @@ async fn run_resumed(
                 };
 
                 let is_docker = provider == SandboxProvider::Docker;
-                let record = fabro_workflows::sandbox_record::SandboxRecord {
+                let record = fabro_workflows::records::SandboxRecord {
                     provider: provider.to_string(),
                     working_directory: working_directory.clone(),
                     identifier: sandbox_info_opt,

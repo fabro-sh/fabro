@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use fabro_agent::Sandbox;
 
-use crate::checkpoint::Checkpoint;
+use crate::records::Checkpoint;
 use crate::error::Result;
 use crate::event::EventEmitter;
 use crate::handler::HandlerRegistry;

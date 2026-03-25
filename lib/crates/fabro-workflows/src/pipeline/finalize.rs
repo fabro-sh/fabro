@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::checkpoint::Checkpoint;
+use crate::records::Checkpoint;
 use crate::error::FabroError;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};

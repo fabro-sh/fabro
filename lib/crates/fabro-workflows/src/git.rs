@@ -5,7 +5,7 @@ use fabro_git_storage::branchstore::BranchStore;
 use fabro_git_storage::gitobj::Store;
 use git2::{Repository, Signature};
 
-use crate::checkpoint::Checkpoint;
+use crate::records::Checkpoint;
 use crate::error::{FabroError, Result};
 
 /// Branch prefix for workflow run branches (e.g. `fabro/run/{run_id}`).
@@ -485,10 +485,10 @@ impl MetadataStore {
     pub fn read_run_record(
         repo_path: &Path,
         run_id: &str,
-    ) -> Result<Option<crate::run_record::RunRecord>> {
+    ) -> Result<Option<crate::records::RunRecord>> {
         match Self::read_file(repo_path, run_id, "run.json")? {
             Some(bytes) => {
-                let record: crate::run_record::RunRecord = serde_json::from_slice(&bytes)
+                let record: crate::records::RunRecord = serde_json::from_slice(&bytes)
                     .map_err(|e| git_error(format!("run record deserialize failed: {e}")))?;
                 Ok(Some(record))
             }
@@ -500,10 +500,10 @@ impl MetadataStore {
     pub fn read_start_record(
         repo_path: &Path,
         run_id: &str,
-    ) -> Result<Option<crate::start_record::StartRecord>> {
+    ) -> Result<Option<crate::records::StartRecord>> {
         match Self::read_file(repo_path, run_id, "start.json")? {
             Some(bytes) => {
-                let record: crate::start_record::StartRecord = serde_json::from_slice(&bytes)
+                let record: crate::records::StartRecord = serde_json::from_slice(&bytes)
                     .map_err(|e| git_error(format!("start record deserialize failed: {e}")))?;
                 Ok(Some(record))
             }
@@ -634,7 +634,7 @@ mod tests {
 
         let ctx = crate::context::Context::new();
         ctx.set("goal", serde_json::json!("test"));
-        let cp = crate::checkpoint::Checkpoint::from_context(
+        let cp = crate::records::Checkpoint::from_context(
             &ctx,
             "node_a",
             vec!["start".to_string()],
@@ -669,7 +669,7 @@ mod tests {
         store.init_run("RUN3", &[]).unwrap();
 
         let ctx = crate::context::Context::new();
-        let cp1 = crate::checkpoint::Checkpoint::from_context(
+        let cp1 = crate::records::Checkpoint::from_context(
             &ctx,
             "node_a",
             vec!["start".to_string()],
@@ -683,7 +683,7 @@ mod tests {
         let cp1_json = serde_json::to_vec_pretty(&cp1).unwrap();
         store.write_checkpoint("RUN3", &cp1_json, &[]).unwrap();
 
-        let cp2 = crate::checkpoint::Checkpoint::from_context(
+        let cp2 = crate::records::Checkpoint::from_context(
             &ctx,
             "node_b",
             vec!["start".to_string(), "node_a".to_string()],

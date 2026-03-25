@@ -21,7 +21,7 @@ use fabro_agent::LocalSandbox;
 use crate::error::ApiError;
 use crate::jwt_auth::{AuthMode, AuthenticatedService, AuthenticatedUser};
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
-use fabro_workflows::checkpoint::Checkpoint;
+use fabro_workflows::records::Checkpoint;
 use fabro_workflows::context::Context;
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
 use fabro_workflows::handler::HandlerRegistry;
@@ -503,7 +503,7 @@ async fn start_run(
         .into_response();
     }
 
-    let run_record = fabro_workflows::run_record::RunRecord {
+    let run_record = fabro_workflows::records::RunRecord {
         run_id: run_id.clone(),
         created_at,
         config: fabro_config::config::FabroConfig {
@@ -640,7 +640,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         }
     }
 
-    let run_record = match fabro_workflows::run_record::RunRecord::load(&run_dir) {
+    let run_record = match fabro_workflows::records::RunRecord::load(&run_dir) {
         Ok(r) => r,
         Err(e) => {
             tracing::error!(run_id = %run_id, error = %e, "Failed to load RunRecord");

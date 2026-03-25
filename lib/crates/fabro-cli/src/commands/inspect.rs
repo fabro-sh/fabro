@@ -36,21 +36,21 @@ fn inspect_run_dir(
     run_dir: &Path,
     status: fabro_workflows::run_status::RunStatus,
 ) -> Result<InspectOutput> {
-    let run_record = fabro_workflows::run_record::RunRecord::load(run_dir)
+    let run_record = fabro_workflows::records::RunRecord::load(run_dir)
         .ok()
         .and_then(|v| serde_json::to_value(v).ok());
-    let start_record = fabro_workflows::start_record::StartRecord::load(run_dir)
+    let start_record = fabro_workflows::records::StartRecord::load(run_dir)
         .ok()
         .and_then(|v| serde_json::to_value(v).ok());
     let conclusion = fabro_workflows::records::Conclusion::load(&run_dir.join("conclusion.json"))
         .ok()
         .and_then(|v| serde_json::to_value(v).ok());
     let checkpoint =
-        fabro_workflows::checkpoint::Checkpoint::load(&run_dir.join("checkpoint.json"))
+        fabro_workflows::records::Checkpoint::load(&run_dir.join("checkpoint.json"))
             .ok()
             .and_then(|v| serde_json::to_value(v).ok());
     let sandbox =
-        fabro_workflows::sandbox_record::SandboxRecord::load(&run_dir.join("sandbox.json"))
+        fabro_workflows::records::SandboxRecord::load(&run_dir.join("sandbox.json"))
             .ok()
             .and_then(|v| serde_json::to_value(v).ok());
 

@@ -31,7 +31,7 @@ pub async fn run(args: PreviewArgs) -> Result<()> {
     let base = fabro_workflows::run_lookup::default_runs_base();
     let run_dir = fabro_workflows::run_lookup::resolve_run(&base, &args.run)?.path;
     let sandbox_json = run_dir.join("sandbox.json");
-    let record = fabro_workflows::sandbox_record::SandboxRecord::load(&sandbox_json).context(
+    let record = fabro_workflows::records::SandboxRecord::load(&sandbox_json).context(
         "Failed to load sandbox.json — was this run started with a recent version of arc?",
     )?;
 

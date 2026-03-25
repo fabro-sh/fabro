@@ -324,7 +324,7 @@ async fn run_engine_entrypoint(
         cli_config.git_author().and_then(|a| a.email.clone()),
     );
 
-    let record = match fabro_workflows::run_record::RunRecord::load(&run_dir) {
+    let record = match fabro_workflows::records::RunRecord::load(&run_dir) {
         Ok(record) => record,
         Err(err) => {
             let anyhow_err: anyhow::Error = anyhow::anyhow!("Failed to load run record: {err}");

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 
-use crate::sandbox_record::SandboxRecord;
+use crate::records::SandboxRecord;
 
 /// Reconnect to a sandbox from a saved record.
 ///

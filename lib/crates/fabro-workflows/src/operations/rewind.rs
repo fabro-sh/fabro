@@ -5,7 +5,7 @@ use fabro_git_storage::branchstore::{BranchStore, CommitInfo};
 use fabro_git_storage::gitobj::Store;
 use git2::{Oid, Repository, Signature};
 
-use crate::checkpoint::Checkpoint;
+use crate::records::Checkpoint;
 use crate::git::MetadataStore;
 use fabro_graphviz::graph::Graph;
 
@@ -322,7 +322,7 @@ pub fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String>
     let bs = BranchStore::new(store, &branch, &sig);
 
     if let Ok(Some(run_bytes)) = bs.read_entry("run.json") {
-        if let Ok(record) = serde_json::from_slice::<crate::run_record::RunRecord>(&run_bytes) {
+        if let Ok(record) = serde_json::from_slice::<crate::records::RunRecord>(&run_bytes) {
             return detect_parallel_interior(&record.graph);
         }
     }

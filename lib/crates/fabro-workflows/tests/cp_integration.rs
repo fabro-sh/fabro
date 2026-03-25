@@ -5,7 +5,7 @@
 //! Run Docker tests with: `cargo test --package arc-workflows --test cp_integration -- --ignored`
 
 use fabro_workflows::sandbox_reconnect::reconnect;
-use fabro_workflows::sandbox_record::SandboxRecord;
+use fabro_workflows::records::SandboxRecord;
 
 // ---------------------------------------------------------------------------
 // Local sandbox

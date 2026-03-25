@@ -28,7 +28,7 @@ pub(crate) fn load_json<T: serde::de::DeserializeOwned>(
 /// Build `Vec<CompletedStage>` from a `Checkpoint`, mapping workflow-engine
 /// types into the flat struct expected by `fabro_retro::retro::derive_retro`.
 pub fn build_completed_stages(
-    cp: &checkpoint::Checkpoint,
+    cp: &records::Checkpoint,
     run_failed: bool,
 ) -> Vec<fabro_retro::retro::CompletedStage> {
     use outcome::{OutcomeExt, StageStatus};
@@ -91,7 +91,6 @@ pub fn build_completed_stages(
 pub mod artifact;
 pub mod asset_snapshot;
 pub mod assets;
-pub mod checkpoint;
 pub mod condition;
 pub mod context;
 pub mod cost;
@@ -111,14 +110,11 @@ pub mod pull_request;
 pub mod records;
 pub mod run_dir;
 pub mod run_lookup;
-pub mod run_record;
 pub mod run_settings;
 pub mod run_status;
 pub mod sandbox_git;
 pub mod sandbox_provider;
 pub mod sandbox_reconnect;
-pub mod sandbox_record;
-pub mod start_record;
 #[doc(hidden)]
 pub mod test_support;
 pub mod transforms;
