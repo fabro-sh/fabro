@@ -9,17 +9,20 @@ use fabro_agent::Sandbox;
 use fabro_config::config::FabroConfig;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_hooks::HookConfig;
+use fabro_interview::AutoApproveInterviewer;
 
+use super::*;
 use crate::checkpoint::Checkpoint;
 use crate::context::{self, Context};
 use crate::error::FabroError;
 use crate::event::{EventEmitter, WorkflowRunEvent};
+use crate::handler::default_registry;
 use crate::handler::start::StartHandler;
 use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
 use crate::operations::create_from_graph;
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline::initialize;
-use crate::pipeline::types::InitOptions;
+use crate::pipeline::types::{InitOptions, Validated};
 use crate::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
 use crate::test_support::run_graph;
 
@@ -80,12 +83,80 @@ fn test_settings(run_dir: &Path, run_id: &str) -> RunSettings {
     }
 }
 
+fn simple_validated_graph() -> (Graph, String) {
+    let source =
+        "digraph test { start [shape=Mdiamond]; exit [shape=Msquare]; start -> exit; }".to_string();
+    let mut graph = Graph::new("test");
+
+    let mut start = Node::new("start");
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
+    graph.nodes.insert("start".to_string(), start);
+
+    let mut exit = Node::new("exit");
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
+    graph.nodes.insert("exit".to_string(), exit);
+
+    graph.edges.push(Edge::new("start", "exit"));
+    (graph, source)
+}
+
 fn test_lifecycle(setup_commands: Vec<String>) -> LifecycleConfig {
     LifecycleConfig {
         setup_commands,
         setup_command_timeout_ms: 300_000,
         devcontainer_phases: Vec::new(),
     }
+}
+
+#[tokio::test]
+async fn execute_runs_start_to_exit_and_returns_final_context() {
+    let temp = tempfile::tempdir().unwrap();
+    let run_dir = temp.path().join("run");
+    let (graph, source) = simple_validated_graph();
+    let initialized = initialize(
+        Validated::new(graph, source, vec![]),
+        InitOptions {
+            run_id: "run-test".to_string(),
+            run_dir: run_dir.clone(),
+            dry_run: false,
+            emitter: Arc::new(crate::event::EventEmitter::new()),
+            sandbox: Arc::new(fabro_agent::LocalSandbox::new(
+                std::env::current_dir().unwrap(),
+            )),
+            registry: Arc::new(default_registry(Arc::new(AutoApproveInterviewer), || None)),
+            lifecycle: LifecycleConfig {
+                setup_commands: vec![],
+                setup_command_timeout_ms: 1_000,
+                devcontainer_phases: vec![],
+            },
+            run_settings: test_settings(&run_dir, "run-test"),
+            hooks: HookConfig { hooks: vec![] },
+            sandbox_env: HashMap::new(),
+            checkpoint: None,
+            seed_context: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let executed = execute(initialized).await;
+
+    assert_eq!(
+        executed.outcome.as_ref().unwrap().status,
+        crate::outcome::StageStatus::Success
+    );
+    assert_eq!(
+        executed
+            .final_context
+            .get(crate::context::keys::INTERNAL_RUN_ID),
+        Some(serde_json::json!("run-test"))
+    );
 }
 
 async fn run_with_lifecycle(
