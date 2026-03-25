@@ -1474,6 +1474,7 @@ dependencies = [
 name = "fabro-graphviz"
 version = "0.176.2"
 dependencies = [
+ "anyhow",
  "nom",
  "regex",
  "serde",

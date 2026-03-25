@@ -68,7 +68,7 @@ pub fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
 
     let source = read_workflow_file(&dot_path)?;
     let source = apply_direction(&source, args.direction);
-    let rendered = fabro_workflows::graph_render::render_dot(&source, args.format.into())?;
+    let rendered = fabro_graphviz::render::render_dot(&source, args.format.into())?;
 
     if let Some(ref output_path) = args.output {
         std::fs::write(output_path, &rendered)?;
@@ -91,7 +91,7 @@ pub enum GraphOutputFormat {
     Png,
 }
 
-impl From<GraphOutputFormat> for fabro_workflows::graph_render::GraphFormat {
+impl From<GraphOutputFormat> for fabro_graphviz::render::GraphFormat {
     fn from(value: GraphOutputFormat) -> Self {
         match value {
             GraphOutputFormat::Svg => Self::Svg,
