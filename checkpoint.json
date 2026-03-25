@@ -1,0 +1,62 @@
+{
+  "timestamp": "2026-03-25T20:33:55.908477Z",
+  "current_node": "main",
+  "completed_nodes": [
+    "start",
+    "main"
+  ],
+  "node_retries": {
+    "start": 1,
+    "main": 1
+  },
+  "context_values": {
+    "graph.goal": "Verify the sandbox can lint and test the project",
+    "internal.retry_count.main": 1,
+    "internal.node_visit_count": 1,
+    "graph.rankdir": "LR",
+    "failure_class": "",
+    "internal.retry_count.start": 1,
+    "failure_signature": "",
+    "response.main": "Here's the full summary of all steps:\n\n| # | Command | Result | Notes |\n|---|---------|--------|-------|\n| 1 | `rustc --version && cargo --version` | ✅ **Pass** | rustc 1.94.0, cargo 1.94.0 |\n| 2 | `bun --version` | ✅ **Pass** | bun 1.3.10 |\n| 3 | `cargo fmt --check --all` | ✅ **Pass** | No formatting issues |\n| 4 | `cargo clippy -q --workspace -- -D warnings` | ✅ **Pass** | No lint warnings |\n| 5 | `cargo nextest run --workspace --status-level fail` | ✅ **Pass** | 3,475 tests run, 3,475 passed, 178 skipped (E2E), 1 slow |\n| 6 | `bun install && bun run typecheck` | ✅ **Pass** | 1,400 packages installed, no type errors |\n| 7 | `bun test` | ✅ **Pass** | 15 tests across 3 files, all passed |\n\n**All 7 steps passed.** The sandbox is fully healthy for linting and testing. 🎉",
+    "internal.thread_id": "start",
+    "outcome": "success",
+    "last_stage": "main",
+    "internal.fidelity": "compact",
+    "current_node": "main",
+    "thread.start.current_node": "main",
+    "last_response": "Here's the full summary of all steps:\n\n| # | Command | Result | Notes |\n|---|---------|--------|-------|\n| 1 | `rustc --version && cargo --version` | ✅ **Pass** | rustc 1.94.0, cargo 1.94.0 |\n| 2 | ",
+    "current.preamble": "Goal: Verify the sandbox can lint and test the project\n",
+    "internal.run_id": "01KMKAZ1N820QXG4WK4V2538X9"
+  },
+  "logs": [],
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "duration_ms": 0
+    },
+    "main": {
+      "status": "success",
+      "context_updates": {
+        "last_response": "Here's the full summary of all steps:\n\n| # | Command | Result | Notes |\n|---|---------|--------|-------|\n| 1 | `rustc --version && cargo --version` | ✅ **Pass** | rustc 1.94.0, cargo 1.94.0 |\n| 2 | ",
+        "response.main": "Here's the full summary of all steps:\n\n| # | Command | Result | Notes |\n|---|---------|--------|-------|\n| 1 | `rustc --version && cargo --version` | ✅ **Pass** | rustc 1.94.0, cargo 1.94.0 |\n| 2 | `bun --version` | ✅ **Pass** | bun 1.3.10 |\n| 3 | `cargo fmt --check --all` | ✅ **Pass** | No formatting issues |\n| 4 | `cargo clippy -q --workspace -- -D warnings` | ✅ **Pass** | No lint warnings |\n| 5 | `cargo nextest run --workspace --status-level fail` | ✅ **Pass** | 3,475 tests run, 3,475 passed, 178 skipped (E2E), 1 slow |\n| 6 | `bun install && bun run typecheck` | ✅ **Pass** | 1,400 packages installed, no type errors |\n| 7 | `bun test` | ✅ **Pass** | 15 tests across 3 files, all passed |\n\n**All 7 steps passed.** The sandbox is fully healthy for linting and testing. 🎉",
+        "last_stage": "main"
+      },
+      "notes": "Stage completed: main",
+      "usage": {
+        "model": "claude-sonnet-4-6",
+        "input_tokens": 2488,
+        "output_tokens": 1166,
+        "cache_read_tokens": 39638,
+        "cache_write_tokens": 7305,
+        "reasoning_tokens": 16,
+        "cost": 0.024953999999999997
+      },
+      "duration_ms": 296319
+    }
+  },
+  "next_node_id": "exit",
+  "node_visits": {
+    "main": 1,
+    "start": 1
+  }
+}
