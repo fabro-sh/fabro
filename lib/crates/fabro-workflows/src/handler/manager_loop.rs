@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use crate::condition::evaluate_condition;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
-use crate::engine::{RunConfig, WorkflowRunEngine};
+use crate::engine::{RunSettings, WorkflowRunEngine};
 use crate::error::FabroError;
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::workflow::{prepare_from_file, prepare_from_source};
@@ -127,7 +127,7 @@ impl Handler for SubWorkflowHandler {
             }
         };
 
-        // Build child RunConfig
+        // Build child RunSettings
         let visit = crate::engine::visit_from_context(context) as u64;
         let child_logs = run_dir.join(format!("nodes/{}_{visit}/child", node.id));
         let _ = std::fs::create_dir_all(&child_logs);
@@ -137,27 +137,22 @@ impl Handler for SubWorkflowHandler {
         let child_cancel = Arc::clone(&cancel_token);
 
         let git_state = services.git_state();
-        let child_config = RunConfig {
+        let child_config = RunSettings {
+            config: fabro_config::FabroConfig::default(),
             run_dir: child_logs,
             cancel_token: Some(cancel_token),
             dry_run: services.dry_run,
             run_id: format!("{parent_run_id}_child_{}", node.id),
-            git_checkpoint_enabled: false,
-            host_repo_path: None,
-            base_sha: None,
-            run_branch: None,
-            meta_branch: None,
             labels: HashMap::new(),
-            checkpoint_exclude_globs: Vec::new(),
-            github_app: None,
             git_author: git_state
                 .as_ref()
                 .map(|gs| gs.git_author.clone())
                 .unwrap_or_default(),
-            base_branch: None,
-            pull_request: None,
-            asset_globs: Vec::new(),
             workflow_slug: None,
+            github_app: None,
+            base_branch: None,
+            host_repo_path: None,
+            git: None,
         };
 
         // Clone parent context for child; inject parent preamble

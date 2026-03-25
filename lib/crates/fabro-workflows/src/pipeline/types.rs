@@ -8,7 +8,7 @@ use fabro_validate::Diagnostic;
 
 use crate::checkpoint::Checkpoint;
 use crate::conclusion::Conclusion;
-use crate::engine::{LifecycleConfig, RunConfig, WorkflowRunEngine};
+use crate::engine::{LifecycleConfig, RunSettings, WorkflowRunEngine};
 use crate::error::FabroError;
 use crate::event::EventEmitter;
 use crate::handler::HandlerRegistry;
@@ -103,7 +103,7 @@ pub struct InitOptions {
     pub sandbox: Arc<dyn Sandbox>,
     pub registry: HandlerRegistry,
     pub lifecycle: LifecycleConfig,
-    pub run_config: RunConfig,
+    pub run_settings: RunSettings,
     pub hooks: fabro_hooks::HookConfig,
     pub sandbox_env: HashMap<String, String>,
 }
@@ -114,7 +114,7 @@ pub struct Initialized {
     pub graph: Graph,
     pub source: String,
     pub engine: WorkflowRunEngine,
-    pub config: RunConfig,
+    pub settings: RunSettings,
     pub(crate) checkpoint: Option<Checkpoint>,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
@@ -125,7 +125,7 @@ pub struct Initialized {
 pub struct Executed {
     pub graph: Graph,
     pub outcome: Result<Outcome, FabroError>,
-    pub config: RunConfig,
+    pub settings: RunSettings,
     pub engine: WorkflowRunEngine,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
@@ -137,7 +137,7 @@ pub struct Executed {
 pub struct Retroed {
     pub graph: Graph,
     pub outcome: Result<Outcome, FabroError>,
-    pub config: RunConfig,
+    pub settings: RunSettings,
     pub engine: WorkflowRunEngine,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,

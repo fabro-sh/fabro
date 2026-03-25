@@ -12,7 +12,7 @@ use super::super::graph::WorkflowGraph;
 use super::super::WorkflowNode;
 use super::circuit_breaker::CircuitBreakerLifecycle;
 use crate::checkpoint::Checkpoint;
-use crate::engine::{self, RunConfig};
+use crate::engine::{self, RunSettings};
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::outcome::StageUsage;
 
@@ -24,7 +24,7 @@ pub struct DiskLifecycle {
     pub run_dir: PathBuf,
     pub run_id: String,
     pub graph: Arc<fabro_graphviz::graph::types::Graph>,
-    pub config: Arc<RunConfig>,
+    pub config: Arc<RunSettings>,
     pub emitter: Arc<EventEmitter>,
     pub circuit_breaker: Arc<CircuitBreakerLifecycle>,
     pub checkpoint_enabled: bool,

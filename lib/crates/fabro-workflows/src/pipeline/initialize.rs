@@ -47,16 +47,16 @@ pub async fn initialize(
 
     // Prepare sandbox (initialize, git setup, setup commands, devcontainer)
     engine
-        .prepare_sandbox(&graph, &mut options.run_config, options.lifecycle)
+        .prepare_sandbox(&graph, &mut options.run_settings, options.lifecycle)
         .await?;
 
-    // At this point run_config may have been mutated by prepare_sandbox (base_sha, run_branch, etc.)
+    // At this point run_settings may have been mutated by prepare_sandbox (base_sha, run_branch, etc.)
 
     Ok(Initialized {
         graph,
         source,
         engine,
-        config: options.run_config,
+        settings: options.run_settings,
         checkpoint: None,
         emitter: options.emitter,
         sandbox: options.sandbox,

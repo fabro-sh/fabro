@@ -16,7 +16,7 @@ use fabro_workflows::backend::cli::{parse_cli_response, AgentCliBackend, Backend
 use fabro_workflows::backend::AgentApiBackend;
 use fabro_workflows::checkpoint::Checkpoint;
 use fabro_workflows::context::Context;
-use fabro_workflows::engine::{RunConfig, WorkflowRunEngine};
+use fabro_workflows::engine::{GitCheckpointSettings, RunSettings, WorkflowRunEngine};
 use fabro_workflows::error::FabroError;
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
 use fabro_workflows::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
@@ -192,26 +192,20 @@ async fn end_to_end_linear_pipeline() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -337,26 +331,20 @@ async fn end_to_end_branching_pipeline() {
     registry.register("conditional", Box::new(ConditionalHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -463,26 +451,20 @@ async fn end_to_end_human_gate_pipeline() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -565,26 +547,20 @@ async fn human_gate_aborted_input_fails_closed_without_fail_route() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -682,26 +658,20 @@ async fn human_gate_aborted_input_routes_via_outcome_fail_condition() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -801,26 +771,20 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
     registry.register("always_fail", Box::new(AlwaysFailHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(
         result.is_ok(),
@@ -928,26 +892,20 @@ async fn goal_gate_routes_to_retry_target_when_present() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -1246,26 +1204,20 @@ async fn retry_on_failure_then_succeed() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -1327,26 +1279,20 @@ async fn pipeline_with_many_nodes() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -1655,26 +1601,20 @@ async fn smoke_test_with_mock_codergen_backend() {
     registry.register("conditional", Box::new(ConditionalHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -1762,26 +1702,20 @@ async fn end_to_end_parallel_fan_out_fan_in() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -1881,26 +1815,20 @@ async fn resume_from_checkpoint_completes_pipeline() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run_from_checkpoint(&graph, &config, &checkpoint)
         .await
@@ -1986,26 +1914,20 @@ async fn resume_from_checkpoint_preserves_goal_gate_outcomes() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     // This should succeed because goal gate for gated_work is satisfied
     // via restored outcomes
     let outcome = engine
@@ -2035,24 +1957,19 @@ async fn graph_goal_in_context() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -2076,24 +1993,19 @@ async fn event_streaming_lifecycle() {
     let emitter = EventEmitter::new();
     let events = collect_events(&emitter);
     let engine = WorkflowRunEngine::new(make_linear_registry(), Arc::new(emitter), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -2161,24 +2073,19 @@ async fn context_flow_between_stages() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -2219,24 +2126,19 @@ async fn tool_handler_e2e() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2294,24 +2196,19 @@ async fn auto_approve_interviewer_e2e() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2336,24 +2233,19 @@ async fn codergen_without_backend_simulated() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -2446,24 +2338,19 @@ async fn branching_loop_back_on_failure() {
         }),
     );
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2534,24 +2421,19 @@ async fn human_gate_loops_back() {
     registry.register("exit", Box::new(ExitHandler));
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2597,24 +2479,19 @@ async fn scenario_ship_a_feature() {
         Arc::new(emitter),
         local_env(),
     );
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2688,24 +2565,19 @@ async fn scenario_parallel_expert_review() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2777,24 +2649,19 @@ async fn scenario_node_retries_on_retry_status() {
         }),
     );
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2844,24 +2711,19 @@ async fn scenario_loop_restart_resets_context() {
         }),
     );
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2917,24 +2779,19 @@ async fn scenario_bug_triage_router() {
     registry.register("exit", Box::new(ExitHandler));
     registry.register("conditional", Box::new(ConditionalHandler));
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2981,24 +2838,19 @@ async fn scenario_crash_recovery() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine
         .run_from_checkpoint(&graph, &config, &checkpoint)
@@ -3095,24 +2947,19 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
     registry.register("done_setter", Box::new(DoneSetterHandler));
     registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
 
@@ -3177,24 +3024,19 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
     registry.register("exit", Box::new(ExitHandler));
     registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
 
@@ -3318,24 +3160,19 @@ async fn conditional_branching_success_fail_paths() {
     registry.register("exit", Box::new(ExitHandler));
     registry.register("always_fail", Box::new(AlwaysFailHandler));
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -3376,24 +3213,19 @@ async fn edge_selection_condition_match_wins_over_weight() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -3428,24 +3260,19 @@ async fn edge_selection_weight_breaks_ties() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -3472,24 +3299,19 @@ async fn edge_selection_lexical_tiebreak() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -3535,24 +3357,19 @@ async fn context_updates_visible_across_nodes() {
     registry.register("conditional", Box::new(ConditionalHandler));
     registry.register("context_setter", Box::new(ContextSetterHandler));
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -3584,24 +3401,19 @@ async fn stylesheet_applies_model_override() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -3645,24 +3457,19 @@ async fn custom_handler_registration_and_execution() {
     registry.register("exit", Box::new(ExitHandler));
     registry.register("my_custom", Box::new(CustomHandler));
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -3721,24 +3528,19 @@ async fn integration_smoke_plan_implement_review_done() {
         Arc::new(emitter),
         local_env(),
     );
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -3830,26 +3632,20 @@ async fn manager_loop_runs_child_engine_e2e() {
     registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -3970,26 +3766,20 @@ async fn manager_loop_context_flows_e2e() {
     registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
@@ -4049,26 +3839,20 @@ async fn manager_loop_child_dotfile_e2e() {
     registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 }
@@ -4168,26 +3952,20 @@ async fn graph_merge_e2e_through_engine() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&main_graph, &config)
         .await
@@ -4324,24 +4102,19 @@ async fn fidelity_default_is_compact() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4386,24 +4159,19 @@ async fn fidelity_graph_default_applied() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4444,24 +4212,19 @@ async fn fidelity_node_overrides_graph_default() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4508,24 +4271,19 @@ async fn fidelity_edge_overrides_node_and_graph() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4562,24 +4320,19 @@ async fn fidelity_full_produces_empty_preamble() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4626,24 +4379,19 @@ async fn fidelity_truncate_preamble_minimal() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4703,24 +4451,19 @@ async fn fidelity_summary_low_mode() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4775,24 +4518,19 @@ async fn fidelity_summary_medium_mode() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4847,24 +4585,19 @@ async fn fidelity_summary_high_mode() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4912,24 +4645,19 @@ async fn fidelity_full_sets_thread_id_in_context() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -4988,24 +4716,19 @@ async fn fidelity_full_nodes_share_thread_id() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -5074,24 +4797,19 @@ async fn fidelity_resume_degrades_full_to_summary_high() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine
         .run_from_checkpoint(&graph, &config, &checkpoint)
@@ -5176,24 +4894,19 @@ async fn fidelity_resume_degrade_only_affects_first_hop() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine
         .run_from_checkpoint(&graph, &config, &checkpoint)
@@ -5265,24 +4978,19 @@ async fn fidelity_resume_no_degrade_when_not_full() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine
         .run_from_checkpoint(&graph, &config, &checkpoint)
@@ -5312,24 +5020,19 @@ async fn fidelity_stored_in_checkpoint_context() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -5403,24 +5106,19 @@ async fn fidelity_precedence_multi_node_pipeline() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -5476,24 +5174,19 @@ async fn fidelity_compact_preamble_includes_completed_stages_and_context() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -5557,24 +5250,19 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
     );
     let engine_low =
         WorkflowRunEngine::new(registry_low, Arc::new(EventEmitter::new()), local_env());
-    let config_low = RunConfig {
+    let config_low = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir_low.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine_low
         .run(&graph_low, &config_low)
@@ -5630,24 +5318,19 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
     );
     let engine_med =
         WorkflowRunEngine::new(registry_med, Arc::new(EventEmitter::new()), local_env());
-    let config_med = RunConfig {
+    let config_med = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir_med.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine_med
         .run(&graph_med, &config_med)
@@ -5706,24 +5389,19 @@ async fn fidelity_thread_id_fallback_to_previous_node_in_pipeline() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -5765,24 +5443,19 @@ async fn fidelity_thread_id_from_node_class_in_pipeline() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -5827,24 +5500,19 @@ async fn fidelity_edge_thread_id_override_in_pipeline() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -5890,24 +5558,19 @@ async fn fidelity_full_without_explicit_thread_id_uses_previous_node() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -5963,24 +5626,19 @@ async fn fidelity_from_parsed_dot_pipeline() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -6016,24 +5674,19 @@ async fn fidelity_checkpoint_roundtrip_preserves_fidelity() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -6091,24 +5744,19 @@ async fn fidelity_node_thread_id_overrides_edge_thread_id_in_pipeline() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -6183,24 +5831,19 @@ async fn fidelity_resume_preserves_context_values_across_checkpoint() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     engine
         .run_from_checkpoint(&graph, &config, &checkpoint)
@@ -6231,6 +5874,7 @@ mod real_llm {
 
     use async_trait::async_trait;
 
+    use fabro_config::FabroConfig;
     use fabro_graphviz::graph::Node;
     use fabro_workflows::context::Context;
     use fabro_workflows::error::FabroError;
@@ -6325,7 +5969,7 @@ mod real_llm {
     use fabro_graphviz::graph::{AttrValue, Edge, Graph};
     use fabro_interview::AutoApproveInterviewer;
     use fabro_workflows::checkpoint::Checkpoint;
-    use fabro_workflows::engine::{RunConfig, WorkflowRunEngine};
+    use fabro_workflows::engine::{RunSettings, WorkflowRunEngine};
     use fabro_workflows::event::EventEmitter;
     use fabro_workflows::handler::exit::ExitHandler;
     use fabro_workflows::handler::human::HumanHandler;
@@ -6401,26 +6045,20 @@ mod real_llm {
         );
 
         let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-        let config = RunConfig {
+        let config = RunSettings {
+            config: FabroConfig::default(),
             run_dir: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint_enabled: false,
-            host_repo_path: None,
-            base_sha: None,
-            run_branch: None,
-            meta_branch: None,
             labels: std::collections::HashMap::new(),
-            checkpoint_exclude_globs: Vec::new(),
-            github_app: None,
             git_author: fabro_workflows::git::GitAuthor::default(),
-            base_branch: None,
-            pull_request: None,
-            asset_globs: Vec::new(),
             workflow_slug: None,
+            github_app: None,
+            base_branch: None,
+            host_repo_path: None,
+            git: None,
         };
-
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(120),
             engine.run(&graph, &config),
@@ -6521,26 +6159,20 @@ mod real_llm {
         );
 
         let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-        let config = RunConfig {
+        let config = RunSettings {
+            config: FabroConfig::default(),
             run_dir: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint_enabled: false,
-            host_repo_path: None,
-            base_sha: None,
-            run_branch: None,
-            meta_branch: None,
             labels: std::collections::HashMap::new(),
-            checkpoint_exclude_globs: Vec::new(),
-            github_app: None,
             git_author: fabro_workflows::git::GitAuthor::default(),
-            base_branch: None,
-            pull_request: None,
-            asset_globs: Vec::new(),
             workflow_slug: None,
+            github_app: None,
+            base_branch: None,
+            host_repo_path: None,
+            git: None,
         };
-
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(120),
             engine.run(&graph, &config),
@@ -6666,26 +6298,20 @@ mod real_llm {
         registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
         let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-        let config = RunConfig {
+        let config = RunSettings {
+            config: FabroConfig::default(),
             run_dir: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint_enabled: false,
-            host_repo_path: None,
-            base_sha: None,
-            run_branch: None,
-            meta_branch: None,
             labels: std::collections::HashMap::new(),
-            checkpoint_exclude_globs: Vec::new(),
-            github_app: None,
             git_author: fabro_workflows::git::GitAuthor::default(),
-            base_branch: None,
-            pull_request: None,
-            asset_globs: Vec::new(),
             workflow_slug: None,
+            github_app: None,
+            base_branch: None,
+            host_repo_path: None,
+            git: None,
         };
-
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(120),
             engine.run(&graph, &config),
@@ -6779,26 +6405,20 @@ mod real_llm {
         );
 
         let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-        let config = RunConfig {
+        let config = RunSettings {
+            config: FabroConfig::default(),
             run_dir: dir.path().to_path_buf(),
             cancel_token: None,
             dry_run: false,
             run_id: "test-run".into(),
-            git_checkpoint_enabled: false,
-            host_repo_path: None,
-            base_sha: None,
-            run_branch: None,
-            meta_branch: None,
             labels: std::collections::HashMap::new(),
-            checkpoint_exclude_globs: Vec::new(),
-            github_app: None,
             git_author: fabro_workflows::git::GitAuthor::default(),
-            base_branch: None,
-            pull_request: None,
-            asset_globs: Vec::new(),
             workflow_slug: None,
+            github_app: None,
+            base_branch: None,
+            host_repo_path: None,
+            git: None,
         };
-
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(30),
             engine.run(&graph, &config),
@@ -6881,26 +6501,20 @@ async fn human_gate_freeform_only_routes_text() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -7017,26 +6631,20 @@ async fn human_gate_freeform_with_fixed_choice_match() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -7138,26 +6746,20 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -7272,26 +6874,20 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -7386,26 +6982,20 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -7651,25 +7241,20 @@ fn engine_with_hooks_and_events(
     (engine, events)
 }
 
-fn make_run_config(dir: &std::path::Path) -> RunConfig {
-    RunConfig {
+fn make_run_config(dir: &std::path::Path) -> RunSettings {
+    RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "hook-test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     }
 }
 
@@ -8761,26 +8346,20 @@ async fn arc_e2e_with_real_llm() {
 
     let run_dir = tempfile::tempdir().unwrap();
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -8895,26 +8474,20 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     engine
         .run(&graph, &config)
         .await
@@ -9100,26 +8673,20 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
     let emitter = EventEmitter::new();
     let events = collect_events(&emitter);
     let engine = WorkflowRunEngine::new(registry, Arc::new(emitter), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -9326,26 +8893,20 @@ async fn artifact_pointers_rewritten_for_remote_sandbox() {
     let remote_env = Arc::new(RemoteMockEnv::new("/sandbox"));
     let engine =
         WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), remote_env.clone());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -9462,26 +9023,20 @@ async fn node_dir_uses_visit_count_on_revisit() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -10440,26 +9995,20 @@ async fn full_pipeline_with_cli_backend_node() {
 
     let dir = tempfile::tempdir().unwrap();
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), env);
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -10577,26 +10126,20 @@ async fn stylesheet_backend_property_routes_to_cli() {
 
     let dir = tempfile::tempdir().unwrap();
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), env);
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -10862,26 +10405,24 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunEngine::new(registry, Arc::new(emitter), env);
 
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-docker".into(),
-        git_checkpoint_enabled: true,
-        host_repo_path: Some(worktree_path.clone()),
-        base_sha: Some(base_sha.clone()),
-        run_branch: Some("fabro/run/test-docker".to_string()),
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: Some(worktree_path.clone()),
+        git: Some(GitCheckpointSettings {
+            base_sha: Some(base_sha.clone()),
+            run_branch: Some("fabro/run/test-docker".to_string()),
+            meta_branch: None,
+        }),
     };
-
     // 5. Run pipeline
     let outcome = engine
         .run(&graph, &config)
@@ -11067,26 +10608,24 @@ async fn git_checkpoint_host_writes_shadow_branch() {
     let engine = WorkflowRunEngine::new(registry, Arc::new(emitter), env);
 
     let meta_branch = MetadataStore::branch_name(run_id);
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: run_id.into(),
-        git_checkpoint_enabled: true,
-        host_repo_path: Some(worktree_path.clone()),
-        base_sha: Some(base_sha),
-        run_branch: Some(format!("fabro/run/{run_id}")),
-        meta_branch: Some(meta_branch),
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: Some(worktree_path.clone()),
+        git: Some(GitCheckpointSettings {
+            base_sha: Some(base_sha),
+            run_branch: Some(format!("fabro/run/{run_id}")),
+            meta_branch: Some(meta_branch),
+        }),
     };
-
     // 5. Run pipeline
     let outcome = engine
         .run(&graph, &config)
@@ -11267,26 +10806,24 @@ async fn parallel_git_branching_host_e2e() {
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(emitter), env);
 
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: run_id.into(),
-        git_checkpoint_enabled: true,
-        host_repo_path: Some(worktree_path.clone()),
-        base_sha: Some(base_sha.clone()),
-        run_branch: Some(run_branch.clone()),
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: Some(worktree_path.clone()),
+        git: Some(GitCheckpointSettings {
+            base_sha: Some(base_sha.clone()),
+            run_branch: Some(run_branch.clone()),
+            meta_branch: None,
+        }),
     };
-
     // 5. Run pipeline
     let outcome = engine
         .run(&graph, &config)
@@ -11532,26 +11069,24 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunEngine::new(registry, Arc::new(emitter), env);
 
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "empty-diff".into(),
-        git_checkpoint_enabled: true,
-        host_repo_path: Some(worktree_path.clone()),
-        base_sha: Some(base_sha.clone()),
-        run_branch: Some("fabro/run/empty-diff".to_string()),
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: Some(worktree_path.clone()),
+        git: Some(GitCheckpointSettings {
+            base_sha: Some(base_sha.clone()),
+            run_branch: Some("fabro/run/empty-diff".to_string()),
+            meta_branch: None,
+        }),
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -11916,26 +11451,20 @@ async fn e2e_circuit_breaker_deterministic_self_loop() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-circuit-breaker".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(result.is_err(), "pipeline should abort, not loop forever");
     let err = result.unwrap_err().to_string();
@@ -11969,26 +11498,20 @@ async fn e2e_circuit_breaker_custom_limit() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-custom-limit".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
@@ -12015,26 +11538,20 @@ async fn e2e_circuit_breaker_ignores_transient_failures() {
     registry.register("test_handler", Box::new(TransientInfraFailHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-transient-no-breaker".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
@@ -12068,26 +11585,20 @@ async fn e2e_circuit_breaker_different_reasons_separate_counters() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-varying-reasons".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
@@ -12114,26 +11625,20 @@ async fn e2e_circuit_breaker_loop_restart() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-restart-breaker".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(
         result.is_err(),
@@ -12182,26 +11687,20 @@ async fn e2e_failure_signature_persisted_in_context() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-sig-context".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine.run(&graph, &config).await.unwrap();
     // Pipeline reaches exit (terminal) with goal gates satisfied.
     // Per spec, reaching exit with satisfied goal gates returns SUCCESS.
@@ -12252,26 +11751,20 @@ async fn e2e_failure_signature_hint_overrides_reason_in_context() {
     registry.register("hint_handler", Box::new(SignatureHintHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-sig-hint".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let _outcome = engine.run(&graph, &config).await.unwrap();
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
@@ -12314,26 +11807,20 @@ async fn e2e_signature_maps_persist_in_checkpoint() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-sig-persist".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine.run(&graph, &config).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 
@@ -12447,26 +11934,20 @@ async fn e2e_circuit_breaker_emits_events_before_abort() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(emitter), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-events".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(result.is_err());
 
@@ -12520,26 +12001,20 @@ async fn e2e_circuit_breaker_does_not_fire_below_limit() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-below-limit".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine.run(&graph, &config).await.unwrap();
     assert_eq!(
         outcome.status,
@@ -12622,26 +12097,20 @@ async fn e2e_circuit_breaker_multi_stage_impl_verify_cycle() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-impl-verify-cycle".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(
         result.is_err(),
@@ -12725,26 +12194,20 @@ async fn e2e_loop_restart_blocked_for_deterministic_failure() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-restart-blocked-det".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(
         result.is_err(),
@@ -12771,26 +12234,20 @@ async fn e2e_loop_restart_blocked_for_structural_failure() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-restart-blocked-struct".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(
         result.is_err(),
@@ -12817,26 +12274,20 @@ async fn e2e_loop_restart_blocked_for_budget_exhausted_failure() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-restart-blocked-budget".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(
         result.is_err(),
@@ -12863,26 +12314,20 @@ async fn e2e_loop_restart_blocked_for_canceled_failure() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-restart-blocked-canceled".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(result.is_err(), "canceled failure should not loop_restart");
     let err = result.unwrap_err().to_string();
@@ -12906,26 +12351,20 @@ async fn e2e_loop_restart_blocked_for_compilation_loop_failure() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-restart-blocked-comploop".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(
         result.is_err(),
@@ -12953,26 +12392,20 @@ async fn e2e_loop_restart_allowed_for_transient_infra() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "e2e-restart-allowed-transient".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(
         result.is_ok(),
@@ -13063,26 +12496,20 @@ async fn e2e_stall_watchdog_triggers_from_dot_parsed_pipeline() {
     });
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(emitter), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "stall-e2e".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let result = engine.run(&graph, &config).await;
     assert!(result.is_err(), "expected stall watchdog error");
     let err = result.unwrap_err().to_string();
@@ -13125,26 +12552,20 @@ async fn e2e_stall_watchdog_kept_alive_by_handler_events() {
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "stall-alive-e2e".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -13177,26 +12598,20 @@ async fn e2e_stall_watchdog_disabled_with_zero_timeout() {
     registry.register("slow", Box::new(SlowTestHandler { sleep_ms: 50 }));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "stall-disabled-e2e".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -13248,26 +12663,20 @@ async fn e2e_stall_watchdog_with_explicit_timeout_override() {
     registry.register("hanging", Box::new(HangingHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "stall-override-e2e".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let start = std::time::Instant::now();
     let result = engine.run(&graph, &config).await;
     let elapsed = start.elapsed();
@@ -13385,26 +12794,25 @@ async fn asset_collection_local_sandbox_success() {
     graph.edges.push(Edge::new("start", "create_assets"));
     graph.edges.push(Edge::new("create_assets", "exit"));
 
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig {
+            assets: Some(fabro_config::run::AssetsConfig {
+                include: vec!["test-results/**".to_string()],
+            }),
+            ..FabroConfig::default()
+        },
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "asset-test-local".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: vec!["test-results/**".to_string()],
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -13500,26 +12908,25 @@ async fn asset_collection_local_sandbox_on_failure() {
     graph.edges.push(Edge::new("start", "create_assets"));
     graph.edges.push(Edge::new("create_assets", "exit"));
 
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig {
+            assets: Some(fabro_config::run::AssetsConfig {
+                include: vec!["test-results/**".to_string()],
+            }),
+            ..FabroConfig::default()
+        },
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "asset-test-fail".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: vec!["test-results/**".to_string()],
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -13598,26 +13005,25 @@ async fn asset_collection_docker_sandbox() {
     graph.edges.push(Edge::new("start", "create_assets"));
     graph.edges.push(Edge::new("create_assets", "exit"));
 
-    let run_config = RunConfig {
+    let run_config = RunSettings {
+        config: FabroConfig {
+            assets: Some(fabro_config::run::AssetsConfig {
+                include: vec!["test-results/**".to_string()],
+            }),
+            ..FabroConfig::default()
+        },
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "asset-test-docker".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: vec!["test-results/**".to_string()],
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &run_config)
         .await
@@ -13673,24 +13079,19 @@ async fn wait_timer_e2e() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);

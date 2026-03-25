@@ -20,7 +20,7 @@ use fabro_workflows::checkpoint::Checkpoint;
 use fabro_workflows::conclusion::Conclusion;
 use fabro_workflows::cost::{compute_stage_cost, format_cost};
 use fabro_workflows::devcontainer_bridge;
-use fabro_workflows::engine::{RunConfig, WorkflowRunEngine};
+use fabro_workflows::engine::{GitCheckpointSettings, RunSettings, WorkflowRunEngine};
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::git::GitSyncStatus;
 use fabro_workflows::handler::default_registry;
@@ -1018,6 +1018,29 @@ async fn run_command_impl(
         record.save(&run_dir)?;
     }
 
+    let settings_config = if cached_run_restart {
+        existing_record
+            .as_ref()
+            .map(|r| r.config.clone())
+            .unwrap_or_default()
+    } else {
+        super::create::normalize_config(
+            run_cfg.as_ref(),
+            &run_defaults,
+            &model,
+            provider.as_deref(),
+            sandbox_provider,
+            &graph,
+            super::create::CliFlags {
+                dry_run: dry_run_flag,
+                auto_approve: auto_approve_flag,
+                no_retro: no_retro_flag,
+                verbose: verbose_flag,
+                preserve_sandbox: preserve_sandbox_flag,
+            },
+        )
+    };
+
     // Now resolve ${env.VARNAME} references for runtime use.
     if let Some(ref mut cfg) = run_cfg {
         run_config::resolve_sandbox_env(cfg)?;
@@ -1537,7 +1560,7 @@ async fn run_command_impl(
                             "worktree_setup_failed",
                             format!("Git worktree setup failed ({e}), running without worktree."),
                         );
-                        // Reset so RunConfig does not enable git checkpointing
+                        // Reset so RunSettings does not enable git checkpointing
                         worktree_path = None;
                         worktree_branch = None;
                         worktree_base_sha = None;
@@ -1710,53 +1733,39 @@ async fn run_command_impl(
 
     // 7. Execute
     // Set up metadata branch for git checkpointing (host or remote — engine fills remote)
-    let meta_branch = if worktree_path.is_some() {
-        Some(fabro_workflows::git::MetadataStore::branch_name(&run_id))
+    let git = if worktree_path.is_some() {
+        Some(GitCheckpointSettings {
+            base_sha: worktree_base_sha,
+            run_branch: worktree_branch,
+            meta_branch: Some(fabro_workflows::git::MetadataStore::branch_name(&run_id)),
+        })
     } else {
         None
     };
-    let checkpoint_exclude_globs = run_cfg
-        .as_ref()
-        .map(|c| c.checkpoint.exclude_globs.clone())
-        .unwrap_or_default();
-    let mut config = RunConfig {
+
+    let mut config = RunSettings {
+        config: settings_config,
         run_dir: run_dir.clone(),
         cancel_token: None,
         dry_run: dry_run_mode,
         run_id: run_id.clone(),
-        git_checkpoint_enabled: worktree_path.is_some(),
-        host_repo_path: existing_record
-            .as_ref()
-            .and_then(|r| r.host_repo_path.as_deref().map(PathBuf::from))
-            .or_else(|| Some(original_cwd.clone())),
-        base_sha: worktree_base_sha,
-        run_branch: worktree_branch,
-        meta_branch,
         labels: label_vec
             .iter()
             .filter_map(|s| s.split_once('='))
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
-        checkpoint_exclude_globs,
+        git_author: git_author.clone(),
+        workflow_slug: workflow_slug.clone(),
         github_app: github_app.clone(),
-        git_author,
         base_branch: existing_record
             .as_ref()
             .and_then(|r| r.base_branch.clone())
             .or(detected_base_branch),
-        pull_request: run_cfg
+        host_repo_path: existing_record
             .as_ref()
-            .and_then(|c| c.pull_request.as_ref())
-            .or(run_defaults.pull_request.as_ref())
-            .filter(|p| p.enabled)
-            .cloned(),
-        asset_globs: run_cfg
-            .as_ref()
-            .and_then(|c| c.assets.as_ref())
-            .or(run_defaults.assets.as_ref())
-            .map(|a| a.include.clone())
-            .unwrap_or_default(),
-        workflow_slug: workflow_slug.clone(),
+            .and_then(|r| r.host_repo_path.as_deref().map(PathBuf::from))
+            .or_else(|| Some(original_cwd.clone())),
+        git,
     };
 
     // Build lifecycle config for sandbox init, setup commands, and devcontainer phases
@@ -1844,7 +1853,7 @@ async fn run_command_impl(
     // Auto-create PR on successful completion (skip in dry-run mode)
     let mut pushed_branch: Option<String> = None;
     let mut pr_url: Option<String> = None;
-    if let Some(ref pr_cfg) = config.pull_request {
+    if let Some(pr_cfg) = config.pull_request() {
         if dry_run_mode {
             debug!("Skipping PR creation: dry-run mode");
         } else if let Err(ref e) = engine_result {
@@ -1866,14 +1875,14 @@ async fn run_command_impl(
                     Some(ref origin),
                 ) = (
                     &config.base_branch,
-                    &config.run_branch,
+                    config.git.as_ref().and_then(|g| g.run_branch.as_ref()),
                     &github_app,
                     &origin_url,
                 ) {
                     // Run branch was pushed during checkpoint commits;
                     // just record it for the PR creation.
-                    if config.git_checkpoint_enabled {
-                        pushed_branch = Some(run_branch.clone());
+                    if config.git.is_some() {
+                        pushed_branch = Some(run_branch.to_string());
                     }
 
                     let auto_merge = if pr_cfg.auto_merge {
@@ -2689,10 +2698,11 @@ async fn run_preflight(
 ///
 /// This captures the last diff.patch (written after the final checkpoint) and retro.json.
 /// Best-effort: errors are logged as warnings.
-pub(crate) async fn write_finalize_commit(config: &RunConfig, run_dir: &std::path::Path) {
-    let (Some(ref meta_branch), Some(ref repo_path)) =
-        (&config.meta_branch, &config.host_repo_path)
-    else {
+pub(crate) async fn write_finalize_commit(config: &RunSettings, run_dir: &std::path::Path) {
+    let (Some(meta_branch), Some(repo_path)) = (
+        config.git.as_ref().and_then(|g| g.meta_branch.as_ref()),
+        config.host_repo_path.as_ref(),
+    ) else {
         return;
     };
 

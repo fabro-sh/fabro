@@ -62,7 +62,7 @@ assert_eq!(graph.goal(), "Run tests");
 ### Running a Pipeline
 
 ```rust
-use arc_workflows::engine::{PipelineEngine, RunConfig};
+use arc_workflows::engine::{PipelineEngine, RunSettings};
 use arc_workflows::event::EventEmitter;
 use arc_workflows::handler::HandlerRegistry;
 use arc_workflows::handler::start::StartHandler;
@@ -78,8 +78,19 @@ registry.register("exit", Box::new(ExitHandler));
 registry.register("agent", Box::new(AgentHandler::new(None)));
 
 let engine = PipelineEngine::new(registry, EventEmitter::new());
-let config = RunConfig {
+let config = RunSettings {
+    config: fabro_config::FabroConfig::default(),
     run_dir: "/tmp/pipeline-run".into(),
+    cancel_token: None,
+    dry_run: false,
+    run_id: "example-run".into(),
+    labels: std::collections::HashMap::new(),
+    git_author: fabro_workflows::git::GitAuthor::default(),
+    workflow_slug: None,
+    github_app: None,
+    base_branch: None,
+    host_repo_path: None,
+    git: None,
 };
 
 // engine.run(&graph, &config).await

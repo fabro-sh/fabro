@@ -60,6 +60,7 @@ pub(crate) fn normalize_config(
     if flags.preserve_sandbox {
         config.sandbox.get_or_insert_default().preserve = Some(true);
     }
+    config.pull_request = config.pull_request.take().filter(|p| p.enabled);
     config
 }
 

@@ -23,7 +23,7 @@ use crate::jwt_auth::{AuthMode, AuthenticatedService, AuthenticatedUser};
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_workflows::checkpoint::Checkpoint;
 use fabro_workflows::context::Context;
-use fabro_workflows::engine::{RunConfig, WorkflowRunEngine};
+use fabro_workflows::engine::{RunSettings, WorkflowRunEngine};
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
 use fabro_workflows::handler::HandlerRegistry;
 
@@ -648,24 +648,21 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         }
     }
 
-    let config = RunConfig {
+    let run_record = fabro_workflows::run_record::RunRecord::load(&run_dir)
+        .expect("RunRecord must exist — written by start_run");
+    let config = RunSettings {
+        config: run_record.config,
         run_dir,
         cancel_token: Some(cancel_token),
         dry_run: state.dry_run,
         run_id: run_id.clone(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
-        labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
+        labels: run_record.labels,
         git_author: state.git_author.clone(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
 
     let result = tokio::select! {
