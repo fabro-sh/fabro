@@ -8,13 +8,14 @@ use std::path::Path;
 use std::sync::Arc;
 
 use fabro_agent::Sandbox;
+use fabro_config::FabroConfig;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_llm::provider::Provider;
 use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 use fabro_workflows::artifact::sync_artifacts_to_env;
 use fabro_workflows::checkpoint::Checkpoint;
 use fabro_workflows::context::Context;
-use fabro_workflows::engine::{RunConfig, WorkflowRunEngine};
+use fabro_workflows::engine::{GitCheckpointSettings, RunSettings, WorkflowRunEngine};
 use fabro_workflows::error::FabroError;
 use fabro_workflows::event::EventEmitter;
 use fabro_workflows::handler::exit::ExitHandler;
@@ -386,26 +387,20 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), env.clone());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "test-run".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -536,7 +531,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
     }
 
     // Set up git in the sandbox
-    let (run_id, base_sha, branch_name) = setup_daytona_git(&*env).await;
+    let (_run_id, base_sha, branch_name) = setup_daytona_git(&*env).await;
 
     // Pipeline: start -> work -> exit
     let mut graph = Graph::new("DaytonaGitCheckpoint");
@@ -583,26 +578,24 @@ async fn daytona_git_checkpoint_remote_emits_events() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(emitter), env.clone());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
-        run_id,
-        git_checkpoint_enabled: true,
-        host_repo_path: Some(dir.path().to_path_buf()),
-        base_sha: Some(base_sha),
-        run_branch: Some(branch_name),
-        meta_branch: None,
+        run_id: "git-cp-test".into(),
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: Some(dir.path().to_path_buf()),
+        git: Some(GitCheckpointSettings {
+            base_sha: Some(base_sha),
+            run_branch: Some(branch_name),
+            meta_branch: None,
+        }),
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -771,26 +764,24 @@ async fn daytona_parallel_git_branching_e2e() {
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(emitter), Arc::clone(&env));
 
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: run_tmp.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: run_id.clone(),
-        git_checkpoint_enabled: true,
-        host_repo_path: Some(run_tmp.path().to_path_buf()),
-        base_sha: Some(base_sha),
-        run_branch: Some(branch_name),
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: Some(run_tmp.path().to_path_buf()),
+        git: Some(GitCheckpointSettings {
+            base_sha: Some(base_sha),
+            run_branch: Some(branch_name),
+            meta_branch: None,
+        }),
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -1149,26 +1140,24 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
 
     let meta_branch = MetadataStore::branch_name(&run_id);
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), env.clone());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: run_id.clone(),
-        git_checkpoint_enabled: true,
-        host_repo_path: Some(host_repo.path().to_path_buf()),
-        base_sha: Some(base_sha),
-        run_branch: Some(branch_name),
-        meta_branch: Some(meta_branch),
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: Some(host_repo.path().to_path_buf()),
+        git: Some(GitCheckpointSettings {
+            base_sha: Some(base_sha),
+            run_branch: Some(branch_name),
+            meta_branch: Some(meta_branch),
+        }),
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -1291,26 +1280,25 @@ async fn daytona_asset_collection() {
     graph.edges.push(Edge::new("start", "create_assets"));
     graph.edges.push(Edge::new("create_assets", "exit"));
 
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig {
+            assets: Some(fabro_config::run::AssetsConfig {
+                include: vec!["test-results/**".to_string()],
+            }),
+            ..FabroConfig::default()
+        },
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: "asset-test-daytona".into(),
-        git_checkpoint_enabled: false,
-        host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: vec!["test-results/**".to_string()],
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: None,
+        git: None,
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await
@@ -1548,26 +1536,24 @@ async fn daytona_git_push_run_branch_to_origin() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), env.clone());
-    let config = RunConfig {
+    let config = RunSettings {
+        config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
         dry_run: false,
         run_id: run_id.clone(),
-        git_checkpoint_enabled: true,
-        host_repo_path: Some(dir.path().to_path_buf()),
-        base_sha: Some(base_sha),
-        run_branch: Some(branch_name.clone()),
-        meta_branch: None,
         labels: std::collections::HashMap::new(),
-        checkpoint_exclude_globs: Vec::new(),
-        github_app: None,
         git_author: fabro_workflows::git::GitAuthor::default(),
-        base_branch: None,
-        pull_request: None,
-        asset_globs: Vec::new(),
         workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        host_repo_path: Some(dir.path().to_path_buf()),
+        git: Some(GitCheckpointSettings {
+            base_sha: Some(base_sha),
+            run_branch: Some(branch_name.clone()),
+            meta_branch: None,
+        }),
     };
-
     let outcome = engine
         .run(&graph, &config)
         .await

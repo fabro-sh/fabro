@@ -12,7 +12,7 @@ use fabro_core::state::RunState;
 use super::super::graph::WorkflowGraph;
 use super::super::WorkflowNode;
 use crate::artifact::ArtifactStore;
-use crate::engine::{self, RunConfig};
+use crate::engine::{self, RunSettings};
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::outcome::{Outcome, StageStatus, StageUsage};
 
@@ -33,7 +33,7 @@ pub struct GitLifecycle {
     pub emitter: Arc<EventEmitter>,
     pub run_dir: PathBuf,
     pub run_id: String,
-    pub config: Arc<RunConfig>,
+    pub config: Arc<RunSettings>,
     pub start_node_id: Option<String>,
     // Cross-lifecycle data (shared with EventLifecycle)
     pub checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
@@ -52,9 +52,13 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         *self.checkpoint_git_result.lock().unwrap() = None;
 
         // Init metadata branch (best-effort)
-        if let (Some(_), Some(ref repo_path)) =
-            (&self.config.meta_branch, &self.config.host_repo_path)
-        {
+        if let (Some(_), Some(repo_path)) = (
+            self.config
+                .git
+                .as_ref()
+                .and_then(|g| g.meta_branch.as_ref()),
+            self.config.host_repo_path.as_ref(),
+        ) {
             let store = crate::git::MetadataStore::new(repo_path, &self.config.git_author);
             let run_json = std::fs::read(self.run_dir.join("run.json")).ok();
             let start_json = std::fs::read(self.run_dir.join("start.json")).ok();
@@ -91,15 +95,19 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         let node_id = node.id();
 
         // Skip git checkpoint for the start node (always empty) or if git disabled
-        if self.start_node_id.as_deref() == Some(node_id) || !self.config.git_checkpoint_enabled {
+        if self.start_node_id.as_deref() == Some(node_id) || self.config.git.is_none() {
             *self.checkpoint_git_result.lock().unwrap() = None;
             return Ok(());
         }
 
         // Shadow commit (best-effort, metadata branch)
-        let shadow_sha: Option<String> = if let (Some(_), Some(ref repo_path)) =
-            (&self.config.meta_branch, &self.config.host_repo_path)
-        {
+        let shadow_sha: Option<String> = if let (Some(_), Some(repo_path)) = (
+            self.config
+                .git
+                .as_ref()
+                .and_then(|g| g.meta_branch.as_ref()),
+            self.config.host_repo_path.as_ref(),
+        ) {
             let store = crate::git::MetadataStore::new(repo_path, &self.config.git_author);
             // Build checkpoint JSON for shadow branch
             let checkpoint_path = self.run_dir.join("checkpoint.json");
@@ -148,7 +156,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             &result.outcome.status.to_string(),
             completed_count,
             shadow_sha,
-            &self.config.checkpoint_exclude_globs,
+            self.config.checkpoint_exclude_globs(),
             &self.config.git_author,
         )
         .await;
@@ -177,10 +185,12 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
 
                 // Push run branch (skip in dry-run mode)
                 if !self.config.dry_run {
-                    if let Some(ref branch) = self.config.run_branch {
+                    if let Some(branch) =
+                        self.config.git.as_ref().and_then(|g| g.run_branch.as_ref())
+                    {
                         let push_ok = if self.sandbox.git_push_branch(branch).await {
                             true
-                        } else if let Some(ref repo_path) = self.config.host_repo_path {
+                        } else if let Some(repo_path) = self.config.host_repo_path.as_ref() {
                             let refspec = format!("refs/heads/{branch}");
                             engine::git_push_host(
                                 repo_path,
@@ -195,9 +205,13 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                         git_result.push_results.push((branch.clone(), push_ok));
                     }
                     // Push metadata branch (always from host)
-                    if let (Some(ref meta_branch), Some(ref repo_path)) =
-                        (&self.config.meta_branch, &self.config.host_repo_path)
-                    {
+                    if let (Some(meta_branch), Some(repo_path)) = (
+                        self.config
+                            .git
+                            .as_ref()
+                            .and_then(|g| g.meta_branch.as_ref()),
+                        self.config.host_repo_path.as_ref(),
+                    ) {
                         let refspec = format!("refs/heads/{meta_branch}");
                         let meta_push_ok = engine::git_push_host(
                             repo_path,
@@ -219,7 +233,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                     .lock()
                     .unwrap()
                     .clone()
-                    .or_else(|| self.config.base_sha.clone())
+                    .or_else(|| self.config.git.as_ref().and_then(|g| g.base_sha.clone()))
                     .unwrap_or_else(|| sha.clone());
                 let diff_dest = engine::node_dir(&self.run_dir, node_id, visit).join("diff.patch");
 
@@ -259,11 +273,11 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
     async fn on_run_end(&self, outcome: &Outcome, _state: &WfRunState) {
         // Write final.patch on success
         if (outcome.status == StageStatus::Success || outcome.status == StageStatus::PartialSuccess)
-            && self.config.git_checkpoint_enabled
+            && self.config.git.is_some()
         {
-            if let Some(ref base_sha) = self.config.base_sha {
+            if let Some(base_sha) = self.config.git.as_ref().and_then(|g| g.base_sha.clone()) {
                 let diff_dest = self.run_dir.join("final.patch");
-                match engine::git_diff(&*self.sandbox, base_sha).await {
+                match engine::git_diff(&*self.sandbox, &base_sha).await {
                     Ok(patch) if !patch.is_empty() => {
                         let _ = std::fs::write(&diff_dest, patch);
                     }

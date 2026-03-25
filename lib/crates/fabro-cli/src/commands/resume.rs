@@ -13,7 +13,7 @@ use fabro_model::{Catalog, Provider};
 use fabro_util::terminal::Styles;
 use fabro_workflows::backend::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::checkpoint::Checkpoint;
-use fabro_workflows::engine::RunConfig;
+use fabro_workflows::engine::{GitCheckpointSettings, RunSettings};
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel};
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::run_record::RunRecord;
@@ -102,7 +102,7 @@ struct ResumeContext {
     /// Kept as Arc so the sandbox event callbacks can emit through it. Listeners
     /// that need to be added later (e.g. ProgressUI) are registered separately.
     emitter: Arc<EventEmitter>,
-    config: RunConfig,
+    settings: RunSettings,
     setup_commands: Vec<String>,
     /// Devcontainer lifecycle phases (on_create, post_create, post_start) resolved from config.
     devcontainer_phases: Vec<(String, Vec<fabro_devcontainer::Command>)>,
@@ -231,7 +231,7 @@ async fn prepare_from_checkpoint(
     write_run_config_snapshot(&run_dir, workflow_toml_path.as_deref()).await?;
 
     // Write RunRecord for the resumed run
-    {
+    let settings_config = {
         let working_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let cli_flags = super::create::CliFlags {
             dry_run: args.dry_run,
@@ -252,7 +252,7 @@ async fn prepare_from_checkpoint(
         let record = fabro_workflows::run_record::RunRecord {
             run_id: run_id.clone(),
             created_at: chrono::Utc::now(),
-            config: normalized,
+            config: normalized.clone(),
             graph: graph.clone(),
             workflow_slug: workflow_slug.clone(),
             working_directory: working_directory.clone(),
@@ -261,7 +261,8 @@ async fn prepare_from_checkpoint(
             labels: std::collections::HashMap::new(),
         };
         let _ = record.save(&run_dir);
-    }
+        normalized
+    };
 
     let original_cwd = std::env::current_dir()?;
     let emitter = Arc::new(EventEmitter::new());
@@ -439,41 +440,23 @@ async fn prepare_from_checkpoint(
     };
     let sandbox: Arc<dyn Sandbox> = Arc::new(fabro_agent::ReadBeforeWriteSandbox::new(sandbox));
 
-    let config = RunConfig {
+    let settings = RunSettings {
+        config: settings_config,
         run_dir: run_dir.clone(),
         cancel_token: None,
         dry_run: args.dry_run,
         run_id: run_id.clone(),
-        git_checkpoint_enabled: false,
         host_repo_path: None,
-        base_sha: None,
-        run_branch: None,
-        meta_branch: None,
+        git: None,
         labels: args
             .label
             .iter()
             .filter_map(|s| s.split_once('='))
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
-        checkpoint_exclude_globs: run_cfg
-            .as_ref()
-            .map(|cfg| cfg.checkpoint.exclude_globs.clone())
-            .unwrap_or_else(|| run_defaults.checkpoint.exclude_globs.clone()),
         github_app: github_app.clone(),
         git_author,
         base_branch: None,
-        pull_request: run_cfg
-            .as_ref()
-            .and_then(|cfg| cfg.pull_request.as_ref())
-            .or(run_defaults.pull_request.as_ref())
-            .filter(|p| p.enabled)
-            .cloned(),
-        asset_globs: run_cfg
-            .as_ref()
-            .and_then(|cfg| cfg.assets.as_ref())
-            .or(run_defaults.assets.as_ref())
-            .map(|a| a.include.clone())
-            .unwrap_or_default(),
         workflow_slug,
     };
 
@@ -496,7 +479,7 @@ async fn prepare_from_checkpoint(
         run_cfg,
         sandbox,
         emitter,
-        config,
+        settings,
         setup_commands,
         devcontainer_phases,
         devcontainer_env,
@@ -639,7 +622,7 @@ async fn prepare_from_branch(
     write_run_config_snapshot(&run_dir, None).await?;
 
     // Write RunRecord for the resumed run
-    {
+    let settings_config = {
         let (model_str, provider_str) = resolve_model_provider(
             args.model.as_deref(),
             args.provider.as_deref(),
@@ -666,7 +649,7 @@ async fn prepare_from_branch(
         let record = fabro_workflows::run_record::RunRecord {
             run_id: run_id.clone(),
             created_at: chrono::Utc::now(),
-            config: normalized,
+            config: normalized.clone(),
             graph: graph.clone(),
             workflow_slug: workflow_slug.clone(),
             working_directory: resume_repo_path.clone(),
@@ -675,7 +658,8 @@ async fn prepare_from_branch(
             labels: std::collections::HashMap::new(),
         };
         let _ = record.save(&run_dir);
-    }
+        normalized
+    };
 
     let emitter = Arc::new(EventEmitter::new());
 
@@ -888,42 +872,27 @@ async fn prepare_from_branch(
         .unwrap_or_default();
     setup_commands.extend(sandbox.resume_setup_commands(&run_branch));
 
-    let meta_branch = Some(fabro_workflows::git::MetadataStore::branch_name(&run_id));
-    let config = RunConfig {
+    let settings = RunSettings {
+        config: settings_config,
         run_dir: run_dir.clone(),
         cancel_token: None,
         dry_run: args.dry_run,
         run_id: run_id.clone(),
-        git_checkpoint_enabled: true,
         host_repo_path: Some(resume_repo_path.clone()),
-        base_sha,
-        run_branch: Some(run_branch),
-        meta_branch,
+        git: Some(GitCheckpointSettings {
+            base_sha,
+            run_branch: Some(run_branch),
+            meta_branch: Some(fabro_workflows::git::MetadataStore::branch_name(&run_id)),
+        }),
         labels: args
             .label
             .iter()
             .filter_map(|s| s.split_once('='))
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
-        checkpoint_exclude_globs: run_cfg
-            .as_ref()
-            .map(|cfg| cfg.checkpoint.exclude_globs.clone())
-            .unwrap_or_else(|| run_defaults.checkpoint.exclude_globs.clone()),
         github_app: github_app.clone(),
         git_author,
         base_branch: detected_base_branch,
-        pull_request: run_cfg
-            .as_ref()
-            .and_then(|cfg| cfg.pull_request.as_ref())
-            .or(run_defaults.pull_request.as_ref())
-            .filter(|p| p.enabled)
-            .cloned(),
-        asset_globs: run_cfg
-            .as_ref()
-            .and_then(|cfg| cfg.assets.as_ref())
-            .or(run_defaults.assets.as_ref())
-            .map(|a| a.include.clone())
-            .unwrap_or_default(),
         workflow_slug,
     };
 
@@ -940,7 +909,7 @@ async fn prepare_from_branch(
         run_cfg,
         sandbox,
         emitter,
-        config,
+        settings,
         setup_commands,
         devcontainer_phases,
         devcontainer_env,
@@ -968,7 +937,7 @@ async fn run_resumed(
         mut run_cfg,
         sandbox,
         emitter,
-        mut config,
+        settings: mut config,
         setup_commands,
         devcontainer_phases,
         devcontainer_env,
@@ -1386,7 +1355,7 @@ async fn run_resumed(
     // Auto-create PR on successful completion (mirrors run_command)
     let mut pushed_branch: Option<String> = None;
     let mut pr_url: Option<String> = None;
-    if let Some(ref pr_cfg) = config.pull_request {
+    if let Some(pr_cfg) = config.pull_request() {
         if config.dry_run {
             debug!("Skipping PR creation: dry-run mode");
         } else if let Err(ref e) = engine_result {
@@ -1408,12 +1377,12 @@ async fn run_resumed(
                     Some(ref origin),
                 ) = (
                     &config.base_branch,
-                    &config.run_branch,
+                    config.git.as_ref().and_then(|g| g.run_branch.as_ref()),
                     &github_app,
                     &origin_url,
                 ) {
-                    if config.git_checkpoint_enabled {
-                        pushed_branch = Some(run_branch.clone());
+                    if config.git.is_some() {
+                        pushed_branch = Some(run_branch.to_string());
                     }
 
                     let auto_merge = if pr_cfg.auto_merge {

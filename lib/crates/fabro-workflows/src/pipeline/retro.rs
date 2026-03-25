@@ -8,7 +8,7 @@ pub async fn retro(executed: Executed, _options: &RetroOptions) -> Retroed {
     let Executed {
         graph,
         outcome,
-        config,
+        settings,
         engine,
         emitter,
         sandbox,
@@ -20,7 +20,7 @@ pub async fn retro(executed: Executed, _options: &RetroOptions) -> Retroed {
     Retroed {
         graph,
         outcome,
-        config,
+        settings,
         engine,
         emitter,
         sandbox,

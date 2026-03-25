@@ -14,7 +14,7 @@ pub async fn finalize(
     let Retroed {
         graph: _,
         outcome,
-        config,
+        settings,
         engine: _,
         emitter: _,
         sandbox: _,
@@ -45,7 +45,7 @@ pub async fn finalize(
     };
 
     Ok(Finalized {
-        run_id: config.run_id,
+        run_id: settings.run_id,
         outcome,
         conclusion,
         pr_url: None,
