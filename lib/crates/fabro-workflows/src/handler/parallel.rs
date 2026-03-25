@@ -10,7 +10,7 @@ use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
-use crate::graph_ops::set_hook_node;
+use crate::hook_context::set_hook_node;
 use crate::millis_u64;
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use fabro_graphviz::graph::{Graph, Node};

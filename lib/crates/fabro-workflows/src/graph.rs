@@ -1,12 +1,13 @@
+mod routing;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_core::error::{CoreError, Result as CoreResult};
-use fabro_core::graph::{EdgeSelection, EdgeSpec, Graph, NodeSpec};
+use fabro_core::graph::{EdgeSelection as CoreEdgeSelection, EdgeSpec, Graph, NodeSpec};
 use fabro_graphviz::graph::types::{Edge as GvEdge, Graph as GvGraph, Node as GvNode};
 
 use crate::context::Context;
-use crate::graph_ops;
 use crate::outcome::{Outcome, StageUsage};
 
 // ---- WorkflowNode ----
@@ -26,7 +27,7 @@ impl NodeSpec for WorkflowNode {
     }
 
     fn is_terminal(&self) -> bool {
-        graph_ops::is_terminal(&self.0)
+        routing::is_terminal(&self.0)
     }
 
     fn max_visits(&self) -> Option<usize> {
@@ -102,15 +103,15 @@ impl Graph for WorkflowGraph {
         node: &Self::Node,
         outcome: &Outcome,
         context: &Context,
-    ) -> Option<EdgeSelection<Self>> {
-        let selection = graph_ops::select_edge(
+    ) -> Option<CoreEdgeSelection<Self>> {
+        let selection = routing::select_edge(
             node.inner(),
             outcome,
             context,
             self.inner(),
             node.inner().selection(),
         );
-        selection.map(|sel| EdgeSelection {
+        selection.map(|sel| CoreEdgeSelection {
             edge: WorkflowEdge(Arc::new(sel.edge.clone())),
             reason: sel.reason,
         })
@@ -120,10 +121,10 @@ impl Graph for WorkflowGraph {
         &self,
         outcomes: &HashMap<String, Outcome>,
     ) -> std::result::Result<(), String> {
-        graph_ops::check_goal_gates(self.inner(), outcomes)
+        routing::check_goal_gates(self.inner(), outcomes)
     }
 
     fn get_retry_target(&self, failed_node_id: &str) -> Option<String> {
-        graph_ops::get_retry_target(failed_node_id, self.inner())
+        routing::get_retry_target(failed_node_id, self.inner())
     }
 }

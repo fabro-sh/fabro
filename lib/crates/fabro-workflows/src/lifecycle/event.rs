@@ -13,11 +13,19 @@ use crate::artifact::ArtifactStore;
 use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::graph_ops::node_script;
 use crate::outcome::{FailureCategory, FailureDetail, Outcome, StageStatus, StageUsage};
+use fabro_graphviz::graph::types::Node as GvNode;
 
 type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
+
+fn node_script(node: &GvNode) -> Option<String> {
+    node.attrs
+        .get("script")
+        .or_else(|| node.attrs.get("tool_command"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
 
 /// Sub-lifecycle responsible for emitting workflow run events.
 pub struct EventLifecycle {
