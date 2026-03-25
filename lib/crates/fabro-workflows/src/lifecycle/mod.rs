@@ -23,8 +23,8 @@ use fabro_core::lifecycle::{
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::RunState;
 
-use super::graph::WorkflowGraph;
-use super::WorkflowNode;
+use crate::graph::WorkflowGraph;
+use crate::graph::WorkflowNode;
 use crate::artifact::ArtifactStore;
 use crate::context;
 use crate::event::EventEmitter;
