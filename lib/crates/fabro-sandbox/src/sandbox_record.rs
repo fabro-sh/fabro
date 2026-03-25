@@ -1,8 +1,7 @@
 use std::path::Path;
 
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-
-use crate::error::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SandboxRecord {
@@ -26,11 +25,15 @@ pub struct SandboxRecord {
 
 impl SandboxRecord {
     pub fn save(&self, path: &Path) -> Result<()> {
-        crate::save_json(self, path, "sandbox_record")
+        let json = serde_json::to_string_pretty(self).context("sandbox_record serialize failed")?;
+        std::fs::write(path, json)?;
+        Ok(())
     }
 
     pub fn load(path: &Path) -> Result<Self> {
-        crate::load_json(path, "sandbox_record")
+        let data = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        serde_json::from_str(&data).context("sandbox_record deserialize failed")
     }
 }
 

@@ -85,7 +85,7 @@ pub fn split_run_path(s: &str) -> Option<(&str, &str)> {
 }
 
 pub fn validate_daytona_provider(
-    record: &fabro_workflows::records::SandboxRecord,
+    record: &fabro_sandbox::SandboxRecord,
     feature: &str,
 ) -> Result<()> {
     if record.provider != "daytona" {
