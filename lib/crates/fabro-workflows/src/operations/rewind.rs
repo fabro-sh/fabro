@@ -5,8 +5,8 @@ use fabro_git_storage::branchstore::{BranchStore, CommitInfo};
 use fabro_git_storage::gitobj::Store;
 use git2::{Oid, Repository, Signature};
 
-use crate::records::Checkpoint;
 use crate::git::MetadataStore;
+use crate::records::Checkpoint;
 use fabro_graphviz::graph::Graph;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
