@@ -137,8 +137,8 @@ fn print_human_output(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabro_workflows::records::Conclusion;
     use fabro_workflows::outcome::StageStatus;
+    use fabro_workflows::records::Conclusion;
 
     fn no_color_styles() -> Styles {
         Styles::new(false)

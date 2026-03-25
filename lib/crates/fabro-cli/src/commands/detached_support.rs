@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
-use fabro_workflows::records::Conclusion;
 use fabro_workflows::event::{RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::outcome::StageStatus;
+use fabro_workflows::records::Conclusion;
 use fabro_workflows::run_status::{self, RunStatus, StatusReason};
 use serde::Serialize;
 

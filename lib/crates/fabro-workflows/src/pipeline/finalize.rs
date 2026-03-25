@@ -2,10 +2,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::checkpoint::Checkpoint;
-use crate::records::Conclusion;
 use crate::error::FabroError;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
+use crate::records::Conclusion;
 use crate::run_settings::RunSettings;
 use crate::run_status::{RunStatus, StatusReason};
 use fabro_hooks::{HookContext, HookEvent, HookRunner};

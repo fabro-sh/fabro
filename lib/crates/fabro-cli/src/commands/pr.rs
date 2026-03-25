@@ -331,9 +331,8 @@ async fn create_from(
     let start = fabro_workflows::start_record::StartRecord::load(&run_dir)
         .context("Failed to load start.json")?;
 
-    let conclusion =
-        fabro_workflows::records::Conclusion::load(&run_dir.join("conclusion.json"))
-            .context("Failed to load conclusion.json — is the run finished?")?;
+    let conclusion = fabro_workflows::records::Conclusion::load(&run_dir.join("conclusion.json"))
+        .context("Failed to load conclusion.json — is the run finished?")?;
 
     match conclusion.status {
         fabro_workflows::outcome::StageStatus::Success
