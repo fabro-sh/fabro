@@ -211,11 +211,18 @@ fn parse_dot_summary(dot: &str) -> (String, usize, usize) {
     }
 }
 
-/// Read the workflow graph source from `run_dir/graph.fabro` (or `graph.dot` fallback).
+/// Read the workflow graph source from `run_dir/workflow.fabro`.
+/// Falls back to `graph.fabro` / `graph.dot` for older runs.
 fn read_dot_source(run_dir: &Path) -> Option<String> {
-    let fabro_path = run_dir.join("graph.fabro");
-    if let Ok(content) = std::fs::read_to_string(&fabro_path) {
-        debug!(path = %fabro_path.display(), "Read workflow graph for PR body");
+    let workflow_fabro_path = run_dir.join("workflow.fabro");
+    if let Ok(content) = std::fs::read_to_string(&workflow_fabro_path) {
+        debug!(path = %workflow_fabro_path.display(), "Read workflow graph for PR body");
+        return Some(content);
+    }
+
+    let legacy_fabro_path = run_dir.join("graph.fabro");
+    if let Ok(content) = std::fs::read_to_string(&legacy_fabro_path) {
+        debug!(path = %legacy_fabro_path.display(), "Read workflow graph for PR body (legacy)");
         return Some(content);
     }
     let dot_path = run_dir.join("graph.dot");
@@ -828,9 +835,17 @@ mod tests {
     #[test]
     fn read_dot_source_found() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("graph.fabro"), "digraph test {}").unwrap();
+        std::fs::write(tmp.path().join("workflow.fabro"), "digraph test {}").unwrap();
         let result = read_dot_source(tmp.path());
         assert_eq!(result, Some("digraph test {}".to_string()));
+    }
+
+    #[test]
+    fn read_dot_source_legacy_fabro_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("graph.fabro"), "digraph legacy {}").unwrap();
+        let result = read_dot_source(tmp.path());
+        assert_eq!(result, Some("digraph legacy {}".to_string()));
     }
 
     #[test]
