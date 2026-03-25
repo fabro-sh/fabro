@@ -9,6 +9,7 @@ description = "Graphviz DOT parser and typed graph data model"
 doctest = false
 
 [dependencies]
+anyhow.workspace = true
 nom = "7"
 regex = { workspace = true }
 serde = { workspace = true }

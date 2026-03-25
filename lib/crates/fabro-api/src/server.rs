@@ -1510,7 +1510,7 @@ async fn get_retro(
 
 /// Render DOT source to a styled SVG via `render_dot` on a blocking thread.
 pub(crate) async fn render_dot_svg(dot_source: &str) -> Response {
-    use fabro_workflows::graph_render::{render_dot, GraphFormat};
+    use fabro_graphviz::render::{render_dot, GraphFormat};
 
     let source = dot_source.to_owned();
     match tokio::task::spawn_blocking(move || render_dot(&source, GraphFormat::Svg)).await {
