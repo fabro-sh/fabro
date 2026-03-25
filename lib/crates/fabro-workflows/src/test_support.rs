@@ -4,12 +4,43 @@ use std::sync::Arc;
 use fabro_agent::Sandbox;
 
 use crate::checkpoint::Checkpoint;
-use crate::engine::WorkflowRunEngine;
 use crate::error::Result;
 use crate::event::EventEmitter;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
+use crate::pipeline;
+use crate::pipeline::types::Initialized;
 use crate::run_settings::RunSettings;
+
+struct InitializedOptions {
+    hook_runner: Option<Arc<fabro_hooks::HookRunner>>,
+    env: HashMap<String, String>,
+    checkpoint: Option<Checkpoint>,
+}
+
+fn initialized(
+    registry: HandlerRegistry,
+    emitter: Arc<EventEmitter>,
+    sandbox: Arc<dyn Sandbox>,
+    graph: &fabro_graphviz::graph::Graph,
+    settings: &RunSettings,
+    options: InitializedOptions,
+) -> Initialized {
+    std::fs::create_dir_all(&settings.run_dir).expect("failed to create run dir");
+    Initialized {
+        graph: graph.clone(),
+        source: String::new(),
+        settings: settings.clone(),
+        checkpoint: options.checkpoint,
+        seed_context: None,
+        emitter,
+        sandbox,
+        registry: Arc::new(registry),
+        hook_runner: options.hook_runner,
+        env: options.env,
+        dry_run: settings.dry_run,
+    }
+}
 
 pub async fn run_graph(
     registry: HandlerRegistry,
@@ -18,8 +49,20 @@ pub async fn run_graph(
     graph: &fabro_graphviz::graph::Graph,
     settings: &RunSettings,
 ) -> Result<Outcome> {
-    let engine = WorkflowRunEngine::new(registry, emitter, sandbox);
-    engine.run(graph, settings).await
+    let executed = pipeline::execute(initialized(
+        registry,
+        emitter,
+        sandbox,
+        graph,
+        settings,
+        InitializedOptions {
+            hook_runner: None,
+            env: HashMap::new(),
+            checkpoint: None,
+        },
+    ))
+    .await;
+    executed.outcome
 }
 
 pub async fn run_graph_with_hooks(
@@ -31,12 +74,20 @@ pub async fn run_graph_with_hooks(
     hook_runner: Arc<fabro_hooks::HookRunner>,
     env: Option<HashMap<String, String>>,
 ) -> Result<Outcome> {
-    let mut engine = WorkflowRunEngine::new(registry, emitter, sandbox);
-    engine.set_hook_runner(hook_runner);
-    if let Some(env) = env {
-        engine.set_env(env);
-    }
-    engine.run(graph, settings).await
+    let executed = pipeline::execute(initialized(
+        registry,
+        emitter,
+        sandbox,
+        graph,
+        settings,
+        InitializedOptions {
+            hook_runner: Some(hook_runner),
+            env: env.unwrap_or_default(),
+            checkpoint: None,
+        },
+    ))
+    .await;
+    executed.outcome
 }
 
 pub async fn run_graph_from_checkpoint(
@@ -47,10 +98,20 @@ pub async fn run_graph_from_checkpoint(
     settings: &RunSettings,
     checkpoint: &Checkpoint,
 ) -> Result<Outcome> {
-    let engine = WorkflowRunEngine::new(registry, emitter, sandbox);
-    engine
-        .run_from_checkpoint(graph, settings, checkpoint)
-        .await
+    let executed = pipeline::execute(initialized(
+        registry,
+        emitter,
+        sandbox,
+        graph,
+        settings,
+        InitializedOptions {
+            hook_runner: None,
+            env: HashMap::new(),
+            checkpoint: Some(checkpoint.clone()),
+        },
+    ))
+    .await;
+    executed.outcome
 }
 
 pub struct WorkflowRunner {

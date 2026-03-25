@@ -23,9 +23,11 @@ use crate::jwt_auth::{AuthMode, AuthenticatedService, AuthenticatedUser};
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_workflows::checkpoint::Checkpoint;
 use fabro_workflows::context::Context;
-use fabro_workflows::engine::WorkflowRunEngine;
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
 use fabro_workflows::handler::HandlerRegistry;
+use fabro_workflows::operations::{self, CreateOptions};
+use fabro_workflows::pipeline::{self, InitOptions};
+use fabro_workflows::run_settings::LifecycleConfig;
 use fabro_workflows::run_settings::RunSettings;
 
 pub use fabro_types::{
@@ -475,8 +477,14 @@ async fn start_run(
     Json(req): Json<StartRunRequest>,
 ) -> Response {
     // Parse the DOT source
-    let graph = match fabro_workflows::workflow::prepare_from_source(&req.dot_source) {
-        Ok(g) => g,
+    let graph = match operations::create(&req.dot_source, CreateOptions::default()) {
+        Ok(validated) => {
+            if let Err(e) = validated.raise_on_errors() {
+                return ApiError::bad_request(e.to_string()).into_response();
+            }
+            let (graph, _, _) = validated.into_parts();
+            graph
+        }
         Err(e) => {
             return ApiError::bad_request(e.to_string()).into_response();
         }
@@ -615,24 +623,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
     let sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::new(
         fabro_agent::ReadBeforeWriteSandbox::new(Arc::new(LocalSandbox::new(cwd))),
     );
-    let mut engine = WorkflowRunEngine::with_interviewer(
-        registry,
-        Arc::new(emitter),
-        Arc::clone(&interviewer) as Arc<dyn Interviewer>,
-        sandbox,
-    );
-    if state.dry_run {
-        engine.set_dry_run(true);
-    }
-
-    // Wire up hook runner from server config
-    if !state.hooks.is_empty() {
-        let hook_config = fabro_hooks::HookConfig {
-            hooks: state.hooks.clone(),
-        };
-        let runner = fabro_hooks::HookRunner::new(hook_config);
-        engine.set_hook_runner(std::sync::Arc::new(runner));
-    }
+    let emitter = Arc::new(emitter);
 
     // Transition to Running, populate interviewer + context
     {
@@ -665,7 +656,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
     };
     let config = RunSettings {
         config: run_record.config,
-        run_dir,
+        run_dir: run_dir.clone(),
         cancel_token: Some(cancel_token),
         dry_run: state.dry_run,
         run_id: run_id.clone(),
@@ -678,8 +669,49 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         git: None,
     };
 
-    let result = tokio::select! {
-        result = engine.run(&graph, &config) => result,
+    let execution = {
+        let emitter = Arc::clone(&emitter);
+        let sandbox = Arc::clone(&sandbox);
+        let registry = Arc::new(registry);
+        let graph = graph.clone();
+        let run_dir = run_dir.clone();
+        let run_id = run_id.clone();
+        let config = config.clone();
+        let hooks = state.hooks.clone();
+        let dry_run = state.dry_run;
+        async move {
+            let validated = operations::create_from_graph(graph, String::new());
+            let initialized = pipeline::initialize(
+                validated,
+                InitOptions {
+                    run_id,
+                    run_dir,
+                    dry_run,
+                    emitter,
+                    sandbox,
+                    registry,
+                    lifecycle: LifecycleConfig {
+                        setup_commands: Vec::new(),
+                        setup_command_timeout_ms: 300_000,
+                        devcontainer_phases: Vec::new(),
+                    },
+                    run_settings: config,
+                    hooks: fabro_hooks::HookConfig { hooks },
+                    sandbox_env: HashMap::new(),
+                    checkpoint: None,
+                    seed_context: None,
+                },
+            )
+            .await?;
+            Ok::<_, fabro_workflows::error::FabroError>(pipeline::execute(initialized).await)
+        }
+    };
+
+    let (result, final_context) = tokio::select! {
+        result = execution => match result {
+            Ok(executed) => (executed.outcome, Some(executed.final_context)),
+            Err(err) => (Err(err), None),
+        },
         _ = cancel_rx => {
             let mut runs = state.runs.lock().expect("runs lock poisoned");
             if let Some(managed_run) = runs.get_mut(&run_id) {
@@ -748,6 +780,9 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
             }
         }
         managed_run.checkpoint = checkpoint;
+        if let Some(ctx) = final_context {
+            managed_run.context = Some(ctx);
+        }
         managed_run.run_dir = Some(config.run_dir.clone());
         managed_run.event_tx = None;
     }

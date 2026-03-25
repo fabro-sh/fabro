@@ -395,3 +395,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "execute_engine_compat_tests.rs"]
+mod engine_compat_tests;
