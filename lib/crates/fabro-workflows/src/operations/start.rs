@@ -329,18 +329,20 @@ mod tests {
             _run_dir: &Path,
             services: &crate::handler::EngineServices,
         ) -> Result<Outcome, FabroError> {
-            services.emitter.emit(&WorkflowRunEvent::CheckpointCompleted {
-                node_id: node.id.clone(),
-                status: "success".to_string(),
-                git_commit_sha: Some("sha-test".to_string()),
-            });
+            services
+                .emitter
+                .emit(&WorkflowRunEvent::CheckpointCompleted {
+                    node_id: node.id.clone(),
+                    status: "success".to_string(),
+                    git_commit_sha: Some("sha-test".to_string()),
+                });
             Ok(Outcome::success())
         }
     }
 
     fn validated_workflow(dot: &str) -> Validated {
-        let validated = crate::operations::create(dot, crate::operations::CreateOptions::default())
-            .unwrap();
+        let validated =
+            crate::operations::create(dot, crate::operations::CreateOptions::default()).unwrap();
         validated.raise_on_errors().unwrap();
         validated
     }

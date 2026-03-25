@@ -1733,7 +1733,11 @@ async fn run_command_impl(
     status_guard.defuse();
 
     let run_start = Instant::now();
-    let pr_config = config.pull_request().cloned();
+    let pr_config = if dry_run_mode {
+        None
+    } else {
+        config.pull_request().cloned()
+    };
     let started = start(
         validated,
         StartOptions {
@@ -1784,6 +1788,9 @@ async fn run_command_impl(
         Ok(started) => {
             if let Some(ref retro) = started.retro {
                 print_retro_result(retro, started.retro_duration, &run_dir, styles);
+            } else if !no_retro_flag && project_config::is_retro_enabled() {
+                eprintln!("\n{}", styles.bold.apply_to("=== Retro ==="));
+                eprintln!("{}", styles.dim.apply_to("Retro unavailable"));
             }
             let finalized = started.finalized;
             print_run_conclusion(
@@ -1974,7 +1981,7 @@ pub(crate) fn print_retro_result(
         .map(|s| s.to_string())
         .unwrap_or_else(|| "unknown".to_string());
     let outcome_str = retro.outcome.as_deref().unwrap_or("No outcome recorded");
-    let line1_content = format!("Retro: {smoothness_str} - {outcome_str}");
+    let line1_content = format!("Retro: {smoothness_str} \u{2014} {outcome_str}");
     let term_width = console::Term::stderr().size().1 as usize;
     let pad1 = term_width.saturating_sub(line1_content.len() + retro_dur.len());
     eprintln!(
@@ -1982,7 +1989,7 @@ pub(crate) fn print_retro_result(
         styles.bold.apply_to("Retro:"),
         styles
             .dim
-            .apply_to(format!("{smoothness_str} - {outcome_str}")),
+            .apply_to(format!("{smoothness_str} \u{2014} {outcome_str}")),
         "",
         styles.dim.apply_to(&retro_dur),
     );

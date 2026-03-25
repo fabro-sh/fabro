@@ -1242,7 +1242,11 @@ async fn run_resumed(
         &run_defaults,
     );
     let run_start = Instant::now();
-    let pr_config = settings.pull_request().cloned();
+    let pr_config = if dry_run_mode {
+        None
+    } else {
+        settings.pull_request().cloned()
+    };
     let started = start(
         validated,
         StartOptions {
@@ -1299,6 +1303,9 @@ async fn run_resumed(
         Ok(started) => {
             if let Some(ref retro) = started.retro {
                 print_retro_result(retro, started.retro_duration, &run_dir, styles);
+            } else if !args.no_retro && project_config::is_retro_enabled() {
+                eprintln!("\n{}", styles.bold.apply_to("=== Retro ==="));
+                eprintln!("{}", styles.dim.apply_to("Retro unavailable"));
             }
             let finalized = started.finalized;
             print_run_conclusion(

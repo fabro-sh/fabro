@@ -32,7 +32,7 @@ pub fn run(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<()> {
         styles.dim.apply_to(relative_path(&dot_path)),
     );
 
-    print_diagnostics(&diagnostics, styles);
+    print_diagnostics(diagnostics, styles);
 
     if diagnostics.iter().any(|d| d.severity == Severity::Error) {
         bail!("Validation failed");
