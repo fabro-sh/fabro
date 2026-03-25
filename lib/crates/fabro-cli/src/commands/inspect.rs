@@ -45,14 +45,12 @@ fn inspect_run_dir(
     let conclusion = fabro_workflows::records::Conclusion::load(&run_dir.join("conclusion.json"))
         .ok()
         .and_then(|v| serde_json::to_value(v).ok());
-    let checkpoint =
-        fabro_workflows::records::Checkpoint::load(&run_dir.join("checkpoint.json"))
-            .ok()
-            .and_then(|v| serde_json::to_value(v).ok());
-    let sandbox =
-        fabro_workflows::records::SandboxRecord::load(&run_dir.join("sandbox.json"))
-            .ok()
-            .and_then(|v| serde_json::to_value(v).ok());
+    let checkpoint = fabro_workflows::records::Checkpoint::load(&run_dir.join("checkpoint.json"))
+        .ok()
+        .and_then(|v| serde_json::to_value(v).ok());
+    let sandbox = fabro_workflows::records::SandboxRecord::load(&run_dir.join("sandbox.json"))
+        .ok()
+        .and_then(|v| serde_json::to_value(v).ok());
 
     Ok(InspectOutput {
         run_id: run_id.to_string(),

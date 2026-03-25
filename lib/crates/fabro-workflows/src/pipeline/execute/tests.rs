@@ -12,7 +12,6 @@ use fabro_hooks::HookConfig;
 use fabro_interview::AutoApproveInterviewer;
 
 use super::*;
-use crate::records::Checkpoint;
 use crate::context::{self, Context};
 use crate::error::FabroError;
 use crate::event::{EventEmitter, WorkflowRunEvent};
@@ -23,6 +22,7 @@ use crate::operations::create_from_graph;
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline::initialize;
 use crate::pipeline::types::{InitOptions, Validated};
+use crate::records::Checkpoint;
 use crate::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
 use crate::test_support::run_graph;
 

@@ -325,8 +325,8 @@ async fn create_from(
 ) -> Result<()> {
     let run_dir = fabro_workflows::run_lookup::resolve_run(base, &args.run_id)?.path;
 
-    let record = fabro_workflows::records::RunRecord::load(&run_dir)
-        .context("Failed to load run.json")?;
+    let record =
+        fabro_workflows::records::RunRecord::load(&run_dir).context("Failed to load run.json")?;
 
     let start = fabro_workflows::records::StartRecord::load(&run_dir)
         .context("Failed to load start.json")?;

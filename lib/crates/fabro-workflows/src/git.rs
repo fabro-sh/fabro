@@ -5,8 +5,8 @@ use fabro_git_storage::branchstore::BranchStore;
 use fabro_git_storage::gitobj::Store;
 use git2::{Repository, Signature};
 
-use crate::records::Checkpoint;
 use crate::error::{FabroError, Result};
+use crate::records::Checkpoint;
 
 /// Branch prefix for workflow run branches (e.g. `fabro/run/{run_id}`).
 pub const RUN_BRANCH_PREFIX: &str = "fabro/run/";

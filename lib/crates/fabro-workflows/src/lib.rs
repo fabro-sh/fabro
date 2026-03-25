@@ -93,7 +93,6 @@ pub mod asset_snapshot;
 pub mod assets;
 pub mod condition;
 pub mod context;
-pub mod cost;
 pub mod devcontainer_bridge;
 pub mod error;
 pub mod event;

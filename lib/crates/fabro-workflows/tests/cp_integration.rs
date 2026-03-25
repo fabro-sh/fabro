@@ -4,8 +4,8 @@
 //! Docker tests require a Docker daemon and are marked `#[ignore]`.
 //! Run Docker tests with: `cargo test --package arc-workflows --test cp_integration -- --ignored`
 
-use fabro_workflows::sandbox_reconnect::reconnect;
 use fabro_workflows::records::SandboxRecord;
+use fabro_workflows::sandbox_reconnect::reconnect;
 
 // ---------------------------------------------------------------------------
 // Local sandbox

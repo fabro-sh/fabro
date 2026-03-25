@@ -13,7 +13,6 @@ use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_llm::provider::Provider;
 use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 use fabro_workflows::artifact::sync_artifacts_to_env;
-use fabro_workflows::records::Checkpoint;
 use fabro_workflows::context::Context;
 use fabro_workflows::error::FabroError;
 use fabro_workflows::event::EventEmitter;
@@ -21,6 +20,7 @@ use fabro_workflows::handler::exit::ExitHandler;
 use fabro_workflows::handler::start::StartHandler;
 use fabro_workflows::handler::{Handler, HandlerRegistry};
 use fabro_workflows::outcome::{Outcome, OutcomeExt, StageStatus};
+use fabro_workflows::records::Checkpoint;
 use fabro_workflows::run_settings::{GitCheckpointSettings, RunSettings};
 use fabro_workflows::test_support::WorkflowRunner;
 
@@ -1740,8 +1740,8 @@ async fn daytona_toolbox_idle_diagnostic() {
 #[tokio::test]
 #[ignore]
 async fn daytona_cp_upload_download_round_trip() {
-    use fabro_workflows::sandbox_reconnect::reconnect;
     use fabro_workflows::records::SandboxRecord;
+    use fabro_workflows::sandbox_reconnect::reconnect;
 
     // 1. Create and initialize a real Daytona sandbox
     let env = create_env().await;

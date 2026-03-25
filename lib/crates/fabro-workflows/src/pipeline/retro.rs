@@ -3,8 +3,8 @@ use std::sync::Arc;
 use fabro_agent::SessionEvent;
 use fabro_retro::retro::Retro;
 
-use crate::records::Checkpoint;
 use crate::event::WorkflowRunEvent;
+use crate::records::Checkpoint;
 
 use super::types::{Executed, RetroOptions, Retroed};
 
@@ -151,10 +151,10 @@ mod tests {
     use fabro_graphviz::graph::Graph;
 
     use super::*;
-    use crate::records::Checkpoint;
     use crate::context::Context;
     use crate::event::{EventEmitter, WorkflowRunEvent};
     use crate::pipeline::types::Executed;
+    use crate::records::Checkpoint;
     use crate::run_settings::RunSettings;
 
     fn write_checkpoint(run_dir: &std::path::Path) {
