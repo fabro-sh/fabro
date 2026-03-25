@@ -27,7 +27,7 @@ use super::graph::WorkflowGraph;
 use super::WorkflowNode;
 use crate::artifact::ArtifactStore;
 use crate::context;
-use crate::engine::RunConfig;
+use crate::engine::RunSettings;
 use crate::event::EventEmitter;
 use crate::outcome::{Outcome, StageUsage};
 use fabro_hooks::HookRunner;
@@ -79,7 +79,7 @@ impl WorkflowLifecycle {
         sandbox: Arc<dyn Sandbox>,
         graph: Arc<fabro_graphviz::graph::types::Graph>,
         run_dir: PathBuf,
-        config: Arc<RunConfig>,
+        config: Arc<RunSettings>,
         is_resume: bool,
     ) -> Self {
         let restarted_from: Arc<Mutex<Option<(String, String)>>> = Arc::new(Mutex::new(None));
@@ -91,8 +91,12 @@ impl WorkflowLifecycle {
 
         let circuit_breaker = Arc::new(CircuitBreakerLifecycle::new(loop_restart_signature_limit));
 
-        let local_git_checkpoint =
-            config.git_checkpoint_enabled && sandbox.host_git_dir().is_some();
+        let has_run_branch = config
+            .git
+            .as_ref()
+            .and_then(|g| g.run_branch.as_ref())
+            .is_some();
+        let local_git_checkpoint = has_run_branch && sandbox.host_git_dir().is_some();
         let working_directory = if local_git_checkpoint {
             Some(sandbox.working_directory().to_string())
         } else {
@@ -105,8 +109,8 @@ impl WorkflowLifecycle {
             run_id: config.run_id.clone(),
             run_start: Mutex::new(Instant::now()),
             restarted_from: Arc::clone(&restarted_from),
-            base_sha: config.base_sha.clone(),
-            run_branch: config.run_branch.clone(),
+            base_sha: config.git.as_ref().and_then(|g| g.base_sha.clone()),
+            run_branch: config.git.as_ref().and_then(|g| g.run_branch.clone()),
             worktree_dir: working_directory.clone(),
             goal: (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
             artifact_store: Arc::clone(&artifact_store),
@@ -154,7 +158,7 @@ impl WorkflowLifecycle {
             Some(run_dir.clone()),
             Arc::clone(&emitter),
             run_dir,
-            config.asset_globs.clone(),
+            config.asset_globs().to_vec(),
         );
 
         Self {

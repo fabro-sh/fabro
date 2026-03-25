@@ -10,7 +10,7 @@ pub async fn execute(init: Initialized) -> Executed {
         graph,
         source: _,
         engine,
-        config,
+        settings,
         checkpoint,
         emitter,
         sandbox,
@@ -19,7 +19,7 @@ pub async fn execute(init: Initialized) -> Executed {
     let start = Instant::now();
 
     let outcome = engine
-        .execute_graph(&graph, &config, checkpoint.as_ref())
+        .execute_graph(&graph, &settings, checkpoint.as_ref())
         .await;
 
     let duration_ms = crate::millis_u64(start.elapsed());
@@ -27,7 +27,7 @@ pub async fn execute(init: Initialized) -> Executed {
     Executed {
         graph,
         outcome,
-        config,
+        settings,
         engine,
         emitter,
         sandbox,
