@@ -254,7 +254,7 @@ pub async fn finalize(
                     .unwrap_or_default();
                 if let (
                     Some(ref base_branch),
-                    Some(ref run_branch),
+                    Some(run_branch),
                     Some(ref creds),
                     Some(ref origin),
                 ) = (

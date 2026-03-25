@@ -228,3 +228,74 @@ pub async fn git_replace_worktree(sandbox: &dyn Sandbox, path: &str, branch: &st
     let _ = git_remove_worktree(sandbox, path).await;
     git_add_worktree(sandbox, path, branch).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn git_checkpoint_includes_builtin_excludes() {
+        // Set up a real git repo
+        let repo_dir = tempfile::tempdir().unwrap();
+        let repo = repo_dir.path();
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@test.com",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "initial",
+            ])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+
+        // Create files in both tracked and excluded directories
+        std::fs::write(repo.join("hello.txt"), "hello").unwrap();
+        std::fs::create_dir_all(repo.join("node_modules/pkg")).unwrap();
+        std::fs::write(repo.join("node_modules/pkg/index.js"), "module").unwrap();
+        std::fs::create_dir_all(repo.join(".venv/lib")).unwrap();
+        std::fs::write(repo.join(".venv/lib/site.py"), "venv").unwrap();
+
+        let sandbox = fabro_agent::LocalSandbox::new(repo.to_path_buf());
+        let author = crate::git::GitAuthor::default();
+
+        // Call git_checkpoint with empty user excludes — built-in excludes should still apply
+        let result =
+            git_checkpoint(&sandbox, "run1", "work", "success", 1, None, &[], &author).await;
+        assert!(result.is_ok(), "git_checkpoint failed: {:?}", result.err());
+
+        // Verify that excluded directories were NOT staged
+        let status = sandbox
+            .exec_command(
+                "git diff --cached --name-only HEAD~1",
+                10_000,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let staged_files: Vec<&str> = status.stdout.lines().collect();
+        assert!(
+            staged_files.contains(&"hello.txt"),
+            "expected hello.txt to be staged, got: {staged_files:?}"
+        );
+        assert!(
+            !staged_files.iter().any(|f| f.contains("node_modules")),
+            "node_modules should be excluded from checkpoint, got: {staged_files:?}"
+        );
+        assert!(
+            !staged_files.iter().any(|f| f.contains(".venv")),
+            ".venv should be excluded from checkpoint, got: {staged_files:?}"
+        );
+    }
+}
