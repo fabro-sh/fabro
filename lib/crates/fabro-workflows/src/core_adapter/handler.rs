@@ -14,9 +14,9 @@ use crate::context::Context;
 
 use super::graph::WorkflowGraph;
 use super::WorkflowNode;
-use crate::engine;
 use crate::handler::{format_panic_message, EngineServices};
 use crate::outcome::{Outcome, StageStatus};
+use crate::{graph_ops, run_dir};
 
 /// Production node handler that bridges fabro-core's NodeHandler to the
 /// existing fabro-workflows Handler trait via EngineServices.
@@ -98,7 +98,7 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
             Err(panic_payload) => {
                 let msg = format_panic_message(panic_payload);
                 let visit = context.node_visit_count().max(1);
-                let panic_dir = crate::engine::node_dir(&self.run_dir, &gv_node.id, visit);
+                let panic_dir = run_dir::node_dir(&self.run_dir, &gv_node.id, visit);
                 let _ = std::fs::create_dir_all(&panic_dir);
                 let _ = std::fs::write(panic_dir.join("panic.txt"), &msg);
                 Err(CoreError::handler(HandlerErrorDetail {
@@ -113,7 +113,7 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
 
     fn retry_policy(&self, node: &WorkflowNode, _graph: &WorkflowGraph) -> CoreRetryPolicy {
         let gv_node = node.inner();
-        let wf_policy = engine::build_retry_policy(gv_node, &self.graph);
+        let wf_policy = graph_ops::build_retry_policy(gv_node, &self.graph);
         CoreRetryPolicy {
             max_attempts: wf_policy.max_attempts,
             backoff: wf_policy.backoff,

@@ -27,9 +27,9 @@ use super::graph::WorkflowGraph;
 use super::WorkflowNode;
 use crate::artifact::ArtifactStore;
 use crate::context;
-use crate::engine::RunSettings;
 use crate::event::EventEmitter;
 use crate::outcome::{Outcome, StageUsage};
+use crate::run_settings::RunSettings;
 use fabro_hooks::HookRunner;
 use fabro_sandbox::Sandbox;
 
@@ -307,7 +307,7 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
     ) -> CoreResult<()> {
         let outcome = &result.outcome;
         let retry_count = state.node_retries.get(node.id()).copied().unwrap_or(0);
-        let failure_class = crate::engine::classify_outcome(outcome);
+        let failure_class = crate::graph_ops::classify_outcome(outcome);
         let failure_signature = failure_class
             .map(|category| {
                 let signature_hint = outcome

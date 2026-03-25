@@ -9,7 +9,7 @@ use fabro_core::state::RunState;
 use super::super::graph::WorkflowGraph;
 use super::super::WorkflowNode;
 use crate::context::keys;
-use crate::engine;
+use crate::graph_ops::{resolve_fidelity, resolve_thread_id};
 use crate::outcome::StageUsage;
 use crate::preamble::build_preamble;
 
@@ -67,7 +67,7 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
 
         // 1. Fidelity resolution via resolve_fidelity: edge → node → graph default → Compact
         let incoming_edge_ref = incoming.as_ref().map(|d| d.edge.as_ref());
-        let fidelity = engine::resolve_fidelity(incoming_edge_ref, gv_node, &self.graph);
+        let fidelity = resolve_fidelity(incoming_edge_ref, gv_node, &self.graph);
 
         // 2. Fidelity degradation on resume (full → summary:high)
         let fidelity = {
@@ -99,7 +99,7 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
             .set(keys::CURRENT_PREAMBLE, serde_json::json!(preamble));
 
         // 5. Thread ID resolution via resolve_thread_id: edge → node → graph default → class → previous
-        let thread_id = engine::resolve_thread_id(
+        let thread_id = resolve_thread_id(
             incoming_edge_ref,
             gv_node,
             &self.graph,

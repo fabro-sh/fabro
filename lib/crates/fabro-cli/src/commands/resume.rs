@@ -1,35 +1,38 @@
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::{bail, Context};
 use clap::Args;
 use fabro_agent::{DockerSandbox, DockerSandboxConfig, Sandbox, WorktreeConfig, WorktreeSandbox};
 use fabro_config::config::FabroConfig;
-use fabro_graphviz::graph::Graph;
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, Interviewer};
 use fabro_model::{Catalog, Provider};
 use fabro_util::terminal::Styles;
 use fabro_workflows::backend::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::checkpoint::Checkpoint;
-use fabro_workflows::engine::{GitCheckpointSettings, RunSettings};
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel};
+use fabro_workflows::operations::{
+    create_from_graph, start, StartFinalizeConfig, StartOptions, StartRetroConfig,
+};
 use fabro_workflows::outcome::StageStatus;
+use fabro_workflows::pipeline::{
+    build_conclusion, classify_engine_result, persist_terminal_outcome,
+};
 use fabro_workflows::run_record::RunRecord;
+use fabro_workflows::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
 use fabro_workflows::sandbox_provider::SandboxProvider;
-use indicatif::HumanDuration;
 
 use super::detached_support::{DetachedRunBootstrapGuard, DetachedRunCompletionGuard};
 use super::run::{
-    build_conclusion, build_event_envelope, cached_graph_path, classify_engine_result,
-    default_run_dir, emit_run_notice, generate_retro, local_sandbox_with_callback,
-    mint_github_token, persist_terminal_outcome, prepare_workflow_with_project_config,
-    print_assets, print_final_output, resolve_daytona_config, resolve_fallback_chain,
-    resolve_model_provider, resolve_ssh_clone_params, resolve_ssh_config, write_finalize_commit,
-    write_run_config_snapshot, CliSandboxProvider, RunArgs,
+    build_event_envelope, cached_graph_path, default_run_dir, emit_run_notice,
+    local_sandbox_with_callback, mint_github_token, prepare_workflow_with_project_config,
+    print_assets, print_final_output, print_retro_result, print_run_conclusion,
+    resolve_daytona_config, resolve_fallback_chain, resolve_model_provider,
+    resolve_ssh_clone_params, resolve_ssh_config, write_run_config_snapshot, CliSandboxProvider,
+    RunArgs,
 };
-use crate::commands::shared::tilde_path;
 use fabro_config::project as project_config;
 use fabro_config::run as run_config;
 use fabro_workflows::devcontainer_bridge;
@@ -94,7 +97,7 @@ pub struct ResumeArgs {
 /// Intermediate state produced by the two resolution paths (checkpoint-file vs. git-branch).
 struct ResumeContext {
     checkpoint: Checkpoint,
-    graph: Graph,
+    validated: fabro_workflows::pipeline::Validated,
     run_id: String,
     run_dir: PathBuf,
     run_cfg: Option<FabroConfig>,
@@ -201,7 +204,9 @@ async fn prepare_from_checkpoint(
         true,
         false,
     )?;
-    let (graph, source, _diagnostics) = prepared.validated.into_parts();
+    let source = prepared.raw_source.clone();
+    let validated = prepared.validated;
+    let graph = validated.graph().clone();
     let run_cfg = prepared.run_cfg;
     let sandbox_provider = prepared.sandbox_provider;
     let workflow_slug = prepared.workflow_slug;
@@ -473,7 +478,7 @@ async fn prepare_from_checkpoint(
 
     Ok(ResumeContext {
         checkpoint,
-        graph,
+        validated,
         run_id,
         run_dir,
         run_cfg,
@@ -509,7 +514,7 @@ async fn prepare_from_branch(
             (stripped.to_string(), run_arg.to_string())
         } else {
             let repo = git2::Repository::discover(".").context("not in a git repository")?;
-            let id = fabro_workflows::run_rewind::find_run_id_by_prefix(&repo, run_arg)?;
+            let id = fabro_workflows::operations::find_run_id_by_prefix(&repo, run_arg)?;
             let branch = format!("{}{}", fabro_workflows::git::RUN_BRANCH_PREFIX, id);
             (id, branch)
         };
@@ -544,7 +549,7 @@ async fn prepare_from_branch(
         .or_else(|| repo_info.as_ref().and_then(|(_, branch)| branch.clone()));
     let base_sha = start_record.as_ref().and_then(|s| s.base_sha.clone());
 
-    let (graph, graph_source, run_cfg, mut sandbox_provider, workflow_slug) =
+    let (validated, graph_source, run_cfg, mut sandbox_provider, workflow_slug) =
         if let Some(ref workflow_path) = args.workflow {
             let prepared = prepare_workflow_with_project_config(
                 &resume_as_run_args(args, workflow_path.clone()),
@@ -553,19 +558,16 @@ async fn prepare_from_branch(
                 true,
                 false,
             )?;
-            {
-                let (graph, source, _diagnostics) = prepared.validated.into_parts();
-                (
-                    graph,
-                    source,
-                    prepared.run_cfg,
-                    prepared.sandbox_provider,
-                    prepared.workflow_slug,
-                )
-            }
+            (
+                prepared.validated,
+                prepared.raw_source,
+                prepared.run_cfg,
+                prepared.sandbox_provider,
+                prepared.workflow_slug,
+            )
         } else if let Some(ref rec) = record {
             // Use the fully transformed graph from the RunRecord
-            let graph = rec.graph.clone();
+            let validated = create_from_graph(rec.graph.clone(), String::new());
             let source = String::new(); // no DOT source needed — graph is from RunRecord
             let run_cfg = Some(rec.config.clone());
             let sandbox_provider = if args.dry_run {
@@ -581,7 +583,7 @@ async fn prepare_from_branch(
                 args.sandbox.map(Into::into).unwrap_or(sp)
             };
             (
-                graph,
+                validated,
                 source,
                 run_cfg,
                 sandbox_provider,
@@ -590,6 +592,7 @@ async fn prepare_from_branch(
         } else {
             bail!("no run.json found on metadata branch for run {run_id}");
         };
+    let graph = validated.graph().clone();
 
     eprintln!(
         "{} {} from branch {} ({})",
@@ -903,7 +906,7 @@ async fn prepare_from_branch(
 
     Ok(ResumeContext {
         checkpoint,
-        graph,
+        validated,
         run_id,
         run_dir,
         run_cfg,
@@ -931,7 +934,7 @@ async fn run_resumed(
 ) -> anyhow::Result<()> {
     let ResumeContext {
         checkpoint,
-        graph,
+        validated,
         run_id,
         run_dir,
         mut run_cfg,
@@ -948,21 +951,7 @@ async fn run_resumed(
         github_app,
         mut status_guard,
     } = ctx;
-
-    // Track the last git commit SHA from CheckpointCompleted events
-    let last_git_sha: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
-    {
-        let sha_clone = Arc::clone(&last_git_sha);
-        emitter.on_event(move |event| {
-            if let fabro_workflows::event::WorkflowRunEvent::CheckpointCompleted {
-                git_commit_sha: Some(sha),
-                ..
-            } = event
-            {
-                *sha_clone.lock().unwrap() = Some(sha.clone());
-            }
-        });
-    }
+    let graph = validated.graph().clone();
 
     // Create progress UI (verbose mode shows detailed turn/tool counts and token usage)
     let is_tty = std::io::stderr().is_terminal();
@@ -1238,34 +1227,7 @@ async fn run_resumed(
             }
         }
     });
-    let mut engine = fabro_workflows::engine::WorkflowRunEngine::with_interviewer(
-        registry,
-        Arc::clone(&emitter),
-        interviewer,
-        Arc::clone(&sandbox),
-    );
-    if !sandbox_env.is_empty() {
-        engine.set_env(sandbox_env);
-    }
-    if dry_run_mode {
-        engine.set_dry_run(true);
-    }
-    // Wire up hook runner from run defaults (mirrors run_command)
-    {
-        let hooks = run_cfg
-            .as_ref()
-            .map(|cfg| &cfg.hooks)
-            .unwrap_or(&run_defaults.hooks);
-        if !hooks.is_empty() {
-            let hook_config = fabro_hooks::HookConfig {
-                hooks: hooks.clone(),
-            };
-            let runner = fabro_hooks::HookRunner::new(hook_config);
-            engine.set_hook_runner(Arc::new(runner));
-        }
-    }
-
-    let lifecycle = fabro_workflows::engine::LifecycleConfig {
+    let lifecycle = LifecycleConfig {
         setup_commands,
         setup_command_timeout_ms: 300_000,
         devcontainer_phases,
@@ -1274,29 +1236,56 @@ async fn run_resumed(
     // Defuse the bootstrap guard — engine.run() has taken ownership of lifecycle status.
     status_guard.defuse();
 
-    // Safety net: if we panic or return early, best-effort cleanup via spawn (mirrors run_command).
     let preserve = super::run::resolve_preserve_sandbox(
         args.preserve_sandbox,
         run_cfg.as_ref(),
         &run_defaults,
     );
-    let sandbox_for_cleanup = Arc::clone(&sandbox);
-    let cleanup_guard = scopeguard::guard((), move |()| {
-        if preserve {
-            return;
-        }
-        let rt = tokio::runtime::Handle::try_current();
-        if let Ok(handle) = rt {
-            handle.spawn(async move {
-                let _ = sandbox_for_cleanup.cleanup().await;
-            });
-        }
-    });
-
     let run_start = Instant::now();
-    let engine_result = engine
-        .run_with_lifecycle(&graph, &mut settings, lifecycle, Some(&checkpoint))
-        .await;
+    let pr_config = settings.pull_request().cloned();
+    let started = start(
+        validated,
+        StartOptions {
+            init: fabro_workflows::pipeline::InitOptions {
+                run_id: run_id.clone(),
+                run_dir: run_dir.clone(),
+                dry_run: dry_run_mode,
+                emitter: Arc::clone(&emitter),
+                sandbox: Arc::clone(&sandbox),
+                registry: Arc::new(registry),
+                lifecycle,
+                run_settings: settings,
+                hooks: fabro_hooks::HookConfig {
+                    hooks: run_cfg
+                        .as_ref()
+                        .map(|cfg| cfg.hooks.clone())
+                        .unwrap_or_else(|| run_defaults.hooks.clone()),
+                },
+                sandbox_env,
+                checkpoint: Some(checkpoint),
+                seed_context: None,
+            },
+            retro: StartRetroConfig {
+                enabled: !args.no_retro && project_config::is_retro_enabled(),
+                dry_run: dry_run_mode,
+                llm_client: if dry_run_mode {
+                    None
+                } else {
+                    fabro_llm::client::Client::from_env().await.ok()
+                },
+                provider: provider_enum,
+                model: model.clone(),
+            },
+            finalize: StartFinalizeConfig {
+                preserve_sandbox: preserve,
+                pr_config,
+                github_app: github_app.clone(),
+                origin_url: origin_url.clone(),
+                model: model.clone(),
+            },
+        },
+    )
+    .await;
     let run_duration_ms = run_start.elapsed().as_millis() as u64;
     let mut completion_guard = DetachedRunCompletionGuard::arm(&run_dir);
 
@@ -1305,263 +1294,45 @@ async fn run_resumed(
         let _ = std::env::set_current_dir(cwd);
     }
 
-    let (final_status, failure_reason, run_status, status_reason) =
-        classify_engine_result(&engine_result);
-    let conclusion = build_conclusion(
-        &run_dir,
-        final_status.clone(),
-        failure_reason,
-        run_duration_ms,
-        last_git_sha.lock().unwrap().clone(),
-    );
-
-    // Auto-derive retro
-    if !args.no_retro && project_config::is_retro_enabled() {
-        let failed = match &engine_result {
-            Ok(ref o) => o.status == StageStatus::Fail,
-            Err(_) => true,
-        };
-
-        let llm_client = if dry_run_mode {
-            None
-        } else {
-            fabro_llm::client::Client::from_env().await.ok()
-        };
-
-        generate_retro(
-            &settings.run_id,
-            &graph.name,
-            graph.goal(),
-            &run_dir,
-            failed,
-            run_duration_ms,
-            dry_run_mode,
-            llm_client.as_ref(),
-            &sandbox,
-            provider_enum,
-            &model,
-            styles,
-            Some(Arc::clone(&emitter)),
-        )
-        .await;
-    }
-
-    // Finish progress bars after retro (retro stage uses the same ProgressUI)
     progress_ui.lock().expect("progress lock poisoned").finish();
-
-    // Write finalize commit with retro.json + final node files (captures last diff.patch)
-    write_finalize_commit(&settings, &run_dir).await;
-
-    // Auto-create PR on successful completion (mirrors run_command)
-    let mut pushed_branch: Option<String> = None;
-    let mut pr_url: Option<String> = None;
-    if let Some(pr_cfg) = settings.pull_request() {
-        if settings.dry_run {
-            debug!("Skipping PR creation: dry-run mode");
-        } else if let Err(ref e) = engine_result {
-            debug!(error = %e, "Skipping PR creation: engine returned an error");
-        } else if let Ok(ref outcome) = engine_result {
-            if !matches!(
-                outcome.status,
-                StageStatus::Success | StageStatus::PartialSuccess
-            ) {
-                debug!(status = ?outcome.status, "Skipping PR creation: run status is not success");
-            } else {
-                let diff = tokio::fs::read_to_string(run_dir.join("final.patch"))
-                    .await
-                    .unwrap_or_default();
-                if let (
-                    Some(ref base_branch),
-                    Some(ref run_branch),
-                    Some(ref creds),
-                    Some(ref origin),
-                ) = (
-                    &settings.base_branch,
-                    settings.git.as_ref().and_then(|g| g.run_branch.as_ref()),
-                    &github_app,
-                    &origin_url,
-                ) {
-                    if settings.git.is_some() {
-                        pushed_branch = Some(run_branch.to_string());
-                    }
-
-                    let auto_merge = if pr_cfg.auto_merge {
-                        Some(fabro_workflows::pull_request::AutoMergeConfig {
-                            merge_strategy: pr_cfg.merge_strategy,
-                        })
-                    } else {
-                        None
-                    };
-
-                    match fabro_workflows::pull_request::maybe_open_pull_request(
-                        creds,
-                        origin,
-                        base_branch,
-                        run_branch,
-                        graph.goal(),
-                        &diff,
-                        &model,
-                        pr_cfg.draft,
-                        auto_merge,
-                        &run_dir,
-                    )
-                    .await
-                    {
-                        Ok(Some(record)) => {
-                            emitter.emit(
-                                &fabro_workflows::event::WorkflowRunEvent::PullRequestCreated {
-                                    pr_url: record.html_url.clone(),
-                                    pr_number: record.number,
-                                    draft: pr_cfg.draft,
-                                },
-                            );
-                            pr_url = Some(record.html_url.clone());
-                            if let Err(e) = record.save(&run_dir.join("pull_request.json")) {
-                                tracing::warn!(error = %e, "Failed to save pull_request.json");
-                            }
-                        }
-                        Ok(None) => {} // empty diff, logged at DEBUG
-                        Err(e) => {
-                            emitter.emit(
-                                &fabro_workflows::event::WorkflowRunEvent::PullRequestFailed {
-                                    error: e.to_string(),
-                                },
-                            );
-                            emit_run_notice(
-                                &emitter,
-                                RunNoticeLevel::Warn,
-                                "pull_request_failed",
-                                format!("PR creation failed: {e}"),
-                            );
-                        }
-                    }
-                }
+    let final_status = match started {
+        Ok(started) => {
+            if let Some(ref retro) = started.retro {
+                print_retro_result(retro, started.retro_duration, &run_dir, styles);
             }
-        }
-    } else {
-        debug!("Skipping PR creation: pull_request not enabled in config");
-    }
-
-    // Defuse the cleanup guard — we are about to do explicit cleanup
-    scopeguard::ScopeGuard::into_inner(cleanup_guard);
-
-    // Cleanup sandbox via engine (fires SandboxCleanup hook)
-    // Before cleanup, print preserve banner (mirrors run_command)
-    if preserve {
-        let info = sandbox.sandbox_info();
-        if !info.is_empty() {
-            emit_run_notice(
-                &emitter,
-                RunNoticeLevel::Info,
-                "sandbox_preserved",
-                format!("sandbox preserved: {info}"),
+            let finalized = started.finalized;
+            print_run_conclusion(
+                &finalized.conclusion,
+                &run_id,
+                &run_dir,
+                finalized.pushed_branch.as_deref(),
+                finalized.pr_url.as_deref(),
+                styles,
             );
-        } else {
-            emit_run_notice(
-                &emitter,
-                RunNoticeLevel::Info,
-                "sandbox_preserved",
-                "sandbox preserved",
-            );
+            print_final_output(&run_dir, styles);
+            print_assets(&run_dir, styles);
+            finalized.conclusion.status.clone()
         }
-    }
-    if let Err(e) = engine
-        .cleanup_sandbox(&settings.run_id, &graph.name, preserve)
-        .await
-    {
-        tracing::warn!(error = %e, "Sandbox cleanup failed");
-        emit_run_notice(
-            &emitter,
-            RunNoticeLevel::Warn,
-            "sandbox_cleanup_failed",
-            format!("sandbox cleanup failed: {e}"),
-        );
-    }
-
-    persist_terminal_outcome(&run_dir, &conclusion, run_status, status_reason);
-    completion_guard.defuse();
-
-    eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="));
-    eprintln!("{}", styles.dim.apply_to(format!("Run:       {run_id}")));
-    let status_str = final_status.to_string().to_uppercase();
-    let status_color = match final_status {
-        StageStatus::Success | StageStatus::PartialSuccess => &styles.bold_green,
-        _ => &styles.bold_red,
+        Err(err) => {
+            let engine_result: Result<fabro_workflows::outcome::Outcome, _> = Err(err.clone());
+            let (final_status, failure_reason, run_status, status_reason) =
+                classify_engine_result(&engine_result);
+            let conclusion = build_conclusion(
+                &run_dir,
+                final_status.clone(),
+                failure_reason,
+                run_duration_ms,
+                None,
+            );
+            persist_terminal_outcome(&run_dir, &conclusion, run_status, status_reason);
+            print_run_conclusion(&conclusion, &run_id, &run_dir, None, None, styles);
+            print_final_output(&run_dir, styles);
+            print_assets(&run_dir, styles);
+            final_status
+        }
     };
-    eprintln!("Status:    {}", status_color.apply_to(&status_str));
-    eprintln!(
-        "Duration:  {}",
-        HumanDuration(Duration::from_millis(run_duration_ms))
-    );
 
-    {
-        use crate::commands::shared::format_tokens_human;
-        use fabro_workflows::cost::format_cost;
-        let acc = accumulator.lock().unwrap();
-        let total_tokens = acc.total_input_tokens + acc.total_output_tokens;
-        if total_tokens > 0 {
-            if acc.has_pricing {
-                eprintln!(
-                    "{}",
-                    styles.dim.apply_to(format!(
-                        "Cost:      {} ({} toks)",
-                        format_cost(acc.total_cost),
-                        format_tokens_human(total_tokens)
-                    ))
-                );
-            } else {
-                eprintln!(
-                    "{}",
-                    styles
-                        .dim
-                        .apply_to(format!("Toks:      {}", format_tokens_human(total_tokens)))
-                );
-            }
-            if acc.total_cache_read_tokens > 0 {
-                eprintln!(
-                    "{}",
-                    styles.dim.apply_to(format!(
-                        "Cache:     {} read, {} write",
-                        format_tokens_human(acc.total_cache_read_tokens),
-                        format_tokens_human(acc.total_cache_write_tokens),
-                    )),
-                );
-            }
-            if acc.total_reasoning_tokens > 0 {
-                eprintln!(
-                    "{}",
-                    styles.dim.apply_to(format!(
-                        "Reasoning: {} tokens",
-                        format_tokens_human(acc.total_reasoning_tokens),
-                    )),
-                );
-            }
-        }
-    }
-
-    eprintln!(
-        "{}",
-        styles
-            .dim
-            .apply_to(format!("Run:       {}", tilde_path(&run_dir)))
-    );
-
-    if let Some(failure) = conclusion.failure_reason.as_deref() {
-        eprintln!("Failure:   {}", styles.red.apply_to(failure));
-    }
-
-    if pushed_branch.is_some() || pr_url.is_some() {
-        eprintln!();
-        if let Some(ref branch) = pushed_branch {
-            eprintln!("{} {branch}", styles.bold.apply_to("Pushed branch:"));
-        }
-        if let Some(ref url) = pr_url {
-            eprintln!("{} {url}", styles.bold.apply_to("Pull request:"));
-        }
-    }
-
-    print_final_output(&run_dir, styles);
-    print_assets(&run_dir, styles);
+    completion_guard.defuse();
 
     fabro_util::run_log::deactivate();
     match final_status {
