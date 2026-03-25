@@ -395,8 +395,8 @@ mod tests {
     use chrono::Utc;
     use fabro_interview::{Answer, AnswerValue};
     use fabro_util::terminal::Styles;
-    use fabro_workflows::records::Conclusion;
     use fabro_workflows::outcome::StageStatus;
+    use fabro_workflows::records::Conclusion;
     use fabro_workflows::run_status::{write_run_status, StatusReason};
 
     fn no_color_styles() -> &'static Styles {

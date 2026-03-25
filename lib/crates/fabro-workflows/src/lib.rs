@@ -119,8 +119,10 @@ pub mod sandbox_provider;
 pub mod sandbox_reconnect;
 pub mod sandbox_record;
 pub mod start_record;
-pub mod stylesheet;
 #[doc(hidden)]
 pub mod test_support;
-pub mod transform;
-pub mod vars;
+pub mod transforms;
+
+pub use transforms as transform;
+pub use transforms::stylesheet;
+pub use transforms::variable_expansion as vars;
