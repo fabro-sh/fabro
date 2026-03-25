@@ -2,7 +2,6 @@
 ///
 /// The parser lives in `fabro_graphviz::condition`; this module re-exports
 /// `parse_condition` and provides runtime evaluation against `Outcome`/`Context`.
-pub use fabro_graphviz::condition::parse_condition;
 use fabro_graphviz::condition::{Clause, ConditionExpr, Op};
 
 use crate::context::keys;

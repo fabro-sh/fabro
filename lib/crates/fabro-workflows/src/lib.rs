@@ -88,35 +88,46 @@ pub fn build_completed_stages(
     stages
 }
 
+#[doc(hidden)]
 pub mod artifact;
 pub mod asset_snapshot;
 pub mod assets;
-pub mod condition;
+pub(crate) mod condition;
 pub mod context;
 pub mod devcontainer_bridge;
 pub mod error;
 pub mod event;
 pub mod git;
-pub mod graph;
+pub(crate) mod graph;
 pub mod handler;
 mod hook_context;
-pub mod lifecycle;
-pub mod node_handler;
+#[allow(dead_code)]
+pub(crate) mod lifecycle;
+pub(crate) mod node_handler;
 pub mod operations;
 pub mod outcome;
 pub mod pipeline;
 pub mod pull_request;
 pub mod records;
 mod retry;
-pub mod run_dir;
+pub(crate) mod run_dir;
 pub mod run_lookup;
 pub mod run_settings;
 pub mod run_status;
 pub mod sandbox_git;
 #[doc(hidden)]
 pub mod test_support;
+#[doc(hidden)]
 pub mod transforms;
 
-pub use transforms as transform;
+// Re-export aliases (back-compat with `fabro_workflows::transform::*` imports)
+#[doc(hidden)]
+pub mod transform {
+    pub use crate::transforms::*;
+}
+#[doc(hidden)]
+pub mod vars {
+    pub use crate::transforms::variable_expansion::*;
+}
+#[doc(hidden)]
 pub use transforms::stylesheet;
-pub use transforms::variable_expansion as vars;
