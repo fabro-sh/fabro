@@ -35,8 +35,10 @@ pub async fn initialize(
 
     // Create run directory and write graph
     std::fs::create_dir_all(&options.run_dir)?;
-    let graph_path = options.run_dir.join("graph.fabro");
-    std::fs::write(&graph_path, &source)?;
+    if !source.is_empty() {
+        let graph_path = options.run_dir.join("graph.fabro");
+        std::fs::write(&graph_path, &source)?;
+    }
 
     let hook_runner = if options.hooks.hooks.is_empty() {
         None
@@ -290,5 +292,45 @@ mod tests {
             initialized.env.get("TEST_KEY").map(String::as_str),
             Some("value")
         );
+    }
+
+    #[tokio::test]
+    async fn initialize_skips_empty_graph_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        let (graph, _source) = simple_graph();
+        let validated = Validated::new(graph, String::new(), vec![]);
+        let emitter = Arc::new(crate::event::EventEmitter::new());
+        let sandbox = Arc::new(fabro_agent::LocalSandbox::new(
+            std::env::current_dir().unwrap(),
+        ));
+        let registry = Arc::new(default_registry(Arc::new(AutoApproveInterviewer), || None));
+
+        let initialized = initialize(
+            validated,
+            InitOptions {
+                run_id: "run-test".to_string(),
+                run_dir: run_dir.clone(),
+                dry_run: false,
+                emitter,
+                sandbox,
+                registry,
+                lifecycle: crate::run_settings::LifecycleConfig {
+                    setup_commands: vec![],
+                    setup_command_timeout_ms: 1_000,
+                    devcontainer_phases: vec![],
+                },
+                run_settings: test_settings(&run_dir),
+                hooks: fabro_hooks::HookConfig { hooks: vec![] },
+                sandbox_env: HashMap::new(),
+                checkpoint: None,
+                seed_context: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(!run_dir.join("graph.fabro").exists());
+        assert!(initialized.source.is_empty());
     }
 }
