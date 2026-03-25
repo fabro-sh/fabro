@@ -8,8 +8,8 @@ use fabro_core::lifecycle::RunLifecycle;
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::RunState;
 
-use super::super::graph::WorkflowGraph;
-use super::super::WorkflowNode;
+use crate::graph::WorkflowGraph;
+use crate::graph::WorkflowNode;
 use super::circuit_breaker::CircuitBreakerLifecycle;
 use crate::checkpoint::Checkpoint;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
