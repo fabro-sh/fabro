@@ -4,7 +4,7 @@ use fabro_graphviz::graph::Graph;
 
 use crate::error::FabroError;
 use crate::pipeline::{self, TransformOptions, Validated};
-use crate::transform::Transform;
+use crate::transforms::Transform;
 
 #[derive(Default)]
 pub struct CreateOptions {
