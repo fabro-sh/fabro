@@ -15,7 +15,7 @@ use crate::jwt_auth::{AuthMode, AuthStrategy};
 use crate::server::build_router;
 use crate::tls::ClientAuth;
 use fabro_interview::Interviewer;
-use fabro_workflows::backend::AgentApiBackend;
+use fabro_workflows::handler::llm::AgentApiBackend;
 use fabro_workflows::handler::default_registry;
 use fabro_workflows::sandbox_provider::SandboxProvider;
 
