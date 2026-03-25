@@ -982,8 +982,8 @@ async fn run_command_impl(
         write_run_config_snapshot(&run_dir, workflow_toml_path.as_deref()).await?;
     }
 
-    // Write RunRecord
-    if !cached_run_restart {
+    // Write RunRecord and compute normalized config for RunSettings
+    let settings_config = if !cached_run_restart {
         let cli_flags = super::create::CliFlags {
             dry_run: dry_run_flag,
             auto_approve: auto_approve_flag,
@@ -1003,7 +1003,7 @@ async fn run_command_impl(
         let record = fabro_workflows::run_record::RunRecord {
             run_id: run_id.clone(),
             created_at: chrono::Utc::now(),
-            config: normalized_config,
+            config: normalized_config.clone(),
             graph: graph.clone(),
             workflow_slug: workflow_slug.clone(),
             working_directory: original_cwd.clone(),
@@ -1016,29 +1016,12 @@ async fn run_command_impl(
                 .collect(),
         };
         record.save(&run_dir)?;
-    }
-
-    let settings_config = if cached_run_restart {
+        normalized_config
+    } else {
         existing_record
             .as_ref()
             .map(|r| r.config.clone())
             .unwrap_or_default()
-    } else {
-        super::create::normalize_config(
-            run_cfg.as_ref(),
-            &run_defaults,
-            &model,
-            provider.as_deref(),
-            sandbox_provider,
-            &graph,
-            super::create::CliFlags {
-                dry_run: dry_run_flag,
-                auto_approve: auto_approve_flag,
-                no_retro: no_retro_flag,
-                verbose: verbose_flag,
-                preserve_sandbox: preserve_sandbox_flag,
-            },
-        )
     };
 
     // Now resolve ${env.VARNAME} references for runtime use.
