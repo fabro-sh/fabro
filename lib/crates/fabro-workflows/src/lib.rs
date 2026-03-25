@@ -91,7 +91,6 @@ pub fn build_completed_stages(
 pub mod artifact;
 pub mod asset_snapshot;
 pub mod assets;
-pub mod backend;
 pub mod checkpoint;
 pub mod conclusion;
 pub mod condition;
