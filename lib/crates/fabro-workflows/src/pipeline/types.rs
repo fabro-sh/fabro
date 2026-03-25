@@ -4,16 +4,17 @@ use std::sync::Arc;
 
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::Graph;
+use fabro_hooks::HookRunner;
 use fabro_validate::Diagnostic;
 
 use crate::checkpoint::Checkpoint;
 use crate::conclusion::Conclusion;
-use crate::engine::{LifecycleConfig, RunSettings, WorkflowRunEngine};
+use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::EventEmitter;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
-use fabro_interview::Interviewer;
+use crate::run_settings::{LifecycleConfig, RunSettings};
 use fabro_validate::Severity;
 
 /// Output of the PARSE phase.
@@ -99,13 +100,14 @@ pub struct InitOptions {
     pub run_dir: PathBuf,
     pub dry_run: bool,
     pub emitter: Arc<EventEmitter>,
-    pub interviewer: Arc<dyn Interviewer>,
     pub sandbox: Arc<dyn Sandbox>,
-    pub registry: HandlerRegistry,
+    pub registry: Arc<HandlerRegistry>,
     pub lifecycle: LifecycleConfig,
     pub run_settings: RunSettings,
     pub hooks: fabro_hooks::HookConfig,
     pub sandbox_env: HashMap<String, String>,
+    pub checkpoint: Option<Checkpoint>,
+    pub seed_context: Option<Context>,
 }
 
 /// Output of the INITIALIZE phase.
@@ -113,11 +115,15 @@ pub struct InitOptions {
 pub struct Initialized {
     pub graph: Graph,
     pub source: String,
-    pub engine: WorkflowRunEngine,
     pub settings: RunSettings,
     pub(crate) checkpoint: Option<Checkpoint>,
+    pub(crate) seed_context: Option<Context>,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
+    pub registry: Arc<HandlerRegistry>,
+    pub hook_runner: Option<Arc<HookRunner>>,
+    pub env: HashMap<String, String>,
+    pub dry_run: bool,
 }
 
 /// Output of the EXECUTE phase.
@@ -126,10 +132,11 @@ pub struct Executed {
     pub graph: Graph,
     pub outcome: Result<Outcome, FabroError>,
     pub settings: RunSettings,
-    pub engine: WorkflowRunEngine,
+    pub hook_runner: Option<Arc<HookRunner>>,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
     pub duration_ms: u64,
+    pub final_context: Context,
 }
 
 /// Output of the RETRO phase.
@@ -138,7 +145,7 @@ pub struct Retroed {
     pub graph: Graph,
     pub outcome: Result<Outcome, FabroError>,
     pub settings: RunSettings,
-    pub engine: WorkflowRunEngine,
+    pub hook_runner: Option<Arc<HookRunner>>,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
     pub duration_ms: u64,
@@ -162,6 +169,14 @@ pub struct TransformOptions {
 
 /// Options for the RETRO phase.
 pub struct RetroOptions {
+    pub run_id: String,
+    pub workflow_name: String,
+    pub goal: String,
+    pub run_dir: PathBuf,
+    pub sandbox: Arc<dyn Sandbox>,
+    pub emitter: Option<Arc<EventEmitter>>,
+    pub failed: bool,
+    pub run_duration_ms: u64,
     pub enabled: bool,
     pub dry_run: bool,
     pub llm_client: Option<fabro_llm::client::Client>,
@@ -171,6 +186,10 @@ pub struct RetroOptions {
 
 /// Options for the FINALIZE phase.
 pub struct FinalizeOptions {
+    pub run_dir: PathBuf,
+    pub run_id: String,
+    pub workflow_name: String,
+    pub hook_runner: Option<Arc<HookRunner>>,
     pub preserve_sandbox: bool,
     pub pr_config: Option<fabro_config::run::PullRequestConfig>,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
