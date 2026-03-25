@@ -22,17 +22,16 @@ use indicatif::HumanDuration;
 
 use super::detached_support::{DetachedRunBootstrapGuard, DetachedRunCompletionGuard};
 use super::run::{
-    build_conclusion, build_event_envelope, classify_engine_result, default_run_dir,
-    emit_run_notice, generate_retro, local_sandbox_with_callback, mint_github_token,
-    persist_terminal_outcome, prepare_workflow_with_project_config, print_assets,
-    print_final_output, resolve_daytona_config, resolve_fallback_chain, resolve_model_provider,
-    resolve_sandbox_provider, resolve_ssh_clone_params, resolve_ssh_config, write_finalize_commit,
+    build_conclusion, build_event_envelope, cached_graph_path, classify_engine_result,
+    default_run_dir, emit_run_notice, generate_retro, local_sandbox_with_callback,
+    mint_github_token, persist_terminal_outcome, prepare_workflow_with_project_config,
+    print_assets, print_final_output, resolve_daytona_config, resolve_fallback_chain,
+    resolve_model_provider, resolve_ssh_clone_params, resolve_ssh_config, write_finalize_commit,
     write_run_config_snapshot, CliSandboxProvider, RunArgs,
 };
-use crate::commands::shared::{print_diagnostics, tilde_path};
+use crate::commands::shared::tilde_path;
 use fabro_config::project as project_config;
 use fabro_config::run as run_config;
-use fabro_validate::Severity;
 use fabro_workflows::devcontainer_bridge;
 use std::collections::HashMap;
 use tracing::debug;
@@ -227,7 +226,7 @@ async fn prepare_from_checkpoint(
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
     let status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
-    tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
+    tokio::fs::write(cached_graph_path(&run_dir), &source).await?;
     let run_cfg: Option<FabroConfig> = run_cfg;
     write_run_config_snapshot(&run_dir, workflow_toml_path.as_deref()).await?;
 
@@ -606,27 +605,7 @@ async fn prepare_from_branch(
                 rec.workflow_slug.clone(),
             )
         } else {
-            // Fallback: read DOT source from metadata branch
-            let source =
-                fabro_workflows::git::MetadataStore::read_graph_dot(&resume_repo_path, &run_id)?
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "no run.json or graph.fabro found on metadata branch for run {run_id}"
-                        )
-                    })?;
-            let (graph, diagnostics) =
-                fabro_workflows::workflow::WorkflowBuilder::new().prepare(&source)?;
-            print_diagnostics(&diagnostics, styles);
-            if diagnostics.iter().any(|d| d.severity == Severity::Error) {
-                bail!("Validation failed");
-            }
-
-            let sandbox_provider = if args.dry_run {
-                SandboxProvider::Local
-            } else {
-                resolve_sandbox_provider(args.sandbox.map(Into::into), None, run_defaults)?
-            };
-            (graph, source.clone(), None, sandbox_provider, None)
+            bail!("no run.json found on metadata branch for run {run_id}");
         };
 
     eprintln!(
@@ -652,7 +631,9 @@ async fn prepare_from_branch(
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
     let status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
-    tokio::fs::write(run_dir.join("graph.fabro"), &graph_source).await?;
+    if !graph_source.is_empty() {
+        tokio::fs::write(cached_graph_path(&run_dir), &graph_source).await?;
+    }
     let run_cfg: Option<FabroConfig> = run_cfg;
     // Git-branch resume: no original TOML available, skip debug snapshot.
     write_run_config_snapshot(&run_dir, None).await?;

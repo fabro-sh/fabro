@@ -543,6 +543,7 @@ pub(crate) fn resolve_workflow_source(
 /// Result of workflow preparation (shared between `create` and `run` commands).
 pub(crate) struct PreparedWorkflow {
     pub validated: fabro_workflows::pipeline::Validated,
+    pub raw_source: String,
     pub run_cfg: Option<FabroConfig>,
     pub sandbox_provider: SandboxProvider,
     pub model: String,
@@ -558,9 +559,9 @@ impl PreparedWorkflow {
     pub fn graph(&self) -> &fabro_graphviz::graph::Graph {
         self.validated.graph()
     }
-    /// Read-through to validated source.
+    /// Original DOT source as authored on disk, before runtime var expansion.
     pub fn source(&self) -> &str {
-        self.validated.source()
+        &self.raw_source
     }
 }
 
@@ -624,14 +625,14 @@ pub(crate) fn prepare_workflow_with_project_config(
     }
 
     // Parse and transform workflow using pipeline functions
-    let source = read_workflow_file(&dot_path)?;
+    let raw_source = read_workflow_file(&dot_path)?;
     let vars = run_cfg
         .as_ref()
         .and_then(|c| c.vars.as_ref())
         .or(run_defaults.vars.as_ref());
     let source = match vars {
-        Some(vars) => fabro_workflows::vars::expand_vars(&source, vars)?,
-        None => source,
+        Some(vars) => fabro_workflows::vars::expand_vars(&raw_source, vars)?,
+        None => raw_source.clone(),
     };
     let dot_dir = dot_path.parent().unwrap_or(std::path::Path::new("."));
 
@@ -727,6 +728,7 @@ pub(crate) fn prepare_workflow_with_project_config(
 
     Ok(PreparedWorkflow {
         validated,
+        raw_source,
         run_cfg,
         sandbox_provider,
         model,
@@ -740,7 +742,7 @@ pub(crate) fn prepare_workflow_with_project_config(
 /// Pre-prepared run state, used to skip workflow preparation in `run_command_impl`.
 struct RecordBasedRun {
     graph: fabro_graphviz::graph::Graph,
-    source: String,
+    raw_source: String,
     run_cfg: Option<FabroConfig>,
     sandbox_provider: SandboxProvider,
     model: String,
@@ -784,7 +786,7 @@ pub async fn run_from_record(
         .filter(|s| !s.is_empty());
 
     let record_run = RecordBasedRun {
-        source: String::new(), // DOT source not needed — graph is already deserialized
+        raw_source: String::new(), // Raw DOT provenance is best-effort for record-based runs
         graph: record.graph.clone(),
         run_cfg: Some(record.config.clone()),
         sandbox_provider,
@@ -840,6 +842,7 @@ pub async fn run_command(
 ) -> anyhow::Result<()> {
     let PreparedWorkflow {
         validated,
+        raw_source,
         run_cfg,
         sandbox_provider,
         model,
@@ -848,11 +851,11 @@ pub async fn run_command(
         run_defaults,
         workflow_toml_path,
     } = prepare_workflow(&args, run_defaults, styles, false)?;
-    let (graph, source, _diagnostics) = validated.into_parts();
+    let (graph, _source, _diagnostics) = validated.into_parts();
 
     let record_run = RecordBasedRun {
         graph,
-        source,
+        raw_source,
         run_cfg,
         sandbox_provider,
         model,
@@ -874,7 +877,7 @@ async fn run_command_impl(
 ) -> anyhow::Result<()> {
     let (
         graph,
-        source,
+        raw_source,
         mut run_cfg,
         sandbox_provider,
         model,
@@ -885,7 +888,7 @@ async fn run_command_impl(
     ) = match record_run {
         Some(rr) => (
             rr.graph,
-            rr.source,
+            rr.raw_source,
             rr.run_cfg,
             rr.sandbox_provider,
             rr.model,
@@ -968,8 +971,8 @@ async fn run_command_impl(
     };
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
-    if !from_record {
-        tokio::fs::write(cached_graph_path(&run_dir), &source).await?;
+    if !from_record && !raw_source.is_empty() {
+        tokio::fs::write(cached_graph_path(&run_dir), &raw_source).await?;
     }
     let mut status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
 
