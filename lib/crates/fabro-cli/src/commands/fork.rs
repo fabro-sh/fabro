@@ -24,29 +24,28 @@ pub struct ForkArgs {
 
 pub fn run(args: &ForkArgs, styles: &Styles) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let run_id = fabro_workflows::run_rewind::find_run_id_by_prefix(&repo, &args.run_id)?;
+    let run_id = fabro_workflows::operations::find_run_id_by_prefix(&repo, &args.run_id)?;
     let store = Store::new(repo);
 
-    let timeline = fabro_workflows::run_rewind::build_timeline(&store, &run_id)?;
+    let timeline = fabro_workflows::operations::build_timeline(&store, &run_id)?;
 
     if args.list {
-        let parallel_map = fabro_workflows::run_rewind::load_parallel_map(&store, &run_id);
+        let parallel_map = fabro_workflows::operations::load_parallel_map(&store, &run_id);
         super::rewind::print_timeline(&timeline, &parallel_map, styles);
         return Ok(());
     }
 
     let entry = if let Some(target_str) = &args.target {
-        let target = fabro_workflows::run_rewind::parse_target(target_str)?;
-        let parallel_map = fabro_workflows::run_rewind::load_parallel_map(&store, &run_id);
-        fabro_workflows::run_rewind::resolve_target(&timeline, &target, &parallel_map)?
+        let target = fabro_workflows::operations::parse_target(target_str)?;
+        let parallel_map = fabro_workflows::operations::load_parallel_map(&store, &run_id);
+        fabro_workflows::operations::resolve_target(&timeline, &target, &parallel_map)?
     } else {
         timeline
             .last()
             .ok_or_else(|| anyhow::anyhow!("no checkpoints found for run {run_id}"))?
     };
 
-    let new_run_id =
-        fabro_workflows::run_fork::execute_fork(&store, &run_id, entry, !args.no_push)?;
+    let new_run_id = fabro_workflows::operations::fork(&store, &run_id, entry, !args.no_push)?;
 
     eprintln!(
         "\nForked run {} -> {}",

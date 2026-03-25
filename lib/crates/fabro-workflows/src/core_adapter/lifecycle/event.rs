@@ -12,8 +12,8 @@ use super::super::graph::WorkflowGraph;
 use super::super::WorkflowNode;
 use super::git::GitCheckpointResult;
 use crate::artifact::ArtifactStore;
-use crate::engine;
 use crate::event::{EventEmitter, WorkflowRunEvent};
+use crate::graph_ops::node_script;
 use crate::outcome::{FailureCategory, FailureDetail, Outcome, StageStatus, StageUsage};
 
 type WfRunState = RunState<Option<StageUsage>>;
@@ -87,7 +87,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             name: gv.label().to_string(),
             index: stage_index,
             handler_type: gv.handler_type().map(String::from),
-            script: engine::node_script(gv),
+            script: node_script(gv),
             attempt: 1,
             max_attempts: 1,
         });
@@ -119,7 +119,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             name: gv.label().to_string(),
             index: state.stage_index,
             handler_type: gv.handler_type().map(String::from),
-            script: engine::node_script(gv),
+            script: node_script(gv),
             attempt: ctx.attempt as usize,
             max_attempts: ctx.max_attempts as usize,
         });

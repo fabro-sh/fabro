@@ -116,7 +116,7 @@ impl Handler for FanInHandler {
         };
 
         if let (Some(ref sha), Some(_)) = (&best_head_sha, services.git_state()) {
-            crate::engine::git_merge_ff_only(&*services.sandbox, sha).await;
+            crate::sandbox_git::git_merge_ff_only(&*services.sandbox, sha).await;
         }
 
         let mut outcome = Outcome::success();
@@ -231,8 +231,8 @@ async fn llm_evaluate(
     );
 
     // Write prompt to logs
-    let visit = crate::engine::visit_from_context(context);
-    let stage_dir = crate::engine::node_dir(run_dir, node_id, visit);
+    let visit = crate::run_dir::visit_from_context(context);
+    let stage_dir = crate::run_dir::node_dir(run_dir, node_id, visit);
     tokio::fs::create_dir_all(&stage_dir).await?;
     tokio::fs::write(stage_dir.join("prompt.md"), &full_prompt).await?;
 

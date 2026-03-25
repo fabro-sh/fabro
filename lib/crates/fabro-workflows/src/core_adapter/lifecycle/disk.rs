@@ -12,9 +12,10 @@ use super::super::graph::WorkflowGraph;
 use super::super::WorkflowNode;
 use super::circuit_breaker::CircuitBreakerLifecycle;
 use crate::checkpoint::Checkpoint;
-use crate::engine::{self, RunSettings};
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::outcome::StageUsage;
+use crate::run_dir::{write_node_status, write_start_record};
+use crate::run_settings::RunSettings;
 
 type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
@@ -38,7 +39,7 @@ impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
         _state: &WfRunState,
     ) -> fabro_core::error::Result<()> {
         // Write start.json
-        engine::write_start_record(&self.run_dir, &self.config);
+        write_start_record(&self.run_dir, &self.config);
         // Write run status as Running
         crate::run_status::write_run_status(
             &self.run_dir,
@@ -56,7 +57,7 @@ impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
     ) -> fabro_core::error::Result<()> {
         let gv = node.inner();
         let visit = state.node_visits.get(gv.id.as_str()).copied().unwrap_or(1);
-        engine::write_node_status(&self.run_dir, &gv.id, visit, &result.outcome);
+        write_node_status(&self.run_dir, &gv.id, visit, &result.outcome);
         Ok(())
     }
 

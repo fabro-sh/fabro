@@ -23,9 +23,10 @@ use crate::jwt_auth::{AuthMode, AuthenticatedService, AuthenticatedUser};
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_workflows::checkpoint::Checkpoint;
 use fabro_workflows::context::Context;
-use fabro_workflows::engine::{RunSettings, WorkflowRunEngine};
+use fabro_workflows::engine::WorkflowRunEngine;
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
 use fabro_workflows::handler::HandlerRegistry;
+use fabro_workflows::run_settings::RunSettings;
 
 pub use fabro_types::{
     ApiQuestion, ApiQuestionOption, PaginatedRunList, PaginationMeta,

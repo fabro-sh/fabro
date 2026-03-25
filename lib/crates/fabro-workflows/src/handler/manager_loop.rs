@@ -9,10 +9,11 @@ use async_trait::async_trait;
 use crate::condition::evaluate_condition;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
-use crate::engine::{RunSettings, WorkflowRunEngine};
+use crate::engine::WorkflowRunEngine;
 use crate::error::FabroError;
+use crate::operations::{create, create_from_file, CreateOptions};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
-use crate::workflow::{prepare_from_file, prepare_from_source};
+use crate::run_settings::RunSettings;
 use fabro_graphviz::graph::{Graph, Node};
 
 use super::{EngineServices, Handler};
@@ -52,7 +53,10 @@ fn parse_child_graph(node: &Node) -> Result<Graph, FabroError> {
         .get("stack.child_dot_source")
         .and_then(|v| v.as_str())
     {
-        return prepare_from_source(dot);
+        let validated = create(dot, CreateOptions::default())?;
+        validated.raise_on_errors()?;
+        let (graph, _, _) = validated.into_parts();
+        return Ok(graph);
     }
     if let Some(path) = node
         .attrs
@@ -60,8 +64,9 @@ fn parse_child_graph(node: &Node) -> Result<Graph, FabroError> {
         .or_else(|| node.attrs.get("stack.child_dotfile"))
         .and_then(|v| v.as_str())
     {
-        let (graph, diagnostics) = prepare_from_file(std::path::Path::new(path))?;
-        fabro_validate::raise_on_errors(&diagnostics)?;
+        let validated = create_from_file(std::path::Path::new(path))?;
+        validated.raise_on_errors()?;
+        let (graph, _, _) = validated.into_parts();
         return Ok(graph);
     }
     Err(FabroError::handler("No child workflow source".to_string()))
@@ -128,7 +133,7 @@ impl Handler for SubWorkflowHandler {
         };
 
         // Build child RunSettings
-        let visit = crate::engine::visit_from_context(context) as u64;
+        let visit = crate::run_dir::visit_from_context(context) as u64;
         let child_logs = run_dir.join(format!("nodes/{}_{visit}/child", node.id));
         let _ = std::fs::create_dir_all(&child_logs);
 
