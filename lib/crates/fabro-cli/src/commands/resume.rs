@@ -463,18 +463,17 @@ async fn prepare_from_checkpoint(
         cancel_token: None,
         dry_run: args.dry_run,
         run_id: run_id.clone(),
-        host_repo_path: None,
+        host_repo_path: persisted
+            .run_record()
+            .host_repo_path
+            .as_deref()
+            .map(PathBuf::from),
         git: None,
-        labels: args
-            .label
-            .iter()
-            .filter_map(|s| s.split_once('='))
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect(),
+        labels: persisted.run_record().labels.clone(),
         github_app: github_app.clone(),
         git_author,
-        base_branch: None,
-        workflow_slug,
+        base_branch: persisted.run_record().base_branch.clone(),
+        workflow_slug: persisted.run_record().workflow_slug.clone(),
     };
 
     let devcontainer_env = devcontainer_config
@@ -561,50 +560,6 @@ async fn prepare_from_branch(
         .or_else(|| repo_info.as_ref().and_then(|(_, branch)| branch.clone()));
     let base_sha = start_record.as_ref().and_then(|s| s.base_sha.clone());
 
-    let (mut validated, mut graph_source, mut run_cfg, mut sandbox_provider, mut workflow_slug) =
-        if let Some(ref workflow_path) = args.workflow {
-            let prepared = prepare_workflow_with_project_config(
-                &resume_as_run_args(args, workflow_path.clone()),
-                run_defaults.clone(),
-                styles,
-                true,
-                false,
-            )?;
-            (
-                prepared.validated,
-                prepared.raw_source,
-                prepared.run_cfg,
-                prepared.sandbox_provider,
-                prepared.workflow_slug,
-            )
-        } else if let Some(ref rec) = record {
-            // Use the fully transformed graph from the RunRecord
-            let validated = create_from_graph(rec.graph.clone(), String::new());
-            let source = String::new(); // no DOT source needed — graph is from RunRecord
-            let run_cfg = Some(rec.config.clone());
-            let sandbox_provider = if args.dry_run {
-                SandboxProvider::Local
-            } else {
-                let sp = rec
-                    .config
-                    .sandbox
-                    .as_ref()
-                    .and_then(|s| s.provider.as_deref())
-                    .and_then(|s| s.parse::<SandboxProvider>().ok())
-                    .unwrap_or_default();
-                args.sandbox.map(Into::into).unwrap_or(sp)
-            };
-            (
-                validated,
-                source,
-                run_cfg,
-                sandbox_provider,
-                rec.workflow_slug.clone(),
-            )
-        } else {
-            bail!("no run.json found on metadata branch for run {run_id}");
-        };
-
     // Set up logs directory — reuse existing run dir for this run_id to avoid
     // "ambiguous prefix" errors when the resume happens on a different day.
     // Skip reuse when dry-running to avoid corrupting real run data.
@@ -617,28 +572,145 @@ async fn prepare_from_branch(
     };
     tokio::fs::create_dir_all(&run_dir).await?;
     let run_dir = tokio::fs::canonicalize(&run_dir).await.unwrap_or(run_dir);
-    if args.workflow.is_none() {
-        if let Ok(loaded) = Persisted::load(&run_dir) {
-            graph_source = loaded.source().to_string();
-            run_cfg = Some(loaded.run_record().config.clone());
-            workflow_slug = loaded.run_record().workflow_slug.clone();
-            validated = create_from_graph(loaded.graph().clone(), loaded.source().to_string());
-            if !args.dry_run {
-                if let Some(provider) = loaded
+    let cli_flags = super::create::CliFlags {
+        dry_run: args.dry_run,
+        auto_approve: args.auto_approve,
+        no_retro: args.no_retro,
+        verbose: args.verbose,
+        preserve_sandbox: args.preserve_sandbox,
+    };
+
+    let (persisted, _run_cfg, mut sandbox_provider, graph_source) =
+        if let Some(ref workflow_path) = args.workflow {
+            let prepared = prepare_workflow_with_project_config(
+                &resume_as_run_args(args, workflow_path.clone()),
+                run_defaults.clone(),
+                styles,
+                true,
+                false,
+            )?;
+            let graph = prepared.validated.graph().clone();
+            let (model_str, provider_str) = resolve_model_provider(
+                args.model.as_deref(),
+                args.provider.as_deref(),
+                prepared.run_cfg.as_ref(),
+                run_defaults,
+                &graph,
+            );
+            let normalized = super::create::normalize_config(
+                prepared.run_cfg.as_ref(),
+                run_defaults,
+                &model_str,
+                provider_str.as_deref(),
+                prepared.sandbox_provider,
+                &graph,
+                cli_flags,
+            );
+            let persisted = fabro_workflows::pipeline::persist(
+                prepared.validated,
+                PersistOptions {
+                    run_dir: run_dir.clone(),
+                    run_record: fabro_workflows::records::RunRecord {
+                        run_id: run_id.clone(),
+                        created_at: chrono::Utc::now(),
+                        config: normalized,
+                        graph,
+                        workflow_slug: prepared.workflow_slug,
+                        working_directory: resume_repo_path.clone(),
+                        host_repo_path: Some(resume_repo_path.to_string_lossy().to_string()),
+                        base_branch: detected_base_branch.clone(),
+                        labels: args
+                            .label
+                            .iter()
+                            .filter_map(|s| s.split_once('='))
+                            .map(|(k, v)| (k.to_string(), v.to_string()))
+                            .collect(),
+                    },
+                },
+            )?;
+            let graph_source = persisted.source().to_string();
+            let run_cfg = Some(persisted.run_record().config.clone());
+            let sandbox_provider = prepared.sandbox_provider;
+            (persisted, run_cfg, sandbox_provider, graph_source)
+        } else if let Ok(loaded) = Persisted::load(&run_dir) {
+            let sandbox_provider = if args.dry_run {
+                SandboxProvider::Local
+            } else {
+                let persisted_provider = loaded
                     .run_record()
                     .config
                     .sandbox
                     .as_ref()
                     .and_then(|s| s.provider.as_deref())
                     .and_then(|s| s.parse::<SandboxProvider>().ok())
-                {
-                    sandbox_provider = args.sandbox.map(Into::into).unwrap_or(provider);
-                }
-            }
-        }
-    }
+                    .unwrap_or_default();
+                args.sandbox.map(Into::into).unwrap_or(persisted_provider)
+            };
+            let graph_source = loaded.source().to_string();
+            let run_cfg = Some(loaded.run_record().config.clone());
+            (loaded, run_cfg, sandbox_provider, graph_source)
+        } else if let Some(ref rec) = record {
+            let sandbox_provider = if args.dry_run {
+                SandboxProvider::Local
+            } else {
+                let sp = rec
+                    .config
+                    .sandbox
+                    .as_ref()
+                    .and_then(|s| s.provider.as_deref())
+                    .and_then(|s| s.parse::<SandboxProvider>().ok())
+                    .unwrap_or_default();
+                args.sandbox.map(Into::into).unwrap_or(sp)
+            };
+            let validated = create_from_graph(rec.graph.clone(), String::new());
+            let graph = validated.graph().clone();
+            let run_cfg = Some(rec.config.clone());
+            let (model_str, provider_str) = resolve_model_provider(
+                args.model.as_deref(),
+                args.provider.as_deref(),
+                run_cfg.as_ref(),
+                run_defaults,
+                &graph,
+            );
+            let normalized = super::create::normalize_config(
+                run_cfg.as_ref(),
+                run_defaults,
+                &model_str,
+                provider_str.as_deref(),
+                sandbox_provider,
+                &graph,
+                cli_flags,
+            );
+            let persisted = fabro_workflows::pipeline::persist(
+                validated,
+                PersistOptions {
+                    run_dir: run_dir.clone(),
+                    run_record: fabro_workflows::records::RunRecord {
+                        run_id: run_id.clone(),
+                        created_at: chrono::Utc::now(),
+                        config: normalized,
+                        graph,
+                        workflow_slug: rec.workflow_slug.clone(),
+                        working_directory: resume_repo_path.clone(),
+                        host_repo_path: Some(resume_repo_path.to_string_lossy().to_string()),
+                        base_branch: detected_base_branch.clone(),
+                        labels: args
+                            .label
+                            .iter()
+                            .filter_map(|s| s.split_once('='))
+                            .map(|(k, v)| (k.to_string(), v.to_string()))
+                            .collect(),
+                    },
+                },
+            )?;
+            let graph_source = persisted.source().to_string();
+            let run_cfg = Some(persisted.run_record().config.clone());
+            (persisted, run_cfg, sandbox_provider, graph_source)
+        } else {
+            bail!("no run.json found on metadata branch for run {run_id}");
+        };
 
-    let graph = validated.graph().clone();
+    let graph = persisted.graph().clone();
 
     eprintln!(
         "{} {} from branch {} ({})",
@@ -648,51 +720,6 @@ async fn prepare_from_branch(
         run_id,
     );
 
-    let (model_str, provider_str) = resolve_model_provider(
-        args.model.as_deref(),
-        args.provider.as_deref(),
-        run_cfg.as_ref(),
-        run_defaults,
-        &graph,
-    );
-    let cli_flags = super::create::CliFlags {
-        dry_run: args.dry_run,
-        auto_approve: args.auto_approve,
-        no_retro: args.no_retro,
-        verbose: args.verbose,
-        preserve_sandbox: args.preserve_sandbox,
-    };
-    let normalized = super::create::normalize_config(
-        run_cfg.as_ref(),
-        run_defaults,
-        &model_str,
-        provider_str.as_deref(),
-        sandbox_provider,
-        &graph,
-        cli_flags,
-    );
-    let persisted = fabro_workflows::pipeline::persist(
-        validated,
-        PersistOptions {
-            run_dir: run_dir.clone(),
-            run_record: fabro_workflows::records::RunRecord {
-                run_id: run_id.clone(),
-                created_at: chrono::Utc::now(),
-                config: normalized,
-                graph: graph.clone(),
-                workflow_slug: workflow_slug.clone(),
-                working_directory: resume_repo_path.clone(),
-                host_repo_path: Some(resume_repo_path.to_string_lossy().to_string()),
-                base_branch: detected_base_branch.clone(),
-                labels: args
-                    .label
-                    .iter()
-                    .filter_map(|s| s.split_once('='))
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect(),
-            },
-        },
-    )?;
     let run_cfg: Option<FabroConfig> = Some(persisted.run_record().config.clone());
     let settings_config = persisted.run_record().config.clone();
 
@@ -926,22 +953,26 @@ async fn prepare_from_branch(
         cancel_token: None,
         dry_run: args.dry_run,
         run_id: run_id.clone(),
-        host_repo_path: Some(resume_repo_path.clone()),
+        host_repo_path: persisted
+            .run_record()
+            .host_repo_path
+            .as_deref()
+            .map(PathBuf::from)
+            .or_else(|| Some(resume_repo_path.clone())),
         git: Some(GitCheckpointSettings {
             base_sha,
             run_branch: Some(run_branch),
             meta_branch: Some(fabro_workflows::git::MetadataStore::branch_name(&run_id)),
         }),
-        labels: args
-            .label
-            .iter()
-            .filter_map(|s| s.split_once('='))
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect(),
+        labels: persisted.run_record().labels.clone(),
         github_app: github_app.clone(),
         git_author,
-        base_branch: detected_base_branch,
-        workflow_slug,
+        base_branch: persisted
+            .run_record()
+            .base_branch
+            .clone()
+            .or(detected_base_branch),
+        workflow_slug: persisted.run_record().workflow_slug.clone(),
     };
 
     let devcontainer_env = devcontainer_config

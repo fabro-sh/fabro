@@ -197,6 +197,7 @@ mod tests {
 
     use super::*;
     use crate::handler::default_registry;
+    use crate::pipeline::PersistOptions;
     use crate::records::RunRecord;
     use crate::run_settings::RunSettings;
 
@@ -343,5 +344,65 @@ mod tests {
         .unwrap();
 
         assert!(initialized.source.is_empty());
+    }
+
+    #[tokio::test]
+    async fn initialize_uses_loaded_persisted_run_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        let wrong_run_dir = temp.path().join("wrong-run-dir");
+        let (graph, source) = simple_graph();
+
+        crate::pipeline::persist(
+            crate::pipeline::Validated::new(graph.clone(), source.clone(), vec![]),
+            PersistOptions {
+                run_dir: run_dir.clone(),
+                run_record: RunRecord {
+                    run_id: "run-test".to_string(),
+                    created_at: Utc::now(),
+                    config: FabroConfig::default(),
+                    graph,
+                    workflow_slug: Some("test".to_string()),
+                    working_directory: std::env::current_dir().unwrap(),
+                    host_repo_path: Some(std::env::current_dir().unwrap().display().to_string()),
+                    base_branch: Some("main".to_string()),
+                    labels: HashMap::new(),
+                },
+            },
+        )
+        .unwrap();
+
+        let loaded = Persisted::load(&run_dir).unwrap();
+        let emitter = Arc::new(crate::event::EventEmitter::new());
+        let sandbox = Arc::new(fabro_agent::LocalSandbox::new(
+            std::env::current_dir().unwrap(),
+        ));
+        let registry = Arc::new(default_registry(Arc::new(AutoApproveInterviewer), || None));
+
+        let initialized = initialize(
+            loaded,
+            InitOptions {
+                run_id: "run-test".to_string(),
+                dry_run: false,
+                emitter,
+                sandbox,
+                registry,
+                lifecycle: crate::run_settings::LifecycleConfig {
+                    setup_commands: vec![],
+                    setup_command_timeout_ms: 1_000,
+                    devcontainer_phases: vec![],
+                },
+                run_settings: test_settings(&wrong_run_dir),
+                hooks: fabro_hooks::HookConfig { hooks: vec![] },
+                sandbox_env: HashMap::new(),
+                checkpoint: None,
+                seed_context: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(initialized.settings.run_dir, run_dir);
+        assert_eq!(initialized.source, source);
     }
 }
