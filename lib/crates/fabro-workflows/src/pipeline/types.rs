@@ -258,7 +258,7 @@ pub struct Finalized {
 /// Options for the TRANSFORM phase.
 pub struct TransformOptions {
     pub base_dir: Option<PathBuf>,
-    pub custom_transforms: Vec<Box<dyn crate::transform::Transform>>,
+    pub custom_transforms: Vec<Box<dyn crate::transforms::Transform>>,
 }
 
 /// Options for the RETRO phase.
