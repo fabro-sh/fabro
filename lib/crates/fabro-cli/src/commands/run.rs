@@ -21,13 +21,12 @@ use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::git::GitSyncStatus;
 use fabro_workflows::handler::default_registry;
 use fabro_workflows::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
-use fabro_workflows::operations::{
-    create_from_graph, start, StartFinalizeConfig, StartOptions, StartRetroConfig,
-};
+use fabro_workflows::operations::{start, StartFinalizeConfig, StartOptions, StartRetroConfig};
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::outcome::{compute_stage_cost, format_cost};
 use fabro_workflows::pipeline::{
-    build_conclusion, classify_engine_result, persist_terminal_outcome,
+    build_conclusion, classify_engine_result, persist_terminal_outcome, PersistOptions, Persisted,
+    Validated,
 };
 use fabro_workflows::records::Checkpoint;
 use fabro_workflows::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
@@ -571,6 +570,11 @@ impl PreparedWorkflow {
     }
 }
 
+enum WorkflowState {
+    Validated(Validated),
+    Persisted(Box<Persisted>),
+}
+
 /// Resolve config, parse/validate the workflow graph, and resolve sandbox + model.
 ///
 /// Shared between `create_run` (which only persists the spec) and
@@ -747,7 +751,7 @@ pub(crate) fn prepare_workflow_with_project_config(
 
 /// Pre-prepared run state, used to skip workflow preparation in `run_command_impl`.
 struct RecordBasedRun {
-    validated: fabro_workflows::pipeline::Validated,
+    workflow: WorkflowState,
     raw_source: String,
     run_cfg: Option<FabroConfig>,
     sandbox_provider: SandboxProvider,
@@ -763,13 +767,14 @@ struct RecordBasedRun {
 ///
 /// Used by `run_engine_entrypoint` for detached runs that already have a RunRecord on disk.
 pub async fn run_from_record(
-    record: fabro_workflows::records::RunRecord,
+    persisted: Persisted,
     run_dir: PathBuf,
     run_defaults: FabroConfig,
     styles: &'static Styles,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     git_author: fabro_workflows::git::GitAuthor,
 ) -> anyhow::Result<()> {
+    let record = persisted.run_record().clone();
     let sandbox_provider = record
         .config
         .sandbox
@@ -792,8 +797,8 @@ pub async fn run_from_record(
         .filter(|s| !s.is_empty());
 
     let record_run = RecordBasedRun {
+        workflow: WorkflowState::Persisted(Box::new(persisted)),
         raw_source: String::new(), // Raw DOT provenance is best-effort for record-based runs
-        validated: create_from_graph(record.graph.clone(), String::new()),
         run_cfg: Some(record.config.clone()),
         sandbox_provider,
         model: model.clone(),
@@ -817,7 +822,7 @@ pub async fn run_from_record(
         sandbox: Some(CliSandboxProvider::from(sandbox_provider)),
         label: record
             .labels
-            .into_iter()
+            .iter()
             .map(|(k, v)| format!("{k}={v}"))
             .collect(),
         no_retro: record.config.no_retro_enabled(),
@@ -828,7 +833,7 @@ pub async fn run_from_record(
             .and_then(|s| s.preserve)
             .unwrap_or(false),
         detach: false,
-        run_id: Some(record.run_id),
+        run_id: Some(record.run_id.clone()),
     };
 
     run_command_impl(args, styles, github_app, git_author, Some(record_run)).await
@@ -859,7 +864,7 @@ pub async fn run_command(
     } = prepare_workflow(&args, run_defaults, styles, false)?;
 
     let record_run = RecordBasedRun {
-        validated,
+        workflow: WorkflowState::Validated(validated),
         raw_source,
         run_cfg,
         sandbox_provider,
@@ -881,7 +886,7 @@ async fn run_command_impl(
     record_run: Option<RecordBasedRun>,
 ) -> anyhow::Result<()> {
     let (
-        validated,
+        workflow,
         raw_source,
         mut run_cfg,
         sandbox_provider,
@@ -892,7 +897,7 @@ async fn run_command_impl(
         workflow_toml_path,
     ) = match record_run {
         Some(rr) => (
-            rr.validated,
+            rr.workflow,
             rr.raw_source,
             rr.run_cfg,
             rr.sandbox_provider,
@@ -904,10 +909,13 @@ async fn run_command_impl(
         ),
         None => unreachable!("run_command_impl always receives a RecordBasedRun"),
     };
-    let graph = validated.graph().clone();
+    let graph = match &workflow {
+        WorkflowState::Validated(validated) => validated.graph().clone(),
+        WorkflowState::Persisted(persisted) => persisted.graph().clone(),
+    };
 
-    // For record-based runs from run_from_record, workflow is None (preparation was skipped).
-    let from_record = args.workflow.is_none();
+    // For record-based runs from run_from_record, the workflow has already been persisted.
+    let from_record = matches!(&workflow, WorkflowState::Persisted(_)) && args.workflow.is_none();
 
     // Collect setup commands — they'll be run inside the sandbox
     let setup_commands: Vec<String> = run_cfg
@@ -955,26 +963,61 @@ async fn run_command_impl(
     let run_dir = args
         .run_dir
         .unwrap_or_else(|| default_run_dir(&run_id, dry_run_flag));
-    tokio::fs::create_dir_all(&run_dir).await?;
     let cached_run_restart = if from_record {
-        // Record-based runs already have RunRecord on disk — skip re-writing.
-        true
+        false
     } else {
         let workflow_path = args.workflow.as_ref().unwrap();
         is_cached_run_restart(workflow_path, &run_dir)
     };
-    let existing_record = if cached_run_restart {
-        fabro_workflows::records::RunRecord::load(&run_dir).ok()
-    } else {
-        None
+
+    let persisted = match (cached_run_restart, workflow) {
+        (true, _) => Persisted::load(&run_dir)?,
+        (false, WorkflowState::Persisted(persisted)) => *persisted,
+        (false, WorkflowState::Validated(validated)) => {
+            let cli_flags = super::create::CliFlags {
+                dry_run: dry_run_flag,
+                auto_approve: auto_approve_flag,
+                no_retro: no_retro_flag,
+                verbose: verbose_flag,
+                preserve_sandbox: preserve_sandbox_flag,
+            };
+            let normalized_config = super::create::normalize_config(
+                run_cfg.as_ref(),
+                &run_defaults,
+                &model,
+                provider.as_deref(),
+                sandbox_provider,
+                validated.graph(),
+                cli_flags,
+            );
+            let run_record = fabro_workflows::records::RunRecord {
+                run_id: run_id.clone(),
+                created_at: chrono::Utc::now(),
+                config: normalized_config,
+                graph: validated.graph().clone(),
+                workflow_slug: prepared_workflow_slug.clone(),
+                working_directory: original_cwd.clone(),
+                host_repo_path: Some(original_cwd.to_string_lossy().to_string()),
+                base_branch: detected_base_branch.clone(),
+                labels: label_vec
+                    .iter()
+                    .filter_map(|s| s.split_once('='))
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            };
+            fabro_workflows::pipeline::persist(
+                validated,
+                PersistOptions {
+                    run_dir: run_dir.clone(),
+                    run_record,
+                },
+            )?
+        }
     };
-    let workflow_slug = if cached_run_restart {
-        existing_record
-            .as_ref()
-            .and_then(|r| r.workflow_slug.clone())
-    } else {
-        prepared_workflow_slug
-    };
+    run_cfg = Some(persisted.run_record().config.clone());
+    let workflow_slug = persisted.run_record().workflow_slug.clone();
+
+    tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
     if !from_record && !raw_source.is_empty() {
@@ -988,47 +1031,7 @@ async fn run_command_impl(
         write_run_config_snapshot(&run_dir, workflow_toml_path.as_deref()).await?;
     }
 
-    // Write RunRecord and compute normalized config for RunSettings
-    let settings_config = if !cached_run_restart {
-        let cli_flags = super::create::CliFlags {
-            dry_run: dry_run_flag,
-            auto_approve: auto_approve_flag,
-            no_retro: no_retro_flag,
-            verbose: verbose_flag,
-            preserve_sandbox: preserve_sandbox_flag,
-        };
-        let normalized_config = super::create::normalize_config(
-            run_cfg.as_ref(),
-            &run_defaults,
-            &model,
-            provider.as_deref(),
-            sandbox_provider,
-            &graph,
-            cli_flags,
-        );
-        let record = fabro_workflows::records::RunRecord {
-            run_id: run_id.clone(),
-            created_at: chrono::Utc::now(),
-            config: normalized_config.clone(),
-            graph: graph.clone(),
-            workflow_slug: workflow_slug.clone(),
-            working_directory: original_cwd.clone(),
-            host_repo_path: Some(original_cwd.to_string_lossy().to_string()),
-            base_branch: detected_base_branch.clone(),
-            labels: label_vec
-                .iter()
-                .filter_map(|s| s.split_once('='))
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-        };
-        record.save(&run_dir)?;
-        normalized_config
-    } else {
-        existing_record
-            .as_ref()
-            .map(|r| r.config.clone())
-            .unwrap_or_default()
-    };
+    let settings_config = persisted.run_record().config.clone();
 
     // Now resolve ${env.VARNAME} references for runtime use.
     if let Some(ref mut cfg) = run_cfg {
@@ -1701,21 +1704,20 @@ async fn run_command_impl(
         cancel_token: None,
         dry_run: dry_run_mode,
         run_id: run_id.clone(),
-        labels: label_vec
-            .iter()
-            .filter_map(|s| s.split_once('='))
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect(),
+        labels: persisted.run_record().labels.clone(),
         git_author: git_author.clone(),
         workflow_slug: workflow_slug.clone(),
         github_app: github_app.clone(),
-        base_branch: existing_record
-            .as_ref()
-            .and_then(|r| r.base_branch.clone())
+        base_branch: persisted
+            .run_record()
+            .base_branch
+            .clone()
             .or(detected_base_branch),
-        host_repo_path: existing_record
-            .as_ref()
-            .and_then(|r| r.host_repo_path.as_deref().map(PathBuf::from))
+        host_repo_path: persisted
+            .run_record()
+            .host_repo_path
+            .as_deref()
+            .map(PathBuf::from)
             .or_else(|| Some(original_cwd.clone())),
         git,
     };
@@ -1745,11 +1747,10 @@ async fn run_command_impl(
         config.pull_request().cloned()
     };
     let started = start(
-        validated,
+        persisted,
         StartOptions {
             init: fabro_workflows::pipeline::InitOptions {
                 run_id: run_id.clone(),
-                run_dir: run_dir.clone(),
                 dry_run: dry_run_mode,
                 emitter: Arc::clone(&emitter),
                 sandbox: Arc::clone(&sandbox),

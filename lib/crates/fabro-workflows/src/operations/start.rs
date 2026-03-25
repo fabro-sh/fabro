@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
 use crate::outcome::StageStatus;
-use crate::pipeline::{self, FinalizeOptions, Finalized, InitOptions, RetroOptions, Validated};
+use crate::pipeline::{self, FinalizeOptions, Finalized, InitOptions, Persisted, RetroOptions};
 
 pub struct StartRetroConfig {
     pub enabled: bool,
@@ -34,8 +34,8 @@ pub struct Started {
     pub retro_duration: Duration,
 }
 
-/// Run a validated workflow through initialize, execute, retro, and finalize.
-pub async fn start(validated: Validated, options: StartOptions) -> Result<Started, FabroError> {
+/// Run a persisted workflow through initialize, execute, retro, and finalize.
+pub async fn start(persisted: Persisted, options: StartOptions) -> Result<Started, FabroError> {
     let preserve_sandbox = options.finalize.preserve_sandbox;
     let sandbox_for_cleanup = Arc::clone(&options.init.sandbox);
     let cleanup_guard = scopeguard::guard((), move |()| {
@@ -49,7 +49,7 @@ pub async fn start(validated: Validated, options: StartOptions) -> Result<Starte
         }
     });
 
-    let initialized = pipeline::initialize(validated, options.init).await?;
+    let initialized = pipeline::initialize(persisted, options.init).await?;
 
     let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     {
@@ -123,6 +123,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use async_trait::async_trait;
+    use chrono::Utc;
     use fabro_agent::{DirEntry, ExecResult, GrepOptions, LocalSandbox, Sandbox};
     use fabro_config::config::FabroConfig;
     use fabro_graphviz::graph::{Graph, Node};
@@ -135,6 +136,8 @@ mod tests {
     use crate::handler::start::StartHandler;
     use crate::handler::{Handler, HandlerRegistry};
     use crate::outcome::Outcome;
+    use crate::pipeline::PersistOptions;
+    use crate::records::RunRecord;
     use crate::run_settings::{LifecycleConfig, RunSettings};
 
     const MINIMAL_DOT: &str = r#"digraph Test {
@@ -340,11 +343,29 @@ mod tests {
         }
     }
 
-    fn validated_workflow(dot: &str) -> Validated {
+    fn persisted_workflow(dot: &str, run_dir: &std::path::Path) -> Persisted {
         let validated =
             crate::operations::create(dot, crate::operations::CreateOptions::default()).unwrap();
         validated.raise_on_errors().unwrap();
-        validated
+        let graph = validated.graph().clone();
+        crate::pipeline::persist(
+            validated,
+            PersistOptions {
+                run_dir: run_dir.to_path_buf(),
+                run_record: RunRecord {
+                    run_id: "run-test".to_string(),
+                    created_at: Utc::now(),
+                    config: FabroConfig::default(),
+                    graph,
+                    workflow_slug: Some("test".to_string()),
+                    working_directory: std::env::current_dir().unwrap(),
+                    host_repo_path: Some(std::env::current_dir().unwrap().display().to_string()),
+                    base_branch: Some("main".to_string()),
+                    labels: HashMap::new(),
+                },
+            },
+        )
+        .unwrap()
     }
 
     fn test_settings(run_dir: &std::path::Path) -> RunSettings {
@@ -383,7 +404,6 @@ mod tests {
         StartOptions {
             init: InitOptions {
                 run_id: "run-test".to_string(),
-                run_dir: run_dir.to_path_buf(),
                 dry_run: false,
                 emitter,
                 sandbox,
@@ -433,7 +453,7 @@ mod tests {
         let (sandbox, cleanup_count) = counting_sandbox();
 
         let result = start(
-            validated_workflow(MINIMAL_DOT),
+            persisted_workflow(MINIMAL_DOT, &run_dir),
             test_start_options(
                 &run_dir,
                 sandbox,
@@ -465,7 +485,7 @@ mod tests {
             Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
 
         let started = start(
-            validated_workflow(EMIT_DOT),
+            persisted_workflow(EMIT_DOT, &run_dir),
             test_start_options(
                 &run_dir,
                 sandbox,

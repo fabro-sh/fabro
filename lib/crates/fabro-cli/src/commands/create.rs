@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use chrono::Utc;
 use fabro_config::config::FabroConfig;
 use fabro_sandbox::SandboxProvider;
+use fabro_workflows::pipeline::PersistOptions;
 use fabro_workflows::records::RunRecord;
 
 use super::run::{
@@ -77,7 +78,6 @@ pub async fn create_run(
     let dot_source = prep.source().to_string();
     let graph = prep.graph().clone();
 
-    // Create run directory
     let run_id = args
         .run_id
         .clone()
@@ -86,20 +86,6 @@ pub async fn create_run(
         .run_dir
         .clone()
         .unwrap_or_else(|| default_run_dir(&run_id, args.dry_run));
-    tokio::fs::create_dir_all(&run_dir).await?;
-
-    // Write essential files
-    tokio::fs::write(cached_graph_path(&run_dir), &dot_source).await?;
-    tokio::fs::write(run_dir.join("id.txt"), &run_id).await?;
-    std::fs::File::create(run_dir.join("progress.jsonl"))?;
-    fabro_workflows::run_status::write_run_status(
-        &run_dir,
-        fabro_workflows::run_status::RunStatus::Submitted,
-        None,
-    );
-
-    // Copy the original workflow TOML into the run dir as a debug artifact.
-    write_run_config_snapshot(&run_dir, prep.workflow_toml_path.as_deref()).await?;
 
     // Build normalized config and RunRecord
     let working_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -134,7 +120,24 @@ pub async fn create_run(
         base_branch,
         labels,
     };
-    record.save(&run_dir)?;
+    fabro_workflows::pipeline::persist(
+        prep.validated,
+        PersistOptions {
+            run_dir: run_dir.clone(),
+            run_record: record,
+        },
+    )?;
+
+    // Write CLI-owned debug and status artifacts after the run has been persisted.
+    tokio::fs::write(cached_graph_path(&run_dir), &dot_source).await?;
+    tokio::fs::write(run_dir.join("id.txt"), &run_id).await?;
+    std::fs::File::create(run_dir.join("progress.jsonl"))?;
+    fabro_workflows::run_status::write_run_status(
+        &run_dir,
+        fabro_workflows::run_status::RunStatus::Submitted,
+        None,
+    );
+    write_run_config_snapshot(&run_dir, prep.workflow_toml_path.as_deref()).await?;
 
     Ok((run_id, run_dir))
 }

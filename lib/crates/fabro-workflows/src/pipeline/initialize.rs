@@ -8,7 +8,7 @@ use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
 use crate::run_settings::GitCheckpointSettings;
 
-use super::types::{InitOptions, Initialized, Validated};
+use super::types::{InitOptions, Initialized, Persisted};
 
 async fn run_hooks(
     hook_runner: Option<&HookRunner>,
@@ -28,17 +28,11 @@ async fn run_hooks(
 ///
 /// Returns `FabroError` if sandbox preparation fails.
 pub async fn initialize(
-    validated: Validated,
+    persisted: Persisted,
     mut options: InitOptions,
 ) -> Result<Initialized, FabroError> {
-    let (graph, source, _diagnostics) = validated.into_parts();
-
-    // Create run directory and write graph
-    std::fs::create_dir_all(&options.run_dir)?;
-    if !source.is_empty() {
-        let graph_path = options.run_dir.join("graph.fabro");
-        std::fs::write(&graph_path, &source)?;
-    }
+    let (graph, source, _diagnostics, run_dir, _run_record) = persisted.into_parts();
+    options.run_settings.run_dir = run_dir;
 
     let hook_runner = if options.hooks.hooks.is_empty() {
         None
@@ -196,13 +190,14 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use chrono::Utc;
     use fabro_config::config::FabroConfig;
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_interview::AutoApproveInterviewer;
 
     use super::*;
     use crate::handler::default_registry;
-    use crate::pipeline::types::Validated;
+    use crate::records::RunRecord;
     use crate::run_settings::RunSettings;
 
     fn simple_graph() -> (Graph, String) {
@@ -246,12 +241,33 @@ mod tests {
         }
     }
 
+    fn test_persisted(graph: Graph, source: String, run_dir: &std::path::Path) -> Persisted {
+        Persisted::new(
+            graph.clone(),
+            source,
+            vec![],
+            run_dir.to_path_buf(),
+            RunRecord {
+                run_id: "run-test".to_string(),
+                created_at: Utc::now(),
+                config: FabroConfig::default(),
+                graph,
+                workflow_slug: Some("test".to_string()),
+                working_directory: std::env::current_dir().unwrap(),
+                host_repo_path: Some(std::env::current_dir().unwrap().display().to_string()),
+                base_branch: Some("main".to_string()),
+                labels: HashMap::new(),
+            },
+        )
+    }
+
     #[tokio::test]
-    async fn initialize_prepares_sandbox_and_writes_graph() {
+    async fn initialize_prepares_sandbox_and_uses_persisted_run_dir() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
         let (graph, source) = simple_graph();
-        let validated = Validated::new(graph, source.clone(), vec![]);
+        let persisted = test_persisted(graph, source.clone(), &run_dir);
         let emitter = Arc::new(crate::event::EventEmitter::new());
         let sandbox = Arc::new(fabro_agent::LocalSandbox::new(
             std::env::current_dir().unwrap(),
@@ -259,10 +275,9 @@ mod tests {
         let registry = Arc::new(default_registry(Arc::new(AutoApproveInterviewer), || None));
 
         let initialized = initialize(
-            validated,
+            persisted,
             InitOptions {
                 run_id: "run-test".to_string(),
-                run_dir: run_dir.clone(),
                 dry_run: false,
                 emitter,
                 sandbox,
@@ -282,11 +297,8 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(run_dir.join("graph.fabro").exists());
-        assert_eq!(
-            std::fs::read_to_string(run_dir.join("graph.fabro")).unwrap(),
-            source
-        );
+        assert_eq!(initialized.settings.run_dir, run_dir);
+        assert_eq!(initialized.source, source);
         assert!(initialized.hook_runner.is_none());
         assert_eq!(
             initialized.env.get("TEST_KEY").map(String::as_str),
@@ -298,8 +310,9 @@ mod tests {
     async fn initialize_skips_empty_graph_source() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
         let (graph, _source) = simple_graph();
-        let validated = Validated::new(graph, String::new(), vec![]);
+        let persisted = test_persisted(graph, String::new(), &run_dir);
         let emitter = Arc::new(crate::event::EventEmitter::new());
         let sandbox = Arc::new(fabro_agent::LocalSandbox::new(
             std::env::current_dir().unwrap(),
@@ -307,10 +320,9 @@ mod tests {
         let registry = Arc::new(default_registry(Arc::new(AutoApproveInterviewer), || None));
 
         let initialized = initialize(
-            validated,
+            persisted,
             InitOptions {
                 run_id: "run-test".to_string(),
-                run_dir: run_dir.clone(),
                 dry_run: false,
                 emitter,
                 sandbox,
@@ -330,7 +342,6 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(!run_dir.join("graph.fabro").exists());
         assert!(initialized.source.is_empty());
     }
 }

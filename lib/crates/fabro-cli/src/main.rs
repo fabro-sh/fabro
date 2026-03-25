@@ -324,10 +324,10 @@ async fn run_engine_entrypoint(
         cli_config.git_author().and_then(|a| a.email.clone()),
     );
 
-    let record = match fabro_workflows::records::RunRecord::load(&run_dir) {
-        Ok(record) => record,
+    let persisted = match fabro_workflows::pipeline::Persisted::load(&run_dir) {
+        Ok(persisted) => persisted,
         Err(err) => {
-            let anyhow_err: anyhow::Error = anyhow::anyhow!("Failed to load run record: {err}");
+            let anyhow_err: anyhow::Error = anyhow::anyhow!("Failed to load persisted run: {err}");
             let _ = commands::detached_support::persist_detached_failure(
                 &run_dir,
                 "bootstrap",
@@ -338,12 +338,14 @@ async fn run_engine_entrypoint(
         }
     };
 
-    if let Err(err) = std::env::set_current_dir(&record.working_directory).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to set working directory to {}: {e}",
-            record.working_directory.display()
-        )
-    }) {
+    if let Err(err) =
+        std::env::set_current_dir(&persisted.run_record().working_directory).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to set working directory to {}: {e}",
+                persisted.run_record().working_directory.display()
+            )
+        })
+    {
         let _ = commands::detached_support::persist_detached_failure(
             &run_dir,
             "bootstrap",
@@ -353,10 +355,10 @@ async fn run_engine_entrypoint(
         return Err(err);
     }
 
-    // Use run_from_record: loads config + graph directly from RunRecord,
+    // Use run_from_record: loads config + graph directly from persisted state,
     // skipping prepare_workflow() entirely. No TOML/DOT re-parsing needed.
     match commands::run::run_from_record(
-        record,
+        persisted,
         run_dir.clone(),
         cli_config,
         styles,

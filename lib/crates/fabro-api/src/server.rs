@@ -25,7 +25,7 @@ use fabro_workflows::context::Context;
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
 use fabro_workflows::handler::HandlerRegistry;
 use fabro_workflows::operations::{self, CreateOptions};
-use fabro_workflows::pipeline::{self, InitOptions};
+use fabro_workflows::pipeline::{self, InitOptions, PersistOptions, Persisted};
 use fabro_workflows::records::Checkpoint;
 use fabro_workflows::run_settings::LifecycleConfig;
 use fabro_workflows::run_settings::RunSettings;
@@ -67,7 +67,6 @@ impl<T: serde::Serialize> ListResponse<T> {
 /// Snapshot of a managed run.
 struct ManagedRun {
     dot_source: String,
-    graph: fabro_graphviz::graph::Graph,
     status: RunStatus,
     error: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
@@ -476,14 +475,13 @@ async fn start_run(
     State(state): State<Arc<AppState>>,
     Json(req): Json<StartRunRequest>,
 ) -> Response {
-    // Parse the DOT source
-    let graph = match operations::create(&req.dot_source, CreateOptions::default()) {
+    // Parse and persist the DOT source.
+    let validated = match operations::create(&req.dot_source, CreateOptions::default()) {
         Ok(validated) => {
             if let Err(e) = validated.raise_on_errors() {
                 return ApiError::bad_request(e.to_string()).into_response();
             }
-            let (graph, _, _) = validated.into_parts();
-            graph
+            validated
         }
         Err(e) => {
             return ApiError::bad_request(e.to_string()).into_response();
@@ -495,13 +493,6 @@ async fn start_run(
 
     let created_at = chrono::Utc::now();
     let run_dir = std::env::temp_dir().join(format!("fabro-{}", uuid::Uuid::new_v4()));
-    if let Err(err) = std::fs::create_dir_all(&run_dir) {
-        return ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to create run directory: {err}"),
-        )
-        .into_response();
-    }
 
     let run_record = fabro_workflows::records::RunRecord {
         run_id: run_id.clone(),
@@ -515,7 +506,7 @@ async fn start_run(
             }),
             ..Default::default()
         },
-        graph: graph.clone(),
+        graph: validated.graph().clone(),
         workflow_slug: None,
         working_directory: std::env::current_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from(".")),
@@ -523,10 +514,16 @@ async fn start_run(
         base_branch: None,
         labels: std::collections::HashMap::new(),
     };
-    if let Err(err) = run_record.save(&run_dir) {
+    if let Err(err) = fabro_workflows::pipeline::persist(
+        validated,
+        PersistOptions {
+            run_dir: run_dir.clone(),
+            run_record,
+        },
+    ) {
         return ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to persist run record: {err}"),
+            format!("Failed to persist run state: {err}"),
         )
         .into_response();
     }
@@ -537,7 +534,6 @@ async fn start_run(
             run_id.clone(),
             ManagedRun {
                 dot_source: req.dot_source,
-                graph,
                 status: RunStatus::Queued,
                 error: None,
                 created_at,
@@ -570,7 +566,7 @@ async fn start_run(
 /// Execute a single run: transitions queued → starting → running → completed/failed/cancelled.
 async fn execute_run(state: Arc<AppState>, run_id: String) {
     // Transition to Starting and set up cancel infrastructure
-    let (cancel_rx, graph, run_dir) = {
+    let (cancel_rx, run_dir) = {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = match runs.get_mut(&run_id) {
             Some(r) if r.status == RunStatus::Queued => r,
@@ -590,7 +586,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         managed_run.cancel_token = Some(Arc::clone(&cancel_token));
         managed_run.event_tx = Some(event_tx);
 
-        (cancel_rx, managed_run.graph.clone(), run_dir)
+        (cancel_rx, run_dir)
     };
 
     // Create interviewer, sandbox, engine (this is the "provisioning" phase)
@@ -640,20 +636,21 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         }
     }
 
-    let run_record = match fabro_workflows::records::RunRecord::load(&run_dir) {
-        Ok(r) => r,
+    let persisted = match Persisted::load(&run_dir) {
+        Ok(persisted) => persisted,
         Err(e) => {
-            tracing::error!(run_id = %run_id, error = %e, "Failed to load RunRecord");
+            tracing::error!(run_id = %run_id, error = %e, "Failed to load persisted run");
             let mut runs = state.runs.lock().expect("runs lock poisoned");
             if let Some(managed_run) = runs.get_mut(&run_id) {
                 managed_run.status = RunStatus::Failed;
-                managed_run.error = Some(format!("Failed to load run record: {e}"));
+                managed_run.error = Some(format!("Failed to load persisted run: {e}"));
                 managed_run.event_tx = None;
             }
             state.scheduler_notify.notify_one();
             return;
         }
     };
+    let run_record = persisted.run_record().clone();
     let config = RunSettings {
         config: run_record.config,
         run_dir: run_dir.clone(),
@@ -662,10 +659,10 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         run_id: run_id.clone(),
         labels: run_record.labels,
         git_author: state.git_author.clone(),
-        workflow_slug: None,
+        workflow_slug: run_record.workflow_slug,
         github_app: None,
-        base_branch: None,
-        host_repo_path: None,
+        base_branch: run_record.base_branch,
+        host_repo_path: run_record.host_repo_path.map(Into::into),
         git: None,
     };
 
@@ -673,19 +670,15 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         let emitter = Arc::clone(&emitter);
         let sandbox = Arc::clone(&sandbox);
         let registry = Arc::new(registry);
-        let graph = graph.clone();
-        let run_dir = run_dir.clone();
         let run_id = run_id.clone();
         let config = config.clone();
         let hooks = state.hooks.clone();
         let dry_run = state.dry_run;
         async move {
-            let validated = operations::create_from_graph(graph, String::new());
             let initialized = pipeline::initialize(
-                validated,
+                persisted,
                 InitOptions {
                     run_id,
-                    run_dir,
                     dry_run,
                     emitter,
                     sandbox,
