@@ -49,28 +49,24 @@ pub fn execute_fork(
         .ensure_branch()
         .map_err(|e| anyhow::anyhow!("failed to create metadata branch: {e}"))?;
 
-    // Read run record, start record, graph, and sandbox from source
+    // Read run record, start record, and sandbox from source metadata.
     let source_entries = source_bs
-        .read_entries(&["run.json", "start.json", "graph.fabro", "sandbox.json"])
+        .read_entries(&["run.json", "start.json", "sandbox.json"])
         .map_err(|e| anyhow::anyhow!("failed to read source metadata: {e}"))?;
 
     let mut run_record_bytes = None;
     let mut start_record_bytes = None;
-    let mut graph_bytes = None;
     let mut sandbox_bytes = None;
     for (path, data) in source_entries {
         match path {
             "run.json" => run_record_bytes = Some(data),
             "start.json" => start_record_bytes = Some(data),
-            "graph.fabro" => graph_bytes = Some(data),
             "sandbox.json" => sandbox_bytes = Some(data),
             _ => {}
         }
     }
     let run_record_bytes =
         run_record_bytes.ok_or_else(|| anyhow::anyhow!("source run has no run.json"))?;
-    let graph_bytes =
-        graph_bytes.ok_or_else(|| anyhow::anyhow!("source run has no graph.fabro"))?;
 
     let now = chrono::Utc::now();
 
@@ -112,7 +108,6 @@ pub fn execute_fork(
     // Write all entries to the new metadata branch in a single commit
     let mut file_entries: Vec<(&str, &[u8])> = vec![
         ("run.json", &new_run_record_bytes),
-        ("graph.fabro", &graph_bytes),
         ("checkpoint.json", &checkpoint_bytes),
     ];
     if let Some(ref start_record) = new_start_record_bytes {
@@ -260,16 +255,11 @@ mod tests {
         let bs = BranchStore::new(store, &meta_branch, &sig);
         bs.ensure_branch().unwrap();
 
-        // Write run record, start record, and graph
+        // Write run record and start record
         let run_record = make_run_record_json(run_id);
         let start_record = make_start_record_json(run_id);
-        let graph = b"digraph { start -> build -> test }";
         bs.write_entries(
-            &[
-                ("run.json", &run_record),
-                ("start.json", &start_record),
-                ("graph.fabro", graph),
-            ],
+            &[("run.json", &run_record), ("start.json", &start_record)],
             "init run",
         )
         .unwrap();
@@ -329,10 +319,6 @@ mod tests {
             start_record.run_branch.as_deref(),
             Some(format!("{}{new_run_id}", crate::git::RUN_BRANCH_PREFIX).as_str())
         );
-
-        // Check graph exists
-        let graph_bytes = bs.read_entry("graph.fabro").unwrap().unwrap();
-        assert_eq!(graph_bytes, b"digraph { start -> build -> test }");
 
         // Check checkpoint matches target (@1 = start)
         let cp_bytes = bs.read_entry("checkpoint.json").unwrap().unwrap();

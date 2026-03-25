@@ -45,7 +45,6 @@ The metadata branch (`fabro/meta/{run_id}`) is an orphan branch that stores stru
 
 - **`run.json`** — Run record: run ID, created_at, config, graph, workflow slug, working directory, host repo path, base branch, labels
 - **`start.json`** — Start record: run ID, start time, run branch, base SHA
-- **`graph.fabro`** — The workflow Graphviz source as it was parsed
 
 After each node, the metadata branch is updated with:
 
@@ -115,7 +114,7 @@ This reads the checkpoint, run record, and Graphviz graph from the metadata bran
 
 <Accordion title="What happens during resume">
 1. Fabro reads `checkpoint.json` from the metadata branch
-2. Reads `run.json` and `graph.fabro` to reconstruct the workflow
+2. Reads `run.json` to reconstruct the workflow graph and config
 3. Creates a fresh worktree attached to the existing run branch
 4. Restores the full context, completed node list, retry counts, and failure signatures
 5. If the checkpointed node used `full` fidelity, downgrades the first resumed node to `summary:high` (since the original conversation thread no longer exists in memory)

@@ -485,6 +485,42 @@ async fn start_run(
     info!(run_id = %run_id, "Run queued");
 
     let created_at = chrono::Utc::now();
+    let run_dir = std::env::temp_dir().join(format!("fabro-{}", uuid::Uuid::new_v4()));
+    if let Err(err) = std::fs::create_dir_all(&run_dir) {
+        return ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create run directory: {err}"),
+        )
+        .into_response();
+    }
+
+    let run_record = fabro_workflows::run_record::RunRecord {
+        run_id: run_id.clone(),
+        created_at,
+        config: fabro_config::config::FabroConfig {
+            dry_run: Some(state.dry_run),
+            hooks: state.hooks.clone(),
+            sandbox: Some(fabro_config::sandbox::SandboxConfig {
+                provider: Some("local".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        graph: graph.clone(),
+        workflow_slug: None,
+        working_directory: std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from(".")),
+        host_repo_path: None,
+        base_branch: None,
+        labels: std::collections::HashMap::new(),
+    };
+    if let Err(err) = run_record.save(&run_dir) {
+        return ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to persist run record: {err}"),
+        )
+        .into_response();
+    }
 
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
@@ -502,7 +538,7 @@ async fn start_run(
                 checkpoint: None,
                 cancel_tx: None,
                 cancel_token: None,
-                run_dir: None,
+                run_dir: Some(run_dir),
             },
         );
     }
@@ -525,11 +561,15 @@ async fn start_run(
 /// Execute a single run: transitions queued → starting → running → completed/failed/cancelled.
 async fn execute_run(state: Arc<AppState>, run_id: String) {
     // Transition to Starting and set up cancel infrastructure
-    let (cancel_rx, graph, created_at) = {
+    let (cancel_rx, graph, run_dir) = {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = match runs.get_mut(&run_id) {
             Some(r) if r.status == RunStatus::Queued => r,
             _ => return,
+        };
+        let run_dir = match managed_run.run_dir.clone() {
+            Some(path) => path,
+            None => return,
         };
 
         let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
@@ -541,7 +581,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         managed_run.cancel_token = Some(Arc::clone(&cancel_token));
         managed_run.event_tx = Some(event_tx);
 
-        (cancel_rx, managed_run.graph.clone(), managed_run.created_at)
+        (cancel_rx, managed_run.graph.clone(), run_dir)
     };
 
     // Create interviewer, sandbox, engine (this is the "provisioning" phase)
@@ -606,34 +646,6 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
             managed_run.interviewer = Some(Arc::clone(&interviewer));
             managed_run.context = Some(context);
         }
-    }
-
-    let run_dir = std::env::temp_dir().join(format!("fabro-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&run_dir).expect("failed to create run directory");
-
-    // Write RunRecord for observability (enables `fabro ps` / `fabro inspect` for API runs).
-    {
-        let record_config = fabro_config::config::FabroConfig {
-            dry_run: Some(state.dry_run),
-            sandbox: Some(fabro_config::sandbox::SandboxConfig {
-                provider: Some("local".to_string()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        let run_record = fabro_workflows::run_record::RunRecord {
-            run_id: run_id.clone(),
-            created_at,
-            config: record_config,
-            graph: graph.clone(),
-            workflow_slug: None,
-            working_directory: std::env::current_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            host_repo_path: None,
-            base_branch: None,
-            labels: std::collections::HashMap::new(),
-        };
-        let _ = run_record.save(&run_dir);
     }
 
     let config = RunConfig {
