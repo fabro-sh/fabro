@@ -21,12 +21,12 @@ use fabro_agent::LocalSandbox;
 use crate::error::ApiError;
 use crate::jwt_auth::{AuthMode, AuthenticatedService, AuthenticatedUser};
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
-use fabro_workflows::records::Checkpoint;
 use fabro_workflows::context::Context;
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
 use fabro_workflows::handler::HandlerRegistry;
 use fabro_workflows::operations::{self, CreateOptions};
 use fabro_workflows::pipeline::{self, InitOptions};
+use fabro_workflows::records::Checkpoint;
 use fabro_workflows::run_settings::LifecycleConfig;
 use fabro_workflows::run_settings::RunSettings;
 

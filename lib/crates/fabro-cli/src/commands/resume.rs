@@ -10,7 +10,6 @@ use fabro_config::config::FabroConfig;
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, Interviewer};
 use fabro_model::{Catalog, Provider};
 use fabro_util::terminal::Styles;
-use fabro_workflows::records::Checkpoint;
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel};
 use fabro_workflows::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::operations::{
@@ -20,6 +19,7 @@ use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::pipeline::{
     build_conclusion, classify_engine_result, persist_terminal_outcome,
 };
+use fabro_workflows::records::Checkpoint;
 use fabro_workflows::records::RunRecord;
 use fabro_workflows::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
 use fabro_workflows::sandbox_provider::SandboxProvider;
@@ -989,7 +989,7 @@ async fn run_resumed(
                 acc.total_cache_read_tokens += u.cache_read_tokens.unwrap_or(0);
                 acc.total_cache_write_tokens += u.cache_write_tokens.unwrap_or(0);
                 acc.total_reasoning_tokens += u.reasoning_tokens.unwrap_or(0);
-                if let Some(cost) = fabro_workflows::cost::compute_stage_cost(u) {
+                if let Some(cost) = fabro_workflows::outcome::compute_stage_cost(u) {
                     acc.total_cost += cost;
                     acc.has_pricing = true;
                 }

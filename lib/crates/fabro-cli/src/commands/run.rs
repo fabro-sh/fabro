@@ -15,8 +15,6 @@ use fabro_config::{project as project_config, run as run_config, sandbox as sand
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, FileInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_util::terminal::Styles;
-use fabro_workflows::records::Checkpoint;
-use fabro_workflows::cost::{compute_stage_cost, format_cost};
 use fabro_workflows::devcontainer_bridge;
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::git::GitSyncStatus;
@@ -26,9 +24,11 @@ use fabro_workflows::operations::{
     create_from_graph, start, StartFinalizeConfig, StartOptions, StartRetroConfig,
 };
 use fabro_workflows::outcome::StageStatus;
+use fabro_workflows::outcome::{compute_stage_cost, format_cost};
 use fabro_workflows::pipeline::{
     build_conclusion, classify_engine_result, persist_terminal_outcome,
 };
+use fabro_workflows::records::Checkpoint;
 use fabro_workflows::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
 use fabro_workflows::sandbox_provider::SandboxProvider;
 use indicatif::HumanDuration;

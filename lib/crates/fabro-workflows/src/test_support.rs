@@ -3,13 +3,13 @@ use std::sync::Arc;
 
 use fabro_agent::Sandbox;
 
-use crate::records::Checkpoint;
 use crate::error::Result;
 use crate::event::EventEmitter;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::pipeline;
 use crate::pipeline::types::Initialized;
+use crate::records::Checkpoint;
 use crate::run_settings::RunSettings;
 
 struct InitializedOptions {

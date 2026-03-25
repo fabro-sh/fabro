@@ -7,12 +7,12 @@ use fabro_graphviz::graph::Graph;
 use fabro_hooks::HookRunner;
 use fabro_validate::Diagnostic;
 
-use crate::records::Checkpoint;
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::EventEmitter;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
+use crate::records::Checkpoint;
 use crate::records::Conclusion;
 use crate::run_settings::{LifecycleConfig, RunSettings};
 use fabro_validate::Severity;

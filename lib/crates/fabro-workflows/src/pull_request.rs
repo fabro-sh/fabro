@@ -56,7 +56,7 @@ fn truncate_pr_body(body: &str) -> String {
 
 /// Format an optional cost as `$X.XX` or an en-dash when absent.
 fn format_cost(cost: Option<f64>) -> String {
-    cost.map(crate::cost::format_cost)
+    cost.map(crate::outcome::format_cost)
         .unwrap_or_else(|| "\u{2013}".to_string())
 }
 
