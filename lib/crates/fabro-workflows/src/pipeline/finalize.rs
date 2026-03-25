@@ -357,6 +357,7 @@ pub async fn finalize(
         run_id: settings.run_id,
         outcome,
         conclusion,
+        pushed_branch: settings.git.as_ref().and_then(|g| g.run_branch.clone()),
         pr_url,
     })
 }

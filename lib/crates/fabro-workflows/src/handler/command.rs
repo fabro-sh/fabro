@@ -84,8 +84,8 @@ impl Handler for CommandHandler {
             )));
         }
 
-        let visit = crate::engine::visit_from_context(context);
-        let stage_dir = crate::engine::node_dir(run_dir, &node.id, visit);
+        let visit = crate::run_dir::visit_from_context(context);
+        let stage_dir = crate::run_dir::node_dir(run_dir, &node.id, visit);
         tokio::fs::create_dir_all(&stage_dir).await?;
 
         let invocation = serde_json::json!({

@@ -28,22 +28,22 @@ pub struct RewindArgs {
 
 pub fn run(args: &RewindArgs, styles: &Styles) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let run_id = fabro_workflows::run_rewind::find_run_id_by_prefix(&repo, &args.run_id)?;
+    let run_id = fabro_workflows::operations::find_run_id_by_prefix(&repo, &args.run_id)?;
     let store = Store::new(repo);
 
-    let timeline = fabro_workflows::run_rewind::build_timeline(&store, &run_id)?;
+    let timeline = fabro_workflows::operations::build_timeline(&store, &run_id)?;
 
     if args.list || args.target.is_none() {
-        let parallel_map = fabro_workflows::run_rewind::load_parallel_map(&store, &run_id);
+        let parallel_map = fabro_workflows::operations::load_parallel_map(&store, &run_id);
         print_timeline(&timeline, &parallel_map, styles);
         return Ok(());
     }
 
-    let target = fabro_workflows::run_rewind::parse_target(args.target.as_deref().unwrap())?;
-    let parallel_map = fabro_workflows::run_rewind::load_parallel_map(&store, &run_id);
-    let entry = fabro_workflows::run_rewind::resolve_target(&timeline, &target, &parallel_map)?;
+    let target = fabro_workflows::operations::parse_target(args.target.as_deref().unwrap())?;
+    let parallel_map = fabro_workflows::operations::load_parallel_map(&store, &run_id);
+    let entry = fabro_workflows::operations::resolve_target(&timeline, &target, &parallel_map)?;
 
-    fabro_workflows::run_rewind::execute_rewind(&store, &run_id, entry, !args.no_push)?;
+    fabro_workflows::operations::rewind(&store, &run_id, entry, !args.no_push)?;
 
     eprintln!(
         "\nTo resume: fabro resume {}",
@@ -54,7 +54,7 @@ pub fn run(args: &RewindArgs, styles: &Styles) -> Result<()> {
 }
 
 pub(crate) fn print_timeline(
-    timeline: &[fabro_workflows::run_rewind::TimelineEntry],
+    timeline: &[fabro_workflows::operations::TimelineEntry],
     parallel_map: &std::collections::HashMap<String, String>,
     styles: &Styles,
 ) {

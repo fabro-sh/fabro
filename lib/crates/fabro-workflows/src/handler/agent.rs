@@ -249,8 +249,8 @@ impl Handler for AgentHandler {
         };
 
         // 2. Write prompt to logs
-        let visit = crate::engine::visit_from_context(context);
-        let stage_dir = crate::engine::node_dir(run_dir, &node.id, visit);
+        let visit = crate::run_dir::visit_from_context(context);
+        let stage_dir = crate::run_dir::node_dir(run_dir, &node.id, visit);
         tokio::fs::create_dir_all(&stage_dir).await?;
         tokio::fs::write(stage_dir.join("prompt.md"), &prompt).await?;
 

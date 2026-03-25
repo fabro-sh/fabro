@@ -106,6 +106,7 @@ pub mod git;
 pub mod graph_ops;
 pub mod graph_render;
 pub mod handler;
+pub mod operations;
 pub mod outcome;
 pub mod pipeline;
 pub mod preamble;
@@ -123,6 +124,8 @@ pub mod sandbox_reconnect;
 pub mod sandbox_record;
 pub mod start_record;
 pub mod stylesheet;
+#[doc(hidden)]
+pub mod test_support;
 pub mod transform;
 pub mod vars;
 pub mod workflow;

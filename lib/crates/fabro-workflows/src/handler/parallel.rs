@@ -8,9 +8,9 @@ use tokio::sync::Semaphore;
 
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
-use crate::engine::set_hook_node;
 use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
+use crate::graph_ops::set_hook_node;
 use crate::millis_u64;
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use fabro_graphviz::graph::{Graph, Node};
@@ -162,7 +162,7 @@ impl Handler for ParallelHandler {
 
         // --- Git isolation: checkpoint "parallel base" before fan-out ---
         let base_sha: Option<String> = if let Some(ref gs) = git_state {
-            let result = crate::engine::git_checkpoint(
+            let result = crate::sandbox_git::git_checkpoint(
                 &*services.sandbox,
                 &gs.run_id,
                 &node.id,
@@ -205,7 +205,7 @@ impl Handler for ParallelHandler {
                 (&git_state, &base_sha)
             {
                 let branch_key = &target_id;
-                let visit = crate::engine::visit_from_context(&branch_context);
+                let visit = crate::run_dir::visit_from_context(&branch_context);
                 let branch_name = format!(
                     "fabro/run/parallel/{}/{}/pass{}/{}",
                     gs.run_id,
@@ -327,7 +327,7 @@ impl Handler for ParallelHandler {
                     let nid = &setup.target_id;
                     let status_str = outcome.status.to_string();
                     // Use exec_command to commit and capture HEAD in the branch worktree
-                    let git_r = crate::engine::GIT_REMOTE;
+                    let git_r = crate::sandbox_git::GIT_REMOTE;
                     let add_cmd = format!("{git_r} add -A");
                     let add_result = setup
                         .sandbox
@@ -414,7 +414,7 @@ impl Handler for ParallelHandler {
             for result in &results {
                 if let Some(ref wt_path) = result.worktree_path {
                     let wt_str = wt_path.to_string_lossy().into_owned();
-                    crate::engine::git_remove_worktree(&*services.sandbox, &wt_str).await;
+                    crate::sandbox_git::git_remove_worktree(&*services.sandbox, &wt_str).await;
                     services
                         .emitter
                         .emit(&WorkflowRunEvent::GitWorktreeRemove { path: wt_str });
@@ -431,7 +431,7 @@ impl Handler for ParallelHandler {
             successful.sort_by(|a, b| a.id.cmp(&b.id));
             if let Some(winner) = successful.first() {
                 let sha = winner.head_sha.as_ref().unwrap();
-                crate::engine::git_merge_ff_only(&*services.sandbox, sha).await;
+                crate::sandbox_git::git_merge_ff_only(&*services.sandbox, sha).await;
             }
         }
 
@@ -463,8 +463,8 @@ impl Handler for ParallelHandler {
         context.set(keys::PARALLEL_RESULTS, serde_json::json!(results_json));
         context.set(keys::PARALLEL_BRANCH_COUNT, serde_json::json!(total));
 
-        let visit = crate::engine::visit_from_context(context);
-        let node_dir = crate::engine::node_dir(run_dir, &node.id, visit);
+        let visit = crate::run_dir::visit_from_context(context);
+        let node_dir = crate::run_dir::node_dir(run_dir, &node.id, visit);
         let _ = tokio::fs::create_dir_all(&node_dir).await;
         if let Ok(json) = serde_json::to_string_pretty(&results_json) {
             let _ = tokio::fs::write(node_dir.join("parallel_results.json"), json).await;

@@ -57,7 +57,8 @@ static RANKDIR_RE: LazyLock<regex::Regex> =
 pub fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
     let (dot_path, _cfg) = fabro_config::project::resolve_workflow(&args.workflow)?;
 
-    let (_graph, diagnostics) = fabro_workflows::workflow::prepare_from_file(&dot_path)?;
+    let validated = fabro_workflows::operations::create_from_file(&dot_path)?;
+    let diagnostics = validated.diagnostics();
 
     print_diagnostics(&diagnostics, styles);
 

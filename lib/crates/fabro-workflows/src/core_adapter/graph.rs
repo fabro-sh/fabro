@@ -6,7 +6,7 @@ use fabro_core::graph::{EdgeSelection, EdgeSpec, Graph, NodeSpec};
 use fabro_graphviz::graph::types::{Edge as GvEdge, Graph as GvGraph, Node as GvNode};
 
 use crate::context::Context;
-use crate::engine;
+use crate::graph_ops;
 use crate::outcome::{Outcome, StageUsage};
 
 // ---- WorkflowNode ----
@@ -26,7 +26,7 @@ impl NodeSpec for WorkflowNode {
     }
 
     fn is_terminal(&self) -> bool {
-        engine::is_terminal(&self.0)
+        graph_ops::is_terminal(&self.0)
     }
 
     fn max_visits(&self) -> Option<usize> {
@@ -103,7 +103,7 @@ impl Graph for WorkflowGraph {
         outcome: &Outcome,
         context: &Context,
     ) -> Option<EdgeSelection<Self>> {
-        let selection = engine::select_edge(
+        let selection = graph_ops::select_edge(
             node.inner(),
             outcome,
             context,
@@ -120,10 +120,10 @@ impl Graph for WorkflowGraph {
         &self,
         outcomes: &HashMap<String, Outcome>,
     ) -> std::result::Result<(), String> {
-        engine::check_goal_gates(self.inner(), outcomes)
+        graph_ops::check_goal_gates(self.inner(), outcomes)
     }
 
     fn get_retry_target(&self, failed_node_id: &str) -> Option<String> {
-        engine::get_retry_target(failed_node_id, self.inner())
+        graph_ops::get_retry_target(failed_node_id, self.inner())
     }
 }

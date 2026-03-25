@@ -19,11 +19,17 @@ use fabro_workflows::backend::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::checkpoint::Checkpoint;
 use fabro_workflows::cost::{compute_stage_cost, format_cost};
 use fabro_workflows::devcontainer_bridge;
-use fabro_workflows::engine::{GitCheckpointSettings, RunSettings, WorkflowRunEngine};
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::git::GitSyncStatus;
 use fabro_workflows::handler::default_registry;
+use fabro_workflows::operations::{
+    create_from_graph, start, StartFinalizeConfig, StartOptions, StartRetroConfig,
+};
 use fabro_workflows::outcome::StageStatus;
+use fabro_workflows::pipeline::{
+    build_conclusion, classify_engine_result, persist_terminal_outcome,
+};
+use fabro_workflows::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
 use fabro_workflows::sandbox_provider::SandboxProvider;
 use indicatif::HumanDuration;
 use std::time::Duration;
@@ -33,10 +39,6 @@ use super::detached_support::{self, DetachedRunBootstrapGuard, DetachedRunComple
 use super::run_progress;
 use crate::commands::shared::{
     format_tokens_human, print_diagnostics, read_workflow_file, relative_path, tilde_path,
-};
-
-pub(crate) use fabro_workflows::pipeline::{
-    build_conclusion, classify_engine_result, persist_terminal_outcome, write_finalize_commit,
 };
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -743,7 +745,7 @@ pub(crate) fn prepare_workflow_with_project_config(
 
 /// Pre-prepared run state, used to skip workflow preparation in `run_command_impl`.
 struct RecordBasedRun {
-    graph: fabro_graphviz::graph::Graph,
+    validated: fabro_workflows::pipeline::Validated,
     raw_source: String,
     run_cfg: Option<FabroConfig>,
     sandbox_provider: SandboxProvider,
@@ -789,7 +791,7 @@ pub async fn run_from_record(
 
     let record_run = RecordBasedRun {
         raw_source: String::new(), // Raw DOT provenance is best-effort for record-based runs
-        graph: record.graph.clone(),
+        validated: create_from_graph(record.graph.clone(), String::new()),
         run_cfg: Some(record.config.clone()),
         sandbox_provider,
         model: model.clone(),
@@ -853,10 +855,9 @@ pub async fn run_command(
         run_defaults,
         workflow_toml_path,
     } = prepare_workflow(&args, run_defaults, styles, false)?;
-    let (graph, _source, _diagnostics) = validated.into_parts();
 
     let record_run = RecordBasedRun {
-        graph,
+        validated,
         raw_source,
         run_cfg,
         sandbox_provider,
@@ -878,7 +879,7 @@ async fn run_command_impl(
     record_run: Option<RecordBasedRun>,
 ) -> anyhow::Result<()> {
     let (
-        graph,
+        validated,
         raw_source,
         mut run_cfg,
         sandbox_provider,
@@ -889,7 +890,7 @@ async fn run_command_impl(
         workflow_toml_path,
     ) = match record_run {
         Some(rr) => (
-            rr.graph,
+            rr.validated,
             rr.raw_source,
             rr.run_cfg,
             rr.sandbox_provider,
@@ -901,6 +902,7 @@ async fn run_command_impl(
         ),
         None => unreachable!("run_command_impl always receives a RecordBasedRun"),
     };
+    let graph = validated.graph().clone();
 
     // For record-based runs from run_from_record, workflow is None (preparation was skipped).
     let from_record = args.workflow.is_none();
@@ -1047,21 +1049,6 @@ async fn run_command_impl(
 
     // 3. Build event emitter
     let emitter = EventEmitter::new();
-
-    // Track the last git commit SHA from CheckpointCompleted events
-    let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    {
-        let sha_clone = Arc::clone(&last_git_sha);
-        emitter.on_event(move |event| {
-            if let fabro_workflows::event::WorkflowRunEvent::CheckpointCompleted {
-                git_commit_sha: Some(sha),
-                ..
-            } = event
-            {
-                *sha_clone.lock().unwrap() = Some(sha.clone());
-            }
-        });
-    }
 
     // Cost accumulator — shared across all verbosity levels
     let accumulator = Arc::new(Mutex::new(CostAccumulator::default()));
@@ -1689,32 +1676,6 @@ async fn run_command_impl(
             }
         }
     });
-    let mut engine = WorkflowRunEngine::with_interviewer(
-        registry,
-        Arc::clone(&emitter),
-        interviewer,
-        Arc::clone(&sandbox),
-    );
-    if !sandbox_env.is_empty() {
-        engine.set_env(sandbox_env);
-    }
-    if dry_run_mode {
-        engine.set_dry_run(true);
-    }
-    // Wire up hook runner from run config or run defaults
-    {
-        let hooks = run_cfg
-            .as_ref()
-            .map(|c| &c.hooks)
-            .unwrap_or(&run_defaults.hooks);
-        if !hooks.is_empty() {
-            let hook_config = fabro_hooks::HookConfig {
-                hooks: hooks.clone(),
-            };
-            let runner = fabro_hooks::HookRunner::new(hook_config);
-            engine.set_hook_runner(Arc::new(runner));
-        }
-    }
 
     // 7. Execute
     // Set up metadata branch for git checkpointing (host or remote — engine fills remote)
@@ -1728,7 +1689,7 @@ async fn run_command_impl(
         None
     };
 
-    let mut config = RunSettings {
+    let config = RunSettings {
         config: settings_config,
         run_dir: run_dir.clone(),
         cancel_token: None,
@@ -1754,7 +1715,7 @@ async fn run_command_impl(
     };
 
     // Build lifecycle config for sandbox init, setup commands, and devcontainer phases
-    let lifecycle = fabro_workflows::engine::LifecycleConfig {
+    let lifecycle = LifecycleConfig {
         setup_commands,
         setup_command_timeout_ms: 300_000,
         devcontainer_phases: if let Some(ref dc) = devcontainer_config {
@@ -1771,287 +1732,97 @@ async fn run_command_impl(
     // Defuse the bootstrap guard — engine.run() has taken ownership of lifecycle status.
     status_guard.defuse();
 
-    // Safety net: if we panic or return early, best-effort cleanup via spawn.
-    let sandbox_for_cleanup = Arc::clone(&sandbox);
-    let cleanup_guard = scopeguard::guard((), move |()| {
-        if preserve_sandbox {
-            return;
-        }
-        let rt = tokio::runtime::Handle::try_current();
-        if let Ok(handle) = rt {
-            handle.spawn(async move {
-                let _ = sandbox_for_cleanup.cleanup().await;
-            });
-        }
-    });
-
     let run_start = Instant::now();
-    let engine_result = engine
-        .run_with_lifecycle(&graph, &mut config, lifecycle, None)
-        .await;
+    let pr_config = config.pull_request().cloned();
+    let started = start(
+        validated,
+        StartOptions {
+            init: fabro_workflows::pipeline::InitOptions {
+                run_id: run_id.clone(),
+                run_dir: run_dir.clone(),
+                dry_run: dry_run_mode,
+                emitter: Arc::clone(&emitter),
+                sandbox: Arc::clone(&sandbox),
+                registry: Arc::new(registry),
+                lifecycle,
+                run_settings: config,
+                hooks: fabro_hooks::HookConfig {
+                    hooks: run_cfg
+                        .as_ref()
+                        .map(|c| c.hooks.clone())
+                        .unwrap_or_else(|| run_defaults.hooks.clone()),
+                },
+                sandbox_env,
+                checkpoint: None,
+                seed_context: None,
+            },
+            retro: StartRetroConfig {
+                enabled: !no_retro_flag && project_config::is_retro_enabled(),
+                dry_run: dry_run_mode,
+                llm_client: llm_client.clone(),
+                provider: provider_enum,
+                model: model.clone(),
+            },
+            finalize: StartFinalizeConfig {
+                preserve_sandbox,
+                pr_config,
+                github_app: github_app.clone(),
+                origin_url: origin_url.clone(),
+                model: model.clone(),
+            },
+        },
+    )
+    .await;
     let run_duration_ms = run_start.elapsed().as_millis() as u64;
     let mut completion_guard = DetachedRunCompletionGuard::arm(&run_dir);
 
     // Restore cwd (worktree is kept for `fabro cp` access; pruned separately)
     let _ = std::env::set_current_dir(&original_cwd);
-
-    let (final_status, failure_reason, run_status, status_reason) =
-        classify_engine_result(&engine_result);
-    let conclusion = build_conclusion(
-        &run_dir,
-        final_status.clone(),
-        failure_reason,
-        run_duration_ms,
-        last_git_sha.lock().unwrap().clone(),
-    );
-
-    // Auto-derive retro (always, cheap) and optionally run retro agent
-    if !no_retro_flag && project_config::is_retro_enabled() {
-        let failed = match &engine_result {
-            Ok(ref o) => o.status == StageStatus::Fail,
-            Err(_) => true,
-        };
-        generate_retro(
-            &config.run_id,
-            &graph.name,
-            graph.goal(),
-            &run_dir,
-            failed,
-            run_duration_ms,
-            dry_run_mode,
-            llm_client.as_ref(),
-            &sandbox,
-            provider_enum,
-            &model,
-            styles,
-            Some(Arc::clone(&emitter)),
-        )
-        .await;
-    }
-
-    // Finish progress bars after retro (retro stage uses the same ProgressUI)
     progress_ui.lock().expect("progress lock poisoned").finish();
 
-    // Write finalize commit with retro.json + final node files (captures last diff.patch)
-    write_finalize_commit(&config, &run_dir).await;
-
-    // Auto-create PR on successful completion (skip in dry-run mode)
-    let mut pushed_branch: Option<String> = None;
-    let mut pr_url: Option<String> = None;
-    if let Some(pr_cfg) = config.pull_request() {
-        if dry_run_mode {
-            debug!("Skipping PR creation: dry-run mode");
-        } else if let Err(ref e) = engine_result {
-            debug!(error = %e, "Skipping PR creation: engine returned an error");
-        } else if let Ok(ref outcome) = engine_result {
-            if !matches!(
-                outcome.status,
-                StageStatus::Success | StageStatus::PartialSuccess
-            ) {
-                debug!(status = ?outcome.status, "Skipping PR creation: run status is not success");
-            } else {
-                let diff = tokio::fs::read_to_string(run_dir.join("final.patch"))
-                    .await
-                    .unwrap_or_default();
-                if let (
-                    Some(ref base_branch),
-                    Some(ref run_branch),
-                    Some(ref creds),
-                    Some(ref origin),
-                ) = (
-                    &config.base_branch,
-                    config.git.as_ref().and_then(|g| g.run_branch.as_ref()),
-                    &github_app,
-                    &origin_url,
-                ) {
-                    // Run branch was pushed during checkpoint commits;
-                    // just record it for the PR creation.
-                    if config.git.is_some() {
-                        pushed_branch = Some(run_branch.to_string());
-                    }
-
-                    let auto_merge = if pr_cfg.auto_merge {
-                        Some(fabro_workflows::pull_request::AutoMergeConfig {
-                            merge_strategy: pr_cfg.merge_strategy,
-                        })
-                    } else {
-                        None
-                    };
-
-                    match fabro_workflows::pull_request::maybe_open_pull_request(
-                        creds,
-                        origin,
-                        base_branch,
-                        run_branch,
-                        graph.goal(),
-                        &diff,
-                        &model,
-                        pr_cfg.draft,
-                        auto_merge,
-                        &run_dir,
-                    )
-                    .await
-                    {
-                        Ok(Some(record)) => {
-                            emitter.emit(
-                                &fabro_workflows::event::WorkflowRunEvent::PullRequestCreated {
-                                    pr_url: record.html_url.clone(),
-                                    pr_number: record.number,
-                                    draft: pr_cfg.draft,
-                                },
-                            );
-                            pr_url = Some(record.html_url.clone());
-                            if let Err(e) = record.save(&run_dir.join("pull_request.json")) {
-                                tracing::warn!(error = %e, "Failed to save pull_request.json");
-                            }
-                        }
-                        Ok(None) => {} // empty diff, logged at DEBUG
-                        Err(e) => {
-                            emitter.emit(
-                                &fabro_workflows::event::WorkflowRunEvent::PullRequestFailed {
-                                    error: e.to_string(),
-                                },
-                            );
-                            emit_run_notice(
-                                &emitter,
-                                RunNoticeLevel::Warn,
-                                "pull_request_failed",
-                                format!("PR creation failed: {e}"),
-                            );
-                        }
-                    }
-                }
+    let final_status = match started {
+        Ok(started) => {
+            if let Some(ref retro) = started.retro {
+                print_retro_result(retro, started.retro_duration, &run_dir, styles);
             }
+            let finalized = started.finalized;
+            print_run_conclusion(
+                &finalized.conclusion,
+                &run_id,
+                &run_dir,
+                finalized.pushed_branch.as_deref(),
+                finalized.pr_url.as_deref(),
+                styles,
+            );
+            print_final_output(&run_dir, styles);
+            print_assets(&run_dir, styles);
+            finalized.conclusion.status.clone()
         }
-    } else {
-        debug!("Skipping PR creation: pull_request not enabled in config");
-    }
-
-    // 8. Print result
-    eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="),);
-
-    eprintln!("{}", styles.dim.apply_to(format!("Run:       {run_id}")));
-    let status_str = final_status.to_string().to_uppercase();
-    let status_color = match final_status {
-        StageStatus::Success | StageStatus::PartialSuccess => &styles.bold_green,
-        _ => &styles.bold_red,
+        Err(err) => {
+            let engine_result = Err(err.clone());
+            let (final_status, failure_reason, run_status, status_reason) =
+                classify_engine_result(&engine_result);
+            let conclusion = build_conclusion(
+                &run_dir,
+                final_status.clone(),
+                failure_reason,
+                run_duration_ms,
+                None,
+            );
+            persist_terminal_outcome(&run_dir, &conclusion, run_status, status_reason);
+            print_run_conclusion(&conclusion, &run_id, &run_dir, None, None, styles);
+            print_final_output(&run_dir, styles);
+            print_assets(&run_dir, styles);
+            final_status
+        }
     };
-    eprintln!("Status:    {}", status_color.apply_to(&status_str),);
-    eprintln!(
-        "Duration:  {}",
-        HumanDuration(Duration::from_millis(run_duration_ms))
-    );
 
-    {
-        let acc = accumulator.lock().unwrap();
-        let total_tokens = acc.total_input_tokens + acc.total_output_tokens;
-        if total_tokens > 0 {
-            if acc.has_pricing {
-                eprintln!(
-                    "{}",
-                    styles.dim.apply_to(format!(
-                        "Cost:      {} ({} toks)",
-                        format_cost(acc.total_cost),
-                        format_tokens_human(total_tokens)
-                    ))
-                );
-            } else {
-                eprintln!(
-                    "{}",
-                    styles
-                        .dim
-                        .apply_to(format!("Toks:      {}", format_tokens_human(total_tokens)))
-                );
-            }
-            if acc.total_cache_read_tokens > 0 {
-                eprintln!(
-                    "{}",
-                    styles.dim.apply_to(format!(
-                        "Cache:     {} read, {} write",
-                        format_tokens_human(acc.total_cache_read_tokens),
-                        format_tokens_human(acc.total_cache_write_tokens),
-                    )),
-                );
-            }
-            if acc.total_reasoning_tokens > 0 {
-                eprintln!(
-                    "{}",
-                    styles.dim.apply_to(format!(
-                        "Reasoning: {} tokens",
-                        format_tokens_human(acc.total_reasoning_tokens),
-                    )),
-                );
-            }
-        }
-    }
-
-    eprintln!(
-        "{}",
-        styles
-            .dim
-            .apply_to(format!("Run:       {}", tilde_path(&run_dir)))
-    );
-
-    if let Some(failure) = conclusion.failure_reason.as_deref() {
-        eprintln!("Failure:   {}", styles.red.apply_to(failure));
-    }
-
-    if pushed_branch.is_some() || pr_url.is_some() {
-        eprintln!();
-        if let Some(ref branch) = pushed_branch {
-            eprintln!("{} {branch}", styles.bold.apply_to("Pushed branch:"));
-        }
-        if let Some(ref url) = pr_url {
-            eprintln!("{} {url}", styles.bold.apply_to("Pull request:"));
-        }
-    }
-
-    print_final_output(&run_dir, styles);
-    print_assets(&run_dir, styles);
-
-    // 9. Cleanup sandbox (defuse the scopeguard so we await properly)
-    scopeguard::ScopeGuard::into_inner(cleanup_guard);
-    if preserve_sandbox {
-        let info = sandbox.sandbox_info();
-        if !info.is_empty() {
-            emit_run_notice(
-                &emitter,
-                RunNoticeLevel::Info,
-                "sandbox_preserved",
-                format!("sandbox preserved: {info}"),
-            );
-        } else {
-            emit_run_notice(
-                &emitter,
-                RunNoticeLevel::Info,
-                "sandbox_preserved",
-                "sandbox preserved",
-            );
-        }
-    }
-    if let Err(e) = engine
-        .cleanup_sandbox(&run_id, &graph.name, preserve_sandbox)
-        .await
-    {
-        tracing::warn!(error = %e, "Sandbox cleanup failed");
-        emit_run_notice(
-            &emitter,
-            RunNoticeLevel::Warn,
-            "sandbox_cleanup_failed",
-            format!("sandbox cleanup failed: {e}"),
-        );
-    }
-
-    persist_terminal_outcome(&run_dir, &conclusion, run_status, status_reason);
     completion_guard.defuse();
 
-    // 10. Exit code
     fabro_util::run_log::deactivate();
     match final_status {
         StageStatus::Success | StageStatus::PartialSuccess => Ok(()),
-        _ => {
-            std::process::exit(1);
-        }
+        _ => std::process::exit(1),
     }
 }
 
@@ -2078,6 +1849,36 @@ pub fn print_run_summary(run_dir: &Path, run_id: &str, styles: &Styles) {
         return;
     };
 
+    // PR info from pull_request.json (saved by _run_engine)
+    let pr_url = std::fs::read_to_string(run_dir.join("pull_request.json"))
+        .ok()
+        .and_then(|content| {
+            serde_json::from_str::<fabro_workflows::pull_request::PullRequestRecord>(&content)
+                .ok()
+                .map(|record| record.html_url)
+        });
+
+    print_run_conclusion(
+        &conclusion,
+        run_id,
+        run_dir,
+        None,
+        pr_url.as_deref(),
+        styles,
+    );
+
+    print_final_output(run_dir, styles);
+    print_assets(run_dir, styles);
+}
+
+pub(crate) fn print_run_conclusion(
+    conclusion: &fabro_workflows::conclusion::Conclusion,
+    run_id: &str,
+    run_dir: &Path,
+    pushed_branch: Option<&str>,
+    pr_url: Option<&str>,
+    styles: &Styles,
+) {
     eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="));
     eprintln!("{}", styles.dim.apply_to(format!("Run:       {run_id}")));
 
@@ -2147,22 +1948,74 @@ pub fn print_run_summary(run_dir: &Path, run_id: &str, styles: &Styles) {
         eprintln!("Failure:   {}", styles.red.apply_to(failure));
     }
 
-    // PR info from pull_request.json (saved by _run_engine)
-    if let Ok(content) = std::fs::read_to_string(run_dir.join("pull_request.json")) {
-        if let Ok(record) =
-            serde_json::from_str::<fabro_workflows::pull_request::PullRequestRecord>(&content)
-        {
-            eprintln!();
-            eprintln!(
-                "{} {}",
-                styles.bold.apply_to("Pull request:"),
-                record.html_url
-            );
+    if pushed_branch.is_some() || pr_url.is_some() {
+        eprintln!();
+        if let Some(branch) = pushed_branch {
+            eprintln!("{} {branch}", styles.bold.apply_to("Pushed branch:"));
+        }
+        if let Some(url) = pr_url {
+            eprintln!("{} {url}", styles.bold.apply_to("Pull request:"));
         }
     }
+}
 
-    print_final_output(run_dir, styles);
-    print_assets(run_dir, styles);
+pub(crate) fn print_retro_result(
+    retro: &fabro_retro::retro::Retro,
+    duration: Duration,
+    run_dir: &Path,
+    styles: &Styles,
+) {
+    eprintln!("\n{}", styles.bold.apply_to("=== Retro ==="));
+
+    let retro_dur = run_progress::format_duration_short(duration);
+    let smoothness_str = retro
+        .smoothness
+        .as_ref()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let outcome_str = retro.outcome.as_deref().unwrap_or("No outcome recorded");
+    let line1_content = format!("Retro: {smoothness_str} - {outcome_str}");
+    let term_width = console::Term::stderr().size().1 as usize;
+    let pad1 = term_width.saturating_sub(line1_content.len() + retro_dur.len());
+    eprintln!(
+        "{} {}{:pad1$}{}",
+        styles.bold.apply_to("Retro:"),
+        styles
+            .dim
+            .apply_to(format!("{smoothness_str} - {outcome_str}")),
+        "",
+        styles.dim.apply_to(&retro_dur),
+    );
+
+    let friction_count = retro.friction_points.as_ref().map(|v| v.len()).unwrap_or(0);
+    let open_count = retro.open_items.as_ref().map(|v| v.len()).unwrap_or(0);
+    if friction_count > 0 || open_count > 0 {
+        let mut parts = Vec::new();
+        if friction_count > 0 {
+            let noun = if friction_count == 1 {
+                "friction point"
+            } else {
+                "friction points"
+            };
+            parts.push(format!("{friction_count} {noun}"));
+        }
+        if open_count > 0 {
+            let noun = if open_count == 1 {
+                "open item"
+            } else {
+                "open items"
+            };
+            parts.push(format!("{open_count} {noun}"));
+        }
+        eprintln!("  {}", styles.dim.apply_to(parts.join(" · ")));
+    }
+
+    let retro_path = format!("{}/retro.json", tilde_path(run_dir));
+    eprintln!(
+        "  {} {}",
+        styles.dim.apply_to("Retro saved to"),
+        styles.underline.apply_to(&retro_path),
+    );
 }
 
 /// Print the final stage output from the checkpoint, if available.
@@ -2554,108 +2407,6 @@ async fn run_preflight(
         Ok(())
     } else {
         std::process::exit(1);
-    }
-}
-
-/// Generate a retro report for a completed workflow run.
-///
-/// Derives a basic retro from the checkpoint, then optionally runs the retro agent
-/// for a richer narrative. Errors are logged as warnings rather than propagated.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn generate_retro(
-    run_id: &str,
-    workflow_name: &str,
-    goal: &str,
-    run_dir: &std::path::Path,
-    failed: bool,
-    run_duration_ms: u64,
-    dry_run_mode: bool,
-    llm_client: Option<&fabro_llm::client::Client>,
-    sandbox: &Arc<dyn fabro_agent::Sandbox>,
-    provider_enum: Provider,
-    model: &str,
-    styles: &'static Styles,
-    emitter: Option<Arc<EventEmitter>>,
-) {
-    eprintln!("\n{}", styles.bold.apply_to("=== Retro ==="));
-    if emitter.is_none() {
-        eprintln!(
-            "{}",
-            styles.dim.apply_to(format!("Running retro ({model})..."))
-        );
-    }
-
-    let retro_start = std::time::Instant::now();
-    let retro = fabro_workflows::pipeline::run_retro(&fabro_workflows::pipeline::RetroOptions {
-        run_id: run_id.to_string(),
-        workflow_name: workflow_name.to_string(),
-        goal: goal.to_string(),
-        run_dir: run_dir.to_path_buf(),
-        sandbox: Arc::clone(sandbox),
-        emitter,
-        failed,
-        run_duration_ms,
-        enabled: true,
-        dry_run: dry_run_mode,
-        llm_client: llm_client.cloned(),
-        provider: provider_enum,
-        model: model.to_string(),
-    })
-    .await;
-
-    let retro_dur = run_progress::format_duration_short(retro_start.elapsed());
-    if let Some(retro) = retro {
-        let smoothness_str = retro
-            .smoothness
-            .as_ref()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
-        let outcome_str = retro.outcome.as_deref().unwrap_or("No outcome recorded");
-        let line1_content = format!("Retro: {smoothness_str} \u{2014} {outcome_str}");
-        let term_width = console::Term::stderr().size().1 as usize;
-        let dur_len = retro_dur.len();
-        let pad1 = term_width.saturating_sub(line1_content.len() + dur_len);
-        eprintln!(
-            "{} {}{:pad1$}{}",
-            styles.bold.apply_to("Retro:"),
-            styles
-                .dim
-                .apply_to(format!("{smoothness_str} \u{2014} {outcome_str}")),
-            "",
-            styles.dim.apply_to(&retro_dur),
-        );
-
-        let friction_count = retro.friction_points.as_ref().map(|v| v.len()).unwrap_or(0);
-        let open_count = retro.open_items.as_ref().map(|v| v.len()).unwrap_or(0);
-        if friction_count > 0 || open_count > 0 {
-            let mut parts = Vec::new();
-            if friction_count > 0 {
-                let noun = if friction_count == 1 {
-                    "friction point"
-                } else {
-                    "friction points"
-                };
-                parts.push(format!("{friction_count} {noun}"));
-            }
-            if open_count > 0 {
-                let noun = if open_count == 1 {
-                    "open item"
-                } else {
-                    "open items"
-                };
-                parts.push(format!("{open_count} {noun}"));
-            }
-            eprintln!("  {}", styles.dim.apply_to(parts.join(" \u{00b7} ")));
-        }
-
-        let retro_path = format!("{}/retro.json", tilde_path(run_dir));
-        eprintln!(
-            "  {} {}",
-            styles.dim.apply_to("Retro saved to"),
-            styles.underline.apply_to(&retro_path),
-        );
-    } else {
-        eprintln!("{}", styles.dim.apply_to("Retro unavailable"));
     }
 }
 

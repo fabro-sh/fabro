@@ -28,17 +28,11 @@ use fabro_graphviz::graph::{Edge, Node};
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_interview::Interviewer;
 
-pub(crate) use crate::graph_ops::{
-    build_retry_policy, check_goal_gates, classify_outcome, get_retry_target, is_terminal,
-    node_script, set_hook_node,
-};
 pub use crate::graph_ops::{
     resolve_fidelity, resolve_thread_id, select_edge, EdgeSelection, RetryPolicy,
 };
 pub use crate::run_dir::{node_dir, visit_from_context};
-pub(crate) use crate::run_dir::{write_node_status, write_start_record};
 pub use crate::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
-pub(crate) use crate::sandbox_git::git_diff;
 pub use crate::sandbox_git::{
     git_add_worktree, git_checkpoint, git_create_branch_at, git_merge_ff_only, git_push_host,
     git_remove_worktree, git_replace_worktree, GitState, GIT_REMOTE,
@@ -613,6 +607,7 @@ mod tests {
     use super::*;
     use crate::handler::start::StartHandler;
     use crate::handler::Handler as HandlerTrait;
+    use crate::outcome::OutcomeExt;
     use async_trait::async_trait;
     use fabro_graphviz::graph::AttrValue;
     use std::time::Duration;

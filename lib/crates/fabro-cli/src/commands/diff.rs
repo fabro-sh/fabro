@@ -108,8 +108,8 @@ fn build_live_diff_cmd(base_sha: &str, stat: bool, shortstat: bool) -> String {
     );
     format!(
         "{} add -N . && {} diff{flags} {quoted_sha}",
-        fabro_workflows::engine::GIT_REMOTE,
-        fabro_workflows::engine::GIT_REMOTE
+        fabro_workflows::sandbox_git::GIT_REMOTE,
+        fabro_workflows::sandbox_git::GIT_REMOTE
     )
 }
 

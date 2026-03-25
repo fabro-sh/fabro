@@ -158,6 +158,7 @@ pub struct Finalized {
     pub run_id: String,
     pub outcome: Result<Outcome, FabroError>,
     pub conclusion: Conclusion,
+    pub pushed_branch: Option<String>,
     pub pr_url: Option<String>,
 }
 

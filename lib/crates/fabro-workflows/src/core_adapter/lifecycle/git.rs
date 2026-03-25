@@ -12,9 +12,11 @@ use fabro_core::state::RunState;
 use super::super::graph::WorkflowGraph;
 use super::super::WorkflowNode;
 use crate::artifact::ArtifactStore;
-use crate::engine::{self, RunSettings};
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::outcome::{Outcome, StageStatus, StageUsage};
+use crate::run_dir::node_dir;
+use crate::run_settings::RunSettings;
+use crate::sandbox_git::{git_checkpoint, git_diff, git_push_host};
 
 type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
@@ -149,7 +151,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
 
         // Run branch commit via sandbox
         let completed_count = state.completed_nodes.len();
-        let commit_result = engine::git_checkpoint(
+        let commit_result = git_checkpoint(
             &*self.sandbox,
             &self.run_id,
             node_id,
@@ -192,7 +194,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                             true
                         } else if let Some(repo_path) = self.config.host_repo_path.as_ref() {
                             let refspec = format!("refs/heads/{branch}");
-                            engine::git_push_host(
+                            git_push_host(
                                 repo_path,
                                 &refspec,
                                 &self.config.github_app,
@@ -213,7 +215,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                         self.config.host_repo_path.as_ref(),
                     ) {
                         let refspec = format!("refs/heads/{meta_branch}");
-                        let meta_push_ok = engine::git_push_host(
+                        let meta_push_ok = git_push_host(
                             repo_path,
                             &refspec,
                             &self.config.github_app,
@@ -235,9 +237,9 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                     .clone()
                     .or_else(|| self.config.git.as_ref().and_then(|g| g.base_sha.clone()))
                     .unwrap_or_else(|| sha.clone());
-                let diff_dest = engine::node_dir(&self.run_dir, node_id, visit).join("diff.patch");
+                let diff_dest = node_dir(&self.run_dir, node_id, visit).join("diff.patch");
 
-                match engine::git_diff(&*self.sandbox, &prev).await {
+                match git_diff(&*self.sandbox, &prev).await {
                     Ok(patch) if !patch.is_empty() => {
                         let _ = std::fs::write(&diff_dest, patch);
                     }
@@ -277,7 +279,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         {
             if let Some(base_sha) = self.config.git.as_ref().and_then(|g| g.base_sha.clone()) {
                 let diff_dest = self.run_dir.join("final.patch");
-                match engine::git_diff(&*self.sandbox, &base_sha).await {
+                match git_diff(&*self.sandbox, &base_sha).await {
                     Ok(patch) if !patch.is_empty() => {
                         let _ = std::fs::write(&diff_dest, patch);
                     }
