@@ -6,18 +6,10 @@ use crate::error::FabroError;
 use crate::pipeline::{self, TransformOptions, Validated};
 use crate::transform::Transform;
 
+#[derive(Default)]
 pub struct CreateOptions {
     pub base_dir: Option<PathBuf>,
     pub custom_transforms: Vec<Box<dyn Transform>>,
-}
-
-impl Default for CreateOptions {
-    fn default() -> Self {
-        Self {
-            base_dir: None,
-            custom_transforms: Vec::new(),
-        }
-    }
 }
 
 /// Parse, transform, and validate a DOT source string.
