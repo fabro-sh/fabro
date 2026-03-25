@@ -12,7 +12,6 @@ pub enum SandboxProvider {
     /// Run tools inside a Daytona cloud sandbox
     Daytona,
     /// Run tools inside an exe.dev VM
-    #[cfg(feature = "exedev")]
     Exe,
     /// Run tools on a user-provided SSH host
     Ssh,
@@ -26,7 +25,6 @@ impl fmt::Display for SandboxProvider {
             Self::Local => write!(f, "local"),
             Self::Docker => write!(f, "docker"),
             Self::Daytona => write!(f, "daytona"),
-            #[cfg(feature = "exedev")]
             Self::Exe => write!(f, "exe"),
             Self::Ssh => write!(f, "ssh"),
         }
@@ -41,7 +39,6 @@ impl FromStr for SandboxProvider {
             "local" => Ok(Self::Local),
             "docker" => Ok(Self::Docker),
             "daytona" => Ok(Self::Daytona),
-            #[cfg(feature = "exedev")]
             "exe" => Ok(Self::Exe),
             "ssh" => Ok(Self::Ssh),
             other => Err(format!("unknown sandbox provider: {other}")),
@@ -76,17 +73,14 @@ mod tests {
             "LOCAL".parse::<SandboxProvider>().unwrap(),
             SandboxProvider::Local
         );
-        #[cfg(feature = "exedev")]
-        {
-            assert_eq!(
-                "exe".parse::<SandboxProvider>().unwrap(),
-                SandboxProvider::Exe
-            );
-            assert_eq!(
-                "EXE".parse::<SandboxProvider>().unwrap(),
-                SandboxProvider::Exe
-            );
-        }
+        assert_eq!(
+            "exe".parse::<SandboxProvider>().unwrap(),
+            SandboxProvider::Exe
+        );
+        assert_eq!(
+            "EXE".parse::<SandboxProvider>().unwrap(),
+            SandboxProvider::Exe
+        );
         assert_eq!(
             "ssh".parse::<SandboxProvider>().unwrap(),
             SandboxProvider::Ssh
@@ -103,7 +97,6 @@ mod tests {
         assert_eq!(SandboxProvider::Local.to_string(), "local");
         assert_eq!(SandboxProvider::Docker.to_string(), "docker");
         assert_eq!(SandboxProvider::Daytona.to_string(), "daytona");
-        #[cfg(feature = "exedev")]
         assert_eq!(SandboxProvider::Exe.to_string(), "exe");
         assert_eq!(SandboxProvider::Ssh.to_string(), "ssh");
     }

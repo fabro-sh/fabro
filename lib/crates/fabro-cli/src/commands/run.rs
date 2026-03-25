@@ -14,6 +14,7 @@ use fabro_config::config::FabroConfig;
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, FileInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
+use fabro_sandbox::SandboxProvider;
 use fabro_util::terminal::Styles;
 use fabro_workflows::devcontainer_bridge;
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
@@ -30,7 +31,6 @@ use fabro_workflows::pipeline::{
 };
 use fabro_workflows::records::Checkpoint;
 use fabro_workflows::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
-use fabro_workflows::sandbox_provider::SandboxProvider;
 use indicatif::HumanDuration;
 use std::time::Duration;
 use tracing::debug;
@@ -72,6 +72,8 @@ impl From<SandboxProvider> for CliSandboxProvider {
             SandboxProvider::Daytona => Self::Daytona,
             #[cfg(feature = "exedev")]
             SandboxProvider::Exe => Self::Exe,
+            #[cfg(not(feature = "exedev"))]
+            SandboxProvider::Exe => Self::Local,
             SandboxProvider::Ssh => Self::Ssh,
         }
     }
@@ -1485,6 +1487,10 @@ async fn run_command_impl(
             }));
             Arc::new(env)
         }
+        #[cfg(not(feature = "exedev"))]
+        SandboxProvider::Exe => {
+            bail!("exe sandbox requires the exedev feature");
+        }
         SandboxProvider::Ssh => {
             let config = ssh_config
                 .clone()
@@ -2201,6 +2207,8 @@ async fn run_preflight(
                 Err(e) => Err(format!("exe.dev SSH connection failed: {e}")),
             }
         }
+        #[cfg(not(feature = "exedev"))]
+        SandboxProvider::Exe => Err("exe sandbox requires the exedev feature".to_string()),
         SandboxProvider::Ssh => match ssh_config {
             Some(config) => {
                 let clone_params = resolve_ssh_clone_params(&original_cwd);
