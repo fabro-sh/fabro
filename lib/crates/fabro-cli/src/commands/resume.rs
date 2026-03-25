@@ -9,6 +9,7 @@ use fabro_agent::{DockerSandbox, DockerSandboxConfig, Sandbox, WorktreeConfig, W
 use fabro_config::config::FabroConfig;
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, Interviewer};
 use fabro_model::{Catalog, Provider};
+use fabro_sandbox::SandboxProvider;
 use fabro_util::terminal::Styles;
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel};
 use fabro_workflows::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
@@ -22,7 +23,6 @@ use fabro_workflows::pipeline::{
 use fabro_workflows::records::Checkpoint;
 use fabro_workflows::records::RunRecord;
 use fabro_workflows::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
-use fabro_workflows::sandbox_provider::SandboxProvider;
 
 use super::detached_support::{DetachedRunBootstrapGuard, DetachedRunCompletionGuard};
 use super::run::{
@@ -408,6 +408,10 @@ async fn prepare_from_checkpoint(
                 emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
             }));
             Arc::new(env)
+        }
+        #[cfg(not(feature = "exedev"))]
+        SandboxProvider::Exe => {
+            anyhow::bail!("exe sandbox requires the exedev feature");
         }
         SandboxProvider::Ssh => {
             let config = resolve_ssh_config(run_cfg.as_ref(), run_defaults)
@@ -827,6 +831,10 @@ async fn prepare_from_branch(
                 emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
             }));
             (Arc::new(env), None)
+        }
+        #[cfg(not(feature = "exedev"))]
+        SandboxProvider::Exe => {
+            anyhow::bail!("exe sandbox requires the exedev feature");
         }
         SandboxProvider::Ssh => {
             let config = resolve_ssh_config(run_cfg.as_ref(), run_defaults)

@@ -2,6 +2,8 @@ pub mod sandbox;
 
 pub mod read_guard;
 
+pub mod sandbox_provider;
+
 pub mod worktree;
 
 #[cfg(feature = "ssh")]
@@ -34,6 +36,8 @@ pub use sandbox::{
 };
 
 pub use read_guard::ReadBeforeWriteSandbox;
+
+pub use sandbox_provider::SandboxProvider;
 
 pub use worktree::{WorktreeConfig, WorktreeEvent, WorktreeEventCallback, WorktreeSandbox};
 

@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use chrono::Utc;
 use fabro_config::config::FabroConfig;
+use fabro_sandbox::SandboxProvider;
 use fabro_workflows::records::RunRecord;
-use fabro_workflows::sandbox_provider::SandboxProvider;
 
 use super::run::{
     cached_graph_path, default_run_dir, prepare_workflow, write_run_config_snapshot, RunArgs,
