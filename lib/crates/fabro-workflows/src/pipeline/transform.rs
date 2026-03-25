@@ -1,4 +1,4 @@
-use crate::transform::{
+use crate::transforms::{
     FileInliningTransform, ModelResolutionTransform, StylesheetApplicationTransform, Transform,
     VariableExpansionTransform,
 };
