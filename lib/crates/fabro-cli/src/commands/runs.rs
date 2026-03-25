@@ -539,9 +539,9 @@ async fn remove_from(args: &RunsRemoveArgs, base: &Path) -> Result<()> {
         );
 
         let sandbox_path = run.path.join("sandbox.json");
-        if let Ok(record) = fabro_workflows::records::SandboxRecord::load(&sandbox_path) {
+        if let Ok(record) = fabro_sandbox::SandboxRecord::load(&sandbox_path) {
             if record.provider != "local" {
-                match fabro_workflows::sandbox_reconnect::reconnect(&record).await {
+                match fabro_sandbox::reconnect::reconnect(&record).await {
                     Ok(sandbox) => {
                         if let Err(err) = sandbox.cleanup().await {
                             warn!(run_id = %run.run_id, error = %err, "sandbox cleanup failed");

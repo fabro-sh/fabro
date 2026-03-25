@@ -1740,8 +1740,8 @@ async fn daytona_toolbox_idle_diagnostic() {
 #[tokio::test]
 #[ignore]
 async fn daytona_cp_upload_download_round_trip() {
-    use fabro_workflows::records::SandboxRecord;
-    use fabro_workflows::sandbox_reconnect::reconnect;
+    use fabro_sandbox::reconnect::reconnect;
+    use fabro_sandbox::SandboxRecord;
 
     // 1. Create and initialize a real Daytona sandbox
     let env = create_env().await;

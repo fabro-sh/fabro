@@ -71,12 +71,12 @@ async fn resolve_diff(run_dir: &Path, args: &DiffArgs) -> Result<String> {
 
     debug!("No final.patch found; attempting live diff from sandbox");
     let sandbox_json = run_dir.join("sandbox.json");
-    let record = fabro_workflows::records::SandboxRecord::load(&sandbox_json).context(
+    let record = fabro_sandbox::SandboxRecord::load(&sandbox_json).context(
         "Failed to load sandbox.json — was this run started with a recent version of arc?",
     )?;
 
     info!(provider = %record.provider, "Reconnecting to sandbox for live diff");
-    let sandbox = fabro_workflows::sandbox_reconnect::reconnect(&record).await?;
+    let sandbox = fabro_sandbox::reconnect::reconnect(&record).await?;
 
     let cmd = build_live_diff_cmd(base_sha, args.stat, args.shortstat);
     debug!(cmd, "Running git diff in sandbox");
