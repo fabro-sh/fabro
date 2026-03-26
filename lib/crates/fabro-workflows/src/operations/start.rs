@@ -10,7 +10,7 @@ use crate::outcome::StageStatus;
 use crate::pipeline::{
     self, FinalizeOptions, Finalized, InitOptions, Persisted, PullRequestOptions, RetroOptions,
 };
-use crate::records::Checkpoint;
+use crate::records::{Checkpoint, Conclusion};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 
 pub struct StartRetroOptions {
@@ -83,6 +83,23 @@ pub async fn resume(
     run_dir: &std::path::Path,
     options: StartOptions,
 ) -> Result<Started, FabroError> {
+    if let Ok(record) = crate::run_status::RunStatusRecord::load(&run_dir.join("status.json")) {
+        if record.status == crate::run_status::RunStatus::Succeeded {
+            return Err(FabroError::Precondition(
+                "run already finished successfully — nothing to resume".to_string(),
+            ));
+        }
+    }
+    if let Ok(conclusion) = Conclusion::load(&run_dir.join("conclusion.json")) {
+        if matches!(
+            conclusion.status,
+            StageStatus::Success | StageStatus::PartialSuccess | StageStatus::Skipped
+        ) {
+            return Err(FabroError::Precondition(
+                "run already finished successfully — nothing to resume".to_string(),
+            ));
+        }
+    }
     let cp_path = run_dir.join("checkpoint.json");
     let checkpoint = Checkpoint::load(&cp_path)
         .map_err(|e| FabroError::Precondition(format!("no checkpoint to resume from: {e}")))?;
@@ -220,6 +237,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use async_trait::async_trait;
+    use chrono::Utc;
     use fabro_agent::{DirEntry, ExecResult, GrepOptions, LocalSandbox, Sandbox};
     use fabro_config::config::FabroConfig;
     use fabro_graphviz::graph::{Graph, Node};
@@ -662,6 +680,73 @@ mod tests {
             Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
+
+        let result = resume(
+            &run_dir,
+            test_start_options(
+                &run_dir,
+                sandbox,
+                emitter,
+                registry,
+                LifecycleOptions {
+                    setup_commands: vec![],
+                    setup_command_timeout_ms: 1_000,
+                    devcontainer_phases: vec![],
+                },
+                false,
+            ),
+        )
+        .await;
+
+        assert!(
+            matches!(&result, Err(crate::error::FabroError::Precondition(_))),
+            "expected Precondition error, got: {result:?}",
+            result = result.as_ref().map(|_| "Ok"),
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_errors_when_run_already_finished_successfully() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        let emitter = Arc::new(EventEmitter::new());
+        let registry = Arc::new(test_registry());
+        let sandbox: Arc<dyn Sandbox> =
+            Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
+
+        persisted_workflow(MINIMAL_DOT, &run_dir);
+
+        let checkpoint = Checkpoint::from_context(
+            &Context::new(),
+            "start",
+            vec!["start".to_string()],
+            HashMap::new(),
+            HashMap::new(),
+            Some("exit".to_string()),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        );
+        checkpoint.save(&run_dir.join("checkpoint.json")).unwrap();
+
+        crate::records::Conclusion {
+            timestamp: Utc::now(),
+            status: StageStatus::Success,
+            duration_ms: 1,
+            failure_reason: None,
+            final_git_commit_sha: None,
+            stages: vec![],
+            total_cost: None,
+            total_retries: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_write_tokens: 0,
+            total_reasoning_tokens: 0,
+            has_pricing: false,
+        }
+        .save(&run_dir.join("conclusion.json"))
+        .unwrap();
 
         let result = resume(
             &run_dir,

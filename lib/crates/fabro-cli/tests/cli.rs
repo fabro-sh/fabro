@@ -944,6 +944,91 @@ digraph G {
     );
 }
 
+#[test]
+fn bug4_run_engine_resume_rejects_completed_run_without_mutating_it() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let workflow_path = project.path().join("workflow.fabro");
+    std::fs::write(
+        &workflow_path,
+        "\
+digraph Test {
+  start [shape=Mdiamond, label=\"Start\"]
+  exit  [shape=Msquare, label=\"Exit\"]
+  start -> exit
+}
+",
+    )
+    .unwrap();
+
+    let run = arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args([
+            "run",
+            "--dry-run",
+            "--auto-approve",
+            "--no-retro",
+            "--detach",
+            workflow_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    let run_id = String::from_utf8(run.get_output().stdout.clone())
+        .unwrap()
+        .trim()
+        .to_string();
+
+    arc()
+        .env("HOME", home.path())
+        .args(["wait", &run_id])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+
+    let inspect_before = arc()
+        .env("HOME", home.path())
+        .args(["inspect", &run_id])
+        .assert()
+        .success();
+    let before: serde_json::Value =
+        serde_json::from_slice(&inspect_before.get_output().stdout).unwrap();
+    let run_dir = before[0]["run_dir"].as_str().unwrap().to_string();
+    let start_time_before = before[0]["start_record"]["start_time"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let conclusion_ts_before = before[0]["conclusion"]["timestamp"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    arc()
+        .env("HOME", home.path())
+        .args(["_run_engine", "--run-dir", &run_dir, "--resume"])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("nothing to resume"));
+
+    let inspect_after = arc()
+        .env("HOME", home.path())
+        .args(["inspect", &run_id])
+        .assert()
+        .success();
+    let after: serde_json::Value =
+        serde_json::from_slice(&inspect_after.get_output().stdout).unwrap();
+
+    assert_eq!(
+        after[0]["start_record"]["start_time"].as_str().unwrap(),
+        start_time_before
+    );
+    assert_eq!(
+        after[0]["conclusion"]["timestamp"].as_str().unwrap(),
+        conclusion_ts_before
+    );
+}
+
 // Bug 3: attach loop must delete interview_request.json after handling it
 // to prevent re-prompting the user on the next poll iteration.
 #[test]
