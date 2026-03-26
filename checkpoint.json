@@ -1,32 +1,51 @@
 {
-  "timestamp": "2026-03-26T14:31:30.629246Z",
-  "current_node": "run_tests",
+  "timestamp": "2026-03-26T14:31:31.196086Z",
+  "current_node": "report",
   "completed_nodes": [
     "start",
-    "run_tests"
+    "run_tests",
+    "report"
   ],
   "node_retries": {},
   "context_values": {
     "internal.retry_count.start": 0,
     "internal.fidelity": "compact",
-    "current.preamble": "Goal: Run tests and report results\n",
+    "current.preamble": "Goal: Run tests and report results\n\n## Completed stages\n- **run_tests**: success\n",
     "outcome": "success",
-    "current_node": "run_tests",
+    "thread.run_tests.current_node": "report",
+    "current_node": "report",
     "graph.rankdir": "LR",
-    "internal.thread_id": "start",
+    "internal.thread_id": "run_tests",
     "failure_signature": "",
+    "internal.retry_count.report": 0,
     "failure_class": "",
     "internal.node_visit_count": 1,
-    "last_stage": "run_tests",
+    "last_stage": "report",
     "internal.work_dir": "/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmp4DnLgQ/run/worktree",
     "internal.run_id": "01KMN8XECCNS93RVRW87BDM60W",
     "internal.retry_count.run_tests": 0,
-    "last_response": "[Simulated] Response for stage: run_tests",
+    "last_response": "[Simulated] Response for stage: report",
     "response.run_tests": "[Simulated] Response for stage: run_tests",
     "thread.start.current_node": "run_tests",
-    "graph.goal": "Run tests and report results"
+    "graph.goal": "Run tests and report results",
+    "response.report": "[Simulated] Response for stage: report"
   },
   "node_outcomes": {
+    "report": {
+      "status": "success",
+      "context_updates": {
+        "last_response": "[Simulated] Response for stage: report",
+        "response.report": "[Simulated] Response for stage: report",
+        "last_stage": "report"
+      },
+      "notes": "[Simulated] report",
+      "usage": null
+    },
+    "start": {
+      "status": "success",
+      "notes": "[Simulated] start",
+      "usage": null
+    },
     "run_tests": {
       "status": "success",
       "context_updates": {
@@ -36,15 +55,11 @@
       },
       "notes": "[Simulated] run_tests",
       "usage": null
-    },
-    "start": {
-      "status": "success",
-      "notes": "[Simulated] start",
-      "usage": null
     }
   },
-  "next_node_id": "report",
+  "next_node_id": "exit",
   "node_visits": {
+    "report": 1,
     "start": 1,
     "run_tests": 1
   }
