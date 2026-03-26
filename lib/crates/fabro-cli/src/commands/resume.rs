@@ -14,11 +14,12 @@ use fabro_util::terminal::Styles;
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel};
 use fabro_workflows::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::operations::{
-    create_from_graph, start, StartFinalizeConfig, StartOptions, StartRetroConfig,
+    create_from_graph, start, RunCreateSettings, StartFinalizeConfig, StartOptions,
+    StartRetroConfig,
 };
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::pipeline::{
-    build_conclusion, classify_engine_result, persist_terminal_outcome, PersistOptions, Persisted,
+    build_conclusion, classify_engine_result, persist_terminal_outcome, Persisted,
 };
 use fabro_workflows::records::Checkpoint;
 use fabro_workflows::records::RunRecord;
@@ -26,12 +27,13 @@ use fabro_workflows::run_settings::{GitCheckpointSettings, LifecycleConfig, RunS
 
 use super::detached_support::{DetachedRunBootstrapGuard, DetachedRunCompletionGuard};
 use super::run::{
-    build_event_envelope, cached_graph_path, default_run_dir, emit_run_notice,
-    local_sandbox_with_callback, mint_github_token, prepare_workflow_with_project_config,
-    print_assets, print_final_output, print_retro_result, print_run_conclusion,
+    apply_execution_overrides, build_event_envelope, cached_graph_path, default_run_dir,
+    emit_run_notice, load_workflow_source_input, local_sandbox_with_callback, mint_github_token,
+    parse_labels, print_assets, print_diagnostics_from_error, print_final_output,
+    print_retro_result, print_run_conclusion, print_workflow_report_from_persisted,
     resolve_daytona_config, resolve_fallback_chain, resolve_model_provider,
-    resolve_ssh_clone_params, resolve_ssh_config, write_run_config_snapshot, CliSandboxProvider,
-    RunArgs,
+    resolve_sandbox_provider, resolve_ssh_clone_params, resolve_ssh_config,
+    write_run_config_snapshot, CliSandboxProvider, ExecutionOverrides, RunArgs,
 };
 use fabro_config::project as project_config;
 use fabro_config::run as run_config;
@@ -197,76 +199,76 @@ async fn prepare_from_checkpoint(
         .ok_or_else(|| anyhow::anyhow!("--workflow is required when using --checkpoint"))?;
 
     let checkpoint = Checkpoint::load(checkpoint_path)?;
-    let prepared = prepare_workflow_with_project_config(
+    let source_input = load_workflow_source_input(
         &resume_as_run_args(args, workflow_path.clone()),
         run_defaults.clone(),
-        styles,
-        true,
         false,
     )?;
-    let source = prepared.raw_source.clone();
-    let validated = prepared.validated;
-    let graph = validated.graph().clone();
-    let run_cfg = prepared.run_cfg;
-    let sandbox_provider = prepared.sandbox_provider;
-    let workflow_slug = prepared.workflow_slug;
-    let prepared_model = prepared.model;
-    let prepared_provider = prepared.provider;
-    let prepared_run_defaults = prepared.run_defaults;
-    let workflow_toml_path = prepared.workflow_toml_path;
-
-    eprintln!(
-        "{} {} from checkpoint {}",
-        styles.bold.apply_to("Resuming workflow:"),
-        graph.name,
-        styles.dim.apply_to(checkpoint_path.display()),
-    );
 
     let run_id = ulid::Ulid::new().to_string();
     let run_dir = args
         .run_dir
         .clone()
         .unwrap_or_else(|| default_run_dir(&run_id, args.dry_run));
-    let labels = args
-        .label
-        .iter()
-        .filter_map(|s| s.split_once('='))
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
     let working_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let cli_flags = super::create::CliFlags {
-        dry_run: args.dry_run,
-        auto_approve: args.auto_approve,
-        no_retro: args.no_retro,
-        verbose: args.verbose,
-        preserve_sandbox: args.preserve_sandbox,
+    let sandbox_provider = if args.dry_run {
+        SandboxProvider::Local
+    } else {
+        resolve_sandbox_provider(
+            args.sandbox.map(Into::into),
+            Some(&source_input.config),
+            run_defaults,
+        )?
     };
-    let normalized = super::create::normalize_config(
-        run_cfg.as_ref(),
-        &prepared_run_defaults,
-        &prepared_model,
-        prepared_provider.as_deref(),
-        sandbox_provider,
-        &graph,
-        cli_flags,
-    );
-    let persisted = fabro_workflows::pipeline::persist(
-        validated,
-        PersistOptions {
-            run_dir: run_dir.clone(),
-            run_record: fabro_workflows::records::RunRecord {
-                run_id: run_id.clone(),
-                created_at: chrono::Utc::now(),
-                config: normalized,
-                graph: graph.clone(),
-                workflow_slug: workflow_slug.clone(),
-                working_directory: working_directory.clone(),
-                host_repo_path: Some(working_directory.to_string_lossy().to_string()),
-                base_branch: None,
-                labels,
-            },
+    let mut config = source_input.config.clone();
+    apply_execution_overrides(
+        &mut config,
+        &ExecutionOverrides {
+            dry_run: args.dry_run,
+            auto_approve: args.auto_approve,
+            no_retro: args.no_retro,
+            verbose: args.verbose,
+            preserve_sandbox: args.preserve_sandbox,
+            model: args.model.as_deref(),
+            provider: args.provider.as_deref(),
+            sandbox_provider,
         },
-    )?;
+    );
+    let persisted = match fabro_workflows::operations::create(
+        &source_input.raw_source,
+        RunCreateSettings {
+            config,
+            run_dir: Some(run_dir.clone()),
+            run_id: Some(run_id.clone()),
+            workflow_slug: source_input.workflow_slug.clone(),
+            labels: parse_labels(&args.label),
+            base_branch: None,
+            working_directory: Some(working_directory.clone()),
+            host_repo_path: Some(working_directory.to_string_lossy().to_string()),
+            goal_override: source_input.goal_override.clone(),
+            base_dir: Some(
+                source_input
+                    .dot_path
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .to_path_buf(),
+            ),
+        },
+    ) {
+        Ok(persisted) => persisted,
+        Err(fabro_workflows::error::FabroError::ValidationFailed { diagnostics }) => {
+            print_diagnostics_from_error(&diagnostics, styles);
+            bail!("Validation failed");
+        }
+        Err(err) => return Err(err.into()),
+    };
+    print_workflow_report_from_persisted(&persisted, &source_input.dot_path, styles);
+    eprintln!(
+        "{} {} from checkpoint {}",
+        styles.bold.apply_to("Resuming workflow:"),
+        persisted.graph().name,
+        styles.dim.apply_to(checkpoint_path.display()),
+    );
     let run_cfg: Option<FabroConfig> = Some(persisted.run_record().config.clone());
     let settings_config = persisted.run_record().config.clone();
 
@@ -274,8 +276,8 @@ async fn prepare_from_checkpoint(
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
     let status_guard = DetachedRunBootstrapGuard::arm(&run_dir)?;
-    tokio::fs::write(cached_graph_path(&run_dir), &source).await?;
-    write_run_config_snapshot(&run_dir, workflow_toml_path.as_deref()).await?;
+    tokio::fs::write(cached_graph_path(&run_dir), &source_input.raw_source).await?;
+    write_run_config_snapshot(&run_dir, source_input.workflow_toml_path.as_deref()).await?;
 
     let original_cwd = std::env::current_dir()?;
     let emitter = Arc::new(EventEmitter::new());
@@ -572,65 +574,68 @@ async fn prepare_from_branch(
     };
     tokio::fs::create_dir_all(&run_dir).await?;
     let run_dir = tokio::fs::canonicalize(&run_dir).await.unwrap_or(run_dir);
-    let cli_flags = super::create::CliFlags {
-        dry_run: args.dry_run,
-        auto_approve: args.auto_approve,
-        no_retro: args.no_retro,
-        verbose: args.verbose,
-        preserve_sandbox: args.preserve_sandbox,
-    };
 
     let (persisted, _run_cfg, mut sandbox_provider, graph_source) =
         if let Some(ref workflow_path) = args.workflow {
-            let prepared = prepare_workflow_with_project_config(
+            let source_input = load_workflow_source_input(
                 &resume_as_run_args(args, workflow_path.clone()),
                 run_defaults.clone(),
-                styles,
-                true,
                 false,
             )?;
-            let graph = prepared.validated.graph().clone();
-            let (model_str, provider_str) = resolve_model_provider(
-                args.model.as_deref(),
-                args.provider.as_deref(),
-                prepared.run_cfg.as_ref(),
-                run_defaults,
-                &graph,
-            );
-            let normalized = super::create::normalize_config(
-                prepared.run_cfg.as_ref(),
-                run_defaults,
-                &model_str,
-                provider_str.as_deref(),
-                prepared.sandbox_provider,
-                &graph,
-                cli_flags,
-            );
-            let persisted = fabro_workflows::pipeline::persist(
-                prepared.validated,
-                PersistOptions {
-                    run_dir: run_dir.clone(),
-                    run_record: fabro_workflows::records::RunRecord {
-                        run_id: run_id.clone(),
-                        created_at: chrono::Utc::now(),
-                        config: normalized,
-                        graph,
-                        workflow_slug: prepared.workflow_slug,
-                        working_directory: resume_repo_path.clone(),
-                        host_repo_path: Some(resume_repo_path.to_string_lossy().to_string()),
-                        base_branch: detected_base_branch.clone(),
-                        labels: args
-                            .label
-                            .iter()
-                            .filter_map(|s| s.split_once('='))
-                            .map(|(k, v)| (k.to_string(), v.to_string()))
-                            .collect(),
-                    },
+            let sandbox_provider = if args.dry_run {
+                SandboxProvider::Local
+            } else {
+                resolve_sandbox_provider(
+                    args.sandbox.map(Into::into),
+                    Some(&source_input.config),
+                    run_defaults,
+                )?
+            };
+            let mut config = source_input.config.clone();
+            apply_execution_overrides(
+                &mut config,
+                &ExecutionOverrides {
+                    dry_run: args.dry_run,
+                    auto_approve: args.auto_approve,
+                    no_retro: args.no_retro,
+                    verbose: args.verbose,
+                    preserve_sandbox: args.preserve_sandbox,
+                    model: args.model.as_deref(),
+                    provider: args.provider.as_deref(),
+                    sandbox_provider,
                 },
-            )?;
-            let graph_source = persisted.source().to_string();
+            );
+            let persisted = match fabro_workflows::operations::create(
+                &source_input.raw_source,
+                RunCreateSettings {
+                    config,
+                    run_dir: Some(run_dir.clone()),
+                    run_id: Some(run_id.clone()),
+                    workflow_slug: source_input.workflow_slug.clone(),
+                    labels: parse_labels(&args.label),
+                    base_branch: detected_base_branch.clone(),
+                    working_directory: Some(resume_repo_path.clone()),
+                    host_repo_path: Some(resume_repo_path.to_string_lossy().to_string()),
+                    goal_override: source_input.goal_override.clone(),
+                    base_dir: Some(
+                        source_input
+                            .dot_path
+                            .parent()
+                            .unwrap_or(std::path::Path::new("."))
+                            .to_path_buf(),
+                    ),
+                },
+            ) {
+                Ok(persisted) => persisted,
+                Err(fabro_workflows::error::FabroError::ValidationFailed { diagnostics }) => {
+                    print_diagnostics_from_error(&diagnostics, styles);
+                    bail!("Validation failed");
+                }
+                Err(err) => return Err(err.into()),
+            };
+            print_workflow_report_from_persisted(&persisted, &source_input.dot_path, styles);
+            let graph_source = source_input.raw_source;
             let run_cfg = Some(persisted.run_record().config.clone());
-            let sandbox_provider = prepared.sandbox_provider;
             (persisted, run_cfg, sandbox_provider, graph_source)
         } else if let Ok(loaded) = Persisted::load(&run_dir) {
             let sandbox_provider = if args.dry_run {
@@ -662,45 +667,33 @@ async fn prepare_from_branch(
                     .unwrap_or_default();
                 args.sandbox.map(Into::into).unwrap_or(sp)
             };
-            let validated = create_from_graph(rec.graph.clone(), String::new());
-            let graph = validated.graph().clone();
-            let run_cfg = Some(rec.config.clone());
-            let (model_str, provider_str) = resolve_model_provider(
-                args.model.as_deref(),
-                args.provider.as_deref(),
-                run_cfg.as_ref(),
-                run_defaults,
-                &graph,
+            let mut config = rec.config.clone();
+            apply_execution_overrides(
+                &mut config,
+                &ExecutionOverrides {
+                    dry_run: args.dry_run,
+                    auto_approve: args.auto_approve,
+                    no_retro: args.no_retro,
+                    verbose: args.verbose,
+                    preserve_sandbox: args.preserve_sandbox,
+                    model: args.model.as_deref(),
+                    provider: args.provider.as_deref(),
+                    sandbox_provider,
+                },
             );
-            let normalized = super::create::normalize_config(
-                run_cfg.as_ref(),
-                run_defaults,
-                &model_str,
-                provider_str.as_deref(),
-                sandbox_provider,
-                &graph,
-                cli_flags,
-            );
-            let persisted = fabro_workflows::pipeline::persist(
-                validated,
-                PersistOptions {
-                    run_dir: run_dir.clone(),
-                    run_record: fabro_workflows::records::RunRecord {
-                        run_id: run_id.clone(),
-                        created_at: chrono::Utc::now(),
-                        config: normalized,
-                        graph,
-                        workflow_slug: rec.workflow_slug.clone(),
-                        working_directory: resume_repo_path.clone(),
-                        host_repo_path: Some(resume_repo_path.to_string_lossy().to_string()),
-                        base_branch: detected_base_branch.clone(),
-                        labels: args
-                            .label
-                            .iter()
-                            .filter_map(|s| s.split_once('='))
-                            .map(|(k, v)| (k.to_string(), v.to_string()))
-                            .collect(),
-                    },
+            let persisted = create_from_graph(
+                rec.graph.clone(),
+                RunCreateSettings {
+                    config,
+                    run_dir: Some(run_dir.clone()),
+                    run_id: Some(run_id.clone()),
+                    workflow_slug: rec.workflow_slug.clone(),
+                    labels: parse_labels(&args.label),
+                    base_branch: detected_base_branch.clone(),
+                    working_directory: Some(resume_repo_path.clone()),
+                    host_repo_path: Some(resume_repo_path.to_string_lossy().to_string()),
+                    goal_override: None,
+                    base_dir: None,
                 },
             )?;
             let graph_source = persisted.source().to_string();
