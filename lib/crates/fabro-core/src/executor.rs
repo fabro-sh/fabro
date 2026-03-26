@@ -25,7 +25,7 @@ pub struct ExecutorOptions {
 pub struct Executor<G: Graph> {
     handler: Arc<dyn NodeHandler<G>>,
     lifecycle: Box<dyn RunLifecycle<G>>,
-    settings: ExecutorOptions,
+    options: ExecutorOptions,
 }
 
 enum NextStep {
@@ -38,7 +38,7 @@ enum NextStep {
 pub struct ExecutorBuilder<G: Graph> {
     handler: Arc<dyn NodeHandler<G>>,
     lifecycle: Option<Box<dyn RunLifecycle<G>>>,
-    settings: ExecutorOptions,
+    options: ExecutorOptions,
 }
 
 impl<G: Graph + 'static> ExecutorBuilder<G> {
@@ -46,7 +46,7 @@ impl<G: Graph + 'static> ExecutorBuilder<G> {
         Self {
             handler,
             lifecycle: None,
-            settings: ExecutorOptions::default(),
+            options: ExecutorOptions::default(),
         }
     }
 
@@ -56,17 +56,17 @@ impl<G: Graph + 'static> ExecutorBuilder<G> {
     }
 
     pub fn cancel_token(mut self, token: Arc<AtomicBool>) -> Self {
-        self.settings.cancel_token = Some(token);
+        self.options.cancel_token = Some(token);
         self
     }
 
     pub fn stall_token(mut self, token: CancellationToken) -> Self {
-        self.settings.stall_token = Some(token);
+        self.options.stall_token = Some(token);
         self
     }
 
     pub fn max_node_visits(mut self, limit: usize) -> Self {
-        self.settings.max_node_visits = Some(limit);
+        self.options.max_node_visits = Some(limit);
         self
     }
 
@@ -74,7 +74,7 @@ impl<G: Graph + 'static> ExecutorBuilder<G> {
         Executor {
             handler: self.handler,
             lifecycle: self.lifecycle.unwrap_or_else(|| Box::new(NoopLifecycle)),
-            settings: self.settings,
+            options: self.options,
         }
     }
 }
@@ -89,7 +89,7 @@ impl<G: Graph + 'static> Executor<G> {
 
         loop {
             // Check cancellation
-            if let Some(ref token) = self.settings.cancel_token {
+            if let Some(ref token) = self.options.cancel_token {
                 if token.load(Ordering::Relaxed) {
                     state.cancelled = true;
                     let outcome = Outcome::fail("run cancelled");
@@ -151,7 +151,7 @@ impl<G: Graph + 'static> Executor<G> {
                     });
                 }
             }
-            if let Some(global_max) = self.settings.max_node_visits {
+            if let Some(global_max) = self.options.max_node_visits {
                 if visits >= global_max {
                     return Err(CoreError::VisitLimitExceeded {
                         node_id: node.id().to_string(),
@@ -176,7 +176,7 @@ impl<G: Graph + 'static> Executor<G> {
                 }
                 NodeDecision::Continue => {
                     // Execute with retry, racing against stall token
-                    let mut result = if let Some(ref stall) = self.settings.stall_token {
+                    let mut result = if let Some(ref stall) = self.options.stall_token {
                         tokio::select! {
                             r = self.execute_with_retry(&node, &state, graph) => r?,
                             () = stall.cancelled() => {

@@ -79,7 +79,7 @@ impl WorkflowLifecycle {
         sandbox: Arc<dyn Sandbox>,
         graph: Arc<fabro_graphviz::graph::types::Graph>,
         run_dir: PathBuf,
-        config: Arc<RunOptions>,
+        run_options: Arc<RunOptions>,
         is_resume: bool,
     ) -> Self {
         let restarted_from: Arc<Mutex<Option<(String, String)>>> = Arc::new(Mutex::new(None));
@@ -91,7 +91,7 @@ impl WorkflowLifecycle {
 
         let circuit_breaker = Arc::new(CircuitBreakerLifecycle::new(loop_restart_signature_limit));
 
-        let has_run_branch = config
+        let has_run_branch = run_options
             .git
             .as_ref()
             .and_then(|g| g.run_branch.as_ref())
@@ -106,11 +106,11 @@ impl WorkflowLifecycle {
         let event = EventLifecycle {
             emitter: Arc::clone(&emitter),
             graph_name: graph.name.clone(),
-            run_id: config.run_id.clone(),
+            run_id: run_options.run_id.clone(),
             run_start: Mutex::new(Instant::now()),
             restarted_from: Arc::clone(&restarted_from),
-            base_sha: config.git.as_ref().and_then(|g| g.base_sha.clone()),
-            run_branch: config.git.as_ref().and_then(|g| g.run_branch.clone()),
+            base_sha: run_options.git.as_ref().and_then(|g| g.base_sha.clone()),
+            run_branch: run_options.git.as_ref().and_then(|g| g.run_branch.clone()),
             worktree_dir: working_directory.clone(),
             goal: (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
             artifact_store: Arc::clone(&artifact_store),
@@ -122,7 +122,7 @@ impl WorkflowLifecycle {
             hook_runner,
             sandbox: Arc::clone(&sandbox),
             hook_work_dir: working_directory.clone().map(PathBuf::from),
-            run_id: config.run_id.clone(),
+            run_id: run_options.run_id.clone(),
             graph_name: graph.name.clone(),
         };
 
@@ -130,9 +130,9 @@ impl WorkflowLifecycle {
 
         let disk = DiskLifecycle {
             run_dir: run_dir.clone(),
-            run_id: config.run_id.clone(),
+            run_id: run_options.run_id.clone(),
             graph: Arc::clone(&graph),
-            config: Arc::clone(&config),
+            run_options: Arc::clone(&run_options),
             emitter: Arc::clone(&emitter),
             circuit_breaker: Arc::clone(&circuit_breaker),
             checkpoint_enabled: true,
@@ -145,8 +145,8 @@ impl WorkflowLifecycle {
             artifact_store: Arc::clone(&artifact_store),
             emitter: Arc::clone(&emitter),
             run_dir: run_dir.clone(),
-            run_id: config.run_id.clone(),
-            config: Arc::clone(&config),
+            run_id: run_options.run_id.clone(),
+            run_options: Arc::clone(&run_options),
             start_node_id,
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
             last_git_sha: Arc::clone(&last_git_sha),
@@ -158,7 +158,7 @@ impl WorkflowLifecycle {
             Some(run_dir.clone()),
             Arc::clone(&emitter),
             run_dir,
-            config.asset_globs().to_vec(),
+            run_options.asset_globs().to_vec(),
         );
 
         Self {
@@ -174,7 +174,7 @@ impl WorkflowLifecycle {
             checkpoint_git_result,
             is_initial_resume: AtomicBool::new(is_resume),
             graph,
-            run_id: config.run_id.clone(),
+            run_id: run_options.run_id.clone(),
             working_directory,
         }
     }

@@ -116,7 +116,7 @@ pub async fn retro(executed: Executed, options: &RetroOptions) -> Retroed {
     let Executed {
         graph,
         outcome,
-        settings,
+        run_options,
         hook_runner,
         emitter,
         sandbox,
@@ -133,7 +133,7 @@ pub async fn retro(executed: Executed, options: &RetroOptions) -> Retroed {
     Retroed {
         graph,
         outcome,
-        settings,
+        run_options,
         hook_runner,
         emitter,
         sandbox,
@@ -176,7 +176,7 @@ mod tests {
         checkpoint.save(&run_dir.join("checkpoint.json")).unwrap();
     }
 
-    fn test_settings(run_dir: &std::path::Path) -> RunOptions {
+    fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
             config: FabroConfig::default(),
             run_dir: run_dir.to_path_buf(),
@@ -207,7 +207,7 @@ mod tests {
         let executed = Executed {
             graph: Graph::new("test"),
             outcome: Ok(crate::outcome::Outcome::success()),
-            settings: test_settings(&run_dir),
+            run_options: test_run_options(&run_dir),
             hook_runner: None,
             emitter: Arc::clone(&emitter),
             sandbox: Arc::clone(&sandbox),

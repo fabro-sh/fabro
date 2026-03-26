@@ -482,7 +482,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
         conclusion,
         pushed_branch,
         graph,
-        settings,
+        run_options,
         emitter,
     } = concluded;
 
@@ -499,7 +499,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                     .await
                     .unwrap_or_default();
                 if let (Some(base_branch), Some(run_branch), Some(creds), Some(origin)) = (
-                    &settings.base_branch,
+                    &run_options.base_branch,
                     pushed_branch.as_deref(),
                     &options.github_app,
                     &options.origin_url,

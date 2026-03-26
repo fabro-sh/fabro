@@ -208,7 +208,7 @@ pub struct InitOptions {
 pub struct Initialized {
     pub graph: Graph,
     pub source: String,
-    pub settings: RunOptions,
+    pub run_options: RunOptions,
     pub(crate) checkpoint: Option<Checkpoint>,
     pub(crate) seed_context: Option<Context>,
     pub emitter: Arc<EventEmitter>,
@@ -224,7 +224,7 @@ pub struct Initialized {
 pub struct Executed {
     pub graph: Graph,
     pub outcome: Result<Outcome, FabroError>,
-    pub settings: RunOptions,
+    pub run_options: RunOptions,
     pub hook_runner: Option<Arc<HookRunner>>,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
@@ -237,7 +237,7 @@ pub struct Executed {
 pub struct Retroed {
     pub graph: Graph,
     pub outcome: Result<Outcome, FabroError>,
-    pub settings: RunOptions,
+    pub run_options: RunOptions,
     pub hook_runner: Option<Arc<HookRunner>>,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
@@ -253,7 +253,7 @@ pub struct Concluded {
     pub conclusion: Conclusion,
     pub pushed_branch: Option<String>,
     pub graph: Graph,
-    pub settings: RunOptions,
+    pub run_options: RunOptions,
     pub emitter: Arc<EventEmitter>,
 }
 

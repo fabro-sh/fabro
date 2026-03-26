@@ -23,14 +23,14 @@ fn initialized(
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &fabro_graphviz::graph::Graph,
-    settings: &RunOptions,
+    run_options: &RunOptions,
     options: InitializedOptions,
 ) -> Initialized {
-    std::fs::create_dir_all(&settings.run_dir).expect("failed to create run dir");
+    std::fs::create_dir_all(&run_options.run_dir).expect("failed to create run dir");
     Initialized {
         graph: graph.clone(),
         source: String::new(),
-        settings: settings.clone(),
+        run_options: run_options.clone(),
         checkpoint: options.checkpoint,
         seed_context: None,
         emitter,
@@ -38,7 +38,7 @@ fn initialized(
         registry: Arc::new(registry),
         hook_runner: options.hook_runner,
         env: options.env,
-        dry_run: settings.dry_run,
+        dry_run: run_options.dry_run,
     }
 }
 
@@ -47,14 +47,14 @@ pub async fn run_graph(
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &fabro_graphviz::graph::Graph,
-    settings: &RunOptions,
+    run_options: &RunOptions,
 ) -> Result<Outcome> {
     let executed = pipeline::execute(initialized(
         registry,
         emitter,
         sandbox,
         graph,
-        settings,
+        run_options,
         InitializedOptions {
             hook_runner: None,
             env: HashMap::new(),
@@ -70,7 +70,7 @@ pub async fn run_graph_with_hooks(
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &fabro_graphviz::graph::Graph,
-    settings: &RunOptions,
+    run_options: &RunOptions,
     hook_runner: Arc<fabro_hooks::HookRunner>,
     env: Option<HashMap<String, String>>,
 ) -> Result<Outcome> {
@@ -79,7 +79,7 @@ pub async fn run_graph_with_hooks(
         emitter,
         sandbox,
         graph,
-        settings,
+        run_options,
         InitializedOptions {
             hook_runner: Some(hook_runner),
             env: env.unwrap_or_default(),
@@ -95,7 +95,7 @@ pub async fn run_graph_from_checkpoint(
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &fabro_graphviz::graph::Graph,
-    settings: &RunOptions,
+    run_options: &RunOptions,
     checkpoint: &Checkpoint,
 ) -> Result<Outcome> {
     let executed = pipeline::execute(initialized(
@@ -103,7 +103,7 @@ pub async fn run_graph_from_checkpoint(
         emitter,
         sandbox,
         graph,
-        settings,
+        run_options,
         InitializedOptions {
             hook_runner: None,
             env: HashMap::new(),
@@ -137,7 +137,7 @@ impl WorkflowRunner {
     pub async fn run(
         &self,
         graph: &fabro_graphviz::graph::Graph,
-        settings: &RunOptions,
+        run_options: &RunOptions,
     ) -> Result<Outcome> {
         let registry = self
             .registry
@@ -150,7 +150,7 @@ impl WorkflowRunner {
             Arc::clone(&self.emitter),
             Arc::clone(&self.sandbox),
             graph,
-            settings,
+            run_options,
         )
         .await
     }
@@ -158,7 +158,7 @@ impl WorkflowRunner {
     pub async fn run_from_checkpoint(
         &self,
         graph: &fabro_graphviz::graph::Graph,
-        settings: &RunOptions,
+        run_options: &RunOptions,
         checkpoint: &Checkpoint,
     ) -> Result<Outcome> {
         let registry = self
@@ -172,7 +172,7 @@ impl WorkflowRunner {
             Arc::clone(&self.emitter),
             Arc::clone(&self.sandbox),
             graph,
-            settings,
+            run_options,
             checkpoint,
         )
         .await
