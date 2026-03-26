@@ -233,6 +233,9 @@ pub enum FabroError {
     #[error("I/O error: {0}")]
     Io(String),
 
+    #[error("Precondition failed: {0}")]
+    Precondition(String),
+
     #[error("Pipeline cancelled")]
     Cancelled,
 }
@@ -274,6 +277,7 @@ impl FabroError {
             | Self::ValidationFailed { .. }
             | Self::Stylesheet(_)
             | Self::Checkpoint(_)
+            | Self::Precondition(_)
             | Self::Cancelled => false,
         }
     }
@@ -290,6 +294,7 @@ impl FabroError {
             | Self::ValidationFailed { .. }
             | Self::Stylesheet(_)
             | Self::Checkpoint(_) => FailureCategory::Deterministic,
+            Self::Precondition(_) => FailureCategory::Structural,
             Self::Handler { failure_class, .. } | Self::Engine { failure_class, .. } => {
                 *failure_class
             }

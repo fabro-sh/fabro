@@ -90,35 +90,22 @@ For Daytona sandboxes, the worktree is created inside the remote sandbox instead
 
 ## Resuming a run
 
-There are two ways to resume an interrupted run:
-
-### From a checkpoint file
-
-Resume from a `checkpoint.json` saved in the run directory:
-
-```bash
-fabro resume --checkpoint path/to/logs/checkpoint.json --workflow workflow.fabro
-```
-
-Fabro loads the checkpoint, restores the context and execution state, and continues from the next node after the checkpoint.
-
-### From a run branch
-
-Resume from the Git branches created during a previous run:
+Resume an interrupted run from its checkpoint on disk:
 
 ```bash
 fabro resume 01JKXYZ
 ```
 
-This reads the checkpoint, run record, and Graphviz graph from the metadata branch (`fabro/meta/01JKXYZ...`), re-attaches a worktree to the existing run branch, and resumes execution. No workflow file argument is needed — everything is recovered from Git.
+Fabro looks up the run directory by ID prefix, loads `checkpoint.json` and `run.json` from the run directory, and spawns a new engine process to continue execution. No workflow file or override flags are needed — all configuration is read from the persisted run state.
 
 <Accordion title="What happens during resume">
-1. Fabro reads `checkpoint.json` from the metadata branch
-2. Reads `run.json` to reconstruct the workflow graph and config
-3. Creates a fresh worktree attached to the existing run branch
-4. Restores the full context, completed node list, retry counts, and failure signatures
-5. If the checkpointed node used `full` fidelity, downgrades the first resumed node to `summary:high` (since the original conversation thread no longer exists in memory)
-6. Continues execution from `next_node_id`
+1. Fabro looks up the run directory by ID prefix
+2. Validates that `checkpoint.json` exists and no engine process is already running
+3. Cleans stale artifacts from the previous execution (conclusion, PID file, etc.)
+4. Resets status to `Submitted` and spawns a new engine subprocess with `--resume`
+5. The engine loads `run.json` and `checkpoint.json`, restores the full context, completed node list, retry counts, and failure signatures
+6. If the checkpointed node used `full` fidelity, downgrades the first resumed node to `summary:high` (since the original conversation thread no longer exists in memory)
+7. Continues execution from `next_node_id`
 </Accordion>
 
 ## The checkpoint cycle

@@ -22,7 +22,8 @@ use fabro_workflows::git::GitSyncStatus;
 use fabro_workflows::handler::default_registry;
 use fabro_workflows::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::operations::{
-    start, StartFinalizeOptions, StartOptions, StartPullRequestConfig, StartRetroOptions,
+    resume as operations_resume, start, StartFinalizeOptions, StartOptions, StartPullRequestConfig,
+    StartRetroOptions,
 };
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::outcome::{compute_stage_cost, format_cost};
@@ -30,7 +31,7 @@ use fabro_workflows::pipeline::{
     build_conclusion, classify_engine_result, persist_terminal_outcome, Persisted, Validated,
 };
 use fabro_workflows::records::Checkpoint;
-use fabro_workflows::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
+use fabro_workflows::run_options::{GitCheckpointOptions, LifecycleOptions};
 use indicatif::HumanDuration;
 use std::time::Duration;
 use tracing::debug;
@@ -755,7 +756,82 @@ pub async fn run_from_record(
         run_id: Some(record.run_id.clone()),
     };
 
-    run_command_impl(args, styles, github_app, git_author, Some(record_run)).await
+    run_command_impl(
+        args,
+        styles,
+        github_app,
+        git_author,
+        Some(record_run),
+        false,
+    )
+    .await
+}
+
+/// Resume an existing workflow run from its persisted checkpoint.
+pub async fn resume_from_record(
+    persisted: Persisted,
+    run_dir: PathBuf,
+    run_defaults: FabroConfig,
+    styles: &'static Styles,
+    github_app: Option<fabro_github::GitHubAppCredentials>,
+    git_author: fabro_workflows::git::GitAuthor,
+) -> anyhow::Result<()> {
+    let record = persisted.run_record().clone();
+    let record_run = RecordBasedRun {
+        workflow: WorkflowState::Persisted(Box::new(persisted)),
+        run_defaults,
+    };
+
+    let sandbox_provider = record
+        .config
+        .sandbox
+        .as_ref()
+        .and_then(|s| s.provider.as_deref())
+        .unwrap_or("local")
+        .parse()
+        .unwrap_or(SandboxProvider::Local);
+    let model = record
+        .config
+        .llm
+        .as_ref()
+        .and_then(|l| l.model.clone())
+        .unwrap_or_default();
+    let provider = record
+        .config
+        .llm
+        .as_ref()
+        .and_then(|l| l.provider.clone())
+        .filter(|s| !s.is_empty());
+
+    let args = RunArgs {
+        workflow: None,
+        run_dir: Some(run_dir),
+        dry_run: record.config.dry_run_enabled(),
+        preflight: false,
+        auto_approve: record.config.auto_approve_enabled(),
+        goal: record.config.goal.clone(),
+        goal_file: None,
+        model: Some(model),
+        provider,
+        verbose: record.config.verbose_enabled(),
+        sandbox: Some(CliSandboxProvider::from(sandbox_provider)),
+        label: record
+            .labels
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect(),
+        no_retro: record.config.no_retro_enabled(),
+        preserve_sandbox: record
+            .config
+            .sandbox
+            .as_ref()
+            .and_then(|s| s.preserve)
+            .unwrap_or(false),
+        detach: false,
+        run_id: Some(record.run_id.clone()),
+    };
+
+    run_command_impl(args, styles, github_app, git_author, Some(record_run), true).await
 }
 
 /// Execute a full workflow run.
@@ -778,7 +854,15 @@ pub async fn run_command(
         run_defaults: resolved_run_defaults,
     };
 
-    run_command_impl(args, styles, github_app, git_author, Some(record_run)).await
+    run_command_impl(
+        args,
+        styles,
+        github_app,
+        git_author,
+        Some(record_run),
+        false,
+    )
+    .await
 }
 
 async fn run_command_impl(
@@ -787,6 +871,7 @@ async fn run_command_impl(
     github_app: Option<fabro_github::GitHubAppCredentials>,
     git_author: fabro_workflows::git::GitAuthor,
     record_run: Option<RecordBasedRun>,
+    resume: bool,
 ) -> anyhow::Result<()> {
     let (workflow, run_defaults) = match record_run {
         Some(rr) => (rr.workflow, rr.run_defaults),
@@ -937,7 +1022,6 @@ async fn run_command_impl(
         }
     };
     let mut run_cfg = Some(persisted.run_record().config.clone());
-    let workflow_slug = persisted.run_record().workflow_slug.clone();
     let sandbox_provider = run_cfg
         .as_ref()
         .and_then(|cfg| cfg.sandbox.as_ref())
@@ -977,8 +1061,6 @@ async fn run_command_impl(
     if !from_record && !cached_run_restart {
         write_run_config_snapshot(&run_dir, workflow_toml_path.as_deref()).await?;
     }
-
-    let settings_config = persisted.run_record().config.clone();
 
     // Now resolve ${env.VARNAME} references for runtime use.
     if let Some(ref mut cfg) = run_cfg {
@@ -1645,30 +1727,6 @@ async fn run_command_impl(
         None
     };
 
-    let run_options = RunOptions {
-        config: settings_config,
-        run_dir: run_dir.clone(),
-        cancel_token: None,
-        dry_run: dry_run_mode,
-        run_id: run_id.clone(),
-        labels: persisted.run_record().labels.clone(),
-        git_author: git_author.clone(),
-        workflow_slug: workflow_slug.clone(),
-        github_app: github_app.clone(),
-        base_branch: persisted
-            .run_record()
-            .base_branch
-            .clone()
-            .or(detected_base_branch),
-        host_repo_path: persisted
-            .run_record()
-            .host_repo_path
-            .as_deref()
-            .map(PathBuf::from)
-            .or_else(|| Some(original_cwd.clone())),
-        git,
-    };
-
     // Build lifecycle config for sandbox init, setup commands, and devcontainer phases
     let lifecycle = LifecycleOptions {
         setup_commands,
@@ -1691,46 +1749,46 @@ async fn run_command_impl(
     let pr_config = if dry_run_mode {
         None
     } else {
-        run_options.pull_request().cloned()
+        persisted.run_record().config.pull_request.clone()
     };
-    let started = start(
-        persisted,
-        StartOptions {
-            init: fabro_workflows::pipeline::InitOptions {
-                run_id: run_id.clone(),
-                dry_run: dry_run_mode,
-                emitter: Arc::clone(&emitter),
-                sandbox: Arc::clone(&sandbox),
-                registry: Arc::new(registry),
-                lifecycle,
-                run_options,
-                hooks: fabro_hooks::HookConfig {
-                    hooks: run_cfg
-                        .as_ref()
-                        .map(|c| c.hooks.clone())
-                        .unwrap_or_else(|| run_defaults.hooks.clone()),
-                },
-                sandbox_env,
-                checkpoint: None,
-                seed_context: None,
-            },
-            retro: StartRetroOptions {
-                enabled: !no_retro_flag && project_config::is_retro_enabled(),
-                dry_run: dry_run_mode,
-                llm_client: llm_client.clone(),
-                provider: provider_enum,
-                model: model.clone(),
-            },
-            finalize: StartFinalizeOptions { preserve_sandbox },
-            pull_request: StartPullRequestConfig {
-                pr_config,
-                github_app: github_app.clone(),
-                origin_url: origin_url.clone(),
-                model: model.clone(),
-            },
+    let start_options = StartOptions {
+        cancel_token: None,
+        emitter: Arc::clone(&emitter),
+        sandbox: Arc::clone(&sandbox),
+        registry: Arc::new(registry),
+        lifecycle,
+        hooks: fabro_hooks::HookConfig {
+            hooks: run_cfg
+                .as_ref()
+                .map(|c| c.hooks.clone())
+                .unwrap_or_else(|| run_defaults.hooks.clone()),
         },
-    )
-    .await;
+        sandbox_env,
+        seed_context: None,
+        git_author,
+        git,
+        github_app: github_app.clone(),
+        dry_run: dry_run_mode,
+        retro: StartRetroOptions {
+            enabled: !no_retro_flag && project_config::is_retro_enabled(),
+            dry_run: dry_run_mode,
+            llm_client: llm_client.clone(),
+            provider: provider_enum,
+            model: model.clone(),
+        },
+        finalize: StartFinalizeOptions { preserve_sandbox },
+        pull_request: StartPullRequestConfig {
+            pr_config,
+            github_app: github_app.clone(),
+            origin_url: origin_url.clone(),
+            model: model.clone(),
+        },
+    };
+    let started = if resume {
+        operations_resume(&run_dir, start_options).await
+    } else {
+        start(&run_dir, start_options).await
+    };
     let run_duration_ms = run_start.elapsed().as_millis() as u64;
     let mut completion_guard = DetachedRunCompletionGuard::arm(&run_dir);
 

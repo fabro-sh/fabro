@@ -523,12 +523,13 @@ fn resume_help_shows_expected_args() {
         .args(["resume", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("--checkpoint"))
-        .stdout(predicate::str::contains("--workflow"));
+        .stdout(predicate::str::contains("--detach"))
+        .stdout(predicate::str::contains("--checkpoint").not())
+        .stdout(predicate::str::contains("--workflow").not());
 }
 
 #[test]
-fn resume_requires_run_or_checkpoint() {
+fn resume_requires_run_arg() {
     arc().args(["resume"]).assert().failure();
 }
 
@@ -743,84 +744,6 @@ digraph FooWorkflow {
         serde_json::from_str(&std::fs::read_to_string(run_dir.join("run.json")).unwrap()).unwrap();
     assert_eq!(run_record["graph"]["name"].as_str(), Some("FooWorkflow"));
     assert_eq!(run_record["workflow_slug"].as_str(), Some("alpha"));
-}
-
-#[test]
-fn resumed_run_preserves_workflow_slug_for_lookup() {
-    let home = tempfile::tempdir().unwrap();
-    let project = tempfile::tempdir().unwrap();
-    let workflow_dir = project.path().join("workflows").join("sluggy");
-    std::fs::create_dir_all(&workflow_dir).unwrap();
-    let workflow_path = workflow_dir.join("workflow.fabro");
-    std::fs::write(
-        &workflow_path,
-        "\
-digraph BarBaz {
-  start [shape=Mdiamond, label=\"Start\"]
-  exit  [shape=Msquare, label=\"Exit\"]
-  start -> exit
-}
-",
-    )
-    .unwrap();
-    let original_run_dir = project.path().join("original-run");
-
-    arc()
-        .env("HOME", home.path())
-        .current_dir(project.path())
-        .args([
-            "run",
-            "--dry-run",
-            "--auto-approve",
-            "--no-retro",
-            "--run-dir",
-            original_run_dir.to_str().unwrap(),
-            workflow_path.to_str().unwrap(),
-        ])
-        .assert()
-        .success();
-
-    arc()
-        .env("HOME", home.path())
-        .current_dir(project.path())
-        .args([
-            "resume",
-            "--checkpoint",
-            original_run_dir.join("checkpoint.json").to_str().unwrap(),
-            "--workflow",
-            workflow_path.to_str().unwrap(),
-            "--dry-run",
-            "--auto-approve",
-            "--no-retro",
-        ])
-        .assert()
-        .success();
-
-    arc()
-        .env("HOME", home.path())
-        .current_dir(project.path())
-        .args(["attach", "sluggy"])
-        .timeout(std::time::Duration::from_secs(10))
-        .assert()
-        .success();
-
-    let resumed_runs_dir = home.path().join(".fabro").join("runs");
-    let resumed_run_dir = std::fs::read_dir(&resumed_runs_dir)
-        .unwrap()
-        .flatten()
-        .map(|entry| entry.path())
-        .find(|path| path.is_dir())
-        .unwrap_or_else(|| {
-            panic!(
-                "expected a resumed run under {}",
-                resumed_runs_dir.display()
-            )
-        });
-    let run_record: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(resumed_run_dir.join("run.json")).unwrap())
-            .unwrap();
-    assert_eq!(run_record["graph"]["name"].as_str(), Some("BarBaz"));
-    assert_eq!(run_record["workflow_slug"].as_str(), Some("sluggy"));
 }
 
 #[test]

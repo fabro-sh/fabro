@@ -9,7 +9,7 @@ use super::detached_support::persist_detached_failure;
 ///
 /// The engine process reads `run.json` from the run directory and executes the
 /// workflow. Returns the child process handle (use `.id()` for the PID).
-pub fn start_run(run_dir: &Path) -> Result<std::process::Child> {
+pub fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Child> {
     // Validate status is Submitted
     let status_path = run_dir.join("status.json");
     match fabro_workflows::run_status::RunStatusRecord::load(&status_path) {
@@ -56,9 +56,11 @@ pub fn start_run(run_dir: &Path) -> Result<std::process::Child> {
             return Err(err);
         }
     };
-    cmd.args(["_run_engine", "--run-dir"])
-        .arg(run_dir)
-        .stdout(stdout_log)
+    cmd.args(["_run_engine", "--run-dir"]).arg(run_dir);
+    if resume {
+        cmd.arg("--resume");
+    }
+    cmd.stdout(stdout_log)
         .stderr(log_file)
         .stdin(std::process::Stdio::null());
 
@@ -134,7 +136,7 @@ mod tests {
         sample_record().save(dir.path()).unwrap();
         std::fs::create_dir(dir.path().join("detach.log")).unwrap();
 
-        let _ = start_run(dir.path());
+        let _ = start_run(dir.path(), false);
 
         let record = RunStatusRecord::load(&dir.path().join("status.json")).unwrap();
         assert_eq!(
