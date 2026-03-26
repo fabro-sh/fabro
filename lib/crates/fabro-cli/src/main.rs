@@ -965,11 +965,10 @@ async fn main_inner() -> (String, Result<()>) {
                 let styles: &'static fabro_util::terminal::Styles =
                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
                 #[cfg(feature = "sleep_inhibitor")]
-                {
+                let _sleep_guard = {
                     let cli_config = cli_config::load_cli_config(None)?;
-                    let _sleep_guard =
-                        fabro_beastie::guard(cli_config.prevent_idle_sleep_enabled());
-                }
+                    fabro_beastie::guard(cli_config.prevent_idle_sleep_enabled())
+                };
                 commands::resume::resume_command(args, styles).await?;
             }
             Command::Rewind(args) => {
