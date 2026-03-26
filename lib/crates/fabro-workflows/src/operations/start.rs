@@ -4,7 +4,9 @@ use std::time::{Duration, Instant};
 use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
 use crate::outcome::StageStatus;
-use crate::pipeline::{self, FinalizeOptions, Finalized, InitOptions, Persisted, RetroOptions};
+use crate::pipeline::{
+    self, FinalizeOptions, Finalized, InitOptions, Persisted, PullRequestOptions, RetroOptions,
+};
 
 pub struct StartRetroConfig {
     pub enabled: bool,
@@ -16,6 +18,9 @@ pub struct StartRetroConfig {
 
 pub struct StartFinalizeConfig {
     pub preserve_sandbox: bool,
+}
+
+pub struct StartPullRequestConfig {
     pub pr_config: Option<fabro_config::run::PullRequestConfig>,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
     pub origin_url: Option<String>,
@@ -26,6 +31,7 @@ pub struct StartOptions {
     pub init: InitOptions,
     pub retro: StartRetroConfig,
     pub finalize: StartFinalizeConfig,
+    pub pull_request: StartPullRequestConfig,
 }
 
 pub struct Started {
@@ -34,7 +40,7 @@ pub struct Started {
     pub retro_duration: Duration,
 }
 
-/// Run a persisted workflow through initialize, execute, retro, and finalize.
+/// Run a persisted workflow through initialize, execute, retro, finalize, and pull_request.
 pub async fn start(persisted: Persisted, options: StartOptions) -> Result<Started, FabroError> {
     let preserve_sandbox = options.finalize.preserve_sandbox;
     let sandbox_for_cleanup = Arc::clone(&options.init.sandbox);
@@ -97,15 +103,19 @@ pub async fn start(persisted: Persisted, options: StartOptions) -> Result<Starte
         workflow_name: retroed.graph.name.clone(),
         hook_runner: retroed.hook_runner.clone(),
         preserve_sandbox: options.finalize.preserve_sandbox,
-        pr_config: options.finalize.pr_config,
-        github_app: options.finalize.github_app,
-        origin_url: options.finalize.origin_url,
-        model: options.finalize.model,
         last_git_sha: last_git_sha.lock().unwrap().clone(),
+    };
+    let pr_opts = PullRequestOptions {
+        run_dir: retroed.settings.run_dir.clone(),
+        pr_config: options.pull_request.pr_config,
+        github_app: options.pull_request.github_app,
+        origin_url: options.pull_request.origin_url,
+        model: options.pull_request.model,
     };
 
     let retro = retroed.retro.clone();
-    let finalized = pipeline::finalize(retroed, &finalize_opts).await?;
+    let concluded = pipeline::finalize(retroed, &finalize_opts).await?;
+    let finalized = pipeline::pull_request(concluded, &pr_opts).await;
 
     scopeguard::ScopeGuard::into_inner(cleanup_guard);
 
@@ -413,8 +423,8 @@ mod tests {
                 provider: fabro_llm::Provider::Anthropic,
                 model: "test-model".to_string(),
             },
-            finalize: StartFinalizeConfig {
-                preserve_sandbox,
+            finalize: StartFinalizeConfig { preserve_sandbox },
+            pull_request: StartPullRequestConfig {
                 pr_config: None,
                 github_app: None,
                 origin_url: None,
