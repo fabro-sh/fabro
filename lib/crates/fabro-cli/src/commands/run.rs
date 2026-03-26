@@ -1157,30 +1157,39 @@ async fn run_command_impl(
     // Only the Local provider supports git worktrees on the host.
     // Remote sandboxes (Daytona, Exe, SSH) clone from origin inside the sandbox.
     // Docker uses the bind-mounted host directory as-is.
-    let workdir_strategy = match sandbox_provider {
-        SandboxProvider::Local => {
-            let worktree_mode = resolve_worktree_mode(run_cfg.as_ref(), &run_defaults);
-            match worktree_mode {
-                sandbox_config::WorktreeMode::Always => WorkdirStrategy::LocalWorktree,
-                sandbox_config::WorktreeMode::Clean => {
-                    if git_status.is_clean() {
-                        WorkdirStrategy::LocalWorktree
-                    } else {
-                        WorkdirStrategy::LocalDirectory
-                    }
-                }
-                sandbox_config::WorktreeMode::Dirty => {
-                    if git_status.is_clean() {
-                        WorkdirStrategy::LocalDirectory
-                    } else {
-                        WorkdirStrategy::LocalWorktree
-                    }
-                }
-                sandbox_config::WorktreeMode::Never => WorkdirStrategy::LocalDirectory,
-            }
+    // Resume runs skip worktree creation — the engine runs in the original
+    // working directory and the checkpoint restores logical state.
+    let workdir_strategy = if resume {
+        match sandbox_provider {
+            SandboxProvider::Local | SandboxProvider::Docker => WorkdirStrategy::LocalDirectory,
+            _ => WorkdirStrategy::Cloud,
         }
-        SandboxProvider::Docker => WorkdirStrategy::LocalDirectory,
-        _ => WorkdirStrategy::Cloud,
+    } else {
+        match sandbox_provider {
+            SandboxProvider::Local => {
+                let worktree_mode = resolve_worktree_mode(run_cfg.as_ref(), &run_defaults);
+                match worktree_mode {
+                    sandbox_config::WorktreeMode::Always => WorkdirStrategy::LocalWorktree,
+                    sandbox_config::WorktreeMode::Clean => {
+                        if git_status.is_clean() {
+                            WorkdirStrategy::LocalWorktree
+                        } else {
+                            WorkdirStrategy::LocalDirectory
+                        }
+                    }
+                    sandbox_config::WorktreeMode::Dirty => {
+                        if git_status.is_clean() {
+                            WorkdirStrategy::LocalDirectory
+                        } else {
+                            WorkdirStrategy::LocalWorktree
+                        }
+                    }
+                    sandbox_config::WorktreeMode::Never => WorkdirStrategy::LocalDirectory,
+                }
+            }
+            SandboxProvider::Docker => WorkdirStrategy::LocalDirectory,
+            _ => WorkdirStrategy::Cloud,
+        }
     };
     debug!(
         ?workdir_strategy,
