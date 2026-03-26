@@ -16,7 +16,7 @@ pub struct ValidateArgs {
 pub fn run(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<()> {
     let (dot_path, _cfg) = fabro_config::project::resolve_workflow(&args.workflow)?;
 
-    let validated = fabro_workflows::operations::create_from_file(&dot_path)?;
+    let validated = fabro_workflows::operations::validate_from_file(&dot_path)?;
     let graph = validated.graph();
     let diagnostics = validated.diagnostics();
 

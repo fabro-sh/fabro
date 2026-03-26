@@ -25,8 +25,7 @@ use fabro_workflows::operations::{start, StartFinalizeConfig, StartOptions, Star
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::outcome::{compute_stage_cost, format_cost};
 use fabro_workflows::pipeline::{
-    build_conclusion, classify_engine_result, persist_terminal_outcome, PersistOptions, Persisted,
-    Validated,
+    build_conclusion, classify_engine_result, persist_terminal_outcome, Persisted, Validated,
 };
 use fabro_workflows::records::Checkpoint;
 use fabro_workflows::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
@@ -163,36 +162,7 @@ pub(crate) fn resolve_cli_goal(
     }
 }
 
-/// Apply goal to the graph from TOML config or CLI flag.
-/// Precedence: CLI `--goal` / `--goal-file` > TOML `goal` > DOT `graph [goal="..."]`.
-pub(crate) fn apply_goal_override(
-    graph: &mut fabro_graphviz::graph::Graph,
-    cli_goal: Option<&str>,
-    toml_goal: Option<&str>,
-) {
-    let goal = cli_goal.or(toml_goal);
-    if let Some(goal) = goal {
-        debug!(goal = %goal, "overriding graph goal");
-        graph.attrs.insert(
-            "goal".to_string(),
-            fabro_graphviz::graph::AttrValue::String(goal.to_string()),
-        );
-    }
-}
-
-/// Compute the default run directory when `--run-dir` is not provided.
-pub(crate) fn default_run_dir(run_id: &str, dry_run: bool) -> PathBuf {
-    let base = fabro_workflows::run_lookup::default_runs_base();
-    if dry_run {
-        base.join(format!(
-            "{}-dry-run-{}",
-            Local::now().format("%Y%m%d"),
-            run_id
-        ))
-    } else {
-        base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
-    }
-}
+pub(crate) use fabro_workflows::operations::default_run_dir;
 
 pub(crate) fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
     let file_name = workflow_path.file_name()?.to_string_lossy();
@@ -545,56 +515,114 @@ pub(crate) fn resolve_workflow_source(
     }
 }
 
-/// Result of workflow preparation (shared between `create` and `run` commands).
-pub(crate) struct PreparedWorkflow {
-    pub validated: fabro_workflows::pipeline::Validated,
-    pub raw_source: String,
-    pub run_cfg: Option<FabroConfig>,
+pub(crate) struct ExecutionOverrides<'a> {
+    pub dry_run: bool,
+    pub auto_approve: bool,
+    pub no_retro: bool,
+    pub verbose: bool,
+    pub preserve_sandbox: bool,
+    pub model: Option<&'a str>,
+    pub provider: Option<&'a str>,
     pub sandbox_provider: SandboxProvider,
-    pub model: String,
-    pub provider: Option<String>,
-    pub workflow_slug: Option<String>,
-    pub run_defaults: FabroConfig,
-    /// Resolved TOML path (Some for TOML-based workflows, None for bare .fabro).
-    pub workflow_toml_path: Option<PathBuf>,
 }
 
-impl PreparedWorkflow {
-    /// Read-through to validated graph.
-    pub fn graph(&self) -> &fabro_graphviz::graph::Graph {
-        self.validated.graph()
+pub(crate) fn apply_execution_overrides(config: &mut FabroConfig, overrides: &ExecutionOverrides) {
+    config.dry_run = Some(overrides.dry_run);
+    config.auto_approve = Some(overrides.auto_approve);
+    config.no_retro = Some(overrides.no_retro);
+    config.verbose = Some(overrides.verbose);
+
+    if let Some(model) = overrides.model {
+        config.llm.get_or_insert_default().model = Some(model.to_string());
     }
-    /// Original DOT source as authored on disk, before runtime var expansion.
-    pub fn source(&self) -> &str {
-        &self.raw_source
+    if let Some(provider) = overrides.provider {
+        config.llm.get_or_insert_default().provider = Some(provider.to_string());
     }
+
+    config.sandbox.get_or_insert_default().provider = Some(overrides.sandbox_provider.to_string());
+    if overrides.preserve_sandbox {
+        config.sandbox.get_or_insert_default().preserve = Some(true);
+    }
+}
+
+pub(crate) fn parse_labels(labels: &[String]) -> HashMap<String, String> {
+    labels
+        .iter()
+        .filter_map(|label| label.split_once('='))
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect()
+}
+
+fn print_workflow_header(
+    graph: &fabro_graphviz::graph::Graph,
+    diagnostics: &[fabro_validate::Diagnostic],
+    dot_path: &Path,
+    styles: &Styles,
+) {
+    eprintln!(
+        "{} {} {}",
+        styles.bold.apply_to("Workflow:"),
+        graph.name,
+        styles.dim.apply_to(format!(
+            "({} nodes, {} edges)",
+            graph.nodes.len(),
+            graph.edges.len()
+        )),
+    );
+    eprintln!(
+        "{} {}",
+        styles.dim.apply_to("Graph:"),
+        styles.dim.apply_to(relative_path(dot_path)),
+    );
+
+    let goal = graph.goal();
+    if !goal.is_empty() {
+        let stripped = fabro_util::text::strip_goal_decoration(goal);
+        eprintln!("{} {stripped}\n", styles.bold.apply_to("Goal:"));
+    }
+
+    print_diagnostics(diagnostics, styles);
+}
+
+pub(crate) fn print_workflow_report(validated: &Validated, dot_path: &Path, styles: &Styles) {
+    print_workflow_header(validated.graph(), validated.diagnostics(), dot_path, styles);
+}
+
+pub(crate) fn print_workflow_report_from_persisted(
+    persisted: &Persisted,
+    dot_path: &Path,
+    styles: &Styles,
+) {
+    print_workflow_header(persisted.graph(), persisted.diagnostics(), dot_path, styles);
+}
+
+pub(crate) fn print_diagnostics_from_error(
+    diagnostics: &[fabro_validate::Diagnostic],
+    styles: &Styles,
+) {
+    print_diagnostics(diagnostics, styles);
+}
+
+pub(crate) struct WorkflowSourceInput {
+    pub raw_source: String,
+    pub config: FabroConfig,
+    pub workflow_slug: Option<String>,
+    pub run_defaults: FabroConfig,
+    pub workflow_toml_path: Option<PathBuf>,
+    pub dot_path: PathBuf,
+    pub goal_override: Option<String>,
 }
 
 enum WorkflowState {
-    Validated(Validated),
+    Source(Box<WorkflowSourceInput>),
     Persisted(Box<Persisted>),
 }
 
-/// Resolve config, parse/validate the workflow graph, and resolve sandbox + model.
-///
-/// Shared between `create_run` (which only persists the spec) and
-/// `run_command` (which goes on to execute the workflow).
-pub(crate) fn prepare_workflow(
-    args: &RunArgs,
-    run_defaults: FabroConfig,
-    styles: &Styles,
-    quiet: bool,
-) -> anyhow::Result<PreparedWorkflow> {
-    prepare_workflow_with_project_config(args, run_defaults, styles, quiet, true)
-}
-
-pub(crate) fn prepare_workflow_with_project_config(
+pub(crate) fn load_workflow_source_input(
     args: &RunArgs,
     mut run_defaults: FabroConfig,
-    styles: &Styles,
-    quiet: bool,
     apply_project_config: bool,
-) -> anyhow::Result<PreparedWorkflow> {
+) -> anyhow::Result<WorkflowSourceInput> {
     let workflow_path = args
         .workflow
         .as_ref()
@@ -610,122 +638,28 @@ pub(crate) fn prepare_workflow_with_project_config(
         }
     }
 
-    // Resolve workflow arg, load run config if TOML, merge with defaults
-    let (resolved_workflow_path, dot_path, run_cfg) = {
+    // Resolve workflow arg, load run config if TOML, merge with defaults.
+    let (resolved_workflow_path, dot_path, config) = {
         let (resolved, dot, cfg) = resolve_workflow_source(workflow_path)?;
         match cfg {
             Some(cfg) => {
-                // run_defaults is the base; cfg (from workflow.toml) is the overlay that wins
                 let mut merged = run_defaults.clone();
                 merged.merge_overlay(cfg);
-                (resolved, dot, Some(merged))
+                (resolved, dot, merged)
             }
-            None => (resolved, dot, None),
+            None => (resolved, dot, run_defaults.clone()),
         }
     };
     let workflow_slug = workflow_slug_from_path(&resolved_workflow_path);
 
-    let directory = run_cfg
-        .as_ref()
-        .and_then(|c| c.work_dir.as_deref())
-        .or(run_defaults.work_dir.as_deref());
-    if let Some(dir) = directory {
+    if let Some(dir) = config.work_dir.as_deref() {
         std::env::set_current_dir(dir)
             .map_err(|e| anyhow::anyhow!("Failed to set working directory to {dir}: {e}"))?;
     }
 
-    // Parse and transform workflow using pipeline functions
     let raw_source = read_workflow_file(&dot_path)?;
-    let vars = run_cfg
-        .as_ref()
-        .and_then(|c| c.vars.as_ref())
-        .or(run_defaults.vars.as_ref());
-    let source = match vars {
-        Some(vars) => fabro_workflows::vars::expand_vars(&raw_source, vars)?,
-        None => raw_source.clone(),
-    };
-    let dot_dir = dot_path.parent().unwrap_or(std::path::Path::new("."));
-
-    let parsed = fabro_workflows::pipeline::parse(&source)?;
-    let mut transformed = fabro_workflows::pipeline::transform(
-        parsed,
-        &fabro_workflows::pipeline::TransformOptions {
-            base_dir: Some(dot_dir.to_path_buf()),
-            custom_transforms: vec![],
-        },
-    );
-
-    // Apply goal override on the mutable transformed graph
     let cli_goal = resolve_cli_goal(&args.goal, &args.goal_file)?;
-    let toml_goal = run_cfg.as_ref().and_then(|c| c.goal.as_deref());
-    apply_goal_override(&mut transformed.graph, cli_goal.as_deref(), toml_goal);
-
-    // Inline @file references in the (possibly overridden) goal
-    if let Some(fabro_graphviz::graph::AttrValue::String(goal)) =
-        transformed.graph.attrs.get("goal")
-    {
-        let fallback = dirs::home_dir().map(|h| h.join(".fabro"));
-        let resolved =
-            fabro_workflows::transform::resolve_file_ref(goal, dot_dir, fallback.as_deref());
-        if resolved != *goal {
-            transformed.graph.attrs.insert(
-                "goal".to_string(),
-                fabro_graphviz::graph::AttrValue::String(resolved),
-            );
-        }
-    }
-
-    let validated = fabro_workflows::pipeline::validate(transformed, &[]);
-
-    if !quiet {
-        eprintln!(
-            "{} {} {}",
-            styles.bold.apply_to("Workflow:"),
-            validated.graph().name,
-            styles.dim.apply_to(format!(
-                "({} nodes, {} edges)",
-                validated.graph().nodes.len(),
-                validated.graph().edges.len()
-            )),
-        );
-        eprintln!(
-            "{} {}",
-            styles.dim.apply_to("Graph:"),
-            styles.dim.apply_to(relative_path(&dot_path)),
-        );
-
-        let goal = validated.graph().goal();
-        if !goal.is_empty() {
-            let stripped = fabro_util::text::strip_goal_decoration(goal);
-            eprintln!("{} {stripped}\n", styles.bold.apply_to("Goal:"));
-        }
-
-        print_diagnostics(validated.diagnostics(), styles);
-    }
-
-    if validated.has_errors() {
-        bail!("Validation failed");
-    }
-
-    // Resolve sandbox provider
-    let sandbox_provider = if args.dry_run {
-        SandboxProvider::Local
-    } else {
-        resolve_sandbox_provider(
-            args.sandbox.map(Into::into),
-            run_cfg.as_ref(),
-            &run_defaults,
-        )?
-    };
-
-    // Resolve model and provider
-    let (model, provider) = resolve_model_provider(
-        args.model.as_deref(),
-        args.provider.as_deref(),
-        run_cfg.as_ref(),
-        &run_defaults,
-        validated.graph(),
-    );
+    let goal_override = cli_goal.or_else(|| config.goal.clone());
 
     let workflow_toml_path = if resolved_workflow_path
         .extension()
@@ -736,31 +670,21 @@ pub(crate) fn prepare_workflow_with_project_config(
         None
     };
 
-    Ok(PreparedWorkflow {
-        validated,
+    Ok(WorkflowSourceInput {
         raw_source,
-        run_cfg,
-        sandbox_provider,
-        model,
-        provider,
+        config,
         workflow_slug,
         run_defaults,
         workflow_toml_path,
+        dot_path,
+        goal_override,
     })
 }
 
 /// Pre-prepared run state, used to skip workflow preparation in `run_command_impl`.
 struct RecordBasedRun {
     workflow: WorkflowState,
-    raw_source: String,
-    run_cfg: Option<FabroConfig>,
-    sandbox_provider: SandboxProvider,
-    model: String,
-    provider: Option<String>,
-    workflow_slug: Option<String>,
     run_defaults: FabroConfig,
-    /// Original TOML path for debug snapshot (None for record-based or bare .fabro runs).
-    workflow_toml_path: Option<PathBuf>,
 }
 
 /// Execute a workflow run from a saved RunRecord, bypassing workflow preparation.
@@ -775,6 +699,11 @@ pub async fn run_from_record(
     git_author: fabro_workflows::git::GitAuthor,
 ) -> anyhow::Result<()> {
     let record = persisted.run_record().clone();
+    let record_run = RecordBasedRun {
+        workflow: WorkflowState::Persisted(Box::new(persisted)),
+        run_defaults,
+    };
+
     let sandbox_provider = record
         .config
         .sandbox
@@ -795,18 +724,6 @@ pub async fn run_from_record(
         .as_ref()
         .and_then(|l| l.provider.clone())
         .filter(|s| !s.is_empty());
-
-    let record_run = RecordBasedRun {
-        workflow: WorkflowState::Persisted(Box::new(persisted)),
-        raw_source: String::new(), // Raw DOT provenance is best-effort for record-based runs
-        run_cfg: Some(record.config.clone()),
-        sandbox_provider,
-        model: model.clone(),
-        provider: provider.clone(),
-        workflow_slug: record.workflow_slug.clone(),
-        run_defaults,
-        workflow_toml_path: None, // No TOML to copy — config is in RunRecord
-    };
 
     let args = RunArgs {
         workflow: None,
@@ -851,28 +768,12 @@ pub async fn run_command(
     github_app: Option<fabro_github::GitHubAppCredentials>,
     git_author: fabro_workflows::git::GitAuthor,
 ) -> anyhow::Result<()> {
-    let PreparedWorkflow {
-        validated,
-        raw_source,
-        run_cfg,
-        sandbox_provider,
-        model,
-        provider,
-        workflow_slug,
-        run_defaults,
-        workflow_toml_path,
-    } = prepare_workflow(&args, run_defaults, styles, false)?;
+    let source_input = load_workflow_source_input(&args, run_defaults, true)?;
+    let resolved_run_defaults = source_input.run_defaults.clone();
 
     let record_run = RecordBasedRun {
-        workflow: WorkflowState::Validated(validated),
-        raw_source,
-        run_cfg,
-        sandbox_provider,
-        model,
-        provider,
-        workflow_slug,
-        run_defaults,
-        workflow_toml_path,
+        workflow: WorkflowState::Source(Box::new(source_input)),
+        run_defaults: resolved_run_defaults,
     };
 
     run_command_impl(args, styles, github_app, git_author, Some(record_run)).await
@@ -885,49 +786,15 @@ async fn run_command_impl(
     git_author: fabro_workflows::git::GitAuthor,
     record_run: Option<RecordBasedRun>,
 ) -> anyhow::Result<()> {
-    let (
-        workflow,
-        raw_source,
-        mut run_cfg,
-        sandbox_provider,
-        model,
-        provider,
-        prepared_workflow_slug,
-        run_defaults,
-        workflow_toml_path,
-    ) = match record_run {
-        Some(rr) => (
-            rr.workflow,
-            rr.raw_source,
-            rr.run_cfg,
-            rr.sandbox_provider,
-            rr.model,
-            rr.provider,
-            rr.workflow_slug,
-            rr.run_defaults,
-            rr.workflow_toml_path,
-        ),
+    let (workflow, run_defaults) = match record_run {
+        Some(rr) => (rr.workflow, rr.run_defaults),
         None => unreachable!("run_command_impl always receives a RecordBasedRun"),
-    };
-    let graph = match &workflow {
-        WorkflowState::Validated(validated) => validated.graph().clone(),
-        WorkflowState::Persisted(persisted) => persisted.graph().clone(),
     };
 
     // For record-based runs from run_from_record, the workflow has already been persisted.
     let from_record = matches!(&workflow, WorkflowState::Persisted(_)) && args.workflow.is_none();
 
-    // Collect setup commands — they'll be run inside the sandbox
-    let setup_commands: Vec<String> = run_cfg
-        .as_ref()
-        .and_then(|c| c.setup.as_ref())
-        .or(run_defaults.setup.as_ref())
-        .map(|s| s.commands.clone())
-        .unwrap_or_default();
-
     // Pre-flight: check git cleanliness before creating any files
-    let preserve_sandbox =
-        resolve_preserve_sandbox(args.preserve_sandbox, run_cfg.as_ref(), &run_defaults);
     let original_cwd = std::env::current_dir()?;
     let (origin_url, detected_base_branch) =
         fabro_sandbox::daytona::detect_repo_info(&original_cwd)
@@ -935,21 +802,6 @@ async fn run_command_impl(
             .unwrap_or((None, None));
     let git_status =
         fabro_workflows::git::sync_status(&original_cwd, "origin", detected_base_branch.as_deref());
-
-    if args.preflight {
-        return run_preflight(
-            &graph,
-            &run_cfg,
-            &args,
-            &run_defaults,
-            git_status,
-            sandbox_provider,
-            styles,
-            github_app,
-            origin_url.as_deref(),
-        )
-        .await;
-    }
 
     // 3. Create logs directory
     // Extract values from args before partial move
@@ -959,63 +811,156 @@ async fn run_command_impl(
     let verbose_flag = args.verbose;
     let preserve_sandbox_flag = args.preserve_sandbox;
     let label_vec = args.label.clone();
-    let run_id = args.run_id.unwrap_or_else(|| ulid::Ulid::new().to_string());
+    let run_id = args
+        .run_id
+        .clone()
+        .unwrap_or_else(|| ulid::Ulid::new().to_string());
     let run_dir = args
         .run_dir
+        .clone()
         .unwrap_or_else(|| default_run_dir(&run_id, dry_run_flag));
-    let cached_run_restart = if from_record {
-        false
-    } else {
-        let workflow_path = args.workflow.as_ref().unwrap();
-        is_cached_run_restart(workflow_path, &run_dir)
+    let cached_run_restart = match &workflow {
+        WorkflowState::Source(_) if !from_record => {
+            let workflow_path = args.workflow.as_ref().unwrap();
+            is_cached_run_restart(workflow_path, &run_dir)
+        }
+        _ => false,
     };
 
-    let persisted = match (cached_run_restart, workflow) {
-        (true, _) => Persisted::load(&run_dir)?,
-        (false, WorkflowState::Persisted(persisted)) => *persisted,
-        (false, WorkflowState::Validated(validated)) => {
-            let cli_flags = super::create::CliFlags {
-                dry_run: dry_run_flag,
-                auto_approve: auto_approve_flag,
-                no_retro: no_retro_flag,
-                verbose: verbose_flag,
-                preserve_sandbox: preserve_sandbox_flag,
+    let (persisted, raw_source, workflow_toml_path) = match workflow {
+        WorkflowState::Persisted(persisted) => (*persisted, String::new(), None),
+        WorkflowState::Source(source_input) if cached_run_restart => (
+            Persisted::load(&run_dir)?,
+            source_input.raw_source,
+            source_input.workflow_toml_path,
+        ),
+        WorkflowState::Source(source_input) => {
+            let mut config = source_input.config.clone();
+            let sandbox_provider = if dry_run_flag {
+                SandboxProvider::Local
+            } else {
+                resolve_sandbox_provider(
+                    args.sandbox.map(Into::into),
+                    Some(&config),
+                    &source_input.run_defaults,
+                )?
             };
-            let normalized_config = super::create::normalize_config(
-                run_cfg.as_ref(),
-                &run_defaults,
-                &model,
-                provider.as_deref(),
-                sandbox_provider,
-                validated.graph(),
-                cli_flags,
-            );
-            let run_record = fabro_workflows::records::RunRecord {
-                run_id: run_id.clone(),
-                created_at: chrono::Utc::now(),
-                config: normalized_config,
-                graph: validated.graph().clone(),
-                workflow_slug: prepared_workflow_slug.clone(),
-                working_directory: original_cwd.clone(),
-                host_repo_path: Some(original_cwd.to_string_lossy().to_string()),
-                base_branch: detected_base_branch.clone(),
-                labels: label_vec
-                    .iter()
-                    .filter_map(|s| s.split_once('='))
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect(),
-            };
-            fabro_workflows::pipeline::persist(
-                validated,
-                PersistOptions {
-                    run_dir: run_dir.clone(),
-                    run_record,
+            apply_execution_overrides(
+                &mut config,
+                &ExecutionOverrides {
+                    dry_run: dry_run_flag,
+                    auto_approve: auto_approve_flag,
+                    no_retro: no_retro_flag,
+                    verbose: verbose_flag,
+                    preserve_sandbox: preserve_sandbox_flag,
+                    model: args.model.as_deref(),
+                    provider: args.provider.as_deref(),
+                    sandbox_provider,
                 },
-            )?
+            );
+
+            if args.preflight {
+                let validated = fabro_workflows::operations::validate(
+                    &source_input.raw_source,
+                    fabro_workflows::operations::ValidateOptions {
+                        base_dir: Some(
+                            source_input
+                                .dot_path
+                                .parent()
+                                .unwrap_or(Path::new("."))
+                                .to_path_buf(),
+                        ),
+                        config: Some(config.clone()),
+                        goal_override: source_input.goal_override.clone(),
+                        ..Default::default()
+                    },
+                )?;
+                print_workflow_report(&validated, &source_input.dot_path, styles);
+                if validated.has_errors() {
+                    bail!("Validation failed");
+                }
+                return run_preflight(
+                    validated.graph(),
+                    &Some(config),
+                    &args,
+                    &run_defaults,
+                    git_status,
+                    sandbox_provider,
+                    styles,
+                    github_app,
+                    origin_url.as_deref(),
+                )
+                .await;
+            }
+
+            match fabro_workflows::operations::create(
+                &source_input.raw_source,
+                fabro_workflows::operations::RunCreateSettings {
+                    config,
+                    run_dir: Some(run_dir.clone()),
+                    run_id: Some(run_id.clone()),
+                    workflow_slug: source_input.workflow_slug.clone(),
+                    labels: parse_labels(&label_vec),
+                    base_branch: detected_base_branch.clone(),
+                    working_directory: Some(original_cwd.clone()),
+                    host_repo_path: Some(original_cwd.to_string_lossy().to_string()),
+                    goal_override: source_input.goal_override.clone(),
+                    base_dir: Some(
+                        source_input
+                            .dot_path
+                            .parent()
+                            .unwrap_or(Path::new("."))
+                            .to_path_buf(),
+                    ),
+                },
+            ) {
+                Ok(persisted) => {
+                    print_workflow_report_from_persisted(
+                        &persisted,
+                        &source_input.dot_path,
+                        styles,
+                    );
+                    (
+                        persisted,
+                        source_input.raw_source,
+                        source_input.workflow_toml_path,
+                    )
+                }
+                Err(fabro_workflows::error::FabroError::ValidationFailed { diagnostics }) => {
+                    print_diagnostics_from_error(&diagnostics, styles);
+                    bail!("Validation failed");
+                }
+                Err(err) => return Err(err.into()),
+            }
         }
     };
-    run_cfg = Some(persisted.run_record().config.clone());
+    let mut run_cfg = Some(persisted.run_record().config.clone());
     let workflow_slug = persisted.run_record().workflow_slug.clone();
+    let sandbox_provider = run_cfg
+        .as_ref()
+        .and_then(|cfg| cfg.sandbox.as_ref())
+        .and_then(|sandbox| sandbox.provider.as_deref())
+        .unwrap_or("local")
+        .parse()
+        .unwrap_or(SandboxProvider::Local);
+    let model = run_cfg
+        .as_ref()
+        .and_then(|cfg| cfg.llm.as_ref())
+        .and_then(|llm| llm.model.clone())
+        .unwrap_or_default();
+    let provider = run_cfg
+        .as_ref()
+        .and_then(|cfg| cfg.llm.as_ref())
+        .and_then(|llm| llm.provider.clone())
+        .filter(|value| !value.is_empty());
+    let preserve_sandbox =
+        resolve_preserve_sandbox(args.preserve_sandbox, run_cfg.as_ref(), &run_defaults);
+    let setup_commands: Vec<String> = run_cfg
+        .as_ref()
+        .and_then(|c| c.setup.as_ref())
+        .or(run_defaults.setup.as_ref())
+        .map(|s| s.commands.clone())
+        .unwrap_or_default();
 
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
@@ -2522,7 +2467,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_workflow_with_project_config_resolves_workflow_toml_settings() {
+    fn load_workflow_source_input_resolves_workflow_toml_settings() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("workflow.fabro"),
@@ -2579,26 +2524,36 @@ include = ["*.md"]
             run_id: None,
         };
 
-        let styles = Styles::new(false);
-        let prepared = prepare_workflow_with_project_config(
-            &args,
-            FabroConfig::default(),
-            &styles,
-            true,
-            false,
+        let source_input =
+            load_workflow_source_input(&args, FabroConfig::default(), false).unwrap();
+        let validated = fabro_workflows::operations::validate(
+            &source_input.raw_source,
+            fabro_workflows::operations::ValidateOptions {
+                base_dir: Some(dir.path().to_path_buf()),
+                config: Some(source_input.config.clone()),
+                goal_override: source_input.goal_override.clone(),
+                ..Default::default()
+            },
         )
         .unwrap();
 
-        assert_eq!(prepared.graph().name, "smoke");
-        assert_eq!(prepared.graph().goal(), "toml goal");
-        assert_eq!(prepared.sandbox_provider, SandboxProvider::Docker);
-        assert_eq!(prepared.model, "gpt-5.2");
-        assert_eq!(prepared.provider.as_deref(), Some("openai"));
+        assert_eq!(validated.graph().name, "smoke");
+        assert_eq!(validated.graph().goal(), "toml goal");
+        let (model, provider) = resolve_model_provider(
+            None,
+            None,
+            Some(&source_input.config),
+            &source_input.run_defaults,
+            validated.graph(),
+        );
+        assert_eq!(model, "gpt-5.2");
+        assert_eq!(provider.as_deref(), Some("openai"));
+        let sandbox_provider =
+            resolve_sandbox_provider(None, Some(&source_input.config), &source_input.run_defaults)
+                .unwrap();
+        assert_eq!(sandbox_provider, SandboxProvider::Docker);
 
-        let run_cfg = prepared
-            .run_cfg
-            .as_ref()
-            .expect("run config should be loaded");
+        let run_cfg = &source_input.config;
         assert_eq!(
             run_cfg
                 .setup
@@ -2622,42 +2577,6 @@ include = ["*.md"]
                 .include,
             vec!["*.md".to_string()]
         );
-    }
-
-    #[test]
-    fn apply_goal_override_cli_wins_over_toml() {
-        use fabro_graphviz::graph::{AttrValue, Graph};
-        let mut graph = Graph::new("test");
-        graph.attrs.insert(
-            "goal".to_string(),
-            AttrValue::String("original".to_string()),
-        );
-        apply_goal_override(&mut graph, Some("CLI goal"), Some("TOML goal"));
-        assert_eq!(graph.goal(), "CLI goal");
-    }
-
-    #[test]
-    fn apply_goal_override_toml_wins_over_dot() {
-        use fabro_graphviz::graph::{AttrValue, Graph};
-        let mut graph = Graph::new("test");
-        graph.attrs.insert(
-            "goal".to_string(),
-            AttrValue::String("original".to_string()),
-        );
-        apply_goal_override(&mut graph, None, Some("TOML goal"));
-        assert_eq!(graph.goal(), "TOML goal");
-    }
-
-    #[test]
-    fn apply_goal_override_noop_when_none() {
-        use fabro_graphviz::graph::{AttrValue, Graph};
-        let mut graph = Graph::new("test");
-        graph.attrs.insert(
-            "goal".to_string(),
-            AttrValue::String("original".to_string()),
-        );
-        apply_goal_override(&mut graph, None, None);
-        assert_eq!(graph.goal(), "original");
     }
 
     #[test]

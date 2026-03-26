@@ -1,6 +1,7 @@
 use std::fmt;
 
 use fabro_llm::error::{ProviderErrorKind, SdkError};
+use fabro_validate::Diagnostic;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -205,6 +206,9 @@ pub enum FabroError {
     #[error("Validation error: {0}")]
     Validation(String),
 
+    #[error("Validation failed")]
+    ValidationFailed { diagnostics: Vec<Diagnostic> },
+
     #[error("Engine error: {message}")]
     Engine {
         message: String,
@@ -267,6 +271,7 @@ impl FabroError {
             Self::Llm(sdk_err) => sdk_err.retryable(),
             Self::Parse(_)
             | Self::Validation(_)
+            | Self::ValidationFailed { .. }
             | Self::Stylesheet(_)
             | Self::Checkpoint(_)
             | Self::Cancelled => false,
@@ -280,9 +285,11 @@ impl FabroError {
             Self::Cancelled => FailureCategory::Canceled,
             Self::Llm(sdk_err) => classify_sdk_error(sdk_err),
             Self::Io(_) => FailureCategory::TransientInfra,
-            Self::Parse(_) | Self::Validation(_) | Self::Stylesheet(_) | Self::Checkpoint(_) => {
-                FailureCategory::Deterministic
-            }
+            Self::Parse(_)
+            | Self::Validation(_)
+            | Self::ValidationFailed { .. }
+            | Self::Stylesheet(_)
+            | Self::Checkpoint(_) => FailureCategory::Deterministic,
             Self::Handler { failure_class, .. } | Self::Engine { failure_class, .. } => {
                 *failure_class
             }
@@ -361,6 +368,21 @@ mod tests {
     }
 
     #[test]
+    fn validation_failed_display() {
+        let err = FabroError::ValidationFailed {
+            diagnostics: vec![Diagnostic {
+                rule: "test".to_string(),
+                severity: fabro_validate::Severity::Error,
+                message: "missing start node".to_string(),
+                node_id: None,
+                edge: None,
+                fix: None,
+            }],
+        };
+        assert_eq!(err.to_string(), "Validation failed");
+    }
+
+    #[test]
     fn engine_error_display() {
         let err = FabroError::engine("no outgoing edge");
         assert_eq!(err.to_string(), "Engine error: no outgoing edge");
@@ -416,6 +438,10 @@ mod tests {
     fn is_retryable_terminal_errors() {
         assert!(!FabroError::Parse("bad".to_string()).is_retryable());
         assert!(!FabroError::Validation("bad".to_string()).is_retryable());
+        assert!(!FabroError::ValidationFailed {
+            diagnostics: vec![]
+        }
+        .is_retryable());
         assert!(!FabroError::Stylesheet("bad".to_string()).is_retryable());
         assert!(!FabroError::Checkpoint("bad".to_string()).is_retryable());
     }
@@ -1519,6 +1545,16 @@ mod tests {
         let errors: Vec<FabroError> = vec![
             FabroError::Parse("bad".into()),
             FabroError::Validation("bad".into()),
+            FabroError::ValidationFailed {
+                diagnostics: vec![Diagnostic {
+                    rule: "test".into(),
+                    severity: fabro_validate::Severity::Error,
+                    message: "bad".into(),
+                    node_id: None,
+                    edge: None,
+                    fix: None,
+                }],
+            },
             FabroError::engine("engine err"),
             FabroError::handler("handler err"),
             FabroError::Llm(SdkError::Network {

@@ -123,7 +123,6 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use async_trait::async_trait;
-    use chrono::Utc;
     use fabro_agent::{DirEntry, ExecResult, GrepOptions, LocalSandbox, Sandbox};
     use fabro_config::config::FabroConfig;
     use fabro_graphviz::graph::{Graph, Node};
@@ -136,8 +135,6 @@ mod tests {
     use crate::handler::start::StartHandler;
     use crate::handler::{Handler, HandlerRegistry};
     use crate::outcome::Outcome;
-    use crate::pipeline::PersistOptions;
-    use crate::records::RunRecord;
     use crate::run_settings::{LifecycleConfig, RunSettings};
 
     const MINIMAL_DOT: &str = r#"digraph Test {
@@ -344,25 +341,19 @@ mod tests {
     }
 
     fn persisted_workflow(dot: &str, run_dir: &std::path::Path) -> Persisted {
-        let validated =
-            crate::operations::create(dot, crate::operations::CreateOptions::default()).unwrap();
-        validated.raise_on_errors().unwrap();
-        let graph = validated.graph().clone();
-        crate::pipeline::persist(
-            validated,
-            PersistOptions {
-                run_dir: run_dir.to_path_buf(),
-                run_record: RunRecord {
-                    run_id: "run-test".to_string(),
-                    created_at: Utc::now(),
-                    config: FabroConfig::default(),
-                    graph,
-                    workflow_slug: Some("test".to_string()),
-                    working_directory: std::env::current_dir().unwrap(),
-                    host_repo_path: Some(std::env::current_dir().unwrap().display().to_string()),
-                    base_branch: Some("main".to_string()),
-                    labels: HashMap::new(),
-                },
+        crate::operations::create(
+            dot,
+            crate::operations::RunCreateSettings {
+                config: FabroConfig::default(),
+                run_dir: Some(run_dir.to_path_buf()),
+                run_id: Some("run-test".to_string()),
+                workflow_slug: Some("test".to_string()),
+                labels: std::collections::HashMap::new(),
+                base_branch: Some("main".to_string()),
+                working_directory: Some(std::env::current_dir().unwrap()),
+                host_repo_path: Some(std::env::current_dir().unwrap().display().to_string()),
+                goal_override: None,
+                base_dir: None,
             },
         )
         .unwrap()
