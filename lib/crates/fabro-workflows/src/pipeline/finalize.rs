@@ -10,7 +10,7 @@ use crate::run_settings::RunSettings;
 use crate::run_status::{RunStatus, StatusReason};
 use fabro_hooks::{HookContext, HookEvent, HookRunner};
 
-use super::types::{FinalizeOptions, Finalized, Retroed};
+use super::types::{Concluded, FinalizeOptions, Retroed};
 
 fn emit_run_notice(
     emitter: &EventEmitter,
@@ -216,7 +216,7 @@ async fn cleanup_sandbox(
 pub async fn finalize(
     retroed: Retroed,
     options: &FinalizeOptions,
-) -> Result<Finalized, FabroError> {
+) -> Result<Concluded, FabroError> {
     let Retroed {
         graph,
         outcome,
@@ -239,81 +239,6 @@ pub async fn finalize(
     );
 
     write_finalize_commit(&settings, &options.run_dir).await;
-
-    let mut pr_url = None;
-    if let Some(pr_cfg) = &options.pr_config {
-        if let Err(ref e) = outcome {
-            tracing::debug!(error = %e, "Skipping PR creation: engine returned an error");
-        } else if let Ok(ref result) = outcome {
-            if matches!(
-                result.status,
-                StageStatus::Success | StageStatus::PartialSuccess
-            ) {
-                let diff = tokio::fs::read_to_string(options.run_dir.join("final.patch"))
-                    .await
-                    .unwrap_or_default();
-                if let (
-                    Some(ref base_branch),
-                    Some(run_branch),
-                    Some(ref creds),
-                    Some(ref origin),
-                ) = (
-                    &settings.base_branch,
-                    settings.git.as_ref().and_then(|g| g.run_branch.as_ref()),
-                    &options.github_app,
-                    &options.origin_url,
-                ) {
-                    let auto_merge = if pr_cfg.auto_merge {
-                        Some(crate::pull_request::AutoMergeConfig {
-                            merge_strategy: pr_cfg.merge_strategy,
-                        })
-                    } else {
-                        None
-                    };
-
-                    match crate::pull_request::maybe_open_pull_request(
-                        creds,
-                        origin,
-                        base_branch,
-                        run_branch,
-                        graph.goal(),
-                        &diff,
-                        &options.model,
-                        pr_cfg.draft,
-                        auto_merge,
-                        &options.run_dir,
-                    )
-                    .await
-                    {
-                        Ok(Some(record)) => {
-                            emitter.emit(&WorkflowRunEvent::PullRequestCreated {
-                                pr_url: record.html_url.clone(),
-                                pr_number: record.number,
-                                draft: pr_cfg.draft,
-                            });
-                            pr_url = Some(record.html_url.clone());
-                            if let Err(e) = record.save(&options.run_dir.join("pull_request.json"))
-                            {
-                                tracing::warn!(error = %e, "Failed to save pull_request.json");
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(e) => {
-                            emitter.emit(&WorkflowRunEvent::PullRequestFailed {
-                                error: e.to_string(),
-                            });
-                            emit_run_notice(
-                                &emitter,
-                                RunNoticeLevel::Warn,
-                                "pull_request_failed",
-                                format!("PR creation failed: {e}"),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     if options.preserve_sandbox {
         let info = sandbox.sandbox_info();
@@ -353,12 +278,14 @@ pub async fn finalize(
 
     persist_terminal_outcome(&options.run_dir, &conclusion, run_status, status_reason);
 
-    Ok(Finalized {
-        run_id: settings.run_id,
+    Ok(Concluded {
+        run_id: settings.run_id.clone(),
         outcome,
         conclusion,
         pushed_branch: settings.git.as_ref().and_then(|g| g.run_branch.clone()),
-        pr_url,
+        graph,
+        settings,
+        emitter,
     })
 }
 
@@ -409,7 +336,7 @@ mod tests {
             retro: None,
         };
 
-        let finalized = finalize(
+        let concluded = finalize(
             retroed,
             &FinalizeOptions {
                 run_dir: run_dir.clone(),
@@ -417,10 +344,6 @@ mod tests {
                 workflow_name: "test".to_string(),
                 hook_runner: None,
                 preserve_sandbox: true,
-                pr_config: None,
-                github_app: None,
-                origin_url: None,
-                model: "test-model".to_string(),
                 last_git_sha: None,
             },
         )
@@ -428,6 +351,6 @@ mod tests {
         .unwrap();
 
         assert!(run_dir.join("conclusion.json").exists());
-        assert_eq!(finalized.conclusion.status, StageStatus::Success);
+        assert_eq!(concluded.conclusion.status, StageStatus::Success);
     }
 }

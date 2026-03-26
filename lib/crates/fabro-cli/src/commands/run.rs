@@ -21,7 +21,9 @@ use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::git::GitSyncStatus;
 use fabro_workflows::handler::default_registry;
 use fabro_workflows::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
-use fabro_workflows::operations::{start, StartFinalizeConfig, StartOptions, StartRetroConfig};
+use fabro_workflows::operations::{
+    start, StartFinalizeConfig, StartOptions, StartPullRequestConfig, StartRetroConfig,
+};
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::outcome::{compute_stage_cost, format_cost};
 use fabro_workflows::pipeline::{
@@ -1719,8 +1721,8 @@ async fn run_command_impl(
                 provider: provider_enum,
                 model: model.clone(),
             },
-            finalize: StartFinalizeConfig {
-                preserve_sandbox,
+            finalize: StartFinalizeConfig { preserve_sandbox },
+            pull_request: StartPullRequestConfig {
                 pr_config,
                 github_app: github_app.clone(),
                 origin_url: origin_url.clone(),

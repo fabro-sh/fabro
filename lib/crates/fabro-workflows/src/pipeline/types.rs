@@ -247,6 +247,18 @@ pub struct Retroed {
 
 /// Output of the FINALIZE phase.
 #[non_exhaustive]
+pub struct Concluded {
+    pub run_id: String,
+    pub outcome: Result<Outcome, FabroError>,
+    pub conclusion: Conclusion,
+    pub pushed_branch: Option<String>,
+    pub graph: Graph,
+    pub settings: RunSettings,
+    pub emitter: Arc<EventEmitter>,
+}
+
+/// Output of the PULL_REQUEST phase.
+#[non_exhaustive]
 pub struct Finalized {
     pub run_id: String,
     pub outcome: Result<Outcome, FabroError>,
@@ -285,9 +297,14 @@ pub struct FinalizeOptions {
     pub workflow_name: String,
     pub hook_runner: Option<Arc<HookRunner>>,
     pub preserve_sandbox: bool,
+    pub last_git_sha: Option<String>,
+}
+
+/// Options for the PULL_REQUEST phase.
+pub struct PullRequestOptions {
+    pub run_dir: PathBuf,
     pub pr_config: Option<fabro_config::run::PullRequestConfig>,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
     pub origin_url: Option<String>,
     pub model: String,
-    pub last_git_sha: Option<String>,
 }

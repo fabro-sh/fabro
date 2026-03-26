@@ -15,7 +15,7 @@ use fabro_workflows::event::{EventEmitter, RunNoticeLevel};
 use fabro_workflows::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::operations::{
     create_from_graph, start, RunCreateSettings, StartFinalizeConfig, StartOptions,
-    StartRetroConfig,
+    StartPullRequestConfig, StartRetroConfig,
 };
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::pipeline::{
@@ -1350,6 +1350,8 @@ async fn run_resumed(
             },
             finalize: StartFinalizeConfig {
                 preserve_sandbox: preserve,
+            },
+            pull_request: StartPullRequestConfig {
                 pr_config,
                 github_app: github_app.clone(),
                 origin_url: origin_url.clone(),
