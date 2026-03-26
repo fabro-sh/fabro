@@ -1,37 +1,36 @@
 {
-  "timestamp": "2026-03-26T14:32:36.283670Z",
-  "current_node": "run_tests",
+  "timestamp": "2026-03-26T14:32:36.552281Z",
+  "current_node": "report",
   "completed_nodes": [
     "start",
-    "run_tests"
+    "run_tests",
+    "report"
   ],
   "node_retries": {},
   "context_values": {
     "response.run_tests": "[Simulated] Response for stage: run_tests",
-    "internal.thread_id": "start",
+    "response.report": "[Simulated] Response for stage: report",
+    "internal.thread_id": "run_tests",
     "internal.run_id": "01KMN8ZE99BB4HX3KZA2CA1QGG",
     "graph.rankdir": "LR",
     "thread.start.current_node": "run_tests",
     "internal.work_dir": "/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpv1Ryri/run/worktree",
-    "current.preamble": "Goal: Run tests and report results\n",
+    "current.preamble": "Goal: Run tests and report results\n\n## Completed stages\n- **run_tests**: success\n",
     "outcome": "success",
     "graph.goal": "Run tests and report results",
-    "last_response": "[Simulated] Response for stage: run_tests",
+    "last_response": "[Simulated] Response for stage: report",
+    "thread.run_tests.current_node": "report",
     "internal.fidelity": "compact",
-    "last_stage": "run_tests",
+    "last_stage": "report",
+    "internal.retry_count.report": 0,
     "failure_class": "",
     "internal.retry_count.start": 0,
-    "current_node": "run_tests",
+    "current_node": "report",
     "internal.retry_count.run_tests": 0,
     "failure_signature": "",
     "internal.node_visit_count": 1
   },
   "node_outcomes": {
-    "start": {
-      "status": "success",
-      "notes": "[Simulated] start",
-      "usage": null
-    },
     "run_tests": {
       "status": "success",
       "context_updates": {
@@ -41,11 +40,27 @@
       },
       "notes": "[Simulated] run_tests",
       "usage": null
+    },
+    "report": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "report",
+        "response.report": "[Simulated] Response for stage: report",
+        "last_response": "[Simulated] Response for stage: report"
+      },
+      "notes": "[Simulated] report",
+      "usage": null
+    },
+    "start": {
+      "status": "success",
+      "notes": "[Simulated] start",
+      "usage": null
     }
   },
-  "next_node_id": "report",
+  "next_node_id": "exit",
   "node_visits": {
     "run_tests": 1,
-    "start": 1
+    "start": 1,
+    "report": 1
   }
 }
