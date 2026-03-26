@@ -12,4 +12,6 @@ pub use rewind::{
     build_timeline, find_run_id_by_prefix, load_parallel_map, parse_target, resolve_target, rewind,
     TimelineEntry,
 };
-pub use start::{start, StartFinalizeConfig, StartOptions, StartRetroConfig, Started};
+pub use start::{
+    start, StartFinalizeConfig, StartOptions, StartPullRequestConfig, StartRetroConfig, Started,
+};
