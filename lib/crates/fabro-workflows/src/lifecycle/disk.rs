@@ -15,7 +15,7 @@ use crate::graph::WorkflowNode;
 use crate::outcome::StageUsage;
 use crate::records::Checkpoint;
 use crate::run_dir::{write_node_status, write_start_record};
-use crate::run_settings::RunSettings;
+use crate::run_options::RunOptions;
 
 type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
@@ -25,7 +25,7 @@ pub struct DiskLifecycle {
     pub run_dir: PathBuf,
     pub run_id: String,
     pub graph: Arc<fabro_graphviz::graph::types::Graph>,
-    pub config: Arc<RunSettings>,
+    pub config: Arc<RunOptions>,
     pub emitter: Arc<EventEmitter>,
     pub circuit_breaker: Arc<CircuitBreakerLifecycle>,
     pub checkpoint_enabled: bool,

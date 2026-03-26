@@ -21,7 +21,7 @@ use fabro_workflows::handler::start::StartHandler;
 use fabro_workflows::handler::{Handler, HandlerRegistry};
 use fabro_workflows::outcome::{Outcome, OutcomeExt, StageStatus};
 use fabro_workflows::records::Checkpoint;
-use fabro_workflows::run_settings::{GitCheckpointSettings, RunSettings};
+use fabro_workflows::run_options::{GitCheckpointOptions, RunOptions};
 use fabro_workflows::test_support::WorkflowRunner;
 
 async fn create_env() -> DaytonaSandbox {
@@ -388,7 +388,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), env.clone());
-    let config = RunSettings {
+    let config = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -579,7 +579,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), env.clone());
-    let config = RunSettings {
+    let config = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -591,7 +591,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         github_app: None,
         base_branch: None,
         host_repo_path: Some(dir.path().to_path_buf()),
-        git: Some(GitCheckpointSettings {
+        git: Some(GitCheckpointOptions {
             base_sha: Some(base_sha),
             run_branch: Some(branch_name),
             meta_branch: None,
@@ -765,7 +765,7 @@ async fn daytona_parallel_git_branching_e2e() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), Arc::clone(&env));
 
-    let config = RunSettings {
+    let config = RunOptions {
         config: FabroConfig::default(),
         run_dir: run_tmp.path().to_path_buf(),
         cancel_token: None,
@@ -777,7 +777,7 @@ async fn daytona_parallel_git_branching_e2e() {
         github_app: None,
         base_branch: None,
         host_repo_path: Some(run_tmp.path().to_path_buf()),
-        git: Some(GitCheckpointSettings {
+        git: Some(GitCheckpointOptions {
             base_sha: Some(base_sha),
             run_branch: Some(branch_name),
             meta_branch: None,
@@ -1141,7 +1141,7 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
 
     let meta_branch = MetadataStore::branch_name(&run_id);
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), env.clone());
-    let config = RunSettings {
+    let config = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -1153,7 +1153,7 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         github_app: None,
         base_branch: None,
         host_repo_path: Some(host_repo.path().to_path_buf()),
-        git: Some(GitCheckpointSettings {
+        git: Some(GitCheckpointOptions {
             base_sha: Some(base_sha),
             run_branch: Some(branch_name),
             meta_branch: Some(meta_branch),
@@ -1281,7 +1281,7 @@ async fn daytona_asset_collection() {
     graph.edges.push(Edge::new("start", "create_assets"));
     graph.edges.push(Edge::new("create_assets", "exit"));
 
-    let config = RunSettings {
+    let config = RunOptions {
         config: FabroConfig {
             assets: Some(fabro_config::run::AssetsConfig {
                 include: vec!["test-results/**".to_string()],
@@ -1537,7 +1537,7 @@ async fn daytona_git_push_run_branch_to_origin() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), env.clone());
-    let config = RunSettings {
+    let config = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -1549,7 +1549,7 @@ async fn daytona_git_push_run_branch_to_origin() {
         github_app: None,
         base_branch: None,
         host_repo_path: Some(dir.path().to_path_buf()),
-        git: Some(GitCheckpointSettings {
+        git: Some(GitCheckpointOptions {
             base_sha: Some(base_sha),
             run_branch: Some(branch_name.clone()),
             meta_branch: None,

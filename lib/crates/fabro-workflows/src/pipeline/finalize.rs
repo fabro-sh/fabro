@@ -6,7 +6,7 @@ use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::records::Checkpoint;
 use crate::records::Conclusion;
-use crate::run_settings::RunSettings;
+use crate::run_options::RunOptions;
 use crate::run_status::{RunStatus, StatusReason};
 use fabro_hooks::{HookContext, HookEvent, HookRunner};
 
@@ -151,7 +151,7 @@ pub fn persist_terminal_outcome(
 ///
 /// This captures the last diff.patch (written after the final checkpoint) and retro.json.
 /// Best-effort: errors are logged as warnings.
-pub async fn write_finalize_commit(config: &RunSettings, run_dir: &Path) {
+pub async fn write_finalize_commit(config: &RunOptions, run_dir: &Path) {
     let (Some(meta_branch), Some(repo_path)) = (
         config.git.as_ref().and_then(|g| g.meta_branch.as_ref()),
         config.host_repo_path.as_ref(),
@@ -299,10 +299,10 @@ mod tests {
 
     use super::*;
     use crate::pipeline::types::Retroed;
-    use crate::run_settings::RunSettings;
+    use crate::run_options::RunOptions;
 
-    fn test_settings(run_dir: &std::path::Path) -> RunSettings {
-        RunSettings {
+    fn test_settings(run_dir: &std::path::Path) -> RunOptions {
+        RunOptions {
             config: FabroConfig::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,

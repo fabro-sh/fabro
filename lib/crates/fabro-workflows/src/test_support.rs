@@ -10,7 +10,7 @@ use crate::outcome::Outcome;
 use crate::pipeline;
 use crate::pipeline::types::Initialized;
 use crate::records::Checkpoint;
-use crate::run_settings::RunSettings;
+use crate::run_options::RunOptions;
 
 struct InitializedOptions {
     hook_runner: Option<Arc<fabro_hooks::HookRunner>>,
@@ -23,7 +23,7 @@ fn initialized(
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &fabro_graphviz::graph::Graph,
-    settings: &RunSettings,
+    settings: &RunOptions,
     options: InitializedOptions,
 ) -> Initialized {
     std::fs::create_dir_all(&settings.run_dir).expect("failed to create run dir");
@@ -47,7 +47,7 @@ pub async fn run_graph(
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &fabro_graphviz::graph::Graph,
-    settings: &RunSettings,
+    settings: &RunOptions,
 ) -> Result<Outcome> {
     let executed = pipeline::execute(initialized(
         registry,
@@ -70,7 +70,7 @@ pub async fn run_graph_with_hooks(
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &fabro_graphviz::graph::Graph,
-    settings: &RunSettings,
+    settings: &RunOptions,
     hook_runner: Arc<fabro_hooks::HookRunner>,
     env: Option<HashMap<String, String>>,
 ) -> Result<Outcome> {
@@ -95,7 +95,7 @@ pub async fn run_graph_from_checkpoint(
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &fabro_graphviz::graph::Graph,
-    settings: &RunSettings,
+    settings: &RunOptions,
     checkpoint: &Checkpoint,
 ) -> Result<Outcome> {
     let executed = pipeline::execute(initialized(
@@ -137,7 +137,7 @@ impl WorkflowRunner {
     pub async fn run(
         &self,
         graph: &fabro_graphviz::graph::Graph,
-        settings: &RunSettings,
+        settings: &RunOptions,
     ) -> Result<Outcome> {
         let registry = self
             .registry
@@ -158,7 +158,7 @@ impl WorkflowRunner {
     pub async fn run_from_checkpoint(
         &self,
         graph: &fabro_graphviz::graph::Graph,
-        settings: &RunSettings,
+        settings: &RunOptions,
         checkpoint: &Checkpoint,
     ) -> Result<Outcome> {
         let registry = self

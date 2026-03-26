@@ -59,7 +59,7 @@ pub async fn create_run(
 
     let persisted = match fabro_workflows::operations::create(
         &source_input.raw_source,
-        fabro_workflows::operations::RunCreateSettings {
+        fabro_workflows::operations::RunCreateOptions {
             config,
             run_dir: Some(run_dir.clone()),
             run_id: Some(run_id.clone()),

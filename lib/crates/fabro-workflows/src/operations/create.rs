@@ -20,7 +20,7 @@ pub struct ValidateOptions {
     pub goal_override: Option<String>,
 }
 
-pub struct RunCreateSettings {
+pub struct RunCreateOptions {
     pub config: FabroConfig,
     pub run_dir: Option<PathBuf>,
     pub run_id: Option<String>,
@@ -62,7 +62,7 @@ pub fn validate_from_file(path: &Path) -> Result<Validated, FabroError> {
 }
 
 /// Parse, transform, validate, normalize config, and persist a run.
-pub fn create(dot_source: &str, settings: RunCreateSettings) -> Result<Persisted, FabroError> {
+pub fn create(dot_source: &str, settings: RunCreateOptions) -> Result<Persisted, FabroError> {
     let validated = preprocess_and_validate(
         dot_source,
         settings.base_dir.clone(),
@@ -83,7 +83,7 @@ pub fn create(dot_source: &str, settings: RunCreateSettings) -> Result<Persisted
 /// Read a DOT file, apply file inlining from its parent directory, then create.
 pub fn create_from_file(
     path: &Path,
-    mut settings: RunCreateSettings,
+    mut settings: RunCreateOptions,
 ) -> Result<Persisted, FabroError> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| FabroError::Parse(format!("Failed to read {}: {e}", path.display())))?;
@@ -99,7 +99,7 @@ pub fn create_from_file(
 #[doc(hidden)]
 pub fn create_from_graph(
     mut graph: Graph,
-    settings: RunCreateSettings,
+    settings: RunCreateOptions,
 ) -> Result<Persisted, FabroError> {
     if let Some(goal_override) = settings.goal_override.as_deref() {
         apply_goal_override(&mut graph, Some(goal_override));
@@ -150,9 +150,9 @@ fn apply_goal_override(graph: &mut Graph, goal_override: Option<&str>) {
 
 fn persist_validated(
     validated: Validated,
-    settings: RunCreateSettings,
+    settings: RunCreateOptions,
 ) -> Result<Persisted, FabroError> {
-    let RunCreateSettings {
+    let RunCreateOptions {
         mut config,
         run_dir,
         run_id,
@@ -419,7 +419,7 @@ mod tests {
         }"#;
         let err = create(
             dot,
-            RunCreateSettings {
+            RunCreateOptions {
                 config: FabroConfig::default(),
                 run_dir: None,
                 run_id: None,
@@ -447,7 +447,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let persisted = create(
             MINIMAL_DOT,
-            RunCreateSettings {
+            RunCreateOptions {
                 config: FabroConfig {
                     llm: Some(fabro_config::run::LlmConfig {
                         model: Some("sonnet".to_string()),

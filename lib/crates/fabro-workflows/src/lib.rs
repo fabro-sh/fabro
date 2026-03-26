@@ -112,7 +112,7 @@ pub mod records;
 mod retry;
 pub(crate) mod run_dir;
 pub mod run_lookup;
-pub mod run_settings;
+pub mod run_options;
 pub mod run_status;
 pub mod sandbox_git;
 #[doc(hidden)]

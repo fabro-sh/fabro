@@ -155,7 +155,7 @@ mod tests {
     use crate::event::{EventEmitter, WorkflowRunEvent};
     use crate::pipeline::types::Executed;
     use crate::records::Checkpoint;
-    use crate::run_settings::RunSettings;
+    use crate::run_options::RunOptions;
 
     fn write_checkpoint(run_dir: &std::path::Path) {
         let context = Context::new();
@@ -176,8 +176,8 @@ mod tests {
         checkpoint.save(&run_dir.join("checkpoint.json")).unwrap();
     }
 
-    fn test_settings(run_dir: &std::path::Path) -> RunSettings {
-        RunSettings {
+    fn test_settings(run_dir: &std::path::Path) -> RunOptions {
+        RunOptions {
             config: FabroConfig::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,

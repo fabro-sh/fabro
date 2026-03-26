@@ -8,7 +8,7 @@ use crate::pipeline::{
     self, FinalizeOptions, Finalized, InitOptions, Persisted, PullRequestOptions, RetroOptions,
 };
 
-pub struct StartRetroConfig {
+pub struct StartRetroOptions {
     pub enabled: bool,
     pub dry_run: bool,
     pub llm_client: Option<fabro_llm::client::Client>,
@@ -16,7 +16,7 @@ pub struct StartRetroConfig {
     pub model: String,
 }
 
-pub struct StartFinalizeConfig {
+pub struct StartFinalizeOptions {
     pub preserve_sandbox: bool,
 }
 
@@ -29,8 +29,8 @@ pub struct StartPullRequestConfig {
 
 pub struct StartOptions {
     pub init: InitOptions,
-    pub retro: StartRetroConfig,
-    pub finalize: StartFinalizeConfig,
+    pub retro: StartRetroOptions,
+    pub finalize: StartFinalizeOptions,
     pub pull_request: StartPullRequestConfig,
 }
 
@@ -145,7 +145,7 @@ mod tests {
     use crate::handler::start::StartHandler;
     use crate::handler::{Handler, HandlerRegistry};
     use crate::outcome::Outcome;
-    use crate::run_settings::{LifecycleConfig, RunSettings};
+    use crate::run_options::{LifecycleOptions, RunOptions};
 
     const MINIMAL_DOT: &str = r#"digraph Test {
         graph [goal="Build feature"]
@@ -353,7 +353,7 @@ mod tests {
     fn persisted_workflow(dot: &str, run_dir: &std::path::Path) -> Persisted {
         crate::operations::create(
             dot,
-            crate::operations::RunCreateSettings {
+            crate::operations::RunCreateOptions {
                 config: FabroConfig::default(),
                 run_dir: Some(run_dir.to_path_buf()),
                 run_id: Some("run-test".to_string()),
@@ -369,8 +369,8 @@ mod tests {
         .unwrap()
     }
 
-    fn test_settings(run_dir: &std::path::Path) -> RunSettings {
-        RunSettings {
+    fn test_settings(run_dir: &std::path::Path) -> RunOptions {
+        RunOptions {
             config: FabroConfig::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,
@@ -399,7 +399,7 @@ mod tests {
         sandbox: Arc<dyn Sandbox>,
         emitter: Arc<EventEmitter>,
         registry: Arc<HandlerRegistry>,
-        lifecycle: LifecycleConfig,
+        lifecycle: LifecycleOptions,
         preserve_sandbox: bool,
     ) -> StartOptions {
         StartOptions {
@@ -410,20 +410,20 @@ mod tests {
                 sandbox,
                 registry,
                 lifecycle,
-                run_settings: test_settings(run_dir),
+                run_options: test_settings(run_dir),
                 hooks: fabro_hooks::HookConfig { hooks: vec![] },
                 sandbox_env: HashMap::new(),
                 checkpoint: None,
                 seed_context: None,
             },
-            retro: StartRetroConfig {
+            retro: StartRetroOptions {
                 enabled: false,
                 dry_run: false,
                 llm_client: None,
                 provider: fabro_llm::Provider::Anthropic,
                 model: "test-model".to_string(),
             },
-            finalize: StartFinalizeConfig { preserve_sandbox },
+            finalize: StartFinalizeOptions { preserve_sandbox },
             pull_request: StartPullRequestConfig {
                 pr_config: None,
                 github_app: None,
@@ -460,7 +460,7 @@ mod tests {
                 sandbox,
                 emitter,
                 registry,
-                LifecycleConfig {
+                LifecycleOptions {
                     setup_commands: vec!["false".to_string()],
                     setup_command_timeout_ms: 1_000,
                     devcontainer_phases: vec![],
@@ -492,7 +492,7 @@ mod tests {
                 sandbox,
                 emitter,
                 registry,
-                LifecycleConfig {
+                LifecycleOptions {
                     setup_commands: vec![],
                     setup_command_timeout_ms: 1_000,
                     devcontainer_phases: vec![],
@@ -531,7 +531,7 @@ mod tests {
                 sandbox,
                 emitter,
                 registry,
-                LifecycleConfig {
+                LifecycleOptions {
                     setup_commands: vec![],
                     setup_command_timeout_ms: 1_000,
                     devcontainer_phases: vec![],

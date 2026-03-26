@@ -6,7 +6,7 @@ use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 
 use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
-use crate::run_settings::GitCheckpointSettings;
+use crate::run_options::GitCheckpointOptions;
 
 use super::types::{InitOptions, Initialized, Persisted};
 
@@ -32,7 +32,7 @@ pub async fn initialize(
     mut options: InitOptions,
 ) -> Result<Initialized, FabroError> {
     let (graph, source, _diagnostics, run_dir, _run_record) = persisted.into_parts();
-    options.run_settings.run_dir = run_dir;
+    options.run_options.run_dir = run_dir;
 
     let hook_runner = if options.hooks.hooks.is_empty() {
         None
@@ -48,7 +48,7 @@ pub async fn initialize(
 
     let hook_ctx = HookContext::new(
         HookEvent::SandboxReady,
-        options.run_settings.run_id.clone(),
+        options.run_options.run_id.clone(),
         graph.name.clone(),
     );
     let decision = run_hooks(
@@ -68,7 +68,7 @@ pub async fn initialize(
     });
 
     let has_run_branch = options
-        .run_settings
+        .run_options
         .git
         .as_ref()
         .and_then(|g| g.run_branch.as_ref())
@@ -76,25 +76,25 @@ pub async fn initialize(
     if !has_run_branch {
         match options
             .sandbox
-            .setup_git_for_run(&options.run_settings.run_id)
+            .setup_git_for_run(&options.run_options.run_id)
             .await
         {
             Ok(Some(info)) => {
                 let base_sha = options
-                    .run_settings
+                    .run_options
                     .git
                     .as_ref()
                     .and_then(|g| g.base_sha.clone())
                     .or(Some(info.base_sha));
-                options.run_settings.git = Some(GitCheckpointSettings {
+                options.run_options.git = Some(GitCheckpointOptions {
                     base_sha,
                     run_branch: Some(info.run_branch.clone()),
                     meta_branch: Some(crate::git::MetadataStore::branch_name(
-                        &options.run_settings.run_id,
+                        &options.run_options.run_id,
                     )),
                 });
-                if options.run_settings.base_branch.is_none() {
-                    options.run_settings.base_branch = info.base_branch;
+                if options.run_options.base_branch.is_none() {
+                    options.run_options.base_branch = info.base_branch;
                 }
             }
             Ok(None) => {}
@@ -173,7 +173,7 @@ pub async fn initialize(
     Ok(Initialized {
         graph,
         source,
-        settings: options.run_settings,
+        settings: options.run_options,
         checkpoint: options.checkpoint,
         seed_context: options.seed_context,
         emitter: options.emitter,
@@ -199,7 +199,7 @@ mod tests {
     use crate::handler::default_registry;
     use crate::pipeline::types::PersistOptions;
     use crate::records::RunRecord;
-    use crate::run_settings::RunSettings;
+    use crate::run_options::RunOptions;
 
     fn simple_graph() -> (Graph, String) {
         let source = r#"digraph test {
@@ -225,8 +225,8 @@ mod tests {
         (graph, source)
     }
 
-    fn test_settings(run_dir: &std::path::Path) -> RunSettings {
-        RunSettings {
+    fn test_settings(run_dir: &std::path::Path) -> RunOptions {
+        RunOptions {
             config: FabroConfig::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,
@@ -283,12 +283,12 @@ mod tests {
                 emitter,
                 sandbox,
                 registry,
-                lifecycle: crate::run_settings::LifecycleConfig {
+                lifecycle: crate::run_options::LifecycleOptions {
                     setup_commands: vec![],
                     setup_command_timeout_ms: 1_000,
                     devcontainer_phases: vec![],
                 },
-                run_settings: test_settings(&run_dir),
+                run_options: test_settings(&run_dir),
                 hooks: fabro_hooks::HookConfig { hooks: vec![] },
                 sandbox_env: HashMap::from([("TEST_KEY".to_string(), "value".to_string())]),
                 checkpoint: None,
@@ -328,12 +328,12 @@ mod tests {
                 emitter,
                 sandbox,
                 registry,
-                lifecycle: crate::run_settings::LifecycleConfig {
+                lifecycle: crate::run_options::LifecycleOptions {
                     setup_commands: vec![],
                     setup_command_timeout_ms: 1_000,
                     devcontainer_phases: vec![],
                 },
-                run_settings: test_settings(&run_dir),
+                run_options: test_settings(&run_dir),
                 hooks: fabro_hooks::HookConfig { hooks: vec![] },
                 sandbox_env: HashMap::new(),
                 checkpoint: None,
@@ -387,12 +387,12 @@ mod tests {
                 emitter,
                 sandbox,
                 registry,
-                lifecycle: crate::run_settings::LifecycleConfig {
+                lifecycle: crate::run_options::LifecycleOptions {
                     setup_commands: vec![],
                     setup_command_timeout_ms: 1_000,
                     devcontainer_phases: vec![],
                 },
-                run_settings: test_settings(&wrong_run_dir),
+                run_options: test_settings(&wrong_run_dir),
                 hooks: fabro_hooks::HookConfig { hooks: vec![] },
                 sandbox_env: HashMap::new(),
                 checkpoint: None,

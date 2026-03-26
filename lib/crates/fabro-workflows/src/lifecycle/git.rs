@@ -15,7 +15,7 @@ use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageStatus, StageUsage};
 use crate::run_dir::node_dir;
-use crate::run_settings::RunSettings;
+use crate::run_options::RunOptions;
 use crate::sandbox_git::{git_checkpoint, git_diff, git_push_host};
 
 type WfRunState = RunState<Option<StageUsage>>;
@@ -35,7 +35,7 @@ pub struct GitLifecycle {
     pub emitter: Arc<EventEmitter>,
     pub run_dir: PathBuf,
     pub run_id: String,
-    pub config: Arc<RunSettings>,
+    pub config: Arc<RunOptions>,
     pub start_node_id: Option<String>,
     // Cross-lifecycle data (shared with EventLifecycle)
     pub checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,

@@ -24,11 +24,11 @@ use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_workflows::context::Context;
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
 use fabro_workflows::handler::HandlerRegistry;
-use fabro_workflows::operations::{self, RunCreateSettings};
+use fabro_workflows::operations::{self, RunCreateOptions};
 use fabro_workflows::pipeline::{self, InitOptions, Persisted};
 use fabro_workflows::records::Checkpoint;
-use fabro_workflows::run_settings::LifecycleConfig;
-use fabro_workflows::run_settings::RunSettings;
+use fabro_workflows::run_options::LifecycleOptions;
+use fabro_workflows::run_options::RunOptions;
 
 pub use fabro_types::{
     ApiQuestion, ApiQuestionOption, PaginatedRunList, PaginationMeta,
@@ -489,7 +489,7 @@ async fn start_run(
     };
     let persisted = match operations::create(
         &req.dot_source,
-        RunCreateSettings {
+        RunCreateOptions {
             config,
             run_dir: Some(run_dir.clone()),
             run_id: Some(run_id.clone()),
@@ -653,7 +653,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         }
     };
     let run_record = persisted.run_record().clone();
-    let config = RunSettings {
+    let config = RunOptions {
         config: run_record.config,
         run_dir: run_dir.clone(),
         cancel_token: Some(cancel_token),
@@ -685,12 +685,12 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
                     emitter,
                     sandbox,
                     registry,
-                    lifecycle: LifecycleConfig {
+                    lifecycle: LifecycleOptions {
                         setup_commands: Vec::new(),
                         setup_command_timeout_ms: 300_000,
                         devcontainer_phases: Vec::new(),
                     },
-                    run_settings: config,
+                    run_options: config,
                     hooks: fabro_hooks::HookConfig { hooks },
                     sandbox_env: HashMap::new(),
                     checkpoint: None,
