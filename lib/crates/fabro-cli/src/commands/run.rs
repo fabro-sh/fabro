@@ -834,6 +834,31 @@ pub async fn resume_from_record(
     run_command_impl(args, styles, github_app, git_author, Some(record_run), true).await
 }
 
+fn ensure_resume_target_is_not_already_successful(run_dir: &Path) -> anyhow::Result<()> {
+    const MESSAGE: &str = "run already finished successfully — nothing to resume";
+
+    if let Ok(record) =
+        fabro_workflows::run_status::RunStatusRecord::load(&run_dir.join("status.json"))
+    {
+        if record.status == fabro_workflows::run_status::RunStatus::Succeeded {
+            bail!(MESSAGE);
+        }
+    }
+
+    if let Ok(conclusion) =
+        fabro_workflows::records::Conclusion::load(&run_dir.join("conclusion.json"))
+    {
+        if matches!(
+            conclusion.status,
+            StageStatus::Success | StageStatus::PartialSuccess | StageStatus::Skipped
+        ) {
+            bail!(MESSAGE);
+        }
+    }
+
+    Ok(())
+}
+
 /// Execute a full workflow run.
 ///
 /// # Errors
@@ -906,6 +931,9 @@ async fn run_command_impl(
         .run_dir
         .clone()
         .unwrap_or_else(|| default_run_dir(&run_id, dry_run_flag));
+    if resume {
+        ensure_resume_target_is_not_already_successful(&run_dir)?;
+    }
     let cached_run_restart = match &workflow {
         WorkflowState::Source(_) if !from_record => {
             let workflow_path = args.workflow.as_ref().unwrap();
