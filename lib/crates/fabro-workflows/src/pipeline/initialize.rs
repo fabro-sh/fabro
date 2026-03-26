@@ -197,7 +197,7 @@ mod tests {
 
     use super::*;
     use crate::handler::default_registry;
-    use crate::pipeline::PersistOptions;
+    use crate::pipeline::types::PersistOptions;
     use crate::records::RunRecord;
     use crate::run_settings::RunSettings;
 

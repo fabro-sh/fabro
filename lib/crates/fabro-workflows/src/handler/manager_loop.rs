@@ -10,7 +10,7 @@ use crate::condition::evaluate_condition;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
-use crate::operations::{create, create_from_file, CreateOptions};
+use crate::operations::{validate, validate_from_file, ValidateOptions};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline;
 use crate::pipeline::types::Initialized;
@@ -54,7 +54,7 @@ fn parse_child_graph(node: &Node) -> Result<Graph, FabroError> {
         .get("stack.child_dot_source")
         .and_then(|v| v.as_str())
     {
-        let validated = create(dot, CreateOptions::default())?;
+        let validated = validate(dot, ValidateOptions::default())?;
         validated.raise_on_errors()?;
         let (graph, _, _) = validated.into_parts();
         return Ok(graph);
@@ -65,7 +65,7 @@ fn parse_child_graph(node: &Node) -> Result<Graph, FabroError> {
         .or_else(|| node.attrs.get("stack.child_dotfile"))
         .and_then(|v| v.as_str())
     {
-        let validated = create_from_file(std::path::Path::new(path))?;
+        let validated = validate_from_file(std::path::Path::new(path))?;
         validated.raise_on_errors()?;
         let (graph, _, _) = validated.into_parts();
         return Ok(graph);

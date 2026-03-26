@@ -5,7 +5,7 @@ mod parse;
 mod persist;
 mod retro;
 mod transform;
-pub mod types;
+pub(crate) mod types;
 mod validate;
 
 pub use execute::execute;
@@ -15,8 +15,11 @@ pub use finalize::{
 };
 pub use initialize::initialize;
 pub use parse::parse;
-pub use persist::persist;
+pub(crate) use persist::persist;
 pub use retro::{retro, run_retro};
 pub use transform::transform;
-pub use types::*;
+pub use types::{
+    Executed, FinalizeOptions, Finalized, InitOptions, Initialized, Parsed, Persisted,
+    RetroOptions, Retroed, TransformOptions, Transformed, Validated,
+};
 pub use validate::validate;

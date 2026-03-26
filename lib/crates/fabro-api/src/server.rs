@@ -24,8 +24,8 @@ use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_workflows::context::Context;
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
 use fabro_workflows::handler::HandlerRegistry;
-use fabro_workflows::operations::{self, CreateOptions};
-use fabro_workflows::pipeline::{self, InitOptions, PersistOptions, Persisted};
+use fabro_workflows::operations::{self, RunCreateSettings};
+use fabro_workflows::pipeline::{self, InitOptions, Persisted};
 use fabro_workflows::records::Checkpoint;
 use fabro_workflows::run_settings::LifecycleConfig;
 use fabro_workflows::run_settings::RunSettings;
@@ -475,58 +475,60 @@ async fn start_run(
     State(state): State<Arc<AppState>>,
     Json(req): Json<StartRunRequest>,
 ) -> Response {
-    // Parse and persist the DOT source.
-    let validated = match operations::create(&req.dot_source, CreateOptions::default()) {
-        Ok(validated) => {
-            if let Err(e) = validated.raise_on_errors() {
-                return ApiError::bad_request(e.to_string()).into_response();
-            }
-            validated
-        }
-        Err(e) => {
-            return ApiError::bad_request(e.to_string()).into_response();
-        }
-    };
-
     let run_id = ulid::Ulid::new().to_string();
     info!(run_id = %run_id, "Run queued");
-
-    let created_at = chrono::Utc::now();
     let run_dir = std::env::temp_dir().join(format!("fabro-{}", uuid::Uuid::new_v4()));
-
-    let run_record = fabro_workflows::records::RunRecord {
-        run_id: run_id.clone(),
-        created_at,
-        config: fabro_config::config::FabroConfig {
-            dry_run: Some(state.dry_run),
-            hooks: state.hooks.clone(),
-            sandbox: Some(fabro_config::sandbox::SandboxConfig {
-                provider: Some("local".to_string()),
-                ..Default::default()
-            }),
+    let config = fabro_config::config::FabroConfig {
+        dry_run: Some(state.dry_run),
+        hooks: state.hooks.clone(),
+        sandbox: Some(fabro_config::sandbox::SandboxConfig {
+            provider: Some("local".to_string()),
             ..Default::default()
-        },
-        graph: validated.graph().clone(),
-        workflow_slug: None,
-        working_directory: std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from(".")),
-        host_repo_path: None,
-        base_branch: None,
-        labels: std::collections::HashMap::new(),
+        }),
+        ..Default::default()
     };
-    if let Err(err) = fabro_workflows::pipeline::persist(
-        validated,
-        PersistOptions {
-            run_dir: run_dir.clone(),
-            run_record,
+    let persisted = match operations::create(
+        &req.dot_source,
+        RunCreateSettings {
+            config,
+            run_dir: Some(run_dir.clone()),
+            run_id: Some(run_id.clone()),
+            workflow_slug: None,
+            labels: std::collections::HashMap::new(),
+            base_branch: None,
+            working_directory: Some(
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            ),
+            host_repo_path: None,
+            goal_override: None,
+            base_dir: None,
         },
     ) {
-        return ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to persist run state: {err}"),
-        )
-        .into_response();
-    }
+        Ok(persisted) => persisted,
+        Err(ref err @ fabro_workflows::error::FabroError::ValidationFailed { ref diagnostics }) => {
+            let message = if diagnostics.is_empty() {
+                err.to_string()
+            } else {
+                diagnostics
+                    .iter()
+                    .map(|diagnostic| diagnostic.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            };
+            return ApiError::bad_request(message).into_response();
+        }
+        Err(err @ fabro_workflows::error::FabroError::Parse(_)) => {
+            return ApiError::bad_request(err.to_string()).into_response();
+        }
+        Err(err) => {
+            return ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to persist run state: {err}"),
+            )
+            .into_response();
+        }
+    };
+    let created_at = persisted.run_record().created_at;
 
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");

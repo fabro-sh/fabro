@@ -356,7 +356,7 @@ async fn run_engine_entrypoint(
     }
 
     // Use run_from_record: loads config + graph directly from persisted state,
-    // skipping prepare_workflow() entirely. No TOML/DOT re-parsing needed.
+    // skipping workflow source loading and preprocessing entirely.
     match commands::run::run_from_record(
         persisted,
         run_dir.clone(),

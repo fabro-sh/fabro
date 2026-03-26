@@ -1,69 +1,14 @@
 use std::path::PathBuf;
 
-use chrono::Utc;
 use fabro_config::config::FabroConfig;
 use fabro_sandbox::SandboxProvider;
-use fabro_workflows::pipeline::PersistOptions;
-use fabro_workflows::records::RunRecord;
 
 use super::run::{
-    cached_graph_path, default_run_dir, prepare_workflow, write_run_config_snapshot, RunArgs,
+    apply_execution_overrides, cached_graph_path, default_run_dir, load_workflow_source_input,
+    parse_labels, print_diagnostics_from_error, print_workflow_report_from_persisted,
+    resolve_sandbox_provider, write_run_config_snapshot, ExecutionOverrides, RunArgs,
 };
 use fabro_util::terminal::Styles;
-
-/// CLI flag overrides for config normalization.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct CliFlags {
-    pub dry_run: bool,
-    pub auto_approve: bool,
-    pub no_retro: bool,
-    pub verbose: bool,
-    pub preserve_sandbox: bool,
-}
-
-impl From<&RunArgs> for CliFlags {
-    fn from(args: &RunArgs) -> Self {
-        Self {
-            dry_run: args.dry_run,
-            auto_approve: args.auto_approve,
-            no_retro: args.no_retro,
-            verbose: args.verbose,
-            preserve_sandbox: args.preserve_sandbox,
-        }
-    }
-}
-
-/// Build a normalized FabroConfig that captures the full execution intent.
-///
-/// Folds resolved model/provider/sandbox/goal and CLI flag overrides back into
-/// a single FabroConfig so the RunRecord is self-contained.
-pub(crate) fn normalize_config(
-    run_cfg: Option<&FabroConfig>,
-    run_defaults: &FabroConfig,
-    model: &str,
-    provider: Option<&str>,
-    sandbox_provider: SandboxProvider,
-    graph: &fabro_graphviz::graph::Graph,
-    flags: CliFlags,
-) -> FabroConfig {
-    let mut config = run_cfg.cloned().unwrap_or_else(|| run_defaults.clone());
-    // Ensure resolved values are written back into config
-    config.llm.get_or_insert_default().model = Some(model.to_string());
-    config.llm.get_or_insert_default().provider = provider.map(String::from);
-    config.sandbox.get_or_insert_default().provider = Some(sandbox_provider.to_string());
-    let goal = graph.goal().to_string();
-    config.goal = if goal.is_empty() { None } else { Some(goal) };
-    // CLI flag overrides
-    config.dry_run = Some(flags.dry_run);
-    config.auto_approve = Some(flags.auto_approve);
-    config.no_retro = Some(flags.no_retro);
-    config.verbose = Some(flags.verbose);
-    if flags.preserve_sandbox {
-        config.sandbox.get_or_insert_default().preserve = Some(true);
-    }
-    config.pull_request = config.pull_request.take().filter(|p| p.enabled);
-    config
-}
 
 /// Create a workflow run: allocate run directory, persist RunRecord, return (run_id, run_dir).
 ///
@@ -74,10 +19,7 @@ pub async fn create_run(
     styles: &Styles,
     quiet: bool,
 ) -> anyhow::Result<(String, PathBuf)> {
-    let prep = prepare_workflow(args, run_defaults, styles, quiet)?;
-    let dot_source = prep.source().to_string();
-    let graph = prep.graph().clone();
-
+    let source_input = load_workflow_source_input(args, run_defaults, true)?;
     let run_id = args
         .run_id
         .clone()
@@ -86,50 +28,72 @@ pub async fn create_run(
         .run_dir
         .clone()
         .unwrap_or_else(|| default_run_dir(&run_id, args.dry_run));
-
-    // Build normalized config and RunRecord
     let working_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let labels: std::collections::HashMap<String, String> = args
-        .label
-        .iter()
-        .filter_map(|s| s.split_once('='))
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
-
-    let config = normalize_config(
-        prep.run_cfg.as_ref(),
-        &prep.run_defaults,
-        &prep.model,
-        prep.provider.as_deref(),
-        prep.sandbox_provider,
-        &graph,
-        CliFlags::from(args),
-    );
-
     let base_branch = fabro_sandbox::daytona::detect_repo_info(&working_directory)
         .ok()
         .and_then(|(_, branch)| branch);
-    let record = RunRecord {
-        run_id: run_id.clone(),
-        created_at: Utc::now(),
-        config,
-        graph,
-        workflow_slug: prep.workflow_slug.clone(),
-        working_directory: working_directory.clone(),
-        host_repo_path: Some(working_directory.to_string_lossy().to_string()),
-        base_branch,
-        labels,
+    let sandbox_provider = if args.dry_run {
+        SandboxProvider::Local
+    } else {
+        resolve_sandbox_provider(
+            args.sandbox.map(Into::into),
+            Some(&source_input.config),
+            &source_input.run_defaults,
+        )?
     };
-    fabro_workflows::pipeline::persist(
-        prep.validated,
-        PersistOptions {
-            run_dir: run_dir.clone(),
-            run_record: record,
+
+    let mut config = source_input.config.clone();
+    apply_execution_overrides(
+        &mut config,
+        &ExecutionOverrides {
+            dry_run: args.dry_run,
+            auto_approve: args.auto_approve,
+            no_retro: args.no_retro,
+            verbose: args.verbose,
+            preserve_sandbox: args.preserve_sandbox,
+            model: args.model.as_deref(),
+            provider: args.provider.as_deref(),
+            sandbox_provider,
         },
-    )?;
+    );
+
+    let persisted = match fabro_workflows::operations::create(
+        &source_input.raw_source,
+        fabro_workflows::operations::RunCreateSettings {
+            config,
+            run_dir: Some(run_dir.clone()),
+            run_id: Some(run_id.clone()),
+            workflow_slug: source_input.workflow_slug.clone(),
+            labels: parse_labels(&args.label),
+            base_branch,
+            working_directory: Some(working_directory.clone()),
+            host_repo_path: Some(working_directory.to_string_lossy().to_string()),
+            goal_override: source_input.goal_override.clone(),
+            base_dir: Some(
+                source_input
+                    .dot_path
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .to_path_buf(),
+            ),
+        },
+    ) {
+        Ok(persisted) => persisted,
+        Err(fabro_workflows::error::FabroError::ValidationFailed { diagnostics }) => {
+            if !quiet {
+                print_diagnostics_from_error(&diagnostics, styles);
+            }
+            anyhow::bail!("Validation failed");
+        }
+        Err(err) => return Err(err.into()),
+    };
+
+    if !quiet {
+        print_workflow_report_from_persisted(&persisted, &source_input.dot_path, styles);
+    }
 
     // Write CLI-owned debug and status artifacts after the run has been persisted.
-    tokio::fs::write(cached_graph_path(&run_dir), &dot_source).await?;
+    tokio::fs::write(cached_graph_path(&run_dir), &source_input.raw_source).await?;
     tokio::fs::write(run_dir.join("id.txt"), &run_id).await?;
     std::fs::File::create(run_dir.join("progress.jsonl"))?;
     fabro_workflows::run_status::write_run_status(
@@ -137,7 +101,7 @@ pub async fn create_run(
         fabro_workflows::run_status::RunStatus::Submitted,
         None,
     );
-    write_run_config_snapshot(&run_dir, prep.workflow_toml_path.as_deref()).await?;
+    write_run_config_snapshot(&run_dir, source_input.workflow_toml_path.as_deref()).await?;
 
     Ok((run_id, run_dir))
 }
