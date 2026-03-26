@@ -653,7 +653,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         }
     };
     let run_record = persisted.run_record().clone();
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: run_record.config,
         run_dir: run_dir.clone(),
         cancel_token: Some(cancel_token),
@@ -673,7 +673,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         let sandbox = Arc::clone(&sandbox);
         let registry = Arc::new(registry);
         let run_id = run_id.clone();
-        let config = config.clone();
+        let run_options = run_options.clone();
         let hooks = state.hooks.clone();
         let dry_run = state.dry_run;
         async move {
@@ -690,7 +690,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
                         setup_command_timeout_ms: 300_000,
                         devcontainer_phases: Vec::new(),
                     },
-                    run_options: config,
+                    run_options,
                     hooks: fabro_hooks::HookConfig { hooks },
                     sandbox_env: HashMap::new(),
                     checkpoint: None,
@@ -719,13 +719,13 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
     };
 
     // Save final checkpoint
-    let checkpoint = Checkpoint::load(&config.run_dir.join("checkpoint.json")).ok();
+    let checkpoint = Checkpoint::load(&run_options.run_dir.join("checkpoint.json")).ok();
 
     // Auto-derive retro and accumulate aggregate usage
     if let Some(ref cp) = checkpoint {
         let failed = result.is_err();
         let completed_stages = fabro_workflows::build_completed_stages(cp, failed);
-        let stage_durations = fabro_retro::retro::extract_stage_durations(&config.run_dir);
+        let stage_durations = fabro_retro::retro::extract_stage_durations(&run_options.run_dir);
         let retro = fabro_retro::retro::derive_retro(
             &run_id,
             "workflow",
@@ -734,7 +734,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
             0,
             &stage_durations,
         );
-        let _ = retro.save(&config.run_dir);
+        let _ = retro.save(&run_options.run_dir);
 
         // Accumulate aggregate usage
         let mut agg = state
@@ -778,7 +778,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         if let Some(ctx) = final_context {
             managed_run.context = Some(ctx);
         }
-        managed_run.run_dir = Some(config.run_dir.clone());
+        managed_run.run_dir = Some(run_options.run_dir.clone());
         managed_run.event_tx = None;
     }
     drop(runs);

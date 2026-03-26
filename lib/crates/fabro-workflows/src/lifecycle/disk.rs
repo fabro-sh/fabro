@@ -25,7 +25,7 @@ pub struct DiskLifecycle {
     pub run_dir: PathBuf,
     pub run_id: String,
     pub graph: Arc<fabro_graphviz::graph::types::Graph>,
-    pub config: Arc<RunOptions>,
+    pub run_options: Arc<RunOptions>,
     pub emitter: Arc<EventEmitter>,
     pub circuit_breaker: Arc<CircuitBreakerLifecycle>,
     pub checkpoint_enabled: bool,
@@ -39,7 +39,7 @@ impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
         _state: &WfRunState,
     ) -> fabro_core::error::Result<()> {
         // Write start.json
-        write_start_record(&self.run_dir, &self.config);
+        write_start_record(&self.run_dir, &self.run_options);
         // Write run status as Running
         crate::run_status::write_run_status(
             &self.run_dir,

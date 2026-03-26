@@ -143,7 +143,7 @@ impl Handler for SubWorkflowHandler {
         let child_cancel = Arc::clone(&cancel_token);
 
         let git_state = services.git_state();
-        let child_config = RunOptions {
+        let child_run_options = RunOptions {
             config: fabro_config::FabroConfig::default(),
             run_dir: child_logs,
             cancel_token: Some(cancel_token),
@@ -184,7 +184,7 @@ impl Handler for SubWorkflowHandler {
             let initialized = Initialized {
                 graph: child_graph,
                 source: String::new(),
-                settings: child_config,
+                run_options: child_run_options,
                 checkpoint: None,
                 seed_context: Some(child_context),
                 emitter,

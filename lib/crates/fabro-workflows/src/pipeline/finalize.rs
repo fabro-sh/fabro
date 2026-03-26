@@ -151,15 +151,18 @@ pub fn persist_terminal_outcome(
 ///
 /// This captures the last diff.patch (written after the final checkpoint) and retro.json.
 /// Best-effort: errors are logged as warnings.
-pub async fn write_finalize_commit(config: &RunOptions, run_dir: &Path) {
+pub async fn write_finalize_commit(run_options: &RunOptions, run_dir: &Path) {
     let (Some(meta_branch), Some(repo_path)) = (
-        config.git.as_ref().and_then(|g| g.meta_branch.as_ref()),
-        config.host_repo_path.as_ref(),
+        run_options
+            .git
+            .as_ref()
+            .and_then(|g| g.meta_branch.as_ref()),
+        run_options.host_repo_path.as_ref(),
     ) else {
         return;
     };
 
-    let store = crate::git::MetadataStore::new(repo_path, &config.git_author);
+    let store = crate::git::MetadataStore::new(repo_path, &run_options.git_author);
     let mut entries = crate::git::scan_node_files(run_dir);
     if let Ok(retro_bytes) = std::fs::read(run_dir.join("retro.json")) {
         entries.push(("retro.json".to_string(), retro_bytes));
@@ -168,14 +171,19 @@ pub async fn write_finalize_commit(config: &RunOptions, run_dir: &Path) {
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_slice()))
         .collect();
-    if let Err(e) = store.write_files(&config.run_id, &refs, "finalize run") {
+    if let Err(e) = store.write_files(&run_options.run_id, &refs, "finalize run") {
         tracing::warn!(error = %e, "Failed to write finalize commit to metadata branch");
         return;
     }
 
     let refspec = format!("refs/heads/{meta_branch}");
-    crate::sandbox_git::git_push_host(repo_path, &refspec, &config.github_app, "finalize metadata")
-        .await;
+    crate::sandbox_git::git_push_host(
+        repo_path,
+        &refspec,
+        &run_options.github_app,
+        "finalize metadata",
+    )
+    .await;
 }
 
 async fn run_hooks(
@@ -220,7 +228,7 @@ pub async fn finalize(
     let Retroed {
         graph,
         outcome,
-        settings,
+        run_options,
         hook_runner,
         emitter,
         sandbox,
@@ -238,7 +246,7 @@ pub async fn finalize(
         options.last_git_sha.clone(),
     );
 
-    write_finalize_commit(&settings, &options.run_dir).await;
+    write_finalize_commit(&run_options, &options.run_dir).await;
 
     if options.preserve_sandbox {
         let info = sandbox.sandbox_info();
@@ -279,12 +287,12 @@ pub async fn finalize(
     persist_terminal_outcome(&options.run_dir, &conclusion, run_status, status_reason);
 
     Ok(Concluded {
-        run_id: settings.run_id.clone(),
+        run_id: run_options.run_id.clone(),
         outcome,
         conclusion,
-        pushed_branch: settings.git.as_ref().and_then(|g| g.run_branch.clone()),
+        pushed_branch: run_options.git.as_ref().and_then(|g| g.run_branch.clone()),
         graph,
-        settings,
+        run_options,
         emitter,
     })
 }
@@ -301,7 +309,7 @@ mod tests {
     use crate::pipeline::types::Retroed;
     use crate::run_options::RunOptions;
 
-    fn test_settings(run_dir: &std::path::Path) -> RunOptions {
+    fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
             config: FabroConfig::default(),
             run_dir: run_dir.to_path_buf(),
@@ -326,7 +334,7 @@ mod tests {
         let retroed = Retroed {
             graph: Graph::new("test"),
             outcome: Ok(Outcome::success()),
-            settings: test_settings(&run_dir),
+            run_options: test_run_options(&run_dir),
             hook_runner: None,
             emitter: Arc::new(EventEmitter::new()),
             sandbox: Arc::new(fabro_agent::LocalSandbox::new(

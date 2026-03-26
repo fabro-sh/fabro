@@ -173,7 +173,7 @@ pub async fn initialize(
     Ok(Initialized {
         graph,
         source,
-        settings: options.run_options,
+        run_options: options.run_options,
         checkpoint: options.checkpoint,
         seed_context: options.seed_context,
         emitter: options.emitter,
@@ -298,7 +298,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(initialized.settings.run_dir, run_dir);
+        assert_eq!(initialized.run_options.run_dir, run_dir);
         assert_eq!(initialized.source, source);
         assert!(initialized.hook_runner.is_none());
         assert_eq!(
@@ -402,7 +402,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(initialized.settings.run_dir, run_dir);
+        assert_eq!(initialized.run_options.run_dir, run_dir);
         assert_eq!(initialized.source, source);
     }
 }

@@ -66,7 +66,7 @@ fn make_registry() -> HandlerRegistry {
     registry
 }
 
-fn test_settings(run_dir: &Path, run_id: &str) -> RunOptions {
+fn test_run_options(run_dir: &Path, run_id: &str) -> RunOptions {
     RunOptions {
         run_dir: run_dir.to_path_buf(),
         cancel_token: None,
@@ -160,7 +160,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
                 setup_command_timeout_ms: 1_000,
                 devcontainer_phases: vec![],
             },
-            run_options: test_settings(&run_dir, "run-test"),
+            run_options: test_run_options(&run_dir, "run-test"),
             hooks: HookConfig { hooks: vec![] },
             sandbox_env: HashMap::new(),
             checkpoint: None,
@@ -189,22 +189,22 @@ async fn run_with_lifecycle(
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &Graph,
-    settings: RunOptions,
+    run_options: RunOptions,
     lifecycle: LifecycleOptions,
 ) -> Result<Outcome, FabroError> {
-    let run_dir = settings.run_dir.clone();
-    let run_id = settings.run_id.clone();
+    let run_dir = run_options.run_dir.clone();
+    let run_id = run_options.run_id.clone();
     std::fs::create_dir_all(&run_dir).unwrap();
     let initialized = initialize(
         persisted_workflow(graph.clone(), String::new(), &run_dir, &run_id),
         InitOptions {
             run_id,
-            dry_run: settings.dry_run,
+            dry_run: run_options.dry_run,
             emitter,
             sandbox,
             registry: Arc::new(registry),
             lifecycle,
-            run_options: settings,
+            run_options,
             hooks: HookConfig { hooks: vec![] },
             sandbox_env: HashMap::new(),
             checkpoint: None,
@@ -375,7 +375,7 @@ async fn execute_runs_simple_workflow() {
         Arc::new(EventEmitter::new()),
         local_env(),
         &simple_graph(),
-        &test_settings(dir.path(), "test-run"),
+        &test_run_options(dir.path(), "test-run"),
     )
     .await
     .unwrap();
@@ -390,7 +390,7 @@ async fn execute_saves_checkpoint() {
         Arc::new(EventEmitter::new()),
         local_env(),
         &simple_graph(),
-        &test_settings(dir.path(), "test-run"),
+        &test_run_options(dir.path(), "test-run"),
     )
     .await
     .unwrap();
@@ -412,7 +412,7 @@ async fn execute_emits_events() {
         Arc::new(emitter),
         local_env(),
         &simple_graph(),
-        &test_settings(dir.path(), "test-run"),
+        &test_run_options(dir.path(), "test-run"),
     )
     .await
     .unwrap();
@@ -428,7 +428,7 @@ async fn execute_error_when_no_start_node() {
         Arc::new(EventEmitter::new()),
         local_env(),
         &Graph::new("empty"),
-        &test_settings(dir.path(), "test-run"),
+        &test_run_options(dir.path(), "test-run"),
     )
     .await;
     assert!(result.is_err());
@@ -442,7 +442,7 @@ async fn execute_mirrors_graph_goal_to_context() {
         Arc::new(EventEmitter::new()),
         local_env(),
         &simple_graph(),
-        &test_settings(dir.path(), "test-run"),
+        &test_run_options(dir.path(), "test-run"),
     )
     .await
     .unwrap();
@@ -491,7 +491,7 @@ async fn execute_conditional_routing_uses_unconditional_success_path() {
         Arc::new(EventEmitter::new()),
         local_env(),
         &g,
-        &test_settings(dir.path(), "test-run"),
+        &test_run_options(dir.path(), "test-run"),
     )
     .await
     .unwrap();
@@ -504,8 +504,8 @@ async fn execute_conditional_routing_uses_unconditional_success_path() {
 #[tokio::test]
 async fn execute_writes_start_json_and_node_status() {
     let dir = tempfile::tempdir().unwrap();
-    let mut settings = test_settings(dir.path(), "test-run");
-    settings.git = Some(GitCheckpointOptions {
+    let mut run_options = test_run_options(dir.path(), "test-run");
+    run_options.git = Some(GitCheckpointOptions {
         base_sha: Some("abc123".into()),
         run_branch: Some("fabro/run/test-run".into()),
         meta_branch: None,
@@ -516,7 +516,7 @@ async fn execute_writes_start_json_and_node_status() {
         Arc::new(EventEmitter::new()),
         local_env(),
         &simple_graph(),
-        &settings,
+        &run_options,
     )
     .await
     .unwrap();
@@ -575,7 +575,7 @@ async fn timeout_causes_fail_status_json() {
         Arc::new(EventEmitter::new()),
         local_env(),
         &g,
-        &test_settings(dir.path(), "test-run"),
+        &test_run_options(dir.path(), "test-run"),
     )
     .await
     .unwrap();
@@ -604,8 +604,8 @@ async fn execute_cancelled_mid_run() {
     let cancel_token_clone = Arc::clone(&cancel_token);
     let mut registry = make_registry();
     registry.register("slow", Box::new(SlowHandler { sleep_ms: 200 }));
-    let mut settings = test_settings(dir.path(), "test-run");
-    settings.cancel_token = Some(cancel_token);
+    let mut run_options = test_run_options(dir.path(), "test-run");
+    run_options.cancel_token = Some(cancel_token);
 
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -617,7 +617,7 @@ async fn execute_cancelled_mid_run() {
         Arc::new(EventEmitter::new()),
         local_env(),
         &g,
-        &settings,
+        &run_options,
     )
     .await;
     assert!(matches!(result, Err(FabroError::Cancelled)));
@@ -635,7 +635,7 @@ async fn max_node_visits_errors_on_cycle() {
         Arc::new(EventEmitter::new()),
         local_env(),
         &g,
-        &test_settings(dir.path(), "test-run"),
+        &test_run_options(dir.path(), "test-run"),
     )
     .await;
     let err = result.unwrap_err().to_string();
@@ -670,7 +670,7 @@ async fn panic_handler_writes_panic_txt() {
         Arc::new(EventEmitter::new()),
         local_env(),
         &g,
-        &test_settings(dir.path(), "test-run"),
+        &test_run_options(dir.path(), "test-run"),
     )
     .await;
 
@@ -691,7 +691,7 @@ async fn loop_circuit_breaker_aborts_on_repeated_failure() {
         Arc::new(EventEmitter::new()),
         local_env(),
         &looping_fail_graph(),
-        &test_settings(dir.path(), "test-run"),
+        &test_run_options(dir.path(), "test-run"),
     )
     .await;
     let err = result.unwrap_err().to_string();
@@ -740,7 +740,7 @@ async fn stall_watchdog_triggers_on_hung_handler() {
         Arc::new(EventEmitter::new()),
         local_env(),
         &g,
-        &test_settings(dir.path(), "test-run"),
+        &test_run_options(dir.path(), "test-run"),
     )
     .await;
     let err = result.unwrap_err().to_string();
@@ -804,7 +804,7 @@ async fn retry_emits_stage_started_per_attempt() {
         Arc::new(emitter),
         local_env(),
         &g,
-        &test_settings(dir.path(), "retry-events-test"),
+        &test_run_options(dir.path(), "retry-events-test"),
     )
     .await
     .unwrap();
@@ -845,7 +845,7 @@ async fn run_with_lifecycle_emits_initialize_and_setup_events() {
         Arc::new(emitter),
         local_env(),
         &simple_graph(),
-        test_settings(dir.path(), "order-test"),
+        test_run_options(dir.path(), "order-test"),
         test_lifecycle(vec!["echo ok".to_string()]),
     )
     .await
@@ -916,17 +916,23 @@ async fn git_checkpoint_skips_start_node() {
     });
 
     let sandbox: Arc<dyn Sandbox> = Arc::new(fabro_agent::LocalSandbox::new(repo.to_path_buf()));
-    let mut settings = test_settings(run_tmp.path(), "git-cp-test");
-    settings.git = Some(GitCheckpointOptions {
+    let mut run_options = test_run_options(run_tmp.path(), "git-cp-test");
+    run_options.git = Some(GitCheckpointOptions {
         base_sha: Some(base_sha),
         run_branch: None,
         meta_branch: Some(crate::git::MetadataStore::branch_name("git-cp-test")),
     });
-    settings.host_repo_path = Some(repo.to_path_buf());
+    run_options.host_repo_path = Some(repo.to_path_buf());
 
-    run_graph(make_registry(), Arc::new(emitter), sandbox, &g, &settings)
-        .await
-        .unwrap();
+    run_graph(
+        make_registry(),
+        Arc::new(emitter),
+        sandbox,
+        &g,
+        &run_options,
+    )
+    .await
+    .unwrap();
 
     let collected = events.lock().unwrap();
     let checkpoint_node_ids: Vec<&str> = collected

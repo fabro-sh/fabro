@@ -193,7 +193,7 @@ async fn end_to_end_linear_pipeline() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -208,7 +208,7 @@ async fn end_to_end_linear_pipeline() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -332,7 +332,7 @@ async fn end_to_end_branching_pipeline() {
     registry.register("conditional", Box::new(ConditionalHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -347,7 +347,7 @@ async fn end_to_end_branching_pipeline() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -452,7 +452,7 @@ async fn end_to_end_human_gate_pipeline() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -467,7 +467,7 @@ async fn end_to_end_human_gate_pipeline() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -548,7 +548,7 @@ async fn human_gate_aborted_input_fails_closed_without_fail_route() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -563,7 +563,7 @@ async fn human_gate_aborted_input_fails_closed_without_fail_route() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("engine should return Ok with fail outcome");
     assert_eq!(
@@ -659,7 +659,7 @@ async fn human_gate_aborted_input_routes_via_outcome_fail_condition() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -674,7 +674,7 @@ async fn human_gate_aborted_input_routes_via_outcome_fail_condition() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("aborted human gate should follow explicit fail route");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -772,7 +772,7 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
     registry.register("always_fail", Box::new(AlwaysFailHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -786,7 +786,7 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(
         result.is_ok(),
         "goal gate unsatisfied with no retry_target should return Ok(fail outcome)"
@@ -893,7 +893,7 @@ async fn goal_gate_routes_to_retry_target_when_present() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -908,7 +908,7 @@ async fn goal_gate_routes_to_retry_target_when_present() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("run should eventually succeed after retry");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1205,7 +1205,7 @@ async fn retry_on_failure_then_succeed() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -1220,7 +1220,7 @@ async fn retry_on_failure_then_succeed() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("should succeed after retry");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1280,7 +1280,7 @@ async fn pipeline_with_many_nodes() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -1295,7 +1295,7 @@ async fn pipeline_with_many_nodes() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("large pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1602,7 +1602,7 @@ async fn smoke_test_with_mock_codergen_backend() {
     registry.register("conditional", Box::new(ConditionalHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -1617,7 +1617,7 @@ async fn smoke_test_with_mock_codergen_backend() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("smoke test should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1703,7 +1703,7 @@ async fn end_to_end_parallel_fan_out_fan_in() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -1718,7 +1718,7 @@ async fn end_to_end_parallel_fan_out_fan_in() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("parallel pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1816,7 +1816,7 @@ async fn resume_from_checkpoint_completes_pipeline() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -1831,7 +1831,7 @@ async fn resume_from_checkpoint_completes_pipeline() {
         git: None,
     };
     let outcome = engine
-        .run_from_checkpoint(&graph, &config, &checkpoint)
+        .run_from_checkpoint(&graph, &run_options, &checkpoint)
         .await
         .expect("resume should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1915,7 +1915,7 @@ async fn resume_from_checkpoint_preserves_goal_gate_outcomes() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -1932,7 +1932,7 @@ async fn resume_from_checkpoint_preserves_goal_gate_outcomes() {
     // This should succeed because goal gate for gated_work is satisfied
     // via restored outcomes
     let outcome = engine
-        .run_from_checkpoint(&graph, &config, &checkpoint)
+        .run_from_checkpoint(&graph, &run_options, &checkpoint)
         .await
         .expect("resume with goal gate should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1958,7 +1958,7 @@ async fn graph_goal_in_context() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -1972,7 +1972,7 @@ async fn graph_goal_in_context() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     assert_eq!(
@@ -1994,7 +1994,7 @@ async fn event_streaming_lifecycle() {
     let emitter = EventEmitter::new();
     let events = collect_events(&emitter);
     let engine = WorkflowRunner::new(make_linear_registry(), Arc::new(emitter), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2008,7 +2008,7 @@ async fn event_streaming_lifecycle() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let collected = events.lock().unwrap();
     assert!(collected
@@ -2074,7 +2074,7 @@ async fn context_flow_between_stages() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2088,7 +2088,7 @@ async fn context_flow_between_stages() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     assert_eq!(
@@ -2127,7 +2127,7 @@ async fn tool_handler_e2e() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2141,7 +2141,7 @@ async fn tool_handler_e2e() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
@@ -2197,7 +2197,7 @@ async fn auto_approve_interviewer_e2e() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2211,7 +2211,7 @@ async fn auto_approve_interviewer_e2e() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
@@ -2234,7 +2234,7 @@ async fn codergen_without_backend_simulated() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2248,7 +2248,7 @@ async fn codergen_without_backend_simulated() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let response =
         std::fs::read_to_string(dir.path().join("nodes").join("code").join("response.md")).unwrap();
@@ -2339,7 +2339,7 @@ async fn branching_loop_back_on_failure() {
         }),
     );
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2353,7 +2353,7 @@ async fn branching_loop_back_on_failure() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
@@ -2422,7 +2422,7 @@ async fn human_gate_loops_back() {
     registry.register("exit", Box::new(ExitHandler));
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2436,7 +2436,7 @@ async fn human_gate_loops_back() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
@@ -2480,7 +2480,7 @@ async fn scenario_ship_a_feature() {
         Arc::new(emitter),
         local_env(),
     );
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2494,7 +2494,7 @@ async fn scenario_ship_a_feature() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
@@ -2566,7 +2566,7 @@ async fn scenario_parallel_expert_review() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2580,7 +2580,7 @@ async fn scenario_parallel_expert_review() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
@@ -2650,7 +2650,7 @@ async fn scenario_node_retries_on_retry_status() {
         }),
     );
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2664,7 +2664,7 @@ async fn scenario_node_retries_on_retry_status() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
@@ -2712,7 +2712,7 @@ async fn scenario_loop_restart_resets_context() {
         }),
     );
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2726,7 +2726,7 @@ async fn scenario_loop_restart_resets_context() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
     assert!(call_count.load(std::sync::atomic::Ordering::SeqCst) >= 2);
 }
@@ -2780,7 +2780,7 @@ async fn scenario_bug_triage_router() {
     registry.register("exit", Box::new(ExitHandler));
     registry.register("conditional", Box::new(ConditionalHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2794,7 +2794,7 @@ async fn scenario_bug_triage_router() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
@@ -2839,7 +2839,7 @@ async fn scenario_crash_recovery() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2854,7 +2854,7 @@ async fn scenario_crash_recovery() {
         git: None,
     };
     let outcome = engine
-        .run_from_checkpoint(&graph, &config, &checkpoint)
+        .run_from_checkpoint(&graph, &run_options, &checkpoint)
         .await
         .expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2948,7 +2948,7 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
     registry.register("done_setter", Box::new(DoneSetterHandler));
     registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2962,7 +2962,7 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     let manager_outcome = cp.node_outcomes.get("manager").expect("manager outcome");
@@ -3025,7 +3025,7 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
     registry.register("exit", Box::new(ExitHandler));
     registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -3039,7 +3039,7 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     let manager_outcome = cp.node_outcomes.get("manager").expect("manager outcome");
@@ -3161,7 +3161,7 @@ async fn conditional_branching_success_fail_paths() {
     registry.register("exit", Box::new(ExitHandler));
     registry.register("always_fail", Box::new(AlwaysFailHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -3175,7 +3175,7 @@ async fn conditional_branching_success_fail_paths() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
@@ -3214,7 +3214,7 @@ async fn edge_selection_condition_match_wins_over_weight() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -3228,7 +3228,7 @@ async fn edge_selection_condition_match_wins_over_weight() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     assert!(cp.completed_nodes.contains(&"cond_target".to_string()));
@@ -3261,7 +3261,7 @@ async fn edge_selection_weight_breaks_ties() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -3275,7 +3275,7 @@ async fn edge_selection_weight_breaks_ties() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     assert!(cp.completed_nodes.contains(&"high".to_string()));
@@ -3300,7 +3300,7 @@ async fn edge_selection_lexical_tiebreak() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -3314,7 +3314,7 @@ async fn edge_selection_lexical_tiebreak() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     assert!(cp.completed_nodes.contains(&"alpha".to_string()));
@@ -3358,7 +3358,7 @@ async fn context_updates_visible_across_nodes() {
     registry.register("conditional", Box::new(ConditionalHandler));
     registry.register("context_setter", Box::new(ContextSetterHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -3372,7 +3372,7 @@ async fn context_updates_visible_across_nodes() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     assert!(cp.completed_nodes.contains(&"yes".to_string()));
@@ -3402,7 +3402,7 @@ async fn stylesheet_applies_model_override() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -3416,7 +3416,7 @@ async fn stylesheet_applies_model_override() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
@@ -3458,7 +3458,7 @@ async fn custom_handler_registration_and_execution() {
     registry.register("exit", Box::new(ExitHandler));
     registry.register("my_custom", Box::new(CustomHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -3472,7 +3472,7 @@ async fn custom_handler_registration_and_execution() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     assert_eq!(
@@ -3529,7 +3529,7 @@ async fn integration_smoke_plan_implement_review_done() {
         Arc::new(emitter),
         local_env(),
     );
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -3543,7 +3543,7 @@ async fn integration_smoke_plan_implement_review_done() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Verify all nodes completed
@@ -3633,7 +3633,7 @@ async fn manager_loop_runs_child_engine_e2e() {
     registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -3648,7 +3648,7 @@ async fn manager_loop_runs_child_engine_e2e() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("manager loop E2E should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -3767,7 +3767,7 @@ async fn manager_loop_context_flows_e2e() {
     registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -3781,7 +3781,7 @@ async fn manager_loop_context_flows_e2e() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Check that child's context updates were propagated through the manager
@@ -3840,7 +3840,7 @@ async fn manager_loop_child_dotfile_e2e() {
     registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -3854,7 +3854,7 @@ async fn manager_loop_child_dotfile_e2e() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
@@ -3953,7 +3953,7 @@ async fn graph_merge_e2e_through_engine() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -3968,7 +3968,7 @@ async fn graph_merge_e2e_through_engine() {
         git: None,
     };
     let outcome = engine
-        .run(&main_graph, &config)
+        .run(&main_graph, &run_options)
         .await
         .expect("graph merge E2E should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -4103,7 +4103,7 @@ async fn fidelity_default_is_compact() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -4117,7 +4117,7 @@ async fn fidelity_default_is_compact() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let fidelities = captures.fidelities.lock().unwrap();
     assert_eq!(fidelities.len(), 1);
@@ -4160,7 +4160,7 @@ async fn fidelity_graph_default_applied() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -4174,7 +4174,7 @@ async fn fidelity_graph_default_applied() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let fidelities = captures.fidelities.lock().unwrap();
     assert_eq!(fidelities[0].1, "truncate");
@@ -4213,7 +4213,7 @@ async fn fidelity_node_overrides_graph_default() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -4227,7 +4227,7 @@ async fn fidelity_node_overrides_graph_default() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let fidelities = captures.fidelities.lock().unwrap();
     assert_eq!(fidelities[0].1, "summary:medium");
@@ -4272,7 +4272,7 @@ async fn fidelity_edge_overrides_node_and_graph() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -4286,7 +4286,7 @@ async fn fidelity_edge_overrides_node_and_graph() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let fidelities = captures.fidelities.lock().unwrap();
     assert_eq!(fidelities[0].1, "summary:high");
@@ -4321,7 +4321,7 @@ async fn fidelity_full_produces_empty_preamble() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -4335,7 +4335,7 @@ async fn fidelity_full_produces_empty_preamble() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let fidelities = captures.fidelities.lock().unwrap();
     assert_eq!(fidelities[0].1, "full");
@@ -4380,7 +4380,7 @@ async fn fidelity_truncate_preamble_minimal() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -4394,7 +4394,7 @@ async fn fidelity_truncate_preamble_minimal() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let preambles = captures.preambles.lock().unwrap();
     let preamble = &preambles[0].1;
@@ -4452,7 +4452,7 @@ async fn fidelity_summary_low_mode() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -4466,7 +4466,7 @@ async fn fidelity_summary_low_mode() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let fidelities = captures.fidelities.lock().unwrap();
     assert_eq!(fidelities[0].1, "summary:low");
@@ -4519,7 +4519,7 @@ async fn fidelity_summary_medium_mode() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -4533,7 +4533,7 @@ async fn fidelity_summary_medium_mode() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let fidelities = captures.fidelities.lock().unwrap();
     assert_eq!(fidelities[0].1, "summary:medium");
@@ -4586,7 +4586,7 @@ async fn fidelity_summary_high_mode() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -4600,7 +4600,7 @@ async fn fidelity_summary_high_mode() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let fidelities = captures.fidelities.lock().unwrap();
     assert_eq!(fidelities[0].1, "summary:high");
@@ -4646,7 +4646,7 @@ async fn fidelity_full_sets_thread_id_in_context() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -4660,7 +4660,7 @@ async fn fidelity_full_sets_thread_id_in_context() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let thread_ids = captures.thread_ids.lock().unwrap();
     assert_eq!(thread_ids[0].0, "work");
@@ -4717,7 +4717,7 @@ async fn fidelity_full_nodes_share_thread_id() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -4731,7 +4731,7 @@ async fn fidelity_full_nodes_share_thread_id() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let thread_ids = captures.thread_ids.lock().unwrap();
     assert_eq!(thread_ids[0].0, "step_a");
@@ -4798,7 +4798,7 @@ async fn fidelity_resume_degrades_full_to_summary_high() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -4813,7 +4813,7 @@ async fn fidelity_resume_degrades_full_to_summary_high() {
         git: None,
     };
     engine
-        .run_from_checkpoint(&graph, &config, &checkpoint)
+        .run_from_checkpoint(&graph, &run_options, &checkpoint)
         .await
         .expect("resume should succeed");
 
@@ -4895,7 +4895,7 @@ async fn fidelity_resume_degrade_only_affects_first_hop() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -4910,7 +4910,7 @@ async fn fidelity_resume_degrade_only_affects_first_hop() {
         git: None,
     };
     engine
-        .run_from_checkpoint(&graph, &config, &checkpoint)
+        .run_from_checkpoint(&graph, &run_options, &checkpoint)
         .await
         .expect("resume should succeed");
 
@@ -4979,7 +4979,7 @@ async fn fidelity_resume_no_degrade_when_not_full() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -4994,7 +4994,7 @@ async fn fidelity_resume_no_degrade_when_not_full() {
         git: None,
     };
     engine
-        .run_from_checkpoint(&graph, &config, &checkpoint)
+        .run_from_checkpoint(&graph, &run_options, &checkpoint)
         .await
         .expect("resume should succeed");
 
@@ -5021,7 +5021,7 @@ async fn fidelity_stored_in_checkpoint_context() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -5035,7 +5035,7 @@ async fn fidelity_stored_in_checkpoint_context() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     assert_eq!(
@@ -5107,7 +5107,7 @@ async fn fidelity_precedence_multi_node_pipeline() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -5121,7 +5121,7 @@ async fn fidelity_precedence_multi_node_pipeline() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let fidelities = captures.fidelities.lock().unwrap();
     assert_eq!(fidelities[0].0, "step_a");
@@ -5175,7 +5175,7 @@ async fn fidelity_compact_preamble_includes_completed_stages_and_context() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -5189,7 +5189,7 @@ async fn fidelity_compact_preamble_includes_completed_stages_and_context() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let preambles = captures.preambles.lock().unwrap();
     // step_b's preamble should contain structured summary of completed work
@@ -5250,7 +5250,7 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
         }),
     );
     let engine_low = WorkflowRunner::new(registry_low, Arc::new(EventEmitter::new()), local_env());
-    let config_low = RunOptions {
+    let run_options_low = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir_low.path().to_path_buf(),
         cancel_token: None,
@@ -5265,7 +5265,7 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
         git: None,
     };
     engine_low
-        .run(&graph_low, &config_low)
+        .run(&graph_low, &run_options_low)
         .await
         .expect("run low");
 
@@ -5317,7 +5317,7 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
         }),
     );
     let engine_med = WorkflowRunner::new(registry_med, Arc::new(EventEmitter::new()), local_env());
-    let config_med = RunOptions {
+    let run_options_med = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir_med.path().to_path_buf(),
         cancel_token: None,
@@ -5332,7 +5332,7 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
         git: None,
     };
     engine_med
-        .run(&graph_med, &config_med)
+        .run(&graph_med, &run_options_med)
         .await
         .expect("run med");
 
@@ -5388,7 +5388,7 @@ async fn fidelity_thread_id_fallback_to_previous_node_in_pipeline() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -5402,7 +5402,7 @@ async fn fidelity_thread_id_fallback_to_previous_node_in_pipeline() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let thread_ids = captures.thread_ids.lock().unwrap();
     // step_a should have previous node = start
@@ -5442,7 +5442,7 @@ async fn fidelity_thread_id_from_node_class_in_pipeline() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -5456,7 +5456,7 @@ async fn fidelity_thread_id_from_node_class_in_pipeline() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let thread_ids = captures.thread_ids.lock().unwrap();
     assert_eq!(thread_ids[0].0, "work");
@@ -5499,7 +5499,7 @@ async fn fidelity_edge_thread_id_override_in_pipeline() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -5513,7 +5513,7 @@ async fn fidelity_edge_thread_id_override_in_pipeline() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let thread_ids = captures.thread_ids.lock().unwrap();
     assert_eq!(thread_ids[0].0, "work");
@@ -5557,7 +5557,7 @@ async fn fidelity_full_without_explicit_thread_id_uses_previous_node() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -5571,7 +5571,7 @@ async fn fidelity_full_without_explicit_thread_id_uses_previous_node() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let fidelities = captures.fidelities.lock().unwrap();
     assert_eq!(fidelities[0].1, "full");
@@ -5625,7 +5625,7 @@ async fn fidelity_from_parsed_dot_pipeline() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -5639,7 +5639,7 @@ async fn fidelity_from_parsed_dot_pipeline() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let fidelities = captures.fidelities.lock().unwrap();
     // step_a: no node fidelity, no edge fidelity -> graph default "truncate"
@@ -5673,7 +5673,7 @@ async fn fidelity_checkpoint_roundtrip_preserves_fidelity() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -5687,7 +5687,7 @@ async fn fidelity_checkpoint_roundtrip_preserves_fidelity() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     // Load, save, load again to verify roundtrip
     let checkpoint_path = dir.path().join("checkpoint.json");
@@ -5743,7 +5743,7 @@ async fn fidelity_node_thread_id_overrides_edge_thread_id_in_pipeline() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -5757,7 +5757,7 @@ async fn fidelity_node_thread_id_overrides_edge_thread_id_in_pipeline() {
         host_repo_path: None,
         git: None,
     };
-    engine.run(&graph, &config).await.expect("run");
+    engine.run(&graph, &run_options).await.expect("run");
 
     let thread_ids = captures.thread_ids.lock().unwrap();
     assert_eq!(thread_ids[0].0, "work");
@@ -5830,7 +5830,7 @@ async fn fidelity_resume_preserves_context_values_across_checkpoint() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -5845,7 +5845,7 @@ async fn fidelity_resume_preserves_context_values_across_checkpoint() {
         git: None,
     };
     engine
-        .run_from_checkpoint(&graph, &config, &checkpoint)
+        .run_from_checkpoint(&graph, &run_options, &checkpoint)
         .await
         .expect("resume should succeed");
 
@@ -6045,7 +6045,7 @@ mod real_llm {
         );
 
         let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-        let config = RunOptions {
+        let run_options = RunOptions {
             config: FabroConfig::default(),
             run_dir: dir.path().to_path_buf(),
             cancel_token: None,
@@ -6061,7 +6061,7 @@ mod real_llm {
         };
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(120),
-            engine.run(&graph, &config),
+            engine.run(&graph, &run_options),
         )
         .await
         .expect("should not timeout")
@@ -6159,7 +6159,7 @@ mod real_llm {
         );
 
         let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-        let config = RunOptions {
+        let run_options = RunOptions {
             config: FabroConfig::default(),
             run_dir: dir.path().to_path_buf(),
             cancel_token: None,
@@ -6175,7 +6175,7 @@ mod real_llm {
         };
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(120),
-            engine.run(&graph, &config),
+            engine.run(&graph, &run_options),
         )
         .await
         .expect("should not timeout")
@@ -6298,7 +6298,7 @@ mod real_llm {
         registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
         let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-        let config = RunOptions {
+        let run_options = RunOptions {
             config: FabroConfig::default(),
             run_dir: dir.path().to_path_buf(),
             cancel_token: None,
@@ -6314,7 +6314,7 @@ mod real_llm {
         };
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(120),
-            engine.run(&graph, &config),
+            engine.run(&graph, &run_options),
         )
         .await
         .expect("should not timeout")
@@ -6405,7 +6405,7 @@ mod real_llm {
         );
 
         let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-        let config = RunOptions {
+        let run_options = RunOptions {
             config: FabroConfig::default(),
             run_dir: dir.path().to_path_buf(),
             cancel_token: None,
@@ -6421,7 +6421,7 @@ mod real_llm {
         };
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(30),
-            engine.run(&graph, &config),
+            engine.run(&graph, &run_options),
         )
         .await
         .expect("should not timeout")
@@ -6501,7 +6501,7 @@ async fn human_gate_freeform_only_routes_text() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -6516,7 +6516,7 @@ async fn human_gate_freeform_only_routes_text() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -6631,7 +6631,7 @@ async fn human_gate_freeform_with_fixed_choice_match() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -6646,7 +6646,7 @@ async fn human_gate_freeform_with_fixed_choice_match() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -6746,7 +6746,7 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -6761,7 +6761,7 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -6874,7 +6874,7 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -6889,7 +6889,7 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -6982,7 +6982,7 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -6997,7 +6997,7 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -7219,13 +7219,13 @@ struct HookTestRunner {
 }
 
 impl HookTestRunner {
-    async fn run(&self, graph: &Graph, config: &RunOptions) -> Result<Outcome, FabroError> {
+    async fn run(&self, graph: &Graph, run_options: &RunOptions) -> Result<Outcome, FabroError> {
         run_graph_with_hooks(
             make_linear_registry(),
             Arc::clone(&self.emitter),
             local_env(),
             graph,
-            config,
+            run_options,
             Arc::clone(&self.hook_runner),
             None,
         )
@@ -7262,7 +7262,7 @@ fn engine_with_hooks_and_events(
     )
 }
 
-fn make_run_config(dir: &std::path::Path) -> RunOptions {
+fn make_run_options(dir: &std::path::Path) -> RunOptions {
     RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.to_path_buf(),
@@ -7337,9 +7337,9 @@ async fn hook_run_start_proceed_allows_run() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
@@ -7349,9 +7349,9 @@ async fn hook_run_start_block_prevents_run() {
     let (engine, events) = engine_with_hooks_and_events(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err(), "RunStart block should cause error");
     let err = result.unwrap_err();
     assert!(
@@ -7387,9 +7387,9 @@ async fn hook_run_start_block_with_json_reason() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
@@ -7406,9 +7406,9 @@ async fn hook_stage_start_proceed_allows_execution() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Work node should have executed (response.md exists)
@@ -7432,9 +7432,9 @@ async fn hook_stage_start_skip_bypasses_node() {
     let (engine, events) = engine_with_hooks_and_events(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     // Pipeline reached exit with goal gates satisfied — per spec, SUCCESS.
     assert_eq!(outcome.status, StageStatus::Success);
 
@@ -7469,9 +7469,9 @@ async fn hook_stage_start_block_aborts_run() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err(), "StageStart block should abort the run");
 }
 
@@ -7488,9 +7488,9 @@ async fn hook_stage_start_matcher_filters_by_node_id() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(two_step_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     // Pipeline reached exit with goal gates satisfied — per spec, SUCCESS.
     assert_eq!(outcome.status, StageStatus::Success);
 
@@ -7525,9 +7525,9 @@ async fn hook_stage_start_matcher_no_match_proceeds() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
@@ -7544,9 +7544,9 @@ async fn hook_stage_complete_fires_after_success() {
     )];
     let engine = engine_with_hooks(hooks);
     let graph = parse(two_step_dot()).unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Marker file should exist and contain node IDs
@@ -7573,9 +7573,9 @@ async fn hook_stage_complete_failure_does_not_block_pipeline() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(
         outcome.status,
         StageStatus::Success,
@@ -7596,9 +7596,9 @@ async fn hook_run_complete_fires_on_success() {
     )];
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 
     assert!(
@@ -7626,9 +7626,9 @@ async fn hook_run_complete_does_not_fire_on_blocked_run() {
     ];
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let _ = engine.run(&graph, &config).await;
+    let _ = engine.run(&graph, &run_options).await;
 
     assert!(
         !marker.exists(),
@@ -7655,9 +7655,9 @@ async fn hook_run_failed_fires_on_stage_block() {
     ];
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let _ = engine.run(&graph, &config).await;
+    let _ = engine.run(&graph, &run_options).await;
 
     // RunFailed may or may not fire depending on the error path — a StageStart
     // block causes an engine error, which doesn't go through the normal
@@ -7680,9 +7680,9 @@ async fn hook_receives_env_vars() {
     )];
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    engine.run(&graph, &config).await.unwrap();
+    engine.run(&graph, &run_options).await.unwrap();
 
     assert!(env_file.exists(), "Env file should be written by hook");
     let content = std::fs::read_to_string(&env_file).unwrap();
@@ -7729,9 +7729,9 @@ async fn multiple_hooks_same_event_all_fire() {
     ];
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    engine.run(&graph, &config).await.unwrap();
+    engine.run(&graph, &run_options).await.unwrap();
 
     assert!(marker1.exists(), "First hook should have fired");
     assert!(marker2.exists(), "Second hook should have fired");
@@ -7744,9 +7744,9 @@ async fn no_hooks_configured_runs_normally() {
     let engine = engine_with_hooks(vec![]);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
@@ -7767,9 +7767,9 @@ async fn hook_edge_selected_override_redirects_routing() {
     let (engine, events) = engine_with_hooks_and_events(hooks);
     let graph = parse(branching_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Verify pathB was executed (override worked)
@@ -7796,9 +7796,9 @@ async fn hook_edge_selected_block_aborts_run() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(branching_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err(), "EdgeSelected block should abort the run");
 }
 
@@ -7815,9 +7815,9 @@ async fn hook_checkpoint_saved_fires() {
     )];
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Checkpoint is saved after each node
@@ -7837,10 +7837,10 @@ async fn hook_stage_start_exit_2_blocks() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
     // exit 2 without JSON defaults to Block
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err(), "exit 2 should block");
 }
 
@@ -7919,9 +7919,9 @@ async fn hook_config_merge_run_overrides_by_name() {
     let engine = engine_with_hooks(merged.hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
@@ -7973,7 +7973,7 @@ async fn hook_blocking_override_makes_non_blocking_event_blocking() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
     // This test verifies that the blocking override is respected
     // Note: StageComplete hooks run AFTER execution, so they use the
@@ -7981,7 +7981,7 @@ async fn hook_blocking_override_makes_non_blocking_event_blocking() {
     // for StageComplete since it's always after the fact). This is correct
     // behavior — the blocking flag only affects the runner's execution
     // strategy (sequential vs parallel), not the engine's decision handling.
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
@@ -7995,11 +7995,11 @@ async fn hook_non_blocking_override_on_blocking_event() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
     // With blocking=false, the RunStart hook failure should NOT block the run
     // because the runner treats it as non-blocking (doesn't merge decisions)
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
@@ -8018,9 +8018,9 @@ async fn hook_matcher_regex_pattern() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(two_step_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     // Pipeline reached exit with goal gates satisfied — per spec, SUCCESS.
     assert_eq!(outcome.status, StageStatus::Success);
 
@@ -8054,9 +8054,9 @@ async fn hook_json_proceed_explicit() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
@@ -8069,9 +8069,9 @@ async fn hook_json_block_with_reason() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err());
     assert!(result
         .unwrap_err()
@@ -8095,9 +8095,9 @@ async fn hook_sandbox_false_runs_on_host() {
 
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    engine.run(&graph, &config).await.unwrap();
+    engine.run(&graph, &run_options).await.unwrap();
 
     assert!(marker.exists(), "Host hook should write marker file");
     assert_eq!(std::fs::read_to_string(&marker).unwrap().trim(), "host");
@@ -8180,9 +8180,9 @@ async fn hook_prompt_proceed_allows_run() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
@@ -8208,9 +8208,9 @@ async fn hook_prompt_block_prevents_run() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(
         result.is_err(),
         "Prompt hook block should cause error, got: {result:?}"
@@ -8239,9 +8239,9 @@ async fn hook_agent_proceed_allows_run() {
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
@@ -8273,9 +8273,9 @@ async fn hook_agent_with_tool_use() {
     }];
     let engine = engine_with_hooks(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
@@ -8292,9 +8292,9 @@ async fn hooks_do_not_duplicate_workflow_events() {
     let (engine, events) = engine_with_hooks_and_events(hooks);
     let graph = parse(simple_linear_dot()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = make_run_config(dir.path());
+    let run_options = make_run_options(dir.path());
 
-    engine.run(&graph, &config).await.unwrap();
+    engine.run(&graph, &run_options).await.unwrap();
 
     let captured = events.lock().unwrap();
 
@@ -8367,7 +8367,7 @@ async fn arc_e2e_with_real_llm() {
 
     let run_dir = tempfile::tempdir().unwrap();
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
@@ -8382,7 +8382,7 @@ async fn arc_e2e_with_real_llm() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("run should succeed");
 
@@ -8495,7 +8495,7 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -8510,7 +8510,7 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
         git: None,
     };
     engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
 
@@ -8694,7 +8694,7 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
     let emitter = EventEmitter::new();
     let events = collect_events(&emitter);
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -8709,7 +8709,7 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -8913,7 +8913,7 @@ async fn artifact_pointers_rewritten_for_remote_sandbox() {
 
     let remote_env = Arc::new(RemoteMockEnv::new("/sandbox"));
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), remote_env.clone());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -8928,7 +8928,7 @@ async fn artifact_pointers_rewritten_for_remote_sandbox() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -9043,7 +9043,7 @@ async fn node_dir_uses_visit_count_on_revisit() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -9058,7 +9058,7 @@ async fn node_dir_uses_visit_count_on_revisit() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -10015,7 +10015,7 @@ async fn full_pipeline_with_cli_backend_node() {
 
     let dir = tempfile::tempdir().unwrap();
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), env);
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -10030,7 +10030,7 @@ async fn full_pipeline_with_cli_backend_node() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -10146,7 +10146,7 @@ async fn stylesheet_backend_property_routes_to_cli() {
 
     let dir = tempfile::tempdir().unwrap();
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), env);
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -10161,7 +10161,7 @@ async fn stylesheet_backend_property_routes_to_cli() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -10425,7 +10425,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), env);
 
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
@@ -10445,7 +10445,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
     };
     // 5. Run pipeline
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -10628,7 +10628,7 @@ async fn git_checkpoint_host_writes_shadow_branch() {
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), env);
 
     let meta_branch = MetadataStore::branch_name(run_id);
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
@@ -10648,7 +10648,7 @@ async fn git_checkpoint_host_writes_shadow_branch() {
     };
     // 5. Run pipeline
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -10826,7 +10826,7 @@ async fn parallel_git_branching_host_e2e() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), env);
 
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
@@ -10846,7 +10846,7 @@ async fn parallel_git_branching_host_e2e() {
     };
     // 5. Run pipeline
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("parallel pipeline should succeed");
     assert_eq!(
@@ -11089,7 +11089,7 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), env);
 
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
@@ -11108,7 +11108,7 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
         }),
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -11471,7 +11471,7 @@ async fn e2e_circuit_breaker_deterministic_self_loop() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -11485,7 +11485,7 @@ async fn e2e_circuit_breaker_deterministic_self_loop() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err(), "pipeline should abort, not loop forever");
     let err = result.unwrap_err().to_string();
     assert!(
@@ -11518,7 +11518,7 @@ async fn e2e_circuit_breaker_custom_limit() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -11532,7 +11532,7 @@ async fn e2e_circuit_breaker_custom_limit() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(
@@ -11558,7 +11558,7 @@ async fn e2e_circuit_breaker_ignores_transient_failures() {
     registry.register("test_handler", Box::new(TransientInfraFailHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -11572,7 +11572,7 @@ async fn e2e_circuit_breaker_ignores_transient_failures() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     // Should hit visit limit, NOT circuit breaker
@@ -11605,7 +11605,7 @@ async fn e2e_circuit_breaker_different_reasons_separate_counters() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -11619,7 +11619,7 @@ async fn e2e_circuit_breaker_different_reasons_separate_counters() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     // Should hit visit limit because each failure has a unique signature
@@ -11645,7 +11645,7 @@ async fn e2e_circuit_breaker_loop_restart() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -11659,7 +11659,7 @@ async fn e2e_circuit_breaker_loop_restart() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(
         result.is_err(),
         "pipeline should abort, not restart forever"
@@ -11707,7 +11707,7 @@ async fn e2e_failure_signature_persisted_in_context() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -11721,7 +11721,7 @@ async fn e2e_failure_signature_persisted_in_context() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     // Pipeline reaches exit (terminal) with goal gates satisfied.
     // Per spec, reaching exit with satisfied goal gates returns SUCCESS.
     assert_eq!(outcome.status, StageStatus::Success);
@@ -11771,7 +11771,7 @@ async fn e2e_failure_signature_hint_overrides_reason_in_context() {
     registry.register("hint_handler", Box::new(SignatureHintHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -11785,7 +11785,7 @@ async fn e2e_failure_signature_hint_overrides_reason_in_context() {
         host_repo_path: None,
         git: None,
     };
-    let _outcome = engine.run(&graph, &config).await.unwrap();
+    let _outcome = engine.run(&graph, &run_options).await.unwrap();
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     let sig_str = cp
@@ -11827,7 +11827,7 @@ async fn e2e_signature_maps_persist_in_checkpoint() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -11841,7 +11841,7 @@ async fn e2e_signature_maps_persist_in_checkpoint() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Load checkpoint and verify signature maps
@@ -11954,7 +11954,7 @@ async fn e2e_circuit_breaker_emits_events_before_abort() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -11968,7 +11968,7 @@ async fn e2e_circuit_breaker_emits_events_before_abort() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err());
 
     let events = events.lock().unwrap();
@@ -12021,7 +12021,7 @@ async fn e2e_circuit_breaker_does_not_fire_below_limit() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -12035,7 +12035,7 @@ async fn e2e_circuit_breaker_does_not_fire_below_limit() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.unwrap();
+    let outcome = engine.run(&graph, &run_options).await.unwrap();
     assert_eq!(
         outcome.status,
         StageStatus::Success,
@@ -12117,7 +12117,7 @@ async fn e2e_circuit_breaker_multi_stage_impl_verify_cycle() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -12131,7 +12131,7 @@ async fn e2e_circuit_breaker_multi_stage_impl_verify_cycle() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(
         result.is_err(),
         "should detect impl/verify cycle, not loop forever"
@@ -12214,7 +12214,7 @@ async fn e2e_loop_restart_blocked_for_deterministic_failure() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -12228,7 +12228,7 @@ async fn e2e_loop_restart_blocked_for_deterministic_failure() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(
         result.is_err(),
         "deterministic failure should not loop_restart"
@@ -12254,7 +12254,7 @@ async fn e2e_loop_restart_blocked_for_structural_failure() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -12268,7 +12268,7 @@ async fn e2e_loop_restart_blocked_for_structural_failure() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(
         result.is_err(),
         "structural failure should not loop_restart"
@@ -12294,7 +12294,7 @@ async fn e2e_loop_restart_blocked_for_budget_exhausted_failure() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -12308,7 +12308,7 @@ async fn e2e_loop_restart_blocked_for_budget_exhausted_failure() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(
         result.is_err(),
         "budget_exhausted failure should not loop_restart"
@@ -12334,7 +12334,7 @@ async fn e2e_loop_restart_blocked_for_canceled_failure() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -12348,7 +12348,7 @@ async fn e2e_loop_restart_blocked_for_canceled_failure() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err(), "canceled failure should not loop_restart");
     let err = result.unwrap_err().to_string();
     assert!(
@@ -12371,7 +12371,7 @@ async fn e2e_loop_restart_blocked_for_compilation_loop_failure() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -12385,7 +12385,7 @@ async fn e2e_loop_restart_blocked_for_compilation_loop_failure() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(
         result.is_err(),
         "compilation_loop failure should not loop_restart"
@@ -12412,7 +12412,7 @@ async fn e2e_loop_restart_allowed_for_transient_infra() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -12426,7 +12426,7 @@ async fn e2e_loop_restart_allowed_for_transient_infra() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(
         result.is_ok(),
         "transient_infra failure should be allowed to loop_restart, got: {:?}",
@@ -12516,7 +12516,7 @@ async fn e2e_stall_watchdog_triggers_from_dot_parsed_pipeline() {
     });
 
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -12530,7 +12530,7 @@ async fn e2e_stall_watchdog_triggers_from_dot_parsed_pipeline() {
         host_repo_path: None,
         git: None,
     };
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err(), "expected stall watchdog error");
     let err = result.unwrap_err().to_string();
     assert!(
@@ -12572,7 +12572,7 @@ async fn e2e_stall_watchdog_kept_alive_by_handler_events() {
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -12587,7 +12587,7 @@ async fn e2e_stall_watchdog_kept_alive_by_handler_events() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -12618,7 +12618,7 @@ async fn e2e_stall_watchdog_disabled_with_zero_timeout() {
     registry.register("slow", Box::new(SlowTestHandler { sleep_ms: 50 }));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -12633,7 +12633,7 @@ async fn e2e_stall_watchdog_disabled_with_zero_timeout() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -12683,7 +12683,7 @@ async fn e2e_stall_watchdog_with_explicit_timeout_override() {
     registry.register("hanging", Box::new(HangingHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), local_env());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -12698,7 +12698,7 @@ async fn e2e_stall_watchdog_with_explicit_timeout_override() {
         git: None,
     };
     let start = std::time::Instant::now();
-    let result = engine.run(&graph, &config).await;
+    let result = engine.run(&graph, &run_options).await;
     let elapsed = start.elapsed();
 
     assert!(result.is_err(), "expected stall watchdog error");
@@ -12814,7 +12814,7 @@ async fn asset_collection_local_sandbox_success() {
     graph.edges.push(Edge::new("start", "create_assets"));
     graph.edges.push(Edge::new("create_assets", "exit"));
 
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig {
             assets: Some(fabro_config::run::AssetsConfig {
                 include: vec!["test-results/**".to_string()],
@@ -12834,7 +12834,7 @@ async fn asset_collection_local_sandbox_success() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -12928,7 +12928,7 @@ async fn asset_collection_local_sandbox_on_failure() {
     graph.edges.push(Edge::new("start", "create_assets"));
     graph.edges.push(Edge::new("create_assets", "exit"));
 
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig {
             assets: Some(fabro_config::run::AssetsConfig {
                 include: vec!["test-results/**".to_string()],
@@ -12948,7 +12948,7 @@ async fn asset_collection_local_sandbox_on_failure() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("run should succeed");
     // The pipeline completes with goal gates satisfied — per spec, SUCCESS at exit node.
@@ -13025,7 +13025,7 @@ async fn asset_collection_docker_sandbox() {
     graph.edges.push(Edge::new("start", "create_assets"));
     graph.edges.push(Edge::new("create_assets", "exit"));
 
-    let run_config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig {
             assets: Some(fabro_config::run::AssetsConfig {
                 include: vec!["test-results/**".to_string()],
@@ -13045,7 +13045,7 @@ async fn asset_collection_docker_sandbox() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &run_config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -13099,7 +13099,7 @@ async fn wait_timer_e2e() {
         Arc::new(EventEmitter::new()),
         local_env(),
     );
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -13113,6 +13113,6 @@ async fn wait_timer_e2e() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &config).await.expect("run");
+    let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 }

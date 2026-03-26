@@ -388,7 +388,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), env.clone());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -403,7 +403,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -579,7 +579,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), env.clone());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -598,7 +598,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         }),
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -765,7 +765,7 @@ async fn daytona_parallel_git_branching_e2e() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), Arc::clone(&env));
 
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: run_tmp.path().to_path_buf(),
         cancel_token: None,
@@ -784,7 +784,7 @@ async fn daytona_parallel_git_branching_e2e() {
         }),
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("daytona parallel pipeline should succeed");
     assert_eq!(
@@ -1141,7 +1141,7 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
 
     let meta_branch = MetadataStore::branch_name(&run_id);
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), env.clone());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -1160,7 +1160,7 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         }),
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1281,7 +1281,7 @@ async fn daytona_asset_collection() {
     graph.edges.push(Edge::new("start", "create_assets"));
     graph.edges.push(Edge::new("create_assets", "exit"));
 
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig {
             assets: Some(fabro_config::run::AssetsConfig {
                 include: vec!["test-results/**".to_string()],
@@ -1301,7 +1301,7 @@ async fn daytona_asset_collection() {
         git: None,
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1537,7 +1537,7 @@ async fn daytona_git_push_run_branch_to_origin() {
     registry.register("exit", Box::new(ExitHandler));
 
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), env.clone());
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: FabroConfig::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
@@ -1556,7 +1556,7 @@ async fn daytona_git_push_run_branch_to_origin() {
         }),
     };
     let outcome = engine
-        .run(&graph, &config)
+        .run(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
