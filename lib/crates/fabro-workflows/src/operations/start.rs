@@ -1,12 +1,17 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::context::Context;
 use crate::error::FabroError;
-use crate::event::WorkflowRunEvent;
+use crate::event::{EventEmitter, WorkflowRunEvent};
+use crate::handler::HandlerRegistry;
 use crate::outcome::StageStatus;
 use crate::pipeline::{
     self, FinalizeOptions, Finalized, InitOptions, Persisted, PullRequestOptions, RetroOptions,
 };
+use crate::records::Checkpoint;
+use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 
 pub struct StartRetroOptions {
     pub enabled: bool,
@@ -27,8 +32,27 @@ pub struct StartPullRequestConfig {
     pub model: String,
 }
 
+/// Options for `start()` and `resume()`.
+///
+/// Fields that are derivable from `RunRecord` (run_id, labels, base_branch,
+/// host_repo_path, config, workflow_slug) are read from disk by `run_engine()`.
+/// Callers only provide truly external values.
 pub struct StartOptions {
-    pub init: InitOptions,
+    // Truly external (not derivable from RunRecord)
+    pub cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    pub emitter: Arc<EventEmitter>,
+    pub sandbox: Arc<dyn fabro_agent::Sandbox>,
+    pub registry: Arc<HandlerRegistry>,
+    pub lifecycle: LifecycleOptions,
+    pub hooks: fabro_hooks::HookConfig,
+    pub sandbox_env: HashMap<String, String>,
+    pub seed_context: Option<Context>,
+    pub git_author: crate::git::GitAuthor,
+    pub git: Option<GitCheckpointOptions>,
+    pub github_app: Option<fabro_github::GitHubAppCredentials>,
+
+    // Still external for now — could be derived from RunRecord.config in follow-up
+    pub dry_run: bool,
     pub retro: StartRetroOptions,
     pub finalize: StartFinalizeOptions,
     pub pull_request: StartPullRequestConfig,
@@ -40,10 +64,40 @@ pub struct Started {
     pub retro_duration: Duration,
 }
 
-/// Run a persisted workflow through initialize, execute, retro, finalize, and pull_request.
-pub async fn start(persisted: Persisted, options: StartOptions) -> Result<Started, FabroError> {
+/// Start a fresh workflow run. Errors if a checkpoint already exists (use `resume()` instead).
+pub async fn start(
+    run_dir: &std::path::Path,
+    options: StartOptions,
+) -> Result<Started, FabroError> {
+    if run_dir.join("checkpoint.json").exists() {
+        return Err(FabroError::Precondition(
+            "checkpoint.json exists in run directory — did you mean to resume?".to_string(),
+        ));
+    }
+    let persisted = Persisted::load(run_dir)?;
+    run_engine(persisted, None, options).await
+}
+
+/// Resume a workflow run from its checkpoint. Errors if no checkpoint is found.
+pub async fn resume(
+    run_dir: &std::path::Path,
+    options: StartOptions,
+) -> Result<Started, FabroError> {
+    let cp_path = run_dir.join("checkpoint.json");
+    let checkpoint = Checkpoint::load(&cp_path)
+        .map_err(|e| FabroError::Precondition(format!("no checkpoint to resume from: {e}")))?;
+    let persisted = Persisted::load(run_dir)?;
+    run_engine(persisted, Some(checkpoint), options).await
+}
+
+/// Shared engine: initialize, execute, retro, finalize, pull_request.
+async fn run_engine(
+    persisted: Persisted,
+    checkpoint: Option<Checkpoint>,
+    options: StartOptions,
+) -> Result<Started, FabroError> {
     let preserve_sandbox = options.finalize.preserve_sandbox;
-    let sandbox_for_cleanup = Arc::clone(&options.init.sandbox);
+    let sandbox_for_cleanup = Arc::clone(&options.sandbox);
     let cleanup_guard = scopeguard::guard((), move |()| {
         if preserve_sandbox {
             return;
@@ -55,7 +109,40 @@ pub async fn start(persisted: Persisted, options: StartOptions) -> Result<Starte
         }
     });
 
-    let initialized = pipeline::initialize(persisted, options.init).await?;
+    // Build RunOptions from the persisted RunRecord + external caller options
+    let record = persisted.run_record();
+    let run_options = RunOptions {
+        config: record.config.clone(),
+        run_dir: persisted.run_dir().to_path_buf(),
+        cancel_token: options.cancel_token,
+        dry_run: options.dry_run,
+        run_id: record.run_id.clone(),
+        labels: record.labels.clone(),
+        git_author: options.git_author,
+        workflow_slug: record.workflow_slug.clone(),
+        github_app: options.github_app.clone(),
+        host_repo_path: record
+            .host_repo_path
+            .as_deref()
+            .map(std::path::PathBuf::from),
+        base_branch: record.base_branch.clone(),
+        git: options.git,
+    };
+
+    let init_options = InitOptions {
+        run_id: record.run_id.clone(),
+        dry_run: options.dry_run,
+        emitter: options.emitter,
+        sandbox: options.sandbox,
+        registry: options.registry,
+        lifecycle: options.lifecycle,
+        run_options,
+        hooks: options.hooks,
+        sandbox_env: options.sandbox_env,
+        checkpoint,
+        seed_context: options.seed_context,
+    };
+    let initialized = pipeline::initialize(persisted, init_options).await?;
 
     let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     {
@@ -145,7 +232,7 @@ mod tests {
     use crate::handler::start::StartHandler;
     use crate::handler::{Handler, HandlerRegistry};
     use crate::outcome::Outcome;
-    use crate::run_options::{LifecycleOptions, RunOptions};
+    use crate::run_options::LifecycleOptions;
 
     const MINIMAL_DOT: &str = r#"digraph Test {
         graph [goal="Build feature"]
@@ -369,23 +456,6 @@ mod tests {
         .unwrap()
     }
 
-    fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
-        RunOptions {
-            config: FabroConfig::default(),
-            run_dir: run_dir.to_path_buf(),
-            cancel_token: None,
-            dry_run: false,
-            run_id: "run-test".to_string(),
-            labels: HashMap::new(),
-            git_author: crate::git::GitAuthor::default(),
-            workflow_slug: None,
-            github_app: None,
-            host_repo_path: None,
-            base_branch: None,
-            git: None,
-        }
-    }
-
     fn test_registry() -> HandlerRegistry {
         let mut registry = HandlerRegistry::new(Box::new(StartHandler));
         registry.register("start", Box::new(StartHandler));
@@ -395,7 +465,7 @@ mod tests {
     }
 
     fn test_start_options(
-        run_dir: &std::path::Path,
+        _run_dir: &std::path::Path,
         sandbox: Arc<dyn Sandbox>,
         emitter: Arc<EventEmitter>,
         registry: Arc<HandlerRegistry>,
@@ -403,19 +473,18 @@ mod tests {
         preserve_sandbox: bool,
     ) -> StartOptions {
         StartOptions {
-            init: InitOptions {
-                run_id: "run-test".to_string(),
-                dry_run: false,
-                emitter,
-                sandbox,
-                registry,
-                lifecycle,
-                run_options: test_run_options(run_dir),
-                hooks: fabro_hooks::HookConfig { hooks: vec![] },
-                sandbox_env: HashMap::new(),
-                checkpoint: None,
-                seed_context: None,
-            },
+            cancel_token: None,
+            emitter,
+            sandbox,
+            registry,
+            lifecycle,
+            hooks: fabro_hooks::HookConfig { hooks: vec![] },
+            sandbox_env: HashMap::new(),
+            seed_context: None,
+            git_author: crate::git::GitAuthor::default(),
+            git: None,
+            github_app: None,
+            dry_run: false,
             retro: StartRetroOptions {
                 enabled: false,
                 dry_run: false,
@@ -453,8 +522,9 @@ mod tests {
         let registry = Arc::new(test_registry());
         let (sandbox, cleanup_count) = counting_sandbox();
 
+        persisted_workflow(MINIMAL_DOT, &run_dir);
         let result = start(
-            persisted_workflow(MINIMAL_DOT, &run_dir),
+            &run_dir,
             test_start_options(
                 &run_dir,
                 sandbox,
@@ -485,8 +555,9 @@ mod tests {
         let sandbox: Arc<dyn Sandbox> =
             Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
 
+        persisted_workflow(EMIT_DOT, &run_dir);
         let started = start(
-            persisted_workflow(EMIT_DOT, &run_dir),
+            &run_dir,
             test_start_options(
                 &run_dir,
                 sandbox,
@@ -512,22 +583,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_runs_loaded_persisted_workflow() {
+    async fn start_loads_persisted_from_run_dir() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let wrong_run_dir = temp.path().join("wrong-run-dir");
         let emitter = Arc::new(EventEmitter::new());
         let registry = Arc::new(test_registry());
         let sandbox: Arc<dyn Sandbox> =
             Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
-        let loaded = Persisted::load(&run_dir).unwrap();
 
         let started = start(
-            loaded,
+            &run_dir,
             test_start_options(
-                &wrong_run_dir,
+                &run_dir,
                 sandbox,
                 emitter,
                 registry,
@@ -544,6 +613,77 @@ mod tests {
 
         assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
         assert!(run_dir.join("conclusion.json").exists());
-        assert!(!wrong_run_dir.join("conclusion.json").exists());
+    }
+
+    #[tokio::test]
+    async fn start_errors_when_checkpoint_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        let emitter = Arc::new(EventEmitter::new());
+        let registry = Arc::new(test_registry());
+        let sandbox: Arc<dyn Sandbox> =
+            Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
+
+        persisted_workflow(MINIMAL_DOT, &run_dir);
+        // Create a fake checkpoint file
+        std::fs::write(run_dir.join("checkpoint.json"), "{}").unwrap();
+
+        let result = start(
+            &run_dir,
+            test_start_options(
+                &run_dir,
+                sandbox,
+                emitter,
+                registry,
+                LifecycleOptions {
+                    setup_commands: vec![],
+                    setup_command_timeout_ms: 1_000,
+                    devcontainer_phases: vec![],
+                },
+                false,
+            ),
+        )
+        .await;
+
+        assert!(
+            matches!(&result, Err(crate::error::FabroError::Precondition(_))),
+            "expected Precondition error, got: {result:?}",
+            result = result.as_ref().map(|_| "Ok"),
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_errors_when_checkpoint_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        let emitter = Arc::new(EventEmitter::new());
+        let registry = Arc::new(test_registry());
+        let sandbox: Arc<dyn Sandbox> =
+            Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
+
+        persisted_workflow(MINIMAL_DOT, &run_dir);
+
+        let result = resume(
+            &run_dir,
+            test_start_options(
+                &run_dir,
+                sandbox,
+                emitter,
+                registry,
+                LifecycleOptions {
+                    setup_commands: vec![],
+                    setup_command_timeout_ms: 1_000,
+                    devcontainer_phases: vec![],
+                },
+                false,
+            ),
+        )
+        .await;
+
+        assert!(
+            matches!(&result, Err(crate::error::FabroError::Precondition(_))),
+            "expected Precondition error, got: {result:?}",
+            result = result.as_ref().map(|_| "Ok"),
+        );
     }
 }

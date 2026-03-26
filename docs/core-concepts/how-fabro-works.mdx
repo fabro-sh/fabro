@@ -98,11 +98,5 @@ Because Fabro checkpoints after every stage, interrupted runs can be resumed fro
 fabro resume <RUN_ID>
 ```
 
-Or resume from a checkpoint file:
-
-```bash
-fabro resume --checkpoint path/to/checkpoint.json --workflow workflow.fabro
-```
-
-The engine restores the full context, node visit counts, and retry state, then continues execution from the next node.
+The engine restores the full context, node visit counts, and retry state from the run directory, then continues execution from the next node.
 

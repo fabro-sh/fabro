@@ -90,6 +90,9 @@ enum Command {
         /// Path to the run directory
         #[arg(long)]
         run_dir: PathBuf,
+        /// Resume from checkpoint instead of fresh start
+        #[arg(long)]
+        resume: bool,
     },
     /// Validate a workflow
     Validate(commands::validate::ValidateArgs),
@@ -315,6 +318,7 @@ pub(crate) fn build_github_app_credentials(
 
 async fn run_engine_entrypoint(
     run_dir: PathBuf,
+    resume: bool,
     styles: &'static fabro_util::terminal::Styles,
 ) -> Result<()> {
     let cli_config = cli_config::load_cli_config(None)?;
@@ -355,18 +359,29 @@ async fn run_engine_entrypoint(
         return Err(err);
     }
 
-    // Use run_from_record: loads config + graph directly from persisted state,
-    // skipping workflow source loading and preprocessing entirely.
-    match commands::run::run_from_record(
-        persisted,
-        run_dir.clone(),
-        cli_config,
-        styles,
-        github_app,
-        git_author,
-    )
-    .await
-    {
+    let result = if resume {
+        commands::run::resume_from_record(
+            persisted,
+            run_dir.clone(),
+            cli_config,
+            styles,
+            github_app,
+            git_author,
+        )
+        .await
+    } else {
+        commands::run::run_from_record(
+            persisted,
+            run_dir.clone(),
+            cli_config,
+            styles,
+            github_app,
+            git_author,
+        )
+        .await
+    };
+
+    match result {
         Ok(()) => Ok(()),
         Err(err) => {
             let _ = commands::detached_support::persist_detached_failure(
@@ -752,7 +767,7 @@ async fn main_inner() -> (String, Result<()>) {
                     #[cfg(feature = "sleep_inhibitor")]
                     let _sleep_guard = fabro_beastie::guard(_prevent_idle_sleep);
 
-                    let child = commands::start::start_run(&run_dir)?;
+                    let child = commands::start::start_run(&run_dir, false)?;
 
                     if args.detach {
                         println!("{run_id}");
@@ -778,7 +793,7 @@ async fn main_inner() -> (String, Result<()>) {
             Command::Start { run } => {
                 let base = fabro_workflows::run_lookup::default_runs_base();
                 let run_info = fabro_workflows::run_lookup::resolve_run(&base, &run)?;
-                let child = commands::start::start_run(&run_info.path)?;
+                let child = commands::start::start_run(&run_info.path, false)?;
                 eprintln!("Started engine process (PID {})", child.id());
             }
             Command::Attach { run } => {
@@ -792,10 +807,10 @@ async fn main_inner() -> (String, Result<()>) {
                     std::process::exit(1);
                 }
             }
-            Command::RunEngine { run_dir } => {
+            Command::RunEngine { run_dir, resume } => {
                 let styles: &'static fabro_util::terminal::Styles =
                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
-                run_engine_entrypoint(run_dir, styles).await?;
+                run_engine_entrypoint(run_dir, resume, styles).await?;
             }
             Command::Validate(args) => {
                 let styles = fabro_util::terminal::Styles::detect_stderr();
@@ -946,20 +961,16 @@ async fn main_inner() -> (String, Result<()>) {
                     commands::secret::set_command(&args)?;
                 }
             },
-            Command::Resume(mut args) => {
+            Command::Resume(args) => {
                 let styles: &'static fabro_util::terminal::Styles =
                     Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
-                let cli_config = cli_config::load_cli_config(None)?;
-                args.verbose = args.verbose || cli_config.verbose_enabled();
                 #[cfg(feature = "sleep_inhibitor")]
-                let _sleep_guard = fabro_beastie::guard(cli_config.prevent_idle_sleep_enabled());
-                let github_app = build_github_app_credentials(cli_config.app_id());
-                let git_author = fabro_workflows::git::GitAuthor::from_options(
-                    cli_config.git_author().and_then(|a| a.name.clone()),
-                    cli_config.git_author().and_then(|a| a.email.clone()),
-                );
-                commands::resume::resume_command(args, cli_config, styles, github_app, git_author)
-                    .await?;
+                {
+                    let cli_config = cli_config::load_cli_config(None)?;
+                    let _sleep_guard =
+                        fabro_beastie::guard(cli_config.prevent_idle_sleep_enabled());
+                }
+                commands::resume::resume_command(args, styles).await?;
             }
             Command::Rewind(args) => {
                 let styles = fabro_util::terminal::Styles::detect_stderr();
@@ -1114,8 +1125,28 @@ mod tests {
         let cli = Cli::try_parse_from(["fabro", "_run_engine", "--run-dir", "/tmp/runs/test"])
             .expect("should parse");
         match cli.command {
-            Command::RunEngine { run_dir } => {
+            Command::RunEngine { run_dir, resume } => {
                 assert_eq!(run_dir, std::path::PathBuf::from("/tmp/runs/test"));
+                assert!(!resume);
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_run_engine_with_resume() {
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "_run_engine",
+            "--run-dir",
+            "/tmp/runs/test",
+            "--resume",
+        ])
+        .expect("should parse");
+        match cli.command {
+            Command::RunEngine { run_dir, resume } => {
+                assert_eq!(run_dir, std::path::PathBuf::from("/tmp/runs/test"));
+                assert!(resume);
             }
             _ => panic!("unexpected command variant"),
         }

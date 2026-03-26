@@ -68,31 +68,17 @@ fabro run run.toml
 
 ## `fabro resume`
 
-Resume an interrupted workflow run from its last checkpoint.
+Resume an interrupted workflow run from its last checkpoint. The run is looked up by ID prefix and uses the configuration persisted at create time — no runtime overrides are accepted.
 
 ```bash
 fabro resume <RUN_ID>
-fabro resume <RUN_ID> --workflow updated.fabro
-fabro resume --checkpoint path/to/checkpoint.json --workflow workflow.fabro
+fabro resume <RUN_ID> --detach
 ```
 
 | Argument / Flag | Description |
 |---|---|
-| `<RUN_ID>` | Run ID, prefix, or branch (`fabro/run/...`). Not required when using `--checkpoint`. |
-| `--checkpoint <FILE>` | Resume from a checkpoint file (requires `--workflow`) |
-| `--workflow <FILE>` | Override workflow graph (required with `--checkpoint`) |
-| `--run-dir <DIR>` | Run output directory |
-| `--dry-run` | Execute with a simulated LLM backend |
-| `--auto-approve` | Auto-approve all human gates |
-| `--model <MODEL>` | Override default LLM model |
-| `--provider <PROVIDER>` | Override default LLM provider |
-| `-v, --verbose` | Enable verbose output |
-| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, `daytona`, `ssh`, or `exe` |
-| `--goal <GOAL>` | Override the workflow goal |
-| `--goal-file <FILE>` | Read the goal from a file |
-| `--no-retro` | Skip retro generation after the run |
-| `--preserve-sandbox` | Keep the sandbox alive after the run finishes |
-| `--label <KEY=VALUE>` | Attach a label to this run (repeatable) |
+| `<RUN_ID>` | Run ID or unambiguous prefix |
+| `-d, --detach` | Run in the background and print the run ID |
 
 ## `fabro ps`
 
