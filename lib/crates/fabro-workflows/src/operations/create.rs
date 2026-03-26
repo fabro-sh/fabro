@@ -92,22 +92,6 @@ pub fn create_from_file(
     create(&source, options)
 }
 
-/// Build a persisted workflow from an already-materialized graph.
-///
-/// This is used by detached/resume CLI paths that load a graph from `RunRecord`
-/// instead of re-parsing DOT source.
-#[doc(hidden)]
-pub fn create_from_graph(
-    mut graph: Graph,
-    options: RunCreateOptions,
-) -> Result<Persisted, FabroError> {
-    if let Some(goal_override) = options.goal_override.as_deref() {
-        apply_goal_override(&mut graph, Some(goal_override));
-    }
-    let validated = Validated::new(graph, String::new(), vec![]);
-    persist_validated(validated, options)
-}
-
 fn preprocess_and_validate(
     dot_source: &str,
     base_dir: Option<PathBuf>,
@@ -193,7 +177,7 @@ fn persist_validated(
     )
 }
 
-fn finalize_config(config: &mut FabroConfig, graph: &Graph) {
+pub(crate) fn finalize_config(config: &mut FabroConfig, graph: &Graph) {
     let llm_config = config.llm.as_ref();
     let configured_model = llm_config.and_then(|l| l.model.as_deref());
     let configured_provider = llm_config.and_then(|l| l.provider.as_deref());

@@ -14,7 +14,7 @@ use fabro_util::terminal::Styles;
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel};
 use fabro_workflows::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::operations::{
-    create_from_graph, start, RunCreateOptions, StartFinalizeOptions, StartOptions,
+    restore, start, RestoreOptions, RunCreateOptions, StartFinalizeOptions, StartOptions,
     StartPullRequestConfig, StartRetroOptions,
 };
 use fabro_workflows::outcome::StageStatus;
@@ -152,6 +152,29 @@ fn preferred_resume_repo_path(
         .map(PathBuf::from)
         .filter(|path| path.exists())
         .unwrap_or_else(|| original_cwd.to_path_buf())
+}
+
+fn restore_persisted_for_resume(
+    rec: &RunRecord,
+    config: FabroConfig,
+    run_dir: PathBuf,
+    run_id: &str,
+    labels: HashMap<String, String>,
+    base_branch: Option<String>,
+    resume_repo_path: &std::path::Path,
+) -> Result<Persisted, fabro_workflows::error::FabroError> {
+    let mut run_record = rec.clone();
+    run_record.run_id = run_id.to_string();
+    run_record.config = config;
+    run_record.labels = labels;
+    run_record.base_branch = base_branch;
+    run_record.working_directory = resume_repo_path.to_path_buf();
+    run_record.host_repo_path = Some(resume_repo_path.to_string_lossy().to_string());
+
+    restore(RestoreOptions {
+        run_dir,
+        run_record,
+    })
 }
 
 /// Resume an interrupted workflow run.
@@ -681,20 +704,14 @@ async fn prepare_from_branch(
                     sandbox_provider,
                 },
             );
-            let persisted = create_from_graph(
-                rec.graph.clone(),
-                RunCreateOptions {
-                    config,
-                    run_dir: Some(run_dir.clone()),
-                    run_id: Some(run_id.clone()),
-                    workflow_slug: rec.workflow_slug.clone(),
-                    labels: parse_labels(&args.label),
-                    base_branch: detected_base_branch.clone(),
-                    working_directory: Some(resume_repo_path.clone()),
-                    host_repo_path: Some(resume_repo_path.to_string_lossy().to_string()),
-                    goal_override: None,
-                    base_dir: None,
-                },
+            let persisted = restore_persisted_for_resume(
+                rec,
+                config,
+                run_dir.clone(),
+                &run_id,
+                parse_labels(&args.label),
+                detected_base_branch.clone(),
+                &resume_repo_path,
             )?;
             let graph_source = persisted.source().to_string();
             let run_cfg = Some(persisted.run_record().config.clone());
@@ -1450,7 +1467,7 @@ fn run_dir_name_matches_mode(name: &str, run_id_suffix: &str, dry_run: bool) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
+    use chrono::{TimeZone, Utc};
     use fabro_workflows::run_status::{RunStatus, RunStatusRecord, StatusReason};
 
     fn sample_run_record() -> RunRecord {
@@ -1489,6 +1506,66 @@ mod tests {
 
         let selected = preferred_resume_repo_path(cwd.path(), Some(&record));
         assert_eq!(selected, cwd.path());
+    }
+
+    #[test]
+    fn restore_persisted_for_resume_materializes_metadata_record_without_existing_run_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo_dir = dir.path().join("repo");
+        let run_dir = dir.path().join("runs").join("run-1");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+
+        let mut record = sample_run_record();
+        let created_at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).single().unwrap();
+        record.created_at = created_at;
+        record.config = fabro_config::config::FabroConfig {
+            llm: Some(fabro_config::run::LlmConfig {
+                model: Some("sonnet".to_string()),
+                provider: None,
+                fallbacks: None,
+            }),
+            dry_run: Some(true),
+            ..Default::default()
+        };
+        record.labels = HashMap::from([("old".to_string(), "value".to_string())]);
+        record.host_repo_path = Some("/tmp/old-repo".to_string());
+
+        assert!(!run_dir.exists());
+
+        let persisted = restore_persisted_for_resume(
+            &record,
+            record.config.clone(),
+            run_dir.clone(),
+            &record.run_id,
+            HashMap::from([("env".to_string(), "test".to_string())]),
+            Some("develop".to_string()),
+            &repo_dir,
+        )
+        .unwrap();
+        let loaded = Persisted::load(&run_dir).unwrap();
+
+        assert!(run_dir.exists());
+        assert_eq!(persisted.run_record().created_at, created_at);
+        assert_eq!(loaded.run_record().created_at, created_at);
+        assert_eq!(loaded.run_record().working_directory, repo_dir);
+        assert_eq!(
+            loaded.run_record().host_repo_path.as_deref(),
+            Some(repo_dir.to_string_lossy().as_ref())
+        );
+        assert_eq!(loaded.run_record().base_branch.as_deref(), Some("develop"));
+        assert_eq!(
+            loaded.run_record().labels.get("env").map(String::as_str),
+            Some("test")
+        );
+        assert_eq!(
+            loaded
+                .run_record()
+                .config
+                .llm
+                .as_ref()
+                .and_then(|llm| llm.model.as_deref()),
+            Some("claude-sonnet-4-6")
+        );
     }
 
     #[test]
