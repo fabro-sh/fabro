@@ -1645,7 +1645,7 @@ async fn run_command_impl(
         None
     };
 
-    let config = RunOptions {
+    let run_options = RunOptions {
         config: settings_config,
         run_dir: run_dir.clone(),
         cancel_token: None,
@@ -1691,7 +1691,7 @@ async fn run_command_impl(
     let pr_config = if dry_run_mode {
         None
     } else {
-        config.pull_request().cloned()
+        run_options.pull_request().cloned()
     };
     let started = start(
         persisted,
@@ -1703,7 +1703,7 @@ async fn run_command_impl(
                 sandbox: Arc::clone(&sandbox),
                 registry: Arc::new(registry),
                 lifecycle,
-                run_options: config,
+                run_options,
                 hooks: fabro_hooks::HookConfig {
                     hooks: run_cfg
                         .as_ref()

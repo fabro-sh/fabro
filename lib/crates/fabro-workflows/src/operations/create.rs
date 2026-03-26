@@ -62,13 +62,13 @@ pub fn validate_from_file(path: &Path) -> Result<Validated, FabroError> {
 }
 
 /// Parse, transform, validate, normalize config, and persist a run.
-pub fn create(dot_source: &str, settings: RunCreateOptions) -> Result<Persisted, FabroError> {
+pub fn create(dot_source: &str, options: RunCreateOptions) -> Result<Persisted, FabroError> {
     let validated = preprocess_and_validate(
         dot_source,
-        settings.base_dir.clone(),
+        options.base_dir.clone(),
         Vec::new(),
-        Some(&settings.config),
-        settings.goal_override.as_deref(),
+        Some(&options.config),
+        options.goal_override.as_deref(),
     )?;
 
     if validated.has_errors() {
@@ -77,19 +77,19 @@ pub fn create(dot_source: &str, settings: RunCreateOptions) -> Result<Persisted,
         });
     }
 
-    persist_validated(validated, settings)
+    persist_validated(validated, options)
 }
 
 /// Read a DOT file, apply file inlining from its parent directory, then create.
 pub fn create_from_file(
     path: &Path,
-    mut settings: RunCreateOptions,
+    mut options: RunCreateOptions,
 ) -> Result<Persisted, FabroError> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| FabroError::Parse(format!("Failed to read {}: {e}", path.display())))?;
     let base_dir = path.parent().unwrap_or(Path::new("."));
-    settings.base_dir = Some(base_dir.to_path_buf());
-    create(&source, settings)
+    options.base_dir = Some(base_dir.to_path_buf());
+    create(&source, options)
 }
 
 /// Build a persisted workflow from an already-materialized graph.
@@ -99,13 +99,13 @@ pub fn create_from_file(
 #[doc(hidden)]
 pub fn create_from_graph(
     mut graph: Graph,
-    settings: RunCreateOptions,
+    options: RunCreateOptions,
 ) -> Result<Persisted, FabroError> {
-    if let Some(goal_override) = settings.goal_override.as_deref() {
+    if let Some(goal_override) = options.goal_override.as_deref() {
         apply_goal_override(&mut graph, Some(goal_override));
     }
     let validated = Validated::new(graph, String::new(), vec![]);
-    persist_validated(validated, settings)
+    persist_validated(validated, options)
 }
 
 fn preprocess_and_validate(
@@ -150,7 +150,7 @@ fn apply_goal_override(graph: &mut Graph, goal_override: Option<&str>) {
 
 fn persist_validated(
     validated: Validated,
-    settings: RunCreateOptions,
+    options: RunCreateOptions,
 ) -> Result<Persisted, FabroError> {
     let RunCreateOptions {
         mut config,
@@ -163,7 +163,7 @@ fn persist_validated(
         host_repo_path,
         goal_override: _,
         base_dir: _,
-    } = settings;
+    } = options;
 
     finalize_config(&mut config, validated.graph());
 

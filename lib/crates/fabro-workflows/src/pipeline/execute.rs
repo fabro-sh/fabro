@@ -33,7 +33,7 @@ pub async fn execute(init: Initialized) -> Executed {
     let Initialized {
         graph,
         source: _,
-        settings,
+        run_options,
         checkpoint,
         seed_context,
         emitter,
@@ -48,15 +48,15 @@ pub async fn execute(init: Initialized) -> Executed {
     let graph_arc = Arc::new(graph.clone());
     let wf_graph = WorkflowGraph(Arc::clone(&graph_arc));
 
-    let git_state = settings.git.as_ref().and_then(|git| {
+    let git_state = run_options.git.as_ref().and_then(|git| {
         let base_sha = git.base_sha.clone()?;
         Some(Arc::new(GitState {
-            run_id: settings.run_id.clone(),
+            run_id: run_options.run_id.clone(),
             base_sha,
             run_branch: git.run_branch.clone(),
             meta_branch: git.meta_branch.clone(),
-            checkpoint_exclude_globs: settings.checkpoint_exclude_globs().to_vec(),
-            git_author: settings.git_author.clone(),
+            checkpoint_exclude_globs: run_options.checkpoint_exclude_globs().to_vec(),
+            git_author: run_options.git_author.clone(),
         }))
     });
 
@@ -72,17 +72,17 @@ pub async fn execute(init: Initialized) -> Executed {
 
     let handler = Arc::new(WorkflowNodeHandler {
         services: shared_services,
-        run_dir: settings.run_dir.clone(),
+        run_dir: run_options.run_dir.clone(),
         graph: Arc::clone(&graph_arc),
     });
 
-    let settings_arc = Arc::new(settings.clone());
+    let settings_arc = Arc::new(run_options.clone());
     let lifecycle = WorkflowLifecycle::new(
         Arc::clone(&emitter),
         hook_runner.clone(),
         Arc::clone(&sandbox),
         graph_arc,
-        settings.run_dir.clone(),
+        run_options.run_dir.clone(),
         settings_arc,
         checkpoint.is_some(),
     );
@@ -134,7 +134,7 @@ pub async fn execute(init: Initialized) -> Executed {
                 return Executed {
                     graph,
                     outcome: Err(err),
-                    settings,
+                    run_options,
                     hook_runner,
                     emitter,
                     sandbox,
@@ -155,7 +155,7 @@ pub async fn execute(init: Initialized) -> Executed {
                 return Executed {
                     graph,
                     outcome: Err(err),
-                    settings,
+                    run_options,
                     hook_runner,
                     emitter,
                     sandbox,
@@ -171,7 +171,7 @@ pub async fn execute(init: Initialized) -> Executed {
                 return Executed {
                     graph,
                     outcome: Err(err),
-                    settings,
+                    run_options,
                     hook_runner,
                     emitter,
                     sandbox,
@@ -187,7 +187,7 @@ pub async fn execute(init: Initialized) -> Executed {
     let graph_max = graph.max_node_visits();
     let max_node_visits = if graph_max > 0 {
         Some(graph_max as usize)
-    } else if settings.dry_run {
+    } else if run_options.dry_run {
         Some(10)
     } else {
         None
@@ -235,7 +235,7 @@ pub async fn execute(init: Initialized) -> Executed {
         ExecutorBuilder::new(handler as Arc<dyn fabro_core::handler::NodeHandler<WorkflowGraph>>)
             .lifecycle(Box::new(lifecycle));
 
-    if let Some(ref cancel) = settings.cancel_token {
+    if let Some(ref cancel) = run_options.cancel_token {
         builder = builder.cancel_token(cancel.clone());
     }
     if let Some(token) = stall_token.clone() {
@@ -290,7 +290,7 @@ pub async fn execute(init: Initialized) -> Executed {
     Executed {
         graph,
         outcome,
-        settings,
+        run_options,
         hook_runner,
         emitter,
         sandbox,

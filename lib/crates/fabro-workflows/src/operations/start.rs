@@ -78,10 +78,10 @@ pub async fn start(persisted: Persisted, options: StartOptions) -> Result<Starte
     );
 
     let retro_opts = RetroOptions {
-        run_id: executed.settings.run_id.clone(),
+        run_id: executed.run_options.run_id.clone(),
         workflow_name: executed.graph.name.clone(),
         goal: executed.graph.goal().to_string(),
-        run_dir: executed.settings.run_dir.clone(),
+        run_dir: executed.run_options.run_dir.clone(),
         sandbox: Arc::clone(&executed.sandbox),
         emitter: Some(Arc::clone(&executed.emitter)),
         failed,
@@ -98,15 +98,15 @@ pub async fn start(persisted: Persisted, options: StartOptions) -> Result<Starte
     let retro_duration = retro_start.elapsed();
 
     let finalize_opts = FinalizeOptions {
-        run_dir: retroed.settings.run_dir.clone(),
-        run_id: retroed.settings.run_id.clone(),
+        run_dir: retroed.run_options.run_dir.clone(),
+        run_id: retroed.run_options.run_id.clone(),
         workflow_name: retroed.graph.name.clone(),
         hook_runner: retroed.hook_runner.clone(),
         preserve_sandbox: options.finalize.preserve_sandbox,
         last_git_sha: last_git_sha.lock().unwrap().clone(),
     };
     let pr_opts = PullRequestOptions {
-        run_dir: retroed.settings.run_dir.clone(),
+        run_dir: retroed.run_options.run_dir.clone(),
         pr_config: options.pull_request.pr_config,
         github_app: options.pull_request.github_app,
         origin_url: options.pull_request.origin_url,
@@ -369,7 +369,7 @@ mod tests {
         .unwrap()
     }
 
-    fn test_settings(run_dir: &std::path::Path) -> RunOptions {
+    fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
             config: FabroConfig::default(),
             run_dir: run_dir.to_path_buf(),
@@ -410,7 +410,7 @@ mod tests {
                 sandbox,
                 registry,
                 lifecycle,
-                run_options: test_settings(run_dir),
+                run_options: test_run_options(run_dir),
                 hooks: fabro_hooks::HookConfig { hooks: vec![] },
                 sandbox_env: HashMap::new(),
                 checkpoint: None,

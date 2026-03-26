@@ -107,7 +107,7 @@ struct ResumeContext {
     /// Kept as Arc so the sandbox event callbacks can emit through it. Listeners
     /// that need to be added later (e.g. ProgressUI) are registered separately.
     emitter: Arc<EventEmitter>,
-    settings: RunOptions,
+    run_options: RunOptions,
     setup_commands: Vec<String>,
     /// Devcontainer lifecycle phases (on_create, post_create, post_start) resolved from config.
     devcontainer_phases: Vec<(String, Vec<fabro_devcontainer::Command>)>,
@@ -459,7 +459,7 @@ async fn prepare_from_checkpoint(
     };
     let sandbox: Arc<dyn Sandbox> = Arc::new(fabro_agent::ReadBeforeWriteSandbox::new(sandbox));
 
-    let settings = RunOptions {
+    let run_options = RunOptions {
         config: settings_config,
         run_dir: run_dir.clone(),
         cancel_token: None,
@@ -497,7 +497,7 @@ async fn prepare_from_checkpoint(
         run_cfg,
         sandbox,
         emitter,
-        settings,
+        run_options,
         setup_commands,
         devcontainer_phases,
         devcontainer_env,
@@ -940,7 +940,7 @@ async fn prepare_from_branch(
         .unwrap_or_default();
     setup_commands.extend(sandbox.resume_setup_commands(&run_branch));
 
-    let settings = RunOptions {
+    let run_options = RunOptions {
         config: settings_config,
         run_dir: run_dir.clone(),
         cancel_token: None,
@@ -981,7 +981,7 @@ async fn prepare_from_branch(
         run_cfg,
         sandbox,
         emitter,
-        settings,
+        run_options,
         setup_commands,
         devcontainer_phases,
         devcontainer_env,
@@ -1009,7 +1009,7 @@ async fn run_resumed(
         mut run_cfg,
         sandbox,
         emitter,
-        mut settings,
+        mut run_options,
         setup_commands,
         devcontainer_phases,
         devcontainer_env,
@@ -1195,7 +1195,7 @@ async fn run_resumed(
             }
         }
     };
-    settings.dry_run = dry_run_mode;
+    run_options.dry_run = dry_run_mode;
 
     if let Some(ref mut cfg) = run_cfg {
         run_config::resolve_sandbox_env(cfg)?;
@@ -1314,7 +1314,7 @@ async fn run_resumed(
     let pr_config = if dry_run_mode {
         None
     } else {
-        settings.pull_request().cloned()
+        run_options.pull_request().cloned()
     };
     let started = start(
         persisted,
@@ -1326,7 +1326,7 @@ async fn run_resumed(
                 sandbox: Arc::clone(&sandbox),
                 registry: Arc::new(registry),
                 lifecycle,
-                run_options: settings,
+                run_options,
                 hooks: fabro_hooks::HookConfig {
                     hooks: run_cfg
                         .as_ref()
