@@ -5,7 +5,7 @@ mod start;
 
 pub use create::{
     create, create_from_file, create_from_graph, default_run_dir, validate, validate_from_file,
-    RunCreateSettings, ValidateOptions,
+    RunCreateOptions, ValidateOptions,
 };
 pub use fork::fork;
 pub use rewind::{
@@ -13,5 +13,5 @@ pub use rewind::{
     TimelineEntry,
 };
 pub use start::{
-    start, StartFinalizeConfig, StartOptions, StartPullRequestConfig, StartRetroConfig, Started,
+    start, StartFinalizeOptions, StartOptions, StartPullRequestConfig, StartRetroOptions, Started,
 };

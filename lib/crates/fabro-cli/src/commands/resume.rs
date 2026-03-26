@@ -14,8 +14,8 @@ use fabro_util::terminal::Styles;
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel};
 use fabro_workflows::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::operations::{
-    create_from_graph, start, RunCreateSettings, StartFinalizeConfig, StartOptions,
-    StartPullRequestConfig, StartRetroConfig,
+    create_from_graph, start, RunCreateOptions, StartFinalizeOptions, StartOptions,
+    StartPullRequestConfig, StartRetroOptions,
 };
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::pipeline::{
@@ -23,7 +23,7 @@ use fabro_workflows::pipeline::{
 };
 use fabro_workflows::records::Checkpoint;
 use fabro_workflows::records::RunRecord;
-use fabro_workflows::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
+use fabro_workflows::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 
 use super::detached_support::{DetachedRunBootstrapGuard, DetachedRunCompletionGuard};
 use super::run::{
@@ -107,7 +107,7 @@ struct ResumeContext {
     /// Kept as Arc so the sandbox event callbacks can emit through it. Listeners
     /// that need to be added later (e.g. ProgressUI) are registered separately.
     emitter: Arc<EventEmitter>,
-    settings: RunSettings,
+    settings: RunOptions,
     setup_commands: Vec<String>,
     /// Devcontainer lifecycle phases (on_create, post_create, post_start) resolved from config.
     devcontainer_phases: Vec<(String, Vec<fabro_devcontainer::Command>)>,
@@ -236,7 +236,7 @@ async fn prepare_from_checkpoint(
     );
     let persisted = match fabro_workflows::operations::create(
         &source_input.raw_source,
-        RunCreateSettings {
+        RunCreateOptions {
             config,
             run_dir: Some(run_dir.clone()),
             run_id: Some(run_id.clone()),
@@ -459,7 +459,7 @@ async fn prepare_from_checkpoint(
     };
     let sandbox: Arc<dyn Sandbox> = Arc::new(fabro_agent::ReadBeforeWriteSandbox::new(sandbox));
 
-    let settings = RunSettings {
+    let settings = RunOptions {
         config: settings_config,
         run_dir: run_dir.clone(),
         cancel_token: None,
@@ -607,7 +607,7 @@ async fn prepare_from_branch(
             );
             let persisted = match fabro_workflows::operations::create(
                 &source_input.raw_source,
-                RunCreateSettings {
+                RunCreateOptions {
                     config,
                     run_dir: Some(run_dir.clone()),
                     run_id: Some(run_id.clone()),
@@ -683,7 +683,7 @@ async fn prepare_from_branch(
             );
             let persisted = create_from_graph(
                 rec.graph.clone(),
-                RunCreateSettings {
+                RunCreateOptions {
                     config,
                     run_dir: Some(run_dir.clone()),
                     run_id: Some(run_id.clone()),
@@ -940,7 +940,7 @@ async fn prepare_from_branch(
         .unwrap_or_default();
     setup_commands.extend(sandbox.resume_setup_commands(&run_branch));
 
-    let settings = RunSettings {
+    let settings = RunOptions {
         config: settings_config,
         run_dir: run_dir.clone(),
         cancel_token: None,
@@ -952,7 +952,7 @@ async fn prepare_from_branch(
             .as_deref()
             .map(PathBuf::from)
             .or_else(|| Some(resume_repo_path.clone())),
-        git: Some(GitCheckpointSettings {
+        git: Some(GitCheckpointOptions {
             base_sha,
             run_branch: Some(run_branch),
             meta_branch: Some(fabro_workflows::git::MetadataStore::branch_name(&run_id)),
@@ -1296,7 +1296,7 @@ async fn run_resumed(
             }
         }
     });
-    let lifecycle = LifecycleConfig {
+    let lifecycle = LifecycleOptions {
         setup_commands,
         setup_command_timeout_ms: 300_000,
         devcontainer_phases,
@@ -1326,7 +1326,7 @@ async fn run_resumed(
                 sandbox: Arc::clone(&sandbox),
                 registry: Arc::new(registry),
                 lifecycle,
-                run_settings: settings,
+                run_options: settings,
                 hooks: fabro_hooks::HookConfig {
                     hooks: run_cfg
                         .as_ref()
@@ -1337,7 +1337,7 @@ async fn run_resumed(
                 checkpoint: Some(checkpoint),
                 seed_context: None,
             },
-            retro: StartRetroConfig {
+            retro: StartRetroOptions {
                 enabled: !args.no_retro && project_config::is_retro_enabled(),
                 dry_run: dry_run_mode,
                 llm_client: if dry_run_mode {
@@ -1348,7 +1348,7 @@ async fn run_resumed(
                 provider: provider_enum,
                 model: model.clone(),
             },
-            finalize: StartFinalizeConfig {
+            finalize: StartFinalizeOptions {
                 preserve_sandbox: preserve,
             },
             pull_request: StartPullRequestConfig {

@@ -14,7 +14,7 @@ use crate::operations::{validate, validate_from_file, ValidateOptions};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline;
 use crate::pipeline::types::Initialized;
-use crate::run_settings::RunSettings;
+use crate::run_options::RunOptions;
 use fabro_graphviz::graph::{Graph, Node};
 
 use super::{EngineServices, Handler};
@@ -133,7 +133,7 @@ impl Handler for SubWorkflowHandler {
             }
         };
 
-        // Build child RunSettings
+        // Build child RunOptions
         let visit = crate::run_dir::visit_from_context(context) as u64;
         let child_logs = run_dir.join(format!("nodes/{}_{visit}/child", node.id));
         let _ = std::fs::create_dir_all(&child_logs);
@@ -143,7 +143,7 @@ impl Handler for SubWorkflowHandler {
         let child_cancel = Arc::clone(&cancel_token);
 
         let git_state = services.git_state();
-        let child_config = RunSettings {
+        let child_config = RunOptions {
             config: fabro_config::FabroConfig::default(),
             run_dir: child_logs,
             cancel_token: Some(cancel_token),

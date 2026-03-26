@@ -13,7 +13,7 @@ use crate::event::EventEmitter;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::records::{Checkpoint, Conclusion, RunRecord};
-use crate::run_settings::{LifecycleConfig, RunSettings};
+use crate::run_options::{LifecycleOptions, RunOptions};
 use fabro_validate::Severity;
 
 /// Output of the PARSE phase.
@@ -195,8 +195,8 @@ pub struct InitOptions {
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
     pub registry: Arc<HandlerRegistry>,
-    pub lifecycle: LifecycleConfig,
-    pub run_settings: RunSettings,
+    pub lifecycle: LifecycleOptions,
+    pub run_options: RunOptions,
     pub hooks: fabro_hooks::HookConfig,
     pub sandbox_env: HashMap<String, String>,
     pub checkpoint: Option<Checkpoint>,
@@ -208,7 +208,7 @@ pub struct InitOptions {
 pub struct Initialized {
     pub graph: Graph,
     pub source: String,
-    pub settings: RunSettings,
+    pub settings: RunOptions,
     pub(crate) checkpoint: Option<Checkpoint>,
     pub(crate) seed_context: Option<Context>,
     pub emitter: Arc<EventEmitter>,
@@ -224,7 +224,7 @@ pub struct Initialized {
 pub struct Executed {
     pub graph: Graph,
     pub outcome: Result<Outcome, FabroError>,
-    pub settings: RunSettings,
+    pub settings: RunOptions,
     pub hook_runner: Option<Arc<HookRunner>>,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
@@ -237,7 +237,7 @@ pub struct Executed {
 pub struct Retroed {
     pub graph: Graph,
     pub outcome: Result<Outcome, FabroError>,
-    pub settings: RunSettings,
+    pub settings: RunOptions,
     pub hook_runner: Option<Arc<HookRunner>>,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
@@ -253,7 +253,7 @@ pub struct Concluded {
     pub conclusion: Conclusion,
     pub pushed_branch: Option<String>,
     pub graph: Graph,
-    pub settings: RunSettings,
+    pub settings: RunOptions,
     pub emitter: Arc<EventEmitter>,
 }
 

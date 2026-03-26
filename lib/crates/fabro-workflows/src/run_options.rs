@@ -8,17 +8,17 @@ use fabro_config::run::PullRequestConfig;
 
 use crate::git::GitAuthor;
 
-/// Git checkpoint settings for a workflow run.
+/// Git checkpoint options for a workflow run.
 #[derive(Clone)]
-pub struct GitCheckpointSettings {
+pub struct GitCheckpointOptions {
     pub base_sha: Option<String>,
     pub run_branch: Option<String>,
     pub meta_branch: Option<String>,
 }
 
-/// Configuration for a workflow run.
+/// Options for a workflow run.
 #[derive(Clone)]
-pub struct RunSettings {
+pub struct RunOptions {
     pub config: FabroConfig,
     pub run_dir: PathBuf,
     pub cancel_token: Option<Arc<AtomicBool>>,
@@ -37,11 +37,11 @@ pub struct RunSettings {
     pub host_repo_path: Option<PathBuf>,
     /// Name of the branch the run was started from (for PR base).
     pub base_branch: Option<String>,
-    /// Git checkpoint settings; `None` means checkpointing disabled.
-    pub git: Option<GitCheckpointSettings>,
+    /// Git checkpoint options; `None` means checkpointing disabled.
+    pub git: Option<GitCheckpointOptions>,
 }
 
-impl RunSettings {
+impl RunOptions {
     pub fn checkpoint_exclude_globs(&self) -> &[String] {
         &self.config.checkpoint.exclude_globs
     }
@@ -60,8 +60,8 @@ impl RunSettings {
     }
 }
 
-/// Configuration for sandbox lifecycle management within the engine.
-pub struct LifecycleConfig {
+/// Options for sandbox lifecycle management within the engine.
+pub struct LifecycleOptions {
     /// Setup commands to run inside the sandbox after initialization.
     pub setup_commands: Vec<String>,
     /// Timeout in milliseconds for each setup command.

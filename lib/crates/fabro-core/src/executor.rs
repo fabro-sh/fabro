@@ -16,7 +16,7 @@ use crate::outcome::{NodeResult, Outcome, StageStatus};
 use crate::state::RunState;
 
 #[derive(Default)]
-pub struct ExecutorSettings {
+pub struct ExecutorOptions {
     pub cancel_token: Option<Arc<AtomicBool>>,
     pub stall_token: Option<CancellationToken>,
     pub max_node_visits: Option<usize>,
@@ -25,7 +25,7 @@ pub struct ExecutorSettings {
 pub struct Executor<G: Graph> {
     handler: Arc<dyn NodeHandler<G>>,
     lifecycle: Box<dyn RunLifecycle<G>>,
-    settings: ExecutorSettings,
+    settings: ExecutorOptions,
 }
 
 enum NextStep {
@@ -38,7 +38,7 @@ enum NextStep {
 pub struct ExecutorBuilder<G: Graph> {
     handler: Arc<dyn NodeHandler<G>>,
     lifecycle: Option<Box<dyn RunLifecycle<G>>>,
-    settings: ExecutorSettings,
+    settings: ExecutorOptions,
 }
 
 impl<G: Graph + 'static> ExecutorBuilder<G> {
@@ -46,7 +46,7 @@ impl<G: Graph + 'static> ExecutorBuilder<G> {
         Self {
             handler,
             lifecycle: None,
-            settings: ExecutorSettings::default(),
+            settings: ExecutorOptions::default(),
         }
     }
 

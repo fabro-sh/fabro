@@ -390,7 +390,7 @@ pub async fn build_pr_body(
 }
 
 /// Auto-merge configuration for a pull request.
-pub struct AutoMergeConfig {
+pub struct AutoMergeOptions {
     pub merge_strategy: MergeStrategy,
 }
 
@@ -408,7 +408,7 @@ pub async fn maybe_open_pull_request(
     diff: &str,
     model: &str,
     draft: bool,
-    auto_merge: Option<AutoMergeConfig>,
+    auto_merge: Option<AutoMergeOptions>,
     run_dir: &Path,
     conclusion: Option<&Conclusion>,
 ) -> Result<Option<PullRequestRecord>, String> {
@@ -505,7 +505,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                     &options.origin_url,
                 ) {
                     let auto_merge = if pr_cfg.auto_merge {
-                        Some(AutoMergeConfig {
+                        Some(AutoMergeOptions {
                             merge_strategy: pr_cfg.merge_strategy,
                         })
                     } else {

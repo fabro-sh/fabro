@@ -29,7 +29,7 @@ use crate::event::EventEmitter;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageUsage};
-use crate::run_settings::RunSettings;
+use crate::run_options::RunOptions;
 use fabro_hooks::HookRunner;
 use fabro_sandbox::Sandbox;
 
@@ -79,7 +79,7 @@ impl WorkflowLifecycle {
         sandbox: Arc<dyn Sandbox>,
         graph: Arc<fabro_graphviz::graph::types::Graph>,
         run_dir: PathBuf,
-        config: Arc<RunSettings>,
+        config: Arc<RunOptions>,
         is_resume: bool,
     ) -> Self {
         let restarted_from: Arc<Mutex<Option<(String, String)>>> = Arc::new(Mutex::new(None));

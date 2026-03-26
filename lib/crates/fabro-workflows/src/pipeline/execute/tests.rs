@@ -23,7 +23,7 @@ use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline::initialize;
 use crate::pipeline::types::{InitOptions, Persisted};
 use crate::records::{Checkpoint, RunRecord};
-use crate::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
+use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::test_support::run_graph;
 
 fn local_env() -> Arc<dyn Sandbox> {
@@ -66,8 +66,8 @@ fn make_registry() -> HandlerRegistry {
     registry
 }
 
-fn test_settings(run_dir: &Path, run_id: &str) -> RunSettings {
-    RunSettings {
+fn test_settings(run_dir: &Path, run_id: &str) -> RunOptions {
+    RunOptions {
         run_dir: run_dir.to_path_buf(),
         cancel_token: None,
         dry_run: false,
@@ -131,8 +131,8 @@ fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: &str
     )
 }
 
-fn test_lifecycle(setup_commands: Vec<String>) -> LifecycleConfig {
-    LifecycleConfig {
+fn test_lifecycle(setup_commands: Vec<String>) -> LifecycleOptions {
+    LifecycleOptions {
         setup_commands,
         setup_command_timeout_ms: 300_000,
         devcontainer_phases: Vec::new(),
@@ -155,12 +155,12 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
                 std::env::current_dir().unwrap(),
             )),
             registry: Arc::new(default_registry(Arc::new(AutoApproveInterviewer), || None)),
-            lifecycle: LifecycleConfig {
+            lifecycle: LifecycleOptions {
                 setup_commands: vec![],
                 setup_command_timeout_ms: 1_000,
                 devcontainer_phases: vec![],
             },
-            run_settings: test_settings(&run_dir, "run-test"),
+            run_options: test_settings(&run_dir, "run-test"),
             hooks: HookConfig { hooks: vec![] },
             sandbox_env: HashMap::new(),
             checkpoint: None,
@@ -189,8 +189,8 @@ async fn run_with_lifecycle(
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &Graph,
-    settings: RunSettings,
-    lifecycle: LifecycleConfig,
+    settings: RunOptions,
+    lifecycle: LifecycleOptions,
 ) -> Result<Outcome, FabroError> {
     let run_dir = settings.run_dir.clone();
     let run_id = settings.run_id.clone();
@@ -204,7 +204,7 @@ async fn run_with_lifecycle(
             sandbox,
             registry: Arc::new(registry),
             lifecycle,
-            run_settings: settings,
+            run_options: settings,
             hooks: HookConfig { hooks: vec![] },
             sandbox_env: HashMap::new(),
             checkpoint: None,
@@ -505,7 +505,7 @@ async fn execute_conditional_routing_uses_unconditional_success_path() {
 async fn execute_writes_start_json_and_node_status() {
     let dir = tempfile::tempdir().unwrap();
     let mut settings = test_settings(dir.path(), "test-run");
-    settings.git = Some(GitCheckpointSettings {
+    settings.git = Some(GitCheckpointOptions {
         base_sha: Some("abc123".into()),
         run_branch: Some("fabro/run/test-run".into()),
         meta_branch: None,
@@ -917,7 +917,7 @@ async fn git_checkpoint_skips_start_node() {
 
     let sandbox: Arc<dyn Sandbox> = Arc::new(fabro_agent::LocalSandbox::new(repo.to_path_buf()));
     let mut settings = test_settings(run_tmp.path(), "git-cp-test");
-    settings.git = Some(GitCheckpointSettings {
+    settings.git = Some(GitCheckpointOptions {
         base_sha: Some(base_sha),
         run_branch: None,
         meta_branch: Some(crate::git::MetadataStore::branch_name("git-cp-test")),

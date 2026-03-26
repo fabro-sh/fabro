@@ -22,7 +22,7 @@ use fabro_workflows::git::GitSyncStatus;
 use fabro_workflows::handler::default_registry;
 use fabro_workflows::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::operations::{
-    start, StartFinalizeConfig, StartOptions, StartPullRequestConfig, StartRetroConfig,
+    start, StartFinalizeOptions, StartOptions, StartPullRequestConfig, StartRetroOptions,
 };
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::outcome::{compute_stage_cost, format_cost};
@@ -30,7 +30,7 @@ use fabro_workflows::pipeline::{
     build_conclusion, classify_engine_result, persist_terminal_outcome, Persisted, Validated,
 };
 use fabro_workflows::records::Checkpoint;
-use fabro_workflows::run_settings::{GitCheckpointSettings, LifecycleConfig, RunSettings};
+use fabro_workflows::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use indicatif::HumanDuration;
 use std::time::Duration;
 use tracing::debug;
@@ -897,7 +897,7 @@ async fn run_command_impl(
 
             match fabro_workflows::operations::create(
                 &source_input.raw_source,
-                fabro_workflows::operations::RunCreateSettings {
+                fabro_workflows::operations::RunCreateOptions {
                     config,
                     run_dir: Some(run_dir.clone()),
                     run_id: Some(run_id.clone()),
@@ -1488,7 +1488,7 @@ async fn run_command_impl(
                             "worktree_setup_failed",
                             format!("Git worktree setup failed ({e}), running without worktree."),
                         );
-                        // Reset so RunSettings does not enable git checkpointing
+                        // Reset so RunOptions does not enable git checkpointing
                         worktree_path = None;
                         worktree_branch = None;
                         worktree_base_sha = None;
@@ -1636,7 +1636,7 @@ async fn run_command_impl(
     // 7. Execute
     // Set up metadata branch for git checkpointing (host or remote — engine fills remote)
     let git = if worktree_path.is_some() {
-        Some(GitCheckpointSettings {
+        Some(GitCheckpointOptions {
             base_sha: worktree_base_sha,
             run_branch: worktree_branch,
             meta_branch: Some(fabro_workflows::git::MetadataStore::branch_name(&run_id)),
@@ -1645,7 +1645,7 @@ async fn run_command_impl(
         None
     };
 
-    let config = RunSettings {
+    let config = RunOptions {
         config: settings_config,
         run_dir: run_dir.clone(),
         cancel_token: None,
@@ -1670,7 +1670,7 @@ async fn run_command_impl(
     };
 
     // Build lifecycle config for sandbox init, setup commands, and devcontainer phases
-    let lifecycle = LifecycleConfig {
+    let lifecycle = LifecycleOptions {
         setup_commands,
         setup_command_timeout_ms: 300_000,
         devcontainer_phases: if let Some(ref dc) = devcontainer_config {
@@ -1703,7 +1703,7 @@ async fn run_command_impl(
                 sandbox: Arc::clone(&sandbox),
                 registry: Arc::new(registry),
                 lifecycle,
-                run_settings: config,
+                run_options: config,
                 hooks: fabro_hooks::HookConfig {
                     hooks: run_cfg
                         .as_ref()
@@ -1714,14 +1714,14 @@ async fn run_command_impl(
                 checkpoint: None,
                 seed_context: None,
             },
-            retro: StartRetroConfig {
+            retro: StartRetroOptions {
                 enabled: !no_retro_flag && project_config::is_retro_enabled(),
                 dry_run: dry_run_mode,
                 llm_client: llm_client.clone(),
                 provider: provider_enum,
                 model: model.clone(),
             },
-            finalize: StartFinalizeConfig { preserve_sandbox },
+            finalize: StartFinalizeOptions { preserve_sandbox },
             pull_request: StartPullRequestConfig {
                 pr_config,
                 github_app: github_app.clone(),
