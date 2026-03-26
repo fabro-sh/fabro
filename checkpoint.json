@@ -1,35 +1,49 @@
 {
-  "timestamp": "2026-03-26T14:32:50.865812Z",
-  "current_node": "run_tests",
+  "timestamp": "2026-03-26T14:32:51.174676Z",
+  "current_node": "report",
   "completed_nodes": [
     "start",
-    "run_tests"
+    "run_tests",
+    "report"
   ],
   "node_retries": {},
   "context_values": {
-    "current_node": "run_tests",
+    "current_node": "report",
     "thread.start.current_node": "run_tests",
     "internal.work_dir": "/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpqsZonu/run/worktree",
-    "last_response": "[Simulated] Response for stage: run_tests",
+    "last_response": "[Simulated] Response for stage: report",
     "internal.retry_count.run_tests": 0,
+    "response.report": "[Simulated] Response for stage: report",
+    "internal.retry_count.report": 0,
     "graph.goal": "Run tests and report results",
     "graph.rankdir": "LR",
     "internal.fidelity": "compact",
     "response.run_tests": "[Simulated] Response for stage: run_tests",
-    "internal.thread_id": "start",
+    "internal.thread_id": "run_tests",
     "internal.run_id": "01KMN8ZX1S7DFQTVT4KK6FZMVJ",
     "internal.node_visit_count": 1,
     "failure_signature": "",
     "failure_class": "",
-    "last_stage": "run_tests",
-    "current.preamble": "Goal: Run tests and report results\n",
+    "last_stage": "report",
+    "current.preamble": "Goal: Run tests and report results\n\n## Completed stages\n- **run_tests**: success\n",
     "internal.retry_count.start": 0,
+    "thread.run_tests.current_node": "report",
     "outcome": "success"
   },
   "node_outcomes": {
     "start": {
       "status": "success",
       "notes": "[Simulated] start",
+      "usage": null
+    },
+    "report": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "report",
+        "last_response": "[Simulated] Response for stage: report",
+        "response.report": "[Simulated] Response for stage: report"
+      },
+      "notes": "[Simulated] report",
       "usage": null
     },
     "run_tests": {
@@ -43,9 +57,10 @@
       "usage": null
     }
   },
-  "next_node_id": "report",
+  "next_node_id": "exit",
   "node_visits": {
     "start": 1,
+    "report": 1,
     "run_tests": 1
   }
 }
