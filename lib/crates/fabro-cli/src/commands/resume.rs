@@ -2,7 +2,7 @@ use anyhow::bail;
 use clap::Args;
 use fabro_util::terminal::Styles;
 use fabro_workflows::records::{Checkpoint, RunRecord};
-use fabro_workflows::run_status::RunStatus;
+use fabro_workflows::run_status::{RunStatus, RunStatusRecord};
 
 #[derive(Debug, Args)]
 pub struct ResumeArgs {
@@ -29,6 +29,22 @@ pub async fn resume_command(args: ResumeArgs, styles: &'static Styles) -> anyhow
     }
     let run_id = RunRecord::load(&run_dir)?.run_id;
 
+    // Guard against resuming a live run — must happen before checkpoint
+    // validation because the engine writes checkpoint.json with a plain
+    // fs::write, so a mid-write read would see a truncated file and
+    // report "corrupt" for a run that is simply still alive.
+    if is_pid_alive(&run_dir.join("run.pid")) {
+        bail!("an engine process is still running for this run — cannot resume");
+    }
+
+    // Reject runs that completed successfully — only failed/interrupted
+    // runs should be resumed.
+    if let Ok(record) = RunStatusRecord::load(&run_dir.join("status.json")) {
+        if record.status == RunStatus::Succeeded {
+            bail!("run already succeeded — nothing to resume");
+        }
+    }
+
     // Validate checkpoint is parseable before touching any state.
     // A crash during the original run can leave a truncated file;
     // we must not destroy the old conclusion/failure evidence and
@@ -41,11 +57,6 @@ pub async fn resume_command(args: ResumeArgs, styles: &'static Styles) -> anyhow
             anyhow::anyhow!("no checkpoint found — nothing to resume")
         }
     })?;
-
-    // Guard against resuming a live run
-    if is_pid_alive(&run_dir.join("run.pid")) {
-        bail!("an engine process is still running for this run — cannot resume");
-    }
 
     // Clean stale artifacts from previous execution
     for name in &[
