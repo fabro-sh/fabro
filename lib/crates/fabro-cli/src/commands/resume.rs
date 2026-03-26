@@ -1,7 +1,7 @@
 use anyhow::bail;
 use clap::Args;
 use fabro_util::terminal::Styles;
-use fabro_workflows::records::RunRecord;
+use fabro_workflows::records::{Checkpoint, RunRecord};
 use fabro_workflows::run_status::RunStatus;
 
 #[derive(Debug, Args)]
@@ -29,9 +29,18 @@ pub async fn resume_command(args: ResumeArgs, styles: &'static Styles) -> anyhow
     }
     let run_id = RunRecord::load(&run_dir)?.run_id;
 
-    if !run_dir.join("checkpoint.json").exists() {
-        bail!("no checkpoint found — nothing to resume");
-    }
+    // Validate checkpoint is parseable before touching any state.
+    // A crash during the original run can leave a truncated file;
+    // we must not destroy the old conclusion/failure evidence and
+    // only then discover the checkpoint is corrupt.
+    let cp_path = run_dir.join("checkpoint.json");
+    Checkpoint::load(&cp_path).map_err(|e| {
+        if cp_path.exists() {
+            anyhow::anyhow!("checkpoint.json is corrupt — cannot resume: {e}")
+        } else {
+            anyhow::anyhow!("no checkpoint found — nothing to resume")
+        }
+    })?;
 
     // Guard against resuming a live run
     if is_pid_alive(&run_dir.join("run.pid")) {
@@ -48,6 +57,7 @@ pub async fn resume_command(args: ResumeArgs, styles: &'static Styles) -> anyhow
         "interview_request.claim",
         "detach.log",
         "run.pid",
+        "progress.jsonl",
     ] {
         let _ = std::fs::remove_file(run_dir.join(name));
     }
