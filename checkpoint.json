@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-03-27T02:34:22.909642Z",
+  "current_node": "draft",
+  "completed_nodes": [
+    "start",
+    "draft"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "internal.fidelity": "compact",
+    "last_response": "# Hello! 👋\n\nWelcome to Fabro! I'm here to help you orchestrate and automate your workflows. Ready to build something great?\n\n---\n\nIf you're testing a human gate with auto-approve, this greeting wou",
+    "response.draft": "# Hello! 👋\n\nWelcome to Fabro! I'm here to help you orchestrate and automate your workflows. Ready to build something great?\n\n---\n\nIf you're testing a human gate with auto-approve, this greeting would appear before the gate. Is there a specific workflow test scenario you'd like to set up?",
+    "current.preamble": "Goal: Test human gate with auto-approve\n",
+    "failure_class": "",
+    "internal.node_visit_count": 1,
+    "thread.start.current_node": "draft",
+    "graph.goal": "Test human gate with auto-approve",
+    "graph.rankdir": "LR",
+    "outcome": "success",
+    "internal.run_id": "01KMPJ8R3G22FBN3J1DW03VVJH",
+    "last_stage": "draft",
+    "internal.retry_count.start": 0,
+    "internal.thread_id": "start",
+    "internal.retry_count.draft": 0,
+    "current_node": "draft",
+    "failure_signature": ""
+  },
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "usage": null
+    },
+    "draft": {
+      "status": "success",
+      "context_updates": {
+        "last_response": "# Hello! 👋\n\nWelcome to Fabro! I'm here to help you orchestrate and automate your workflows. Ready to build something great?\n\n---\n\nIf you're testing a human gate with auto-approve, this greeting wou",
+        "response.draft": "# Hello! 👋\n\nWelcome to Fabro! I'm here to help you orchestrate and automate your workflows. Ready to build something great?\n\n---\n\nIf you're testing a human gate with auto-approve, this greeting would appear before the gate. Is there a specific workflow test scenario you'd like to set up?",
+        "last_stage": "draft"
+      },
+      "notes": "Stage completed: draft",
+      "usage": {
+        "model": "claude-haiku-4-5",
+        "input_tokens": 2206,
+        "output_tokens": 236,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "reasoning_tokens": 172,
+        "cost": 0.0027088
+      }
+    }
+  },
+  "next_node_id": "approve",
+  "node_visits": {
+    "draft": 1,
+    "start": 1
+  }
+}
