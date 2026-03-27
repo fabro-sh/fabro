@@ -1,0 +1,60 @@
+{
+  "timestamp": "2026-03-27T14:58:16.699977Z",
+  "current_node": "work",
+  "completed_nodes": [
+    "start",
+    "work"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "internal.retry_count.start": 0,
+    "failure_class": "",
+    "internal.node_visit_count": 1,
+    "thread.start.current_node": "work",
+    "current.preamble": "Goal: Write hello to a file using an agent\n",
+    "outcome": "success",
+    "graph.rankdir": "LR",
+    "current_node": "work",
+    "response.work": "Done! I've written the word 'hello' to the file `scenario_test.txt` in the workspace directory.",
+    "last_response": "Done! I've written the word 'hello' to the file `scenario_test.txt` in the workspace directory.",
+    "internal.run_id": "01KMQWTV54XMRX6K89X619WT5V",
+    "internal.fidelity": "compact",
+    "internal.thread_id": "start",
+    "graph.goal": "Write hello to a file using an agent",
+    "failure_signature": "",
+    "internal.retry_count.work": 0,
+    "last_stage": "work"
+  },
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "usage": null
+    },
+    "work": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "work",
+        "response.work": "Done! I've written the word 'hello' to the file `scenario_test.txt` in the workspace directory.",
+        "last_response": "Done! I've written the word 'hello' to the file `scenario_test.txt` in the workspace directory."
+      },
+      "notes": "Stage completed: work",
+      "usage": {
+        "model": "claude-haiku-4-5",
+        "input_tokens": 617,
+        "output_tokens": 229,
+        "cache_read_tokens": 4802,
+        "cache_write_tokens": 5172,
+        "reasoning_tokens": 102,
+        "cost": 0.0014096
+      },
+      "files_touched": [
+        "/home/daytona/workspace/scenario_test.txt"
+      ]
+    }
+  },
+  "next_node_id": "exit",
+  "node_visits": {
+    "start": 1,
+    "work": 1
+  }
+}
