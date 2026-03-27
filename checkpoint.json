@@ -1,9 +1,10 @@
 {
-  "timestamp": "2026-03-27T14:58:17.923240Z",
-  "current_node": "draft",
+  "timestamp": "2026-03-27T14:58:22.377828Z",
+  "current_node": "approve",
   "completed_nodes": [
     "start",
-    "draft"
+    "draft",
+    "approve"
   ],
   "node_retries": {},
   "context_values": {
@@ -12,20 +13,41 @@
     "internal.retry_count.draft": 0,
     "failure_class": "",
     "last_response": "# Greeting Message\n\nHello! 👋 \n\nWelcome to Fabro! I'm here to help you build, test, and deploy AI-powered workflows. Whether you're orchestrating agents, running automations, or testing workflow gat",
-    "current_node": "draft",
+    "current_node": "approve",
     "thread.start.current_node": "draft",
-    "current.preamble": "Goal: Test human gate with auto-approve\n",
+    "internal.retry_count.approve": 0,
+    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.2k tokens in / 235 out\n",
     "graph.goal": "Test human gate with auto-approve",
-    "internal.thread_id": "start",
+    "thread.draft.current_node": "approve",
+    "human.gate.selected": "A",
+    "internal.thread_id": "draft",
     "internal.fidelity": "compact",
     "internal.node_visit_count": 1,
+    "human.gate.label": "[A] Approve",
     "internal.run_id": "01KMQWTV544SGDZTYEWVMSPPAS",
     "last_stage": "draft",
+    "preferred_label": "[A] Approve",
     "outcome": "success",
     "failure_signature": "",
     "internal.retry_count.start": 0
   },
   "node_outcomes": {
+    "approve": {
+      "status": "success",
+      "preferred_label": "[A] Approve",
+      "suggested_next_ids": [
+        "ship"
+      ],
+      "context_updates": {
+        "human.gate.label": "[A] Approve",
+        "human.gate.selected": "A"
+      },
+      "usage": null
+    },
+    "start": {
+      "status": "success",
+      "usage": null
+    },
     "draft": {
       "status": "success",
       "context_updates": {
@@ -43,15 +65,12 @@
         "reasoning_tokens": 132,
         "cost": 0.0027048000000000003
       }
-    },
-    "start": {
-      "status": "success",
-      "usage": null
     }
   },
-  "next_node_id": "approve",
+  "next_node_id": "ship",
   "node_visits": {
     "start": 1,
-    "draft": 1
+    "draft": 1,
+    "approve": 1
   }
 }
