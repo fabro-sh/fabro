@@ -137,6 +137,73 @@ SHARED = "run"
     (home, project)
 }
 
+fn setup_external_workflow_fixture() -> (tempfile::TempDir, tempfile::TempDir, std::path::PathBuf) {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let storage_dir = home.path().join("fabro-data");
+
+    let home_fabro = home.path().join(".fabro");
+    std::fs::create_dir_all(&home_fabro).unwrap();
+    std::fs::write(
+        home_fabro.join("cli.toml"),
+        format!(
+            r#"
+storage_dir = "{}"
+auto_approve = true
+
+[setup]
+commands = ["cli-setup"]
+"#,
+            storage_dir.display()
+        ),
+    )
+    .unwrap();
+
+    std::fs::write(
+        project.path().join("fabro.toml"),
+        r#"
+version = 1
+
+[setup]
+commands = ["project-setup"]
+
+[sandbox]
+preserve = true
+"#,
+    )
+    .unwrap();
+
+    std::fs::write(
+        project.path().join("workflow.fabro"),
+        r#"
+digraph Test {
+  start [shape=Mdiamond, label="Start"]
+  exit [shape=Msquare, label="Exit"]
+  start -> exit
+}
+"#,
+    )
+    .unwrap();
+
+    std::fs::write(
+        project.path().join("workflow.toml"),
+        r#"
+version = 1
+goal = "Ship it"
+graph = "workflow.fabro"
+
+[llm]
+model = "claude-sonnet-4-6"
+
+[setup]
+commands = ["workflow-setup"]
+"#,
+    )
+    .unwrap();
+
+    (home, project, storage_dir)
+}
+
 // == LLM: prompt ==============================================================
 
 #[test]
@@ -1494,6 +1561,99 @@ fn config_show_workflow_name_applies_run_overlay_and_deep_merges() {
     assert_eq!(env.get("CLI_ONLY").map(String::as_str), Some("1"));
     assert_eq!(env.get("RUN_ONLY").map(String::as_str), Some("1"));
     assert_eq!(env.get("SHARED").map(String::as_str), Some("run"));
+}
+
+#[test]
+fn config_show_explicit_workflow_path_uses_workflow_project_layers() {
+    let (home, project, _storage_dir) = setup_external_workflow_fixture();
+    let cwd = tempfile::tempdir().unwrap();
+    let workflow = project.path().join("workflow.toml");
+
+    let output = arc()
+        .env("HOME", home.path())
+        .current_dir(cwd.path())
+        .args(["config", "show", workflow.to_str().unwrap()])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let cfg = parse_config_show(&output);
+    assert_eq!(cfg.auto_approve, Some(true));
+    assert_eq!(
+        cfg.setup.as_ref().expect("setup config").commands,
+        vec![
+            "workflow-setup".to_string(),
+            "project-setup".to_string(),
+            "cli-setup".to_string(),
+        ]
+    );
+    assert_eq!(
+        cfg.sandbox.as_ref().expect("sandbox config").preserve,
+        Some(true)
+    );
+}
+
+#[test]
+fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
+    let (home, project, storage_dir) = setup_external_workflow_fixture();
+    let cwd = tempfile::tempdir().unwrap();
+    let workflow = project.path().join("workflow.toml");
+    let run_id = "external-config-run";
+
+    arc()
+        .env("HOME", home.path())
+        .current_dir(cwd.path())
+        .args([
+            "create",
+            "--dry-run",
+            "--model",
+            "gpt-5.2",
+            "--run-id",
+            run_id,
+            workflow.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let runs_dir = storage_dir.join("runs");
+    let run_dir = std::fs::read_dir(&runs_dir)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.is_dir()
+                && path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().ends_with(run_id))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "expected run directory for {run_id} under {}",
+                runs_dir.display()
+            )
+        });
+
+    let run_record: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("run.json")).unwrap()).unwrap();
+    assert_eq!(run_record["config"]["auto_approve"].as_bool(), Some(true));
+    assert_eq!(
+        run_record["config"]["storage_dir"].as_str(),
+        Some(storage_dir.to_str().unwrap())
+    );
+    assert_eq!(
+        run_record["config"]["sandbox"]["preserve"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        run_record["config"]["llm"]["model"].as_str(),
+        Some("gpt-5.2")
+    );
+    assert_eq!(
+        run_record["config"]["setup"]["commands"],
+        serde_json::json!(["workflow-setup", "project-setup", "cli-setup"])
+    );
 }
 
 #[test]

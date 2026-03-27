@@ -139,8 +139,8 @@ impl Combine for FabroConfig {
         } else if other.hooks.is_empty() {
             self.hooks
         } else {
-            HookConfig { hooks: self.hooks }
-                .merge(HookConfig { hooks: other.hooks })
+            HookConfig { hooks: other.hooks }
+                .merge(HookConfig { hooks: self.hooks })
                 .hooks
         };
 
