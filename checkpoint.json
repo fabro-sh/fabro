@@ -1,0 +1,48 @@
+{
+  "timestamp": "2026-03-27T19:07:07.330624Z",
+  "current_node": "echo_task",
+  "completed_nodes": [
+    "start",
+    "echo_task"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "internal.node_visit_count": 1,
+    "outcome": "success",
+    "thread.start.current_node": "echo_task",
+    "command.stderr": "",
+    "current.preamble": "Goal: Verify backwards compatibility with old tool naming\n",
+    "internal.retry_count.echo_task": 0,
+    "internal.retry_count.start": 0,
+    "graph.rankdir": "LR",
+    "failure_class": "",
+    "internal.thread_id": "start",
+    "failure_signature": "",
+    "internal.fidelity": "compact",
+    "current_node": "echo_task",
+    "internal.run_id": "01KMRB2JHK3R8GNY6SERJWWV09",
+    "command.output": "",
+    "graph.goal": "Verify backwards compatibility with old tool naming"
+  },
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "notes": "[Simulated] start",
+      "usage": null
+    },
+    "echo_task": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "",
+        "command.stderr": ""
+      },
+      "notes": "[Simulated] Command skipped: echo hello",
+      "usage": null
+    }
+  },
+  "next_node_id": "exit",
+  "node_visits": {
+    "start": 1,
+    "echo_task": 1
+  }
+}
