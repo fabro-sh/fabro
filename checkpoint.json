@@ -1,0 +1,50 @@
+{
+  "timestamp": "2026-03-27T19:07:06.690627Z",
+  "current_node": "plan",
+  "completed_nodes": [
+    "start",
+    "plan"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "failure_signature": "",
+    "current.preamble": "Goal: Implement and validate a feature\n",
+    "thread.start.current_node": "plan",
+    "internal.retry_count.start": 0,
+    "outcome": "success",
+    "failure_class": "",
+    "current_node": "plan",
+    "last_response": "[Simulated] Response for stage: plan",
+    "internal.run_id": "01KMRB2JHK10TZ54R97Z7XKHFJ",
+    "internal.retry_count.plan": 0,
+    "last_stage": "plan",
+    "graph.goal": "Implement and validate a feature",
+    "response.plan": "[Simulated] Response for stage: plan",
+    "internal.thread_id": "start",
+    "internal.fidelity": "compact",
+    "graph.rankdir": "LR",
+    "internal.node_visit_count": 1
+  },
+  "node_outcomes": {
+    "plan": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "plan",
+        "response.plan": "[Simulated] Response for stage: plan",
+        "last_response": "[Simulated] Response for stage: plan"
+      },
+      "notes": "[Simulated] plan",
+      "usage": null
+    },
+    "start": {
+      "status": "success",
+      "notes": "[Simulated] start",
+      "usage": null
+    }
+  },
+  "next_node_id": "implement",
+  "node_visits": {
+    "start": 1,
+    "plan": 1
+  }
+}
