@@ -1,10 +1,11 @@
 {
-  "timestamp": "2026-03-27T16:07:46.609965Z",
-  "current_node": "gate",
+  "timestamp": "2026-03-27T16:07:48.803620Z",
+  "current_node": "passed",
   "completed_nodes": [
     "start",
     "cmd",
-    "gate"
+    "gate",
+    "passed"
   ],
   "node_retries": {},
   "context_values": {
@@ -12,14 +13,16 @@
     "internal.fidelity": "compact",
     "graph.goal": "Test conditional edge selection after a command",
     "command.stderr": "",
-    "command.output": "pass\n",
-    "internal.thread_id": "cmd",
+    "command.output": "branch-passed\n",
+    "internal.thread_id": "gate",
     "thread.cmd.current_node": "gate",
+    "thread.gate.current_node": "passed",
     "internal.retry_count.start": 0,
     "failure_signature": "",
-    "current_node": "gate",
+    "current_node": "passed",
     "internal.node_visit_count": 1,
-    "current.preamble": "Goal: Test conditional edge selection after a command\n\n## Completed stages\n- **cmd**: success\n  - Script: `echo pass`\n  - Stdout:\n    ```\n    pass\n    ```\n  - Stderr: (empty)\n",
+    "internal.retry_count.passed": 0,
+    "current.preamble": "Goal: Test conditional edge selection after a command\n\n## Completed stages\n- **cmd**: success\n  - Script: `echo pass`\n  - Stdout:\n    ```\n    pass\n    ```\n  - Stderr: (empty)\n- **gate**: success\n",
     "internal.retry_count.cmd": 0,
     "internal.run_id": "01KMR0T5SB6P6GE7XGE9ZX8QKD",
     "graph.rankdir": "LR",
@@ -41,16 +44,26 @@
       "notes": "Script completed: echo pass",
       "usage": null
     },
+    "passed": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "branch-passed\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: echo branch-passed",
+      "usage": null
+    },
     "gate": {
       "status": "success",
       "notes": "Conditional node evaluated: gate",
       "usage": null
     }
   },
-  "next_node_id": "passed",
+  "next_node_id": "exit",
   "node_visits": {
     "start": 1,
     "cmd": 1,
-    "gate": 1
+    "gate": 1,
+    "passed": 1
   }
 }
