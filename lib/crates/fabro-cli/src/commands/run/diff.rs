@@ -8,7 +8,8 @@ use crate::args::DiffArgs;
 
 pub async fn run(args: DiffArgs) -> Result<()> {
     info!(run_id = %args.run, "Showing diff");
-    let base = fabro_workflows::run_lookup::default_runs_base();
+    let cli_config = crate::cli_config::load_cli_config(None)?;
+    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
     let run_dir = fabro_workflows::run_lookup::resolve_run(&base, &args.run)?.path;
 
     let patch = resolve_diff(&run_dir, &args).await?;

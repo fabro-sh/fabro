@@ -8,7 +8,8 @@ use crate::args::RunsRemoveArgs;
 use super::short_run_id;
 
 pub async fn remove_command(args: &RunsRemoveArgs) -> Result<()> {
-    let base = fabro_workflows::run_lookup::default_runs_base();
+    let cli_config = crate::cli_config::load_cli_config(None)?;
+    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
     remove_from(args, &base).await
 }
 

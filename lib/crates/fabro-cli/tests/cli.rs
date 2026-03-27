@@ -495,19 +495,29 @@ fn doctor_no_color_when_no_color_set() {
 #[test]
 fn dry_run_writes_jsonl_and_live_json() {
     let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("run");
+    let storage_dir = tmp.path().join("fabro-data");
 
     arc()
         .args([
             "run",
             "--dry-run",
             "--auto-approve",
-            "--run-dir",
-            run_dir.to_str().unwrap(),
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
             "../../../test/simple.fabro",
         ])
         .assert()
         .success();
+
+    // Find the single run directory under storage_dir/runs/
+    let runs_base = storage_dir.join("runs");
+    assert!(runs_base.exists(), "runs/ directory should exist");
+    let entries: Vec<_> = std::fs::read_dir(&runs_base)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(entries.len(), 1, "should have exactly one run directory");
+    let run_dir = entries[0].path();
 
     // progress.jsonl must exist and contain valid JSON lines
     let jsonl_path = run_dir.join("progress.jsonl");
@@ -555,7 +565,7 @@ fn dry_run_writes_jsonl_and_live_json() {
 #[test]
 fn run_id_passthrough_uses_provided_ulid() {
     let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("run");
+    let storage_dir = tmp.path().join("fabro-data");
     let my_ulid = "01JTEST1234567890ABCDE";
 
     arc()
@@ -565,8 +575,8 @@ fn run_id_passthrough_uses_provided_ulid() {
             "--auto-approve",
             "--run-id",
             my_ulid,
-            "--run-dir",
-            run_dir.to_str().unwrap(),
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
             "../../../test/simple.fabro",
         ])
         .assert()
@@ -614,7 +624,7 @@ fn detach_prints_ulid_and_exits() {
 #[test]
 fn detach_creates_run_dir_with_detach_log() {
     let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("detached-run");
+    let storage_dir = tmp.path().join("fabro-data");
 
     let output = arc()
         .args([
@@ -622,8 +632,8 @@ fn detach_creates_run_dir_with_detach_log() {
             "--detach",
             "--dry-run",
             "--auto-approve",
-            "--run-dir",
-            run_dir.to_str().unwrap(),
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
             "../../../test/simple.fabro",
         ])
         .assert()
@@ -636,8 +646,15 @@ fn detach_creates_run_dir_with_detach_log() {
     let ulid = ulid.trim();
     assert!(!ulid.is_empty(), "should print a ULID");
 
-    // Run dir should have been created with detach.log
-    assert!(run_dir.exists(), "run dir should exist");
+    // Run dir should have been created under storage_dir/runs/ with detach.log
+    let runs_base = storage_dir.join("runs");
+    assert!(runs_base.exists(), "runs/ directory should exist");
+    let entries: Vec<_> = std::fs::read_dir(&runs_base)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(entries.len(), 1, "should have exactly one run directory");
+    let run_dir = entries[0].path();
     assert!(
         run_dir.join("detach.log").exists(),
         "detach.log should exist in run dir"
@@ -1015,7 +1032,8 @@ fn start_by_workflow_name_prefers_newly_created_submitted_run() {
 #[test]
 fn bug2_detached_uses_cached_graph_not_original_path() {
     let dir = tempfile::tempdir().unwrap();
-    let run_dir = dir.path().join("run");
+    let storage_dir = dir.path().join("storage");
+    let run_dir = storage_dir.join("runs").join("20260101-test-bug2");
     std::fs::create_dir_all(&run_dir).unwrap();
 
     let dot = "\
@@ -1059,7 +1077,13 @@ digraph G {
 
     // __detached should use graph.fabro and never reference the deleted file.
     let output = arc()
-        .args(["__detached", "--run-dir", run_dir.to_str().unwrap()])
+        .args([
+            "__detached",
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
+            "--run-id",
+            "test-bug2",
+        ])
         .env("NO_COLOR", "1")
         .timeout(std::time::Duration::from_secs(15))
         .output()
@@ -1122,7 +1146,7 @@ digraph Test {
         .success();
     let before: serde_json::Value =
         serde_json::from_slice(&inspect_before.get_output().stdout).unwrap();
-    let run_dir = before[0]["run_dir"].as_str().unwrap().to_string();
+    let _run_dir = before[0]["run_dir"].as_str().unwrap().to_string();
     let start_time_before = before[0]["start_record"]["start_time"]
         .as_str()
         .unwrap()
@@ -1132,9 +1156,17 @@ digraph Test {
         .unwrap()
         .to_string();
 
+    let storage_dir = home.path().join(".fabro");
     arc()
         .env("HOME", home.path())
-        .args(["__detached", "--run-dir", &run_dir, "--resume"])
+        .args([
+            "__detached",
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
+            "--run-id",
+            &run_id,
+            "--resume",
+        ])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .failure()

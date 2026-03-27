@@ -9,6 +9,9 @@ use super::detached::persist_detached_failure;
 ///
 /// The engine process reads `run.json` from the run directory and executes the
 /// workflow. Returns the child process handle (use `.id()` for the PID).
+///
+/// `storage_dir` is the base storage directory (e.g. `~/.fabro`). If `None`,
+/// it is derived from the `run_dir` by stripping the `runs/<dir_name>` suffix.
 pub fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Child> {
     // Validate status is Submitted
     let status_path = run_dir.join("status.json");
@@ -56,7 +59,18 @@ pub fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Child> {
             return Err(err);
         }
     };
-    cmd.args(["__detached", "--run-dir"]).arg(run_dir);
+    // Derive storage_dir (grandparent of run_dir, e.g. ~/.fabro) and run_id
+    let storage_dir = run_dir
+        .parent() // runs/
+        .and_then(|p| p.parent()) // ~/.fabro/
+        .unwrap_or(run_dir);
+    let run_id = fabro_workflows::records::RunRecord::load(run_dir)
+        .map(|r| r.run_id)
+        .or_else(|_| std::fs::read_to_string(run_dir.join("id.txt")).map(|s| s.trim().to_string()))
+        .unwrap_or_default();
+    cmd.args(["__detached", "--storage-dir"])
+        .arg(storage_dir)
+        .args(["--run-id", &run_id]);
     if resume {
         cmd.arg("--resume");
     }

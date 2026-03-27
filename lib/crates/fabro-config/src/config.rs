@@ -103,8 +103,8 @@ pub struct FabroConfig {
     pub no_retro: Option<bool>,
 
     // --- Server config fields ---
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub data_dir: Option<PathBuf>,
+    #[serde(default, alias = "data_dir", skip_serializing_if = "Option::is_none")]
+    pub storage_dir: Option<PathBuf>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_concurrent_runs: Option<usize>,
@@ -132,6 +132,15 @@ pub struct FabroConfig {
 
 impl FabroConfig {
     // --- Convenience methods (ported from CliConfig) ---
+
+    /// Resolve the storage directory: config value > default `~/.fabro`.
+    pub fn storage_dir(&self) -> PathBuf {
+        self.storage_dir.clone().unwrap_or_else(|| {
+            dirs::home_dir()
+                .expect("could not determine home directory")
+                .join(".fabro")
+        })
+    }
 
     pub fn app_id(&self) -> Option<&str> {
         self.git.as_ref().and_then(|g| g.app_id.as_deref())
@@ -356,8 +365,8 @@ impl FabroConfig {
         }
 
         // --- Server config fields ---
-        if overlay.data_dir.is_some() {
-            self.data_dir = overlay.data_dir;
+        if overlay.storage_dir.is_some() {
+            self.storage_dir = overlay.storage_dir;
         }
         if overlay.max_concurrent_runs.is_some() {
             self.max_concurrent_runs = overlay.max_concurrent_runs;

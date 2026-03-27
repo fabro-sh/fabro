@@ -38,18 +38,26 @@ pub struct RunInfo {
     pub is_orphan: bool,
 }
 
-pub fn default_data_dir() -> PathBuf {
+pub fn default_storage_dir() -> PathBuf {
     dirs::home_dir()
         .expect("could not determine home directory")
         .join(".fabro")
 }
 
+pub fn logs_base(storage_dir: &Path) -> PathBuf {
+    storage_dir.join("logs")
+}
+
 pub fn default_logs_base() -> PathBuf {
-    default_data_dir().join("logs")
+    logs_base(&default_storage_dir())
+}
+
+pub fn runs_base(storage_dir: &Path) -> PathBuf {
+    storage_dir.join("runs")
 }
 
 pub fn default_runs_base() -> PathBuf {
-    default_data_dir().join("runs")
+    runs_base(&default_storage_dir())
 }
 
 pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {

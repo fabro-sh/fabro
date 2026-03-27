@@ -9,9 +9,10 @@ use crate::args::DfArgs;
 use crate::shared::format_size;
 
 pub fn df_command(args: &DfArgs) -> Result<()> {
-    let data_dir = fabro_workflows::run_lookup::default_data_dir();
-    let runs_base = fabro_workflows::run_lookup::default_runs_base();
-    let logs_base = fabro_workflows::run_lookup::default_logs_base();
+    let cli_config = crate::cli_config::load_cli_config(None)?;
+    let data_dir = cli_config.storage_dir();
+    let runs_base = fabro_workflows::run_lookup::runs_base(&data_dir);
+    let logs_base = fabro_workflows::run_lookup::logs_base(&data_dir);
     df_from(args, &data_dir, &runs_base, &logs_base)
 }
 

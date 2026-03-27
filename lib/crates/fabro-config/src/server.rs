@@ -134,14 +134,9 @@ pub fn load_server_config(path: Option<&Path>) -> anyhow::Result<FabroConfig> {
     crate::load_config_file(path, "server.toml")
 }
 
-/// Resolve the data directory: config value > default `~/.fabro`.
-pub fn resolve_data_dir(config: &FabroConfig) -> PathBuf {
-    if let Some(ref dir) = config.data_dir {
-        return dir.clone();
-    }
-    dirs::home_dir()
-        .map(|h| h.join(".fabro"))
-        .unwrap_or_else(|| PathBuf::from(".fabro"))
+/// Resolve the storage directory: config value > default `~/.fabro`.
+pub fn resolve_storage_dir(config: &FabroConfig) -> PathBuf {
+    config.storage_dir()
 }
 
 #[cfg(test)]
@@ -149,32 +144,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_config_with_data_dir() {
+    fn parse_config_with_storage_dir() {
+        let toml = r#"storage_dir = "/custom/path""#;
+        let config: FabroConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.storage_dir, Some(PathBuf::from("/custom/path")));
+    }
+
+    #[test]
+    fn parse_config_with_data_dir_alias() {
         let toml = r#"data_dir = "/custom/path""#;
         let config: FabroConfig = toml::from_str(toml).unwrap();
-        assert_eq!(config.data_dir, Some(PathBuf::from("/custom/path")));
+        assert_eq!(config.storage_dir, Some(PathBuf::from("/custom/path")));
     }
 
     #[test]
     fn parse_empty_config_defaults() {
         let toml = "";
         let config: FabroConfig = toml::from_str(toml).unwrap();
-        assert_eq!(config.data_dir, None);
+        assert_eq!(config.storage_dir, None);
     }
 
     #[test]
-    fn resolve_data_dir_uses_config_value() {
+    fn resolve_storage_dir_uses_config_value() {
         let config = FabroConfig {
-            data_dir: Some(PathBuf::from("/my/data")),
+            storage_dir: Some(PathBuf::from("/my/data")),
             ..FabroConfig::default()
         };
-        assert_eq!(resolve_data_dir(&config), PathBuf::from("/my/data"));
+        assert_eq!(resolve_storage_dir(&config), PathBuf::from("/my/data"));
     }
 
     #[test]
-    fn resolve_data_dir_defaults_to_home_arc() {
+    fn resolve_storage_dir_defaults_to_home() {
         let config = FabroConfig::default();
-        let dir = resolve_data_dir(&config);
+        let dir = resolve_storage_dir(&config);
         // Should end with .fabro
         assert!(
             dir.ends_with(".fabro"),

@@ -4259,9 +4259,9 @@ components:
       description: Structured server configuration mirroring FabroConfig.
       type: object
       properties:
-        data_dir:
+        storage_dir:
           type: string
-          description: Data directory path.
+          description: Storage directory path.
         max_concurrent_runs:
           type: integer
           description: Maximum concurrent runs.

@@ -11,7 +11,9 @@ use serde::Serialize;
 use crate::cli_config;
 use crate::shared;
 
-pub async fn execute(run_dir: PathBuf, resume: bool) -> Result<()> {
+pub async fn execute(storage_dir: PathBuf, run_id: String, resume: bool) -> Result<()> {
+    let runs_base = fabro_workflows::run_lookup::runs_base(&storage_dir);
+    let run_dir = fabro_workflows::run_lookup::find_run_by_prefix(&runs_base, &run_id)?;
     let styles: &'static fabro_util::terminal::Styles =
         Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
     let cli_config = cli_config::load_cli_config(None)?;

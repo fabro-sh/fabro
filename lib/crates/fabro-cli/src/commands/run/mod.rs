@@ -30,7 +30,8 @@ pub async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
             Ok(())
         }
         RunCommands::Start { run } => {
-            let base = fabro_workflows::run_lookup::default_runs_base();
+            let cli_config = crate::cli_config::load_cli_config(None)?;
+            let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
             let run_info = fabro_workflows::run_lookup::resolve_run(&base, &run)?;
             let child = start::start_run(&run_info.path, false)?;
             eprintln!("Started engine process (PID {})", child.id());
@@ -39,7 +40,8 @@ pub async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
         RunCommands::Attach { run } => {
             let styles: &'static fabro_util::terminal::Styles =
                 Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
-            let base = fabro_workflows::run_lookup::default_runs_base();
+            let cli_config = crate::cli_config::load_cli_config(None)?;
+            let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
             let run_info = fabro_workflows::run_lookup::resolve_run(&base, &run)?;
             let exit_code = attach::attach_run(&run_info.path, false, styles, None).await?;
             if exit_code != std::process::ExitCode::SUCCESS {
@@ -47,7 +49,11 @@ pub async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
             }
             Ok(())
         }
-        RunCommands::Detached { run_dir, resume } => detached::execute(run_dir, resume).await,
+        RunCommands::Detached {
+            storage_dir,
+            run_id,
+            resume,
+        } => detached::execute(storage_dir, run_id, resume).await,
         RunCommands::Cp(args) => cp::cp_command(args).await,
         RunCommands::Preview(args) => preview::run(args).await,
         RunCommands::Ssh(args) => ssh::run(args).await,

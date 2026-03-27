@@ -12,7 +12,8 @@ use crate::shared::{color_if, format_duration_ms, tilde_path};
 use super::short_run_id;
 
 pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
-    let base = fabro_workflows::run_lookup::default_runs_base();
+    let cli_config = crate::cli_config::load_cli_config(None)?;
+    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
     let runs = fabro_workflows::run_lookup::scan_runs(&base)?;
     let label_filters = parse_label_filters(&args.filter.label);
     let filtered = fabro_workflows::run_lookup::filter_runs(

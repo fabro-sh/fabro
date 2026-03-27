@@ -56,7 +56,7 @@ pub(crate) fn resolve_cli_goal(
     }
 }
 
-pub(crate) use fabro_workflows::operations::default_run_dir;
+pub(crate) use fabro_workflows::operations::{default_run_dir, make_run_dir};
 
 pub(crate) fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
     let file_name = workflow_path.file_name()?.to_string_lossy();
@@ -395,6 +395,7 @@ pub(crate) struct ExecutionOverrides<'a> {
     pub model: Option<&'a str>,
     pub provider: Option<&'a str>,
     pub sandbox_provider: SandboxProvider,
+    pub storage_dir: Option<&'a Path>,
 }
 
 pub(crate) fn apply_execution_overrides(config: &mut FabroConfig, overrides: &ExecutionOverrides) {
@@ -413,6 +414,10 @@ pub(crate) fn apply_execution_overrides(config: &mut FabroConfig, overrides: &Ex
     config.sandbox.get_or_insert_default().provider = Some(overrides.sandbox_provider.to_string());
     if overrides.preserve_sandbox {
         config.sandbox.get_or_insert_default().preserve = Some(true);
+    }
+
+    if let Some(storage_dir) = overrides.storage_dir {
+        config.storage_dir = Some(storage_dir.to_path_buf());
     }
 }
 
@@ -566,7 +571,7 @@ struct RecordBasedRun {
 /// Used by `run_engine_entrypoint` for detached runs that already have a RunRecord on disk.
 pub async fn run_from_record(
     persisted: Persisted,
-    run_dir: PathBuf,
+    _run_dir: PathBuf,
     run_defaults: FabroConfig,
     styles: &'static Styles,
     github_app: Option<fabro_github::GitHubAppCredentials>,
@@ -601,7 +606,7 @@ pub async fn run_from_record(
 
     let args = RunArgs {
         workflow: None,
-        run_dir: Some(run_dir),
+        storage_dir: None,
         dry_run: record.config.dry_run_enabled(),
 
         auto_approve: record.config.auto_approve_enabled(),
@@ -641,7 +646,7 @@ pub async fn run_from_record(
 /// Resume an existing workflow run from its persisted checkpoint.
 pub async fn resume_from_record(
     persisted: Persisted,
-    run_dir: PathBuf,
+    _run_dir: PathBuf,
     run_defaults: FabroConfig,
     styles: &'static Styles,
     github_app: Option<fabro_github::GitHubAppCredentials>,
@@ -676,7 +681,7 @@ pub async fn resume_from_record(
 
     let args = RunArgs {
         workflow: None,
-        run_dir: Some(run_dir),
+        storage_dir: None,
         dry_run: record.config.dry_run_enabled(),
 
         auto_approve: record.config.auto_approve_enabled(),
@@ -798,10 +803,13 @@ async fn run_command_impl(
         .run_id
         .clone()
         .unwrap_or_else(|| ulid::Ulid::new().to_string());
-    let run_dir = args
-        .run_dir
-        .clone()
-        .unwrap_or_else(|| default_run_dir(&run_id, dry_run_flag));
+    let run_dir = match &workflow {
+        WorkflowState::Persisted(p) => p.run_dir().to_path_buf(),
+        _ => match &args.storage_dir {
+            Some(sd) => make_run_dir(&sd.join("runs"), &run_id, dry_run_flag),
+            None => default_run_dir(&run_id, dry_run_flag),
+        },
+    };
     if resume {
         ensure_resume_target_is_not_already_successful(&run_dir)?;
     }
@@ -842,6 +850,7 @@ async fn run_command_impl(
                     model: args.model.as_deref(),
                     provider: args.provider.as_deref(),
                     sandbox_provider,
+                    storage_dir: args.storage_dir.as_deref(),
                 },
             );
 

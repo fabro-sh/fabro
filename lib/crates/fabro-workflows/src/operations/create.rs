@@ -221,15 +221,18 @@ pub(crate) fn finalize_config(config: &mut FabroConfig, graph: &Graph) {
 }
 
 pub fn default_run_dir(run_id: &str, dry_run: bool) -> PathBuf {
-    let base = crate::run_lookup::default_runs_base();
+    make_run_dir(&crate::run_lookup::default_runs_base(), run_id, dry_run)
+}
+
+pub fn make_run_dir(runs_base: &Path, run_id: &str, dry_run: bool) -> PathBuf {
     if dry_run {
-        base.join(format!(
+        runs_base.join(format!(
             "{}-dry-run-{}",
             Local::now().format("%Y%m%d"),
             run_id
         ))
     } else {
-        base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
+        runs_base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
     }
 }
 

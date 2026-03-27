@@ -43,6 +43,23 @@ fn read_conclusion(run_dir: &Path) -> Value {
     read_json(&run_dir.join("conclusion.json"))
 }
 
+/// Find the single run directory under `storage_dir/runs/`.
+fn find_run_dir(storage_dir: &Path) -> PathBuf {
+    let runs_base = storage_dir.join("runs");
+    let entries: Vec<_> = std::fs::read_dir(&runs_base)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", runs_base.display()))
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        "expected exactly one run directory under {}",
+        runs_base.display()
+    );
+    entries[0].path()
+}
+
 fn completed_nodes(run_dir: &Path) -> Vec<String> {
     let cp = read_checkpoint(run_dir);
     cp["completed_nodes"]
@@ -105,7 +122,7 @@ scenario_tests!(command_pipeline);
 fn scenario_command_pipeline(sandbox: &str) {
     dotenvy::dotenv().ok();
     let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("run");
+    let storage_dir = tmp.path().join("storage");
 
     // Validate the workflow before running it
     fabro()
@@ -123,14 +140,15 @@ fn scenario_command_pipeline(sandbox: &str) {
             "--no-retro",
             "--sandbox",
             sandbox,
-            "--run-dir",
-            run_dir.to_str().unwrap(),
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
             fixture("command_pipeline.fabro").to_str().unwrap(),
         ])
         .timeout(timeout_for(sandbox))
         .assert()
         .success();
 
+    let run_dir = find_run_dir(&storage_dir);
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(
         conclusion["status"].as_str(),
@@ -163,7 +181,7 @@ scenario_tests!(conditional_branching);
 fn scenario_conditional_branching(sandbox: &str) {
     dotenvy::dotenv().ok();
     let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("run");
+    let storage_dir = tmp.path().join("storage");
 
     fabro()
         .args([
@@ -172,14 +190,15 @@ fn scenario_conditional_branching(sandbox: &str) {
             "--no-retro",
             "--sandbox",
             sandbox,
-            "--run-dir",
-            run_dir.to_str().unwrap(),
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
             fixture("conditional_branching.fabro").to_str().unwrap(),
         ])
         .timeout(timeout_for(sandbox))
         .assert()
         .success();
 
+    let run_dir = find_run_dir(&storage_dir);
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(conclusion["status"].as_str(), Some("success"));
 
@@ -200,7 +219,7 @@ scenario_tests!(agent_linear);
 fn scenario_agent_linear(sandbox: &str) {
     dotenvy::dotenv().ok();
     let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("run");
+    let storage_dir = tmp.path().join("storage");
 
     fabro()
         .args([
@@ -211,14 +230,15 @@ fn scenario_agent_linear(sandbox: &str) {
             sandbox,
             "--model",
             "claude-haiku-4-5",
-            "--run-dir",
-            run_dir.to_str().unwrap(),
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
             fixture("agent_linear.fabro").to_str().unwrap(),
         ])
         .timeout(timeout_for(sandbox))
         .assert()
         .success();
 
+    let run_dir = find_run_dir(&storage_dir);
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(conclusion["status"].as_str(), Some("success"));
 
@@ -247,7 +267,7 @@ scenario_tests!(human_gate);
 fn scenario_human_gate(sandbox: &str) {
     dotenvy::dotenv().ok();
     let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("run");
+    let storage_dir = tmp.path().join("storage");
 
     fabro()
         .args([
@@ -258,14 +278,15 @@ fn scenario_human_gate(sandbox: &str) {
             sandbox,
             "--model",
             "claude-haiku-4-5",
-            "--run-dir",
-            run_dir.to_str().unwrap(),
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
             fixture("human_gate.fabro").to_str().unwrap(),
         ])
         .timeout(timeout_for(sandbox))
         .assert()
         .success();
 
+    let run_dir = find_run_dir(&storage_dir);
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(conclusion["status"].as_str(), Some("success"));
 
@@ -286,7 +307,7 @@ scenario_tests!(command_agent_mixed);
 fn scenario_command_agent_mixed(sandbox: &str) {
     dotenvy::dotenv().ok();
     let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("run");
+    let storage_dir = tmp.path().join("storage");
 
     fabro()
         .args([
@@ -297,14 +318,15 @@ fn scenario_command_agent_mixed(sandbox: &str) {
             sandbox,
             "--model",
             "claude-haiku-4-5",
-            "--run-dir",
-            run_dir.to_str().unwrap(),
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
             fixture("command_agent_mixed.fabro").to_str().unwrap(),
         ])
         .timeout(timeout_for(sandbox))
         .assert()
         .success();
 
+    let run_dir = find_run_dir(&storage_dir);
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(conclusion["status"].as_str(), Some("success"));
 
@@ -337,7 +359,7 @@ scenario_tests!(full_stack);
 fn scenario_full_stack(sandbox: &str) {
     dotenvy::dotenv().ok();
     let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join("run");
+    let storage_dir = tmp.path().join("storage");
 
     fabro()
         .args([
@@ -348,14 +370,15 @@ fn scenario_full_stack(sandbox: &str) {
             sandbox,
             "--model",
             "claude-haiku-4-5",
-            "--run-dir",
-            run_dir.to_str().unwrap(),
+            "--storage-dir",
+            storage_dir.to_str().unwrap(),
             fixture("full_stack.fabro").to_str().unwrap(),
         ])
         .timeout(timeout_for(sandbox))
         .assert()
         .success();
 
+    let run_dir = find_run_dir(&storage_dir);
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(
         conclusion["status"].as_str(),
