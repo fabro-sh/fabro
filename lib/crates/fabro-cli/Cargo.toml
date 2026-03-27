@@ -69,6 +69,7 @@ git2.workspace = true
 axum = "0.8"
 open = "5"
 serde_json.workspace = true
+serde_yaml = "0.9"
 tempfile = "3"
 sha2.workspace = true
 shlex = "1"

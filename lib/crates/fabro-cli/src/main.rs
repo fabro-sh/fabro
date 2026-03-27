@@ -202,6 +202,7 @@ async fn main_inner() -> (String, Result<()>) {
             }
             Commands::Pr(ns) => commands::pr::dispatch(ns).await?,
             Commands::Secret(ns) => commands::secret::dispatch(ns)?,
+            Commands::Config(ns) => commands::config::dispatch(ns)?,
             Commands::Workflow(ns) => commands::workflow::dispatch(ns)?,
             Commands::Skill(ns) => commands::skill::dispatch(ns)?,
             Commands::Upgrade(args) => {
@@ -357,6 +358,33 @@ mod tests {
             Commands::RunCmd(RunCommands::Detached { run_dir, resume }) => {
                 assert_eq!(run_dir, std::path::PathBuf::from("/tmp/runs/test"));
                 assert!(resume);
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_config_show_command() {
+        let cli = Cli::try_parse_from(["fabro", "config", "show"]).expect("should parse");
+        assert_eq!(cli.command.name(), "config show");
+        match *cli.command {
+            Commands::Config(ConfigNamespace {
+                command: ConfigCommand::Show(args),
+            }) => {
+                assert!(args.workflow.is_none());
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_config_show_with_workflow() {
+        let cli = Cli::try_parse_from(["fabro", "config", "show", "demo"]).expect("should parse");
+        match *cli.command {
+            Commands::Config(ConfigNamespace {
+                command: ConfigCommand::Show(args),
+            }) => {
+                assert_eq!(args.workflow, Some(std::path::PathBuf::from("demo")));
             }
             _ => panic!("unexpected command variant"),
         }

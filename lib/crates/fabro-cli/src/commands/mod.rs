@@ -1,4 +1,5 @@
 pub mod asset;
+pub mod config;
 pub mod doctor;
 pub mod exec;
 pub mod graph;

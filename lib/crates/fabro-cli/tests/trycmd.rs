@@ -10,6 +10,7 @@ macro_rules! trycmd_subcommand {
 }
 
 trycmd_subcommand!(cli_cp, "cp");
+trycmd_subcommand!(cli_config, "config");
 trycmd_subcommand!(cli_doctor, "doctor");
 trycmd_subcommand!(cli_exec, "exec");
 trycmd_subcommand!(cli_init, "init");

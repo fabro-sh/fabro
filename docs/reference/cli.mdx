@@ -35,6 +35,29 @@ CLI flags always override `cli.toml` values, which override hardcoded defaults.
 
 ---
 
+## `fabro config show`
+
+Print the merged `FabroConfig` as YAML.
+
+```bash
+fabro config show
+fabro config show demo
+fabro config show run.toml
+```
+
+With no argument, Fabro prints the merged ambient defaults from `~/.fabro/cli.toml` and the nearest `fabro.toml`.
+
+When you pass a workflow name or path:
+
+- If it resolves to a `.toml` run config, Fabro overlays that run config on top of the ambient defaults before printing.
+- If it resolves to a `.fabro` graph file, Fabro prints the ambient defaults unchanged.
+
+| Argument | Description |
+|---|---|
+| `[WORKFLOW]` | Optional workflow name, `.fabro` workflow path, or `.toml` run config path |
+
+---
+
 ## `fabro run`
 
 Launch a workflow from a `.fabro` workflow file or `.toml` task config.
@@ -811,4 +834,3 @@ Open the Fabro Discord community invite in your default browser.
 ```bash
 fabro discord
 ```
-

@@ -1,4 +1,6 @@
 use assert_cmd::Command;
+use fabro_config::mcp::McpTransport;
+use fabro_config::FabroConfig;
 use predicates::prelude::*;
 
 #[allow(deprecated)]
@@ -6,6 +8,133 @@ fn arc() -> Command {
     let mut cmd = Command::cargo_bin("fabro").unwrap();
     cmd.arg("--no-upgrade-check");
     cmd
+}
+
+fn parse_config_show(stdout: &[u8]) -> FabroConfig {
+    serde_yaml::from_slice(stdout).expect("stdout should be valid YAML FabroConfig")
+}
+
+fn setup_config_show_fixture() -> (tempfile::TempDir, tempfile::TempDir) {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+
+    let home_fabro = home.path().join(".fabro");
+    std::fs::create_dir_all(&home_fabro).unwrap();
+    std::fs::write(
+        home_fabro.join("cli.toml"),
+        r#"
+verbose = true
+
+[llm]
+model = "cli-model"
+provider = "openai"
+
+[vars]
+cli_only = "1"
+shared = "cli"
+
+[checkpoint]
+exclude_globs = ["cli-only", "shared"]
+
+[[hooks]]
+name = "shared"
+event = "run_start"
+command = "echo cli"
+
+[mcp_servers.shared]
+type = "stdio"
+command = ["echo", "cli"]
+
+[sandbox]
+provider = "daytona"
+
+[sandbox.daytona]
+labels = { cli_only = "1", shared = "cli" }
+
+[sandbox.env]
+CLI_ONLY = "1"
+SHARED = "cli"
+"#,
+    )
+    .unwrap();
+
+    std::fs::write(
+        project.path().join("fabro.toml"),
+        r#"
+version = 1
+
+[fabro]
+root = "fabro"
+
+[llm]
+model = "project-model"
+
+[vars]
+project_only = "1"
+shared = "project"
+
+[[hooks]]
+name = "project"
+event = "run_complete"
+command = "echo project"
+"#,
+    )
+    .unwrap();
+
+    let workflow_dir = project.path().join("fabro").join("workflows").join("demo");
+    std::fs::create_dir_all(&workflow_dir).unwrap();
+    std::fs::write(
+        workflow_dir.join("workflow.toml"),
+        r#"
+version = 1
+goal = "demo goal"
+
+[llm]
+model = "run-model"
+provider = "anthropic"
+
+[vars]
+run_only = "1"
+shared = "run"
+
+[checkpoint]
+exclude_globs = ["run-only", "shared"]
+
+[[hooks]]
+name = "shared"
+event = "run_start"
+command = "echo run"
+
+[[hooks]]
+name = "run-only"
+event = "run_complete"
+command = "echo run-only"
+
+[mcp_servers.shared]
+type = "stdio"
+command = ["echo", "run"]
+
+[mcp_servers.run_only]
+type = "stdio"
+command = ["echo", "run-only"]
+
+[sandbox.daytona]
+labels = { run_only = "1", shared = "run" }
+
+[sandbox.env]
+RUN_ONLY = "1"
+SHARED = "run"
+"#,
+    )
+    .unwrap();
+
+    std::fs::write(
+        project.path().join("standalone.fabro"),
+        "digraph Test { start -> end }",
+    )
+    .unwrap();
+
+    (home, project)
 }
 
 // == LLM: prompt ==============================================================
@@ -1224,4 +1353,152 @@ fn bug4_attach_respects_verbose_from_spec() {
         stderr.contains("turns") && stderr.contains("tools"),
         "bug4: attach should show verbose stats when spec.verbose=true.\nstderr: {stderr}"
     );
+}
+
+#[test]
+fn config_show_merges_cli_and_project_defaults() {
+    let (home, project) = setup_config_show_fixture();
+
+    let output = arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args(["config", "show"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let cfg = parse_config_show(&output);
+    let llm = cfg.llm.as_ref().expect("llm config");
+    assert_eq!(llm.model.as_deref(), Some("project-model"));
+    assert_eq!(llm.provider.as_deref(), Some("openai"));
+    assert_eq!(cfg.goal.as_deref(), None);
+    assert_eq!(cfg.fabro.as_ref().map(|f| f.root.as_str()), Some("fabro"));
+
+    let vars = cfg.vars.as_ref().expect("vars");
+    assert_eq!(vars.get("cli_only").map(String::as_str), Some("1"));
+    assert_eq!(vars.get("project_only").map(String::as_str), Some("1"));
+    assert_eq!(vars.get("shared").map(String::as_str), Some("project"));
+
+    let sandbox = cfg.sandbox.as_ref().expect("sandbox");
+    let labels = sandbox
+        .daytona
+        .as_ref()
+        .and_then(|d| d.labels.as_ref())
+        .expect("daytona labels");
+    assert_eq!(labels.get("cli_only").map(String::as_str), Some("1"));
+    assert_eq!(labels.get("shared").map(String::as_str), Some("cli"));
+}
+
+#[test]
+fn config_show_workflow_name_applies_run_overlay_and_deep_merges() {
+    let (home, project) = setup_config_show_fixture();
+
+    let output = arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args(["config", "show", "demo"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let cfg = parse_config_show(&output);
+    let llm = cfg.llm.as_ref().expect("llm config");
+    assert_eq!(cfg.goal.as_deref(), Some("demo goal"));
+    assert_eq!(llm.model.as_deref(), Some("run-model"));
+    assert_eq!(llm.provider.as_deref(), Some("anthropic"));
+
+    let vars = cfg.vars.as_ref().expect("vars");
+    assert_eq!(vars.get("cli_only").map(String::as_str), Some("1"));
+    assert_eq!(vars.get("project_only").map(String::as_str), Some("1"));
+    assert_eq!(vars.get("run_only").map(String::as_str), Some("1"));
+    assert_eq!(vars.get("shared").map(String::as_str), Some("run"));
+
+    assert_eq!(
+        cfg.checkpoint.exclude_globs,
+        vec![
+            "cli-only".to_string(),
+            "run-only".to_string(),
+            "shared".to_string()
+        ]
+    );
+
+    assert_eq!(cfg.hooks.len(), 3);
+    let shared_hook = cfg
+        .hooks
+        .iter()
+        .find(|hook| hook.name.as_deref() == Some("shared"))
+        .expect("shared hook");
+    assert_eq!(shared_hook.command.as_deref(), Some("echo run"));
+    assert!(cfg
+        .hooks
+        .iter()
+        .any(|hook| hook.name.as_deref() == Some("project")));
+    assert!(cfg
+        .hooks
+        .iter()
+        .any(|hook| hook.name.as_deref() == Some("run-only")));
+
+    match &cfg.mcp_servers["shared"].transport {
+        McpTransport::Stdio { command, .. } => assert_eq!(command, &vec!["echo", "run"]),
+        other => panic!("unexpected MCP transport: {other:?}"),
+    }
+    assert!(cfg.mcp_servers.contains_key("run_only"));
+
+    let sandbox = cfg.sandbox.as_ref().expect("sandbox");
+    let labels = sandbox
+        .daytona
+        .as_ref()
+        .and_then(|d| d.labels.as_ref())
+        .expect("daytona labels");
+    assert_eq!(labels.get("cli_only").map(String::as_str), Some("1"));
+    assert_eq!(labels.get("run_only").map(String::as_str), Some("1"));
+    assert_eq!(labels.get("shared").map(String::as_str), Some("run"));
+
+    let env = sandbox.env.as_ref().expect("sandbox env");
+    assert_eq!(env.get("CLI_ONLY").map(String::as_str), Some("1"));
+    assert_eq!(env.get("RUN_ONLY").map(String::as_str), Some("1"));
+    assert_eq!(env.get("SHARED").map(String::as_str), Some("run"));
+}
+
+#[test]
+fn config_show_fabro_path_matches_ambient_defaults() {
+    let (home, project) = setup_config_show_fixture();
+
+    let ambient = arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args(["config", "show"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let graph = arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args(["config", "show", "standalone.fabro"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    assert_eq!(parse_config_show(&graph), parse_config_show(&ambient));
+}
+
+#[test]
+fn config_show_missing_run_config_errors() {
+    let (home, project) = setup_config_show_fixture();
+
+    arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args(["config", "show", "missing.toml"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to read"));
 }
