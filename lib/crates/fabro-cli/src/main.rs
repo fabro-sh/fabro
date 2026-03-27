@@ -3,6 +3,8 @@ mod cli_config;
 mod commands;
 mod logging;
 mod shared;
+#[cfg(feature = "sleep_inhibitor")]
+mod sleep_inhibitor;
 
 use anyhow::Result;
 use args::*;

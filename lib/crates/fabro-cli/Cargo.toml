@@ -13,7 +13,7 @@ path = "src/main.rs"
 default = []
 server = ["dep:fabro-api"]
 exedev = ["fabro-sandbox/exe", "fabro-config/exedev", "fabro-workflows/exedev"]
-sleep_inhibitor = ["dep:fabro-beastie"]
+sleep_inhibitor = ["dep:core-foundation"]
 
 [dependencies]
 fabro-config = { path = "../fabro-config" }
@@ -33,7 +33,6 @@ fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-validate = { path = "../fabro-validate" }
 fabro-workflows = { path = "../fabro-workflows" }
 fabro-api = { path = "../fabro-api", optional = true }
-fabro-beastie = { path = "../fabro-beastie", optional = true }
 fabro-telemetry = { path = "../fabro-telemetry" }
 fabro-util = { path = "../fabro-util" }
 clap.workspace = true
@@ -77,6 +76,9 @@ walkdir.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = { version = "0.9", optional = true }
 
 [build-dependencies]
 chrono = { workspace = true }

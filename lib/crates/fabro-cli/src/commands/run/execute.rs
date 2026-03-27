@@ -780,7 +780,7 @@ pub async fn execute(mut args: RunArgs, _globals: &GlobalArgs) -> anyhow::Result
     let (run_id, run_dir) = super::create::create_run(&args, cli_defaults, styles, quiet).await?;
 
     #[cfg(feature = "sleep_inhibitor")]
-    let _sleep_guard = fabro_beastie::guard(_prevent_idle_sleep);
+    let _sleep_guard = crate::sleep_inhibitor::guard(_prevent_idle_sleep);
 
     let child = super::start::start_run(&run_dir, false)?;
 
