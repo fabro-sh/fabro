@@ -96,11 +96,16 @@ struct AggregateUsageTotals {
     by_model: HashMap<String, ModelUsageTotals>,
 }
 
+type LlmSpecFactory = dyn Fn() -> LlmSpec + Send + Sync;
+type RegistryFactoryOverride =
+    dyn Fn(Arc<dyn Interviewer>) -> fabro_workflows::handler::HandlerRegistry + Send + Sync;
+
 /// Shared application state for the server.
 pub struct AppState {
     runs: Mutex<HashMap<String, ManagedRun>>,
     aggregate_usage: Mutex<AggregateUsageTotals>,
-    llm_spec_factory: Box<dyn Fn() -> LlmSpec + Send + Sync>,
+    llm_spec_factory: Box<LlmSpecFactory>,
+    registry_factory_override: Option<Box<RegistryFactoryOverride>>,
     pub dry_run: bool,
     pub db: sqlx::SqlitePool,
     max_concurrent_runs: usize,
@@ -395,6 +400,26 @@ pub fn create_app_state(
     )
 }
 
+#[doc(hidden)]
+pub fn create_app_state_with_registry_factory(
+    db: sqlx::SqlitePool,
+    llm_spec_factory: impl Fn() -> LlmSpec + Send + Sync + 'static,
+    registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> fabro_workflows::handler::HandlerRegistry
+        + Send
+        + Sync
+        + 'static,
+) -> Arc<AppState> {
+    build_app_state(
+        db,
+        Box::new(llm_spec_factory),
+        Some(Box::new(registry_factory_override)),
+        false,
+        5,
+        fabro_workflows::git::GitAuthor::default(),
+        Vec::new(),
+    )
+}
+
 /// Create an `AppState` with the given database pool, LLM spec factory, dry-run flag, and concurrency limit.
 pub fn create_app_state_with_options(
     db: sqlx::SqlitePool,
@@ -404,10 +429,31 @@ pub fn create_app_state_with_options(
     git_author: fabro_workflows::git::GitAuthor,
     hooks: Vec<fabro_hooks::HookDefinition>,
 ) -> Arc<AppState> {
+    build_app_state(
+        db,
+        Box::new(llm_spec_factory),
+        None,
+        dry_run,
+        max_concurrent_runs,
+        git_author,
+        hooks,
+    )
+}
+
+fn build_app_state(
+    db: sqlx::SqlitePool,
+    llm_spec_factory: Box<LlmSpecFactory>,
+    registry_factory_override: Option<Box<RegistryFactoryOverride>>,
+    dry_run: bool,
+    max_concurrent_runs: usize,
+    git_author: fabro_workflows::git::GitAuthor,
+    hooks: Vec<fabro_hooks::HookDefinition>,
+) -> Arc<AppState> {
     Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
         aggregate_usage: Mutex::new(AggregateUsageTotals::default()),
-        llm_spec_factory: Box::new(llm_spec_factory),
+        llm_spec_factory,
+        registry_factory_override,
         dry_run,
         db,
         max_concurrent_runs,
@@ -617,6 +663,10 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         working_directory: cwd,
     };
     let llm = (state.llm_spec_factory)();
+    let registry_override = state
+        .registry_factory_override
+        .as_ref()
+        .map(|factory| Arc::new(factory(Arc::clone(&interviewer) as Arc<dyn Interviewer>)));
     let emitter = Arc::new(emitter);
 
     // Transition to Running, populate interviewer + context
@@ -698,6 +748,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
                     devcontainer: None,
                     git: None,
                     worktree_mode: None,
+                    registry_override,
                     checkpoint: None,
                     seed_context: None,
                 },

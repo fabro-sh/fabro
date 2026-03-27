@@ -20,9 +20,7 @@ use crate::handler::start::StartHandler;
 use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline::initialize;
-use crate::pipeline::types::{
-    InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec, SandboxSpec,
-};
+use crate::pipeline::types::{InitOptions, LlmSpec, Persisted, SandboxEnvSpec, SandboxSpec};
 use crate::records::{Checkpoint, RunRecord};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::test_support::run_graph;
@@ -208,25 +206,46 @@ async fn run_with_lifecycle(
     sandbox: Arc<dyn Sandbox>,
     graph: &Graph,
     run_options: RunOptions,
-    _lifecycle: LifecycleOptions,
+    lifecycle: LifecycleOptions,
 ) -> Result<Outcome, FabroError> {
     std::fs::create_dir_all(&run_options.run_dir).unwrap();
-    let initialized = Initialized {
-        graph: graph.clone(),
-        source: String::new(),
-        run_options,
-        checkpoint: None,
-        seed_context: None,
-        emitter,
-        sandbox,
-        registry: Arc::new(registry),
-        hook_runner: None,
-        env: HashMap::new(),
-        dry_run: false,
-        llm_client: None,
-        model: "test-model".to_string(),
-        provider: fabro_llm::Provider::Anthropic,
-    };
+    let run_dir = run_options.run_dir.clone();
+    let run_id = run_options.run_id.clone();
+    let initialized = initialize(
+        persisted_workflow(graph.clone(), String::new(), &run_dir, &run_id),
+        InitOptions {
+            run_id,
+            dry_run: false,
+            emitter,
+            sandbox: SandboxSpec::Local {
+                working_directory: PathBuf::from(sandbox.working_directory()),
+            },
+            llm: LlmSpec {
+                model: "test-model".to_string(),
+                provider: fabro_llm::Provider::Anthropic,
+                fallback_chain: Vec::new(),
+                mcp_servers: Vec::new(),
+                dry_run: true,
+            },
+            interviewer: Arc::new(AutoApproveInterviewer),
+            lifecycle,
+            run_options,
+            hooks: HookConfig { hooks: vec![] },
+            sandbox_env: SandboxEnvSpec {
+                devcontainer_env: HashMap::new(),
+                toml_env: HashMap::new(),
+                github_permissions: None,
+                origin_url: None,
+            },
+            devcontainer: None,
+            git: None,
+            worktree_mode: None,
+            registry_override: Some(Arc::new(registry)),
+            checkpoint: None,
+            seed_context: None,
+        },
+    )
+    .await?;
     super::execute(initialized).await.outcome
 }
 

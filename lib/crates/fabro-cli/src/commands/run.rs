@@ -1264,6 +1264,7 @@ async fn run_command_impl(
         git: None,
         github_app: github_app.clone(),
         worktree_mode: Some(worktree_mode),
+        registry_override: None,
         dry_run: dry_run_flag,
         retro: StartRetroOptions {
             enabled: !no_retro_flag && project_config::is_retro_enabled(),
