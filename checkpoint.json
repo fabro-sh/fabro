@@ -1,30 +1,46 @@
 {
-  "timestamp": "2026-03-27T19:07:04.914668Z",
-  "current_node": "decide",
+  "timestamp": "2026-03-27T19:07:05.277782Z",
+  "current_node": "path_b",
   "completed_nodes": [
     "start",
-    "decide"
+    "decide",
+    "path_b"
   ],
   "node_retries": {},
   "context_values": {
-    "internal.thread_id": "start",
-    "graph.goal": "Test condition evaluation with OR and parentheses",
     "internal.node_visit_count": 1,
-    "internal.retry_count.decide": 0,
-    "current.preamble": "Goal: Test condition evaluation with OR and parentheses\n",
+    "response.path_b": "[Simulated] Response for stage: path_b",
+    "current.preamble": "Goal: Test condition evaluation with OR and parentheses\n\n## Completed stages\n- **decide**: success\n",
     "internal.run_id": "01KMRB2JHKJ9CZP6RAJBFVP269",
     "internal.fidelity": "compact",
     "internal.retry_count.start": 0,
     "failure_class": "",
     "thread.start.current_node": "decide",
+    "last_stage": "path_b",
+    "current_node": "path_b",
+    "failure_signature": "",
+    "internal.thread_id": "decide",
+    "graph.goal": "Test condition evaluation with OR and parentheses",
+    "internal.retry_count.path_b": 0,
+    "thread.decide.current_node": "path_b",
+    "last_response": "[Simulated] Response for stage: path_b",
     "outcome": "success",
-    "current_node": "decide",
-    "failure_signature": ""
+    "internal.retry_count.decide": 0
   },
   "node_outcomes": {
     "decide": {
       "status": "success",
       "notes": "[Simulated] decide",
+      "usage": null
+    },
+    "path_b": {
+      "status": "success",
+      "context_updates": {
+        "last_response": "[Simulated] Response for stage: path_b",
+        "response.path_b": "[Simulated] Response for stage: path_b",
+        "last_stage": "path_b"
+      },
+      "notes": "[Simulated] path_b",
       "usage": null
     },
     "start": {
@@ -33,9 +49,10 @@
       "usage": null
     }
   },
-  "next_node_id": "path_b",
+  "next_node_id": "exit",
   "node_visits": {
     "decide": 1,
-    "start": 1
+    "start": 1,
+    "path_b": 1
   }
 }
