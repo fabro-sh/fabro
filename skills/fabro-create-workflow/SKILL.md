@@ -133,7 +133,7 @@ NODE_ENV = "test"
 
 ### Step 7: Validate
 
-Run `fabro run --preflight workflow.toml` (or `fabro run --preflight workflow.fabro`) to validate without executing.
+Run `fabro preflight workflow.toml` (or `fabro preflight workflow.fabro`) to validate without executing.
 
 If validation fails, fix the reported errors and re-validate.
 

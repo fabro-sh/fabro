@@ -49,7 +49,6 @@ fabro run run.toml
 | `<WORKFLOW>` | Path to a `.fabro` workflow file, `.toml` task config, or workflow name (resolved from `fabro/workflows/` in the project, then `~/.fabro/workflows/`). |
 | `--run-dir <DIR>` | Run output directory |
 | `--dry-run` | Execute with a simulated LLM backend |
-| `--preflight` | Validate run configuration without executing |
 | `--auto-approve` | Auto-approve all human gates |
 | `--model <MODEL>` | Override default LLM model |
 | `--provider <PROVIDER>` | Override default LLM provider |
@@ -62,9 +61,24 @@ fabro run run.toml
 | `--preserve-sandbox` | Keep the sandbox alive after the run finishes (for debugging) |
 | `-d, --detach` | Fork the workflow as a background process and print the run ID. Reconnect later with `fabro logs -f`. |
 
-<Note>
-`--preflight` conflicts with `--dry-run` and `--detach`.
-</Note>
+## `fabro preflight`
+
+Validate run configuration (sandbox, LLM providers, GitHub tokens) without executing the workflow.
+
+```bash
+fabro preflight <WORKFLOW>
+fabro preflight run.toml
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<WORKFLOW>` | Path to a `.fabro` workflow file, `.toml` task config, or workflow name. |
+| `--goal <GOAL>` | Override the workflow goal (exposed as `$goal` in prompts) |
+| `--goal-file <FILE>` | Read the goal from a file instead of inline text |
+| `--model <MODEL>` | Override default LLM model |
+| `--provider <PROVIDER>` | Override default LLM provider |
+| `-v, --verbose` | Enable verbose output |
+| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, `daytona`, `ssh`, or `exe` |
 
 ## `fabro resume`
 

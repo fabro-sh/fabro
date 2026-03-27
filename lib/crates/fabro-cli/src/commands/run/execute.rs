@@ -40,11 +40,11 @@ use crate::shared::{
 
 /// Resolve goal from `--goal` string or `--goal-file` path.
 pub(crate) fn resolve_cli_goal(
-    goal: &Option<String>,
-    goal_file: &Option<PathBuf>,
+    goal: Option<&str>,
+    goal_file: Option<&Path>,
 ) -> anyhow::Result<Option<String>> {
     match (goal, goal_file) {
-        (Some(g), _) => Ok(Some(g.clone())),
+        (Some(g), _) => Ok(Some(g.to_string())),
         (_, Some(path)) => {
             let path = fabro_util::path::expand_tilde(path);
             let content = std::fs::read_to_string(&path)
@@ -484,21 +484,19 @@ pub(crate) struct WorkflowSourceInput {
     pub goal_override: Option<String>,
 }
 
+#[allow(dead_code)]
 enum WorkflowState {
     Source(Box<WorkflowSourceInput>),
     Persisted(Box<Persisted>),
 }
 
 pub(crate) fn load_workflow_source_input(
-    args: &RunArgs,
+    workflow: &Path,
+    goal: Option<&str>,
+    goal_file: Option<&Path>,
     mut run_defaults: FabroConfig,
     apply_project_config: bool,
 ) -> anyhow::Result<WorkflowSourceInput> {
-    let workflow_path = args
-        .workflow
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
-
     if apply_project_config {
         // Apply project-level config overrides (fabro.toml) on top of CLI defaults.
         if let Ok(Some((_config_path, project_config))) =
@@ -511,7 +509,7 @@ pub(crate) fn load_workflow_source_input(
 
     // Resolve workflow arg, load run config if TOML, merge with defaults.
     let (resolved_workflow_path, dot_path, config) = {
-        let (resolved, dot, cfg) = resolve_workflow_source(workflow_path)?;
+        let (resolved, dot, cfg) = resolve_workflow_source(workflow)?;
         match cfg {
             Some(cfg) => {
                 let mut merged = run_defaults.clone();
@@ -529,7 +527,7 @@ pub(crate) fn load_workflow_source_input(
     }
 
     let raw_source = read_workflow_file(&dot_path)?;
-    let cli_goal = resolve_cli_goal(&args.goal, &args.goal_file)?;
+    let cli_goal = resolve_cli_goal(goal, goal_file)?;
     let goal_override = cli_goal.or_else(|| config.goal.clone());
 
     let workflow_toml_path = if resolved_workflow_path
@@ -600,7 +598,7 @@ pub async fn run_from_record(
         workflow: None,
         run_dir: Some(run_dir),
         dry_run: record.config.dry_run_enabled(),
-        preflight: false,
+
         auto_approve: record.config.auto_approve_enabled(),
         goal: record.config.goal.clone(),
         goal_file: None,
@@ -675,7 +673,7 @@ pub async fn resume_from_record(
         workflow: None,
         run_dir: Some(run_dir),
         dry_run: record.config.dry_run_enabled(),
-        preflight: false,
+
         auto_approve: record.config.auto_approve_enabled(),
         goal: record.config.goal.clone(),
         goal_file: None,
@@ -738,61 +736,26 @@ pub async fn execute(mut args: RunArgs, _globals: &GlobalArgs) -> anyhow::Result
     let cli_config = cli_config::load_cli_config(None)?;
     args.verbose = args.verbose || cli_config.verbose_enabled();
 
-    if args.preflight {
-        let github_app = crate::shared::github::build_github_app_credentials(cli_config.app_id());
-        let git_author = fabro_workflows::git::GitAuthor::from_options(
-            cli_config.git_author().and_then(|a| a.name.clone()),
-            cli_config.git_author().and_then(|a| a.email.clone()),
-        );
-        run_command(args, cli_config, styles, github_app, git_author).await?;
+    let quiet = args.detach;
+    let _prevent_idle_sleep = cli_config.prevent_idle_sleep_enabled();
+    let (run_id, run_dir) = super::create::create_run(&args, cli_config, styles, quiet).await?;
+
+    #[cfg(feature = "sleep_inhibitor")]
+    let _sleep_guard = fabro_beastie::guard(_prevent_idle_sleep);
+
+    let child = super::start::start_run(&run_dir, false)?;
+
+    if args.detach {
+        println!("{run_id}");
     } else {
-        let quiet = args.detach;
-        let _prevent_idle_sleep = cli_config.prevent_idle_sleep_enabled();
-        let (run_id, run_dir) = super::create::create_run(&args, cli_config, styles, quiet).await?;
-
-        #[cfg(feature = "sleep_inhibitor")]
-        let _sleep_guard = fabro_beastie::guard(_prevent_idle_sleep);
-
-        let child = super::start::start_run(&run_dir, false)?;
-
-        if args.detach {
-            println!("{run_id}");
-        } else {
-            let exit_code = super::attach::attach_run(&run_dir, true, styles, Some(child)).await?;
-            print_run_summary(&run_dir, &run_id, styles);
-            if exit_code != std::process::ExitCode::SUCCESS {
-                std::process::exit(1);
-            }
+        let exit_code = super::attach::attach_run(&run_dir, true, styles, Some(child)).await?;
+        print_run_summary(&run_dir, &run_id, styles);
+        if exit_code != std::process::ExitCode::SUCCESS {
+            std::process::exit(1);
         }
     }
 
     Ok(())
-}
-
-pub async fn run_command(
-    args: RunArgs,
-    run_defaults: FabroConfig,
-    styles: &'static Styles,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
-    git_author: fabro_workflows::git::GitAuthor,
-) -> anyhow::Result<()> {
-    let source_input = load_workflow_source_input(&args, run_defaults, true)?;
-    let resolved_run_defaults = source_input.run_defaults.clone();
-
-    let record_run = RecordBasedRun {
-        workflow: WorkflowState::Source(Box::new(source_input)),
-        run_defaults: resolved_run_defaults,
-    };
-
-    run_command_impl(
-        args,
-        styles,
-        github_app,
-        git_author,
-        Some(record_run),
-        false,
-    )
-    .await
 }
 
 async fn run_command_impl(
@@ -817,8 +780,6 @@ async fn run_command_impl(
         fabro_sandbox::daytona::detect_repo_info(&original_cwd)
             .map(|(url, branch)| (Some(url), branch))
             .unwrap_or((None, None));
-    let git_status =
-        fabro_workflows::git::sync_status(&original_cwd, "origin", detected_base_branch.as_deref());
 
     // 3. Create logs directory
     // Extract values from args before partial move
@@ -878,40 +839,6 @@ async fn run_command_impl(
                     sandbox_provider,
                 },
             );
-
-            if args.preflight {
-                let validated = fabro_workflows::operations::validate(
-                    &source_input.raw_source,
-                    fabro_workflows::operations::ValidateOptions {
-                        base_dir: Some(
-                            source_input
-                                .dot_path
-                                .parent()
-                                .unwrap_or(Path::new("."))
-                                .to_path_buf(),
-                        ),
-                        config: Some(config.clone()),
-                        goal_override: source_input.goal_override.clone(),
-                        ..Default::default()
-                    },
-                )?;
-                print_workflow_report(&validated, &source_input.dot_path, styles);
-                if validated.has_errors() {
-                    bail!("Validation failed");
-                }
-                return run_preflight(
-                    validated.graph(),
-                    &Some(config),
-                    &args,
-                    &run_defaults,
-                    git_status,
-                    sandbox_provider,
-                    styles,
-                    github_app,
-                    origin_url.as_deref(),
-                )
-                .await;
-            }
 
             match fabro_workflows::operations::create(
                 &source_input.raw_source,
@@ -1501,10 +1428,11 @@ pub(crate) fn print_assets(run_dir: &std::path::Path, styles: &Styles) {
 /// resolves the model/provider through the full precedence chain, and prints
 /// a styled check report.
 #[allow(clippy::too_many_arguments)]
-async fn run_preflight(
+pub(crate) async fn run_preflight(
     graph: &fabro_graphviz::graph::Graph,
     run_cfg: &Option<FabroConfig>,
-    args: &RunArgs,
+    cli_model: Option<&str>,
+    cli_provider: Option<&str>,
     run_defaults: &FabroConfig,
     git_status: GitSyncStatus,
     sandbox_provider: SandboxProvider,
@@ -1558,8 +1486,8 @@ async fn run_preflight(
 
     // 2. Workflow metadata
     let (model, provider) = resolve_model_provider(
-        args.model.as_deref(),
-        args.provider.as_deref(),
+        cli_model,
+        cli_provider,
         run_cfg.as_ref(),
         run_defaults,
         graph,
@@ -1979,27 +1907,11 @@ include = ["*.md"]
         )
         .unwrap();
 
-        let args = RunArgs {
-            workflow: Some(dir.path().join("workflow.toml")),
-            run_dir: None,
-            dry_run: false,
-            preflight: false,
-            auto_approve: false,
-            goal: None,
-            goal_file: None,
-            model: None,
-            provider: None,
-            verbose: false,
-            sandbox: None,
-            label: Vec::new(),
-            no_retro: false,
-            preserve_sandbox: false,
-            detach: false,
-            run_id: None,
-        };
+        let workflow_path = dir.path().join("workflow.toml");
 
         let source_input =
-            load_workflow_source_input(&args, FabroConfig::default(), false).unwrap();
+            load_workflow_source_input(&workflow_path, None, None, FabroConfig::default(), false)
+                .unwrap();
         let validated = fabro_workflows::operations::validate(
             &source_input.raw_source,
             fabro_workflows::operations::ValidateOptions {
@@ -2058,19 +1970,19 @@ include = ["*.md"]
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("goal.md");
         std::fs::write(&path, "goal from file").unwrap();
-        let result = resolve_cli_goal(&None, &Some(path)).unwrap();
+        let result = resolve_cli_goal(None, Some(path.as_path())).unwrap();
         assert_eq!(result, Some("goal from file".to_string()));
     }
 
     #[test]
     fn resolve_cli_goal_from_string() {
-        let result = resolve_cli_goal(&Some("inline goal".to_string()), &None).unwrap();
+        let result = resolve_cli_goal(Some("inline goal"), None).unwrap();
         assert_eq!(result, Some("inline goal".to_string()));
     }
 
     #[test]
     fn resolve_cli_goal_none() {
-        let result = resolve_cli_goal(&None, &None).unwrap();
+        let result = resolve_cli_goal(None, None).unwrap();
         assert_eq!(result, None);
     }
 
