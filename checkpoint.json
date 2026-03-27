@@ -1,33 +1,36 @@
 {
-  "timestamp": "2026-03-27T19:07:05.818911Z",
-  "current_node": "implement",
+  "timestamp": "2026-03-27T19:07:06.161819Z",
+  "current_node": "critical_review",
   "completed_nodes": [
     "start",
     "plan",
-    "implement"
+    "implement",
+    "critical_review"
   ],
   "node_retries": {},
   "context_values": {
-    "current_node": "implement",
+    "current_node": "critical_review",
     "outcome": "success",
-    "current.preamble": "Goal: Build a styled pipeline\n\n## Completed stages\n- **plan**: success\n",
+    "current.preamble": "Goal: Build a styled pipeline\n\n## Completed stages\n- **plan**: success\n- **implement**: success\n",
     "internal.run_id": "01KMRB2JHJ8CS9VFY2JPTPJ2KK",
     "internal.fidelity": "compact",
     "thread.planning.current_node": "plan",
     "internal.thread_id": "code",
     "failure_signature": "",
-    "thread.code.current_node": "implement",
+    "thread.code.current_node": "critical_review",
     "internal.retry_count.implement": 0,
     "graph.model_stylesheet": "\n            * { model: claude-sonnet-4-5;}\n            .code { model: claude-opus-4-6; }\n            #critical_review { model: gpt-5.2;reasoning_effort: high; }\n        ",
     "response.plan": "[Simulated] Response for stage: plan",
-    "last_stage": "implement",
-    "last_response": "[Simulated] Response for stage: implement",
+    "last_stage": "critical_review",
+    "last_response": "[Simulated] Response for stage: critical_review",
     "internal.node_visit_count": 1,
     "internal.retry_count.plan": 0,
+    "response.critical_review": "[Simulated] Response for stage: critical_review",
     "failure_class": "",
     "graph.goal": "Build a styled pipeline",
     "internal.retry_count.start": 0,
-    "response.implement": "[Simulated] Response for stage: implement"
+    "response.implement": "[Simulated] Response for stage: implement",
+    "internal.retry_count.critical_review": 0
   },
   "node_outcomes": {
     "start": {
@@ -45,6 +48,16 @@
       "notes": "[Simulated] plan",
       "usage": null
     },
+    "critical_review": {
+      "status": "success",
+      "context_updates": {
+        "last_response": "[Simulated] Response for stage: critical_review",
+        "last_stage": "critical_review",
+        "response.critical_review": "[Simulated] Response for stage: critical_review"
+      },
+      "notes": "[Simulated] critical_review",
+      "usage": null
+    },
     "implement": {
       "status": "success",
       "context_updates": {
@@ -56,10 +69,11 @@
       "usage": null
     }
   },
-  "next_node_id": "critical_review",
+  "next_node_id": "exit",
   "node_visits": {
     "plan": 1,
     "implement": 1,
+    "critical_review": 1,
     "start": 1
   }
 }
