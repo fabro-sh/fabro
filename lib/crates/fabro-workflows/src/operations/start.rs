@@ -134,7 +134,7 @@ async fn run_engine(
             .map(std::path::PathBuf::from),
         base_branch: record.base_branch.clone(),
         display_base_sha: None,
-        git: None,
+        git: options.git.clone(),
     };
 
     let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
