@@ -322,6 +322,7 @@ mod tests {
             github_app: None,
             host_repo_path: None,
             base_branch: None,
+            display_base_sha: None,
             git: None,
         }
     }

@@ -7,23 +7,18 @@ use std::time::Instant;
 use anyhow::{bail, Context};
 use chrono::Local;
 use clap::{Args, ValueEnum};
-use fabro_agent::{
-    DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox, WorktreeConfig, WorktreeSandbox,
-};
+use fabro_agent::{DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox};
 use fabro_config::config::FabroConfig;
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, FileInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::SandboxProvider;
 use fabro_util::terminal::Styles;
-use fabro_workflows::devcontainer_bridge;
-use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
+use fabro_workflows::event::EventEmitter;
 use fabro_workflows::git::GitSyncStatus;
-use fabro_workflows::handler::default_registry;
-use fabro_workflows::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use fabro_workflows::operations::{
-    resume as operations_resume, start, StartFinalizeOptions, StartOptions, StartPullRequestConfig,
-    StartRetroOptions,
+    resume as operations_resume, start, DevcontainerSpec, LlmSpec, SandboxEnvSpec, SandboxSpec,
+    StartFinalizeOptions, StartOptions, StartPullRequestConfig, StartRetroOptions,
 };
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::outcome::{compute_stage_cost, format_cost};
@@ -31,12 +26,12 @@ use fabro_workflows::pipeline::{
     build_conclusion, classify_engine_result, persist_terminal_outcome, Persisted, Validated,
 };
 use fabro_workflows::records::Checkpoint;
-use fabro_workflows::run_options::{GitCheckpointOptions, LifecycleOptions};
+use fabro_workflows::run_options::LifecycleOptions;
 use indicatif::HumanDuration;
 use std::time::Duration;
 use tracing::debug;
 
-use super::detached_support::{self, DetachedRunBootstrapGuard, DetachedRunCompletionGuard};
+use super::detached_support::{DetachedRunBootstrapGuard, DetachedRunCompletionGuard};
 use super::run_progress;
 use crate::commands::shared::{
     format_tokens_human, print_diagnostics, read_workflow_file, relative_path, tilde_path,
@@ -427,17 +422,6 @@ pub(crate) async fn mint_github_token(
     Ok(token)
 }
 
-/// How the workflow run's working directory is set up.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WorkdirStrategy {
-    /// Run directly in the current working directory.
-    LocalDirectory,
-    /// Create a local git worktree for isolation.
-    LocalWorktree,
-    /// Remote sandbox clones from origin (Daytona, Exe, SSH).
-    Cloud,
-}
-
 /// Accumulates token usage and cost across all workflow stages.
 #[derive(Default)]
 pub(crate) struct CostAccumulator {
@@ -448,18 +432,6 @@ pub(crate) struct CostAccumulator {
     pub total_reasoning_tokens: i64,
     pub total_cost: f64,
     pub has_pricing: bool,
-}
-
-/// Create a [`LocalSandbox`] wired to emit [`WorkflowRunEvent::Sandbox`] events.
-pub(crate) fn local_sandbox_with_callback(
-    cwd: PathBuf,
-    emitter: Arc<EventEmitter>,
-) -> Arc<dyn Sandbox> {
-    let mut env = LocalSandbox::new(cwd);
-    env.set_event_callback(Arc::new(move |event| {
-        emitter.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
-    }));
-    Arc::new(env)
 }
 
 pub(crate) const RUN_GRAPH_FILE: &str = "workflow.fabro";
@@ -1132,39 +1104,6 @@ async fn run_command_impl(
         }
     });
 
-    // JSONL progress log + live.json snapshot
-    {
-        let jsonl_path = run_dir.join("progress.jsonl");
-        let live_path = run_dir.join("live.json");
-        let run_id = Arc::new(Mutex::new(run_id.clone()));
-        let run_id_clone = Arc::clone(&run_id);
-        emitter.on_event(move |event| {
-            if let fabro_workflows::event::WorkflowRunEvent::WorkflowRunStarted { run_id, .. } =
-                event
-            {
-                *run_id_clone.lock().unwrap() = run_id.clone();
-            }
-            let envelope = build_event_envelope(event, &run_id_clone.lock().unwrap());
-            // Append to progress.jsonl
-            if let Ok(line) = serde_json::to_string(&envelope) {
-                let line = fabro_util::redact::redact_jsonl_line(&line);
-                use std::io::Write;
-                if let Ok(mut f) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&jsonl_path)
-                {
-                    let _ = writeln!(f, "{line}");
-                }
-            }
-            // Overwrite live.json
-            if let Ok(pretty) = serde_json::to_string_pretty(&envelope) {
-                let pretty = fabro_util::redact::redact_jsonl_line(&pretty);
-                let _ = std::fs::write(&live_path, pretty);
-            }
-        });
-    }
-
     run_progress::ProgressUI::register(&progress_ui, &emitter);
 
     // 4. Build interviewer
@@ -1181,478 +1120,12 @@ async fn run_command_impl(
         ))
     };
 
-    // Determine the working directory strategy.
-    // Only the Local provider supports git worktrees on the host.
-    // Remote sandboxes (Daytona, Exe, SSH) clone from origin inside the sandbox.
-    // Docker uses the bind-mounted host directory as-is.
-    // Resume runs skip worktree creation — the engine runs in the original
-    // working directory and the checkpoint restores logical state.
-    let workdir_strategy = if resume {
-        match sandbox_provider {
-            SandboxProvider::Local | SandboxProvider::Docker => WorkdirStrategy::LocalDirectory,
-            _ => WorkdirStrategy::Cloud,
-        }
-    } else {
-        match sandbox_provider {
-            SandboxProvider::Local => {
-                let worktree_mode = resolve_worktree_mode(run_cfg.as_ref(), &run_defaults);
-                match worktree_mode {
-                    sandbox_config::WorktreeMode::Always => WorkdirStrategy::LocalWorktree,
-                    sandbox_config::WorktreeMode::Clean => {
-                        if git_status.is_clean() {
-                            WorkdirStrategy::LocalWorktree
-                        } else {
-                            WorkdirStrategy::LocalDirectory
-                        }
-                    }
-                    sandbox_config::WorktreeMode::Dirty => {
-                        if git_status.is_clean() {
-                            WorkdirStrategy::LocalDirectory
-                        } else {
-                            WorkdirStrategy::LocalWorktree
-                        }
-                    }
-                    sandbox_config::WorktreeMode::Never => WorkdirStrategy::LocalDirectory,
-                }
-            }
-            SandboxProvider::Docker => WorkdirStrategy::LocalDirectory,
-            _ => WorkdirStrategy::Cloud,
-        }
-    };
-    debug!(
-        ?workdir_strategy,
-        ?sandbox_provider,
-        ?git_status,
-        "Resolved workdir strategy"
-    );
-
-    // Warn about uncommitted changes that won't be available in the execution environment.
-    if git_status == GitSyncStatus::Dirty {
-        let env_name = match workdir_strategy {
-            WorkdirStrategy::LocalWorktree => Some("worktree"),
-            WorkdirStrategy::Cloud => Some("remote sandbox"),
-            WorkdirStrategy::LocalDirectory => None,
-        };
-        if let Some(env_name) = env_name {
-            emit_run_notice(
-                &emitter,
-                RunNoticeLevel::Warn,
-                "dirty_worktree",
-                format!("Uncommitted changes will not be included in the {env_name}."),
-            );
-        }
-    }
-
-    // Auto-push when the execution environment needs commits on the remote.
-    if !dry_run_flag
-        && matches!(
-            workdir_strategy,
-            WorkdirStrategy::LocalWorktree | WorkdirStrategy::Cloud
-        )
-    {
-        if let Some(ref branch) = detected_base_branch {
-            // For Synced we know no push is needed; for Unsynced we know it is;
-            // for Dirty the push status wasn't checked, so check now.
-            let needs_push = match git_status {
-                GitSyncStatus::Synced => false,
-                GitSyncStatus::Unsynced => true,
-                GitSyncStatus::Dirty => {
-                    let check_repo = original_cwd.clone();
-                    let check_branch = branch.clone();
-                    tokio::task::spawn_blocking(move || {
-                        fabro_workflows::git::branch_needs_push(
-                            &check_repo,
-                            "origin",
-                            &check_branch,
-                        )
-                    })
-                    .await
-                    .unwrap_or(true)
-                }
-            };
-
-            if needs_push {
-                let repo_path = original_cwd.clone();
-                let branch_owned = branch.clone();
-                let result = fabro_workflows::git::blocking_push_with_timeout(60, move || {
-                    fabro_workflows::git::push_branch(&repo_path, "origin", &branch_owned)
-                })
-                .await;
-                match result {
-                    Ok(()) => {
-                        tracing::info!(%branch, "Pushed current branch to origin");
-                        emit_run_notice(
-                            &emitter,
-                            RunNoticeLevel::Info,
-                            "git_push_succeeded",
-                            format!("{branch} (synced local commits to remote)"),
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, %branch, "Failed to push current branch");
-                        emit_run_notice(
-                            &emitter,
-                            RunNoticeLevel::Warn,
-                            "git_push_failed",
-                            format!("Failed to push {branch} to origin: {e}"),
-                        );
-                    }
-                }
-            } else {
-                tracing::info!(%branch, "Branch already in sync with origin, skipping push");
-            }
-        }
-    }
-
-    // Compute worktree configuration for local isolation.
-    // The actual git setup (branch, worktree add, reset) happens inside the sandbox
-    // creation block for SandboxProvider::Local below.
-    let (mut worktree_path, mut worktree_branch, mut worktree_base_sha) = if workdir_strategy
-        == WorkdirStrategy::LocalWorktree
-    {
-        match fabro_workflows::git::head_sha(&original_cwd) {
-            Ok(base_sha) => {
-                let branch_name = format!("{}{run_id}", fabro_workflows::git::RUN_BRANCH_PREFIX);
-                let wt_path = run_dir.join("worktree");
-                (Some(wt_path), Some(branch_name), Some(base_sha))
-            }
-            Err(e) => {
-                emit_run_notice(
-                    &emitter,
-                    RunNoticeLevel::Warn,
-                    "worktree_setup_failed",
-                    format!("Git worktree setup failed ({e}), running without worktree."),
-                );
-                (None, None, None)
-            }
-        }
-    } else {
-        (None, None, None)
-    };
-
-    if let Some(ref wt) = worktree_path {
-        progress_ui
-            .lock()
-            .expect("progress lock poisoned")
-            .show_worktree(wt);
-    }
-
-    // Show base SHA for both worktree and cloud strategies.
-    let base_sha_display = worktree_base_sha.clone().or_else(|| {
-        if workdir_strategy == WorkdirStrategy::Cloud {
-            fabro_workflows::git::head_sha(&original_cwd).ok()
-        } else {
-            None
-        }
-    });
-    if let Some(ref sha) = base_sha_display {
-        progress_ui
-            .lock()
-            .expect("progress lock poisoned")
-            .show_base_info(detected_base_branch.as_deref(), sha);
-    }
-
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let mut daytona_config = resolve_daytona_config(run_cfg.as_ref(), &run_defaults);
+    let daytona_config = resolve_daytona_config(run_cfg.as_ref(), &run_defaults);
     #[cfg(feature = "exedev")]
     let exe_config = resolve_exe_config(run_cfg.as_ref(), &run_defaults);
     let ssh_config = resolve_ssh_config(run_cfg.as_ref(), &run_defaults);
-
-    // Resolve devcontainer if enabled
-    let devcontainer_config = if run_cfg
-        .as_ref()
-        .and_then(|c| c.sandbox.as_ref())
-        .or(run_defaults.sandbox.as_ref())
-        .and_then(|s| s.devcontainer)
-        .unwrap_or(false)
-    {
-        match fabro_devcontainer::DevcontainerResolver::resolve(&cwd).await {
-            Ok(dc) => {
-                let lifecycle_command_count = dc.on_create_commands.len()
-                    + dc.post_create_commands.len()
-                    + dc.post_start_commands.len();
-                emitter.emit(
-                    &fabro_workflows::event::WorkflowRunEvent::DevcontainerResolved {
-                        dockerfile_lines: dc.dockerfile.lines().count(),
-                        environment_count: dc.environment.len(),
-                        lifecycle_command_count,
-                        workspace_folder: dc.workspace_folder.clone(),
-                    },
-                );
-
-                // Override daytona_config with devcontainer dockerfile
-                let snapshot = devcontainer_bridge::devcontainer_to_snapshot_config(&dc);
-                let mut cfg = daytona_config.unwrap_or_default();
-                cfg.snapshot = Some(snapshot);
-                daytona_config = Some(cfg);
-
-                // Run initialize_commands on host
-                let timeout = std::time::Duration::from_millis(300_000);
-                for cmd in &dc.initialize_commands {
-                    let shell_cmds = match cmd {
-                        fabro_devcontainer::Command::Shell(s) => vec![s.clone()],
-                        fabro_devcontainer::Command::Args(args) => {
-                            vec![args
-                                .iter()
-                                .map(|a| {
-                                    shlex::try_quote(a).unwrap_or_else(|_| a.into()).to_string()
-                                })
-                                .collect::<Vec<_>>()
-                                .join(" ")]
-                        }
-                        fabro_devcontainer::Command::Parallel(map) => {
-                            map.values().cloned().collect()
-                        }
-                    };
-                    for shell_cmd in &shell_cmds {
-                        let fut = tokio::process::Command::new("sh")
-                            .arg("-c")
-                            .arg(shell_cmd)
-                            .current_dir(&cwd)
-                            .output();
-                        let output = tokio::time::timeout(timeout, fut)
-                            .await
-                            .with_context(|| {
-                                format!("Devcontainer initializeCommand timed out: {shell_cmd}")
-                            })?
-                            .with_context(|| {
-                                format!(
-                                    "Failed to execute devcontainer initializeCommand: {shell_cmd}"
-                                )
-                            })?;
-                        if !output.status.success() {
-                            let code = output
-                                .status
-                                .code()
-                                .map_or("unknown".to_string(), |c| c.to_string());
-                            let stderr = String::from_utf8_lossy(&output.stderr);
-                            bail!(
-                                "Devcontainer initializeCommand failed (exit code {code}): {shell_cmd}\n{stderr}"
-                            );
-                        }
-                    }
-                }
-
-                Some(dc)
-            }
-            Err(e) => {
-                bail!("Failed to resolve devcontainer: {e}");
-            }
-        }
-    } else {
-        None
-    };
-
-    // Deferred sandbox reference — filled after sandbox creation, consumed by event listeners.
-    let deferred_sandbox: Arc<Mutex<Option<Arc<dyn Sandbox>>>> = Arc::new(Mutex::new(None));
-
-    // Register SandboxInitialized listener (must happen before emitter is wrapped in Arc)
-    {
-        let run_dir_for_listener = run_dir.clone();
-        let progress_for_listener = Arc::clone(&progress_ui);
-        let cwd_for_listener = cwd.to_string_lossy().to_string();
-        let ssh_data_host = ssh_config.as_ref().map(|c| c.destination.clone());
-        let deferred_sb = Arc::clone(&deferred_sandbox);
-        let provider = sandbox_provider; // Copy — captured by move closure
-        emitter.on_event(move |event| {
-            if let fabro_workflows::event::WorkflowRunEvent::SandboxInitialized {
-                working_directory,
-            } = event
-            {
-                progress_for_listener
-                    .lock()
-                    .expect("progress lock poisoned")
-                    .set_working_directory(working_directory.clone());
-
-                // Build sandbox record from template
-                let sandbox_info_opt = deferred_sb.lock().unwrap().as_ref().and_then(|sb| {
-                    let info = sb.sandbox_info();
-                    if info.is_empty() {
-                        None
-                    } else {
-                        Some(info)
-                    }
-                });
-
-                let is_docker = provider == SandboxProvider::Docker;
-                let record = fabro_sandbox::SandboxRecord {
-                    provider: provider.to_string(),
-                    working_directory: working_directory.clone(),
-                    identifier: sandbox_info_opt,
-                    host_working_directory: if is_docker {
-                        Some(cwd_for_listener.clone())
-                    } else {
-                        None
-                    },
-                    container_mount_point: if is_docker {
-                        Some(working_directory.clone())
-                    } else {
-                        None
-                    },
-                    data_host: if provider == SandboxProvider::Ssh {
-                        ssh_data_host.clone()
-                    } else {
-                        None
-                    },
-                };
-                if let Err(e) = record.save(&run_dir_for_listener.join("sandbox.json")) {
-                    tracing::warn!(error = %e, "Failed to save sandbox record");
-                }
-            }
-        });
-    }
-
-    // Wrap emitter in Arc so we can share it with exec env callbacks
     let emitter = Arc::new(emitter);
-
-    let sandbox: Arc<dyn Sandbox> = match sandbox_provider {
-        SandboxProvider::Docker => {
-            let config = DockerSandboxConfig {
-                host_working_directory: cwd.to_string_lossy().to_string(),
-                ..DockerSandboxConfig::default()
-            };
-            let mut env = DockerSandbox::new(config)
-                .map_err(|e| anyhow::anyhow!("Failed to create Docker environment: {e}"))?;
-            let emitter_cb = Arc::clone(&emitter);
-            env.set_event_callback(Arc::new(move |event| {
-                emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
-            }));
-            Arc::new(env)
-        }
-        SandboxProvider::Daytona => {
-            let config = daytona_config.clone().unwrap_or_default();
-            let mut env = fabro_sandbox::daytona::DaytonaSandbox::new(
-                config,
-                github_app.clone(),
-                Some(run_id.clone()),
-                detected_base_branch.clone(),
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let emitter_cb = Arc::clone(&emitter);
-            env.set_event_callback(Arc::new(move |event| {
-                emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
-            }));
-            Arc::new(env)
-        }
-        #[cfg(feature = "exedev")]
-        SandboxProvider::Exe => {
-            let clone_params = resolve_exe_clone_params(&original_cwd);
-
-            let mgmt_ssh = fabro_sandbox::exe::OpensshRunner::connect_raw("exe.dev")
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to connect to exe.dev: {e}"))?;
-            let config = exe_config.unwrap_or_default();
-            let mut env = fabro_sandbox::exe::ExeSandbox::new(
-                Box::new(mgmt_ssh),
-                config,
-                clone_params,
-                Some(run_id.clone()),
-                github_app.clone(),
-            );
-            let emitter_cb = Arc::clone(&emitter);
-            env.set_event_callback(Arc::new(move |event| {
-                emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
-            }));
-            Arc::new(env)
-        }
-        #[cfg(not(feature = "exedev"))]
-        SandboxProvider::Exe => {
-            bail!("exe sandbox requires the exedev feature");
-        }
-        SandboxProvider::Ssh => {
-            let config = ssh_config
-                .clone()
-                .ok_or_else(|| anyhow::anyhow!("--sandbox ssh requires [sandbox.ssh] config"))?;
-            let clone_params = resolve_ssh_clone_params(&original_cwd);
-            let mut env = fabro_sandbox::ssh::SshSandbox::new(
-                config,
-                clone_params,
-                Some(run_id.clone()),
-                github_app.clone(),
-            );
-            let emitter_cb = Arc::clone(&emitter);
-            env.set_event_callback(Arc::new(move |event| {
-                emitter_cb.emit(&fabro_workflows::event::WorkflowRunEvent::Sandbox { event });
-            }));
-            Arc::new(env)
-        }
-        SandboxProvider::Local => {
-            if let (Some(base_sha), Some(branch_name), Some(wt_path)) = (
-                worktree_base_sha.as_ref(),
-                worktree_branch.as_ref(),
-                worktree_path.as_ref(),
-            ) {
-                // Set up a WorktreeSandbox for git-isolated local execution.
-                let wt_path_str = wt_path.to_string_lossy().into_owned();
-                let inner = local_sandbox_with_callback(original_cwd.clone(), Arc::clone(&emitter));
-                let wt_config = WorktreeConfig {
-                    branch_name: branch_name.clone(),
-                    base_sha: base_sha.clone(),
-                    worktree_path: wt_path_str,
-                    skip_branch_creation: false,
-                };
-                let mut wt_sandbox = WorktreeSandbox::new(inner, wt_config);
-                wt_sandbox.set_event_callback(Arc::clone(&emitter).worktree_callback());
-
-                match wt_sandbox.initialize().await {
-                    Ok(()) => {
-                        std::env::set_current_dir(wt_path)?;
-                        Arc::new(wt_sandbox) as Arc<dyn Sandbox>
-                    }
-                    Err(e) => {
-                        emit_run_notice(
-                            &emitter,
-                            RunNoticeLevel::Warn,
-                            "worktree_setup_failed",
-                            format!("Git worktree setup failed ({e}), running without worktree."),
-                        );
-                        // Reset so RunOptions does not enable git checkpointing
-                        worktree_path = None;
-                        worktree_branch = None;
-                        worktree_base_sha = None;
-                        local_sandbox_with_callback(cwd.clone(), Arc::clone(&emitter))
-                    }
-                }
-            } else {
-                local_sandbox_with_callback(cwd.clone(), Arc::clone(&emitter))
-            }
-        }
-    };
-
-    // Wrap with ReadBeforeWriteSandbox to enforce read-before-write guard
-    // (delegate_sandbox! macro delegates initialize/cleanup)
-    let sandbox: Arc<dyn Sandbox> = Arc::new(fabro_agent::ReadBeforeWriteSandbox::new(sandbox));
-
-    // Fill deferred sandbox reference for event listeners registered above
-    *deferred_sandbox.lock().unwrap() = Some(Arc::clone(&sandbox));
-
-    // 6. Resolve backend, model, and provider
-    let (dry_run_mode, llm_client) = if dry_run_flag {
-        (true, None)
-    } else {
-        match fabro_llm::client::Client::from_env().await {
-            Ok(c) if c.provider_names().is_empty() => {
-                emit_run_notice(
-                    &emitter,
-                    RunNoticeLevel::Warn,
-                    "dry_run_no_llm",
-                    "No LLM providers configured. Running in dry-run mode.",
-                );
-                (true, None)
-            }
-            Ok(c) => (false, Some(c)),
-            Err(e) => {
-                emit_run_notice(
-                    &emitter,
-                    RunNoticeLevel::Warn,
-                    "dry_run_llm_init_failed",
-                    format!("Failed to initialize LLM client: {e}. Running in dry-run mode."),
-                );
-                (true, None)
-            }
-        }
-    };
 
     // Parse provider string to enum (defaults to best available from env)
     let provider_enum: Provider = provider
@@ -1662,62 +1135,7 @@ async fn run_command_impl(
         .map_err(|e| anyhow::anyhow!("{e}"))?
         .unwrap_or_else(Provider::default_from_env);
 
-    // Resolve fallback chain from config
     let fallback_chain = resolve_fallback_chain(provider_enum, &model, run_cfg.as_ref());
-
-    // 7. Build engine
-    // Devcontainer env is layered underneath TOML env (TOML wins on conflict)
-    let sandbox_env: HashMap<String, String> = {
-        let mut env = if let Some(ref dc) = devcontainer_config {
-            dc.environment.clone()
-        } else {
-            HashMap::new()
-        };
-        if let Some(mut toml_env) = run_cfg
-            .as_ref()
-            .and_then(|c| c.sandbox.as_ref())
-            .or(run_defaults.sandbox.as_ref())
-            .and_then(|s| s.env.clone())
-        {
-            // When falling back to run_defaults (run_cfg is None, i.e. bare .fabro
-            // workflow), env refs haven't been resolved yet — resolve them now.
-            if run_cfg.is_none() {
-                run_config::resolve_env_refs(&mut toml_env)?;
-            }
-            env.extend(toml_env);
-        }
-        env
-    };
-
-    // Mint a GitHub App IAT and inject as GITHUB_TOKEN if [github] permissions are declared
-    let mut sandbox_env = sandbox_env;
-    let github_permissions = run_cfg
-        .as_ref()
-        .and_then(|c| c.github.as_ref())
-        .or(run_defaults.github.as_ref());
-    if let Some(gh_cfg) = github_permissions {
-        if !gh_cfg.permissions.is_empty() {
-            if let (Some(ref creds), Some(ref url)) = (&github_app, &origin_url) {
-                match mint_github_token(creds, url, &gh_cfg.permissions).await {
-                    Ok(token) => {
-                        debug!("Minted GitHub IAT for sandbox GITHUB_TOKEN");
-                        sandbox_env.insert("GITHUB_TOKEN".to_string(), token);
-                    }
-                    Err(e) => {
-                        emit_run_notice(
-                            &emitter,
-                            RunNoticeLevel::Warn,
-                            "github_token_failed",
-                            format!("Failed to mint GitHub token: {e}"),
-                        );
-                    }
-                }
-            } else {
-                debug!("Skipping GitHub token: no GitHub App credentials or origin URL");
-            }
-        }
-    }
-
     let mcp_servers: Vec<fabro_mcp::config::McpServerConfig> = {
         let servers = run_cfg
             .as_ref()
@@ -1733,66 +1151,102 @@ async fn run_command_impl(
             )
             .collect()
     };
-    let registry = default_registry(interviewer.clone(), {
-        let sandbox_env = sandbox_env.clone();
-        let model = model.clone();
-        let mcp_servers = mcp_servers.clone();
-        move || {
-            if dry_run_mode {
-                None
-            } else {
-                let api =
-                    AgentApiBackend::new(model.clone(), provider_enum, fallback_chain.clone())
-                        .with_env(sandbox_env.clone())
-                        .with_mcp_servers(mcp_servers.clone());
-                let cli = AgentCliBackend::new(model.clone(), provider_enum)
-                    .with_env(sandbox_env.clone());
-                Some(Box::new(BackendRouter::new(Box::new(api), cli)))
-            }
+    let sandbox_spec = match sandbox_provider {
+        SandboxProvider::Local => SandboxSpec::Local {
+            working_directory: cwd.clone(),
+        },
+        SandboxProvider::Docker => SandboxSpec::Docker {
+            config: DockerSandboxConfig {
+                host_working_directory: cwd.to_string_lossy().to_string(),
+                ..DockerSandboxConfig::default()
+            },
+        },
+        SandboxProvider::Daytona => SandboxSpec::Daytona {
+            config: daytona_config.unwrap_or_default(),
+            github_app: github_app.clone(),
+            run_id: Some(run_id.clone()),
+            clone_branch: detected_base_branch.clone(),
+        },
+        #[cfg(feature = "exedev")]
+        SandboxProvider::Exe => SandboxSpec::Exe {
+            config: exe_config.unwrap_or_default(),
+            clone_params: resolve_exe_clone_params(&original_cwd),
+            run_id: Some(run_id.clone()),
+            github_app: github_app.clone(),
+            mgmt_destination: "exe.dev".to_string(),
+        },
+        #[cfg(not(feature = "exedev"))]
+        SandboxProvider::Exe => {
+            bail!("exe sandbox requires the exedev feature");
         }
-    });
-
-    // 7. Execute
-    // Set up metadata branch for git checkpointing (host or remote — engine fills remote)
-    let git = if worktree_path.is_some() {
-        Some(GitCheckpointOptions {
-            base_sha: worktree_base_sha,
-            run_branch: worktree_branch,
-            meta_branch: Some(fabro_workflows::git::MetadataStore::branch_name(&run_id)),
-        })
-    } else {
-        None
+        SandboxProvider::Ssh => SandboxSpec::Ssh {
+            config: ssh_config
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("--sandbox ssh requires [sandbox.ssh] config"))?,
+            clone_params: resolve_ssh_clone_params(&original_cwd),
+            run_id: Some(run_id.clone()),
+            github_app: github_app.clone(),
+        },
     };
 
-    // Build lifecycle config for sandbox init, setup commands, and devcontainer phases
+    let toml_env = if let Some(mut env) = run_cfg
+        .as_ref()
+        .and_then(|c| c.sandbox.as_ref())
+        .or(run_defaults.sandbox.as_ref())
+        .and_then(|s| s.env.clone())
+    {
+        if run_cfg.is_none() {
+            run_config::resolve_env_refs(&mut env)?;
+        }
+        env
+    } else {
+        HashMap::new()
+    };
+
+    let sandbox_env = SandboxEnvSpec {
+        devcontainer_env: HashMap::new(),
+        toml_env,
+        github_permissions: run_cfg
+            .as_ref()
+            .and_then(|c| c.github.as_ref())
+            .or(run_defaults.github.as_ref())
+            .and_then(|cfg| (!cfg.permissions.is_empty()).then(|| cfg.permissions.clone())),
+        origin_url: origin_url.clone(),
+    };
+
+    let devcontainer_enabled = run_cfg
+        .as_ref()
+        .and_then(|c| c.sandbox.as_ref())
+        .or(run_defaults.sandbox.as_ref())
+        .and_then(|s| s.devcontainer)
+        .unwrap_or(false);
+
+    let llm = LlmSpec {
+        model: model.clone(),
+        provider: provider_enum,
+        fallback_chain,
+        mcp_servers,
+        dry_run: dry_run_flag,
+    };
+
+    let worktree_mode = resolve_worktree_mode(run_cfg.as_ref(), &run_defaults);
     let lifecycle = LifecycleOptions {
         setup_commands,
         setup_command_timeout_ms: 300_000,
-        devcontainer_phases: if let Some(ref dc) = devcontainer_config {
-            vec![
-                ("on_create".to_string(), dc.on_create_commands.clone()),
-                ("post_create".to_string(), dc.post_create_commands.clone()),
-                ("post_start".to_string(), dc.post_start_commands.clone()),
-            ]
-        } else {
-            Vec::new()
-        },
+        devcontainer_phases: Vec::new(),
     };
 
     // Defuse the bootstrap guard — engine.run() has taken ownership of lifecycle status.
     status_guard.defuse();
 
     let run_start = Instant::now();
-    let pr_config = if dry_run_mode {
-        None
-    } else {
-        persisted.run_record().config.pull_request.clone()
-    };
+    let pr_config = persisted.run_record().config.pull_request.clone();
     let start_options = StartOptions {
         cancel_token: None,
         emitter: Arc::clone(&emitter),
-        sandbox: Arc::clone(&sandbox),
-        registry: Arc::new(registry),
+        sandbox: sandbox_spec,
+        llm,
+        interviewer: interviewer.clone(),
         lifecycle,
         hooks: fabro_hooks::HookConfig {
             hooks: run_cfg
@@ -1801,17 +1255,18 @@ async fn run_command_impl(
                 .unwrap_or_else(|| run_defaults.hooks.clone()),
         },
         sandbox_env,
+        devcontainer: devcontainer_enabled.then(|| DevcontainerSpec {
+            enabled: true,
+            resolve_dir: cwd.clone(),
+        }),
         seed_context: None,
         git_author,
-        git,
+        git: None,
         github_app: github_app.clone(),
-        dry_run: dry_run_mode,
+        worktree_mode: Some(worktree_mode),
+        dry_run: dry_run_flag,
         retro: StartRetroOptions {
             enabled: !no_retro_flag && project_config::is_retro_enabled(),
-            dry_run: dry_run_mode,
-            llm_client: llm_client.clone(),
-            provider: provider_enum,
-            model: model.clone(),
         },
         finalize: StartFinalizeOptions { preserve_sandbox },
         pull_request: StartPullRequestConfig {
@@ -1880,19 +1335,6 @@ async fn run_command_impl(
         StageStatus::Success | StageStatus::PartialSuccess => Ok(()),
         _ => std::process::exit(1),
     }
-}
-
-pub(crate) fn emit_run_notice(
-    emitter: &EventEmitter,
-    level: RunNoticeLevel,
-    code: impl Into<String>,
-    message: impl Into<String>,
-) {
-    emitter.emit(&WorkflowRunEvent::RunNotice {
-        level,
-        code: code.into(),
-        message: message.into(),
-    });
 }
 
 /// Print a summary of the completed run from `conclusion.json` and `pull_request.json`.
@@ -2468,11 +1910,12 @@ async fn run_preflight(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn build_event_envelope(
     event: &fabro_workflows::event::WorkflowRunEvent,
     run_id: &str,
 ) -> serde_json::Value {
-    detached_support::build_event_envelope(event, run_id)
+    fabro_workflows::event::build_event_envelope(event, run_id)
 }
 
 #[cfg(test)]

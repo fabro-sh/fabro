@@ -23,7 +23,8 @@ pub use pull_request::{
 pub use retro::{retro, run_retro};
 pub use transform::transform;
 pub use types::{
-    Concluded, Executed, FinalizeOptions, Finalized, InitOptions, Initialized, Parsed, Persisted,
-    PullRequestOptions, RetroOptions, Retroed, TransformOptions, Transformed, Validated,
+    Concluded, DevcontainerSpec, Executed, FinalizeOptions, Finalized, InitOptions, Initialized,
+    LlmSpec, Parsed, Persisted, PullRequestOptions, RetroOptions, Retroed, SandboxEnvSpec,
+    SandboxSpec, TransformOptions, Transformed, Validated,
 };
 pub use validate::validate;

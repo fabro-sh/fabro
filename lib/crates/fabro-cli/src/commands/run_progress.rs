@@ -311,6 +311,19 @@ impl ProgressUI {
 
     pub(crate) fn handle_event(&mut self, event: &WorkflowRunEvent) {
         match event {
+            WorkflowRunEvent::WorkflowRunStarted {
+                base_branch,
+                base_sha,
+                worktree_dir,
+                ..
+            } => {
+                if let Some(worktree_dir) = worktree_dir {
+                    self.show_worktree(std::path::Path::new(worktree_dir));
+                }
+                if let Some(base_sha) = base_sha {
+                    self.show_base_info(base_branch.as_deref(), base_sha);
+                }
+            }
             WorkflowRunEvent::Sandbox {
                 event: sandbox_event,
             } => {
@@ -662,6 +675,14 @@ impl ProgressUI {
             |key: &str| -> u64 { envelope.get(key).and_then(|v| v.as_u64()).unwrap_or(0) };
 
         match event_name {
+            "WorkflowRunStarted" => {
+                if let Some(worktree_dir) = str_field("worktree_dir") {
+                    self.show_worktree(std::path::Path::new(worktree_dir));
+                }
+                if let Some(base_sha) = str_field("base_sha") {
+                    self.show_base_info(str_field("base_branch"), base_sha);
+                }
+            }
             "Sandbox.Initializing" => {
                 let provider = str_field("sandbox_provider")
                     .unwrap_or("unknown")

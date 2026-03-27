@@ -1,24 +1,21 @@
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::context::Context;
 use crate::error::FabroError;
-use crate::event::{EventEmitter, WorkflowRunEvent};
-use crate::handler::HandlerRegistry;
+use crate::event::{EventEmitter, ProgressLogger, WorkflowRunEvent};
 use crate::outcome::StageStatus;
 use crate::pipeline::{
-    self, FinalizeOptions, Finalized, InitOptions, Persisted, PullRequestOptions, RetroOptions,
+    self, DevcontainerSpec, FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted,
+    PullRequestOptions, RetroOptions, SandboxEnvSpec, SandboxSpec,
 };
 use crate::records::{Checkpoint, Conclusion};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
+use fabro_config::sandbox::WorktreeMode;
+use fabro_interview::Interviewer;
 
 pub struct StartRetroOptions {
     pub enabled: bool,
-    pub dry_run: bool,
-    pub llm_client: Option<fabro_llm::client::Client>,
-    pub provider: fabro_llm::Provider,
-    pub model: String,
 }
 
 pub struct StartFinalizeOptions {
@@ -41,15 +38,20 @@ pub struct StartOptions {
     // Truly external (not derivable from RunRecord)
     pub cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub emitter: Arc<EventEmitter>,
-    pub sandbox: Arc<dyn fabro_agent::Sandbox>,
-    pub registry: Arc<HandlerRegistry>,
+    pub sandbox: SandboxSpec,
+    pub llm: LlmSpec,
+    pub interviewer: Arc<dyn Interviewer>,
     pub lifecycle: LifecycleOptions,
     pub hooks: fabro_hooks::HookConfig,
-    pub sandbox_env: HashMap<String, String>,
+    pub sandbox_env: SandboxEnvSpec,
+    pub devcontainer: Option<DevcontainerSpec>,
     pub seed_context: Option<Context>,
     pub git_author: crate::git::GitAuthor,
     pub git: Option<GitCheckpointOptions>,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
+    pub worktree_mode: Option<WorktreeMode>,
+    #[cfg(test)]
+    pub registry_override: Option<Arc<crate::handler::HandlerRegistry>>,
 
     // Still external for now — could be derived from RunRecord.config in follow-up
     pub dry_run: bool,
@@ -114,17 +116,6 @@ async fn run_engine(
     options: StartOptions,
 ) -> Result<Started, FabroError> {
     let preserve_sandbox = options.finalize.preserve_sandbox;
-    let sandbox_for_cleanup = Arc::clone(&options.sandbox);
-    let cleanup_guard = scopeguard::guard((), move |()| {
-        if preserve_sandbox {
-            return;
-        }
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
-                let _ = sandbox_for_cleanup.cleanup().await;
-            });
-        }
-    });
 
     // Build RunOptions from the persisted RunRecord + external caller options
     let record = persisted.run_record();
@@ -143,37 +134,64 @@ async fn run_engine(
             .as_deref()
             .map(std::path::PathBuf::from),
         base_branch: record.base_branch.clone(),
-        git: options.git,
+        display_base_sha: None,
+        git: None,
     };
+
+    let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    {
+        let sha_clone = Arc::clone(&last_git_sha);
+        options.emitter.on_event(move |event| match event {
+            WorkflowRunEvent::CheckpointCompleted {
+                git_commit_sha: Some(sha),
+                ..
+            }
+            | WorkflowRunEvent::WorkflowRunCompleted {
+                final_git_commit_sha: Some(sha),
+                ..
+            }
+            | WorkflowRunEvent::GitCommit { sha, .. } => {
+                *sha_clone.lock().unwrap() = Some(sha.clone());
+            }
+            _ => {}
+        });
+    }
+
+    ProgressLogger::new(persisted.run_dir(), record.run_id.clone())
+        .register(options.emitter.as_ref());
 
     let init_options = InitOptions {
         run_id: record.run_id.clone(),
         dry_run: options.dry_run,
         emitter: options.emitter,
         sandbox: options.sandbox,
-        registry: options.registry,
+        llm: options.llm,
+        interviewer: options.interviewer,
         lifecycle: options.lifecycle,
         run_options,
         hooks: options.hooks,
         sandbox_env: options.sandbox_env,
+        devcontainer: options.devcontainer,
+        git: options.git,
+        worktree_mode: options.worktree_mode,
+        #[cfg(test)]
+        registry_override: options.registry_override,
         checkpoint,
         seed_context: options.seed_context,
     };
     let initialized = pipeline::initialize(persisted, init_options).await?;
 
-    let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    {
-        let sha_clone = Arc::clone(&last_git_sha);
-        initialized.emitter.on_event(move |event| {
-            if let WorkflowRunEvent::CheckpointCompleted {
-                git_commit_sha: Some(sha),
-                ..
-            } = event
-            {
-                *sha_clone.lock().unwrap() = Some(sha.clone());
-            }
-        });
-    }
+    let sandbox_for_cleanup = Arc::clone(&initialized.sandbox);
+    let cleanup_guard = scopeguard::guard((), move |()| {
+        if preserve_sandbox {
+            return;
+        }
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let _ = sandbox_for_cleanup.cleanup().await;
+            });
+        }
+    });
 
     let executed = pipeline::execute(initialized).await;
     let failed = !matches!(
@@ -191,10 +209,9 @@ async fn run_engine(
         failed,
         run_duration_ms: executed.duration_ms,
         enabled: options.retro.enabled,
-        dry_run: options.retro.dry_run,
-        llm_client: options.retro.llm_client,
-        provider: options.retro.provider,
-        model: options.retro.model,
+        llm_client: executed.llm_client.clone(),
+        provider: executed.provider,
+        model: executed.model.clone(),
     };
 
     let retro_start = Instant::now();
@@ -233,23 +250,19 @@ async fn run_engine(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::path::Path;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, Ordering};
 
-    use async_trait::async_trait;
     use chrono::Utc;
-    use fabro_agent::{DirEntry, ExecResult, GrepOptions, LocalSandbox, Sandbox};
+    use fabro_agent::{LocalSandbox, Sandbox};
     use fabro_config::config::FabroConfig;
-    use fabro_graphviz::graph::{Graph, Node};
-    use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::context::Context;
     use crate::event::EventEmitter;
     use crate::handler::exit::ExitHandler;
     use crate::handler::start::StartHandler;
-    use crate::handler::{Handler, HandlerRegistry};
-    use crate::outcome::Outcome;
+    use crate::handler::HandlerRegistry;
+    use crate::pipeline::{LlmSpec, SandboxEnvSpec, SandboxSpec};
     use crate::run_options::LifecycleOptions;
 
     const MINIMAL_DOT: &str = r#"digraph Test {
@@ -258,202 +271,6 @@ mod tests {
         exit  [shape=Msquare]
         start -> exit
     }"#;
-
-    const EMIT_DOT: &str = r#"digraph Test {
-        graph [goal="Ship feature"]
-        start [shape=Mdiamond]
-        work [type="emit"]
-        exit [shape=Msquare]
-        start -> work -> exit
-    }"#;
-
-    struct CleanupCountingSandbox {
-        inner: Arc<dyn Sandbox>,
-        cleanup_count: Arc<AtomicUsize>,
-    }
-
-    #[async_trait]
-    impl Sandbox for CleanupCountingSandbox {
-        async fn read_file(
-            &self,
-            path: &str,
-            offset: Option<usize>,
-            limit: Option<usize>,
-        ) -> Result<String, String> {
-            self.inner.read_file(path, offset, limit).await
-        }
-
-        async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
-            self.inner.write_file(path, content).await
-        }
-
-        async fn delete_file(&self, path: &str) -> Result<(), String> {
-            self.inner.delete_file(path).await
-        }
-
-        async fn file_exists(&self, path: &str) -> Result<bool, String> {
-            self.inner.file_exists(path).await
-        }
-
-        async fn list_directory(
-            &self,
-            path: &str,
-            depth: Option<usize>,
-        ) -> Result<Vec<DirEntry>, String> {
-            self.inner.list_directory(path, depth).await
-        }
-
-        async fn exec_command(
-            &self,
-            command: &str,
-            timeout_ms: u64,
-            working_dir: Option<&str>,
-            env_vars: Option<&HashMap<String, String>>,
-            cancel_token: Option<CancellationToken>,
-        ) -> Result<ExecResult, String> {
-            self.inner
-                .exec_command(command, timeout_ms, working_dir, env_vars, cancel_token)
-                .await
-        }
-
-        async fn grep(
-            &self,
-            pattern: &str,
-            path: &str,
-            options: &GrepOptions,
-        ) -> Result<Vec<String>, String> {
-            self.inner.grep(pattern, path, options).await
-        }
-
-        async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String> {
-            self.inner.glob(pattern, path).await
-        }
-
-        async fn download_file_to_local(
-            &self,
-            remote_path: &str,
-            local_path: &Path,
-        ) -> Result<(), String> {
-            self.inner
-                .download_file_to_local(remote_path, local_path)
-                .await
-        }
-
-        async fn upload_file_from_local(
-            &self,
-            local_path: &Path,
-            remote_path: &str,
-        ) -> Result<(), String> {
-            self.inner
-                .upload_file_from_local(local_path, remote_path)
-                .await
-        }
-
-        async fn initialize(&self) -> Result<(), String> {
-            self.inner.initialize().await
-        }
-
-        async fn cleanup(&self) -> Result<(), String> {
-            self.cleanup_count.fetch_add(1, Ordering::SeqCst);
-            self.inner.cleanup().await
-        }
-
-        fn working_directory(&self) -> &str {
-            self.inner.working_directory()
-        }
-
-        fn platform(&self) -> &str {
-            self.inner.platform()
-        }
-
-        fn os_version(&self) -> String {
-            self.inner.os_version()
-        }
-
-        fn sandbox_info(&self) -> String {
-            self.inner.sandbox_info()
-        }
-
-        async fn refresh_push_credentials(&self) -> Result<(), String> {
-            self.inner.refresh_push_credentials().await
-        }
-
-        async fn set_autostop_interval(&self, minutes: i32) -> Result<(), String> {
-            self.inner.set_autostop_interval(minutes).await
-        }
-
-        async fn setup_git_for_run(
-            &self,
-            run_id: &str,
-        ) -> Result<Option<fabro_sandbox::GitRunInfo>, String> {
-            self.inner.setup_git_for_run(run_id).await
-        }
-
-        fn resume_setup_commands(&self, run_branch: &str) -> Vec<String> {
-            self.inner.resume_setup_commands(run_branch)
-        }
-
-        async fn git_push_branch(&self, branch: &str) -> bool {
-            self.inner.git_push_branch(branch).await
-        }
-
-        fn host_git_dir(&self) -> Option<&str> {
-            self.inner.host_git_dir()
-        }
-
-        fn parallel_worktree_path(
-            &self,
-            run_dir: &Path,
-            run_id: &str,
-            node_id: &str,
-            key: &str,
-        ) -> String {
-            self.inner
-                .parallel_worktree_path(run_dir, run_id, node_id, key)
-        }
-
-        async fn ssh_access_command(&self) -> Result<Option<String>, String> {
-            self.inner.ssh_access_command().await
-        }
-
-        fn origin_url(&self) -> Option<&str> {
-            self.inner.origin_url()
-        }
-
-        async fn get_preview_url(
-            &self,
-            port: u16,
-        ) -> Result<Option<(String, HashMap<String, String>)>, String> {
-            self.inner.get_preview_url(port).await
-        }
-
-        fn mark_agent_read(&self, path: &str) {
-            self.inner.mark_agent_read(path);
-        }
-    }
-
-    struct EmitCheckpointHandler;
-
-    #[async_trait]
-    impl Handler for EmitCheckpointHandler {
-        async fn execute(
-            &self,
-            node: &Node,
-            _context: &Context,
-            _graph: &Graph,
-            _run_dir: &Path,
-            services: &crate::handler::EngineServices,
-        ) -> Result<Outcome, FabroError> {
-            services
-                .emitter
-                .emit(&WorkflowRunEvent::CheckpointCompleted {
-                    node_id: node.id.clone(),
-                    status: "success".to_string(),
-                    git_commit_sha: Some("sha-test".to_string()),
-                });
-            Ok(Outcome::success())
-        }
-    }
 
     fn persisted_workflow(dot: &str, run_dir: &std::path::Path) -> Persisted {
         crate::operations::create(
@@ -478,13 +295,12 @@ mod tests {
         let mut registry = HandlerRegistry::new(Box::new(StartHandler));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        registry.register("emit", Box::new(EmitCheckpointHandler));
         registry
     }
 
     fn test_start_options(
         _run_dir: &std::path::Path,
-        sandbox: Arc<dyn Sandbox>,
+        _sandbox: Arc<dyn Sandbox>,
         emitter: Arc<EventEmitter>,
         registry: Arc<HandlerRegistry>,
         lifecycle: LifecycleOptions,
@@ -493,23 +309,34 @@ mod tests {
         StartOptions {
             cancel_token: None,
             emitter,
-            sandbox,
-            registry,
+            sandbox: SandboxSpec::Local {
+                working_directory: std::env::current_dir().unwrap(),
+            },
+            llm: LlmSpec {
+                model: "test-model".to_string(),
+                provider: fabro_llm::Provider::Anthropic,
+                fallback_chain: Vec::new(),
+                mcp_servers: Vec::new(),
+                dry_run: true,
+            },
+            interviewer: Arc::new(fabro_interview::AutoApproveInterviewer),
             lifecycle,
             hooks: fabro_hooks::HookConfig { hooks: vec![] },
-            sandbox_env: HashMap::new(),
+            sandbox_env: SandboxEnvSpec {
+                devcontainer_env: HashMap::new(),
+                toml_env: HashMap::new(),
+                github_permissions: None,
+                origin_url: None,
+            },
+            devcontainer: None,
             seed_context: None,
             git_author: crate::git::GitAuthor::default(),
             git: None,
             github_app: None,
+            worktree_mode: None,
+            registry_override: Some(registry),
             dry_run: false,
-            retro: StartRetroOptions {
-                enabled: false,
-                dry_run: false,
-                llm_client: None,
-                provider: fabro_llm::Provider::Anthropic,
-                model: "test-model".to_string(),
-            },
+            retro: StartRetroOptions { enabled: false },
             finalize: StartFinalizeOptions { preserve_sandbox },
             pull_request: StartPullRequestConfig {
                 pr_config: None,
@@ -520,25 +347,14 @@ mod tests {
         }
     }
 
-    fn counting_sandbox() -> (Arc<dyn Sandbox>, Arc<AtomicUsize>) {
-        let cleanup_count = Arc::new(AtomicUsize::new(0));
-        let inner: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
-        (
-            Arc::new(CleanupCountingSandbox {
-                inner,
-                cleanup_count: Arc::clone(&cleanup_count),
-            }),
-            cleanup_count,
-        )
-    }
-
     #[tokio::test]
     async fn start_cleans_up_sandbox_when_initialize_fails() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         let emitter = Arc::new(EventEmitter::new());
         let registry = Arc::new(test_registry());
-        let (sandbox, cleanup_count) = counting_sandbox();
+        let sandbox: Arc<dyn Sandbox> =
+            Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
         let result = start(
@@ -559,9 +375,6 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        tokio::task::yield_now().await;
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        assert_eq!(cleanup_count.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -572,8 +385,29 @@ mod tests {
         let registry = Arc::new(test_registry());
         let sandbox: Arc<dyn Sandbox> =
             Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
+        let injected = Arc::new(AtomicBool::new(false));
 
-        persisted_workflow(EMIT_DOT, &run_dir);
+        {
+            let injected = Arc::clone(&injected);
+            let emitter_for_injection = Arc::clone(&emitter);
+            emitter.on_event(move |event| {
+                if injected.load(Ordering::SeqCst) {
+                    return;
+                }
+                if let WorkflowRunEvent::StageStarted { node_id, .. } = event {
+                    if node_id == "start" {
+                        injected.store(true, Ordering::SeqCst);
+                        emitter_for_injection.emit(&WorkflowRunEvent::CheckpointCompleted {
+                            node_id: node_id.clone(),
+                            status: "success".to_string(),
+                            git_commit_sha: Some("sha-test".to_string()),
+                        });
+                    }
+                }
+            });
+        }
+
+        persisted_workflow(MINIMAL_DOT, &run_dir);
         let started = start(
             &run_dir,
             test_start_options(

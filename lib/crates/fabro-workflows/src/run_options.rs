@@ -37,6 +37,8 @@ pub struct RunOptions {
     pub host_repo_path: Option<PathBuf>,
     /// Name of the branch the run was started from (for PR base).
     pub base_branch: Option<String>,
+    /// Base commit SHA to display in lifecycle events/UI even when checkpointing is disabled.
+    pub display_base_sha: Option<String>,
     /// Git checkpoint options; `None` means checkpointing disabled.
     pub git: Option<GitCheckpointOptions>,
 }

@@ -157,6 +157,7 @@ impl Handler for SubWorkflowHandler {
             workflow_slug: None,
             github_app: None,
             base_branch: None,
+            display_base_sha: None,
             host_repo_path: None,
             git: None,
         };
@@ -193,6 +194,9 @@ impl Handler for SubWorkflowHandler {
                 hook_runner,
                 env,
                 dry_run,
+                llm_client: None,
+                model: String::new(),
+                provider: fabro_llm::Provider::Anthropic,
             };
             let executed = pipeline::execute(initialized).await;
             Ok::<_, FabroError>((executed.outcome?, executed.final_context))

@@ -39,6 +39,9 @@ fn initialized(
         hook_runner: options.hook_runner,
         env: options.env,
         dry_run: run_options.dry_run,
+        llm_client: None,
+        model: String::new(),
+        provider: fabro_llm::Provider::Anthropic,
     }
 }
 

@@ -16,16 +16,15 @@ use tower::ServiceExt;
 
 use tracing::{error, info};
 
-use fabro_agent::LocalSandbox;
-
 use crate::error::ApiError;
 use crate::jwt_auth::{AuthMode, AuthenticatedService, AuthenticatedUser};
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_workflows::context::Context;
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
-use fabro_workflows::handler::HandlerRegistry;
 use fabro_workflows::operations::{self, RunCreateOptions};
-use fabro_workflows::pipeline::{self, InitOptions, Persisted};
+use fabro_workflows::pipeline::{
+    self, InitOptions, LlmSpec, Persisted, SandboxEnvSpec, SandboxSpec,
+};
 use fabro_workflows::records::Checkpoint;
 use fabro_workflows::run_options::LifecycleOptions;
 use fabro_workflows::run_options::RunOptions;
@@ -101,7 +100,7 @@ struct AggregateUsageTotals {
 pub struct AppState {
     runs: Mutex<HashMap<String, ManagedRun>>,
     aggregate_usage: Mutex<AggregateUsageTotals>,
-    registry_factory: Box<dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync>,
+    llm_spec_factory: Box<dyn Fn() -> LlmSpec + Send + Sync>,
     pub dry_run: bool,
     pub db: sqlx::SqlitePool,
     max_concurrent_runs: usize,
@@ -381,17 +380,14 @@ async fn get_aggregate_usage(
     (StatusCode::OK, Json(response)).into_response()
 }
 
-/// Create an `AppState` with the given registry factory and database pool.
-///
-/// The factory receives the run's `WebInterviewer` so it can wire it
-/// into handlers that need human-in-the-loop interaction (e.g., `HumanHandler`).
+/// Create an `AppState` with the given LLM spec factory and database pool.
 pub fn create_app_state(
     db: sqlx::SqlitePool,
-    registry_factory: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
+    llm_spec_factory: impl Fn() -> LlmSpec + Send + Sync + 'static,
 ) -> Arc<AppState> {
     create_app_state_with_options(
         db,
-        registry_factory,
+        llm_spec_factory,
         false,
         5,
         fabro_workflows::git::GitAuthor::default(),
@@ -399,10 +395,10 @@ pub fn create_app_state(
     )
 }
 
-/// Create an `AppState` with the given database pool, registry factory, dry-run flag, and concurrency limit.
+/// Create an `AppState` with the given database pool, LLM spec factory, dry-run flag, and concurrency limit.
 pub fn create_app_state_with_options(
     db: sqlx::SqlitePool,
-    registry_factory: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
+    llm_spec_factory: impl Fn() -> LlmSpec + Send + Sync + 'static,
     dry_run: bool,
     max_concurrent_runs: usize,
     git_author: fabro_workflows::git::GitAuthor,
@@ -411,7 +407,7 @@ pub fn create_app_state_with_options(
     Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
         aggregate_usage: Mutex::new(AggregateUsageTotals::default()),
-        registry_factory: Box::new(registry_factory),
+        llm_spec_factory: Box::new(llm_spec_factory),
         dry_run,
         db,
         max_concurrent_runs,
@@ -616,11 +612,11 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         None => return,
     };
 
-    let registry = (state.registry_factory)(Arc::clone(&interviewer) as Arc<dyn Interviewer>);
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::new(
-        fabro_agent::ReadBeforeWriteSandbox::new(Arc::new(LocalSandbox::new(cwd))),
-    );
+    let sandbox = SandboxSpec::Local {
+        working_directory: cwd,
+    };
+    let llm = (state.llm_spec_factory)();
     let emitter = Arc::new(emitter);
 
     // Transition to Running, populate interviewer + context
@@ -664,14 +660,14 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         workflow_slug: run_record.workflow_slug,
         github_app: None,
         base_branch: run_record.base_branch,
+        display_base_sha: None,
         host_repo_path: run_record.host_repo_path.map(Into::into),
         git: None,
     };
 
     let execution = {
         let emitter = Arc::clone(&emitter);
-        let sandbox = Arc::clone(&sandbox);
-        let registry = Arc::new(registry);
+        let interviewer = Arc::clone(&interviewer) as Arc<dyn Interviewer>;
         let run_id = run_id.clone();
         let run_options = run_options.clone();
         let hooks = state.hooks.clone();
@@ -684,7 +680,8 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
                     dry_run,
                     emitter,
                     sandbox,
-                    registry,
+                    llm,
+                    interviewer,
                     lifecycle: LifecycleOptions {
                         setup_commands: Vec::new(),
                         setup_command_timeout_ms: 300_000,
@@ -692,7 +689,15 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
                     },
                     run_options,
                     hooks: fabro_hooks::HookConfig { hooks },
-                    sandbox_env: HashMap::new(),
+                    sandbox_env: SandboxEnvSpec {
+                        devcontainer_env: HashMap::new(),
+                        toml_env: HashMap::new(),
+                        github_permissions: None,
+                        origin_url: None,
+                    },
+                    devcontainer: None,
+                    git: None,
+                    worktree_mode: None,
                     checkpoint: None,
                     seed_context: None,
                 },
@@ -1540,9 +1545,6 @@ mod tests {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    use fabro_workflows::handler::exit::ExitHandler;
-    use fabro_workflows::handler::start::StartHandler;
-
     const MINIMAL_DOT: &str = r#"digraph Test {
         graph [goal="Test"]
         start [shape=Mdiamond]
@@ -1550,11 +1552,14 @@ mod tests {
         start -> exit
     }"#;
 
-    fn test_registry(_interviewer: Arc<dyn fabro_interview::Interviewer>) -> HandlerRegistry {
-        let mut registry = HandlerRegistry::new(Box::new(StartHandler));
-        registry.register("start", Box::new(StartHandler));
-        registry.register("exit", Box::new(ExitHandler));
-        registry
+    fn test_llm_spec() -> LlmSpec {
+        LlmSpec {
+            model: "test-model".to_string(),
+            provider: fabro_llm::Provider::Anthropic,
+            fallback_chain: Vec::new(),
+            mcp_servers: Vec::new(),
+            dry_run: true,
+        }
     }
 
     async fn test_db() -> sqlx::SqlitePool {
@@ -1564,7 +1569,7 @@ mod tests {
     }
 
     fn test_app_with(db: sqlx::SqlitePool) -> Router {
-        let state = create_app_state(db, test_registry);
+        let state = create_app_state(db, test_llm_spec);
         build_router(state, AuthMode::Disabled)
     }
 
@@ -1616,7 +1621,7 @@ mod tests {
     async fn test_model_dry_run_returns_ok() {
         let state = create_app_state_with_options(
             test_db().await,
-            test_registry,
+            test_llm_spec,
             true,
             5,
             fabro_workflows::git::GitAuthor::default(),
@@ -1643,7 +1648,7 @@ mod tests {
     async fn test_model_dry_run_unknown_returns_404() {
         let state = create_app_state_with_options(
             test_db().await,
-            test_registry,
+            test_llm_spec,
             true,
             5,
             fabro_workflows::git::GitAuthor::default(),
@@ -1702,7 +1707,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_run_status_returns_status() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = test_app_with_scheduler(state);
 
         // Start a run
@@ -1760,7 +1765,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_questions_returns_empty_list() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -1825,7 +1830,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_checkpoint_returns_null_initially() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -1855,7 +1860,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_context_returns_map() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -1888,7 +1893,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_run_succeeds() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -1937,7 +1942,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_events_returns_sse_stream() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = test_app_with_scheduler(state);
 
         // Start a run
@@ -1988,7 +1993,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn run_completes_and_status_is_completed() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = test_app_with_scheduler(state);
 
         // Start a run
@@ -2027,7 +2032,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_graph_returns_svg() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -2095,7 +2100,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_runs_returns_started_run() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // List should be empty initially
@@ -2144,7 +2149,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_aggregate_usage_returns_zeros_initially() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2167,7 +2172,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn aggregate_usage_increments_after_run_completes() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = test_app_with_scheduler(state);
 
         // Start a run
@@ -2218,7 +2223,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_runs_returns_queued_status() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2249,7 +2254,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_queued_run_succeeds() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = build_router(state, AuthMode::Disabled);
 
         // Submit a run (no scheduler, stays queued)
@@ -2290,7 +2295,7 @@ mod tests {
 
     #[tokio::test]
     async fn queue_position_reported_for_queued_runs() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = build_router(state, AuthMode::Disabled);
 
         // Submit two runs (no scheduler, both stay queued)
@@ -2334,7 +2339,7 @@ mod tests {
     async fn concurrency_limit_respected() {
         let state = create_app_state_with_options(
             test_db().await,
-            test_registry,
+            test_llm_spec,
             false,
             1,
             fabro_workflows::git::GitAuthor::default(),
@@ -2388,7 +2393,7 @@ mod tests {
 
     #[tokio::test]
     async fn submit_answer_to_queued_run_returns_conflict() {
-        let state = create_app_state(test_db().await, test_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2422,7 +2427,7 @@ mod tests {
     async fn create_completion_non_streaming_returns_json() {
         let state = create_app_state_with_options(
             test_db().await,
-            test_registry,
+            test_llm_spec,
             true,
             5,
             fabro_workflows::git::GitAuthor::default(),
@@ -2459,7 +2464,7 @@ mod tests {
     async fn create_completion_streaming_returns_sse() {
         let state = create_app_state_with_options(
             test_db().await,
-            test_registry,
+            test_llm_spec,
             true,
             5,
             fabro_workflows::git::GitAuthor::default(),

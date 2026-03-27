@@ -42,6 +42,9 @@ pub async fn execute(init: Initialized) -> Executed {
         hook_runner,
         env,
         dry_run,
+        llm_client,
+        model,
+        provider,
     } = init;
 
     let start = Instant::now();
@@ -140,6 +143,9 @@ pub async fn execute(init: Initialized) -> Executed {
                     sandbox,
                     duration_ms: crate::millis_u64(start.elapsed()),
                     final_context: seed_context_from_checkpoint(checkpoint.as_ref()),
+                    llm_client,
+                    model,
+                    provider,
                 };
             }
         }
@@ -161,6 +167,9 @@ pub async fn execute(init: Initialized) -> Executed {
                     sandbox,
                     duration_ms: crate::millis_u64(start.elapsed()),
                     final_context: seed,
+                    llm_client,
+                    model,
+                    provider,
                 };
             }
         }
@@ -177,6 +186,9 @@ pub async fn execute(init: Initialized) -> Executed {
                     sandbox,
                     duration_ms: crate::millis_u64(start.elapsed()),
                     final_context: Context::new(),
+                    llm_client,
+                    model,
+                    provider,
                 };
             }
         }
@@ -296,6 +308,9 @@ pub async fn execute(init: Initialized) -> Executed {
         sandbox,
         duration_ms,
         final_context,
+        llm_client,
+        model,
+        provider,
     }
 }
 

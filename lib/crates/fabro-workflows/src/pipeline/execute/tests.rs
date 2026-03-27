@@ -16,12 +16,13 @@ use super::*;
 use crate::context::{self, Context};
 use crate::error::FabroError;
 use crate::event::{EventEmitter, WorkflowRunEvent};
-use crate::handler::default_registry;
 use crate::handler::start::StartHandler;
 use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline::initialize;
-use crate::pipeline::types::{InitOptions, Persisted};
+use crate::pipeline::types::{
+    InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec, SandboxSpec,
+};
 use crate::records::{Checkpoint, RunRecord};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::test_support::run_graph;
@@ -79,6 +80,7 @@ fn test_run_options(run_dir: &Path, run_id: &str) -> RunOptions {
         github_app: None,
         git_author: crate::git::GitAuthor::default(),
         base_branch: None,
+        display_base_sha: None,
         workflow_slug: None,
     }
 }
@@ -151,10 +153,17 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
             run_id: "run-test".to_string(),
             dry_run: false,
             emitter: Arc::new(crate::event::EventEmitter::new()),
-            sandbox: Arc::new(fabro_agent::LocalSandbox::new(
-                std::env::current_dir().unwrap(),
-            )),
-            registry: Arc::new(default_registry(Arc::new(AutoApproveInterviewer), || None)),
+            sandbox: SandboxSpec::Local {
+                working_directory: std::env::current_dir().unwrap(),
+            },
+            llm: LlmSpec {
+                model: "test-model".to_string(),
+                provider: fabro_llm::Provider::Anthropic,
+                fallback_chain: Vec::new(),
+                mcp_servers: Vec::new(),
+                dry_run: true,
+            },
+            interviewer: Arc::new(AutoApproveInterviewer),
             lifecycle: LifecycleOptions {
                 setup_commands: vec![],
                 setup_command_timeout_ms: 1_000,
@@ -162,7 +171,16 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
             },
             run_options: test_run_options(&run_dir, "run-test"),
             hooks: HookConfig { hooks: vec![] },
-            sandbox_env: HashMap::new(),
+            sandbox_env: SandboxEnvSpec {
+                devcontainer_env: HashMap::new(),
+                toml_env: HashMap::new(),
+                github_permissions: None,
+                origin_url: None,
+            },
+            devcontainer: None,
+            git: None,
+            worktree_mode: None,
+            registry_override: None,
             checkpoint: None,
             seed_context: None,
         },
@@ -190,28 +208,25 @@ async fn run_with_lifecycle(
     sandbox: Arc<dyn Sandbox>,
     graph: &Graph,
     run_options: RunOptions,
-    lifecycle: LifecycleOptions,
+    _lifecycle: LifecycleOptions,
 ) -> Result<Outcome, FabroError> {
-    let run_dir = run_options.run_dir.clone();
-    let run_id = run_options.run_id.clone();
-    std::fs::create_dir_all(&run_dir).unwrap();
-    let initialized = initialize(
-        persisted_workflow(graph.clone(), String::new(), &run_dir, &run_id),
-        InitOptions {
-            run_id,
-            dry_run: run_options.dry_run,
-            emitter,
-            sandbox,
-            registry: Arc::new(registry),
-            lifecycle,
-            run_options,
-            hooks: HookConfig { hooks: vec![] },
-            sandbox_env: HashMap::new(),
-            checkpoint: None,
-            seed_context: None,
-        },
-    )
-    .await?;
+    std::fs::create_dir_all(&run_options.run_dir).unwrap();
+    let initialized = Initialized {
+        graph: graph.clone(),
+        source: String::new(),
+        run_options,
+        checkpoint: None,
+        seed_context: None,
+        emitter,
+        sandbox,
+        registry: Arc::new(registry),
+        hook_runner: None,
+        env: HashMap::new(),
+        dry_run: false,
+        llm_client: None,
+        model: "test-model".to_string(),
+        provider: fabro_llm::Provider::Anthropic,
+    };
     super::execute(initialized).await.outcome
 }
 

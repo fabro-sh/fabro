@@ -3,14 +3,23 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fabro_agent::Sandbox;
+use fabro_config::sandbox::WorktreeMode;
 use fabro_graphviz::graph::Graph;
 use fabro_hooks::HookRunner;
+use fabro_interview::Interviewer;
+use fabro_llm::Provider;
+use fabro_mcp::config::McpServerConfig;
+use fabro_model::FallbackTarget;
+use fabro_sandbox::daytona::DaytonaConfig;
+use fabro_sandbox::docker::DockerSandboxConfig;
+#[cfg(feature = "exedev")]
+use fabro_sandbox::exe::{ExeConfig, GitCloneParams as ExeGitCloneParams};
+use fabro_sandbox::ssh::{GitCloneParams as SshGitCloneParams, SshConfig};
 use fabro_validate::Diagnostic;
 
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::EventEmitter;
-use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::records::{Checkpoint, Conclusion, RunRecord};
 use crate::run_options::{LifecycleOptions, RunOptions};
@@ -189,16 +198,74 @@ impl Persisted {
 }
 
 /// Options for the INITIALIZE phase.
+pub enum SandboxSpec {
+    Local {
+        working_directory: PathBuf,
+    },
+    Docker {
+        config: DockerSandboxConfig,
+    },
+    Daytona {
+        config: DaytonaConfig,
+        github_app: Option<fabro_github::GitHubAppCredentials>,
+        run_id: Option<String>,
+        clone_branch: Option<String>,
+    },
+    #[cfg(feature = "exedev")]
+    Exe {
+        config: ExeConfig,
+        clone_params: Option<ExeGitCloneParams>,
+        run_id: Option<String>,
+        github_app: Option<fabro_github::GitHubAppCredentials>,
+        mgmt_destination: String,
+    },
+    Ssh {
+        config: SshConfig,
+        clone_params: Option<SshGitCloneParams>,
+        run_id: Option<String>,
+        github_app: Option<fabro_github::GitHubAppCredentials>,
+    },
+}
+
+#[derive(Clone)]
+pub struct LlmSpec {
+    pub model: String,
+    pub provider: Provider,
+    pub fallback_chain: Vec<FallbackTarget>,
+    pub mcp_servers: Vec<McpServerConfig>,
+    pub dry_run: bool,
+}
+
+#[derive(Clone)]
+pub struct SandboxEnvSpec {
+    pub devcontainer_env: HashMap<String, String>,
+    pub toml_env: HashMap<String, String>,
+    pub github_permissions: Option<HashMap<String, String>>,
+    pub origin_url: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct DevcontainerSpec {
+    pub enabled: bool,
+    pub resolve_dir: PathBuf,
+}
+
 pub struct InitOptions {
     pub run_id: String,
     pub dry_run: bool,
     pub emitter: Arc<EventEmitter>,
-    pub sandbox: Arc<dyn Sandbox>,
-    pub registry: Arc<HandlerRegistry>,
+    pub sandbox: SandboxSpec,
+    pub llm: LlmSpec,
+    pub interviewer: Arc<dyn Interviewer>,
     pub lifecycle: LifecycleOptions,
     pub run_options: RunOptions,
     pub hooks: fabro_hooks::HookConfig,
-    pub sandbox_env: HashMap<String, String>,
+    pub sandbox_env: SandboxEnvSpec,
+    pub devcontainer: Option<DevcontainerSpec>,
+    pub git: Option<crate::run_options::GitCheckpointOptions>,
+    pub worktree_mode: Option<WorktreeMode>,
+    #[cfg(test)]
+    pub registry_override: Option<Arc<crate::handler::HandlerRegistry>>,
     pub checkpoint: Option<Checkpoint>,
     pub seed_context: Option<Context>,
 }
@@ -213,10 +280,13 @@ pub struct Initialized {
     pub(crate) seed_context: Option<Context>,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
-    pub registry: Arc<HandlerRegistry>,
+    pub registry: Arc<crate::handler::HandlerRegistry>,
     pub hook_runner: Option<Arc<HookRunner>>,
     pub env: HashMap<String, String>,
     pub dry_run: bool,
+    pub llm_client: Option<fabro_llm::client::Client>,
+    pub model: String,
+    pub provider: Provider,
 }
 
 /// Output of the EXECUTE phase.
@@ -230,6 +300,9 @@ pub struct Executed {
     pub sandbox: Arc<dyn Sandbox>,
     pub duration_ms: u64,
     pub final_context: Context,
+    pub llm_client: Option<fabro_llm::client::Client>,
+    pub model: String,
+    pub provider: Provider,
 }
 
 /// Output of the RETRO phase.
@@ -284,9 +357,8 @@ pub struct RetroOptions {
     pub failed: bool,
     pub run_duration_ms: u64,
     pub enabled: bool,
-    pub dry_run: bool,
     pub llm_client: Option<fabro_llm::client::Client>,
-    pub provider: fabro_llm::Provider,
+    pub provider: Provider,
     pub model: String,
 }
 
