@@ -32,7 +32,13 @@ pub struct FabroConfig {
     pub goal: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_file: Option<PathBuf>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph: Option<String>,
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub labels: HashMap<String, String>,
 
     // --- Run defaults fields (inlined) ---
     #[serde(default, alias = "directory", skip_serializing_if = "Option::is_none")]
@@ -178,8 +184,16 @@ impl FabroConfig {
         if overlay.goal.is_some() {
             self.goal = overlay.goal;
         }
+        if overlay.goal_file.is_some() {
+            self.goal_file = overlay.goal_file;
+        }
         if overlay.graph.is_some() {
             self.graph = overlay.graph;
+        }
+        if !overlay.labels.is_empty() {
+            let mut merged = std::mem::take(&mut self.labels);
+            merged.extend(overlay.labels);
+            self.labels = merged;
         }
 
         // --- Run defaults fields ---

@@ -529,6 +529,7 @@ async fn start_run(
         }),
         ..Default::default()
     };
+    let run_labels = config.labels.clone();
     let persisted = match operations::create(
         &req.dot_source,
         RunCreateOptions {
@@ -536,7 +537,7 @@ async fn start_run(
             run_dir: Some(run_dir.clone()),
             run_id: Some(run_id.clone()),
             workflow_slug: None,
-            labels: std::collections::HashMap::new(),
+            labels: run_labels,
             base_branch: None,
             working_directory: Some(
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
