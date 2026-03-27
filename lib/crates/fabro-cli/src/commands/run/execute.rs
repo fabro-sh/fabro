@@ -1281,7 +1281,7 @@ pub fn print_run_summary(run_dir: &Path, run_id: &str, styles: &Styles) {
         return;
     };
 
-    // PR info from pull_request.json (saved by _run_engine)
+    // PR info from pull_request.json (saved by __detached)
     let pr_url = std::fs::read_to_string(run_dir.join("pull_request.json"))
         .ok()
         .and_then(|content| {
