@@ -7,6 +7,7 @@ pub mod llm;
 pub mod model;
 pub mod parse;
 pub mod pr;
+pub mod preflight;
 pub mod provider;
 pub mod repo;
 pub mod run;

@@ -32,8 +32,8 @@ It checks:
 
 **SSE streams disconnecting** — If using a reverse proxy, ensure buffering is disabled and the connection timeout is long enough for workflow runs. See the [reverse proxy example](/administration/deployment#binding-and-tls).
 
-**Run config validation errors** — Use `--preflight` to validate without executing:
+**Run config validation errors** — Use `fabro preflight` to validate without executing:
 
 ```bash
-fabro run run.toml --preflight
+fabro preflight run.toml
 ```
