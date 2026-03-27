@@ -1,16 +1,17 @@
 use std::path::Path;
 
 use anyhow::{bail, Result};
-use clap::{Args, ValueEnum};
 use tracing::{debug, info};
 
-const SKILL_MD: &str = include_str!("../../../../skills/fabro-create-workflow/SKILL.md");
+use crate::args::{SkillDir, SkillInstallArgs, SkillScope};
+
+const SKILL_MD: &str = include_str!("../../../../../../skills/fabro-create-workflow/SKILL.md");
 const REF_DOT_LANGUAGE: &str =
-    include_str!("../../../../skills/fabro-create-workflow/references/dot-language.md");
+    include_str!("../../../../../../skills/fabro-create-workflow/references/dot-language.md");
 const REF_EXAMPLE_WORKFLOWS: &str =
-    include_str!("../../../../skills/fabro-create-workflow/references/example-workflows.md");
+    include_str!("../../../../../../skills/fabro-create-workflow/references/example-workflows.md");
 const REF_RUN_CONFIGURATION: &str =
-    include_str!("../../../../skills/fabro-create-workflow/references/run-configuration.md");
+    include_str!("../../../../../../skills/fabro-create-workflow/references/run-configuration.md");
 
 const SKILL_FILES: &[(&str, &str)] = &[
     ("SKILL.md", SKILL_MD),
@@ -18,33 +19,6 @@ const SKILL_FILES: &[(&str, &str)] = &[
     ("references/example-workflows.md", REF_EXAMPLE_WORKFLOWS),
     ("references/run-configuration.md", REF_RUN_CONFIGURATION),
 ];
-
-#[derive(Clone, ValueEnum)]
-pub enum SkillDir {
-    Claude,
-    Agents,
-}
-
-#[derive(Args)]
-pub struct SkillInstallArgs {
-    /// Where to install: user-level or project-level
-    #[arg(long = "for", default_value = "user")]
-    scope: SkillScope,
-
-    /// Target directory convention
-    #[arg(long)]
-    dir: SkillDir,
-
-    /// Overwrite existing skill without prompting
-    #[arg(long)]
-    force: bool,
-}
-
-#[derive(Clone, ValueEnum)]
-pub enum SkillScope {
-    User,
-    Project,
-}
 
 /// Install all skill files under `base_dir/fabro-create-workflow/`.
 pub fn install_skill_to(base_dir: &Path) -> Result<()> {
@@ -134,11 +108,9 @@ mod tests {
 
         install_skill_to(&base).unwrap();
 
-        // Write a sentinel to one file
         let sentinel_path = base.join("fabro-create-workflow/SKILL.md");
         std::fs::write(&sentinel_path, "old content").unwrap();
 
-        // Re-install should overwrite
         install_skill_to(&base).unwrap();
 
         let content = std::fs::read_to_string(&sentinel_path).unwrap();

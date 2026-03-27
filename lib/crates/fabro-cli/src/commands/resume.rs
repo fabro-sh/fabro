@@ -1,18 +1,9 @@
 use anyhow::bail;
-use clap::Args;
 use fabro_util::terminal::Styles;
 use fabro_workflows::records::{Checkpoint, RunRecord};
 use fabro_workflows::run_status::{RunStatus, RunStatusRecord};
 
-#[derive(Debug, Args)]
-pub struct ResumeArgs {
-    /// Run ID or unambiguous prefix
-    pub run: String,
-
-    /// Run in the background and print the run ID
-    #[arg(short = 'd', long)]
-    pub detach: bool,
-}
+use crate::args::ResumeArgs;
 
 /// Resume an interrupted workflow run.
 ///

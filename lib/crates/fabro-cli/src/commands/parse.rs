@@ -1,15 +1,6 @@
+use crate::args::ParseArgs;
+use crate::shared::read_workflow_file;
 use std::io::Write;
-use std::path::PathBuf;
-
-use clap::Args;
-
-use crate::commands::shared::read_workflow_file;
-
-#[derive(Args)]
-pub struct ParseArgs {
-    /// Path to the .fabro workflow file
-    pub workflow: PathBuf,
-}
 
 pub fn run(args: &ParseArgs) -> anyhow::Result<()> {
     let stdout = std::io::stdout();

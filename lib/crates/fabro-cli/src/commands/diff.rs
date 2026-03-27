@@ -2,23 +2,9 @@ use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use clap::Args;
 use tracing::{debug, info};
 
-#[derive(Args)]
-pub struct DiffArgs {
-    /// Run ID or prefix
-    pub run: String,
-    /// Show diff for a specific node
-    #[arg(long)]
-    pub node: Option<String>,
-    /// Show diffstat instead of full patch (live diffs only)
-    #[arg(long)]
-    pub stat: bool,
-    /// Show only files-changed/insertions/deletions summary (live diffs only)
-    #[arg(long)]
-    pub shortstat: bool,
-}
+use crate::args::DiffArgs;
 
 pub async fn run(args: DiffArgs) -> Result<()> {
     info!(run_id = %args.run, "Showing diff");

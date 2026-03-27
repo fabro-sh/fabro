@@ -1,30 +1,13 @@
 use anyhow::Context;
 use anyhow::Result;
-use clap::Args;
 use cli_table::format::{Border, Separator};
 use cli_table::{print_stderr, Cell, CellStruct, Color, Style, Table};
 use fabro_git_storage::gitobj::Store;
 use fabro_util::terminal::Styles;
 use git2::Repository;
 
-use super::shared::color_if;
-
-#[derive(Debug, Args)]
-pub struct RewindArgs {
-    /// Run ID (or unambiguous prefix)
-    pub run_id: String,
-
-    /// Target checkpoint: node name, node@visit, or @ordinal (omit with --list)
-    pub target: Option<String>,
-
-    /// Show the checkpoint timeline instead of rewinding
-    #[arg(long)]
-    pub list: bool,
-
-    /// Skip force-pushing rewound refs to the remote
-    #[arg(long)]
-    pub no_push: bool,
-}
+use crate::args::RewindArgs;
+use crate::shared::color_if;
 
 pub fn run(args: &RewindArgs, styles: &Styles) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;

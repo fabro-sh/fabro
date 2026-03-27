@@ -1,31 +1,8 @@
 use anyhow::{Context, Result};
-use clap::Args;
 use tracing::info;
 
-use super::shared::validate_daytona_provider;
-
-#[derive(Args)]
-pub struct PreviewArgs {
-    /// Run ID or prefix
-    pub run: String,
-    /// Port number
-    pub port: u16,
-    /// Generate a signed URL (embeds auth token, no headers needed)
-    #[arg(long)]
-    pub signed: bool,
-    /// Signed URL expiry in seconds (default 3600, requires --signed)
-    #[arg(long, default_value = "3600", requires = "signed")]
-    pub ttl: i32,
-    /// Open URL in browser (implies --signed)
-    #[arg(long)]
-    pub open: bool,
-}
-
-impl PreviewArgs {
-    fn use_signed(&self) -> bool {
-        self.signed || self.open
-    }
-}
+use crate::args::PreviewArgs;
+use crate::shared::validate_daytona_provider;
 
 pub async fn run(args: PreviewArgs) -> Result<()> {
     let base = fabro_workflows::run_lookup::default_runs_base();
@@ -48,7 +25,7 @@ pub async fn run(args: PreviewArgs) -> Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    if args.use_signed() {
+    if args.signed || args.open {
         let signed = daytona
             .get_signed_preview_url(args.port, Some(args.ttl))
             .await

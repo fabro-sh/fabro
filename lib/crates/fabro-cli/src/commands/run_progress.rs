@@ -12,7 +12,7 @@ use fabro_interview::{Answer, ConsoleInterviewer, Interviewer, Question};
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::outcome::StageStatus;
 
-use crate::commands::shared::{format_duration_ms, format_tokens_human, tilde_path};
+use crate::shared::{format_duration_ms, format_tokens_human, tilde_path};
 use fabro_workflows::outcome::{compute_stage_cost, format_cost};
 
 // ── Cached styles ───────────────────────────────────────────────────────
