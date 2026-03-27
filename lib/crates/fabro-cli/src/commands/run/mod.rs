@@ -6,7 +6,6 @@ pub(crate) mod attach;
 pub(crate) mod cp;
 pub(crate) mod create;
 pub(crate) mod detached;
-pub(crate) mod detached_support;
 pub(crate) mod diff;
 pub(crate) mod execute;
 pub(crate) mod fork;

@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use fabro_workflows::run_status::{RunStatus, StatusReason};
 
-use super::detached_support::persist_detached_failure;
+use super::detached::persist_detached_failure;
 
 /// Spawn a detached engine process for the given run directory.
 ///
