@@ -30,7 +30,7 @@ use indicatif::HumanDuration;
 use std::time::Duration;
 use tracing::debug;
 
-use super::detached_support::{DetachedRunBootstrapGuard, DetachedRunCompletionGuard};
+use super::detached::{DetachedRunBootstrapGuard, DetachedRunCompletionGuard};
 use super::run_progress;
 use crate::args::{CliSandboxProvider, GlobalArgs, RunArgs};
 use crate::cli_config;

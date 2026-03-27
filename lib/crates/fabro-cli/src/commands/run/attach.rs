@@ -12,7 +12,7 @@ use fabro_util::terminal::Styles;
 use fabro_workflows::event::RunNoticeLevel;
 use fabro_workflows::run_status::{RunStatus, RunStatusRecord};
 
-use super::detached_support::append_run_notice;
+use super::detached::append_run_notice;
 use super::run_progress;
 
 #[cfg(test)]
