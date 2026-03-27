@@ -25,7 +25,7 @@ pub struct SessionState {
     pub model_id: String,
     pub model_provider: Option<String>,
     pub system_prompt: Option<String>,
-    pub turns: Vec<fabro_types::SessionTurn>,
+    pub turns: Vec<fabro_api_types::SessionTurn>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub event_tx: broadcast::Sender<SessionEvent>,
@@ -72,17 +72,17 @@ fn resolve_model(model_arg: Option<String>) -> (String, Option<String>) {
     }
 }
 
-fn turns_to_messages(turns: &[fabro_types::SessionTurn]) -> Vec<fabro_llm::types::Message> {
+fn turns_to_messages(turns: &[fabro_api_types::SessionTurn]) -> Vec<fabro_llm::types::Message> {
     turns
         .iter()
         .filter_map(|turn| match turn {
-            fabro_types::SessionTurn::UserTurn(t) => {
+            fabro_api_types::SessionTurn::UserTurn(t) => {
                 Some(fabro_llm::types::Message::user(&t.content))
             }
-            fabro_types::SessionTurn::AssistantTurn(t) => {
+            fabro_api_types::SessionTurn::AssistantTurn(t) => {
                 Some(fabro_llm::types::Message::assistant(&t.content))
             }
-            fabro_types::SessionTurn::ToolTurn(_) => None,
+            fabro_api_types::SessionTurn::ToolTurn(_) => None,
         })
         .collect()
 }
@@ -120,13 +120,15 @@ fn spawn_generation(store: SessionStore, session_id: uuid::Uuid, dry_run: bool, 
             {
                 let mut store = store.write().expect("session store lock poisoned");
                 if let Some(session) = store.get_mut(&session_id) {
-                    session.turns.push(fabro_types::SessionTurn::AssistantTurn(
-                        fabro_types::AssistantTurn {
-                            kind: fabro_types::AssistantTurnKind::Assistant,
-                            content,
-                            created_at: now,
-                        },
-                    ));
+                    session
+                        .turns
+                        .push(fabro_api_types::SessionTurn::AssistantTurn(
+                            fabro_api_types::AssistantTurn {
+                                kind: fabro_api_types::AssistantTurnKind::Assistant,
+                                content,
+                                created_at: now,
+                            },
+                        ));
                     session.updated_at = now;
                 }
             }
@@ -187,13 +189,15 @@ fn spawn_generation(store: SessionStore, session_id: uuid::Uuid, dry_run: bool, 
         {
             let mut store = store.write().expect("session store lock poisoned");
             if let Some(session) = store.get_mut(&session_id) {
-                session.turns.push(fabro_types::SessionTurn::AssistantTurn(
-                    fabro_types::AssistantTurn {
-                        kind: fabro_types::AssistantTurnKind::Assistant,
-                        content: full_text,
-                        created_at: now,
-                    },
-                ));
+                session
+                    .turns
+                    .push(fabro_api_types::SessionTurn::AssistantTurn(
+                        fabro_api_types::AssistantTurn {
+                            kind: fabro_api_types::AssistantTurnKind::Assistant,
+                            content: full_text,
+                            created_at: now,
+                        },
+                    ));
                 session.updated_at = now;
             }
         }
@@ -204,7 +208,7 @@ fn spawn_generation(store: SessionStore, session_id: uuid::Uuid, dry_run: bool, 
 pub async fn create_session(
     _auth: AuthenticatedService,
     State(state): State<Arc<crate::server::AppState>>,
-    Json(req): Json<fabro_types::CreateSessionRequest>,
+    Json(req): Json<fabro_api_types::CreateSessionRequest>,
 ) -> Response {
     let (model_id, model_provider) = resolve_model(req.model);
     let now = chrono::Utc::now();
@@ -214,8 +218,8 @@ pub async fn create_session(
     let (event_tx, _) = broadcast::channel(256);
     let generation_seq = Arc::new(AtomicU64::new(1));
 
-    let user_turn = fabro_types::SessionTurn::UserTurn(fabro_types::UserTurn {
-        kind: fabro_types::UserTurnKind::User,
+    let user_turn = fabro_api_types::SessionTurn::UserTurn(fabro_api_types::UserTurn {
+        kind: fabro_api_types::UserTurnKind::User,
         content: req.content,
         created_at: now,
     });
@@ -242,10 +246,10 @@ pub async fn create_session(
 
     (
         StatusCode::CREATED,
-        Json(fabro_types::CreateSessionResponse {
+        Json(fabro_api_types::CreateSessionResponse {
             id: session_id,
             title,
-            model: fabro_types::ModelReference { id: model_id },
+            model: fabro_api_types::ModelReference { id: model_id },
             created_at: now,
             updated_at: now,
         }),
@@ -262,10 +266,10 @@ pub async fn retrieve_session(
     match store.get(&id) {
         Some(session) => (
             StatusCode::OK,
-            Json(fabro_types::SessionDetail {
+            Json(fabro_api_types::SessionDetail {
                 id: session.id,
                 title: session.title.clone(),
-                model: fabro_types::ModelReference {
+                model: fabro_api_types::ModelReference {
                     id: session.model_id.clone(),
                 },
                 created_at: session.created_at,
@@ -282,20 +286,20 @@ pub async fn send_message(
     _auth: AuthenticatedService,
     State(state): State<Arc<crate::server::AppState>>,
     Path(id): Path<uuid::Uuid>,
-    Json(req): Json<fabro_types::SendMessageRequest>,
+    Json(req): Json<fabro_api_types::SendMessageRequest>,
 ) -> Response {
     let seq = {
         let mut store = state.sessions.write().expect("session store lock poisoned");
         match store.get_mut(&id) {
             Some(session) => {
                 let now = chrono::Utc::now();
-                session
-                    .turns
-                    .push(fabro_types::SessionTurn::UserTurn(fabro_types::UserTurn {
-                        kind: fabro_types::UserTurnKind::User,
+                session.turns.push(fabro_api_types::SessionTurn::UserTurn(
+                    fabro_api_types::UserTurn {
+                        kind: fabro_api_types::UserTurnKind::User,
                         content: req.content,
                         created_at: now,
-                    }));
+                    },
+                ));
                 session.updated_at = now;
                 session.generation_seq.fetch_add(1, Ordering::Relaxed) + 1
             }
@@ -307,7 +311,7 @@ pub async fn send_message(
 
     (
         StatusCode::ACCEPTED,
-        Json(fabro_types::SendMessageResponse { accepted: true }),
+        Json(fabro_api_types::SendMessageResponse { accepted: true }),
     )
         .into_response()
 }
@@ -373,16 +377,16 @@ pub async fn list_sessions(
     let limit = pagination.limit.clamp(1, 100) as usize;
     let offset = pagination.offset as usize;
 
-    let mut items: Vec<fabro_types::SessionListItem> = store
+    let mut items: Vec<fabro_api_types::SessionListItem> = store
         .values()
         .map(|session| {
             let last_message_preview = session
                 .turns
                 .last()
                 .map(|t| match t {
-                    fabro_types::SessionTurn::UserTurn(u) => u.content.clone(),
-                    fabro_types::SessionTurn::AssistantTurn(a) => a.content.clone(),
-                    fabro_types::SessionTurn::ToolTurn(_) => String::new(),
+                    fabro_api_types::SessionTurn::UserTurn(u) => u.content.clone(),
+                    fabro_api_types::SessionTurn::AssistantTurn(a) => a.content.clone(),
+                    fabro_api_types::SessionTurn::ToolTurn(_) => String::new(),
                 })
                 .unwrap_or_default();
             let preview = if last_message_preview.len() > 100 {
@@ -390,10 +394,10 @@ pub async fn list_sessions(
             } else {
                 last_message_preview
             };
-            fabro_types::SessionListItem {
+            fabro_api_types::SessionListItem {
                 id: session.id,
                 title: session.title.clone(),
-                model: fabro_types::ModelReference {
+                model: fabro_api_types::ModelReference {
                     id: session.model_id.clone(),
                 },
                 last_message_preview: preview,
@@ -412,9 +416,9 @@ pub async fn list_sessions(
 
     (
         StatusCode::OK,
-        Json(fabro_types::PaginatedSessionList {
+        Json(fabro_api_types::PaginatedSessionList {
             data,
-            meta: fabro_types::PaginationMeta { has_more },
+            meta: fabro_api_types::PaginationMeta { has_more },
         }),
     )
         .into_response()

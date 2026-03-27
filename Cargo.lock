@@ -1265,6 +1265,7 @@ dependencies = [
  "clap",
  "dirs",
  "fabro-agent",
+ "fabro-api-types",
  "fabro-config",
  "fabro-db",
  "fabro-github",
@@ -1275,7 +1276,6 @@ dependencies = [
  "fabro-model",
  "fabro-retro",
  "fabro-sandbox",
- "fabro-types",
  "fabro-util",
  "fabro-workflows",
  "futures-util",
@@ -1306,6 +1306,21 @@ dependencies = [
  "ulid",
  "uuid",
  "x509-parser",
+]
+
+[[package]]
+name = "fabro-api-types"
+version = "0.176.2"
+dependencies = [
+ "chrono",
+ "prettyplease",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "syn",
+ "typify",
+ "uuid",
 ]
 
 [[package]]
@@ -1691,21 +1706,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "fabro-types"
-version = "0.176.2"
-dependencies = [
- "chrono",
- "prettyplease",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "serde_yaml",
- "syn",
- "typify",
- "uuid",
 ]
 
 [[package]]

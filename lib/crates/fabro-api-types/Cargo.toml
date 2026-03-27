@@ -1,5 +1,5 @@
 [package]
-name = "fabro-types"
+name = "fabro-api-types"
 edition.workspace = true
 version.workspace = true
 license.workspace = true

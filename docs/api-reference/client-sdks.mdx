@@ -36,14 +36,14 @@ The generated client includes a typed API class for each endpoint group: `RunsAp
 
 ## Rust (Types Only)
 
-The `fabro-types` crate generates Rust structs and enums from the OpenAPI component schemas at compile time using [typify](https://github.com/oxidecomputer/typify). This provides type-safe representations of all API models but does not include an HTTP client.
+The `fabro-api-types` crate generates Rust structs and enums from the OpenAPI component schemas at compile time using [typify](https://github.com/oxidecomputer/typify). This provides type-safe representations of all API models but does not include an HTTP client.
 
 ### How It Works
 
 A `build.rs` script reads `docs/api-reference/fabro-api.yaml`, extracts `components/schemas`, and feeds them to typify. The generated code is written to `OUT_DIR` and included via:
 
 ```rust
-// lib/crates/fabro-types/src/lib.rs
+// lib/crates/fabro-api-types/src/lib.rs
 include!(concat!(env!("OUT_DIR"), "/openapi_types.rs"));
 ```
 
@@ -52,13 +52,13 @@ include!(concat!(env!("OUT_DIR"), "/openapi_types.rs"));
 The types are regenerated automatically on every `cargo build` when the OpenAPI spec changes:
 
 ```bash
-cargo build -p fabro-types
+cargo build -p fabro-api-types
 ```
 
 ### Usage
 
 ```rust
-use fabro_types::RunListItem;
+use fabro_api_types::RunListItem;
 ```
 
 All generated types derive `serde::Deserialize` and `serde::Serialize`, so they work directly with any Rust HTTP client for request and response parsing.

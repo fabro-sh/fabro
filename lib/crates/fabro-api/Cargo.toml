@@ -22,7 +22,7 @@ fabro-model = { path = "../fabro-model" }
 fabro-retro = { path = "../fabro-retro" }
 fabro-util = { path = "../fabro-util" }
 fabro-db = { path = "../fabro-db" }
-fabro-types = { path = "../fabro-types" }
+fabro-api-types = { path = "../fabro-api-types" }
 chrono.workspace = true
 futures-util.workspace = true
 axum = "0.8"

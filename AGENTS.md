@@ -40,7 +40,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The OpenAPI spec at `docs/api-reference/fabro-api.yaml` is the source of truth for the fabro-api HTTP interface.
 
 1. Edit `docs/api-reference/fabro-api.yaml`
-2. `cargo build -p fabro-types` — build.rs regenerates Rust types via typify
+2. `cargo build -p fabro-api-types` — build.rs regenerates Rust types via typify
 3. Write/update handler in `lib/crates/fabro-api/src/server.rs`, add route to `build_router()`
 4. `cargo nextest run -p fabro-api` — conformance test catches spec/router drift
 5. `cd lib/packages/fabro-api-client && bun run generate` — regenerates TypeScript Axios client
@@ -57,7 +57,7 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 - **fabro-exe** — SSH-based sandbox implementation (`ExeSandbox`)
 - **fabro-sprites** — Sprites VM sandbox implementation via `sprite` CLI
 - **fabro-llm** — Unified LLM client with providers: Anthropic, OpenAI, Gemini, OpenAI-compatible, plus retry/middleware/streaming
-- **fabro-types** — Auto-generated Rust types from OpenAPI spec (build.rs + typify)
+- **fabro-api-types** — Auto-generated Rust types from OpenAPI spec (build.rs + typify)
 - **fabro-github** — GitHub App auth (JWT signing, installation tokens, PR creation)
 - **fabro-db** — SQLite with WAL mode, schema migrations
 - **fabro-mcp** — Model Context Protocol client/server
