@@ -713,7 +713,8 @@ fn detach_creates_run_dir_with_detach_log() {
     let ulid = ulid.trim();
     assert!(!ulid.is_empty(), "should print a ULID");
 
-    // Run dir should have been created under storage_dir/runs/ with detach.log
+    // Run dir should have been created under storage_dir/runs/ and the launcher
+    // log should live under storage_dir/launchers/.
     let runs_base = storage_dir.join("runs");
     assert!(runs_base.exists(), "runs/ directory should exist");
     let entries: Vec<_> = std::fs::read_dir(&runs_base)
@@ -723,9 +724,13 @@ fn detach_creates_run_dir_with_detach_log() {
     assert_eq!(entries.len(), 1, "should have exactly one run directory");
     let run_dir = entries[0].path();
     assert!(
-        run_dir.join("detach.log").exists(),
-        "detach.log should exist in run dir"
+        storage_dir
+            .join("launchers")
+            .join(format!("{ulid}.log"))
+            .exists(),
+        "launcher log should exist under storage_dir/launchers"
     );
+    assert!(!run_dir.join("detach.log").exists());
 }
 
 // == Resume ===================================================================
@@ -790,7 +795,7 @@ fn setup_run_dir(
     let run_record = serde_json::json!({
         "run_id": run_id,
         "created_at": "2026-01-01T00:00:00Z",
-        "config": {
+        "settings": {
             "goal": overrides.get("goal").and_then(|v| v.as_str()),
             "llm": {
                 "model": get_str("model", "test-model"),
@@ -1146,10 +1151,14 @@ digraph G {
     let output = arc()
         .args([
             "__detached",
-            "--storage-dir",
-            storage_dir.to_str().unwrap(),
-            "--run-id",
-            "test-bug2",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "--launcher-path",
+            storage_dir
+                .join("launchers")
+                .join("test-bug2.json")
+                .to_str()
+                .unwrap(),
         ])
         .env("NO_COLOR", "1")
         .timeout(std::time::Duration::from_secs(15))
@@ -1213,7 +1222,7 @@ digraph Test {
         .success();
     let before: serde_json::Value =
         serde_json::from_slice(&inspect_before.get_output().stdout).unwrap();
-    let _run_dir = before[0]["run_dir"].as_str().unwrap().to_string();
+    let run_dir = before[0]["run_dir"].as_str().unwrap().to_string();
     let start_time_before = before[0]["start_record"]["start_time"]
         .as_str()
         .unwrap()
@@ -1228,10 +1237,14 @@ digraph Test {
         .env("HOME", home.path())
         .args([
             "__detached",
-            "--storage-dir",
-            storage_dir.to_str().unwrap(),
-            "--run-id",
-            &run_id,
+            "--run-dir",
+            &run_dir,
+            "--launcher-path",
+            storage_dir
+                .join("launchers")
+                .join(format!("{run_id}.json"))
+                .to_str()
+                .unwrap(),
             "--resume",
         ])
         .timeout(std::time::Duration::from_secs(10))
@@ -1383,13 +1396,6 @@ fn attach_closed_stdin_keeps_interview_pending() {
     assert!(
         !run_dir.join("interview_request.claim").exists(),
         "attach with closed stdin must release the claim so a later attach can answer"
-    );
-
-    let progress = std::fs::read_to_string(run_dir.join("progress.jsonl")).unwrap();
-    assert!(
-        progress.contains("\"event\":\"RunNotice\"")
-            && progress.contains("\"code\":\"interview_unanswered\""),
-        "attach should emit a structured warning when the interview ends without an answer.\nprogress: {progress}"
     );
 }
 

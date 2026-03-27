@@ -1,59 +1,74 @@
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use chrono::Utc;
+use fabro_config::sandbox::WorktreeMode;
+use fabro_config::FabroSettings;
+use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
+use fabro_interview::{AutoApproveInterviewer, Interviewer};
+use fabro_model::{Catalog, FallbackTarget, Provider};
+use fabro_sandbox::SandboxProvider;
+use serde::Serialize;
+
 use crate::context::Context;
 use crate::error::FabroError;
-use crate::event::{EventEmitter, ProgressLogger, WorkflowRunEvent};
-use crate::outcome::StageStatus;
+use crate::event::{EventEmitter, ProgressLogger, RunNoticeLevel, WorkflowRunEvent};
+use crate::outcome::{Outcome, StageStatus};
 use crate::pipeline::{
-    self, DevcontainerSpec, FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted,
-    PullRequestOptions, RetroOptions, SandboxEnvSpec, SandboxSpec,
+    self, build_conclusion, classify_engine_result, persist_terminal_outcome, DevcontainerSpec,
+    FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted, PullRequestOptions, RetroOptions,
+    SandboxEnvSpec, SandboxSpec,
 };
 use crate::records::{Checkpoint, Conclusion};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
-use fabro_config::sandbox::WorktreeMode;
-use fabro_interview::Interviewer;
+use crate::run_status::{self, RunStatus, StatusReason};
 
-pub struct StartRetroOptions {
-    pub enabled: bool,
+struct StartRetroOptions {
+    enabled: bool,
 }
 
-pub struct StartFinalizeOptions {
-    pub preserve_sandbox: bool,
+struct StartFinalizeOptions {
+    preserve_sandbox: bool,
 }
 
-pub struct StartPullRequestConfig {
-    pub pr_config: Option<fabro_config::run::PullRequestSettings>,
-    pub github_app: Option<fabro_github::GitHubAppCredentials>,
-    pub origin_url: Option<String>,
-    pub model: String,
+struct StartPullRequestConfig {
+    pr_config: Option<fabro_config::run::PullRequestSettings>,
+    github_app: Option<fabro_github::GitHubAppCredentials>,
+    origin_url: Option<String>,
+    model: String,
 }
 
-/// Options for `start()` and `resume()`.
-///
-/// Fields that are derivable from `RunRecord` (run_id, labels, base_branch,
-/// host_repo_path, settings, workflow_slug) are read from disk by `run_engine()`.
-/// Callers only provide truly external values.
-pub struct StartOptions {
-    // Truly external (not derivable from RunRecord)
-    pub cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+struct InternalStartOptions {
+    cancel_token: Option<Arc<AtomicBool>>,
+    emitter: Arc<EventEmitter>,
+    sandbox: SandboxSpec,
+    llm: LlmSpec,
+    interviewer: Arc<dyn Interviewer>,
+    lifecycle: LifecycleOptions,
+    hooks: fabro_hooks::HookConfig,
+    sandbox_env: SandboxEnvSpec,
+    devcontainer: Option<DevcontainerSpec>,
+    seed_context: Option<Context>,
+    git_author: crate::git::GitAuthor,
+    git: Option<GitCheckpointOptions>,
+    github_app: Option<fabro_github::GitHubAppCredentials>,
+    worktree_mode: Option<WorktreeMode>,
+    registry_override: Option<Arc<crate::handler::HandlerRegistry>>,
+    retro: StartRetroOptions,
+    finalize: StartFinalizeOptions,
+    pull_request: StartPullRequestConfig,
+}
+
+pub struct StartServices {
+    pub cancel_token: Option<Arc<AtomicBool>>,
     pub emitter: Arc<EventEmitter>,
-    pub sandbox: SandboxSpec,
-    pub llm: LlmSpec,
     pub interviewer: Arc<dyn Interviewer>,
-    pub lifecycle: LifecycleOptions,
-    pub hooks: fabro_hooks::HookConfig,
-    pub sandbox_env: SandboxEnvSpec,
-    pub devcontainer: Option<DevcontainerSpec>,
-    pub seed_context: Option<Context>,
     pub git_author: crate::git::GitAuthor,
-    pub git: Option<GitCheckpointOptions>,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
-    pub worktree_mode: Option<WorktreeMode>,
     pub registry_override: Option<Arc<crate::handler::HandlerRegistry>>,
-    pub retro: StartRetroOptions,
-    pub finalize: StartFinalizeOptions,
-    pub pull_request: StartPullRequestConfig,
 }
 
 pub struct Started {
@@ -63,26 +78,29 @@ pub struct Started {
 }
 
 /// Start a fresh workflow run. Errors if a checkpoint already exists (use `resume()` instead).
-pub async fn start(
-    run_dir: &std::path::Path,
-    options: StartOptions,
-) -> Result<Started, FabroError> {
+pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, FabroError> {
     if run_dir.join("checkpoint.json").exists() {
         return Err(FabroError::Precondition(
             "checkpoint.json exists in run directory — did you mean to resume?".to_string(),
         ));
     }
-    let persisted = Persisted::load(run_dir)?;
-    run_engine(persisted, None, options).await
+
+    if let Ok(record) = run_status::RunStatusRecord::load(&run_dir.join("status.json")) {
+        if !matches!(record.status, RunStatus::Submitted | RunStatus::Starting) {
+            return Err(FabroError::Precondition(format!(
+                "cannot start run: status is {:?}, expected submitted",
+                record.status
+            )));
+        }
+    }
+
+    execute_persisted_run(run_dir, None, services).await
 }
 
 /// Resume a workflow run from its checkpoint. Errors if no checkpoint is found.
-pub async fn resume(
-    run_dir: &std::path::Path,
-    options: StartOptions,
-) -> Result<Started, FabroError> {
-    if let Ok(record) = crate::run_status::RunStatusRecord::load(&run_dir.join("status.json")) {
-        if record.status == crate::run_status::RunStatus::Succeeded {
+pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, FabroError> {
+    if let Ok(record) = run_status::RunStatusRecord::load(&run_dir.join("status.json")) {
+        if record.status == RunStatus::Succeeded {
             return Err(FabroError::Precondition(
                 "run already finished successfully — nothing to resume".to_string(),
             ));
@@ -98,22 +116,358 @@ pub async fn resume(
             ));
         }
     }
+
     let cp_path = run_dir.join("checkpoint.json");
     let checkpoint = Checkpoint::load(&cp_path)
         .map_err(|e| FabroError::Precondition(format!("no checkpoint to resume from: {e}")))?;
-    let persisted = Persisted::load(run_dir)?;
-    run_engine(persisted, Some(checkpoint), options).await
+
+    cleanup_resume_artifacts(run_dir);
+    run_status::write_run_status(run_dir, RunStatus::Submitted, None);
+
+    execute_persisted_run(run_dir, Some(checkpoint), services).await
+}
+
+async fn execute_persisted_run(
+    run_dir: &Path,
+    checkpoint: Option<Checkpoint>,
+    services: StartServices,
+) -> Result<Started, FabroError> {
+    let mut bootstrap_guard = DetachedRunBootstrapGuard::arm(run_dir)?;
+
+    let persisted = match Persisted::load(run_dir) {
+        Ok(persisted) => persisted,
+        Err(err) => {
+            let _ =
+                persist_detached_failure(run_dir, "bootstrap", StatusReason::BootstrapFailed, &err);
+            bootstrap_guard.defuse();
+            return Err(err);
+        }
+    };
+
+    let original_cwd = std::env::current_dir().ok();
+    if let Err(err) = std::env::set_current_dir(&persisted.run_record().working_directory) {
+        let err = FabroError::Io(format!(
+            "Failed to set working directory to {}: {err}",
+            persisted.run_record().working_directory.display()
+        ));
+        let _ = persist_detached_failure(run_dir, "bootstrap", StatusReason::BootstrapFailed, &err);
+        bootstrap_guard.defuse();
+        return Err(err);
+    }
+    let _cwd_guard = scopeguard::guard(original_cwd, |cwd| {
+        if let Some(cwd) = cwd {
+            let _ = std::env::set_current_dir(cwd);
+        }
+    });
+
+    let options = match derive_start_options(&persisted, services) {
+        Ok(options) => options,
+        Err(err) => {
+            let _ =
+                persist_detached_failure(run_dir, "bootstrap", StatusReason::BootstrapFailed, &err);
+            bootstrap_guard.defuse();
+            return Err(err);
+        }
+    };
+
+    bootstrap_guard.defuse();
+    let mut completion_guard = DetachedRunCompletionGuard::arm(run_dir);
+    let run_start = Instant::now();
+    let started = run_engine(persisted, checkpoint, options).await;
+
+    match started {
+        Ok(started) => {
+            completion_guard.defuse();
+            Ok(started)
+        }
+        Err(err) => {
+            persist_terminal_engine_failure(run_dir, &err, run_start.elapsed());
+            completion_guard.defuse();
+            Err(err)
+        }
+    }
+}
+
+fn persist_terminal_engine_failure(run_dir: &Path, error: &FabroError, duration: Duration) {
+    let engine_result: Result<Outcome, FabroError> = Err(error.clone());
+    let (final_status, failure_reason, run_status, status_reason) =
+        classify_engine_result(&engine_result);
+    let conclusion = build_conclusion(
+        run_dir,
+        final_status,
+        failure_reason,
+        duration.as_millis() as u64,
+        None,
+    );
+    persist_terminal_outcome(run_dir, &conclusion, run_status, status_reason);
+}
+
+fn cleanup_resume_artifacts(run_dir: &Path) {
+    for name in [
+        "conclusion.json",
+        "pull_request.json",
+        "detached_failure.json",
+        "interview_request.json",
+        "interview_response.json",
+        "interview_request.claim",
+        "progress.jsonl",
+    ] {
+        let _ = std::fs::remove_file(run_dir.join(name));
+    }
+}
+
+fn derive_start_options(
+    persisted: &Persisted,
+    services: StartServices,
+) -> Result<InternalStartOptions, FabroError> {
+    let record = persisted.run_record();
+    let mut settings = record.settings.clone();
+    let working_directory = record.working_directory.clone();
+
+    if let Some(env) = settings
+        .sandbox
+        .as_mut()
+        .and_then(|sandbox| sandbox.env.as_mut())
+    {
+        run_config::resolve_env_refs(env)
+            .map_err(|err| FabroError::Precondition(err.to_string()))?;
+    }
+
+    let (origin_url, detected_base_branch) =
+        fabro_sandbox::daytona::detect_repo_info(&working_directory)
+            .map(|(url, branch)| (Some(url), branch))
+            .unwrap_or((None, None));
+
+    let sandbox_provider = resolve_sandbox_provider(&settings)?;
+    let sandbox_provider =
+        if settings.dry_run_enabled() && !matches!(sandbox_provider, SandboxProvider::Local) {
+            SandboxProvider::Local
+        } else {
+            sandbox_provider
+        };
+    let model = settings
+        .llm
+        .as_ref()
+        .and_then(|llm| llm.model.clone())
+        .unwrap_or_else(|| Catalog::builtin().default_from_env().id.clone());
+    let provider = settings
+        .llm
+        .as_ref()
+        .and_then(|llm| llm.provider.clone())
+        .filter(|value| !value.is_empty());
+
+    let provider_enum: Provider = provider
+        .as_deref()
+        .map(|value| value.parse::<Provider>())
+        .transpose()
+        .map_err(|err| FabroError::Precondition(err.to_string()))?
+        .unwrap_or_else(Provider::default_from_env);
+
+    let fallback_chain = resolve_fallback_chain(provider_enum, &model, &settings);
+    let mcp_servers = settings
+        .mcp_server_entries()
+        .clone()
+        .into_iter()
+        .map(|(name, entry)| entry.into_config(name))
+        .collect();
+
+    let sandbox = match sandbox_provider {
+        SandboxProvider::Local => SandboxSpec::Local {
+            working_directory: working_directory.clone(),
+        },
+        SandboxProvider::Docker => SandboxSpec::Docker {
+            config: fabro_agent::DockerSandboxConfig {
+                host_working_directory: working_directory.to_string_lossy().to_string(),
+                ..Default::default()
+            },
+        },
+        SandboxProvider::Daytona => SandboxSpec::Daytona {
+            config: resolve_daytona_config(&settings).unwrap_or_default(),
+            github_app: services.github_app.clone(),
+            run_id: Some(record.run_id.clone()),
+            clone_branch: detected_base_branch.or_else(|| record.base_branch.clone()),
+        },
+        #[cfg(feature = "exedev")]
+        SandboxProvider::Exe => SandboxSpec::Exe {
+            config: resolve_exe_config(&settings).unwrap_or_default(),
+            clone_params: resolve_exe_clone_params(&working_directory),
+            run_id: Some(record.run_id.clone()),
+            github_app: services.github_app.clone(),
+            mgmt_destination: "exe.dev".to_string(),
+        },
+        #[cfg(not(feature = "exedev"))]
+        SandboxProvider::Exe => {
+            return Err(FabroError::Precondition(
+                "exe sandbox requires the exedev feature".to_string(),
+            ));
+        }
+        SandboxProvider::Ssh => SandboxSpec::Ssh {
+            config: resolve_ssh_config(&settings).ok_or_else(|| {
+                FabroError::Precondition("--sandbox ssh requires [sandbox.ssh] config".to_string())
+            })?,
+            clone_params: resolve_ssh_clone_params(&working_directory),
+            run_id: Some(record.run_id.clone()),
+            github_app: services.github_app.clone(),
+        },
+    };
+
+    let sandbox_env = SandboxEnvSpec {
+        devcontainer_env: HashMap::new(),
+        toml_env: settings
+            .sandbox_settings()
+            .and_then(|sandbox| sandbox.env.clone())
+            .unwrap_or_default(),
+        github_permissions: settings.github_permissions().cloned(),
+        origin_url: origin_url.clone(),
+    };
+
+    let devcontainer = settings
+        .sandbox_settings()
+        .and_then(|sandbox| sandbox.devcontainer)
+        .unwrap_or(false)
+        .then(|| DevcontainerSpec {
+            enabled: true,
+            resolve_dir: working_directory.clone(),
+        });
+
+    let interviewer: Arc<dyn Interviewer> = if settings.auto_approve_enabled() {
+        Arc::new(AutoApproveInterviewer)
+    } else {
+        services.interviewer
+    };
+
+    Ok(InternalStartOptions {
+        cancel_token: services.cancel_token,
+        emitter: services.emitter,
+        sandbox,
+        llm: LlmSpec {
+            model: model.clone(),
+            provider: provider_enum,
+            fallback_chain,
+            mcp_servers,
+            dry_run: settings.dry_run_enabled(),
+        },
+        interviewer,
+        lifecycle: LifecycleOptions {
+            setup_commands: settings.setup_commands().to_vec(),
+            setup_command_timeout_ms: settings.setup_timeout_ms().unwrap_or(300_000),
+            devcontainer_phases: Vec::new(),
+        },
+        hooks: fabro_hooks::HookConfig {
+            hooks: settings.hooks.clone(),
+        },
+        sandbox_env,
+        devcontainer,
+        seed_context: None,
+        git_author: services.git_author,
+        git: None,
+        github_app: services.github_app.clone(),
+        worktree_mode: Some(resolve_worktree_mode(&settings)),
+        registry_override: services.registry_override,
+        retro: StartRetroOptions {
+            enabled: !settings.no_retro_enabled() && project_config::is_retro_enabled(),
+        },
+        finalize: StartFinalizeOptions {
+            preserve_sandbox: resolve_preserve_sandbox(&settings),
+        },
+        pull_request: StartPullRequestConfig {
+            pr_config: settings.pull_request.clone(),
+            github_app: services.github_app,
+            origin_url,
+            model,
+        },
+    })
+}
+
+fn resolve_sandbox_provider(settings: &FabroSettings) -> Result<SandboxProvider, FabroError> {
+    settings
+        .sandbox_settings()
+        .and_then(|sandbox| sandbox.provider.as_deref())
+        .map(|provider| provider.parse::<SandboxProvider>())
+        .transpose()
+        .map_err(|err| FabroError::Precondition(format!("Invalid sandbox provider: {err}")))?
+        .map_or_else(|| Ok(SandboxProvider::default()), Ok)
+}
+
+fn resolve_preserve_sandbox(settings: &FabroSettings) -> bool {
+    settings.preserve_sandbox_enabled()
+}
+
+fn resolve_worktree_mode(settings: &FabroSettings) -> sandbox_config::WorktreeMode {
+    settings
+        .sandbox_settings()
+        .and_then(|sandbox| sandbox.local.as_ref())
+        .map(|local| local.worktree_mode)
+        .unwrap_or_default()
+}
+
+fn resolve_daytona_config(
+    settings: &FabroSettings,
+) -> Option<fabro_sandbox::daytona::DaytonaConfig> {
+    settings
+        .sandbox_settings()
+        .and_then(|sandbox| sandbox.daytona.clone())
+}
+
+#[cfg(feature = "exedev")]
+fn resolve_exe_config(settings: &FabroSettings) -> Option<fabro_sandbox::exe::ExeConfig> {
+    settings
+        .sandbox_settings()
+        .and_then(|sandbox| sandbox.exe.clone())
+}
+
+#[cfg(feature = "exedev")]
+fn resolve_exe_clone_params(cwd: &Path) -> Option<fabro_sandbox::exe::GitCloneParams> {
+    let (detected_url, branch) = match fabro_sandbox::daytona::detect_repo_info(cwd) {
+        Ok(info) => info,
+        Err(err) => {
+            tracing::warn!("No git repo detected for exe.dev clone: {err}");
+            return None;
+        }
+    };
+    let url = fabro_github::ssh_url_to_https(&detected_url);
+    Some(fabro_sandbox::exe::GitCloneParams { url, branch })
+}
+
+fn resolve_ssh_config(settings: &FabroSettings) -> Option<fabro_sandbox::ssh::SshConfig> {
+    settings
+        .sandbox_settings()
+        .and_then(|sandbox| sandbox.ssh.clone())
+}
+
+fn resolve_ssh_clone_params(cwd: &Path) -> Option<fabro_sandbox::ssh::GitCloneParams> {
+    let (detected_url, branch) = match fabro_sandbox::daytona::detect_repo_info(cwd) {
+        Ok(info) => info,
+        Err(err) => {
+            tracing::warn!("No git repo detected for SSH clone: {err}");
+            return None;
+        }
+    };
+    let url = fabro_github::ssh_url_to_https(&detected_url);
+    Some(fabro_sandbox::ssh::GitCloneParams { url, branch })
+}
+
+fn resolve_fallback_chain(
+    provider: Provider,
+    model: &str,
+    settings: &FabroSettings,
+) -> Vec<FallbackTarget> {
+    let fallbacks = settings.llm.as_ref().and_then(|llm| llm.fallbacks.as_ref());
+
+    match fallbacks {
+        Some(map) => Catalog::builtin().build_fallback_chain(provider, model, map),
+        None => Vec::new(),
+    }
 }
 
 /// Shared engine: initialize, execute, retro, finalize, pull_request.
 async fn run_engine(
     persisted: Persisted,
     checkpoint: Option<Checkpoint>,
-    options: StartOptions,
+    options: InternalStartOptions,
 ) -> Result<Started, FabroError> {
     let preserve_sandbox = options.finalize.preserve_sandbox;
 
-    // Build RunOptions from the persisted RunRecord + external caller options.
     let record = persisted.run_record();
     let run_options = RunOptions {
         settings: record.settings.clone(),
@@ -124,10 +478,7 @@ async fn run_engine(
         git_author: options.git_author,
         workflow_slug: record.workflow_slug.clone(),
         github_app: options.github_app.clone(),
-        host_repo_path: record
-            .host_repo_path
-            .as_deref()
-            .map(std::path::PathBuf::from),
+        host_repo_path: record.host_repo_path.as_deref().map(PathBuf::from),
         base_branch: record.base_branch.clone(),
         display_base_sha: None,
         git: options.git.clone(),
@@ -241,13 +592,188 @@ async fn run_engine(
     })
 }
 
+struct DetachedRunBootstrapGuard {
+    run_dir: PathBuf,
+    active: bool,
+}
+
+impl DetachedRunBootstrapGuard {
+    fn arm(run_dir: &Path) -> Result<Self, FabroError> {
+        run_status::write_run_status(
+            run_dir,
+            RunStatus::Starting,
+            Some(StatusReason::SandboxInitializing),
+        );
+        Ok(Self {
+            run_dir: run_dir.to_path_buf(),
+            active: true,
+        })
+    }
+
+    fn defuse(&mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for DetachedRunBootstrapGuard {
+    fn drop(&mut self) {
+        if self.active {
+            run_status::write_run_status(
+                &self.run_dir,
+                RunStatus::Failed,
+                Some(StatusReason::SandboxInitFailed),
+            );
+        }
+    }
+}
+
+const POSTRUN_ABORTED_MESSAGE: &str = "Run aborted before post-run finalization completed.";
+
+struct DetachedRunCompletionGuard {
+    run_dir: PathBuf,
+    active: bool,
+}
+
+impl DetachedRunCompletionGuard {
+    fn arm(run_dir: &Path) -> Self {
+        Self {
+            run_dir: run_dir.to_path_buf(),
+            active: true,
+        }
+    }
+
+    fn defuse(&mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for DetachedRunCompletionGuard {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+
+        run_status::write_run_status(
+            &self.run_dir,
+            RunStatus::Failed,
+            Some(StatusReason::WorkflowError),
+        );
+        if !self.run_dir.join("conclusion.json").exists() {
+            let _ = write_failure_conclusion(
+                &self.run_dir,
+                POSTRUN_ABORTED_MESSAGE,
+                Some(StatusReason::WorkflowError),
+            );
+        }
+        if let Some(run_id) = load_run_id(&self.run_dir) {
+            let _ = crate::event::append_progress_event(
+                &self.run_dir,
+                &run_id,
+                &WorkflowRunEvent::RunNotice {
+                    level: RunNoticeLevel::Error,
+                    code: "postrun_aborted".to_string(),
+                    message: POSTRUN_ABORTED_MESSAGE.to_string(),
+                },
+            );
+        }
+    }
+}
+
+fn load_run_id(run_dir: &Path) -> Option<String> {
+    crate::records::RunRecord::load(run_dir)
+        .ok()
+        .map(|record| record.run_id)
+        .filter(|run_id| !run_id.trim().is_empty())
+        .or_else(|| {
+            std::fs::read_to_string(run_dir.join("id.txt"))
+                .ok()
+                .map(|run_id| run_id.trim().to_string())
+                .filter(|run_id| !run_id.is_empty())
+        })
+}
+
+fn persist_detached_failure(
+    run_dir: &Path,
+    phase: &'static str,
+    reason: StatusReason,
+    error: &FabroError,
+) -> Result<(), FabroError> {
+    #[derive(Serialize)]
+    struct DetachedFailureRecord<'a> {
+        timestamp: chrono::DateTime<Utc>,
+        phase: &'a str,
+        reason: StatusReason,
+        error: String,
+    }
+
+    let message = error.to_string();
+    let record = DetachedFailureRecord {
+        timestamp: Utc::now(),
+        phase,
+        reason,
+        error: message.clone(),
+    };
+
+    std::fs::write(
+        run_dir.join("detached_failure.json"),
+        serde_json::to_string_pretty(&record).map_err(|err| FabroError::Io(err.to_string()))?,
+    )
+    .map_err(|err| FabroError::Io(err.to_string()))?;
+
+    write_failure_conclusion(run_dir, &message, Some(reason))?;
+    run_status::write_run_status(run_dir, RunStatus::Failed, Some(reason));
+
+    if let Some(run_id) = load_run_id(run_dir) {
+        crate::event::append_progress_event(
+            run_dir,
+            &run_id,
+            &WorkflowRunEvent::RunNotice {
+                level: RunNoticeLevel::Error,
+                code: format!("{phase}_failed"),
+                message,
+            },
+        )
+        .map_err(|err| FabroError::Io(err.to_string()))?;
+    }
+
+    Ok(())
+}
+
+fn write_failure_conclusion(
+    run_dir: &Path,
+    message: &str,
+    _reason: Option<StatusReason>,
+) -> Result<(), FabroError> {
+    if run_dir.join("conclusion.json").exists() {
+        return Ok(());
+    }
+
+    let conclusion = Conclusion {
+        timestamp: Utc::now(),
+        status: StageStatus::Fail,
+        duration_ms: 0,
+        failure_reason: Some(message.to_string()),
+        final_git_commit_sha: None,
+        stages: vec![],
+        total_cost: None,
+        total_retries: 0,
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        total_cache_read_tokens: 0,
+        total_cache_write_tokens: 0,
+        total_reasoning_tokens: 0,
+        has_pricing: false,
+    };
+    conclusion.save(&run_dir.join("conclusion.json"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use chrono::Utc;
-    use fabro_agent::{LocalSandbox, Sandbox};
     use fabro_config::FabroSettings;
 
     use super::*;
@@ -256,8 +782,6 @@ mod tests {
     use crate::handler::exit::ExitHandler;
     use crate::handler::start::StartHandler;
     use crate::handler::HandlerRegistry;
-    use crate::pipeline::{LlmSpec, SandboxEnvSpec, SandboxSpec};
-    use crate::run_options::LifecycleOptions;
 
     const MINIMAL_DOT: &str = r#"digraph Test {
         graph [goal="Build feature"]
@@ -266,23 +790,25 @@ mod tests {
         start -> exit
     }"#;
 
-    fn persisted_workflow(dot: &str, run_dir: &std::path::Path) -> Persisted {
-        crate::operations::create(
-            dot,
-            crate::operations::RunCreateOptions {
-                settings: FabroSettings::default(),
-                run_dir: Some(run_dir.to_path_buf()),
-                run_id: Some("run-test".to_string()),
-                workflow_slug: Some("test".to_string()),
-                labels: std::collections::HashMap::new(),
-                base_branch: Some("main".to_string()),
-                working_directory: Some(std::env::current_dir().unwrap()),
-                host_repo_path: Some(std::env::current_dir().unwrap().display().to_string()),
-                goal_override: None,
+    fn persisted_workflow(dot: &str, run_dir: &Path) -> Persisted {
+        crate::operations::create(crate::operations::CreateRequest {
+            workflow: crate::operations::WorkflowInput::DotSource {
+                source: dot.to_string(),
                 base_dir: None,
+                workflow_slug: Some("test".to_string()),
             },
-        )
+            settings: FabroSettings {
+                dry_run: Some(true),
+                ..Default::default()
+            },
+            run_dir: Some(run_dir.to_path_buf()),
+            run_id: Some("run-test".to_string()),
+            host_repo_path: Some(std::env::current_dir().unwrap().display().to_string()),
+            base_branch: Some("main".to_string()),
+            ..Default::default()
+        })
         .unwrap()
+        .persisted
     }
 
     fn test_registry() -> HandlerRegistry {
@@ -292,82 +818,18 @@ mod tests {
         registry
     }
 
-    fn test_start_options(
-        _run_dir: &std::path::Path,
-        _sandbox: Arc<dyn Sandbox>,
+    fn test_start_services(
         emitter: Arc<EventEmitter>,
         registry: Arc<HandlerRegistry>,
-        lifecycle: LifecycleOptions,
-        preserve_sandbox: bool,
-    ) -> StartOptions {
-        StartOptions {
+    ) -> StartServices {
+        StartServices {
             cancel_token: None,
             emitter,
-            sandbox: SandboxSpec::Local {
-                working_directory: std::env::current_dir().unwrap(),
-            },
-            llm: LlmSpec {
-                model: "test-model".to_string(),
-                provider: fabro_llm::Provider::Anthropic,
-                fallback_chain: Vec::new(),
-                mcp_servers: Vec::new(),
-                dry_run: true,
-            },
             interviewer: Arc::new(fabro_interview::AutoApproveInterviewer),
-            lifecycle,
-            hooks: fabro_hooks::HookConfig { hooks: vec![] },
-            sandbox_env: SandboxEnvSpec {
-                devcontainer_env: HashMap::new(),
-                toml_env: HashMap::new(),
-                github_permissions: None,
-                origin_url: None,
-            },
-            devcontainer: None,
-            seed_context: None,
             git_author: crate::git::GitAuthor::default(),
-            git: None,
             github_app: None,
-            worktree_mode: None,
             registry_override: Some(registry),
-            retro: StartRetroOptions { enabled: false },
-            finalize: StartFinalizeOptions { preserve_sandbox },
-            pull_request: StartPullRequestConfig {
-                pr_config: None,
-                github_app: None,
-                origin_url: None,
-                model: "test-model".to_string(),
-            },
         }
-    }
-
-    #[tokio::test]
-    async fn start_cleans_up_sandbox_when_initialize_fails() {
-        let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new());
-        let registry = Arc::new(test_registry());
-        let sandbox: Arc<dyn Sandbox> =
-            Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
-
-        persisted_workflow(MINIMAL_DOT, &run_dir);
-        let result = start(
-            &run_dir,
-            test_start_options(
-                &run_dir,
-                sandbox,
-                emitter,
-                registry,
-                LifecycleOptions {
-                    setup_commands: vec!["false".to_string()],
-                    setup_command_timeout_ms: 1_000,
-                    devcontainer_phases: vec![],
-                },
-                false,
-            ),
-        )
-        .await;
-
-        assert!(result.is_err());
     }
 
     #[tokio::test]
@@ -376,8 +838,6 @@ mod tests {
         let run_dir = temp.path().join("run");
         let emitter = Arc::new(EventEmitter::new());
         let registry = Arc::new(test_registry());
-        let sandbox: Arc<dyn Sandbox> =
-            Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
         let injected = Arc::new(AtomicBool::new(false));
 
         {
@@ -401,23 +861,9 @@ mod tests {
         }
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
-        let started = start(
-            &run_dir,
-            test_start_options(
-                &run_dir,
-                sandbox,
-                emitter,
-                registry,
-                LifecycleOptions {
-                    setup_commands: vec![],
-                    setup_command_timeout_ms: 1_000,
-                    devcontainer_phases: vec![],
-                },
-                true,
-            ),
-        )
-        .await
-        .unwrap();
+        let started = start(&run_dir, test_start_services(emitter, registry))
+            .await
+            .unwrap();
 
         assert_eq!(
             started.finalized.conclusion.final_git_commit_sha.as_deref(),
@@ -433,28 +879,12 @@ mod tests {
         let run_dir = temp.path().join("run");
         let emitter = Arc::new(EventEmitter::new());
         let registry = Arc::new(test_registry());
-        let sandbox: Arc<dyn Sandbox> =
-            Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
 
-        let started = start(
-            &run_dir,
-            test_start_options(
-                &run_dir,
-                sandbox,
-                emitter,
-                registry,
-                LifecycleOptions {
-                    setup_commands: vec![],
-                    setup_command_timeout_ms: 1_000,
-                    devcontainer_phases: vec![],
-                },
-                true,
-            ),
-        )
-        .await
-        .unwrap();
+        let started = start(&run_dir, test_start_services(emitter, registry))
+            .await
+            .unwrap();
 
         assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
         assert!(run_dir.join("conclusion.json").exists());
@@ -466,29 +896,11 @@ mod tests {
         let run_dir = temp.path().join("run");
         let emitter = Arc::new(EventEmitter::new());
         let registry = Arc::new(test_registry());
-        let sandbox: Arc<dyn Sandbox> =
-            Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
-        // Create a fake checkpoint file
         std::fs::write(run_dir.join("checkpoint.json"), "{}").unwrap();
 
-        let result = start(
-            &run_dir,
-            test_start_options(
-                &run_dir,
-                sandbox,
-                emitter,
-                registry,
-                LifecycleOptions {
-                    setup_commands: vec![],
-                    setup_command_timeout_ms: 1_000,
-                    devcontainer_phases: vec![],
-                },
-                false,
-            ),
-        )
-        .await;
+        let result = start(&run_dir, test_start_services(emitter, registry)).await;
 
         assert!(
             matches!(&result, Err(crate::error::FabroError::Precondition(_))),
@@ -503,27 +915,10 @@ mod tests {
         let run_dir = temp.path().join("run");
         let emitter = Arc::new(EventEmitter::new());
         let registry = Arc::new(test_registry());
-        let sandbox: Arc<dyn Sandbox> =
-            Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
 
-        let result = resume(
-            &run_dir,
-            test_start_options(
-                &run_dir,
-                sandbox,
-                emitter,
-                registry,
-                LifecycleOptions {
-                    setup_commands: vec![],
-                    setup_command_timeout_ms: 1_000,
-                    devcontainer_phases: vec![],
-                },
-                false,
-            ),
-        )
-        .await;
+        let result = resume(&run_dir, test_start_services(emitter, registry)).await;
 
         assert!(
             matches!(&result, Err(crate::error::FabroError::Precondition(_))),
@@ -538,8 +933,6 @@ mod tests {
         let run_dir = temp.path().join("run");
         let emitter = Arc::new(EventEmitter::new());
         let registry = Arc::new(test_registry());
-        let sandbox: Arc<dyn Sandbox> =
-            Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()));
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
 
@@ -575,22 +968,7 @@ mod tests {
         .save(&run_dir.join("conclusion.json"))
         .unwrap();
 
-        let result = resume(
-            &run_dir,
-            test_start_options(
-                &run_dir,
-                sandbox,
-                emitter,
-                registry,
-                LifecycleOptions {
-                    setup_commands: vec![],
-                    setup_command_timeout_ms: 1_000,
-                    devcontainer_phases: vec![],
-                },
-                false,
-            ),
-        )
-        .await;
+        let result = resume(&run_dir, test_start_services(emitter, registry)).await;
 
         assert!(
             matches!(&result, Err(crate::error::FabroError::Precondition(_))),

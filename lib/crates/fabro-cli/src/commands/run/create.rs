@@ -1,14 +1,11 @@
 use std::path::PathBuf;
 
 use crate::args::RunArgs;
-use fabro_config::FabroConfig;
+use fabro_config::{FabroConfig, FabroSettings};
 
-use super::execute::{
-    cached_graph_path, default_run_dir, load_workflow_source_input, make_run_dir, parse_labels,
-    print_diagnostics_from_error, print_workflow_report_from_persisted, resolve_sandbox_provider,
-    write_run_config_snapshot,
-};
 use fabro_util::terminal::Styles;
+
+use super::output::{print_diagnostics_from_error, print_workflow_report_from_persisted};
 
 /// Create a workflow run: allocate run directory, persist RunRecord, return (run_id, run_dir).
 ///
@@ -24,79 +21,43 @@ pub async fn create_run(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
     let cli_args_config = FabroConfig::try_from(args)?;
-    let source_input =
-        load_workflow_source_input(workflow_path, cli_args_config, cli_defaults, true)?;
-    let run_id = args
-        .run_id
-        .clone()
-        .unwrap_or_else(|| ulid::Ulid::new().to_string());
-    let run_dir = match args
-        .storage_dir
-        .clone()
-        .or_else(|| source_input.settings.storage_dir.clone())
-    {
-        Some(sd) => make_run_dir(&sd.join("runs"), &run_id, args.dry_run),
-        None => default_run_dir(&run_id, args.dry_run),
-    };
+    let settings: FabroSettings = fabro_workflows::operations::resolve_settings_for_path(
+        workflow_path,
+        cli_defaults,
+        cli_args_config,
+        true,
+    )?;
     let working_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let base_branch = fabro_sandbox::daytona::detect_repo_info(&working_directory)
         .ok()
         .and_then(|(_, branch)| branch);
-    if !args.dry_run {
-        let _ = resolve_sandbox_provider(args.sandbox.map(Into::into), &source_input.settings)?;
-    }
 
-    let settings = source_input.settings.clone();
-
-    let persisted = match fabro_workflows::operations::create(
-        &source_input.raw_source,
-        fabro_workflows::operations::RunCreateOptions {
+    let created =
+        match fabro_workflows::operations::create(fabro_workflows::operations::CreateRequest {
+            workflow: fabro_workflows::operations::WorkflowInput::Path(workflow_path.clone()),
             settings,
-            run_dir: Some(run_dir.clone()),
-            run_id: Some(run_id.clone()),
-            workflow_slug: source_input.workflow_slug.clone(),
-            labels: {
-                let mut labels = source_input.settings.labels.clone();
-                labels.extend(parse_labels(&args.label));
-                labels
-            },
+            run_dir: None,
+            run_id: args.run_id.clone(),
             base_branch,
-            working_directory: Some(working_directory.clone()),
             host_repo_path: Some(working_directory.to_string_lossy().to_string()),
-            goal_override: source_input.goal_override.clone(),
-            base_dir: Some(
-                source_input
-                    .dot_path
-                    .parent()
-                    .unwrap_or(std::path::Path::new("."))
-                    .to_path_buf(),
-            ),
-        },
-    ) {
-        Ok(persisted) => persisted,
-        Err(fabro_workflows::error::FabroError::ValidationFailed { diagnostics }) => {
-            if !quiet {
-                print_diagnostics_from_error(&diagnostics, styles);
+        }) {
+            Ok(created) => created,
+            Err(fabro_workflows::error::FabroError::ValidationFailed { diagnostics }) => {
+                if !quiet {
+                    print_diagnostics_from_error(&diagnostics, styles);
+                }
+                anyhow::bail!("Validation failed");
             }
-            anyhow::bail!("Validation failed");
-        }
-        Err(err) => return Err(err.into()),
-    };
+            Err(err) => return Err(err.into()),
+        };
 
     if !quiet {
-        print_workflow_report_from_persisted(&persisted, &source_input.dot_path, styles);
+        print_workflow_report_from_persisted(
+            &created.persisted,
+            created.dot_path.as_deref(),
+            styles,
+        );
     }
 
-    // Write CLI-owned debug and status artifacts after the run has been persisted.
-    tokio::fs::write(cached_graph_path(&run_dir), &source_input.raw_source).await?;
-    tokio::fs::write(run_dir.join("id.txt"), &run_id).await?;
-    std::fs::File::create(run_dir.join("progress.jsonl"))?;
-    fabro_workflows::run_status::write_run_status(
-        &run_dir,
-        fabro_workflows::run_status::RunStatus::Submitted,
-        None,
-    );
-    write_run_config_snapshot(&run_dir, source_input.workflow_toml_path.as_deref()).await?;
-
-    Ok((run_id, run_dir))
+    Ok((created.run_id, created.run_dir))
 }

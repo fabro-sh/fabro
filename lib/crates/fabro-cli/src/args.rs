@@ -646,12 +646,12 @@ pub(crate) enum RunCommands {
     /// Internal: run the engine process (reads run.json from run dir)
     #[command(name = "__detached", hide = true)]
     Detached {
-        /// Base storage directory
+        /// Run directory
         #[arg(long)]
-        storage_dir: PathBuf,
-        /// Run ID
+        run_dir: PathBuf,
+        /// Launcher metadata path
         #[arg(long)]
-        run_id: String,
+        launcher_path: PathBuf,
         /// Resume from checkpoint instead of fresh start
         #[arg(long)]
         resume: bool,

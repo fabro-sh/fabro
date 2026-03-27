@@ -196,6 +196,7 @@ pub struct ProgressUI {
     working_directory: Option<String>,
 }
 
+#[allow(dead_code)]
 impl ProgressUI {
     pub fn new(is_tty: bool, verbose: bool) -> Self {
         let renderer = if is_tty {
@@ -1722,11 +1723,13 @@ impl ProgressUI {
 
 /// Wraps a `ConsoleInterviewer` so that progress bars are hidden during
 /// interactive prompts (avoids garbled output from concurrent writes).
+#[allow(dead_code)]
 pub struct ProgressAwareInterviewer {
     inner: ConsoleInterviewer,
     progress: Arc<Mutex<ProgressUI>>,
 }
 
+#[allow(dead_code)]
 impl ProgressAwareInterviewer {
     pub fn new(inner: ConsoleInterviewer, progress: Arc<Mutex<ProgressUI>>) -> Self {
         Self { inner, progress }

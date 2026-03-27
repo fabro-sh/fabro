@@ -614,7 +614,7 @@ mod tests {
         init_repo(dir.path());
 
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        let run_record = br#"{"run_id":"RUN1","created_at":"2025-01-01T00:00:00Z","config":{},"graph":{"name":"test","nodes":{},"edges":[],"attrs":{}},"working_directory":"/tmp"}"#;
+        let run_record = br#"{"run_id":"RUN1","created_at":"2025-01-01T00:00:00Z","settings":{},"graph":{"name":"test","nodes":{},"edges":[],"attrs":{}},"working_directory":"/tmp"}"#;
         store.init_run("RUN1", &[("run.json", run_record)]).unwrap();
 
         let read_record = MetadataStore::read_run_record(dir.path(), "RUN1")
@@ -794,7 +794,7 @@ mod tests {
         init_repo(dir.path());
 
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        let run_record = br#"{"run_id":"RUN5","created_at":"2025-01-01T00:00:00Z","config":{},"graph":{"name":"test","nodes":{},"edges":[],"attrs":{}},"working_directory":"/tmp"}"#;
+        let run_record = br#"{"run_id":"RUN5","created_at":"2025-01-01T00:00:00Z","settings":{},"graph":{"name":"test","nodes":{},"edges":[],"attrs":{}},"working_directory":"/tmp"}"#;
         store.init_run("RUN5", &[("run.json", run_record)]).unwrap();
 
         store

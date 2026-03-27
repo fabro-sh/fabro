@@ -108,7 +108,7 @@ pub struct PersistOptions {
     pub run_record: RunRecord,
 }
 
-/// Output of the PERSIST phase. Run directory created, run.json and graph.fabro written.
+/// Output of the PERSIST phase. Run directory created, run.json and workflow.fabro written.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Persisted {
