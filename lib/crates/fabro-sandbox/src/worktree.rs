@@ -148,6 +148,14 @@ impl Sandbox for WorktreeSandbox {
             .exec_command(&add_cmd, 30_000, None, None, None)
             .await?;
         if result.exit_code != 0 {
+            // Roll back the branch created above so we don't leak partial state.
+            if !self.config.skip_branch_creation {
+                let rollback_cmd = format!("{GIT} branch -D {branch}");
+                let _ = self
+                    .inner
+                    .exec_command(&rollback_cmd, 30_000, None, None, None)
+                    .await;
+            }
             return Err(format!(
                 "git worktree add failed (exit {}): {}",
                 result.exit_code,
