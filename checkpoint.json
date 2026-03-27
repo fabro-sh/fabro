@@ -1,26 +1,31 @@
 {
-  "timestamp": "2026-03-27T14:58:22.377828Z",
-  "current_node": "approve",
+  "timestamp": "2026-03-27T14:58:26.502242Z",
+  "current_node": "ship",
   "completed_nodes": [
     "start",
     "draft",
-    "approve"
+    "approve",
+    "ship"
   ],
   "node_retries": {},
   "context_values": {
+    "command.output": "shipped\n",
+    "command.stderr": "",
     "graph.rankdir": "LR",
     "response.draft": "# Greeting Message\n\nHello! 👋 \n\nWelcome to Fabro! I'm here to help you build, test, and deploy AI-powered workflows. Whether you're orchestrating agents, running automations, or testing workflow gates, let's get started. What would you like to build today?\n\n---\n\nIf you're testing the human gate with auto-approve, this greeting message could serve as the output from a workflow stage that requires human verification. Feel free to let me know if you'd like to adjust the tone or content!",
     "internal.retry_count.draft": 0,
+    "internal.retry_count.ship": 0,
     "failure_class": "",
     "last_response": "# Greeting Message\n\nHello! 👋 \n\nWelcome to Fabro! I'm here to help you build, test, and deploy AI-powered workflows. Whether you're orchestrating agents, running automations, or testing workflow gat",
-    "current_node": "approve",
+    "current_node": "ship",
     "thread.start.current_node": "draft",
     "internal.retry_count.approve": 0,
-    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.2k tokens in / 235 out\n",
+    "current.preamble": "Goal: Test human gate with auto-approve\n\n## Completed stages\n- **draft**: success\n  - Model: claude-haiku-4-5, 2.2k tokens in / 235 out\n- **approve**: success\n\n## Context\n- human.gate.label: [A] Approve\n- human.gate.selected: A\n",
+    "thread.approve.current_node": "ship",
     "graph.goal": "Test human gate with auto-approve",
     "thread.draft.current_node": "approve",
     "human.gate.selected": "A",
-    "internal.thread_id": "draft",
+    "internal.thread_id": "approve",
     "internal.fidelity": "compact",
     "internal.node_visit_count": 1,
     "human.gate.label": "[A] Approve",
@@ -48,6 +53,15 @@
       "status": "success",
       "usage": null
     },
+    "ship": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "shipped\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: echo shipped",
+      "usage": null
+    },
     "draft": {
       "status": "success",
       "context_updates": {
@@ -67,10 +81,11 @@
       }
     }
   },
-  "next_node_id": "ship",
+  "next_node_id": "exit",
   "node_visits": {
+    "approve": 1,
     "start": 1,
     "draft": 1,
-    "approve": 1
+    "ship": 1
   }
 }
