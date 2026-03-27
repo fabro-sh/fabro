@@ -1,10 +1,11 @@
 {
-  "timestamp": "2026-03-27T19:07:08.520177Z",
-  "current_node": "merge",
+  "timestamp": "2026-03-27T19:07:09.489943Z",
+  "current_node": "review",
   "completed_nodes": [
     "start",
     "fork",
-    "merge"
+    "merge",
+    "review"
   ],
   "node_retries": {},
   "context_values": {
@@ -12,6 +13,7 @@
     "internal.run_id": "01KMRB2JHKV51KCH3B5FXPTK85",
     "failure_class": "",
     "parallel.fan_in.best_outcome": "success",
+    "last_stage": "review",
     "parallel.results": [
       {
         "id": "branch1",
@@ -22,18 +24,22 @@
         "status": "success"
       }
     ],
+    "last_response": "[Simulated] Response for stage: review",
     "internal.retry_count.merge": 0,
-    "current.preamble": "Goal: Test parallel and fan-in execution\n\n## Completed stages\n- **fork**: success\n\n## Context\n- parallel.branch_count: 2\n- parallel.results: [{\"id\":\"branch1\",\"status\":\"success\"},{\"id\":\"branch2\",\"status\":\"success\"}]\n",
+    "internal.retry_count.review": 0,
+    "current.preamble": "Goal: Test parallel and fan-in execution\n\n## Completed stages\n- **fork**: success\n- **merge**: success\n\n## Context\n- parallel.branch_count: 2\n- parallel.fan_in.best_id: branch1\n- parallel.fan_in.best_outcome: success\n- parallel.results: [{\"id\":\"branch1\",\"status\":\"success\"},{\"id\":\"branch2\",\"status\":\"success\"}]\n",
     "failure_signature": "",
     "internal.retry_count.start": 0,
     "outcome": "success",
-    "current_node": "merge",
+    "current_node": "review",
     "parallel.branch_count": 2,
     "thread.fork.current_node": "merge",
     "parallel.fan_in.best_id": "branch1",
-    "internal.thread_id": "fork",
+    "internal.thread_id": "merge",
     "graph.goal": "Test parallel and fan-in execution",
     "internal.fidelity": "compact",
+    "thread.merge.current_node": "review",
+    "response.review": "[Simulated] Response for stage: review",
     "internal.node_visit_count": 1,
     "thread.start.current_node": "fork"
   },
@@ -57,12 +63,23 @@
       "status": "success",
       "notes": "[Simulated] start",
       "usage": null
+    },
+    "review": {
+      "status": "success",
+      "context_updates": {
+        "response.review": "[Simulated] Response for stage: review",
+        "last_stage": "review",
+        "last_response": "[Simulated] Response for stage: review"
+      },
+      "notes": "[Simulated] review",
+      "usage": null
     }
   },
-  "next_node_id": "review",
+  "next_node_id": "exit",
   "node_visits": {
     "start": 1,
     "fork": 1,
-    "merge": 1
+    "merge": 1,
+    "review": 1
   }
 }
