@@ -1,0 +1,50 @@
+{
+  "timestamp": "2026-03-27T19:07:05.517646Z",
+  "current_node": "plan",
+  "completed_nodes": [
+    "start",
+    "plan"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "current_node": "plan",
+    "outcome": "success",
+    "current.preamble": "Goal: Build a styled pipeline\n",
+    "internal.run_id": "01KMRB2JHJ8CS9VFY2JPTPJ2KK",
+    "internal.fidelity": "compact",
+    "thread.planning.current_node": "plan",
+    "internal.thread_id": "planning",
+    "failure_signature": "",
+    "graph.model_stylesheet": "\n            * { model: claude-sonnet-4-5;}\n            .code { model: claude-opus-4-6; }\n            #critical_review { model: gpt-5.2;reasoning_effort: high; }\n        ",
+    "response.plan": "[Simulated] Response for stage: plan",
+    "last_stage": "plan",
+    "last_response": "[Simulated] Response for stage: plan",
+    "internal.node_visit_count": 1,
+    "internal.retry_count.plan": 0,
+    "failure_class": "",
+    "graph.goal": "Build a styled pipeline",
+    "internal.retry_count.start": 0
+  },
+  "node_outcomes": {
+    "plan": {
+      "status": "success",
+      "context_updates": {
+        "response.plan": "[Simulated] Response for stage: plan",
+        "last_stage": "plan",
+        "last_response": "[Simulated] Response for stage: plan"
+      },
+      "notes": "[Simulated] plan",
+      "usage": null
+    },
+    "start": {
+      "status": "success",
+      "notes": "[Simulated] start",
+      "usage": null
+    }
+  },
+  "next_node_id": "implement",
+  "node_visits": {
+    "plan": 1,
+    "start": 1
+  }
+}
