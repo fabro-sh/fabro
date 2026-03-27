@@ -1,0 +1,206 @@
+{
+  "run_id": "01KMRB2JHJ8CS9VFY2JPTPJ2KK",
+  "created_at": "2026-03-27T19:06:58.484522Z",
+  "config": {
+    "version": 1,
+    "goal": "Build a styled pipeline",
+    "llm": {
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "fallbacks": null
+    },
+    "sandbox": {
+      "provider": "daytona",
+      "preserve": null,
+      "devcontainer": null,
+      "local": null,
+      "daytona": {
+        "auto_stop_interval": 30,
+        "labels": {
+          "repo": "fabro-sh/fabro"
+        },
+        "snapshot": {
+          "name": "fabro-v6",
+          "cpu": 4,
+          "memory": 8,
+          "disk": 20,
+          "dockerfile": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+        },
+        "network": null,
+        "skip_clone": false
+      },
+      "ssh": null,
+      "env": null
+    },
+    "pull_request": {
+      "enabled": true,
+      "draft": false,
+      "auto_merge": false,
+      "merge_strategy": "squash"
+    },
+    "hooks": [
+      {
+        "name": "cargo-fmt",
+        "event": "post_tool_use",
+        "command": "cargo fmt",
+        "matcher": "write_file|edit_file|apply_patch",
+        "blocking": true,
+        "timeout_ms": null,
+        "sandbox": null
+      }
+    ],
+    "dry_run": true,
+    "auto_approve": true,
+    "features": {
+      "session_sandboxes": false,
+      "retros": false
+    },
+    "log": {
+      "level": "debug"
+    },
+    "git": {
+      "provider": "github",
+      "app_id": "2993730",
+      "client_id": "Iv23li3Pu4pCpsmPopVN",
+      "slug": "brynary-fabro",
+      "author": {
+        "name": null,
+        "email": null
+      },
+      "webhooks": null
+    },
+    "fabro": {
+      "root": "fabro/"
+    }
+  },
+  "graph": {
+    "name": "Styled",
+    "nodes": {
+      "critical_review": {
+        "id": "critical_review",
+        "attrs": {
+          "label": {
+            "String": "Critical Review"
+          },
+          "reasoning_effort": {
+            "String": "high"
+          },
+          "model": {
+            "String": "gpt-5.2"
+          },
+          "provider": {
+            "String": "openai"
+          },
+          "class": {
+            "String": "code"
+          }
+        },
+        "classes": [
+          "code"
+        ]
+      },
+      "start": {
+        "id": "start",
+        "attrs": {
+          "model": {
+            "String": "claude-sonnet-4-5"
+          },
+          "shape": {
+            "String": "Mdiamond"
+          },
+          "provider": {
+            "String": "anthropic"
+          }
+        }
+      },
+      "exit": {
+        "id": "exit",
+        "attrs": {
+          "model": {
+            "String": "claude-sonnet-4-5"
+          },
+          "provider": {
+            "String": "anthropic"
+          },
+          "shape": {
+            "String": "Msquare"
+          }
+        }
+      },
+      "implement": {
+        "id": "implement",
+        "attrs": {
+          "class": {
+            "String": "code"
+          },
+          "label": {
+            "String": "Implement"
+          },
+          "model": {
+            "String": "claude-opus-4-6"
+          },
+          "provider": {
+            "String": "anthropic"
+          }
+        },
+        "classes": [
+          "code"
+        ]
+      },
+      "plan": {
+        "id": "plan",
+        "attrs": {
+          "label": {
+            "String": "Plan"
+          },
+          "model": {
+            "String": "claude-sonnet-4-5"
+          },
+          "class": {
+            "String": "planning"
+          },
+          "provider": {
+            "String": "anthropic"
+          }
+        },
+        "classes": [
+          "planning"
+        ]
+      }
+    },
+    "edges": [
+      {
+        "from": "start",
+        "to": "plan",
+        "attrs": {}
+      },
+      {
+        "from": "plan",
+        "to": "implement",
+        "attrs": {}
+      },
+      {
+        "from": "implement",
+        "to": "critical_review",
+        "attrs": {}
+      },
+      {
+        "from": "critical_review",
+        "to": "exit",
+        "attrs": {}
+      }
+    ],
+    "attrs": {
+      "model_stylesheet": {
+        "String": "\n            * { model: claude-sonnet-4-5;}\n            .code { model: claude-opus-4-6; }\n            #critical_review { model: gpt-5.2;reasoning_effort: high; }\n        "
+      },
+      "goal": {
+        "String": "Build a styled pipeline"
+      }
+    }
+  },
+  "workflow_slug": "styled",
+  "working_directory": "/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-cli",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-cli",
+  "base_branch": "fabro-core"
+}
