@@ -1,31 +1,45 @@
 {
-  "timestamp": "2026-03-27T19:07:07.253163Z",
-  "current_node": "run_tests",
+  "timestamp": "2026-03-27T19:07:08.438626Z",
+  "current_node": "report",
   "completed_nodes": [
     "start",
-    "run_tests"
+    "run_tests",
+    "report"
   ],
   "node_retries": {},
   "context_values": {
-    "current_node": "run_tests",
-    "current.preamble": "Goal: Run tests and report results\n",
+    "current_node": "report",
+    "current.preamble": "Goal: Run tests and report results\n\n## Completed stages\n- **run_tests**: success\n",
     "internal.retry_count.start": 0,
     "internal.fidelity": "compact",
-    "internal.thread_id": "start",
+    "internal.thread_id": "run_tests",
     "internal.retry_count.run_tests": 0,
     "graph.rankdir": "LR",
     "failure_signature": "",
     "response.run_tests": "[Simulated] Response for stage: run_tests",
     "graph.goal": "Run tests and report results",
-    "last_stage": "run_tests",
+    "last_stage": "report",
+    "response.report": "[Simulated] Response for stage: report",
     "internal.node_visit_count": 1,
     "failure_class": "",
     "internal.run_id": "01KMRB2JHM78X7E9CKYEW1AVV3",
     "thread.start.current_node": "run_tests",
-    "last_response": "[Simulated] Response for stage: run_tests",
-    "outcome": "success"
+    "last_response": "[Simulated] Response for stage: report",
+    "internal.retry_count.report": 0,
+    "outcome": "success",
+    "thread.run_tests.current_node": "report"
   },
   "node_outcomes": {
+    "report": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "report",
+        "last_response": "[Simulated] Response for stage: report",
+        "response.report": "[Simulated] Response for stage: report"
+      },
+      "notes": "[Simulated] report",
+      "usage": null
+    },
     "start": {
       "status": "success",
       "notes": "[Simulated] start",
@@ -42,9 +56,10 @@
       "usage": null
     }
   },
-  "next_node_id": "report",
+  "next_node_id": "exit",
   "node_visits": {
     "run_tests": 1,
+    "report": 1,
     "start": 1
   }
 }
