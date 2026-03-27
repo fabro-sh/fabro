@@ -1,25 +1,28 @@
 {
-  "timestamp": "2026-03-27T19:07:07.473919Z",
-  "current_node": "validate",
+  "timestamp": "2026-03-27T19:07:07.767270Z",
+  "current_node": "gate",
   "completed_nodes": [
     "start",
     "plan",
     "implement",
-    "validate"
+    "validate",
+    "gate"
   ],
   "node_retries": {},
   "context_values": {
     "failure_signature": "",
-    "current.preamble": "Goal: Implement and validate a feature\n\n## Completed stages\n- **plan**: success\n- **implement**: success\n",
+    "current.preamble": "Goal: Implement and validate a feature\n\n## Completed stages\n- **plan**: success\n- **implement**: success\n- **validate**: success\n",
     "thread.start.current_node": "plan",
     "internal.retry_count.implement": 0,
     "internal.retry_count.start": 0,
     "outcome": "success",
     "failure_class": "",
-    "current_node": "validate",
+    "current_node": "gate",
     "last_response": "[Simulated] Response for stage: validate",
     "internal.run_id": "01KMRB2JHK10TZ54R97Z7XKHFJ",
     "internal.retry_count.plan": 0,
+    "thread.validate.current_node": "gate",
+    "internal.retry_count.gate": 0,
     "thread.implement.current_node": "validate",
     "last_stage": "validate",
     "thread.plan.current_node": "implement",
@@ -28,7 +31,7 @@
     "response.validate": "[Simulated] Response for stage: validate",
     "graph.goal": "Implement and validate a feature",
     "response.plan": "[Simulated] Response for stage: plan",
-    "internal.thread_id": "implement",
+    "internal.thread_id": "validate",
     "internal.fidelity": "compact",
     "graph.rankdir": "LR",
     "internal.node_visit_count": 1
@@ -42,6 +45,11 @@
         "last_stage": "implement"
       },
       "notes": "[Simulated] implement",
+      "usage": null
+    },
+    "gate": {
+      "status": "success",
+      "notes": "[Simulated] gate",
       "usage": null
     },
     "validate": {
@@ -70,11 +78,12 @@
       "usage": null
     }
   },
-  "next_node_id": "gate",
+  "next_node_id": "exit",
   "node_visits": {
     "start": 1,
     "plan": 1,
     "implement": 1,
-    "validate": 1
+    "validate": 1,
+    "gate": 1
   }
 }
