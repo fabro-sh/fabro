@@ -1,94 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use clap::Args;
 
-use super::shared::split_run_path;
-
-#[derive(Args)]
-pub struct AssetListArgs {
-    /// Run ID (or prefix)
-    pub run_id: String,
-
-    /// Filter to assets from a specific node
-    #[arg(long)]
-    pub node: Option<String>,
-
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Args)]
-pub struct AssetCpArgs {
-    /// Source: RUN_ID (all assets) or RUN_ID:path (specific asset)
-    pub source: String,
-
-    /// Destination directory (defaults to current directory)
-    #[arg(default_value = ".")]
-    pub dest: PathBuf,
-
-    /// Filter to assets from a specific node
-    #[arg(long)]
-    pub node: Option<String>,
-
-    /// Preserve {node_slug}/retry_{N}/ directory structure
-    #[arg(long)]
-    pub tree: bool,
-}
-
-pub fn list_command(args: &AssetListArgs) -> Result<()> {
-    let base = fabro_workflows::run_lookup::default_runs_base();
-    let run = fabro_workflows::run_lookup::resolve_run(&base, &args.run_id)?;
-    let entries = fabro_workflows::assets::scan_assets(&run.path, args.node.as_deref())?;
-
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&entries)?);
-        return Ok(());
-    }
-
-    if entries.is_empty() {
-        println!("No assets found for this run.");
-        return Ok(());
-    }
-
-    let node_width = entries
-        .iter()
-        .map(|entry| entry.node_slug.len())
-        .max()
-        .unwrap_or(4)
-        .max(4);
-    let retry_width = 5;
-    let size_width = entries
-        .iter()
-        .map(|entry| format_size(entry.size).len())
-        .max()
-        .unwrap_or(4)
-        .max(4);
-
-    println!(
-        "{:<node_width$}  {:>retry_width$}  {:>size_width$}  PATH",
-        "NODE", "RETRY", "SIZE"
-    );
-    let total_size: u64 = entries.iter().map(|entry| entry.size).sum();
-    for entry in &entries {
-        println!(
-            "{:<node_width$}  {:>retry_width$}  {:>size_width$}  {}",
-            entry.node_slug,
-            entry.retry,
-            format_size(entry.size),
-            entry.relative_path
-        );
-    }
-    println!();
-    println!(
-        "{} asset(s), {} total",
-        entries.len(),
-        format_size(total_size)
-    );
-
-    Ok(())
-}
+use crate::args::AssetCpArgs;
+use crate::shared::split_run_path;
 
 pub fn cp_command(args: &AssetCpArgs) -> Result<()> {
     let base = fabro_workflows::run_lookup::default_runs_base();
@@ -206,22 +121,6 @@ fn parse_source(source: &str) -> (&str, Option<&str>) {
     match split_run_path(source) {
         Some((run_id, path)) => (run_id, Some(path)),
         None => (source, None),
-    }
-}
-
-fn format_size(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = 1024 * KB;
-    const GB: u64 = 1024 * MB;
-
-    if bytes >= GB {
-        format!("{:.1} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.1} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.1} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{bytes} B")
     }
 }
 

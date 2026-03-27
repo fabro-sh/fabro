@@ -1,16 +1,9 @@
 use anyhow::{Context, Result};
-use clap::Args;
 use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 
-use crate::provider_auth;
-
-#[derive(Args)]
-pub struct ProviderLoginArgs {
-    /// LLM provider to authenticate with
-    #[arg(long)]
-    pub provider: Provider,
-}
+use crate::args::ProviderLoginArgs;
+use crate::shared::provider_auth;
 
 pub async fn login_command(args: ProviderLoginArgs) -> Result<()> {
     let s = Styles::detect_stderr();

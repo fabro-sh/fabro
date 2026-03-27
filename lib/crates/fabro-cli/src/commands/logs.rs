@@ -3,27 +3,10 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
-use clap::Args;
 use fabro_util::terminal::Styles;
 use tracing::{debug, info};
 
-#[derive(Args)]
-pub struct LogsArgs {
-    /// Run ID prefix or workflow name (most recent run)
-    pub run: String,
-    /// Follow log output
-    #[arg(short, long)]
-    pub follow: bool,
-    /// Logs since timestamp or relative (e.g. "42m", "2h", "2026-01-02T13:00:00Z")
-    #[arg(long)]
-    pub since: Option<String>,
-    /// Lines from end (default: all)
-    #[arg(short = 'n', long)]
-    pub tail: Option<usize>,
-    /// Formatted colored output with rendered assistant text
-    #[arg(short = 'p', long)]
-    pub pretty: bool,
-}
+use crate::args::LogsArgs;
 
 pub fn run(args: LogsArgs, styles: &Styles) -> Result<()> {
     let base = fabro_workflows::run_lookup::default_runs_base();

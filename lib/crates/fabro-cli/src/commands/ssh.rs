@@ -1,20 +1,8 @@
 use anyhow::{bail, Context, Result};
-use clap::Args;
 use tracing::info;
 
-use super::shared::validate_daytona_provider;
-
-#[derive(Args)]
-pub struct SshArgs {
-    /// Run ID or prefix
-    pub run: String,
-    /// SSH access expiry in minutes (default 60)
-    #[arg(long, default_value = "60")]
-    pub ttl: f64,
-    /// Print the SSH command instead of connecting
-    #[arg(long)]
-    pub print: bool,
-}
+use crate::args::SshArgs;
+use crate::shared::validate_daytona_provider;
 
 pub async fn run(args: SshArgs) -> Result<()> {
     let base = fabro_workflows::run_lookup::default_runs_base();

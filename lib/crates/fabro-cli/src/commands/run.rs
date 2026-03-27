@@ -6,7 +6,6 @@ use std::time::Instant;
 
 use anyhow::{bail, Context};
 use chrono::Local;
-use clap::{Args, ValueEnum};
 use fabro_agent::{DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox};
 use fabro_config::config::FabroConfig;
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
@@ -33,114 +32,11 @@ use tracing::debug;
 
 use super::detached_support::{DetachedRunBootstrapGuard, DetachedRunCompletionGuard};
 use super::run_progress;
-use crate::commands::shared::{
+use crate::args::{CliSandboxProvider, GlobalArgs, RunArgs};
+use crate::cli_config;
+use crate::shared::{
     format_tokens_human, print_diagnostics, read_workflow_file, relative_path, tilde_path,
 };
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum CliSandboxProvider {
-    Local,
-    Docker,
-    Daytona,
-    #[cfg(feature = "exedev")]
-    Exe,
-    Ssh,
-}
-
-impl From<CliSandboxProvider> for SandboxProvider {
-    fn from(value: CliSandboxProvider) -> Self {
-        match value {
-            CliSandboxProvider::Local => Self::Local,
-            CliSandboxProvider::Docker => Self::Docker,
-            CliSandboxProvider::Daytona => Self::Daytona,
-            #[cfg(feature = "exedev")]
-            CliSandboxProvider::Exe => Self::Exe,
-            CliSandboxProvider::Ssh => Self::Ssh,
-        }
-    }
-}
-
-impl From<SandboxProvider> for CliSandboxProvider {
-    fn from(value: SandboxProvider) -> Self {
-        match value {
-            SandboxProvider::Local => Self::Local,
-            SandboxProvider::Docker => Self::Docker,
-            SandboxProvider::Daytona => Self::Daytona,
-            #[cfg(feature = "exedev")]
-            SandboxProvider::Exe => Self::Exe,
-            #[cfg(not(feature = "exedev"))]
-            SandboxProvider::Exe => Self::Local,
-            SandboxProvider::Ssh => Self::Ssh,
-        }
-    }
-}
-
-#[derive(Args)]
-pub struct RunArgs {
-    /// Path to a .fabro workflow file or .toml task config
-    #[arg(required = true)]
-    pub workflow: Option<PathBuf>,
-
-    /// Run output directory
-    #[arg(long)]
-    pub run_dir: Option<PathBuf>,
-
-    /// Execute with simulated LLM backend
-    #[arg(long)]
-    pub dry_run: bool,
-
-    /// Validate run configuration without executing
-    #[arg(long, conflicts_with = "dry_run")]
-    pub preflight: bool,
-
-    /// Auto-approve all human gates
-    #[arg(long)]
-    pub auto_approve: bool,
-
-    /// Override the workflow goal (exposed as $goal in prompts)
-    #[arg(long)]
-    pub goal: Option<String>,
-
-    /// Read the workflow goal from a file
-    #[arg(long, conflicts_with = "goal")]
-    pub goal_file: Option<PathBuf>,
-
-    /// Override default LLM model
-    #[arg(long)]
-    pub model: Option<String>,
-
-    /// Override default LLM provider
-    #[arg(long)]
-    pub provider: Option<String>,
-
-    /// Enable verbose output
-    #[arg(short, long)]
-    pub verbose: bool,
-
-    /// Sandbox for agent tools
-    #[arg(long, value_enum)]
-    pub sandbox: Option<CliSandboxProvider>,
-
-    /// Attach a label to this run (repeatable, format: KEY=VALUE)
-    #[arg(long = "label", value_name = "KEY=VALUE")]
-    pub label: Vec<String>,
-
-    /// Skip retro generation after the run
-    #[arg(long)]
-    pub no_retro: bool,
-
-    /// Keep the sandbox alive after the run finishes (for debugging)
-    #[arg(long)]
-    pub preserve_sandbox: bool,
-
-    /// Run the workflow in the background and print the run ID
-    #[arg(short = 'd', long, conflicts_with = "preflight")]
-    pub detach: bool,
-
-    /// Pre-generated run ID (used internally by --detach)
-    #[arg(long, hide = true)]
-    pub run_id: Option<String>,
-}
 
 /// Resolve goal from `--goal` string or `--goal-file` path.
 pub(crate) fn resolve_cli_goal(
@@ -836,6 +732,43 @@ fn ensure_resume_target_is_not_already_successful(run_dir: &Path) -> anyhow::Res
 /// # Errors
 ///
 /// Returns an error if the workflow cannot be read, parsed, validated, or executed.
+pub async fn execute(mut args: RunArgs, _globals: &GlobalArgs) -> anyhow::Result<()> {
+    let styles: &'static fabro_util::terminal::Styles =
+        Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
+    let cli_config = cli_config::load_cli_config(None)?;
+    args.verbose = args.verbose || cli_config.verbose_enabled();
+
+    if args.preflight {
+        let github_app = crate::shared::github::build_github_app_credentials(cli_config.app_id());
+        let git_author = fabro_workflows::git::GitAuthor::from_options(
+            cli_config.git_author().and_then(|a| a.name.clone()),
+            cli_config.git_author().and_then(|a| a.email.clone()),
+        );
+        run_command(args, cli_config, styles, github_app, git_author).await?;
+    } else {
+        let quiet = args.detach;
+        let _prevent_idle_sleep = cli_config.prevent_idle_sleep_enabled();
+        let (run_id, run_dir) = super::create::create_run(&args, cli_config, styles, quiet).await?;
+
+        #[cfg(feature = "sleep_inhibitor")]
+        let _sleep_guard = fabro_beastie::guard(_prevent_idle_sleep);
+
+        let child = super::start::start_run(&run_dir, false)?;
+
+        if args.detach {
+            println!("{run_id}");
+        } else {
+            let exit_code = super::attach::attach_run(&run_dir, true, styles, Some(child)).await?;
+            print_run_summary(&run_dir, &run_id, styles);
+            if exit_code != std::process::ExitCode::SUCCESS {
+                std::process::exit(1);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn run_command(
     args: RunArgs,
     run_defaults: FabroConfig,

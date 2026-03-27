@@ -1,17 +1,9 @@
-use std::path::PathBuf;
-
 use anyhow::bail;
-use clap::Args;
 use fabro_util::terminal::Styles;
 use fabro_validate::Severity;
 
-use crate::commands::shared::{print_diagnostics, relative_path};
-
-#[derive(Args)]
-pub struct ValidateArgs {
-    /// Path to the .fabro workflow file
-    pub workflow: PathBuf,
-}
+use crate::args::ValidateArgs;
+use crate::shared::{print_diagnostics, relative_path};
 
 pub fn run(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<()> {
     let (dot_path, _cfg) = fabro_config::project::resolve_workflow(&args.workflow)?;

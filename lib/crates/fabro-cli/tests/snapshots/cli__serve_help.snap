@@ -1,0 +1,36 @@
+---
+source: lib/crates/fabro-cli/tests/cli.rs
+assertion_line: 349
+expression: stdout
+---
+Start the HTTP API server
+
+Usage: fabro serve [OPTIONS]
+
+Options:
+      --debug
+          Enable DEBUG-level logging (default is INFO)
+      --port <PORT>
+          Port to listen on [default: 3000]
+      --host <HOST>
+          Host address to bind to [default: 127.0.0.1]
+      --no-upgrade-check
+          Disable automatic upgrade check
+      --mode <MODE>
+          Execution mode: standalone (in-process) or server (delegate to API)
+      --model <MODEL>
+          Override default LLM model
+      --provider <PROVIDER>
+          Override default LLM provider
+      --server-url <SERVER_URL>
+          Server URL (overrides server.base_url from cli.toml)
+      --dry-run
+          Execute with simulated LLM backend
+      --sandbox <SANDBOX>
+          Sandbox for agent tools
+      --max-concurrent-runs <MAX_CONCURRENT_RUNS>
+          Maximum number of concurrent run executions
+      --config <CONFIG>
+          Path to server config file (default: ~/.fabro/server.toml)
+  -h, --help
+          Print help

@@ -1,6 +1,8 @@
 pub use fabro_config::cli::*;
 
 #[cfg(feature = "server")]
+use fabro_config::FabroConfig;
+#[cfg(feature = "server")]
 use tracing::debug;
 
 #[cfg(feature = "server")]

@@ -5,7 +5,7 @@ use dialoguer::{Confirm, Password};
 use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 
-use crate::doctor;
+use crate::commands::doctor;
 
 // ---------------------------------------------------------------------------
 // Provider key URLs

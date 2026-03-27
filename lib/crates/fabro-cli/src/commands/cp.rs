@@ -1,21 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use clap::Args;
 use tracing::{debug, info};
 
-use super::shared::split_run_path;
-
-#[derive(Args)]
-pub struct CpArgs {
-    /// Source: <run-id>:<path> or local path
-    pub src: String,
-    /// Destination: <run-id>:<path> or local path
-    pub dst: String,
-    /// Recurse into directories
-    #[arg(short, long)]
-    pub recursive: bool,
-}
+use crate::args::CpArgs;
+use crate::shared::split_run_path;
 
 enum CopyDirection {
     Download {

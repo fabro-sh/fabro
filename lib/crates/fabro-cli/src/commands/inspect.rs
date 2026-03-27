@@ -1,14 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use clap::Args;
 use serde::Serialize;
 
-#[derive(Args)]
-pub struct InspectArgs {
-    /// Run ID prefix or workflow name (most recent run)
-    pub run: String,
-}
+use crate::args::InspectArgs;
 
 #[derive(Debug, Serialize)]
 pub struct InspectOutput {

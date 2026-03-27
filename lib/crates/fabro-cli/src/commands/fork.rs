@@ -1,26 +1,10 @@
 use anyhow::Context;
 use anyhow::Result;
-use clap::Args;
 use fabro_git_storage::gitobj::Store;
 use fabro_util::terminal::Styles;
 use git2::Repository;
 
-#[derive(Debug, Args)]
-pub struct ForkArgs {
-    /// Run ID (or unambiguous prefix)
-    pub run_id: String,
-
-    /// Target checkpoint: node name, node@visit, or @ordinal (omit to fork from latest)
-    pub target: Option<String>,
-
-    /// Show the checkpoint timeline instead of forking
-    #[arg(long)]
-    pub list: bool,
-
-    /// Skip pushing new branches to the remote
-    #[arg(long)]
-    pub no_push: bool,
-}
+use crate::args::ForkArgs;
 
 pub fn run(args: &ForkArgs, styles: &Styles) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
