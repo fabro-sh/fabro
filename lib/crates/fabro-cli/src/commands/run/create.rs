@@ -76,7 +76,11 @@ pub async fn create_run(
             run_dir: Some(run_dir.clone()),
             run_id: Some(run_id.clone()),
             workflow_slug: source_input.workflow_slug.clone(),
-            labels: parse_labels(&args.label),
+            labels: {
+                let mut labels = source_input.config.labels.clone();
+                labels.extend(parse_labels(&args.label));
+                labels
+            },
             base_branch,
             working_directory: Some(working_directory.clone()),
             host_repo_path: Some(working_directory.to_string_lossy().to_string()),

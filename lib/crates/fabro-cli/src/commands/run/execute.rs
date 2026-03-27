@@ -528,7 +528,12 @@ pub(crate) fn load_workflow_source_input(
 
     let raw_source = read_workflow_file(&dot_path)?;
     let cli_goal = resolve_cli_goal(goal, goal_file)?;
-    let goal_override = cli_goal.or_else(|| config.goal.clone());
+    let goal_override = cli_goal.or_else(|| config.goal.clone()).or_else(|| {
+        config
+            .goal_file
+            .as_ref()
+            .and_then(|path| resolve_cli_goal(None, Some(path)).ok().flatten())
+    });
 
     let workflow_toml_path = if resolved_workflow_path
         .extension()
@@ -847,7 +852,11 @@ async fn run_command_impl(
                     run_dir: Some(run_dir.clone()),
                     run_id: Some(run_id.clone()),
                     workflow_slug: source_input.workflow_slug.clone(),
-                    labels: parse_labels(&label_vec),
+                    labels: {
+                        let mut labels = source_input.config.labels.clone();
+                        labels.extend(parse_labels(&label_vec));
+                        labels
+                    },
                     base_branch: detected_base_branch.clone(),
                     working_directory: Some(original_cwd.clone()),
                     host_repo_path: Some(original_cwd.to_string_lossy().to_string()),
