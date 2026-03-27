@@ -4,7 +4,8 @@ use anyhow::{anyhow, Result};
 use chrono::Utc;
 
 use super::launcher::{
-    launcher_log_path, launcher_record_path, write_launcher_record, LauncherRecord,
+    launcher_log_path, launcher_record_path, remove_launcher_record, write_launcher_record,
+    LauncherRecord,
 };
 
 /// Spawn a detached engine process for the given run directory.
@@ -65,6 +66,10 @@ pub fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Child> {
     ) {
         kill_child_best_effort(&mut child);
         return Err(err);
+    }
+
+    if matches!(child.try_wait(), Ok(Some(_))) {
+        remove_launcher_record(&launcher_path);
     }
 
     Ok(child)

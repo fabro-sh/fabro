@@ -27,19 +27,17 @@ pub async fn create_run(
         cli_args_config,
         true,
     )?;
-    let working_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let base_branch = fabro_sandbox::daytona::detect_repo_info(&working_directory)
-        .ok()
-        .and_then(|(_, branch)| branch);
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     let created =
         match fabro_workflows::operations::create(fabro_workflows::operations::CreateRequest {
             workflow: fabro_workflows::operations::WorkflowInput::Path(workflow_path.clone()),
             settings,
+            cwd,
             run_dir: None,
             run_id: args.run_id.clone(),
-            base_branch,
-            host_repo_path: Some(working_directory.to_string_lossy().to_string()),
+            base_branch: None,
+            host_repo_path: None,
         }) {
             Ok(created) => created,
             Err(fabro_workflows::error::FabroError::ValidationFailed { diagnostics }) => {

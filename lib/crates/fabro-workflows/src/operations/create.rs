@@ -29,27 +29,11 @@ pub struct ValidateOptions {
 pub struct CreateRequest {
     pub workflow: WorkflowInput,
     pub settings: FabroSettings,
+    pub cwd: PathBuf,
     pub run_dir: Option<PathBuf>,
     pub run_id: Option<String>,
     pub host_repo_path: Option<String>,
     pub base_branch: Option<String>,
-}
-
-impl Default for CreateRequest {
-    fn default() -> Self {
-        Self {
-            workflow: WorkflowInput::DotSource {
-                source: String::new(),
-                base_dir: None,
-                workflow_slug: None,
-            },
-            settings: FabroSettings::default(),
-            run_dir: None,
-            run_id: None,
-            host_repo_path: None,
-            base_branch: None,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -67,7 +51,7 @@ struct PersistCreateOptions {
     workflow_slug: Option<String>,
     labels: HashMap<String, String>,
     base_branch: Option<String>,
-    working_directory: Option<PathBuf>,
+    working_directory: PathBuf,
     host_repo_path: Option<String>,
     goal_override: Option<String>,
     base_dir: Option<PathBuf>,
@@ -106,6 +90,7 @@ pub fn create(request: CreateRequest) -> Result<CreatedRun, FabroError> {
     let resolved = resolve_workflow(ResolveWorkflowRequest {
         workflow: request.workflow,
         settings: request.settings,
+        cwd: request.cwd,
     })
     .map_err(|err| FabroError::Parse(err.to_string()))?;
 
@@ -116,6 +101,7 @@ pub fn create(request: CreateRequest) -> Result<CreatedRun, FabroError> {
     let CreateRequest {
         workflow: _,
         settings: _,
+        cwd: _,
         run_dir,
         run_id,
         host_repo_path,
@@ -150,7 +136,7 @@ pub fn create(request: CreateRequest) -> Result<CreatedRun, FabroError> {
             workflow_slug: resolved.workflow_slug.clone(),
             labels: resolved.settings.labels.clone(),
             base_branch,
-            working_directory: Some(working_directory),
+            working_directory,
             host_repo_path,
             goal_override: resolved.goal_override.clone(),
             base_dir: resolved.base_dir.clone(),
@@ -276,8 +262,6 @@ fn persist_validated(
 
     let run_id = run_id.unwrap_or_else(|| ulid::Ulid::new().to_string());
     let run_dir = run_dir.unwrap_or_else(|| default_run_dir(&run_id, settings.dry_run_enabled()));
-    let working_directory = working_directory
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     let run_record = RunRecord {
         run_id,
@@ -529,14 +513,19 @@ mod tests {
             graph [goal="Test"]
             work [label="Work"]
         }"#;
+        let dir = tempfile::tempdir().unwrap();
         let err = create(CreateRequest {
             workflow: WorkflowInput::DotSource {
                 source: dot.to_string(),
                 base_dir: None,
                 workflow_slug: None,
             },
-            run_dir: Some(tempfile::tempdir().unwrap().path().join("run")),
-            ..Default::default()
+            settings: FabroSettings::default(),
+            cwd: dir.path().to_path_buf(),
+            run_dir: Some(dir.path().join("run")),
+            run_id: None,
+            host_repo_path: None,
+            base_branch: None,
         })
         .unwrap_err();
 
@@ -572,11 +561,11 @@ mod tests {
                 labels: HashMap::from([("env".to_string(), "test".to_string())]),
                 ..Default::default()
             },
+            cwd: dir.path().to_path_buf(),
             run_dir: Some(dir.path().join("run")),
             run_id: Some("run-123".to_string()),
             host_repo_path: Some(dir.path().display().to_string()),
             base_branch: Some("main".to_string()),
-            ..Default::default()
         })
         .unwrap();
 
@@ -644,13 +633,56 @@ mod tests {
                 dry_run: Some(true),
                 ..Default::default()
             },
-            ..Default::default()
+            cwd: dir.path().to_path_buf(),
+            run_dir: None,
+            run_id: None,
+            host_repo_path: None,
+            base_branch: None,
         })
         .unwrap();
 
         assert_eq!(
             std::fs::read_to_string(created.run_dir.join("workflow.toml")).unwrap(),
             "version = 1\ngraph = \"workflow.fabro\"\n"
+        );
+    }
+
+    #[test]
+    fn create_resolves_working_directory_and_repo_path_from_request_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+
+        let created = create(CreateRequest {
+            workflow: WorkflowInput::DotSource {
+                source: MINIMAL_DOT.to_string(),
+                base_dir: None,
+                workflow_slug: None,
+            },
+            settings: FabroSettings {
+                work_dir: Some("workspace".to_string()),
+                dry_run: Some(true),
+                ..Default::default()
+            },
+            cwd: dir.path().to_path_buf(),
+            run_dir: Some(dir.path().join("run")),
+            run_id: Some("run-cwd".to_string()),
+            host_repo_path: None,
+            base_branch: None,
+        })
+        .unwrap();
+
+        assert_eq!(created.persisted.run_record().working_directory, workspace);
+        assert_eq!(
+            created.persisted.run_record().host_repo_path.as_deref(),
+            Some(
+                created
+                    .persisted
+                    .run_record()
+                    .working_directory
+                    .to_string_lossy()
+                    .as_ref()
+            )
         );
     }
 }

@@ -29,6 +29,7 @@ pub async fn execute(mut args: PreflightArgs) -> anyhow::Result<()> {
         fabro_workflows::operations::ResolveWorkflowRequest {
             workflow: fabro_workflows::operations::WorkflowInput::Path(args.workflow.clone()),
             settings: settings.clone(),
+            cwd: std::env::current_dir()?,
         },
     )?;
 

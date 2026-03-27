@@ -39,7 +39,7 @@ pub async fn resume_command(args: ResumeArgs, styles: &'static Styles) -> anyhow
 }
 
 fn launcher_pid_alive(run_dir: &std::path::Path) -> bool {
-    super::launcher::launcher_record_for_run(run_dir)
+    super::launcher::active_launcher_record_for_run(run_dir)
         .map(|record| process_alive(record.pid))
         .or_else(|| {
             std::fs::read_to_string(run_dir.join("run.pid"))

@@ -29,6 +29,7 @@ pub struct WorkflowPathResolution {
 pub struct ResolveWorkflowRequest {
     pub workflow: WorkflowInput,
     pub settings: FabroSettings,
+    pub cwd: PathBuf,
 }
 
 #[derive(Clone, Debug)]
@@ -93,6 +94,24 @@ pub fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
     Some(file_stem.into_owned())
 }
 
+fn cached_workflow_graph_path(path: &Path) -> Option<PathBuf> {
+    if path.file_name().and_then(|name| name.to_str()) != Some("workflow.toml") {
+        return None;
+    }
+
+    let canonical = path.with_file_name(RUN_GRAPH_FILE);
+    if canonical.exists() {
+        return Some(canonical);
+    }
+
+    let legacy = path.with_file_name(LEGACY_RUN_GRAPH_FILE);
+    if legacy.exists() {
+        return Some(legacy);
+    }
+
+    None
+}
+
 pub fn resolve_workflow_path(workflow_path: &Path) -> anyhow::Result<WorkflowPathResolution> {
     let path = project_config::resolve_workflow_arg(workflow_path)?;
     let workflow_slug = workflow_slug_from_path(&path);
@@ -111,15 +130,9 @@ pub fn resolve_workflow_path(workflow_path: &Path) -> anyhow::Result<WorkflowPat
                     workflow_slug,
                 })
             }
-            Err(_)
-                if !path.exists() && path.starts_with(crate::run_lookup::default_runs_base()) =>
-            {
-                let canonical = path.with_file_name(RUN_GRAPH_FILE);
-                let legacy = path.with_file_name(LEGACY_RUN_GRAPH_FILE);
-                let dot_path = if canonical.exists() || !legacy.exists() {
-                    canonical
-                } else {
-                    legacy
+            Err(_) if !path.exists() => {
+                let Some(dot_path) = cached_workflow_graph_path(&path) else {
+                    anyhow::bail!("Workflow not found: {}", path.display());
                 };
                 Ok(WorkflowPathResolution {
                     resolved_workflow_path: path,
@@ -177,12 +190,11 @@ pub fn resolve_settings_for_path(
 }
 
 pub fn resolve_workflow(request: ResolveWorkflowRequest) -> anyhow::Result<ResolvedWorkflow> {
-    let caller_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     match request.workflow {
         WorkflowInput::Path(workflow_path) => {
             let resolution = resolve_workflow_path(&workflow_path)?;
             let settings = request.settings;
-            let working_directory = resolve_working_directory(&settings, &caller_cwd);
+            let working_directory = resolve_working_directory(&settings, &request.cwd);
             let raw_source = std::fs::read_to_string(&resolution.dot_path)
                 .with_context(|| format!("Failed to read {}", resolution.dot_path.display()))?;
             let goal_override = settings.goal.clone().or(resolve_goal_file(
@@ -214,7 +226,7 @@ pub fn resolve_workflow(request: ResolveWorkflowRequest) -> anyhow::Result<Resol
             workflow_slug,
         } => {
             let settings = request.settings;
-            let working_directory = resolve_working_directory(&settings, &caller_cwd);
+            let working_directory = resolve_working_directory(&settings, &request.cwd);
             let goal_override = settings.goal.clone().or(resolve_goal_file(
                 settings.goal_file.as_deref(),
                 &working_directory,
@@ -231,5 +243,52 @@ pub fn resolve_workflow(request: ResolveWorkflowRequest) -> anyhow::Result<Resol
                 working_directory,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_workflow_path_uses_cached_graph_sibling_for_missing_workflow_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_dir = dir
+            .path()
+            .join("custom-storage")
+            .join("runs")
+            .join("run-123");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        std::fs::write(
+            run_dir.join("workflow.fabro"),
+            "digraph Test { start -> exit }",
+        )
+        .unwrap();
+
+        let resolution = resolve_workflow_path(&run_dir.join("workflow.toml")).unwrap();
+
+        assert_eq!(resolution.dot_path, run_dir.join("workflow.fabro"));
+        assert!(resolution.workflow_config.is_none());
+        assert!(resolution.workflow_toml_path.is_none());
+    }
+
+    #[test]
+    fn resolve_workflow_uses_explicit_cwd_for_relative_work_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved = resolve_workflow(ResolveWorkflowRequest {
+            workflow: WorkflowInput::DotSource {
+                source: "digraph Test { start -> exit }".to_string(),
+                base_dir: None,
+                workflow_slug: None,
+            },
+            settings: FabroSettings {
+                work_dir: Some("workspace".to_string()),
+                ..Default::default()
+            },
+            cwd: dir.path().to_path_buf(),
+        })
+        .unwrap();
+
+        assert_eq!(resolved.working_directory, dir.path().join("workspace"));
     }
 }

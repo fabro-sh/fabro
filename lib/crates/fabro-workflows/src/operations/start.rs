@@ -144,22 +144,6 @@ async fn execute_persisted_run(
         }
     };
 
-    let original_cwd = std::env::current_dir().ok();
-    if let Err(err) = std::env::set_current_dir(&persisted.run_record().working_directory) {
-        let err = FabroError::Io(format!(
-            "Failed to set working directory to {}: {err}",
-            persisted.run_record().working_directory.display()
-        ));
-        let _ = persist_detached_failure(run_dir, "bootstrap", StatusReason::BootstrapFailed, &err);
-        bootstrap_guard.defuse();
-        return Err(err);
-    }
-    let _cwd_guard = scopeguard::guard(original_cwd, |cwd| {
-        if let Some(cwd) = cwd {
-            let _ = std::env::set_current_dir(cwd);
-        }
-    });
-
     let options = match derive_start_options(&persisted, services) {
         Ok(options) => options,
         Err(err) => {
@@ -801,11 +785,14 @@ mod tests {
                 dry_run: Some(true),
                 ..Default::default()
             },
+            cwd: run_dir
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf(),
             run_dir: Some(run_dir.to_path_buf()),
             run_id: Some("run-test".to_string()),
-            host_repo_path: Some(std::env::current_dir().unwrap().display().to_string()),
-            base_branch: Some("main".to_string()),
-            ..Default::default()
+            host_repo_path: None,
+            base_branch: None,
         })
         .unwrap()
         .persisted

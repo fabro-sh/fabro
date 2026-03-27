@@ -271,7 +271,7 @@ fn read_status_record(path: &Path) -> Option<RunStatusRecord> {
 }
 
 fn read_launcher_pid(run_dir: &Path) -> Option<u32> {
-    super::launcher::launcher_record_for_run(run_dir)
+    super::launcher::active_launcher_record_for_run(run_dir)
         .map(|record| record.pid)
         .or_else(|| {
             std::fs::read_to_string(run_dir.join("run.pid"))

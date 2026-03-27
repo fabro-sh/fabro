@@ -533,6 +533,7 @@ async fn start_run(
             workflow_slug: None,
         },
         settings,
+        cwd: std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir()),
         run_dir: Some(run_dir.clone()),
         run_id: Some(run_id.clone()),
         host_repo_path: None,
