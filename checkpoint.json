@@ -1,9 +1,10 @@
 {
-  "timestamp": "2026-03-27T13:59:09.269663Z",
-  "current_node": "run_tests",
+  "timestamp": "2026-03-27T13:59:09.847402Z",
+  "current_node": "report",
   "completed_nodes": [
     "start",
-    "run_tests"
+    "run_tests",
+    "report"
   ],
   "node_retries": {},
   "context_values": {
@@ -11,25 +12,38 @@
     "failure_signature": "",
     "internal.fidelity": "compact",
     "internal.node_visit_count": 1,
-    "last_response": "[Simulated] Response for stage: run_tests",
+    "last_response": "[Simulated] Response for stage: report",
     "internal.retry_count.run_tests": 0,
     "response.run_tests": "[Simulated] Response for stage: run_tests",
     "internal.work_dir": "/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpec24P9/run/worktree",
-    "current.preamble": "Goal: Run tests and report results\n",
+    "internal.retry_count.report": 0,
+    "response.report": "[Simulated] Response for stage: report",
+    "current.preamble": "Goal: Run tests and report results\n\n## Completed stages\n- **run_tests**: success\n",
     "internal.run_id": "01KMQSEXJ7Z4Q65KMA53PSE310",
-    "last_stage": "run_tests",
+    "last_stage": "report",
     "failure_class": "",
     "outcome": "success",
-    "internal.thread_id": "start",
+    "thread.run_tests.current_node": "report",
+    "internal.thread_id": "run_tests",
     "graph.rankdir": "LR",
     "internal.retry_count.start": 0,
     "thread.start.current_node": "run_tests",
-    "current_node": "run_tests"
+    "current_node": "report"
   },
   "node_outcomes": {
     "start": {
       "status": "success",
       "notes": "[Simulated] start",
+      "usage": null
+    },
+    "report": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "report",
+        "last_response": "[Simulated] Response for stage: report",
+        "response.report": "[Simulated] Response for stage: report"
+      },
+      "notes": "[Simulated] report",
       "usage": null
     },
     "run_tests": {
@@ -43,9 +57,10 @@
       "usage": null
     }
   },
-  "next_node_id": "report",
+  "next_node_id": "exit",
   "node_visits": {
     "run_tests": 1,
+    "report": 1,
     "start": 1
   }
 }
