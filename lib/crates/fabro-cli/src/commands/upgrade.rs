@@ -7,22 +7,7 @@ use semver::Version;
 use sha2::{Digest, Sha256};
 use tracing::debug;
 
-// ── Clap args ──────────────────────────────────────────────────────────────
-
-#[derive(clap::Args)]
-pub struct UpgradeArgs {
-    /// Target version (e.g. "0.5.0" or "v0.5.0")
-    #[arg(long)]
-    version: Option<String>,
-
-    /// Upgrade even if already on the target version
-    #[arg(long)]
-    force: bool,
-
-    /// Preview what would happen without making changes
-    #[arg(long)]
-    dry_run: bool,
-}
+use crate::args::UpgradeArgs;
 
 // ── Download backend abstraction ───────────────────────────────────────────
 

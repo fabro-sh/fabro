@@ -780,7 +780,7 @@ pub fn check_crypto(input: &CryptoInput) -> CheckResult {
         let result = input
             .jwt_public_key
             .as_deref()
-            .ok_or_else(|| "JWT configured but ARC_JWT_PUBLIC_KEY not set".to_string())
+            .ok_or_else(|| "JWT configured but FABRO_JWT_PUBLIC_KEY not set".to_string())
             .and_then(|raw| decode_pem_value("FABRO_JWT_PUBLIC_KEY", raw))
             .and_then(|pem| {
                 jsonwebtoken::DecodingKey::from_ed_pem(pem.as_bytes())
@@ -947,7 +947,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
 
     #[cfg(feature = "server")]
     let api_status = {
-        let api = server_config.api.unwrap_or_default();
+        let api = server_config.api.clone().unwrap_or_default();
         ApiStatus {
             base_url: api.base_url.clone(),
             authentication_strategies: api.authentication_strategies.clone(),
@@ -956,13 +956,22 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
 
     #[cfg(feature = "server")]
     let web_status = {
-        let web = server_config.web.unwrap_or_default();
+        let web = server_config.web.clone().unwrap_or_default();
         WebStatus {
             url: web.url.clone(),
             auth_provider: web.auth.provider.clone(),
             allowed_usernames_count: web.auth.allowed_usernames.len(),
         }
     };
+
+    #[cfg(feature = "server")]
+    let server_git = server_config.git.clone().unwrap_or_default();
+
+    #[cfg(feature = "server")]
+    let server_api = server_config.api.clone().unwrap_or_default();
+
+    #[cfg(feature = "server")]
+    let server_web = server_config.web.clone().unwrap_or_default();
 
     let git_app_id = cli_config.app_id().map(str::to_owned);
     let private_key_raw = std::env::var("GITHUB_APP_PRIVATE_KEY").ok();
@@ -995,7 +1004,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
         private_key_set: private_key_raw.is_some(),
         sign_result,
         #[cfg(feature = "server")]
-        client_id: server_config.git.client_id.is_some(),
+        client_id: server_git.client_id.is_some(),
         #[cfg(feature = "server")]
         client_secret: std::env::var("GITHUB_APP_CLIENT_SECRET").is_ok(),
         #[cfg(feature = "server")]
@@ -1004,12 +1013,11 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
 
     #[cfg(feature = "server")]
     let crypto_input = {
-        let has_mtls = server_config
-            .api
+        let has_mtls = server_api
             .authentication_strategies
             .contains(&ApiAuthStrategy::Mtls);
         let tls_files = if has_mtls {
-            server_config.api.tls.as_ref().map(|tls| {
+            server_api.tls.as_ref().map(|tls| {
                 let read = |p: &std::path::Path| -> Result<String, String> {
                     let expanded = fabro_config::expand_tilde(p);
                     std::fs::read_to_string(&expanded)
@@ -1025,7 +1033,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
             None
         };
         CryptoInput {
-            auth_strategies: server_config.api.authentication_strategies.clone(),
+            auth_strategies: server_api.authentication_strategies.clone(),
             tls_files,
             jwt_public_key: std::env::var("FABRO_JWT_PUBLIC_KEY").ok(),
             jwt_private_key: std::env::var("FABRO_JWT_PRIVATE_KEY").ok(),
@@ -1081,9 +1089,9 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
 
         #[cfg(feature = "server")]
         {
-            let api_url = format!("{}/runs", server_config.api.base_url);
+            let api_url = format!("{}/runs", server_api.base_url);
             let api_fut = probe_url(&http, &api_url);
-            let web_fut = probe_url(&http, &server_config.web.url);
+            let web_fut = probe_url(&http, &server_web.url);
 
             let (sandbox, llm, brave, api, web) =
                 tokio::join!(sandbox_fut, llm_fut, brave_fut, api_fut, web_fut);

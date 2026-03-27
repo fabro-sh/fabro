@@ -5,5 +5,6 @@ args = ["doctor", "--dry-run"]
 inherit = false
 
 [env.add]
+PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 HOME = "/tmp/fabro-trycmd-nonexistent"
 ANTHROPIC_API_KEY = "sk-test-dummy"

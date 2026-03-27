@@ -1,30 +1,12 @@
 use std::io::Write;
 
 use anyhow::{bail, Result};
-use clap::Args;
 use fabro_util::terminal::Styles;
 use fabro_workflows::run_status::{RunStatus, RunStatusRecord};
 use tracing::info;
 
-use super::shared::format_duration_ms;
-
-#[derive(Args)]
-pub struct WaitArgs {
-    /// Run ID prefix or workflow name (most recent run)
-    pub run: String,
-
-    /// Maximum time to wait in seconds
-    #[arg(long, value_name = "SECONDS")]
-    pub timeout: Option<u64>,
-
-    /// Poll interval in milliseconds
-    #[arg(long, value_name = "MS", default_value = "1000")]
-    pub interval: u64,
-
-    /// Output conclusion as JSON
-    #[arg(long)]
-    pub json: bool,
-}
+use crate::args::WaitArgs;
+use crate::shared::format_duration_ms;
 
 pub fn run(args: WaitArgs, styles: &Styles) -> Result<()> {
     let base = fabro_workflows::run_lookup::default_runs_base();

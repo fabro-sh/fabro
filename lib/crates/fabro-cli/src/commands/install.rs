@@ -15,8 +15,8 @@ use rand::Rng;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
-use crate::doctor;
-use crate::provider_auth::{
+use super::doctor;
+use crate::shared::provider_auth::{
     prompt_and_validate_key, prompt_confirm, provider_display_name, run_openai_oauth_or_api_key,
     write_env_file,
 };
