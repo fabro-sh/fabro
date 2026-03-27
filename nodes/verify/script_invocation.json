@@ -1,0 +1,5 @@
+{
+  "command": "cat /tmp/scenario_full/result.txt",
+  "language": "shell",
+  "timeout_ms": null
+}
