@@ -880,11 +880,11 @@ fn start_by_workflow_name_prefers_newly_created_submitted_run() {
     );
 }
 
-// Bug 2: _run_engine should use cached graph.fabro, not run.json working_directory.
+// Bug 2: __detached should use cached graph.fabro, not run.json working_directory.
 // When the original workflow file is deleted between create and start,
 // the engine should read the snapshot saved at create time.
 #[test]
-fn bug2_run_engine_uses_cached_graph_not_original_path() {
+fn bug2_detached_uses_cached_graph_not_original_path() {
     let dir = tempfile::tempdir().unwrap();
     let run_dir = dir.path().join("run");
     std::fs::create_dir_all(&run_dir).unwrap();
@@ -928,9 +928,9 @@ digraph G {
     // The cached graph snapshot saved by `fabro create`
     std::fs::write(run_dir.join("graph.fabro"), dot).unwrap();
 
-    // _run_engine should use graph.fabro and never reference the deleted file.
+    // __detached should use graph.fabro and never reference the deleted file.
     let output = arc()
-        .args(["_run_engine", "--run-dir", run_dir.to_str().unwrap()])
+        .args(["__detached", "--run-dir", run_dir.to_str().unwrap()])
         .env("NO_COLOR", "1")
         .timeout(std::time::Duration::from_secs(15))
         .output()
@@ -945,7 +945,7 @@ digraph G {
 }
 
 #[test]
-fn bug4_run_engine_resume_rejects_completed_run_without_mutating_it() {
+fn bug4_detached_resume_rejects_completed_run_without_mutating_it() {
     let home = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
     let workflow_path = project.path().join("workflow.fabro");
@@ -1005,7 +1005,7 @@ digraph Test {
 
     arc()
         .env("HOME", home.path())
-        .args(["_run_engine", "--run-dir", &run_dir, "--resume"])
+        .args(["__detached", "--run-dir", &run_dir, "--resume"])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .failure()

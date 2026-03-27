@@ -47,7 +47,7 @@ pub async fn execute(run_dir: PathBuf, resume: bool) -> Result<()> {
     }
 
     let result = if resume {
-        super::run::resume_from_record(
+        super::execute::resume_from_record(
             persisted,
             run_dir.clone(),
             cli_config,
@@ -57,7 +57,7 @@ pub async fn execute(run_dir: PathBuf, resume: bool) -> Result<()> {
         )
         .await
     } else {
-        super::run::run_from_record(
+        super::execute::run_from_record(
             persisted,
             run_dir.clone(),
             cli_config,

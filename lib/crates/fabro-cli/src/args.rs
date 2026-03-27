@@ -596,13 +596,7 @@ pub(crate) struct UpgradeArgs {
 }
 
 #[derive(Subcommand)]
-pub(crate) enum Commands {
-    /// LLM prompt operations
-    #[command(hide = true)]
-    Llm(LlmNamespace),
-    /// Run an agentic coding session
-    #[command(hide = true)]
-    Exec(fabro_agent::cli::AgentArgs),
+pub(crate) enum RunCommands {
     /// Launch a workflow run
     Run(RunArgs),
     /// Create a workflow run (allocate run dir, persist spec)
@@ -618,8 +612,8 @@ pub(crate) enum Commands {
         run: String,
     },
     /// Internal: run the engine process (reads run.json from run dir)
-    #[command(name = "_run_engine", hide = true)]
-    RunEngine {
+    #[command(name = "__detached", hide = true)]
+    Detached {
         /// Path to the run directory
         #[arg(long)]
         run_dir: PathBuf,
@@ -627,6 +621,76 @@ pub(crate) enum Commands {
         #[arg(long)]
         resume: bool,
     },
+    /// Get a preview URL for a port on a run's sandbox
+    Preview(PreviewArgs),
+    /// SSH into a run's Daytona sandbox
+    Ssh(SshArgs),
+    /// Show the diff of changes from a workflow run
+    #[command(hide = true)]
+    Diff(DiffArgs),
+    /// View the event log of a workflow run
+    Logs(LogsArgs),
+    /// Resume an interrupted workflow run
+    Resume(ResumeArgs),
+    /// Rewind a workflow run to an earlier checkpoint
+    Rewind(RewindArgs),
+    /// Fork a workflow run from an earlier checkpoint into a new run
+    Fork(ForkArgs),
+    /// Block until a workflow run completes
+    Wait(WaitArgs),
+}
+
+impl RunCommands {
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            Self::Run(_) => "run",
+            Self::Create(_) => "create",
+            Self::Start { .. } => "start",
+            Self::Attach { .. } => "attach",
+            Self::Detached { .. } => "__detached",
+            Self::Preview(_) => "preview",
+            Self::Ssh(_) => "ssh",
+            Self::Diff(_) => "diff",
+            Self::Logs(_) => "logs",
+            Self::Resume(_) => "resume",
+            Self::Rewind(_) => "rewind",
+            Self::Fork(_) => "fork",
+            Self::Wait(_) => "wait",
+        }
+    }
+}
+
+#[derive(Subcommand)]
+pub(crate) enum RunsCommands {
+    /// List workflow runs
+    #[command(hide = true)]
+    Ps(RunsListArgs),
+    /// Remove one or more workflow runs
+    Rm(RunsRemoveArgs),
+    /// Show detailed information about a workflow run
+    Inspect(InspectArgs),
+}
+
+impl RunsCommands {
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            Self::Ps(_) => "ps",
+            Self::Rm(_) => "rm",
+            Self::Inspect(_) => "inspect",
+        }
+    }
+}
+
+#[derive(Subcommand)]
+pub(crate) enum Commands {
+    /// LLM prompt operations
+    #[command(hide = true)]
+    Llm(LlmNamespace),
+    /// Run an agentic coding session
+    #[command(hide = true)]
+    Exec(fabro_agent::cli::AgentArgs),
+    #[command(flatten)]
+    RunCmd(RunCommands),
     /// Validate a workflow
     Validate(ValidateArgs),
     /// Render a workflow graph as SVG or PNG
@@ -638,17 +702,8 @@ pub(crate) enum Commands {
     Asset(AssetNamespace),
     /// Copy files to/from a run's sandbox
     Cp(CpArgs),
-    /// Get a preview URL for a port on a run's sandbox
-    Preview(PreviewArgs),
-    /// SSH into a run's Daytona sandbox
-    Ssh(SshArgs),
-    /// Show the diff of changes from a workflow run
-    #[command(hide = true)]
-    Diff(DiffArgs),
-    /// View the event log of a workflow run
-    Logs(LogsArgs),
-    /// Show detailed information about a workflow run
-    Inspect(InspectArgs),
+    #[command(flatten)]
+    RunsCmd(RunsCommands),
     /// List and test LLM models
     Model {
         #[command(subcommand)]
@@ -676,11 +731,6 @@ pub(crate) enum Commands {
         #[arg(long, default_value = "http://localhost:5173")]
         web_url: String,
     },
-    /// List workflow runs
-    #[command(hide = true)]
-    Ps(RunsListArgs),
-    /// Remove one or more workflow runs
-    Rm(RunsRemoveArgs),
     /// Pull request operations
     Pr(PrNamespace),
     /// Skill management
@@ -688,14 +738,6 @@ pub(crate) enum Commands {
     Skill(SkillNamespace),
     /// Manage secrets in ~/.fabro/.env
     Secret(SecretNamespace),
-    /// Resume an interrupted workflow run
-    Resume(ResumeArgs),
-    /// Rewind a workflow run to an earlier checkpoint
-    Rewind(RewindArgs),
-    /// Fork a workflow run from an earlier checkpoint into a new run
-    Fork(ForkArgs),
-    /// Block until a workflow run completes
-    Wait(WaitArgs),
     /// Workflow operations
     Workflow(WorkflowNamespace),
     /// Open the Discord community in the browser
@@ -736,20 +778,12 @@ impl Commands {
                 AssetCommand::Cp(_) => "asset cp",
             },
             Self::Exec(_) => "exec",
-            Self::Run(_) => "run",
-            Self::Create(_) => "create",
-            Self::Start { .. } => "start",
-            Self::Attach { .. } => "attach",
-            Self::RunEngine { .. } => "_run_engine",
+            Self::RunCmd(cmd) => cmd.name(),
             Self::Validate(_) => "validate",
             Self::Graph(_) => "graph",
             Self::Parse(_) => "parse",
             Self::Cp(_) => "cp",
-            Self::Preview(_) => "preview",
-            Self::Ssh(_) => "ssh",
-            Self::Diff(_) => "diff",
-            Self::Logs(_) => "logs",
-            Self::Inspect(_) => "inspect",
+            Self::RunsCmd(cmd) => cmd.name(),
             Self::Model { command } => match command {
                 Some(fabro_llm::cli::ModelsCommand::List { .. }) => "model list",
                 Some(fabro_llm::cli::ModelsCommand::Test { .. }) => "model test",
@@ -764,8 +798,6 @@ impl Commands {
             },
             Self::Init => "init",
             Self::Install { .. } => "install",
-            Self::Ps(_) => "ps",
-            Self::Rm(_) => "rm",
             Self::Pr(ns) => match &ns.command {
                 PrCommand::Create(_) => "pr create",
                 PrCommand::List(_) => "pr list",
@@ -779,10 +811,6 @@ impl Commands {
                 SecretCommand::Rm(_) => "secret rm",
                 SecretCommand::Set(_) => "secret set",
             },
-            Self::Resume(_) => "resume",
-            Self::Rewind(_) => "rewind",
-            Self::Fork(_) => "fork",
-            Self::Wait(_) => "wait",
             Self::Workflow(ns) => match &ns.command {
                 WorkflowCommand::List(_) => "workflow list",
                 WorkflowCommand::Create(_) => "workflow create",

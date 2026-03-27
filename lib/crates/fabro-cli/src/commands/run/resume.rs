@@ -73,7 +73,7 @@ pub async fn resume_command(args: ResumeArgs, styles: &'static Styles) -> anyhow
         println!("{run_id}");
     } else {
         let exit_code = super::attach::attach_run(&run_dir, true, styles, Some(child)).await?;
-        super::run::print_run_summary(&run_dir, &run_id, styles);
+        super::execute::print_run_summary(&run_dir, &run_id, styles);
         if exit_code != std::process::ExitCode::SUCCESS {
             std::process::exit(1);
         }

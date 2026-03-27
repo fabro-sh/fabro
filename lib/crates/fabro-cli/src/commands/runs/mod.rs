@@ -7,8 +7,21 @@ use cli_table::{print_stdout, Cell, CellStruct, Color, Style, Table};
 use fabro_util::terminal::Styles;
 use tracing::warn;
 
-use crate::args::{RunsListArgs, RunsRemoveArgs};
+use crate::args::{RunsCommands, RunsListArgs, RunsRemoveArgs};
 use crate::shared::{color_if, format_duration_ms, tilde_path};
+
+pub(crate) mod inspect;
+
+pub async fn dispatch(cmd: RunsCommands) -> Result<()> {
+    match cmd {
+        RunsCommands::Ps(args) => {
+            let styles = fabro_util::terminal::Styles::detect_stdout();
+            list_command(&args, &styles)
+        }
+        RunsCommands::Rm(args) => remove_command(&args).await,
+        RunsCommands::Inspect(args) => inspect::run(&args),
+    }
+}
 
 pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
     let base = fabro_workflows::run_lookup::default_runs_base();

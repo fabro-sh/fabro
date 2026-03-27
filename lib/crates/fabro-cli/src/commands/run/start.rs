@@ -56,7 +56,7 @@ pub fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Child> {
             return Err(err);
         }
     };
-    cmd.args(["_run_engine", "--run-dir"]).arg(run_dir);
+    cmd.args(["__detached", "--run-dir"]).arg(run_dir);
     if resume {
         cmd.arg("--resume");
     }

@@ -140,8 +140,7 @@ async fn main_inner() -> (String, Result<()>) {
 
     let upgrade_handle = if matches!(
         command.as_ref(),
-        Commands::Run(_)
-            | Commands::Create(_)
+        Commands::RunCmd(RunCommands::Run(_) | RunCommands::Create(_))
             | Commands::Exec(_)
             | Commands::Repo(_)
             | Commands::Init
@@ -156,35 +155,7 @@ async fn main_inner() -> (String, Result<()>) {
         match *command {
             Commands::Llm(ns) => commands::llm::dispatch(ns, &globals).await?,
             Commands::Exec(args) => commands::exec::execute(args, &globals).await?,
-            Commands::Run(args) => commands::run::execute(args, &globals).await?,
-            Commands::Create(args) => {
-                let styles: &'static fabro_util::terminal::Styles =
-                    Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
-                let cli_config = cli_config::load_cli_config(None)?;
-                let (run_id, _run_dir) =
-                    commands::create::create_run(&args, cli_config, styles, true).await?;
-                println!("{run_id}");
-            }
-            Commands::Start { run } => {
-                let base = fabro_workflows::run_lookup::default_runs_base();
-                let run_info = fabro_workflows::run_lookup::resolve_run(&base, &run)?;
-                let child = commands::start::start_run(&run_info.path, false)?;
-                eprintln!("Started engine process (PID {})", child.id());
-            }
-            Commands::Attach { run } => {
-                let styles: &'static fabro_util::terminal::Styles =
-                    Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
-                let base = fabro_workflows::run_lookup::default_runs_base();
-                let run_info = fabro_workflows::run_lookup::resolve_run(&base, &run)?;
-                let exit_code =
-                    commands::attach::attach_run(&run_info.path, false, styles, None).await?;
-                if exit_code != std::process::ExitCode::SUCCESS {
-                    std::process::exit(1);
-                }
-            }
-            Commands::RunEngine { run_dir, resume } => {
-                commands::run_engine::execute(run_dir, resume).await?;
-            }
+            Commands::RunCmd(cmd) => commands::run::dispatch(cmd, &globals).await?,
             Commands::Validate(args) => {
                 let styles = fabro_util::terminal::Styles::detect_stderr();
                 commands::validate::run(&args, &styles)?;
@@ -200,22 +171,7 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Cp(args) => {
                 commands::cp::cp_command(args).await?;
             }
-            Commands::Preview(args) => {
-                commands::preview::run(args).await?;
-            }
-            Commands::Ssh(args) => {
-                commands::ssh::run(args).await?;
-            }
-            Commands::Diff(args) => {
-                commands::diff::run(args).await?;
-            }
-            Commands::Logs(args) => {
-                let styles = fabro_util::terminal::Styles::detect_stdout();
-                commands::logs::run(args, &styles)?;
-            }
-            Commands::Inspect(args) => {
-                commands::inspect::run(&args)?;
-            }
+            Commands::RunsCmd(cmd) => commands::runs::dispatch(cmd).await?,
             Commands::Model { command } => commands::model::execute(command, &globals).await?,
             #[cfg(feature = "server")]
             Commands::Serve(args) => {
@@ -246,37 +202,8 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Install { web_url } => {
                 commands::install::run_install(&web_url).await?;
             }
-            Commands::Ps(args) => {
-                let styles = fabro_util::terminal::Styles::detect_stdout();
-                commands::runs::list_command(&args, &styles)?;
-            }
-            Commands::Rm(args) => {
-                commands::runs::remove_command(&args).await?;
-            }
             Commands::Pr(ns) => commands::pr::dispatch(ns).await?,
             Commands::Secret(ns) => commands::secret::dispatch(ns)?,
-            Commands::Resume(args) => {
-                let styles: &'static fabro_util::terminal::Styles =
-                    Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
-                #[cfg(feature = "sleep_inhibitor")]
-                let _sleep_guard = {
-                    let cli_config = cli_config::load_cli_config(None)?;
-                    fabro_beastie::guard(cli_config.prevent_idle_sleep_enabled())
-                };
-                commands::resume::resume_command(args, styles).await?;
-            }
-            Commands::Rewind(args) => {
-                let styles = fabro_util::terminal::Styles::detect_stderr();
-                commands::rewind::run(&args, &styles)?;
-            }
-            Commands::Fork(args) => {
-                let styles = fabro_util::terminal::Styles::detect_stderr();
-                commands::fork::run(&args, &styles)?;
-            }
-            Commands::Wait(args) => {
-                let styles = fabro_util::terminal::Styles::detect_stderr();
-                commands::wait::run(args, &styles)?;
-            }
             Commands::Workflow(ns) => commands::workflow::dispatch(ns)?,
             Commands::Skill(ns) => commands::skill::dispatch(ns)?,
             Commands::Upgrade(args) => {
@@ -358,7 +285,7 @@ mod tests {
         let cli = Cli::try_parse_from(["fabro", "create", "my-workflow.toml", "--goal", "test"])
             .expect("should parse");
         match *cli.command {
-            Commands::Create(args) => {
+            Commands::RunCmd(RunCommands::Create(args)) => {
                 assert_eq!(
                     args.workflow.as_deref(),
                     Some(std::path::Path::new("my-workflow.toml"))
@@ -373,7 +300,7 @@ mod tests {
     fn parse_start_command() {
         let cli = Cli::try_parse_from(["fabro", "start", "ABC123"]).expect("should parse");
         match *cli.command {
-            Commands::Start { run } => {
+            Commands::RunCmd(RunCommands::Start { run }) => {
                 assert_eq!(run, "ABC123");
             }
             _ => panic!("unexpected command variant"),
@@ -384,7 +311,7 @@ mod tests {
     fn parse_attach_command() {
         let cli = Cli::try_parse_from(["fabro", "attach", "ABC123"]).expect("should parse");
         match *cli.command {
-            Commands::Attach { run } => {
+            Commands::RunCmd(RunCommands::Attach { run }) => {
                 assert_eq!(run, "ABC123");
             }
             _ => panic!("unexpected command variant"),
@@ -392,11 +319,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_run_engine_command() {
-        let cli = Cli::try_parse_from(["fabro", "_run_engine", "--run-dir", "/tmp/runs/test"])
+    fn parse_detached_command() {
+        let cli = Cli::try_parse_from(["fabro", "__detached", "--run-dir", "/tmp/runs/test"])
             .expect("should parse");
         match *cli.command {
-            Commands::RunEngine { run_dir, resume } => {
+            Commands::RunCmd(RunCommands::Detached { run_dir, resume }) => {
                 assert_eq!(run_dir, std::path::PathBuf::from("/tmp/runs/test"));
                 assert!(!resume);
             }
@@ -405,17 +332,17 @@ mod tests {
     }
 
     #[test]
-    fn parse_run_engine_with_resume() {
+    fn parse_detached_with_resume() {
         let cli = Cli::try_parse_from([
             "fabro",
-            "_run_engine",
+            "__detached",
             "--run-dir",
             "/tmp/runs/test",
             "--resume",
         ])
         .expect("should parse");
         match *cli.command {
-            Commands::RunEngine { run_dir, resume } => {
+            Commands::RunCmd(RunCommands::Detached { run_dir, resume }) => {
                 assert_eq!(run_dir, std::path::PathBuf::from("/tmp/runs/test"));
                 assert!(resume);
             }
