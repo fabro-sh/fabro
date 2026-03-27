@@ -1,21 +1,24 @@
 {
-  "timestamp": "2026-03-27T14:36:19.583488Z",
-  "current_node": "gate",
+  "timestamp": "2026-03-27T14:36:22.046481Z",
+  "current_node": "passed",
   "completed_nodes": [
     "start",
     "cmd",
-    "gate"
+    "gate",
+    "passed"
   ],
   "node_retries": {},
   "context_values": {
     "internal.fidelity": "compact",
+    "thread.gate.current_node": "passed",
     "thread.start.current_node": "cmd",
-    "internal.thread_id": "cmd",
+    "internal.thread_id": "gate",
     "internal.node_visit_count": 1,
     "command.stderr": "",
     "internal.retry_count.gate": 0,
-    "current_node": "gate",
-    "current.preamble": "Goal: Test conditional edge selection after a command\n\n## Completed stages\n- **cmd**: success\n  - Script: `echo pass`\n  - Stdout:\n    ```\n    pass\n    ```\n  - Stderr: (empty)\n",
+    "current_node": "passed",
+    "current.preamble": "Goal: Test conditional edge selection after a command\n\n## Completed stages\n- **cmd**: success\n  - Script: `echo pass`\n  - Stdout:\n    ```\n    pass\n    ```\n  - Stderr: (empty)\n- **gate**: success\n",
+    "internal.retry_count.passed": 0,
     "internal.run_id": "01KMQVJVQHVXR61HZDVNG8Y1D9",
     "failure_signature": "",
     "internal.retry_count.cmd": 0,
@@ -25,12 +28,21 @@
     "internal.work_dir": "/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmp9IL0yC/run/worktree",
     "graph.rankdir": "LR",
     "failure_class": "",
-    "command.output": "pass\n",
+    "command.output": "branch-passed\n",
     "thread.cmd.current_node": "gate"
   },
   "node_outcomes": {
     "start": {
       "status": "success",
+      "usage": null
+    },
+    "passed": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "branch-passed\n"
+      },
+      "notes": "Script completed: echo branch-passed",
       "usage": null
     },
     "cmd": {
@@ -48,10 +60,11 @@
       "usage": null
     }
   },
-  "next_node_id": "passed",
+  "next_node_id": "exit",
   "node_visits": {
-    "gate": 1,
     "start": 1,
+    "gate": 1,
+    "passed": 1,
     "cmd": 1
   }
 }
