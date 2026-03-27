@@ -56,7 +56,7 @@ mod tests {
     use std::path::PathBuf;
 
     use chrono::Utc;
-    use fabro_config::config::FabroConfig;
+    use fabro_config::FabroSettings;
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 
     use super::*;
@@ -110,7 +110,7 @@ mod tests {
         RunRecord {
             run_id: "run-123".to_string(),
             created_at: Utc::now(),
-            config: FabroConfig {
+            config: FabroSettings {
                 dry_run: Some(true),
                 verbose: Some(true),
                 ..Default::default()

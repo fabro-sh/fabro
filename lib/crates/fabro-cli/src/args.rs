@@ -938,7 +938,7 @@ pub(crate) struct ConfigNamespace {
 
 #[derive(Subcommand)]
 pub(crate) enum ConfigCommand {
-    /// Print the merged FabroConfig as YAML
+    /// Print the merged FabroSettings as YAML
     Show(ConfigShowArgs),
 }
 

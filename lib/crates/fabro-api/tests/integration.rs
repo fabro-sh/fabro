@@ -10,7 +10,7 @@ mod mtls_e2e {
 
     use fabro_api::jwt_auth::{AuthMode, AuthStrategy};
     use fabro_api::server::{build_router, create_app_state};
-    use fabro_api::server_config::TlsConfig;
+    use fabro_api::server_config::TlsSettings;
     use fabro_api::tls::{build_rustls_config, ClientAuth};
     use fabro_workflows::pipeline::LlmSpec;
     use tokio::net::TcpListener;
@@ -181,7 +181,7 @@ mod mtls_e2e {
 
     /// Start a TLS server on a random port, returning the bound address.
     async fn start_tls_server(
-        tls_config: &TlsConfig,
+        tls_config: &TlsSettings,
         client_auth: ClientAuth,
         auth_mode: AuthMode,
     ) -> std::net::SocketAddr {
@@ -236,7 +236,7 @@ mod mtls_e2e {
         let dir = tempfile::tempdir().unwrap();
         let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
 
-        let tls_config = TlsConfig {
+        let tls_config = TlsSettings {
             cert: pki.server_cert.clone(),
             key: pki.server_key.clone(),
             ca: pki.ca_cert.clone(),
@@ -262,7 +262,7 @@ mod mtls_e2e {
         let dir = tempfile::tempdir().unwrap();
         let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
 
-        let tls_config = TlsConfig {
+        let tls_config = TlsSettings {
             cert: pki.server_cert.clone(),
             key: pki.server_key.clone(),
             ca: pki.ca_cert.clone(),
@@ -303,7 +303,7 @@ mod mtls_e2e {
         let dir = tempfile::tempdir().unwrap();
         let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
 
-        let tls_config = TlsConfig {
+        let tls_config = TlsSettings {
             cert: pki.server_cert.clone(),
             key: pki.server_key.clone(),
             ca: pki.ca_cert.clone(),
@@ -378,7 +378,7 @@ mod mtls_e2e {
         let dir = tempfile::tempdir().unwrap();
         let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
 
-        let tls_config = TlsConfig {
+        let tls_config = TlsSettings {
             cert: pki.server_cert.clone(),
             key: pki.server_key.clone(),
             ca: pki.ca_cert.clone(),

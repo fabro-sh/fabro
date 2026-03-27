@@ -7,7 +7,7 @@ use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::net::TcpListener;
 use tracing::error;
 
-use fabro_config::server::TlsConfig;
+use fabro_config::server::TlsSettings;
 
 use crate::jwt_auth::PeerCertificates;
 
@@ -22,7 +22,7 @@ pub enum ClientAuth {
 }
 
 /// Build a rustls `ServerConfig` from the `[api.tls]` configuration.
-pub fn build_rustls_config(tls_config: &TlsConfig, client_auth: ClientAuth) -> Arc<ServerConfig> {
+pub fn build_rustls_config(tls_config: &TlsSettings, client_auth: ClientAuth) -> Arc<ServerConfig> {
     let certs = load_certs(&tls_config.cert);
     let key = load_private_key(&tls_config.key);
 

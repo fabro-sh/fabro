@@ -9,7 +9,7 @@ use tracing::{error, info, warn};
 
 use clap::Args;
 
-use fabro_config::FabroConfig;
+use fabro_config::FabroSettings;
 
 use crate::jwt_auth::{AuthMode, AuthStrategy};
 use crate::server::build_router;
@@ -83,7 +83,8 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
 
     // Initialize data directory and SQLite database
     let config_path = args.config;
-    let server_config = fabro_config::server::load_server_config(config_path.as_deref())?;
+    let server_config: FabroSettings =
+        fabro_config::server::load_server_config(config_path.as_deref())?.try_into()?;
     let data_dir = fabro_config::server::resolve_storage_dir(&server_config);
 
     // Shared config for live reloading
@@ -216,6 +217,10 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
             interval.tick().await;
             match fabro_config::server::load_server_config(config_path_for_poll.as_deref()) {
                 Ok(new_config) => {
+                    let Ok(new_config) = FabroSettings::try_from(new_config) else {
+                        warn!("Failed to finalize reloaded server config");
+                        continue;
+                    };
                     let changed = {
                         let cfg = config_for_poll.read().expect("config lock poisoned");
                         *cfg != new_config
@@ -263,7 +268,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
 
 /// Resolve model and provider from shared config, with CLI overrides taking precedence.
 fn resolve_model_provider(
-    shared_config: &RwLock<FabroConfig>,
+    shared_config: &RwLock<FabroSettings>,
     cli_model: Option<&str>,
     cli_provider: Option<&str>,
 ) -> (String, Provider) {

@@ -119,7 +119,7 @@ fn kill_child_best_effort(child: &mut std::process::Child) {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use fabro_config::config::FabroConfig;
+    use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
     use fabro_workflows::records::RunRecord;
     use fabro_workflows::run_status::{write_run_status, RunStatus, RunStatusRecord, StatusReason};
@@ -130,7 +130,7 @@ mod tests {
         RunRecord {
             run_id: "run-test123".to_string(),
             created_at: Utc::now(),
-            config: FabroConfig::default(),
+            config: FabroSettings::default(),
             graph: Graph {
                 name: "test".to_string(),
                 ..Default::default()

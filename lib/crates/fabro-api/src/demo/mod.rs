@@ -1277,21 +1277,21 @@ mod runs {
     }
 
     pub fn configuration() -> serde_json::Value {
-        serde_json::to_value(fabro_config::FabroConfig {
+        serde_json::to_value(fabro_config::FabroSettings {
             version: Some(1),
             goal: Some("Add rate limiting to auth endpoints".into()),
             graph: Some("implement.fabro".into()),
             work_dir: Some("/workspace/api-server".into()),
-            llm: Some(fabro_config::run::LlmConfig {
+            llm: Some(fabro_config::run::LlmSettings {
                 model: Some("claude-opus-4-6".into()),
                 provider: Some("anthropic".into()),
                 fallbacks: None,
             }),
-            setup: Some(fabro_config::run::SetupConfig {
+            setup: Some(fabro_config::run::SetupSettings {
                 commands: vec!["bun install".into(), "bun run typecheck".into()],
                 timeout_ms: Some(120_000),
             }),
-            sandbox: Some(fabro_config::sandbox::SandboxConfig {
+            sandbox: Some(fabro_config::sandbox::SandboxSettings {
                 provider: Some("daytona".into()),
                 preserve: None,
                 devcontainer: None,
@@ -1431,7 +1431,7 @@ mod workflows {
         ]
     }
 
-    fn run_config_to_api(cfg: fabro_config::FabroConfig) -> RunConfiguration {
+    fn run_config_to_api(cfg: fabro_config::FabroSettings) -> RunConfiguration {
         fn strip_nulls(val: serde_json::Value) -> serde_json::Value {
             match val {
                 serde_json::Value::Object(map) => serde_json::Value::Object(
@@ -1455,18 +1455,18 @@ mod workflows {
             WorkflowDetail {
                 name: "Fix Build".into(), slug: "fix_build".into(), filename: "fix_build.fabro".into(),
                 description: "Automatically diagnoses and fixes CI build failures by analyzing error logs, identifying root causes, and applying targeted code changes.".into(),
-                config: run_config_to_api(fabro_config::FabroConfig {
+                config: run_config_to_api(fabro_config::FabroSettings {
                     version: Some(1),
                     goal: Some("Diagnose and fix CI build failures".into()),
                     graph: Some("fix_build.fabro".into()),
                     work_dir: None,
-                    llm: Some(fabro_config::run::LlmConfig {
+                    llm: Some(fabro_config::run::LlmSettings {
                         model: Some("claude-sonnet".into()),
                         provider: None,
                         fallbacks: None,
                     }),
                     setup: None,
-                    sandbox: Some(fabro_config::sandbox::SandboxConfig {
+                    sandbox: Some(fabro_config::sandbox::SandboxSettings {
                         provider: Some("daytona".into()),
                         preserve: None,
                         devcontainer: None,
@@ -1526,21 +1526,21 @@ mod workflows {
             WorkflowDetail {
                 name: "Implement Feature".into(), slug: "implement".into(), filename: "implement.fabro".into(),
                 description: "Generates production-ready code from a technical blueprint, including tests, documentation, and a pull request ready for review.".into(),
-                config: run_config_to_api(fabro_config::FabroConfig {
+                config: run_config_to_api(fabro_config::FabroSettings {
                     version: Some(1),
                     goal: Some("Implement feature from technical blueprint".into()),
                     graph: Some("implement.fabro".into()),
                     work_dir: None,
-                    llm: Some(fabro_config::run::LlmConfig {
+                    llm: Some(fabro_config::run::LlmSettings {
                         model: Some("claude-sonnet".into()),
                         provider: None,
                         fallbacks: None,
                     }),
-                    setup: Some(fabro_config::run::SetupConfig {
+                    setup: Some(fabro_config::run::SetupSettings {
                         commands: vec!["bun install".into(), "bun run typecheck".into()],
                         timeout_ms: Some(120_000),
                     }),
-                    sandbox: Some(fabro_config::sandbox::SandboxConfig {
+                    sandbox: Some(fabro_config::sandbox::SandboxSettings {
                         provider: Some("daytona".into()),
                         preserve: None,
                         devcontainer: None,
@@ -1615,18 +1615,18 @@ mod workflows {
             WorkflowDetail {
                 name: "Sync Drift".into(), slug: "sync_drift".into(), filename: "sync_drift.fabro".into(),
                 description: "Detects configuration and code drift between environments, then generates reconciliation patches to bring everything back in sync.".into(),
-                config: run_config_to_api(fabro_config::FabroConfig {
+                config: run_config_to_api(fabro_config::FabroSettings {
                     version: Some(1),
                     goal: Some("Detect and reconcile configuration drift across environments".into()),
                     graph: Some("sync_drift.fabro".into()),
                     work_dir: None,
-                    llm: Some(fabro_config::run::LlmConfig {
+                    llm: Some(fabro_config::run::LlmSettings {
                         model: Some("claude-sonnet".into()),
                         provider: None,
                         fallbacks: None,
                     }),
                     setup: None,
-                    sandbox: Some(fabro_config::sandbox::SandboxConfig {
+                    sandbox: Some(fabro_config::sandbox::SandboxSettings {
                         provider: Some("daytona".into()),
                         preserve: None,
                         devcontainer: None,
@@ -1692,18 +1692,18 @@ mod workflows {
             WorkflowDetail {
                 name: "Expand Product".into(), slug: "expand".into(), filename: "expand.fabro".into(),
                 description: "Evolves the product by analyzing usage patterns and specifications to propose and implement incremental improvements.".into(),
-                config: run_config_to_api(fabro_config::FabroConfig {
+                config: run_config_to_api(fabro_config::FabroSettings {
                     version: Some(1),
                     goal: Some("Propose and implement incremental product improvements".into()),
                     graph: Some("expand.fabro".into()),
                     work_dir: None,
-                    llm: Some(fabro_config::run::LlmConfig {
+                    llm: Some(fabro_config::run::LlmSettings {
                         model: Some("claude-sonnet".into()),
                         provider: None,
                         fallbacks: None,
                     }),
                     setup: None,
-                    sandbox: Some(fabro_config::sandbox::SandboxConfig {
+                    sandbox: Some(fabro_config::sandbox::SandboxSettings {
                         provider: Some("daytona".into()),
                         preserve: None,
                         devcontainer: None,
@@ -3242,25 +3242,25 @@ mod insights {
 
 mod settings {
     use fabro_config::server::*;
-    use fabro_config::FabroConfig;
+    use fabro_config::FabroSettings;
 
     pub fn server_config() -> serde_json::Value {
-        serde_json::to_value(FabroConfig {
+        serde_json::to_value(FabroSettings {
             storage_dir: Some("/home/fabro/.fabro".into()),
             max_concurrent_runs: Some(10),
-            web: Some(WebConfig {
+            web: Some(WebSettings {
                 url: "https://arc.example.com".into(),
-                auth: AuthConfig {
+                auth: AuthSettings {
                     provider: AuthProvider::Github,
                     allowed_usernames: vec!["brynary".into(), "alice".into()],
                 },
             }),
-            api: Some(ApiConfig {
+            api: Some(ApiSettings {
                 base_url: "https://api.fabro.example.com".into(),
                 authentication_strategies: vec![ApiAuthStrategy::Jwt],
                 tls: None,
             }),
-            git: Some(GitConfig {
+            git: Some(GitSettings {
                 provider: GitProvider::Github,
                 app_id: Some("12345".into()),
                 client_id: Some("Iv1.abc123".into()),
@@ -3268,18 +3268,18 @@ mod settings {
                 author: Default::default(),
                 webhooks: None,
             }),
-            features: Some(Features {
+            features: Some(FeaturesSettings {
                 session_sandboxes: false,
                 retros: false,
             }),
             log: Default::default(),
-            llm: Some(fabro_config::run::LlmConfig {
+            llm: Some(fabro_config::run::LlmSettings {
                 model: Some("claude-sonnet".into()),
                 provider: Some("anthropic".into()),
                 fallbacks: None,
             }),
             setup: None,
-            sandbox: Some(fabro_config::sandbox::SandboxConfig {
+            sandbox: Some(fabro_config::sandbox::SandboxSettings {
                 provider: Some("daytona".into()),
                 preserve: None,
                 devcontainer: None,

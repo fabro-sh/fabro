@@ -1395,6 +1395,7 @@ dependencies = [
  "anyhow",
  "clap",
  "dirs",
+ "fabro-config-derive",
  "fabro-util",
  "serde",
  "serde_json",
@@ -1402,6 +1403,15 @@ dependencies = [
  "tempfile",
  "toml",
  "tracing",
+]
+
+[[package]]
+name = "fabro-config-derive"
+version = "0.176.2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

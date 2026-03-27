@@ -1,6 +1,6 @@
 use assert_cmd::Command;
 use fabro_config::mcp::McpTransport;
-use fabro_config::FabroConfig;
+use fabro_config::FabroSettings;
 use predicates::prelude::*;
 
 #[allow(deprecated)]
@@ -10,8 +10,8 @@ fn arc() -> Command {
     cmd
 }
 
-fn parse_config_show(stdout: &[u8]) -> FabroConfig {
-    serde_yaml::from_slice(stdout).expect("stdout should be valid YAML FabroConfig")
+fn parse_config_show(stdout: &[u8]) -> FabroSettings {
+    serde_yaml::from_slice(stdout).expect("stdout should be valid YAML FabroSettings")
 }
 
 fn setup_config_show_fixture() -> (tempfile::TempDir, tempfile::TempDir) {

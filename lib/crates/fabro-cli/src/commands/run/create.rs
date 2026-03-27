@@ -1,14 +1,12 @@
 use std::path::PathBuf;
 
-use fabro_config::config::FabroConfig;
-use fabro_sandbox::SandboxProvider;
-
 use crate::args::RunArgs;
+use fabro_config::FabroConfig;
 
 use super::execute::{
-    apply_execution_overrides, cached_graph_path, default_run_dir, load_workflow_source_input,
-    make_run_dir, parse_labels, print_diagnostics_from_error, print_workflow_report_from_persisted,
-    resolve_sandbox_provider, write_run_config_snapshot, ExecutionOverrides,
+    cached_graph_path, default_run_dir, load_workflow_source_input, make_run_dir, parse_labels,
+    print_diagnostics_from_error, print_workflow_report_from_persisted, resolve_sandbox_provider,
+    write_run_config_snapshot,
 };
 use fabro_util::terminal::Styles;
 
@@ -17,7 +15,7 @@ use fabro_util::terminal::Styles;
 /// This does NOT execute the workflow — it only prepares the run directory.
 pub async fn create_run(
     args: &RunArgs,
-    run_defaults: FabroConfig,
+    cli_defaults: FabroConfig,
     styles: &Styles,
     quiet: bool,
 ) -> anyhow::Result<(String, PathBuf)> {
@@ -25,18 +23,18 @@ pub async fn create_run(
         .workflow
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
-    let source_input = load_workflow_source_input(
-        workflow_path,
-        args.goal.as_deref(),
-        args.goal_file.as_deref(),
-        run_defaults,
-        true,
-    )?;
+    let cli_args_config = FabroConfig::try_from(args)?;
+    let source_input =
+        load_workflow_source_input(workflow_path, cli_args_config, cli_defaults, true)?;
     let run_id = args
         .run_id
         .clone()
         .unwrap_or_else(|| ulid::Ulid::new().to_string());
-    let run_dir = match &args.storage_dir {
+    let run_dir = match args
+        .storage_dir
+        .clone()
+        .or_else(|| source_input.config.storage_dir.clone())
+    {
         Some(sd) => make_run_dir(&sd.join("runs"), &run_id, args.dry_run),
         None => default_run_dir(&run_id, args.dry_run),
     };
@@ -44,31 +42,15 @@ pub async fn create_run(
     let base_branch = fabro_sandbox::daytona::detect_repo_info(&working_directory)
         .ok()
         .and_then(|(_, branch)| branch);
-    let sandbox_provider = if args.dry_run {
-        SandboxProvider::Local
-    } else {
-        resolve_sandbox_provider(
+    if !args.dry_run {
+        let _ = resolve_sandbox_provider(
             args.sandbox.map(Into::into),
             Some(&source_input.config),
             &source_input.run_defaults,
-        )?
-    };
+        )?;
+    }
 
-    let mut config = source_input.config.clone();
-    apply_execution_overrides(
-        &mut config,
-        &ExecutionOverrides {
-            dry_run: args.dry_run,
-            auto_approve: args.auto_approve,
-            no_retro: args.no_retro,
-            verbose: args.verbose,
-            preserve_sandbox: args.preserve_sandbox,
-            model: args.model.as_deref(),
-            provider: args.provider.as_deref(),
-            sandbox_provider,
-            storage_dir: args.storage_dir.as_deref(),
-        },
-    );
+    let config = source_input.config.clone();
 
     let persisted = match fabro_workflows::operations::create(
         &source_input.raw_source,

@@ -1,11 +1,11 @@
 use anyhow::Result;
-use fabro_config::FabroConfig;
+use fabro_config::FabroSettings;
 
 use crate::args::GlobalArgs;
 
 pub async fn execute(
     mut args: fabro_llm::cli::ChatArgs,
-    cli_config: &FabroConfig,
+    cli_config: &FabroSettings,
     globals: &GlobalArgs,
 ) -> Result<()> {
     let llm_defaults = cli_config.llm.as_ref();

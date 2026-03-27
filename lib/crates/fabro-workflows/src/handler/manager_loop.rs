@@ -144,7 +144,7 @@ impl Handler for SubWorkflowHandler {
 
         let git_state = services.git_state();
         let child_run_options = RunOptions {
-            config: fabro_config::FabroConfig::default(),
+            config: fabro_config::FabroSettings::default(),
             run_dir: child_logs,
             cancel_token: Some(cancel_token),
             dry_run: services.dry_run,

@@ -520,10 +520,10 @@ async fn start_run(
     let run_id = ulid::Ulid::new().to_string();
     info!(run_id = %run_id, "Run queued");
     let run_dir = std::env::temp_dir().join(format!("fabro-{}", uuid::Uuid::new_v4()));
-    let config = fabro_config::config::FabroConfig {
+    let config = fabro_config::FabroSettings {
         dry_run: Some(state.dry_run),
         hooks: state.hooks.clone(),
-        sandbox: Some(fabro_config::sandbox::SandboxConfig {
+        sandbox: Some(fabro_config::sandbox::SandboxSettings {
             provider: Some("local".to_string()),
             ..Default::default()
         }),

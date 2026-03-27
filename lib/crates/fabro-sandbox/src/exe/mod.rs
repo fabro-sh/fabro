@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 pub use crate::ssh_common::{GitCloneParams, SshOutput, SshRunner};
 pub use openssh_runner::OpensshRunner;
 
-pub use fabro_config::sandbox::ExeConfig;
+pub use fabro_config::sandbox::ExeSettings as ExeConfig;
 
 const WORKING_DIRECTORY: &str = "/home/exedev";
 const PROVIDER: &str = "exe";

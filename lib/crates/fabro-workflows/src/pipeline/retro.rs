@@ -152,7 +152,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
-    use fabro_config::config::FabroConfig;
+    use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
 
     use super::*;
@@ -183,7 +183,7 @@ mod tests {
 
     fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            config: FabroConfig::default(),
+            config: FabroSettings::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,
             dry_run: true,

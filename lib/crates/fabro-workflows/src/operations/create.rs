@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use chrono::{Local, Utc};
-use fabro_config::config::FabroConfig;
+use fabro_config::FabroSettings;
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 
@@ -16,12 +16,12 @@ use crate::transforms::{expand_vars, Transform};
 pub struct ValidateOptions {
     pub base_dir: Option<PathBuf>,
     pub custom_transforms: Vec<Box<dyn Transform>>,
-    pub config: Option<FabroConfig>,
+    pub config: Option<FabroSettings>,
     pub goal_override: Option<String>,
 }
 
 pub struct RunCreateOptions {
-    pub config: FabroConfig,
+    pub config: FabroSettings,
     pub run_dir: Option<PathBuf>,
     pub run_id: Option<String>,
     pub workflow_slug: Option<String>,
@@ -96,7 +96,7 @@ fn preprocess_and_validate(
     dot_source: &str,
     base_dir: Option<PathBuf>,
     custom_transforms: Vec<Box<dyn Transform>>,
-    config: Option<&FabroConfig>,
+    config: Option<&FabroSettings>,
     goal_override: Option<&str>,
 ) -> Result<Validated, FabroError> {
     let source = match config.and_then(|cfg| cfg.vars.as_ref()) {
@@ -149,7 +149,7 @@ fn persist_validated(
         base_dir: _,
     } = options;
 
-    finalize_config(&mut config, validated.graph());
+    finalize_settings(&mut config, validated.graph());
 
     let run_id = run_id.unwrap_or_else(|| ulid::Ulid::new().to_string());
     let run_dir = run_dir.unwrap_or_else(|| default_run_dir(&run_id, config.dry_run_enabled()));
@@ -177,7 +177,7 @@ fn persist_validated(
     )
 }
 
-pub(crate) fn finalize_config(config: &mut FabroConfig, graph: &Graph) {
+pub(crate) fn finalize_settings(config: &mut FabroSettings, graph: &Graph) {
     let llm_config = config.llm.as_ref();
     let configured_model = llm_config.and_then(|l| l.model.as_deref());
     let configured_provider = llm_config.and_then(|l| l.provider.as_deref());
@@ -308,7 +308,7 @@ mod tests {
         let validated = validate(
             dot,
             ValidateOptions {
-                config: Some(FabroConfig {
+                config: Some(FabroSettings {
                     vars: Some(HashMap::from([("who".to_string(), "agent".to_string())])),
                     ..Default::default()
                 }),
@@ -407,7 +407,7 @@ mod tests {
         let err = create(
             dot,
             RunCreateOptions {
-                config: FabroConfig::default(),
+                config: FabroSettings::default(),
                 run_dir: None,
                 run_id: None,
                 workflow_slug: None,
@@ -435,13 +435,13 @@ mod tests {
         let persisted = create(
             MINIMAL_DOT,
             RunCreateOptions {
-                config: FabroConfig {
-                    llm: Some(fabro_config::run::LlmConfig {
+                config: FabroSettings {
+                    llm: Some(fabro_config::run::LlmSettings {
                         model: Some("sonnet".to_string()),
                         provider: None,
                         fallbacks: None,
                     }),
-                    pull_request: Some(fabro_config::run::PullRequestConfig {
+                    pull_request: Some(fabro_config::run::PullRequestSettings {
                         enabled: false,
                         ..Default::default()
                     }),

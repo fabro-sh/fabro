@@ -15,7 +15,8 @@ const WORKING_DIRECTORY: &str = "/home/daytona/workspace";
 const DEFAULT_SNAPSHOT: &str = "daytona-medium";
 
 pub use fabro_config::sandbox::{
-    DaytonaConfig, DaytonaNetwork, DaytonaSnapshotConfig, DockerfileSource,
+    DaytonaNetwork, DaytonaSettings as DaytonaConfig,
+    DaytonaSnapshotSettings as DaytonaSnapshotConfig, DockerfileSource,
 };
 
 /// Sandbox that runs all operations inside a Daytona cloud sandbox.
