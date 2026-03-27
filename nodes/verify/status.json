@@ -1,0 +1,6 @@
+{
+  "status": "success",
+  "notes": "Script completed: cat /tmp/scenario_full/result.txt",
+  "failure_reason": null,
+  "timestamp": "2026-03-27T14:58:30.837390+00:00"
+}
