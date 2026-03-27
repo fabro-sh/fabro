@@ -168,9 +168,6 @@ async fn main_inner() -> (String, Result<()>) {
                 commands::parse::run(&args)?;
             }
             Commands::Asset(ns) => commands::asset::dispatch(ns)?,
-            Commands::Cp(args) => {
-                commands::cp::cp_command(args).await?;
-            }
             Commands::RunsCmd(cmd) => commands::runs::dispatch(cmd).await?,
             Commands::Model { command } => commands::model::execute(command, &globals).await?,
             #[cfg(feature = "server")]
@@ -313,6 +310,20 @@ mod tests {
         match *cli.command {
             Commands::RunCmd(RunCommands::Attach { run }) => {
                 assert_eq!(run, "ABC123");
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_cp_command() {
+        let cli = Cli::try_parse_from(["fabro", "cp", "ABC123:/tmp/file", "./file"])
+            .expect("should parse");
+        match *cli.command {
+            Commands::RunCmd(RunCommands::Cp(args)) => {
+                assert_eq!(args.src, "ABC123:/tmp/file");
+                assert_eq!(args.dst, "./file");
+                assert!(!args.recursive);
             }
             _ => panic!("unexpected command variant"),
         }

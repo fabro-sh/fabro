@@ -621,6 +621,8 @@ pub(crate) enum RunCommands {
         #[arg(long)]
         resume: bool,
     },
+    /// Copy files to/from a run's sandbox
+    Cp(CpArgs),
     /// Get a preview URL for a port on a run's sandbox
     Preview(PreviewArgs),
     /// SSH into a run's Daytona sandbox
@@ -648,6 +650,7 @@ impl RunCommands {
             Self::Start { .. } => "start",
             Self::Attach { .. } => "attach",
             Self::Detached { .. } => "__detached",
+            Self::Cp(_) => "cp",
             Self::Preview(_) => "preview",
             Self::Ssh(_) => "ssh",
             Self::Diff(_) => "diff",
@@ -700,8 +703,6 @@ pub(crate) enum Commands {
     Parse(ParseArgs),
     /// Inspect and copy run assets (screenshots, reports, traces)
     Asset(AssetNamespace),
-    /// Copy files to/from a run's sandbox
-    Cp(CpArgs),
     #[command(flatten)]
     RunsCmd(RunsCommands),
     /// List and test LLM models
@@ -782,7 +783,6 @@ impl Commands {
             Self::Validate(_) => "validate",
             Self::Graph(_) => "graph",
             Self::Parse(_) => "parse",
-            Self::Cp(_) => "cp",
             Self::RunsCmd(cmd) => cmd.name(),
             Self::Model { command } => match command {
                 Some(fabro_llm::cli::ModelsCommand::List { .. }) => "model list",
