@@ -139,5 +139,5 @@ Node-level attribute > Stylesheet > TOML config > CLI flags > Server defaults > 
 ## Validation
 
 ```bash
-fabro run --preflight workflow.toml   # validate without executing
+fabro preflight workflow.toml   # validate without executing
 ```

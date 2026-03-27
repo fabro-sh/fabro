@@ -488,8 +488,8 @@ Fabro validates the run config when it loads:
 - **Unknown fields** — Extra fields not listed above are silently ignored.
 - **Variable check** — Any `$variable` in the Graphviz file without a matching `[vars]` entry produces an error.
 
-Use `--preflight` to validate a run config without executing it:
+Use `fabro preflight` to validate a run config without executing it:
 
 ```bash
-fabro run run.toml --preflight
+fabro preflight run.toml
 ```

@@ -21,7 +21,17 @@ pub async fn create_run(
     styles: &Styles,
     quiet: bool,
 ) -> anyhow::Result<(String, PathBuf)> {
-    let source_input = load_workflow_source_input(args, run_defaults, true)?;
+    let workflow_path = args
+        .workflow
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
+    let source_input = load_workflow_source_input(
+        workflow_path,
+        args.goal.as_deref(),
+        args.goal_file.as_deref(),
+        run_defaults,
+        true,
+    )?;
     let run_id = args
         .run_id
         .clone()

@@ -156,6 +156,7 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Llm(ns) => commands::llm::dispatch(ns, &globals).await?,
             Commands::Exec(args) => commands::exec::execute(args, &globals).await?,
             Commands::RunCmd(cmd) => commands::run::dispatch(cmd, &globals).await?,
+            Commands::Preflight(args) => commands::preflight::execute(args).await?,
             Commands::Validate(args) => {
                 let styles = fabro_util::terminal::Styles::detect_stderr();
                 commands::validate::run(&args, &styles)?;

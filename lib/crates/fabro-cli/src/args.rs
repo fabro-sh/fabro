@@ -99,10 +99,6 @@ pub(crate) struct RunArgs {
     #[arg(long)]
     pub(crate) dry_run: bool,
 
-    /// Validate run configuration without executing
-    #[arg(long, conflicts_with = "dry_run")]
-    pub(crate) preflight: bool,
-
     /// Auto-approve all human gates
     #[arg(long)]
     pub(crate) auto_approve: bool,
@@ -144,12 +140,42 @@ pub(crate) struct RunArgs {
     pub(crate) preserve_sandbox: bool,
 
     /// Run the workflow in the background and print the run ID
-    #[arg(short = 'd', long, conflicts_with = "preflight")]
+    #[arg(short = 'd', long)]
     pub(crate) detach: bool,
 
     /// Pre-generated run ID (used internally by --detach)
     #[arg(long, hide = true)]
     pub(crate) run_id: Option<String>,
+}
+
+#[derive(Args)]
+pub(crate) struct PreflightArgs {
+    /// Path to a .fabro workflow file or .toml task config
+    pub(crate) workflow: PathBuf,
+
+    /// Override the workflow goal (exposed as $goal in prompts)
+    #[arg(long)]
+    pub(crate) goal: Option<String>,
+
+    /// Read the workflow goal from a file
+    #[arg(long, conflicts_with = "goal")]
+    pub(crate) goal_file: Option<PathBuf>,
+
+    /// Override default LLM model
+    #[arg(long)]
+    pub(crate) model: Option<String>,
+
+    /// Override default LLM provider
+    #[arg(long)]
+    pub(crate) provider: Option<String>,
+
+    /// Enable verbose output
+    #[arg(short, long)]
+    pub(crate) verbose: bool,
+
+    /// Sandbox for agent tools
+    #[arg(long, value_enum)]
+    pub(crate) sandbox: Option<CliSandboxProvider>,
 }
 
 #[derive(Args)]
@@ -694,6 +720,8 @@ pub(crate) enum Commands {
     Exec(fabro_agent::cli::AgentArgs),
     #[command(flatten)]
     RunCmd(RunCommands),
+    /// Validate run configuration without executing
+    Preflight(PreflightArgs),
     /// Validate a workflow
     Validate(ValidateArgs),
     /// Render a workflow graph as SVG or PNG
@@ -780,6 +808,7 @@ impl Commands {
             },
             Self::Exec(_) => "exec",
             Self::RunCmd(cmd) => cmd.name(),
+            Self::Preflight(_) => "preflight",
             Self::Validate(_) => "validate",
             Self::Graph(_) => "graph",
             Self::Parse(_) => "parse",
