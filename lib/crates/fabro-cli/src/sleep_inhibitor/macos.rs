@@ -1,7 +1,7 @@
 use core_foundation::base::TCFType;
 use tracing::{debug, warn};
 
-use crate::iokit_bindings::*;
+use super::iokit_bindings::*;
 
 pub(crate) struct MacOSSleepInhibitor {
     assertion_id: IOPMAssertionID,

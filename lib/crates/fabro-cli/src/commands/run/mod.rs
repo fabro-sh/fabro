@@ -68,7 +68,7 @@ pub async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
             #[cfg(feature = "sleep_inhibitor")]
             let _sleep_guard = {
                 let cli_config = crate::cli_config::load_cli_config(None)?;
-                fabro_beastie::guard(cli_config.prevent_idle_sleep_enabled())
+                crate::sleep_inhibitor::guard(cli_config.prevent_idle_sleep_enabled())
             };
             resume::resume_command(args, styles).await
         }
