@@ -4,9 +4,10 @@ use crate::error::FabroError;
 
 use super::types::{PersistOptions, Persisted, Validated};
 
-const GRAPH_FILE_NAME: &str = "graph.fabro";
+const GRAPH_FILE_NAME: &str = "workflow.fabro";
+const LEGACY_GRAPH_FILE_NAME: &str = "graph.fabro";
 
-/// PERSIST phase: create run directory, write graph.fabro and run.json to disk.
+/// PERSIST phase: create run directory, write workflow.fabro and run.json to disk.
 ///
 /// Overwrites `run_record.graph` with the validated graph before saving.
 pub fn persist(validated: Validated, mut options: PersistOptions) -> Result<Persisted, FabroError> {
@@ -30,14 +31,20 @@ pub fn persist(validated: Validated, mut options: PersistOptions) -> Result<Pers
 
 /// Load a previously persisted run from disk.
 ///
-/// `run.json` is authoritative for graph + config; `graph.fabro` provides the
+/// `run.json` is authoritative for graph + config; `workflow.fabro` provides the
 /// original DOT source string when present.
 pub(crate) fn load(run_dir: &Path) -> Result<Persisted, FabroError> {
     let run_record = crate::records::RunRecord::load(run_dir)?;
     let graph = run_record.graph.clone();
     let source = match std::fs::read_to_string(run_dir.join(GRAPH_FILE_NAME)) {
         Ok(source) => source,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            match std::fs::read_to_string(run_dir.join(LEGACY_GRAPH_FILE_NAME)) {
+                Ok(source) => source,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+                Err(err) => return Err(err.into()),
+            }
+        }
         Err(err) => return Err(err.into()),
     };
 

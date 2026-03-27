@@ -327,9 +327,12 @@ pub fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String>
         }
     }
 
-    let graph_bytes = match bs.read_entry("graph.fabro") {
+    let graph_bytes = match bs.read_entry("workflow.fabro") {
         Ok(Some(bytes)) => bytes,
-        _ => return HashMap::new(),
+        _ => match bs.read_entry("graph.fabro") {
+            Ok(Some(bytes)) => bytes,
+            _ => return HashMap::new(),
+        },
     };
     let dot_source = String::from_utf8_lossy(&graph_bytes);
     let graph = match fabro_graphviz::parser::parse(&dot_source) {

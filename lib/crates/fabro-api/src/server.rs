@@ -21,7 +21,7 @@ use crate::jwt_auth::{AuthMode, AuthenticatedService, AuthenticatedUser};
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_workflows::context::Context;
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
-use fabro_workflows::operations::{self, RunCreateOptions};
+use fabro_workflows::operations::{self, CreateRequest, WorkflowInput};
 use fabro_workflows::pipeline::{
     self, InitOptions, LlmSpec, Persisted, SandboxEnvSpec, SandboxSpec,
 };
@@ -526,25 +526,19 @@ async fn start_run(
         }),
         ..Default::default()
     };
-    let run_labels = settings.labels.clone();
-    let persisted = match operations::create(
-        &req.dot_source,
-        RunCreateOptions {
-            settings,
-            run_dir: Some(run_dir.clone()),
-            run_id: Some(run_id.clone()),
-            workflow_slug: None,
-            labels: run_labels,
-            base_branch: None,
-            working_directory: Some(
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            ),
-            host_repo_path: None,
-            goal_override: None,
+    let created = match operations::create(CreateRequest {
+        workflow: WorkflowInput::DotSource {
+            source: req.dot_source.clone(),
             base_dir: None,
+            workflow_slug: None,
         },
-    ) {
-        Ok(persisted) => persisted,
+        settings,
+        run_dir: Some(run_dir.clone()),
+        run_id: Some(run_id.clone()),
+        host_repo_path: None,
+        base_branch: None,
+    }) {
+        Ok(created) => created,
         Err(ref err @ fabro_workflows::error::FabroError::ValidationFailed { ref diagnostics }) => {
             let message = if diagnostics.is_empty() {
                 err.to_string()
@@ -568,6 +562,7 @@ async fn start_run(
             .into_response();
         }
     };
+    let persisted = created.persisted;
     let created_at = persisted.run_record().created_at;
 
     {

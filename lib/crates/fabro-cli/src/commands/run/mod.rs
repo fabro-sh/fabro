@@ -3,13 +3,16 @@ use anyhow::Result;
 use crate::args::{GlobalArgs, RunCommands};
 
 pub(crate) mod attach;
+pub(crate) mod command;
 pub(crate) mod cp;
 pub(crate) mod create;
 pub(crate) mod detached;
 pub(crate) mod diff;
-pub(crate) mod execute;
 pub(crate) mod fork;
+pub(crate) mod launcher;
 pub(crate) mod logs;
+pub(crate) mod output;
+pub(crate) mod overrides;
 pub(crate) mod preview;
 pub(crate) mod resume;
 pub(crate) mod rewind;
@@ -20,7 +23,7 @@ pub(crate) mod wait;
 
 pub async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
     match cmd {
-        RunCommands::Run(args) => execute::execute(args, globals).await,
+        RunCommands::Run(args) => command::execute(args, globals).await,
         RunCommands::Create(args) => {
             let styles: &'static fabro_util::terminal::Styles =
                 Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
@@ -50,10 +53,10 @@ pub async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
             Ok(())
         }
         RunCommands::Detached {
-            storage_dir,
-            run_id,
+            run_dir,
+            launcher_path,
             resume,
-        } => detached::execute(storage_dir, run_id, resume).await,
+        } => detached::execute(run_dir, launcher_path, resume).await,
         RunCommands::Cp(args) => cp::cp_command(args).await,
         RunCommands::Preview(args) => preview::run(args).await,
         RunCommands::Ssh(args) => ssh::run(args).await,

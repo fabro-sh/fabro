@@ -9,10 +9,8 @@ use anyhow::{bail, Result};
 
 use fabro_interview::{AnswerValue, ConsoleInterviewer};
 use fabro_util::terminal::Styles;
-use fabro_workflows::event::RunNoticeLevel;
 use fabro_workflows::run_status::{RunStatus, RunStatusRecord};
 
-use super::detached::append_run_notice;
 use super::run_progress;
 
 #[cfg(test)]
@@ -36,7 +34,6 @@ pub async fn attach_run(
     let status_path = run_dir.join("status.json");
     let interview_request_path = run_dir.join("interview_request.json");
     let interview_response_path = run_dir.join("interview_response.json");
-    let pid_path = run_dir.join("run.pid");
 
     let mut engine_guard = engine_child.map(EngineChildGuard::new);
 
@@ -86,6 +83,16 @@ pub async fn attach_run(
             }
         }
 
+        if let Some(pid) = read_launcher_pid(run_dir) {
+            if !process_alive(pid) && wait_count > 5 {
+                progress_ui.finish();
+                return Ok(determine_exit_code(
+                    &conclusion_path,
+                    read_status_record(&status_path),
+                ));
+            }
+        }
+
         if wait_count > 100 {
             // Guard's Drop kills+waits on the engine child
             drop(engine_guard.take());
@@ -114,8 +121,13 @@ pub async fn attach_run(
     loop {
         if cancelled.load(Ordering::Relaxed) {
             if kill_on_detach {
-                // Kill the engine process
-                kill_engine(&pid_path);
+                if let Some(guard) = engine_guard.as_mut() {
+                    if let Some(child) = guard.inner() {
+                        let _ = child.kill();
+                    }
+                } else {
+                    kill_engine(run_dir);
+                }
                 // Wait briefly for a terminal status or conclusion
                 for _ in 0..20 {
                     if conclusion_path.exists()
@@ -168,12 +180,6 @@ pub async fn attach_run(
                         progress_ui.show_bars();
 
                         if answer_requires_reattach(&answer) {
-                            let _ = append_run_notice(
-                                run_dir,
-                                RunNoticeLevel::Warn,
-                                "interview_unanswered",
-                                INTERVIEW_UNANSWERED_MESSAGE,
-                            );
                             if let Some(guard) = engine_guard.as_mut() {
                                 guard.defuse();
                             }
@@ -213,7 +219,7 @@ pub async fn attach_run(
             let engine_alive = match cached_pid {
                 Some(pid) => process_alive(pid),
                 None => {
-                    if let Some(pid) = read_pid(&pid_path) {
+                    if let Some(pid) = read_launcher_pid(run_dir) {
                         cached_pid = Some(pid);
                         process_alive(pid)
                     } else {
@@ -264,10 +270,14 @@ fn read_status_record(path: &Path) -> Option<RunStatusRecord> {
     RunStatusRecord::load(path).ok()
 }
 
-fn read_pid(pid_path: &Path) -> Option<u32> {
-    std::fs::read_to_string(pid_path)
-        .ok()
-        .and_then(|pid| pid.trim().parse::<u32>().ok())
+fn read_launcher_pid(run_dir: &Path) -> Option<u32> {
+    super::launcher::launcher_record_for_run(run_dir)
+        .map(|record| record.pid)
+        .or_else(|| {
+            std::fs::read_to_string(run_dir.join("run.pid"))
+                .ok()
+                .and_then(|pid| pid.trim().parse::<u32>().ok())
+        })
 }
 
 fn progress_file_is_empty(path: &Path) -> bool {
@@ -390,15 +400,13 @@ fn determine_exit_code(conclusion_path: &Path, status_record: Option<RunStatusRe
     }
 }
 
-fn kill_engine(pid_path: &Path) {
-    if let Ok(pid_str) = std::fs::read_to_string(pid_path) {
-        if let Ok(pid) = pid_str.trim().parse::<i32>() {
-            #[cfg(unix)]
-            unsafe {
-                libc::kill(pid, libc::SIGTERM);
-            }
-            let _ = pid;
+fn kill_engine(run_dir: &Path) {
+    if let Some(pid) = read_launcher_pid(run_dir).map(|pid| pid as i32) {
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
         }
+        let _ = pid;
     }
 }
 

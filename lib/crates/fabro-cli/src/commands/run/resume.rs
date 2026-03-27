@@ -1,7 +1,6 @@
 use anyhow::bail;
 use fabro_util::terminal::Styles;
-use fabro_workflows::records::{Checkpoint, RunRecord};
-use fabro_workflows::run_status::{RunStatus, RunStatusRecord};
+use fabro_workflows::records::RunRecord;
 
 use crate::args::ResumeArgs;
 
@@ -21,52 +20,9 @@ pub async fn resume_command(args: ResumeArgs, styles: &'static Styles) -> anyhow
     }
     let run_id = RunRecord::load(&run_dir)?.run_id;
 
-    // Guard against resuming a live run — must happen before checkpoint
-    // validation because the engine writes checkpoint.json with a plain
-    // fs::write, so a mid-write read would see a truncated file and
-    // report "corrupt" for a run that is simply still alive.
-    if is_pid_alive(&run_dir.join("run.pid")) {
+    if launcher_pid_alive(&run_dir) {
         bail!("an engine process is still running for this run — cannot resume");
     }
-
-    // Reject runs that completed successfully — only failed/interrupted
-    // runs should be resumed.
-    if let Ok(record) = RunStatusRecord::load(&run_dir.join("status.json")) {
-        if record.status == RunStatus::Succeeded {
-            bail!("run already succeeded — nothing to resume");
-        }
-    }
-
-    // Validate checkpoint is parseable before touching any state.
-    // A crash during the original run can leave a truncated file;
-    // we must not destroy the old conclusion/failure evidence and
-    // only then discover the checkpoint is corrupt.
-    let cp_path = run_dir.join("checkpoint.json");
-    Checkpoint::load(&cp_path).map_err(|e| {
-        if cp_path.exists() {
-            anyhow::anyhow!("checkpoint.json is corrupt — cannot resume: {e}")
-        } else {
-            anyhow::anyhow!("no checkpoint found — nothing to resume")
-        }
-    })?;
-
-    // Clean stale artifacts from previous execution
-    for name in &[
-        "conclusion.json",
-        "pull_request.json",
-        "detached_failure.json",
-        "interview_request.json",
-        "interview_response.json",
-        "interview_request.claim",
-        "detach.log",
-        "run.pid",
-        "progress.jsonl",
-    ] {
-        let _ = std::fs::remove_file(run_dir.join(name));
-    }
-
-    // Reset status for re-execution
-    fabro_workflows::run_status::write_run_status(&run_dir, RunStatus::Submitted, None);
 
     let child = super::start::start_run(&run_dir, true)?;
 
@@ -74,7 +30,7 @@ pub async fn resume_command(args: ResumeArgs, styles: &'static Styles) -> anyhow
         println!("{run_id}");
     } else {
         let exit_code = super::attach::attach_run(&run_dir, true, styles, Some(child)).await?;
-        super::execute::print_run_summary(&run_dir, &run_id, styles);
+        super::output::print_run_summary(&run_dir, &run_id, styles);
         if exit_code != std::process::ExitCode::SUCCESS {
             std::process::exit(1);
         }
@@ -82,16 +38,16 @@ pub async fn resume_command(args: ResumeArgs, styles: &'static Styles) -> anyhow
     Ok(())
 }
 
-/// Check whether a PID file contains a live process.
-fn is_pid_alive(pid_path: &std::path::Path) -> bool {
-    let Ok(content) = std::fs::read_to_string(pid_path) else {
-        return false;
-    };
-    let Ok(pid) = content.trim().parse::<i32>() else {
-        return false;
-    };
-    // kill(pid, 0) checks liveness without sending a signal
-    unsafe { libc::kill(pid, 0) == 0 }
+fn launcher_pid_alive(run_dir: &std::path::Path) -> bool {
+    super::launcher::launcher_record_for_run(run_dir)
+        .map(|record| process_alive(record.pid))
+        .or_else(|| {
+            std::fs::read_to_string(run_dir.join("run.pid"))
+                .ok()
+                .and_then(|pid| pid.trim().parse::<u32>().ok())
+                .map(process_alive)
+        })
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -99,23 +55,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn is_pid_alive_returns_false_for_missing_file() {
+    fn launcher_pid_alive_returns_false_for_missing_record() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(!is_pid_alive(&dir.path().join("run.pid")));
+        assert!(!launcher_pid_alive(dir.path()));
     }
+}
 
-    #[test]
-    fn is_pid_alive_returns_false_for_invalid_pid() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("run.pid"), "not-a-pid").unwrap();
-        assert!(!is_pid_alive(&dir.path().join("run.pid")));
+fn process_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
     }
-
-    #[test]
-    fn is_pid_alive_returns_true_for_current_process() {
-        let dir = tempfile::tempdir().unwrap();
-        let pid = std::process::id();
-        std::fs::write(dir.path().join("run.pid"), pid.to_string()).unwrap();
-        assert!(is_pid_alive(&dir.path().join("run.pid")));
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        true
     }
 }

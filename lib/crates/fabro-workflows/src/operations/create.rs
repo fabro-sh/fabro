@@ -5,12 +5,17 @@ use chrono::{Local, Utc};
 use fabro_config::FabroSettings;
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
+use fabro_sandbox::SandboxProvider;
 
 use crate::error::FabroError;
 use crate::pipeline::types::PersistOptions;
 use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunRecord;
 use crate::transforms::{expand_vars, Transform};
+
+use super::source::{resolve_workflow, ResolveWorkflowRequest, WorkflowInput};
+
+const RUN_CONFIG_FILE: &str = "workflow.toml";
 
 #[derive(Default)]
 pub struct ValidateOptions {
@@ -20,17 +25,52 @@ pub struct ValidateOptions {
     pub goal_override: Option<String>,
 }
 
-pub struct RunCreateOptions {
+#[derive(Clone, Debug)]
+pub struct CreateRequest {
+    pub workflow: WorkflowInput,
     pub settings: FabroSettings,
     pub run_dir: Option<PathBuf>,
     pub run_id: Option<String>,
-    pub workflow_slug: Option<String>,
-    pub labels: HashMap<String, String>,
-    pub base_branch: Option<String>,
-    pub working_directory: Option<PathBuf>,
     pub host_repo_path: Option<String>,
-    pub goal_override: Option<String>,
-    pub base_dir: Option<PathBuf>,
+    pub base_branch: Option<String>,
+}
+
+impl Default for CreateRequest {
+    fn default() -> Self {
+        Self {
+            workflow: WorkflowInput::DotSource {
+                source: String::new(),
+                base_dir: None,
+                workflow_slug: None,
+            },
+            settings: FabroSettings::default(),
+            run_dir: None,
+            run_id: None,
+            host_repo_path: None,
+            base_branch: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct CreatedRun {
+    pub persisted: Persisted,
+    pub run_id: String,
+    pub run_dir: PathBuf,
+    pub dot_path: Option<PathBuf>,
+}
+
+struct PersistCreateOptions {
+    settings: FabroSettings,
+    run_dir: Option<PathBuf>,
+    run_id: Option<String>,
+    workflow_slug: Option<String>,
+    labels: HashMap<String, String>,
+    base_branch: Option<String>,
+    working_directory: Option<PathBuf>,
+    host_repo_path: Option<String>,
+    goal_override: Option<String>,
+    base_dir: Option<PathBuf>,
 }
 
 /// Parse, transform, and validate a DOT source string.
@@ -61,8 +101,104 @@ pub fn validate_from_file(path: &Path) -> Result<Validated, FabroError> {
     )
 }
 
-/// Parse, transform, validate, resolve settings, and persist a run.
-pub fn create(dot_source: &str, options: RunCreateOptions) -> Result<Persisted, FabroError> {
+/// Resolve workflow inputs, normalize settings, and persist a run directory.
+pub fn create(request: CreateRequest) -> Result<CreatedRun, FabroError> {
+    let resolved = resolve_workflow(ResolveWorkflowRequest {
+        workflow: request.workflow,
+        settings: request.settings,
+    })
+    .map_err(|err| FabroError::Parse(err.to_string()))?;
+
+    if !resolved.settings.dry_run_enabled() {
+        validate_sandbox_provider(&resolved.settings)?;
+    }
+
+    let CreateRequest {
+        workflow: _,
+        settings: _,
+        run_dir,
+        run_id,
+        host_repo_path,
+        base_branch,
+    } = request;
+
+    let settings = resolved.settings.clone();
+    let run_id = run_id.unwrap_or_else(|| ulid::Ulid::new().to_string());
+    let storage_dir = settings.storage_dir();
+    let run_dir = run_dir.unwrap_or_else(|| {
+        make_run_dir(
+            &storage_dir.join("runs"),
+            &run_id,
+            settings.dry_run_enabled(),
+        )
+    });
+    let working_directory = resolved.working_directory.clone();
+    let host_repo_path =
+        host_repo_path.or_else(|| Some(working_directory.to_string_lossy().to_string()));
+    let base_branch = base_branch.or_else(|| {
+        fabro_sandbox::daytona::detect_repo_info(&working_directory)
+            .ok()
+            .and_then(|(_, branch)| branch)
+    });
+
+    let persisted = create_from_source(
+        &resolved.raw_source,
+        PersistCreateOptions {
+            settings,
+            run_dir: Some(run_dir.clone()),
+            run_id: Some(run_id.clone()),
+            workflow_slug: resolved.workflow_slug.clone(),
+            labels: resolved.settings.labels.clone(),
+            base_branch,
+            working_directory: Some(working_directory),
+            host_repo_path,
+            goal_override: resolved.goal_override.clone(),
+            base_dir: resolved.base_dir.clone(),
+        },
+    )?;
+
+    write_run_config_snapshot(&run_dir, resolved.workflow_toml_path.as_deref())?;
+    crate::run_status::write_run_status(&run_dir, crate::run_status::RunStatus::Submitted, None);
+
+    Ok(CreatedRun {
+        persisted,
+        run_id,
+        run_dir,
+        dot_path: resolved.dot_path,
+    })
+}
+
+fn validate_sandbox_provider(settings: &FabroSettings) -> Result<(), FabroError> {
+    if let Some(provider) = settings
+        .sandbox_settings()
+        .and_then(|sandbox| sandbox.provider.as_deref())
+    {
+        provider
+            .parse::<SandboxProvider>()
+            .map_err(|err| FabroError::Precondition(format!("Invalid sandbox provider: {err}")))?;
+    }
+
+    Ok(())
+}
+
+fn write_run_config_snapshot(
+    run_dir: &Path,
+    workflow_toml_path: Option<&Path>,
+) -> Result<(), FabroError> {
+    if let Some(toml_path) = workflow_toml_path {
+        if toml_path.is_file() {
+            std::fs::copy(toml_path, run_dir.join(RUN_CONFIG_FILE))
+                .map_err(|err| FabroError::Io(err.to_string()))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn create_from_source(
+    dot_source: &str,
+    options: PersistCreateOptions,
+) -> Result<Persisted, FabroError> {
     let validated = preprocess_and_validate(
         dot_source,
         options.base_dir.clone(),
@@ -80,18 +216,6 @@ pub fn create(dot_source: &str, options: RunCreateOptions) -> Result<Persisted, 
     persist_validated(validated, options)
 }
 
-/// Read a DOT file, apply file inlining from its parent directory, then create.
-pub fn create_from_file(
-    path: &Path,
-    mut options: RunCreateOptions,
-) -> Result<Persisted, FabroError> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|e| FabroError::Parse(format!("Failed to read {}: {e}", path.display())))?;
-    let base_dir = path.parent().unwrap_or(Path::new("."));
-    options.base_dir = Some(base_dir.to_path_buf());
-    create(&source, options)
-}
-
 fn preprocess_and_validate(
     dot_source: &str,
     base_dir: Option<PathBuf>,
@@ -102,7 +226,6 @@ fn preprocess_and_validate(
     let source = match settings.and_then(|resolved| resolved.vars.as_ref()) {
         Some(vars) => {
             let mut vars = vars.clone();
-            // `$goal` is resolved later from the graph goal after any goal override.
             vars.insert("goal".to_string(), "$goal".to_string());
             expand_vars(dot_source, &vars)
                 .map_err(|e| FabroError::Parse(format!("var expansion failed: {e}")))?
@@ -134,9 +257,9 @@ fn apply_goal_override(graph: &mut Graph, goal_override: Option<&str>) {
 
 fn persist_validated(
     validated: Validated,
-    options: RunCreateOptions,
+    options: PersistCreateOptions,
 ) -> Result<Persisted, FabroError> {
-    let RunCreateOptions {
+    let PersistCreateOptions {
         settings,
         run_dir,
         run_id,
@@ -406,21 +529,15 @@ mod tests {
             graph [goal="Test"]
             work [label="Work"]
         }"#;
-        let err = create(
-            dot,
-            RunCreateOptions {
-                settings: FabroSettings::default(),
-                run_dir: None,
-                run_id: None,
-                workflow_slug: None,
-                labels: HashMap::new(),
-                base_branch: None,
-                working_directory: None,
-                host_repo_path: None,
-                goal_override: None,
+        let err = create(CreateRequest {
+            workflow: WorkflowInput::DotSource {
+                source: dot.to_string(),
                 base_dir: None,
+                workflow_slug: None,
             },
-        )
+            run_dir: Some(tempfile::tempdir().unwrap().path().join("run")),
+            ..Default::default()
+        })
         .unwrap_err();
 
         match err {
@@ -432,41 +549,42 @@ mod tests {
     }
 
     #[test]
-    fn create_persists_normalized_config() {
+    fn create_persists_normalized_config_and_initial_state() {
         let dir = tempfile::tempdir().unwrap();
-        let persisted = create(
-            MINIMAL_DOT,
-            RunCreateOptions {
-                settings: FabroSettings {
-                    llm: Some(fabro_config::run::LlmSettings {
-                        model: Some("sonnet".to_string()),
-                        provider: None,
-                        fallbacks: None,
-                    }),
-                    pull_request: Some(fabro_config::run::PullRequestSettings {
-                        enabled: false,
-                        ..Default::default()
-                    }),
-                    dry_run: Some(true),
-                    ..Default::default()
-                },
-                run_dir: Some(dir.path().join("run")),
-                run_id: Some("run-123".to_string()),
-                workflow_slug: Some("slug".to_string()),
-                labels: HashMap::from([("env".to_string(), "test".to_string())]),
-                base_branch: Some("main".to_string()),
-                working_directory: Some(dir.path().to_path_buf()),
-                host_repo_path: Some(dir.path().display().to_string()),
-                goal_override: Some("override goal".to_string()),
+        let created = create(CreateRequest {
+            workflow: WorkflowInput::DotSource {
+                source: MINIMAL_DOT.to_string(),
                 base_dir: None,
+                workflow_slug: Some("slug".to_string()),
             },
-        )
+            settings: FabroSettings {
+                llm: Some(fabro_config::run::LlmSettings {
+                    model: Some("sonnet".to_string()),
+                    provider: None,
+                    fallbacks: None,
+                }),
+                pull_request: Some(fabro_config::run::PullRequestSettings {
+                    enabled: false,
+                    ..Default::default()
+                }),
+                goal: Some("override goal".to_string()),
+                dry_run: Some(true),
+                labels: HashMap::from([("env".to_string(), "test".to_string())]),
+                ..Default::default()
+            },
+            run_dir: Some(dir.path().join("run")),
+            run_id: Some("run-123".to_string()),
+            host_repo_path: Some(dir.path().display().to_string()),
+            base_branch: Some("main".to_string()),
+            ..Default::default()
+        })
         .unwrap();
 
-        assert_eq!(persisted.run_record().run_id, "run-123");
-        assert_eq!(persisted.run_record().graph.goal(), "override goal");
+        assert_eq!(created.run_id, "run-123");
+        assert_eq!(created.persisted.run_record().graph.goal(), "override goal");
         assert_eq!(
-            persisted
+            created
+                .persisted
                 .run_record()
                 .settings
                 .llm
@@ -475,7 +593,8 @@ mod tests {
             Some("claude-sonnet-4-6")
         );
         assert_eq!(
-            persisted
+            created
+                .persisted
                 .run_record()
                 .settings
                 .llm
@@ -484,13 +603,54 @@ mod tests {
             Some("anthropic")
         );
         assert_eq!(
-            persisted.run_record().settings.goal.as_deref(),
+            created.persisted.run_record().settings.goal.as_deref(),
             Some("override goal")
         );
-        assert!(persisted.run_record().settings.pull_request.is_none());
+        assert!(created
+            .persisted
+            .run_record()
+            .settings
+            .pull_request
+            .is_none());
         assert_eq!(
-            persisted.run_record().workflow_slug.as_deref(),
+            created.persisted.run_record().workflow_slug.as_deref(),
             Some("slug")
+        );
+        assert_eq!(
+            crate::run_status::RunStatusRecord::load(&created.run_dir.join("status.json"))
+                .unwrap()
+                .status,
+            crate::run_status::RunStatus::Submitted
+        );
+        assert!(!created.run_dir.join("id.txt").exists());
+    }
+
+    #[test]
+    fn create_copies_workflow_toml_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let workflow_dir = dir.path().join("workflow");
+        std::fs::create_dir_all(&workflow_dir).unwrap();
+        std::fs::write(workflow_dir.join("workflow.fabro"), MINIMAL_DOT).unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.toml"),
+            "version = 1\ngraph = \"workflow.fabro\"\n",
+        )
+        .unwrap();
+
+        let created = create(CreateRequest {
+            workflow: WorkflowInput::Path(workflow_dir.join("workflow.toml")),
+            settings: FabroSettings {
+                storage_dir: Some(dir.path().join("storage")),
+                dry_run: Some(true),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(created.run_dir.join("workflow.toml")).unwrap(),
+            "version = 1\ngraph = \"workflow.fabro\"\n"
         );
     }
 }
