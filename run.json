@@ -1,0 +1,210 @@
+{
+  "run_id": "01KMQWTV544SGDZTYEWVMSPPAS",
+  "created_at": "2026-03-27T14:58:05.096438Z",
+  "config": {
+    "version": 1,
+    "goal": "Test human gate with auto-approve",
+    "llm": {
+      "model": "claude-haiku-4-5",
+      "provider": "anthropic",
+      "fallbacks": null
+    },
+    "sandbox": {
+      "provider": "daytona",
+      "preserve": null,
+      "devcontainer": null,
+      "local": null,
+      "daytona": {
+        "auto_stop_interval": 30,
+        "labels": {
+          "repo": "fabro-sh/fabro"
+        },
+        "snapshot": {
+          "name": "fabro-v6",
+          "cpu": 4,
+          "memory": 8,
+          "disk": 20,
+          "dockerfile": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+        },
+        "network": null,
+        "skip_clone": false
+      },
+      "ssh": null,
+      "env": null
+    },
+    "pull_request": {
+      "enabled": true,
+      "draft": false,
+      "auto_merge": false,
+      "merge_strategy": "squash"
+    },
+    "hooks": [
+      {
+        "name": "cargo-fmt",
+        "event": "post_tool_use",
+        "command": "cargo fmt",
+        "matcher": "write_file|edit_file|apply_patch",
+        "blocking": true,
+        "timeout_ms": null,
+        "sandbox": null
+      }
+    ],
+    "verbose": false,
+    "dry_run": false,
+    "auto_approve": true,
+    "no_retro": true,
+    "features": {
+      "session_sandboxes": false,
+      "retros": false
+    },
+    "log": {
+      "level": "debug"
+    },
+    "git": {
+      "provider": "github",
+      "app_id": "2993730",
+      "client_id": "Iv23li3Pu4pCpsmPopVN",
+      "slug": "brynary-fabro",
+      "author": {
+        "name": null,
+        "email": null
+      },
+      "webhooks": null
+    },
+    "fabro": {
+      "root": "fabro/"
+    }
+  },
+  "graph": {
+    "name": "HumanGate",
+    "nodes": {
+      "start": {
+        "id": "start",
+        "attrs": {
+          "shape": {
+            "String": "Mdiamond"
+          },
+          "label": {
+            "String": "Start"
+          }
+        }
+      },
+      "exit": {
+        "id": "exit",
+        "attrs": {
+          "shape": {
+            "String": "Msquare"
+          },
+          "label": {
+            "String": "Exit"
+          }
+        }
+      },
+      "draft": {
+        "id": "draft",
+        "attrs": {
+          "prompt": {
+            "String": "Write a short greeting message."
+          },
+          "shape": {
+            "String": "tab"
+          },
+          "label": {
+            "String": "Draft"
+          }
+        }
+      },
+      "ship": {
+        "id": "ship",
+        "attrs": {
+          "shape": {
+            "String": "parallelogram"
+          },
+          "label": {
+            "String": "Ship"
+          },
+          "script": {
+            "String": "echo shipped"
+          }
+        }
+      },
+      "approve": {
+        "id": "approve",
+        "attrs": {
+          "label": {
+            "String": "Approve?"
+          },
+          "shape": {
+            "String": "hexagon"
+          }
+        }
+      },
+      "revise": {
+        "id": "revise",
+        "attrs": {
+          "prompt": {
+            "String": "Revise the greeting."
+          },
+          "shape": {
+            "String": "tab"
+          },
+          "label": {
+            "String": "Revise"
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "start",
+        "to": "draft",
+        "attrs": {}
+      },
+      {
+        "from": "draft",
+        "to": "approve",
+        "attrs": {}
+      },
+      {
+        "from": "approve",
+        "to": "ship",
+        "attrs": {
+          "label": {
+            "String": "[A] Approve"
+          }
+        }
+      },
+      {
+        "from": "approve",
+        "to": "revise",
+        "attrs": {
+          "label": {
+            "String": "[R] Revise"
+          }
+        }
+      },
+      {
+        "from": "ship",
+        "to": "exit",
+        "attrs": {}
+      },
+      {
+        "from": "revise",
+        "to": "draft",
+        "attrs": {}
+      }
+    ],
+    "attrs": {
+      "rankdir": {
+        "String": "LR"
+      },
+      "goal": {
+        "String": "Test human gate with auto-approve"
+      }
+    }
+  },
+  "workflow_slug": "human_gate",
+  "working_directory": "/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-cli",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-cli",
+  "base_branch": "fabro-core"
+}
