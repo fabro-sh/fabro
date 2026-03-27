@@ -3,6 +3,7 @@ use anyhow::Result;
 use crate::args::{GlobalArgs, RunCommands};
 
 pub(crate) mod attach;
+pub(crate) mod cp;
 pub(crate) mod create;
 pub(crate) mod detached;
 pub(crate) mod detached_support;
@@ -48,6 +49,7 @@ pub async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
             Ok(())
         }
         RunCommands::Detached { run_dir, resume } => detached::execute(run_dir, resume).await,
+        RunCommands::Cp(args) => cp::cp_command(args).await,
         RunCommands::Preview(args) => preview::run(args).await,
         RunCommands::Ssh(args) => ssh::run(args).await,
         RunCommands::Diff(args) => diff::run(args).await,
