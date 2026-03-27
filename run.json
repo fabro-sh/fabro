@@ -1,0 +1,214 @@
+{
+  "run_id": "01KMPJ8R3F26C5QTJ5WFEZ4ARJ",
+  "created_at": "2026-03-27T02:34:11.955079Z",
+  "config": {
+    "version": 1,
+    "goal": "Test conditional edge selection after a command",
+    "llm": {
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "fallbacks": null
+    },
+    "sandbox": {
+      "provider": "daytona",
+      "preserve": null,
+      "devcontainer": null,
+      "local": null,
+      "daytona": {
+        "auto_stop_interval": 30,
+        "labels": {
+          "repo": "fabro-sh/fabro"
+        },
+        "snapshot": {
+          "name": "fabro-v6",
+          "cpu": 4,
+          "memory": 8,
+          "disk": 20,
+          "dockerfile": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+        },
+        "network": null,
+        "skip_clone": false
+      },
+      "exe": null,
+      "ssh": null,
+      "env": null
+    },
+    "pull_request": {
+      "enabled": true,
+      "draft": false,
+      "auto_merge": false,
+      "merge_strategy": "squash"
+    },
+    "hooks": [
+      {
+        "name": "cargo-fmt",
+        "event": "post_tool_use",
+        "command": "cargo fmt",
+        "matcher": "write_file|edit_file|apply_patch",
+        "blocking": true,
+        "timeout_ms": null,
+        "sandbox": null
+      }
+    ],
+    "verbose": false,
+    "dry_run": false,
+    "auto_approve": true,
+    "no_retro": true,
+    "features": {
+      "session_sandboxes": false,
+      "retros": false
+    },
+    "log": {
+      "level": "debug"
+    },
+    "git": {
+      "provider": "github",
+      "app_id": "2993730",
+      "client_id": "Iv23li3Pu4pCpsmPopVN",
+      "slug": "brynary-fabro",
+      "author": {
+        "name": null,
+        "email": null
+      },
+      "webhooks": null
+    },
+    "fabro": {
+      "root": "fabro/"
+    }
+  },
+  "graph": {
+    "name": "ConditionalBranching",
+    "nodes": {
+      "passed": {
+        "id": "passed",
+        "attrs": {
+          "shape": {
+            "String": "parallelogram"
+          },
+          "script": {
+            "String": "echo branch-passed"
+          },
+          "label": {
+            "String": "Passed"
+          }
+        }
+      },
+      "failed": {
+        "id": "failed",
+        "attrs": {
+          "label": {
+            "String": "Failed"
+          },
+          "shape": {
+            "String": "parallelogram"
+          },
+          "script": {
+            "String": "echo branch-failed"
+          }
+        }
+      },
+      "exit": {
+        "id": "exit",
+        "attrs": {
+          "shape": {
+            "String": "Msquare"
+          },
+          "label": {
+            "String": "Exit"
+          }
+        }
+      },
+      "start": {
+        "id": "start",
+        "attrs": {
+          "shape": {
+            "String": "Mdiamond"
+          },
+          "label": {
+            "String": "Start"
+          }
+        }
+      },
+      "cmd": {
+        "id": "cmd",
+        "attrs": {
+          "script": {
+            "String": "echo pass"
+          },
+          "label": {
+            "String": "Run Command"
+          },
+          "shape": {
+            "String": "parallelogram"
+          }
+        }
+      },
+      "gate": {
+        "id": "gate",
+        "attrs": {
+          "label": {
+            "String": "Check Result"
+          },
+          "shape": {
+            "String": "diamond"
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "start",
+        "to": "cmd",
+        "attrs": {}
+      },
+      {
+        "from": "cmd",
+        "to": "gate",
+        "attrs": {}
+      },
+      {
+        "from": "gate",
+        "to": "passed",
+        "attrs": {
+          "label": {
+            "String": "Pass"
+          },
+          "condition": {
+            "String": "outcome=success"
+          }
+        }
+      },
+      {
+        "from": "gate",
+        "to": "failed",
+        "attrs": {
+          "label": {
+            "String": "Fail"
+          }
+        }
+      },
+      {
+        "from": "passed",
+        "to": "exit",
+        "attrs": {}
+      },
+      {
+        "from": "failed",
+        "to": "exit",
+        "attrs": {}
+      }
+    ],
+    "attrs": {
+      "goal": {
+        "String": "Test conditional edge selection after a command"
+      },
+      "rankdir": {
+        "String": "LR"
+      }
+    }
+  },
+  "workflow_slug": "conditional_branching",
+  "working_directory": "/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-cli",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-cli",
+  "base_branch": "fabro-core"
+}
