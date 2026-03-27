@@ -17,7 +17,7 @@
 /**
  * TLS certificate configuration.
  */
-export interface TlsConfiguration {
+export interface TlsSettings {
     /**
      * Certificate file path.
      */

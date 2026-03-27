@@ -17,7 +17,7 @@
 /**
  * Snapshot configuration for Daytona sandboxes.
  */
-export interface DaytonaSnapshotConfiguration {
+export interface DaytonaSnapshotSettings {
     /**
      * Snapshot name.
      */

@@ -8,7 +8,7 @@ use fabro_config::FabroSettings;
 #[cfg(feature = "server")]
 use tracing::debug;
 
-pub fn load_cli_config(path: Option<&Path>) -> anyhow::Result<FabroSettings> {
+pub fn load_cli_settings(path: Option<&Path>) -> anyhow::Result<FabroSettings> {
     fabro_config::cli::load_cli_config(path)?.try_into()
 }
 

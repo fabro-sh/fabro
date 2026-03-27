@@ -15,19 +15,19 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { GitAuthorConfiguration } from './git-author-configuration';
+import type { GitAuthorSettings } from './git-author-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { WebhookConfiguration } from './webhook-configuration';
+import type { WebhookSettings } from './webhook-configuration';
 
 /**
  * Git provider configuration.
  */
-export interface GitConfiguration {
+export interface GitSettings {
     /**
      * Git provider.
      */
-    'provider'?: GitConfigurationProviderEnum;
+    'provider'?: GitSettingsProviderEnum;
     /**
      * GitHub App ID.
      */
@@ -40,14 +40,14 @@ export interface GitConfiguration {
      * GitHub App slug.
      */
     'slug'?: string;
-    'author'?: GitAuthorConfiguration;
-    'webhooks'?: WebhookConfiguration;
+    'author'?: GitAuthorSettings;
+    'webhooks'?: WebhookSettings;
 }
 
-export const GitConfigurationProviderEnum = {
+export const GitSettingsProviderEnum = {
     GITHUB: 'github'
 } as const;
 
-export type GitConfigurationProviderEnum = typeof GitConfigurationProviderEnum[keyof typeof GitConfigurationProviderEnum];
+export type GitSettingsProviderEnum = typeof GitSettingsProviderEnum[keyof typeof GitSettingsProviderEnum];
 
 

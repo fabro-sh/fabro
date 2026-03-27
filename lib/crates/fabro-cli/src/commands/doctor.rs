@@ -928,7 +928,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
     spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
     // Gather state
-    let cli_config = crate::cli_config::load_cli_config(None).unwrap_or_default();
+    let cli_config = crate::cli_config::load_cli_settings(None).unwrap_or_default();
 
     let config_path = dirs::home_dir().map(|h| h.join(".fabro").join("cli.toml"));
     let config_exists = config_path.as_ref().is_some_and(|p| p.exists());
@@ -943,9 +943,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
     let daytona_configured = std::env::var("DAYTONA_API_KEY").is_ok();
 
     #[cfg(feature = "server")]
-    let server_config = fabro_config::server::load_server_config(None)
-        .and_then(fabro_config::FabroSettings::try_from)
-        .unwrap_or_default();
+    let server_config = fabro_config::server::load_server_settings(None).unwrap_or_default();
 
     #[cfg(feature = "server")]
     let api_status = {

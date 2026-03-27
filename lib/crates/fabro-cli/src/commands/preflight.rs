@@ -29,11 +29,8 @@ pub async fn execute(mut args: PreflightArgs) -> anyhow::Result<()> {
     let git_status =
         fabro_workflows::git::sync_status(&original_cwd, "origin", detected_base_branch.as_deref());
 
-    let sandbox_provider = resolve_sandbox_provider(
-        args.sandbox.map(Into::into),
-        Some(&source_input.config),
-        &source_input.run_defaults,
-    )?;
+    let sandbox_provider =
+        resolve_sandbox_provider(args.sandbox.map(Into::into), &source_input.settings)?;
 
     let validated = fabro_workflows::operations::validate(
         &source_input.raw_source,
@@ -45,7 +42,7 @@ pub async fn execute(mut args: PreflightArgs) -> anyhow::Result<()> {
                     .unwrap_or(Path::new("."))
                     .to_path_buf(),
             ),
-            config: Some(source_input.config.clone()),
+            settings: Some(source_input.settings.clone()),
             goal_override: source_input.goal_override.clone(),
             ..Default::default()
         },
@@ -57,10 +54,9 @@ pub async fn execute(mut args: PreflightArgs) -> anyhow::Result<()> {
 
     run_preflight(
         validated.graph(),
-        &Some(source_input.config),
+        &source_input.settings,
         args.model.as_deref(),
         args.provider.as_deref(),
-        &source_input.run_defaults,
         git_status,
         sandbox_provider,
         styles,

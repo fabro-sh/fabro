@@ -17,22 +17,22 @@
 /**
  * Authentication configuration.
  */
-export interface AuthConfiguration {
+export interface AuthSettings {
     /**
      * Auth provider.
      */
-    'provider'?: AuthConfigurationProviderEnum;
+    'provider'?: AuthSettingsProviderEnum;
     /**
      * Allowed usernames.
      */
     'allowed_usernames'?: Array<string>;
 }
 
-export const AuthConfigurationProviderEnum = {
+export const AuthSettingsProviderEnum = {
     GITHUB: 'github',
     INSECURE_DISABLED: 'insecure_disabled'
 } as const;
 
-export type AuthConfigurationProviderEnum = typeof AuthConfigurationProviderEnum[keyof typeof AuthConfigurationProviderEnum];
+export type AuthSettingsProviderEnum = typeof AuthSettingsProviderEnum[keyof typeof AuthSettingsProviderEnum];
 
 

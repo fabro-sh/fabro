@@ -17,17 +17,17 @@
 /**
  * Webhook delivery configuration.
  */
-export interface WebhookConfiguration {
+export interface WebhookSettings {
     /**
      * Webhook delivery strategy.
      */
-    'strategy': WebhookConfigurationStrategyEnum;
+    'strategy': WebhookSettingsStrategyEnum;
 }
 
-export const WebhookConfigurationStrategyEnum = {
+export const WebhookSettingsStrategyEnum = {
     TAILSCALE_FUNNEL: 'tailscale_funnel'
 } as const;
 
-export type WebhookConfigurationStrategyEnum = typeof WebhookConfigurationStrategyEnum[keyof typeof WebhookConfigurationStrategyEnum];
+export type WebhookSettingsStrategyEnum = typeof WebhookSettingsStrategyEnum[keyof typeof WebhookSettingsStrategyEnum];
 
 

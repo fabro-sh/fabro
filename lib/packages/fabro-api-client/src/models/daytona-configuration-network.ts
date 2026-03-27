@@ -15,12 +15,12 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { DaytonaConfigurationNetworkOneOf } from './daytona-configuration-network-one-of';
+import type { DaytonaSettingsNetworkOneOf } from './daytona-configuration-network-one-of';
 
 /**
- * @type DaytonaConfigurationNetwork
+ * @type DaytonaSettingsNetwork
  * Network access mode: \"block\", \"allow_all\", or {\"allow_list\": [...]}.
  */
-export type DaytonaConfigurationNetwork = DaytonaConfigurationNetworkOneOf | string;
+export type DaytonaSettingsNetwork = DaytonaSettingsNetworkOneOf | string;
 
 

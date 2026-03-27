@@ -24,13 +24,13 @@ pub async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
         RunCommands::Create(args) => {
             let styles: &'static fabro_util::terminal::Styles =
                 Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
-            let cli_config = fabro_config::cli::load_cli_config(None)?;
-            let (run_id, _run_dir) = create::create_run(&args, cli_config, styles, true).await?;
+            let cli_defaults = fabro_config::cli::load_cli_config(None)?;
+            let (run_id, _run_dir) = create::create_run(&args, cli_defaults, styles, true).await?;
             println!("{run_id}");
             Ok(())
         }
         RunCommands::Start { run } => {
-            let cli_config = crate::cli_config::load_cli_config(None)?;
+            let cli_config = crate::cli_config::load_cli_settings(None)?;
             let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
             let run_info = fabro_workflows::run_lookup::resolve_run(&base, &run)?;
             let child = start::start_run(&run_info.path, false)?;
@@ -40,7 +40,7 @@ pub async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
         RunCommands::Attach { run } => {
             let styles: &'static fabro_util::terminal::Styles =
                 Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
-            let cli_config = crate::cli_config::load_cli_config(None)?;
+            let cli_config = crate::cli_config::load_cli_settings(None)?;
             let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
             let run_info = fabro_workflows::run_lookup::resolve_run(&base, &run)?;
             let exit_code = attach::attach_run(&run_info.path, false, styles, None).await?;
@@ -67,7 +67,7 @@ pub async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
                 Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
             #[cfg(feature = "sleep_inhibitor")]
             let _sleep_guard = {
-                let cli_config = crate::cli_config::load_cli_config(None)?;
+                let cli_config = crate::cli_config::load_cli_settings(None)?;
                 crate::sleep_inhibitor::guard(cli_config.prevent_idle_sleep_enabled())
             };
             resume::resume_command(args, styles).await

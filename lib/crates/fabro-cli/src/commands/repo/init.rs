@@ -150,7 +150,7 @@ async fn check_github_app_installation() {
     };
 
     // Load CLI config to get app_id and slug
-    let cli_config = match crate::cli_config::load_cli_config(None) {
+    let cli_config = match crate::cli_config::load_cli_settings(None) {
         Ok(c) => c,
         Err(_) => return,
     };

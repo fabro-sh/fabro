@@ -11,7 +11,7 @@ pub async fn execute(
     let server = {
         #[cfg(feature = "server")]
         {
-            let cli_config = cli_config::load_cli_config(None)?;
+            let cli_config = cli_config::load_cli_settings(None)?;
             let resolved = cli_config::resolve_mode(
                 globals.mode.clone(),
                 globals.server_url.as_deref(),

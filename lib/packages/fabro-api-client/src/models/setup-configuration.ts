@@ -17,7 +17,7 @@
 /**
  * Setup commands run before the workflow.
  */
-export interface SetupConfiguration {
+export interface SetupSettings {
     /**
      * Shell commands to execute.
      */

@@ -21,7 +21,7 @@ enum CopyDirection {
 
 pub async fn cp_command(args: CpArgs) -> Result<()> {
     let direction = parse_direction(&args.src, &args.dst)?;
-    let cli_config = crate::cli_config::load_cli_config(None)?;
+    let cli_config = crate::cli_config::load_cli_settings(None)?;
     let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
 
     match direction {

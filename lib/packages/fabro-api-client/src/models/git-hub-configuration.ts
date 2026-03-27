@@ -17,7 +17,7 @@
 /**
  * GitHub App token injection configuration.
  */
-export interface GitHubConfiguration {
+export interface GitHubSettings {
     /**
      * GitHub API permissions to request (e.g. contents = write).
      */

@@ -99,19 +99,15 @@ async fn main_inner() -> (String, Result<()>) {
         #[cfg(feature = "server")]
         {
             if let Commands::Serve(args) = command.as_ref() {
-                match fabro_config::server::load_server_config(args.config.as_deref()) {
-                    Ok(server_config) => match fabro_config::FabroSettings::try_from(server_config)
-                    {
-                        Ok(server_settings) => (
-                            server_settings.log.as_ref().and_then(|l| l.level.clone()),
-                            false,
-                        ),
-                        Err(err) => return (command_name, Err(err)),
-                    },
+                match fabro_config::server::load_server_settings(args.config.as_deref()) {
+                    Ok(server_settings) => (
+                        server_settings.log.as_ref().and_then(|l| l.level.clone()),
+                        false,
+                    ),
                     Err(err) => return (command_name, Err(err)),
                 }
             } else {
-                match crate::cli_config::load_cli_config(None) {
+                match crate::cli_config::load_cli_settings(None) {
                     Ok(cli_config) => (
                         cli_config.log.as_ref().and_then(|l| l.level.clone()),
                         cli_config.upgrade_check_enabled(),
@@ -122,7 +118,7 @@ async fn main_inner() -> (String, Result<()>) {
         }
         #[cfg(not(feature = "server"))]
         {
-            match crate::cli_config::load_cli_config(None) {
+            match crate::cli_config::load_cli_settings(None) {
                 Ok(cli_config) => (
                     cli_config.log.as_ref().and_then(|l| l.level.clone()),
                     cli_config.upgrade_check_enabled(),
@@ -184,7 +180,7 @@ async fn main_inner() -> (String, Result<()>) {
                 fabro_api::serve::serve_command(args, styles).await?;
             }
             Commands::Doctor { verbose, dry_run } => {
-                let cli_config = cli_config::load_cli_config(None)?;
+                let cli_config = cli_config::load_cli_settings(None)?;
                 let verbose = verbose || cli_config.verbose_enabled();
                 let exit_code = commands::doctor::run_doctor(verbose, !dry_run).await;
                 std::process::exit(exit_code);

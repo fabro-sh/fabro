@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use crate::args::{PrCommand, PrNamespace};
 
 pub async fn dispatch(ns: PrNamespace) -> Result<()> {
-    let cli_config = crate::cli_config::load_cli_config(None)?;
+    let cli_config = crate::cli_config::load_cli_settings(None)?;
     let github_app = crate::shared::github::build_github_app_credentials(cli_config.app_id());
 
     match ns.command {

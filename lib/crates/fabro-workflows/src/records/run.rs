@@ -12,7 +12,7 @@ const FILE_NAME: &str = "run.json";
 pub struct RunRecord {
     pub run_id: String,
     pub created_at: DateTime<Utc>,
-    pub config: FabroSettings,
+    pub settings: FabroSettings,
     pub graph: Graph,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_slug: Option<String>,
@@ -73,7 +73,7 @@ mod tests {
         RunRecord {
             run_id: "run-abc123".to_string(),
             created_at: Utc::now(),
-            config: FabroSettings::default(),
+            settings: FabroSettings::default(),
             graph,
             workflow_slug: Some("smoke".to_string()),
             working_directory: PathBuf::from("/home/user/project"),

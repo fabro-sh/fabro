@@ -737,7 +737,7 @@ pub async fn initialize(
         };
     if effective_dry_run {
         options.dry_run = true;
-        options.run_options.dry_run = true;
+        options.run_options.settings.dry_run = Some(true);
     }
 
     let has_run_branch = options
@@ -900,10 +900,9 @@ mod tests {
 
     fn test_settings(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            config: FabroSettings::default(),
+            settings: FabroSettings::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,
-            dry_run: false,
             run_id: "run-test".to_string(),
             labels: HashMap::new(),
             git_author: crate::git::GitAuthor::default(),
@@ -925,7 +924,7 @@ mod tests {
             RunRecord {
                 run_id: "run-test".to_string(),
                 created_at: Utc::now(),
-                config: FabroSettings::default(),
+                settings: FabroSettings::default(),
                 graph,
                 workflow_slug: Some("test".to_string()),
                 working_directory: std::env::current_dir().unwrap(),

@@ -15,51 +15,51 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { ApiConfiguration } from './api-configuration';
+import type { ApiSettings } from './api-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { AssetsConfiguration } from './assets-configuration';
+import type { AssetsSettings } from './assets-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { CheckpointConfiguration } from './checkpoint-configuration';
+import type { CheckpointSettings } from './checkpoint-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { Features } from './features';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { GitConfiguration } from './git-configuration';
+import type { GitSettings } from './git-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { GitHubConfiguration } from './git-hub-configuration';
+import type { GitHubSettings } from './git-hub-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { HookDefinition } from './hook-definition';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { LlmConfiguration } from './llm-configuration';
+import type { LlmSettings } from './llm-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { LogConfiguration } from './log-configuration';
+import type { LogSettings } from './log-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { McpServerEntry } from './mcp-server-entry';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PullRequestConfiguration } from './pull-request-configuration';
+import type { PullRequestSettings } from './pull-request-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SandboxConfiguration } from './sandbox-configuration';
+import type { SandboxSettings } from './sandbox-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SetupConfiguration } from './setup-configuration';
+import type { SetupSettings } from './setup-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { WebConfiguration } from './web-configuration';
+import type { WebSettings } from './web-configuration';
 
 /**
- * Structured server configuration mirroring ServerConfig.
+ * Structured server settings mirroring FabroSettings.
  */
-export interface ServerConfiguration {
+export interface ServerSettings {
     /**
      * Data directory path.
      */
@@ -68,30 +68,29 @@ export interface ServerConfiguration {
      * Maximum concurrent runs.
      */
     'max_concurrent_runs'?: number;
-    'web'?: WebConfiguration;
-    'api'?: ApiConfiguration;
-    'git'?: GitConfiguration;
+    'web'?: WebSettings;
+    'api'?: ApiSettings;
+    'git'?: GitSettings;
     'features'?: Features;
-    'log'?: LogConfiguration;
+    'log'?: LogSettings;
     /**
      * Default working directory.
      */
     'work_dir'?: string;
-    'llm'?: LlmConfiguration;
-    'setup'?: SetupConfiguration;
-    'sandbox'?: SandboxConfiguration;
+    'llm'?: LlmSettings;
+    'setup'?: SetupSettings;
+    'sandbox'?: SandboxSettings;
     /**
      * Default variable map.
      */
     'vars'?: { [key: string]: string; };
-    'checkpoint'?: CheckpointConfiguration;
-    'pull_request'?: PullRequestConfiguration;
+    'checkpoint'?: CheckpointSettings;
+    'pull_request'?: PullRequestSettings;
     'hooks'?: Array<HookDefinition>;
-    'assets'?: AssetsConfiguration;
+    'assets'?: AssetsSettings;
     /**
      * Default MCP server configurations.
      */
     'mcp_servers'?: { [key: string]: McpServerEntry; };
-    'github'?: GitHubConfiguration;
+    'github'?: GitHubSettings;
 }
-

@@ -17,7 +17,7 @@
 /**
  * Pull request creation configuration.
  */
-export interface PullRequestConfiguration {
+export interface PullRequestSettings {
     /**
      * Whether to create a pull request after a successful run.
      */

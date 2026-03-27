@@ -9,7 +9,7 @@ use tracing::{debug, info};
 use crate::args::LogsArgs;
 
 pub fn run(args: LogsArgs, styles: &Styles) -> Result<()> {
-    let cli_config = crate::cli_config::load_cli_config(None)?;
+    let cli_config = crate::cli_config::load_cli_settings(None)?;
     let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
     let run = fabro_workflows::run_lookup::resolve_run(&base, &args.run)?;
 

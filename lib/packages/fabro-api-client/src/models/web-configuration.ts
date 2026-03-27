@@ -15,16 +15,16 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { AuthConfiguration } from './auth-configuration';
+import type { AuthSettings } from './auth-configuration';
 
 /**
  * Web UI configuration.
  */
-export interface WebConfiguration {
+export interface WebSettings {
     /**
      * Web UI URL.
      */
     'url'?: string;
-    'auth'?: AuthConfiguration;
+    'auth'?: AuthSettings;
 }
 

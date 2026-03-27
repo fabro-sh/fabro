@@ -4,7 +4,7 @@ use crate::args::GlobalArgs;
 use crate::cli_config;
 
 pub async fn execute(mut args: fabro_agent::cli::AgentArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_config = cli_config::load_cli_config(None)?;
+    let cli_config = cli_config::load_cli_settings(None)?;
     #[cfg(feature = "sleep_inhibitor")]
     let _sleep_guard = crate::sleep_inhibitor::guard(cli_config.prevent_idle_sleep_enabled());
     let exec_defaults = cli_config.exec.as_ref();

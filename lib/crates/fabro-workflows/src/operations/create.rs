@@ -16,12 +16,12 @@ use crate::transforms::{expand_vars, Transform};
 pub struct ValidateOptions {
     pub base_dir: Option<PathBuf>,
     pub custom_transforms: Vec<Box<dyn Transform>>,
-    pub config: Option<FabroSettings>,
+    pub settings: Option<FabroSettings>,
     pub goal_override: Option<String>,
 }
 
 pub struct RunCreateOptions {
-    pub config: FabroSettings,
+    pub settings: FabroSettings,
     pub run_dir: Option<PathBuf>,
     pub run_id: Option<String>,
     pub workflow_slug: Option<String>,
@@ -42,7 +42,7 @@ pub fn validate(dot_source: &str, options: ValidateOptions) -> Result<Validated,
         dot_source,
         options.base_dir,
         options.custom_transforms,
-        options.config.as_ref(),
+        options.settings.as_ref(),
         options.goal_override.as_deref(),
     )
 }
@@ -61,13 +61,13 @@ pub fn validate_from_file(path: &Path) -> Result<Validated, FabroError> {
     )
 }
 
-/// Parse, transform, validate, normalize config, and persist a run.
+/// Parse, transform, validate, resolve settings, and persist a run.
 pub fn create(dot_source: &str, options: RunCreateOptions) -> Result<Persisted, FabroError> {
     let validated = preprocess_and_validate(
         dot_source,
         options.base_dir.clone(),
         Vec::new(),
-        Some(&options.config),
+        Some(&options.settings),
         options.goal_override.as_deref(),
     )?;
 
@@ -96,10 +96,10 @@ fn preprocess_and_validate(
     dot_source: &str,
     base_dir: Option<PathBuf>,
     custom_transforms: Vec<Box<dyn Transform>>,
-    config: Option<&FabroSettings>,
+    settings: Option<&FabroSettings>,
     goal_override: Option<&str>,
 ) -> Result<Validated, FabroError> {
-    let source = match config.and_then(|cfg| cfg.vars.as_ref()) {
+    let source = match settings.and_then(|resolved| resolved.vars.as_ref()) {
         Some(vars) => {
             let mut vars = vars.clone();
             // `$goal` is resolved later from the graph goal after any goal override.
@@ -137,7 +137,7 @@ fn persist_validated(
     options: RunCreateOptions,
 ) -> Result<Persisted, FabroError> {
     let RunCreateOptions {
-        mut config,
+        settings,
         run_dir,
         run_id,
         workflow_slug,
@@ -149,17 +149,17 @@ fn persist_validated(
         base_dir: _,
     } = options;
 
-    finalize_settings(&mut config, validated.graph());
+    let settings = resolve_run_settings(settings, validated.graph());
 
     let run_id = run_id.unwrap_or_else(|| ulid::Ulid::new().to_string());
-    let run_dir = run_dir.unwrap_or_else(|| default_run_dir(&run_id, config.dry_run_enabled()));
+    let run_dir = run_dir.unwrap_or_else(|| default_run_dir(&run_id, settings.dry_run_enabled()));
     let working_directory = working_directory
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     let run_record = RunRecord {
         run_id,
         created_at: Utc::now(),
-        config,
+        settings,
         graph: validated.graph().clone(),
         workflow_slug,
         working_directory,
@@ -177,8 +177,8 @@ fn persist_validated(
     )
 }
 
-pub(crate) fn finalize_settings(config: &mut FabroSettings, graph: &Graph) {
-    let llm_config = config.llm.as_ref();
+pub(crate) fn resolve_run_settings(mut settings: FabroSettings, graph: &Graph) -> FabroSettings {
+    let llm_config = settings.llm.as_ref();
     let configured_model = llm_config.and_then(|l| l.model.as_deref());
     let configured_provider = llm_config.and_then(|l| l.provider.as_deref());
     let graph_provider = graph.attrs.get("default_provider").and_then(|v| v.as_str());
@@ -208,16 +208,18 @@ pub(crate) fn finalize_settings(config: &mut FabroSettings, graph: &Graph) {
         None => (model, provider),
     };
 
-    let llm = config.llm.get_or_insert_default();
+    let llm = settings.llm.get_or_insert_default();
     llm.model = Some(resolved_model);
     llm.provider = resolved_provider;
 
     let goal = graph.goal().to_string();
-    config.goal = if goal.is_empty() { None } else { Some(goal) };
-    config.pull_request = config
+    settings.goal = if goal.is_empty() { None } else { Some(goal) };
+    settings.pull_request = settings
         .pull_request
         .take()
         .filter(|pull_request| pull_request.enabled);
+
+    settings
 }
 
 pub fn default_run_dir(run_id: &str, dry_run: bool) -> PathBuf {
@@ -308,7 +310,7 @@ mod tests {
         let validated = validate(
             dot,
             ValidateOptions {
-                config: Some(FabroSettings {
+                settings: Some(FabroSettings {
                     vars: Some(HashMap::from([("who".to_string(), "agent".to_string())])),
                     ..Default::default()
                 }),
@@ -407,7 +409,7 @@ mod tests {
         let err = create(
             dot,
             RunCreateOptions {
-                config: FabroSettings::default(),
+                settings: FabroSettings::default(),
                 run_dir: None,
                 run_id: None,
                 workflow_slug: None,
@@ -435,7 +437,7 @@ mod tests {
         let persisted = create(
             MINIMAL_DOT,
             RunCreateOptions {
-                config: FabroSettings {
+                settings: FabroSettings {
                     llm: Some(fabro_config::run::LlmSettings {
                         model: Some("sonnet".to_string()),
                         provider: None,
@@ -466,7 +468,7 @@ mod tests {
         assert_eq!(
             persisted
                 .run_record()
-                .config
+                .settings
                 .llm
                 .as_ref()
                 .and_then(|llm| llm.model.as_deref()),
@@ -475,17 +477,17 @@ mod tests {
         assert_eq!(
             persisted
                 .run_record()
-                .config
+                .settings
                 .llm
                 .as_ref()
                 .and_then(|llm| llm.provider.as_deref()),
             Some("anthropic")
         );
         assert_eq!(
-            persisted.run_record().config.goal.as_deref(),
+            persisted.run_record().settings.goal.as_deref(),
             Some("override goal")
         );
-        assert!(persisted.run_record().config.pull_request.is_none());
+        assert!(persisted.run_record().settings.pull_request.is_none());
         assert_eq!(
             persisted.run_record().workflow_slug.as_deref(),
             Some("slug")

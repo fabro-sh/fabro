@@ -296,6 +296,10 @@ pub fn load_server_config(path: Option<&Path>) -> anyhow::Result<FabroConfig> {
     crate::load_config_file(path, "server.toml")
 }
 
+pub fn load_server_settings(path: Option<&Path>) -> anyhow::Result<FabroSettings> {
+    load_server_config(path)?.try_into()
+}
+
 /// Resolve the storage directory: config value > default `~/.fabro`.
 pub fn resolve_storage_dir(config: &FabroSettings) -> PathBuf {
     config.storage_dir()

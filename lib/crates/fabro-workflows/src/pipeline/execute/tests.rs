@@ -69,9 +69,8 @@ fn test_run_options(run_dir: &Path, run_id: &str) -> RunOptions {
     RunOptions {
         run_dir: run_dir.to_path_buf(),
         cancel_token: None,
-        dry_run: false,
         run_id: run_id.into(),
-        config: FabroSettings::default(),
+        settings: FabroSettings::default(),
         git: None,
         host_repo_path: None,
         labels: HashMap::new(),
@@ -115,7 +114,7 @@ fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: &str
         RunRecord {
             run_id: run_id.to_string(),
             created_at: Utc::now(),
-            config: FabroSettings::default(),
+            settings: FabroSettings::default(),
             graph,
             workflow_slug: Some("test".to_string()),
             working_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),

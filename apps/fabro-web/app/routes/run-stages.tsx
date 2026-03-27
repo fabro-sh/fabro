@@ -144,11 +144,11 @@ export default function RunStages({ loaderData }: Route.ComponentProps) {
           <ul className="mt-2 space-y-0.5">
             <li>
               <Link
-                to={`/runs/${id}/configuration`}
+                to={`/runs/${id}/settings`}
                 className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-fg-3 transition-colors hover:bg-overlay hover:text-fg"
               >
                 <DocumentTextIcon className="size-4 shrink-0 text-fg-muted" />
-                Run Configuration
+                Run Settings
               </Link>
             </li>
             <li>

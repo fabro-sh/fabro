@@ -127,7 +127,7 @@ pub async fn retro(executed: Executed, options: &RetroOptions) -> Retroed {
         provider: _,
     } = executed;
 
-    let dry_run = run_options.dry_run;
+    let dry_run = run_options.dry_run_enabled();
 
     let retro = if options.enabled {
         run_retro(options, dry_run).await
@@ -183,10 +183,9 @@ mod tests {
 
     fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            config: FabroSettings::default(),
+            settings: FabroSettings::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,
-            dry_run: true,
             run_id: "run-test".to_string(),
             labels: HashMap::new(),
             git_author: crate::git::GitAuthor::default(),

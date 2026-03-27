@@ -19,10 +19,9 @@ pub struct GitCheckpointOptions {
 /// Options for a workflow run.
 #[derive(Clone)]
 pub struct RunOptions {
-    pub config: FabroSettings,
+    pub settings: FabroSettings,
     pub run_dir: PathBuf,
     pub cancel_token: Option<Arc<AtomicBool>>,
-    pub dry_run: bool,
     /// Unique identifier for this workflow run.
     pub run_id: String,
     /// User-defined key-value labels for this run.
@@ -44,17 +43,21 @@ pub struct RunOptions {
 }
 
 impl RunOptions {
+    pub fn dry_run_enabled(&self) -> bool {
+        self.settings.dry_run_enabled()
+    }
+
     pub fn checkpoint_exclude_globs(&self) -> &[String] {
-        &self.config.checkpoint.exclude_globs
+        &self.settings.checkpoint.exclude_globs
     }
 
     /// PR config (already normalized — disabled entries stripped at construction).
     pub fn pull_request(&self) -> Option<&PullRequestSettings> {
-        self.config.pull_request.as_ref()
+        self.settings.pull_request.as_ref()
     }
 
     pub fn asset_globs(&self) -> &[String] {
-        self.config
+        self.settings
             .assets
             .as_ref()
             .map(|a| a.include.as_slice())

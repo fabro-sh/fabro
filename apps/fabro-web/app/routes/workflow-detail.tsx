@@ -1,7 +1,7 @@
 import { ChevronRightIcon } from "@heroicons/react/20/solid";
 import { Link, Outlet, useLocation, useParams } from "react-router";
 import { apiJson } from "../api-client";
-import type { WorkflowDetail as ApiWorkflowDetail, RunConfiguration } from "@qltysh/fabro-api-client";
+import type { WorkflowDetail as ApiWorkflowDetail, RunSettings } from "@qltysh/fabro-api-client";
 import type { Route } from "./+types/workflow-detail";
 
 export interface WorkflowEntry {
@@ -9,7 +9,7 @@ export interface WorkflowEntry {
   slug: string;
   description: string;
   filename: string;
-  config: RunConfiguration;
+  settings: RunSettings;
   graph: string;
 }
 
@@ -21,7 +21,7 @@ export const workflowData: Record<string, WorkflowEntry> = {
     slug: "fix_build",
     filename: "fix_build.fabro",
     description: "Automatically diagnoses and fixes CI build failures by analyzing error logs, identifying root causes, and applying targeted code changes.",
-    config: {
+    settings: {
       version: 1,
       goal: "Diagnose and fix CI build failures",
       graph: "fix_build.fabro",
@@ -62,7 +62,7 @@ export const workflowData: Record<string, WorkflowEntry> = {
     slug: "implement",
     filename: "implement.fabro",
     description: "Generates production-ready code from a technical blueprint, including tests, documentation, and a pull request ready for review.",
-    config: {
+    settings: {
       version: 1,
       goal: "Implement feature from technical blueprint",
       graph: "implement.fabro",
@@ -118,7 +118,7 @@ export const workflowData: Record<string, WorkflowEntry> = {
     slug: "sync_drift",
     filename: "sync_drift.fabro",
     description: "Detects configuration and code drift between environments, then generates reconciliation patches to bring everything back in sync.",
-    config: {
+    settings: {
       version: 1,
       goal: "Detect and reconcile configuration drift across environments",
       graph: "sync_drift.fabro",
@@ -163,7 +163,7 @@ export const workflowData: Record<string, WorkflowEntry> = {
     slug: "expand",
     filename: "expand.fabro",
     description: "Evolves the product by analyzing usage patterns and specifications to propose and implement incremental improvements.",
-    config: {
+    settings: {
       version: 1,
       goal: "Propose and implement incremental product improvements",
       graph: "expand.fabro",
@@ -216,7 +216,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     slug: apiWorkflow.slug,
     description: apiWorkflow.description,
     filename: apiWorkflow.filename,
-    config: apiWorkflow.config,
+    settings: apiWorkflow.settings,
     graph: apiWorkflow.graph,
   };
   return { workflow };

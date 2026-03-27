@@ -16,7 +16,7 @@ pub async fn execute(storage_dir: PathBuf, run_id: String, resume: bool) -> Resu
     let run_dir = fabro_workflows::run_lookup::find_run_by_prefix(&runs_base, &run_id)?;
     let styles: &'static fabro_util::terminal::Styles =
         Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
-    let cli_config = cli_config::load_cli_config(None)?;
+    let cli_config = cli_config::load_cli_settings(None)?;
     let github_app = shared::github::build_github_app_credentials(cli_config.app_id());
     let git_author = fabro_workflows::git::GitAuthor::from_options(
         cli_config.git_author().and_then(|a| a.name.clone()),
@@ -54,22 +54,14 @@ pub async fn execute(storage_dir: PathBuf, run_id: String, resume: bool) -> Resu
         super::execute::resume_from_record(
             persisted,
             run_dir.clone(),
-            cli_config,
             styles,
             github_app,
             git_author,
         )
         .await
     } else {
-        super::execute::run_from_record(
-            persisted,
-            run_dir.clone(),
-            cli_config,
-            styles,
-            github_app,
-            git_author,
-        )
-        .await
+        super::execute::run_from_record(persisted, run_dir.clone(), styles, github_app, git_author)
+            .await
     };
 
     match result {

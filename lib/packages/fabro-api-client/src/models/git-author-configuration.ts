@@ -17,7 +17,7 @@
 /**
  * Git commit author configuration.
  */
-export interface GitAuthorConfiguration {
+export interface GitAuthorSettings {
     /**
      * Author name for commits.
      */

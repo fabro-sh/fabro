@@ -17,7 +17,7 @@
 /**
  * Checkpoint configuration for file exclusion.
  */
-export interface CheckpointConfiguration {
+export interface CheckpointSettings {
     /**
      * Glob patterns to exclude from checkpoints.
      */

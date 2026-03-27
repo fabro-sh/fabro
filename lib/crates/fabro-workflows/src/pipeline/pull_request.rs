@@ -488,7 +488,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
 
     let mut pr_url = None;
     if let Some(pr_cfg) = &options.pr_config {
-        if run_options.dry_run {
+        if run_options.dry_run_enabled() {
             tracing::debug!("Skipping PR creation: run is in dry-run mode");
         } else if let Err(ref e) = outcome {
             tracing::debug!(error = %e, "Skipping PR creation: engine returned an error");

@@ -110,7 +110,7 @@ mod tests {
         RunRecord {
             run_id: "run-123".to_string(),
             created_at: Utc::now(),
-            config: FabroSettings {
+            settings: FabroSettings {
                 dry_run: Some(true),
                 verbose: Some(true),
                 ..Default::default()

@@ -4,8 +4,8 @@ import { DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
 import { CollapsibleFile } from "../components/collapsible-file";
 import { apiJson } from "../api-client";
 import { formatDurationSecs } from "../lib/format";
-import type { PaginatedRunStageList, RunConfiguration } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/run-configuration";
+import type { PaginatedRunStageList, RunSettings } from "@qltysh/fabro-api-client";
+import type { Route } from "./+types/run-settings";
 
 export const handle = { wide: true };
 
@@ -27,9 +27,9 @@ const statusConfig: Record<StageStatus, { icon: typeof CheckCircleIcon; color: s
 };
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const [{ data: apiStages }, config] = await Promise.all([
+  const [{ data: apiStages }, settings] = await Promise.all([
     apiJson<PaginatedRunStageList>(`/runs/${params.id}/stages`, { request }),
-    apiJson<RunConfiguration>(`/runs/${params.id}/configuration`, { request }),
+    apiJson<RunSettings>(`/runs/${params.id}/settings`, { request }),
   ]);
   const stages: Stage[] = apiStages.map((s) => ({
     id: s.id,
@@ -37,12 +37,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     status: s.status as StageStatus,
     duration: s.duration_secs != null ? formatDurationSecs(s.duration_secs) : "--",
   }));
-  return { stages, config };
+  return { stages, settings };
 }
 
-export default function RunConfiguration({ loaderData }: Route.ComponentProps) {
+export default function RunSettingsPage({ loaderData }: Route.ComponentProps) {
   const { id } = useParams();
-  const { stages, config } = loaderData;
+  const { stages, settings } = loaderData;
 
   return (
     <div className="flex gap-6">
@@ -74,11 +74,11 @@ export default function RunConfiguration({ loaderData }: Route.ComponentProps) {
           <ul className="mt-2 space-y-0.5">
             <li>
               <Link
-                to={`/runs/${id}/configuration`}
+                to={`/runs/${id}/settings`}
                 className="flex items-center gap-2 rounded-md bg-overlay px-2 py-1.5 text-sm text-fg transition-colors"
               >
                 <DocumentTextIcon className="size-4 shrink-0 text-fg-muted" />
-                Run Configuration
+                Run Settings
               </Link>
             </li>
             <li>
@@ -96,7 +96,7 @@ export default function RunConfiguration({ loaderData }: Route.ComponentProps) {
 
       <div className="min-w-0 flex-1">
         <CollapsibleFile
-          file={{ name: "run.json", contents: JSON.stringify(config, null, 2), lang: "json" }}
+          file={{ name: "run.json", contents: JSON.stringify(settings, null, 2), lang: "json" }}
         />
       </div>
     </div>

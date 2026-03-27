@@ -15,15 +15,15 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { DaytonaConfigurationNetwork } from './daytona-configuration-network';
+import type { DaytonaSettingsNetwork } from './daytona-configuration-network';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { DaytonaSnapshotConfiguration } from './daytona-snapshot-configuration';
+import type { DaytonaSnapshotSettings } from './daytona-snapshot-configuration';
 
 /**
  * Daytona-specific sandbox settings.
  */
-export interface DaytonaConfiguration {
+export interface DaytonaSettings {
     /**
      * Auto-stop interval in seconds.
      */
@@ -32,7 +32,7 @@ export interface DaytonaConfiguration {
      * Labels applied to the sandbox.
      */
     'labels'?: { [key: string]: string; };
-    'snapshot'?: DaytonaSnapshotConfiguration;
-    'network'?: DaytonaConfigurationNetwork;
+    'snapshot'?: DaytonaSnapshotSettings;
+    'network'?: DaytonaSettingsNetwork;
 }
 

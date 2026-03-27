@@ -15,21 +15,21 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { DaytonaConfiguration } from './daytona-configuration';
+import type { DaytonaSettings } from './daytona-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { ExeConfiguration } from './exe-configuration';
+import type { ExeSettings } from './exe-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { LocalSandboxConfiguration } from './local-sandbox-configuration';
+import type { LocalSandboxSettings } from './local-sandbox-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SshConfiguration } from './ssh-configuration';
+import type { SshSettings } from './ssh-configuration';
 
 /**
  * Sandbox execution environment settings.
  */
-export interface SandboxConfiguration {
+export interface SandboxSettings {
     /**
      * Sandbox provider name.
      */
@@ -42,10 +42,10 @@ export interface SandboxConfiguration {
      * Whether to use a devcontainer for the sandbox.
      */
     'devcontainer'?: boolean;
-    'daytona'?: DaytonaConfiguration;
-    'exe'?: ExeConfiguration;
-    'ssh'?: SshConfiguration;
-    'local'?: LocalSandboxConfiguration;
+    'daytona'?: DaytonaSettings;
+    'exe'?: ExeSettings;
+    'ssh'?: SshSettings;
+    'local'?: LocalSandboxSettings;
     /**
      * Environment variables injected into the sandbox.
      */

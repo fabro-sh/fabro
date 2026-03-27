@@ -186,7 +186,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 }
 
                 // Push run branch (skip in dry-run mode)
-                if !self.run_options.dry_run {
+                if !self.run_options.dry_run_enabled() {
                     if let Some(branch) = self
                         .run_options
                         .git

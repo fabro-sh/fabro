@@ -17,7 +17,7 @@
 /**
  * Logging configuration.
  */
-export interface LogConfiguration {
+export interface LogSettings {
     /**
      * Log level (e.g. trace, debug, info).
      */

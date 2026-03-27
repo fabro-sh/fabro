@@ -42,7 +42,7 @@ pub async fn attach_run(
 
     let is_tty = std::io::stderr().is_terminal();
     let verbose = fabro_workflows::records::RunRecord::load(run_dir)
-        .map(|record| record.config.verbose_enabled())
+        .map(|record| record.settings.verbose_enabled())
         .unwrap_or(false);
     let mut progress_ui = run_progress::ProgressUI::new(is_tty, verbose);
 

@@ -32,7 +32,7 @@ pub struct StartPullRequestConfig {
 /// Options for `start()` and `resume()`.
 ///
 /// Fields that are derivable from `RunRecord` (run_id, labels, base_branch,
-/// host_repo_path, config, workflow_slug) are read from disk by `run_engine()`.
+/// host_repo_path, settings, workflow_slug) are read from disk by `run_engine()`.
 /// Callers only provide truly external values.
 pub struct StartOptions {
     // Truly external (not derivable from RunRecord)
@@ -51,9 +51,6 @@ pub struct StartOptions {
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
     pub worktree_mode: Option<WorktreeMode>,
     pub registry_override: Option<Arc<crate::handler::HandlerRegistry>>,
-
-    // Still external for now — could be derived from RunRecord.config in follow-up
-    pub dry_run: bool,
     pub retro: StartRetroOptions,
     pub finalize: StartFinalizeOptions,
     pub pull_request: StartPullRequestConfig,
@@ -116,13 +113,12 @@ async fn run_engine(
 ) -> Result<Started, FabroError> {
     let preserve_sandbox = options.finalize.preserve_sandbox;
 
-    // Build RunOptions from the persisted RunRecord + external caller options
+    // Build RunOptions from the persisted RunRecord + external caller options.
     let record = persisted.run_record();
     let run_options = RunOptions {
-        config: record.config.clone(),
+        settings: record.settings.clone(),
         run_dir: persisted.run_dir().to_path_buf(),
         cancel_token: options.cancel_token,
-        dry_run: options.dry_run,
         run_id: record.run_id.clone(),
         labels: record.labels.clone(),
         git_author: options.git_author,
@@ -161,7 +157,7 @@ async fn run_engine(
 
     let init_options = InitOptions {
         run_id: record.run_id.clone(),
-        dry_run: options.dry_run,
+        dry_run: run_options.dry_run_enabled(),
         emitter: options.emitter,
         sandbox: options.sandbox,
         llm: options.llm,
@@ -274,7 +270,7 @@ mod tests {
         crate::operations::create(
             dot,
             crate::operations::RunCreateOptions {
-                config: FabroSettings::default(),
+                settings: FabroSettings::default(),
                 run_dir: Some(run_dir.to_path_buf()),
                 run_id: Some("run-test".to_string()),
                 workflow_slug: Some("test".to_string()),
@@ -333,7 +329,6 @@ mod tests {
             github_app: None,
             worktree_mode: None,
             registry_override: Some(registry),
-            dry_run: false,
             retro: StartRetroOptions { enabled: false },
             finalize: StartFinalizeOptions { preserve_sandbox },
             pull_request: StartPullRequestConfig {

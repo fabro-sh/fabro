@@ -33,7 +33,7 @@ pub async fn create_run(
     let run_dir = match args
         .storage_dir
         .clone()
-        .or_else(|| source_input.config.storage_dir.clone())
+        .or_else(|| source_input.settings.storage_dir.clone())
     {
         Some(sd) => make_run_dir(&sd.join("runs"), &run_id, args.dry_run),
         None => default_run_dir(&run_id, args.dry_run),
@@ -43,24 +43,20 @@ pub async fn create_run(
         .ok()
         .and_then(|(_, branch)| branch);
     if !args.dry_run {
-        let _ = resolve_sandbox_provider(
-            args.sandbox.map(Into::into),
-            Some(&source_input.config),
-            &source_input.run_defaults,
-        )?;
+        let _ = resolve_sandbox_provider(args.sandbox.map(Into::into), &source_input.settings)?;
     }
 
-    let config = source_input.config.clone();
+    let settings = source_input.settings.clone();
 
     let persisted = match fabro_workflows::operations::create(
         &source_input.raw_source,
         fabro_workflows::operations::RunCreateOptions {
-            config,
+            settings,
             run_dir: Some(run_dir.clone()),
             run_id: Some(run_id.clone()),
             workflow_slug: source_input.workflow_slug.clone(),
             labels: {
-                let mut labels = source_input.config.labels.clone();
+                let mut labels = source_input.settings.labels.clone();
                 labels.extend(parse_labels(&args.label));
                 labels
             },

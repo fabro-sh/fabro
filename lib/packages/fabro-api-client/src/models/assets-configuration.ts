@@ -17,7 +17,7 @@
 /**
  * Asset collection configuration.
  */
-export interface AssetsConfiguration {
+export interface AssetsSettings {
     /**
      * Glob patterns for files to collect as run assets.
      */

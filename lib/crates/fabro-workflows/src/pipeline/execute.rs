@@ -199,7 +199,7 @@ pub async fn execute(init: Initialized) -> Executed {
     let graph_max = graph.max_node_visits();
     let max_node_visits = if graph_max > 0 {
         Some(graph_max as usize)
-    } else if run_options.dry_run {
+    } else if run_options.dry_run_enabled() {
         Some(10)
     } else {
         None

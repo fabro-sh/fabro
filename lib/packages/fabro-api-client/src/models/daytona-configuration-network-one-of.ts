@@ -14,7 +14,7 @@
 
 
 
-export interface DaytonaConfigurationNetworkOneOf {
+export interface DaytonaSettingsNetworkOneOf {
     /**
      * CIDR allowlist for network access.
      */

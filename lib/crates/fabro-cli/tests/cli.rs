@@ -1637,21 +1637,21 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
 
     let run_record: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(run_dir.join("run.json")).unwrap()).unwrap();
-    assert_eq!(run_record["config"]["auto_approve"].as_bool(), Some(true));
+    assert_eq!(run_record["settings"]["auto_approve"].as_bool(), Some(true));
     assert_eq!(
-        run_record["config"]["storage_dir"].as_str(),
+        run_record["settings"]["storage_dir"].as_str(),
         Some(storage_dir.to_str().unwrap())
     );
     assert_eq!(
-        run_record["config"]["sandbox"]["preserve"].as_bool(),
+        run_record["settings"]["sandbox"]["preserve"].as_bool(),
         Some(true)
     );
     assert_eq!(
-        run_record["config"]["llm"]["model"].as_str(),
+        run_record["settings"]["llm"]["model"].as_str(),
         Some("gpt-5.2")
     );
     assert_eq!(
-        run_record["config"]["setup"]["commands"],
+        run_record["settings"]["setup"]["commands"],
         serde_json::json!(["workflow-setup", "project-setup", "cli-setup"])
     );
 }

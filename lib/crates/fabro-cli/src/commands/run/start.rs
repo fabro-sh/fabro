@@ -130,7 +130,7 @@ mod tests {
         RunRecord {
             run_id: "run-test123".to_string(),
             created_at: Utc::now(),
-            config: FabroSettings::default(),
+            settings: FabroSettings::default(),
             graph: Graph {
                 name: "test".to_string(),
                 ..Default::default()

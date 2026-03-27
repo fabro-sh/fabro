@@ -104,12 +104,12 @@ pub async fn get_run_verification(
     paginated_response(runs::verifications(), &pagination)
 }
 
-pub async fn get_run_configuration(
+pub async fn get_run_settings(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
-    (StatusCode::OK, Json(runs::configuration())).into_response()
+    (StatusCode::OK, Json(runs::settings())).into_response()
 }
 
 pub async fn steer_run_stub(
@@ -588,11 +588,11 @@ pub async fn list_models(
 
 // ── Settings ───────────────────────────────────────────────────────────
 
-pub async fn get_server_configuration(
+pub async fn get_server_settings(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
-    (StatusCode::OK, Json(settings::server_config())).into_response()
+    (StatusCode::OK, Json(settings::server_settings())).into_response()
 }
 
 // ── Usage ──────────────────────────────────────────────────────────────
@@ -1276,7 +1276,7 @@ mod runs {
         ]
     }
 
-    pub fn configuration() -> serde_json::Value {
+    pub fn settings() -> serde_json::Value {
         serde_json::to_value(fabro_config::FabroSettings {
             version: Some(1),
             goal: Some("Add rate limiting to auth endpoints".into()),
@@ -1431,7 +1431,7 @@ mod workflows {
         ]
     }
 
-    fn run_config_to_api(cfg: fabro_config::FabroSettings) -> RunConfiguration {
+    fn run_settings_to_api(cfg: fabro_config::FabroSettings) -> RunSettings {
         fn strip_nulls(val: serde_json::Value) -> serde_json::Value {
             match val {
                 serde_json::Value::Object(map) => serde_json::Value::Object(
@@ -1455,7 +1455,7 @@ mod workflows {
             WorkflowDetail {
                 name: "Fix Build".into(), slug: "fix_build".into(), filename: "fix_build.fabro".into(),
                 description: "Automatically diagnoses and fixes CI build failures by analyzing error logs, identifying root causes, and applying targeted code changes.".into(),
-                config: run_config_to_api(fabro_config::FabroSettings {
+                settings: run_settings_to_api(fabro_config::FabroSettings {
                     version: Some(1),
                     goal: Some("Diagnose and fix CI build failures".into()),
                     graph: Some("fix_build.fabro".into()),
@@ -1526,7 +1526,7 @@ mod workflows {
             WorkflowDetail {
                 name: "Implement Feature".into(), slug: "implement".into(), filename: "implement.fabro".into(),
                 description: "Generates production-ready code from a technical blueprint, including tests, documentation, and a pull request ready for review.".into(),
-                config: run_config_to_api(fabro_config::FabroSettings {
+                settings: run_settings_to_api(fabro_config::FabroSettings {
                     version: Some(1),
                     goal: Some("Implement feature from technical blueprint".into()),
                     graph: Some("implement.fabro".into()),
@@ -1615,7 +1615,7 @@ mod workflows {
             WorkflowDetail {
                 name: "Sync Drift".into(), slug: "sync_drift".into(), filename: "sync_drift.fabro".into(),
                 description: "Detects configuration and code drift between environments, then generates reconciliation patches to bring everything back in sync.".into(),
-                config: run_config_to_api(fabro_config::FabroSettings {
+                settings: run_settings_to_api(fabro_config::FabroSettings {
                     version: Some(1),
                     goal: Some("Detect and reconcile configuration drift across environments".into()),
                     graph: Some("sync_drift.fabro".into()),
@@ -1692,7 +1692,7 @@ mod workflows {
             WorkflowDetail {
                 name: "Expand Product".into(), slug: "expand".into(), filename: "expand.fabro".into(),
                 description: "Evolves the product by analyzing usage patterns and specifications to propose and implement incremental improvements.".into(),
-                config: run_config_to_api(fabro_config::FabroSettings {
+                settings: run_settings_to_api(fabro_config::FabroSettings {
                     version: Some(1),
                     goal: Some("Propose and implement incremental product improvements".into()),
                     graph: Some("expand.fabro".into()),
@@ -3244,7 +3244,7 @@ mod settings {
     use fabro_config::server::*;
     use fabro_config::FabroSettings;
 
-    pub fn server_config() -> serde_json::Value {
+    pub fn server_settings() -> serde_json::Value {
         serde_json::to_value(FabroSettings {
             storage_dir: Some("/home/fabro/.fabro".into()),
             max_concurrent_runs: Some(10),

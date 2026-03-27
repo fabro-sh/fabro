@@ -185,10 +185,7 @@ fn demo_routes() -> Router<Arc<AppState>> {
             "/runs/{id}/verification",
             get(crate::demo::get_run_verification),
         )
-        .route(
-            "/runs/{id}/configuration",
-            get(crate::demo::get_run_configuration),
-        )
+        .route("/runs/{id}/settings", get(crate::demo::get_run_settings))
         .route("/runs/{id}/steer", post(crate::demo::steer_run_stub))
         .route(
             "/runs/{id}/preview",
@@ -250,7 +247,7 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/models", get(crate::demo::list_models))
         .route("/models/{id}/test", post(test_model))
         .route("/completions", post(create_completion))
-        .route("/settings", get(crate::demo::get_server_configuration))
+        .route("/settings", get(crate::demo::get_server_settings))
         .route("/usage", get(crate::demo::get_aggregate_usage))
 }
 
@@ -273,7 +270,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/files", get(not_implemented))
         .route("/runs/{id}/usage", get(not_implemented))
         .route("/runs/{id}/verification", get(not_implemented))
-        .route("/runs/{id}/configuration", get(not_implemented))
+        .route("/runs/{id}/settings", get(not_implemented))
         .route("/runs/{id}/steer", post(not_implemented))
         .route("/runs/{id}/preview", post(not_implemented))
         .route("/workflows", get(not_implemented))
@@ -520,7 +517,7 @@ async fn start_run(
     let run_id = ulid::Ulid::new().to_string();
     info!(run_id = %run_id, "Run queued");
     let run_dir = std::env::temp_dir().join(format!("fabro-{}", uuid::Uuid::new_v4()));
-    let config = fabro_config::FabroSettings {
+    let settings = fabro_config::FabroSettings {
         dry_run: Some(state.dry_run),
         hooks: state.hooks.clone(),
         sandbox: Some(fabro_config::sandbox::SandboxSettings {
@@ -529,11 +526,11 @@ async fn start_run(
         }),
         ..Default::default()
     };
-    let run_labels = config.labels.clone();
+    let run_labels = settings.labels.clone();
     let persisted = match operations::create(
         &req.dot_source,
         RunCreateOptions {
-            config,
+            settings,
             run_dir: Some(run_dir.clone()),
             run_id: Some(run_id.clone()),
             workflow_slug: None,
@@ -701,10 +698,9 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
     };
     let run_record = persisted.run_record().clone();
     let run_options = RunOptions {
-        config: run_record.config,
+        settings: run_record.settings,
         run_dir: run_dir.clone(),
         cancel_token: Some(cancel_token),
-        dry_run: state.dry_run,
         run_id: run_id.clone(),
         labels: run_record.labels,
         git_author: state.git_author.clone(),

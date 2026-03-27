@@ -133,7 +133,7 @@ export const WorkflowsApiAxiosParamCreator = function (configuration?: Configura
             };
         },
         /**
-         * Returns the full detail of a workflow including its DOT graph, TOML config, and description.
+         * Returns the full detail of a workflow including its DOT graph, resolved settings, and description.
          * @summary Retrieve Workflow
          * @param {string} name URL-safe slug identifying a workflow definition.
          * @param {*} [options] Override http request option.
@@ -212,7 +212,7 @@ export const WorkflowsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns the full detail of a workflow including its DOT graph, TOML config, and description.
+         * Returns the full detail of a workflow including its DOT graph, resolved settings, and description.
          * @summary Retrieve Workflow
          * @param {string} name URL-safe slug identifying a workflow definition.
          * @param {*} [options] Override http request option.
@@ -257,7 +257,7 @@ export const WorkflowsApiFactory = function (configuration?: Configuration, base
             return localVarFp.listWorkflows(pageLimit, pageOffset, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns the full detail of a workflow including its DOT graph, TOML config, and description.
+         * Returns the full detail of a workflow including its DOT graph, resolved settings, and description.
          * @summary Retrieve Workflow
          * @param {string} name URL-safe slug identifying a workflow definition.
          * @param {*} [options] Override http request option.
@@ -299,7 +299,7 @@ export class WorkflowsApi extends BaseAPI {
     }
 
     /**
-     * Returns the full detail of a workflow including its DOT graph, TOML config, and description.
+     * Returns the full detail of a workflow including its DOT graph, resolved settings, and description.
      * @summary Retrieve Workflow
      * @param {string} name URL-safe slug identifying a workflow definition.
      * @param {*} [options] Override http request option.
@@ -309,4 +309,3 @@ export class WorkflowsApi extends BaseAPI {
         return WorkflowsApiFp(this.configuration).retrieveWorkflow(name, options).then((request) => request(this.axios, this.basePath));
     }
 }
-

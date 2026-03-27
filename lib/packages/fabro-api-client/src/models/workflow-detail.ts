@@ -15,10 +15,10 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { RunConfiguration } from './run-configuration';
+import type { RunSettings } from './run-configuration';
 
 /**
- * Full detail of a workflow definition including graph and configuration.
+ * Full detail of a workflow definition including graph and resolved settings.
  */
 export interface WorkflowDetail {
     /**
@@ -37,10 +37,9 @@ export interface WorkflowDetail {
      * Prose description of what the workflow does.
      */
     'description': string;
-    'config': RunConfiguration;
+    'settings': RunSettings;
     /**
      * DOT language source defining the workflow graph.
      */
     'graph': string;
 }
-

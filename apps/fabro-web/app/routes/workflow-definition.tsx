@@ -21,13 +21,13 @@ export default function WorkflowDefinition() {
   }, []);
 
   if (workflow == null) {
-    return <p className="text-sm text-fg-muted">No configuration found.</p>;
+    return <p className="text-sm text-fg-muted">No settings found.</p>;
   }
 
   return (
     <div className="flex flex-col gap-6">
       <CollapsibleFile
-        file={{ name: "run.json", contents: JSON.stringify(workflow.config, null, 2), lang: "json" }}
+        file={{ name: "run.json", contents: JSON.stringify(workflow.settings, null, 2), lang: "json" }}
         defaultOpen={false}
       />
       {dotReady && (

@@ -17,7 +17,7 @@
 /**
  * LLM provider and model settings.
  */
-export interface LlmConfiguration {
+export interface LlmSettings {
     /**
      * Model identifier.
      */

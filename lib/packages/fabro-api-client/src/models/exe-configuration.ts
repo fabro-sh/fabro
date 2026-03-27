@@ -17,7 +17,7 @@
 /**
  * exe.dev sandbox configuration.
  */
-export interface ExeConfiguration {
+export interface ExeSettings {
     /**
      * VM image to use for the exe.dev sandbox.
      */

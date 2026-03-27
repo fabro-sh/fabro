@@ -83,12 +83,11 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
 
     // Initialize data directory and SQLite database
     let config_path = args.config;
-    let server_config: FabroSettings =
-        fabro_config::server::load_server_config(config_path.as_deref())?.try_into()?;
-    let data_dir = fabro_config::server::resolve_storage_dir(&server_config);
+    let server_settings = fabro_config::server::load_server_settings(config_path.as_deref())?;
+    let data_dir = fabro_config::server::resolve_storage_dir(&server_settings);
 
     // Shared config for live reloading
-    let shared_config = Arc::new(RwLock::new(server_config));
+    let shared_config = Arc::new(RwLock::new(server_settings));
 
     // CLI overrides take precedence over config file values, even after reload
     let cli_model = args.model;
@@ -215,12 +214,8 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         interval.tick().await; // skip first immediate tick
         loop {
             interval.tick().await;
-            match fabro_config::server::load_server_config(config_path_for_poll.as_deref()) {
+            match fabro_config::server::load_server_settings(config_path_for_poll.as_deref()) {
                 Ok(new_config) => {
-                    let Ok(new_config) = FabroSettings::try_from(new_config) else {
-                        warn!("Failed to finalize reloaded server config");
-                        continue;
-                    };
                     let changed = {
                         let cfg = config_for_poll.read().expect("config lock poisoned");
                         *cfg != new_config

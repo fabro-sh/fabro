@@ -18,20 +18,20 @@
 import type { HookDefinition } from './hook-definition';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { LlmConfiguration } from './llm-configuration';
+import type { LlmSettings } from './llm-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SandboxConfiguration } from './sandbox-configuration';
+import type { SandboxSettings } from './sandbox-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SetupConfiguration } from './setup-configuration';
+import type { SetupSettings } from './setup-configuration';
 
 /**
- * Structured run configuration mirroring WorkflowRunConfig.
+ * Structured run settings mirroring FabroSettings.
  */
-export interface RunConfiguration {
+export interface RunSettings {
     /**
-     * Configuration schema version.
+     * Settings schema version.
      */
     'version': number;
     /**
@@ -46,13 +46,12 @@ export interface RunConfiguration {
      * Working directory for the run.
      */
     'work_dir'?: string;
-    'llm'?: LlmConfiguration;
-    'setup'?: SetupConfiguration;
-    'sandbox'?: SandboxConfiguration;
+    'llm'?: LlmSettings;
+    'setup'?: SetupSettings;
+    'sandbox'?: SandboxSettings;
     /**
      * Variable map for template expansion.
      */
     'vars'?: { [key: string]: string; };
     'hooks'?: Array<HookDefinition>;
 }
-

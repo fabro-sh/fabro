@@ -17,7 +17,7 @@
 /**
  * SSH sandbox configuration for user-provided hosts.
  */
-export interface SshConfiguration {
+export interface SshSettings {
     /**
      * SSH destination (e.g. user@host or an SSH alias).
      */

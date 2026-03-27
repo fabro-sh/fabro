@@ -396,18 +396,18 @@ fn fully_populated_server_config() -> FabroSettings {
 }
 
 #[test]
-fn server_config_keys_match_openapi_spec() {
-    let config = fully_populated_server_config();
-    let json = serde_json::to_value(&config).expect("serialize ServerConfig");
+fn server_settings_keys_match_openapi_spec() {
+    let settings = fully_populated_server_config();
+    let json = serde_json::to_value(&settings).expect("serialize ServerSettings");
     let spec = load_spec_json();
-    let schema = &spec["components"]["schemas"]["ServerConfiguration"];
+    let schema = &spec["components"]["schemas"]["ServerSettings"];
 
     let mut errors = Vec::new();
-    compare_schema("ServerConfiguration", &json, schema, &spec, &mut errors);
+    compare_schema("ServerSettings", &json, schema, &spec, &mut errors);
 
     if !errors.is_empty() {
         panic!(
-            "ServerConfig ↔ OpenAPI schema drift:\n  {}",
+            "ServerSettings ↔ OpenAPI schema drift:\n  {}",
             errors.join("\n  ")
         );
     }

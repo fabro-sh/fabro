@@ -15,12 +15,12 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { TlsConfiguration } from './tls-configuration';
+import type { TlsSettings } from './tls-configuration';
 
 /**
  * API server configuration.
  */
-export interface ApiConfiguration {
+export interface ApiSettings {
     /**
      * API base URL.
      */
@@ -28,15 +28,15 @@ export interface ApiConfiguration {
     /**
      * Authentication strategies.
      */
-    'authentication_strategies'?: Array<ApiConfigurationAuthenticationStrategiesEnum>;
-    'tls'?: TlsConfiguration;
+    'authentication_strategies'?: Array<ApiSettingsAuthenticationStrategiesEnum>;
+    'tls'?: TlsSettings;
 }
 
-export const ApiConfigurationAuthenticationStrategiesEnum = {
+export const ApiSettingsAuthenticationStrategiesEnum = {
     JWT: 'jwt',
     MTLS: 'mtls'
 } as const;
 
-export type ApiConfigurationAuthenticationStrategiesEnum = typeof ApiConfigurationAuthenticationStrategiesEnum[keyof typeof ApiConfigurationAuthenticationStrategiesEnum];
+export type ApiSettingsAuthenticationStrategiesEnum = typeof ApiSettingsAuthenticationStrategiesEnum[keyof typeof ApiSettingsAuthenticationStrategiesEnum];
 
 

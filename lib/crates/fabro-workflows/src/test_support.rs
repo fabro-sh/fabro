@@ -38,7 +38,7 @@ fn initialized(
         registry: Arc::new(registry),
         hook_runner: options.hook_runner,
         env: options.env,
-        dry_run: run_options.dry_run,
+        dry_run: run_options.dry_run_enabled(),
         llm_client: None,
         model: String::new(),
         provider: fabro_llm::Provider::Anthropic,

@@ -199,6 +199,42 @@ impl FabroSettings {
         self.git.as_ref().map(|g| &g.author)
     }
 
+    pub fn sandbox_settings(&self) -> Option<&SandboxSettings> {
+        self.sandbox.as_ref()
+    }
+
+    pub fn setup_settings(&self) -> Option<&SetupSettings> {
+        self.setup.as_ref()
+    }
+
+    pub fn setup_commands(&self) -> &[String] {
+        self.setup
+            .as_ref()
+            .map(|setup| setup.commands.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn setup_timeout_ms(&self) -> Option<u64> {
+        self.setup.as_ref().and_then(|setup| setup.timeout_ms)
+    }
+
+    pub fn preserve_sandbox_enabled(&self) -> bool {
+        self.sandbox
+            .as_ref()
+            .and_then(|sandbox| sandbox.preserve)
+            .unwrap_or(false)
+    }
+
+    pub fn github_permissions(&self) -> Option<&HashMap<String, String>> {
+        self.github
+            .as_ref()
+            .and_then(|github| (!github.permissions.is_empty()).then_some(&github.permissions))
+    }
+
+    pub fn mcp_server_entries(&self) -> &HashMap<String, McpServerEntry> {
+        &self.mcp_servers
+    }
+
     pub fn verbose_enabled(&self) -> bool {
         self.verbose.unwrap_or(false)
     }

@@ -1,6 +1,6 @@
 import { apiJson } from "../api-client";
 import { CollapsibleFile } from "../components/collapsible-file";
-import type { ServerConfiguration } from "@qltysh/fabro-api-client";
+import type { ServerSettings } from "@qltysh/fabro-api-client";
 import type { Route } from "./+types/settings";
 
 export function meta({}: Route.MetaArgs) {
@@ -10,17 +10,17 @@ export function meta({}: Route.MetaArgs) {
 export const handle = { hideHeader: true };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const config = await apiJson<ServerConfiguration>("/settings", { request });
-  return { config };
+  const settings = await apiJson<ServerSettings>("/settings", { request });
+  return { settings };
 }
 
 export default function Settings({ loaderData }: Route.ComponentProps) {
-  const { config } = loaderData;
+  const { settings } = loaderData;
 
   return (
     <div className="mx-auto max-w-4xl">
       <CollapsibleFile
-        file={{ name: "server.json", contents: JSON.stringify(config, null, 2), lang: "json" }}
+        file={{ name: "server.json", contents: JSON.stringify(settings, null, 2), lang: "json" }}
       />
     </div>
   );

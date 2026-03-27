@@ -17,20 +17,20 @@
 /**
  * Local sandbox settings.
  */
-export interface LocalSandboxConfiguration {
+export interface LocalSandboxSettings {
     /**
      * Git worktree mode for local sandbox.
      */
-    'worktree_mode'?: LocalSandboxConfigurationWorktreeModeEnum;
+    'worktree_mode'?: LocalSandboxSettingsWorktreeModeEnum;
 }
 
-export const LocalSandboxConfigurationWorktreeModeEnum = {
+export const LocalSandboxSettingsWorktreeModeEnum = {
     ALWAYS: 'always',
     CLEAN: 'clean',
     DIRTY: 'dirty',
     NEVER: 'never'
 } as const;
 
-export type LocalSandboxConfigurationWorktreeModeEnum = typeof LocalSandboxConfigurationWorktreeModeEnum[keyof typeof LocalSandboxConfigurationWorktreeModeEnum];
+export type LocalSandboxSettingsWorktreeModeEnum = typeof LocalSandboxSettingsWorktreeModeEnum[keyof typeof LocalSandboxSettingsWorktreeModeEnum];
 
 
