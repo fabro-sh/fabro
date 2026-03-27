@@ -333,11 +333,23 @@ mod tests {
 
     #[test]
     fn parse_detached_command() {
-        let cli = Cli::try_parse_from(["fabro", "__detached", "--run-dir", "/tmp/runs/test"])
-            .expect("should parse");
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "__detached",
+            "--storage-dir",
+            "/tmp/fabro",
+            "--run-id",
+            "01ABC",
+        ])
+        .expect("should parse");
         match *cli.command {
-            Commands::RunCmd(RunCommands::Detached { run_dir, resume }) => {
-                assert_eq!(run_dir, std::path::PathBuf::from("/tmp/runs/test"));
+            Commands::RunCmd(RunCommands::Detached {
+                storage_dir,
+                run_id,
+                resume,
+            }) => {
+                assert_eq!(storage_dir, std::path::PathBuf::from("/tmp/fabro"));
+                assert_eq!(run_id, "01ABC");
                 assert!(!resume);
             }
             _ => panic!("unexpected command variant"),
@@ -349,14 +361,21 @@ mod tests {
         let cli = Cli::try_parse_from([
             "fabro",
             "__detached",
-            "--run-dir",
-            "/tmp/runs/test",
+            "--storage-dir",
+            "/tmp/fabro",
+            "--run-id",
+            "01ABC",
             "--resume",
         ])
         .expect("should parse");
         match *cli.command {
-            Commands::RunCmd(RunCommands::Detached { run_dir, resume }) => {
-                assert_eq!(run_dir, std::path::PathBuf::from("/tmp/runs/test"));
+            Commands::RunCmd(RunCommands::Detached {
+                storage_dir,
+                run_id,
+                resume,
+            }) => {
+                assert_eq!(storage_dir, std::path::PathBuf::from("/tmp/fabro"));
+                assert_eq!(run_id, "01ABC");
                 assert!(resume);
             }
             _ => panic!("unexpected command variant"),

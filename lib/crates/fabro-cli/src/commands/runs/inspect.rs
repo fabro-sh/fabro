@@ -18,7 +18,8 @@ pub struct InspectOutput {
 }
 
 pub fn run(args: &InspectArgs) -> Result<()> {
-    let base = fabro_workflows::run_lookup::default_runs_base();
+    let cli_config = crate::cli_config::load_cli_config(None)?;
+    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
     let run = fabro_workflows::run_lookup::resolve_run(&base, &args.run)?;
     let output = inspect_run_dir(&run.run_id, &run.path, run.status)?;
     let json = serde_json::to_string_pretty(&[output])?;

@@ -5,8 +5,8 @@ mod start;
 
 pub use crate::pipeline::{DevcontainerSpec, LlmSpec, SandboxEnvSpec, SandboxSpec};
 pub use create::{
-    create, create_from_file, default_run_dir, validate, validate_from_file, RunCreateOptions,
-    ValidateOptions,
+    create, create_from_file, default_run_dir, make_run_dir, validate, validate_from_file,
+    RunCreateOptions, ValidateOptions,
 };
 pub use fork::fork;
 pub use rewind::{

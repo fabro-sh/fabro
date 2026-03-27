@@ -84,7 +84,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     // Initialize data directory and SQLite database
     let config_path = args.config;
     let server_config = fabro_config::server::load_server_config(config_path.as_deref())?;
-    let data_dir = fabro_config::server::resolve_data_dir(&server_config);
+    let data_dir = fabro_config::server::resolve_storage_dir(&server_config);
 
     // Shared config for live reloading
     let shared_config = Arc::new(RwLock::new(server_config));

@@ -9,7 +9,8 @@ use crate::args::WaitArgs;
 use crate::shared::format_duration_ms;
 
 pub fn run(args: WaitArgs, styles: &Styles) -> Result<()> {
-    let base = fabro_workflows::run_lookup::default_runs_base();
+    let cli_config = crate::cli_config::load_cli_config(None)?;
+    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
     let run_info = fabro_workflows::run_lookup::resolve_run(&base, &args.run)?;
 
     info!(run_id = %run_info.run_id, "Waiting for run to complete");

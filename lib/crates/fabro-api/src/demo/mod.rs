@@ -3246,7 +3246,7 @@ mod settings {
 
     pub fn server_config() -> serde_json::Value {
         serde_json::to_value(FabroConfig {
-            data_dir: Some("/home/fabro/.fabro".into()),
+            storage_dir: Some("/home/fabro/.fabro".into()),
             max_concurrent_runs: Some(10),
             web: Some(WebConfig {
                 url: "https://arc.example.com".into(),

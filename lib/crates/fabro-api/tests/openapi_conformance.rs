@@ -239,7 +239,7 @@ fn compare_schema(
 /// in the serialized JSON.
 fn fully_populated_server_config() -> FabroConfig {
     FabroConfig {
-        data_dir: Some("/data".into()),
+        storage_dir: Some("/data".into()),
         max_concurrent_runs: Some(10),
         web: Some(WebConfig {
             url: "https://example.com".into(),

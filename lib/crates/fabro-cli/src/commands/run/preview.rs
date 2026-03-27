@@ -5,7 +5,8 @@ use crate::args::PreviewArgs;
 use crate::shared::validate_daytona_provider;
 
 pub async fn run(args: PreviewArgs) -> Result<()> {
-    let base = fabro_workflows::run_lookup::default_runs_base();
+    let cli_config = crate::cli_config::load_cli_config(None)?;
+    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
     let run_dir = fabro_workflows::run_lookup::resolve_run(&base, &args.run)?.path;
     let sandbox_json = run_dir.join("sandbox.json");
     let record = fabro_sandbox::SandboxRecord::load(&sandbox_json).context(

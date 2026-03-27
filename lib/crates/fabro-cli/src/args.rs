@@ -91,9 +91,9 @@ pub(crate) struct RunArgs {
     #[arg(required = true)]
     pub(crate) workflow: Option<PathBuf>,
 
-    /// Run output directory
+    /// Storage directory (default: ~/.fabro)
     #[arg(long)]
-    pub(crate) run_dir: Option<PathBuf>,
+    pub(crate) storage_dir: Option<PathBuf>,
 
     /// Execute with simulated LLM backend
     #[arg(long)]
@@ -646,9 +646,12 @@ pub(crate) enum RunCommands {
     /// Internal: run the engine process (reads run.json from run dir)
     #[command(name = "__detached", hide = true)]
     Detached {
-        /// Path to the run directory
+        /// Base storage directory
         #[arg(long)]
-        run_dir: PathBuf,
+        storage_dir: PathBuf,
+        /// Run ID
+        #[arg(long)]
+        run_id: String,
         /// Resume from checkpoint instead of fresh start
         #[arg(long)]
         resume: bool,

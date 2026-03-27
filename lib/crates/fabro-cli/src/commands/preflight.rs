@@ -54,6 +54,7 @@ pub async fn execute(mut args: PreflightArgs) -> anyhow::Result<()> {
             model: args.model.as_deref(),
             provider: args.provider.as_deref(),
             sandbox_provider,
+            storage_dir: None,
         },
     );
 

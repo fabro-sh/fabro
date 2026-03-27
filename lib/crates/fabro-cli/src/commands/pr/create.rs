@@ -10,7 +10,8 @@ pub async fn create_command(
     args: PrCreateArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {
-    let base = fabro_workflows::run_lookup::default_runs_base();
+    let cli_config = crate::cli_config::load_cli_config(None)?;
+    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
     create_from(&base, args, github_app).await
 }
 

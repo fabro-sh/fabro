@@ -7,7 +7,7 @@ use crate::args::RunArgs;
 
 use super::execute::{
     apply_execution_overrides, cached_graph_path, default_run_dir, load_workflow_source_input,
-    parse_labels, print_diagnostics_from_error, print_workflow_report_from_persisted,
+    make_run_dir, parse_labels, print_diagnostics_from_error, print_workflow_report_from_persisted,
     resolve_sandbox_provider, write_run_config_snapshot, ExecutionOverrides,
 };
 use fabro_util::terminal::Styles;
@@ -36,10 +36,10 @@ pub async fn create_run(
         .run_id
         .clone()
         .unwrap_or_else(|| ulid::Ulid::new().to_string());
-    let run_dir = args
-        .run_dir
-        .clone()
-        .unwrap_or_else(|| default_run_dir(&run_id, args.dry_run));
+    let run_dir = match &args.storage_dir {
+        Some(sd) => make_run_dir(&sd.join("runs"), &run_id, args.dry_run),
+        None => default_run_dir(&run_id, args.dry_run),
+    };
     let working_directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let base_branch = fabro_sandbox::daytona::detect_repo_info(&working_directory)
         .ok()
@@ -66,6 +66,7 @@ pub async fn create_run(
             model: args.model.as_deref(),
             provider: args.provider.as_deref(),
             sandbox_provider,
+            storage_dir: args.storage_dir.as_deref(),
         },
     );
 

@@ -78,7 +78,7 @@ run_one() {
             local flags=(--auto-approve)
             [[ "$PHASE" == "dry-run" ]] && flags+=(--dry-run)
             [[ "$PHASE" == "haiku" ]] && flags+=(--model claude-haiku-4-5)
-            [[ "$PHASE" != "dry-run" ]] && flags+=(--run-dir "$RUNS_DIR/$(echo "$rel" | tr '/' '_')")
+            [[ "$PHASE" != "dry-run" ]] && flags+=(--storage-dir "$RUNS_DIR")
 
             if (cd "$dot_dir" && capture "$result_file.log" "$ARC" run start "$target" "${flags[@]}"); then
                 echo "PASS" > "$result_file"
