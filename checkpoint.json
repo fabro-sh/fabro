@@ -1,0 +1,47 @@
+{
+  "timestamp": "2026-03-27T02:34:20.060567Z",
+  "current_node": "step1",
+  "completed_nodes": [
+    "start",
+    "step1"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "internal.fidelity": "compact",
+    "failure_signature": "",
+    "internal.retry_count.step1": 0,
+    "command.output": "hello-from-step1\n",
+    "current.preamble": "Goal: Run two commands in sequence\n",
+    "thread.start.current_node": "step1",
+    "internal.node_visit_count": 1,
+    "failure_class": "",
+    "internal.thread_id": "start",
+    "current_node": "step1",
+    "command.stderr": "",
+    "outcome": "success",
+    "graph.rankdir": "LR",
+    "internal.retry_count.start": 0,
+    "internal.run_id": "01KMPJ8R3Z38C7H4557TRMDRG0",
+    "graph.goal": "Run two commands in sequence"
+  },
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "usage": null
+    },
+    "step1": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "hello-from-step1\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: echo hello-from-step1",
+      "usage": null
+    }
+  },
+  "next_node_id": "step2",
+  "node_visits": {
+    "step1": 1,
+    "start": 1
+  }
+}
