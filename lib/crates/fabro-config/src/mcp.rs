@@ -3,6 +3,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::combine::Combine;
+
 pub fn default_startup_timeout_secs() -> u64 {
     10
 }
@@ -57,6 +59,12 @@ pub enum McpTransport {
     },
 }
 
+impl Combine for McpTransport {
+    fn combine(self, _other: Self) -> Self {
+        self
+    }
+}
+
 /// MCP server entry as it appears in TOML config files (without a `name` field).
 ///
 /// Converted to [`McpServerConfig`] via [`McpServerEntry::into_config`].
@@ -78,6 +86,12 @@ impl McpServerEntry {
             startup_timeout_secs: self.startup_timeout_secs,
             tool_timeout_secs: self.tool_timeout_secs,
         }
+    }
+}
+
+impl Combine for McpServerEntry {
+    fn combine(self, _other: Self) -> Self {
+        self
     }
 }
 

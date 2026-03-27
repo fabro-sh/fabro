@@ -98,14 +98,18 @@ async fn main_inner() -> (String, Result<()>) {
         {
             if let Commands::Serve(args) = command.as_ref() {
                 match fabro_config::server::load_server_config(args.config.as_deref()) {
-                    Ok(server_config) => (
-                        server_config.log.as_ref().and_then(|l| l.level.clone()),
-                        false,
-                    ),
+                    Ok(server_config) => match fabro_config::FabroSettings::try_from(server_config)
+                    {
+                        Ok(server_settings) => (
+                            server_settings.log.as_ref().and_then(|l| l.level.clone()),
+                            false,
+                        ),
+                        Err(err) => return (command_name, Err(err)),
+                    },
                     Err(err) => return (command_name, Err(err)),
                 }
             } else {
-                match fabro_config::cli::load_cli_config(None) {
+                match crate::cli_config::load_cli_config(None) {
                     Ok(cli_config) => (
                         cli_config.log.as_ref().and_then(|l| l.level.clone()),
                         cli_config.upgrade_check_enabled(),
@@ -116,7 +120,7 @@ async fn main_inner() -> (String, Result<()>) {
         }
         #[cfg(not(feature = "server"))]
         {
-            match fabro_config::cli::load_cli_config(None) {
+            match crate::cli_config::load_cli_config(None) {
                 Ok(cli_config) => (
                     cli_config.log.as_ref().and_then(|l| l.level.clone()),
                     cli_config.upgrade_check_enabled(),

@@ -16,6 +16,7 @@ clap = ["dep:clap"]
 [dependencies]
 anyhow.workspace = true
 clap = { workspace = true, optional = true }
+fabro-config-derive = { path = "../fabro-config-derive" }
 fabro-util = { path = "../fabro-util" }
 dirs.workspace = true
 serde.workspace = true

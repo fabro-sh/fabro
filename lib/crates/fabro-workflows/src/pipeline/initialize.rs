@@ -865,7 +865,7 @@ mod tests {
     use std::sync::Arc;
 
     use chrono::Utc;
-    use fabro_config::config::FabroConfig;
+    use fabro_config::FabroSettings;
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_interview::AutoApproveInterviewer;
 
@@ -900,7 +900,7 @@ mod tests {
 
     fn test_settings(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            config: FabroConfig::default(),
+            config: FabroSettings::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,
             dry_run: false,
@@ -925,7 +925,7 @@ mod tests {
             RunRecord {
                 run_id: "run-test".to_string(),
                 created_at: Utc::now(),
-                config: FabroConfig::default(),
+                config: FabroSettings::default(),
                 graph,
                 workflow_slug: Some("test".to_string()),
                 working_directory: std::env::current_dir().unwrap(),

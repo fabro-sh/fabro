@@ -7,8 +7,8 @@ use std::time::Instant;
 use anyhow::{bail, Context};
 use chrono::Local;
 use fabro_agent::{DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox};
-use fabro_config::config::FabroConfig;
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
+use fabro_config::{FabroConfig, FabroSettings};
 use fabro_interview::{AutoApproveInterviewer, ConsoleInterviewer, FileInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::SandboxProvider;
@@ -32,8 +32,7 @@ use tracing::debug;
 
 use super::detached::{DetachedRunBootstrapGuard, DetachedRunCompletionGuard};
 use super::run_progress;
-use crate::args::{CliSandboxProvider, GlobalArgs, RunArgs};
-use crate::cli_config;
+use crate::args::{CliSandboxProvider, GlobalArgs, PreflightArgs, RunArgs};
 use crate::shared::{
     format_tokens_human, print_diagnostics, read_workflow_file, relative_path, tilde_path,
 };
@@ -57,6 +56,80 @@ pub(crate) fn resolve_cli_goal(
 }
 
 pub(crate) use fabro_workflows::operations::{default_run_dir, make_run_dir};
+
+fn sparse_flag(value: bool) -> Option<bool> {
+    value.then_some(true)
+}
+
+impl TryFrom<&RunArgs> for FabroConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(args: &RunArgs) -> Result<Self, Self::Error> {
+        let goal = resolve_cli_goal(args.goal.as_deref(), args.goal_file.as_deref())?;
+        let llm = if args.model.is_some() || args.provider.is_some() {
+            Some(fabro_config::run::LlmConfig {
+                model: args.model.clone(),
+                provider: args.provider.clone(),
+                fallbacks: None,
+            })
+        } else {
+            None
+        };
+        let sandbox = if args.sandbox.is_some() || args.preserve_sandbox {
+            Some(sandbox_config::SandboxConfig {
+                provider: args
+                    .sandbox
+                    .map(Into::into)
+                    .map(|provider: SandboxProvider| provider.to_string()),
+                preserve: sparse_flag(args.preserve_sandbox),
+                ..Default::default()
+            })
+        } else {
+            None
+        };
+
+        Ok(Self {
+            goal,
+            llm,
+            sandbox,
+            verbose: sparse_flag(args.verbose),
+            dry_run: sparse_flag(args.dry_run),
+            auto_approve: sparse_flag(args.auto_approve),
+            no_retro: sparse_flag(args.no_retro),
+            storage_dir: args.storage_dir.clone(),
+            ..Default::default()
+        })
+    }
+}
+
+impl TryFrom<&PreflightArgs> for FabroConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(args: &PreflightArgs) -> Result<Self, Self::Error> {
+        let goal = resolve_cli_goal(args.goal.as_deref(), args.goal_file.as_deref())?;
+        let llm = if args.model.is_some() || args.provider.is_some() {
+            Some(fabro_config::run::LlmConfig {
+                model: args.model.clone(),
+                provider: args.provider.clone(),
+                fallbacks: None,
+            })
+        } else {
+            None
+        };
+        let sandbox = args.sandbox.map(|sandbox| sandbox_config::SandboxConfig {
+            provider: Some(SandboxProvider::from(sandbox).to_string()),
+            ..Default::default()
+        });
+
+        Ok(Self {
+            goal,
+            llm,
+            sandbox,
+            verbose: sparse_flag(args.verbose),
+            ..Default::default()
+        })
+    }
+}
 
 pub(crate) fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
     let file_name = workflow_path.file_name()?.to_string_lossy();
@@ -89,8 +162,8 @@ fn is_cached_run_restart(workflow_path: &Path, run_dir: &Path) -> bool {
 pub(crate) fn resolve_model_provider(
     cli_model: Option<&str>,
     cli_provider: Option<&str>,
-    run_cfg: Option<&FabroConfig>,
-    run_defaults: &FabroConfig,
+    run_cfg: Option<&FabroSettings>,
+    run_defaults: &FabroSettings,
     graph: &fabro_graphviz::graph::Graph,
 ) -> (String, Option<String>) {
     let toml_model = run_cfg
@@ -139,7 +212,7 @@ pub(crate) fn resolve_model_provider(
 
 /// Parse sandbox provider from an optional `SandboxConfig`.
 pub(crate) fn parse_sandbox_provider(
-    sandbox: Option<&sandbox_config::SandboxConfig>,
+    sandbox: Option<&sandbox_config::SandboxSettings>,
 ) -> anyhow::Result<Option<SandboxProvider>> {
     sandbox
         .and_then(|s| s.provider.as_deref())
@@ -151,8 +224,8 @@ pub(crate) fn parse_sandbox_provider(
 /// Resolve sandbox provider: CLI flag > TOML config > run defaults > default.
 pub(crate) fn resolve_sandbox_provider(
     cli: Option<SandboxProvider>,
-    run_cfg: Option<&FabroConfig>,
-    run_defaults: &FabroConfig,
+    run_cfg: Option<&FabroSettings>,
+    run_defaults: &FabroSettings,
 ) -> anyhow::Result<SandboxProvider> {
     let toml = parse_sandbox_provider(run_cfg.and_then(|c| c.sandbox.as_ref()))?;
     let defaults = parse_sandbox_provider(run_defaults.sandbox.as_ref())?;
@@ -162,8 +235,8 @@ pub(crate) fn resolve_sandbox_provider(
 /// Resolve preserve-sandbox: CLI flag > TOML config > run defaults > false.
 pub(crate) fn resolve_preserve_sandbox(
     cli: bool,
-    run_cfg: Option<&FabroConfig>,
-    run_defaults: &FabroConfig,
+    run_cfg: Option<&FabroSettings>,
+    run_defaults: &FabroSettings,
 ) -> bool {
     if cli {
         return true;
@@ -177,8 +250,8 @@ pub(crate) fn resolve_preserve_sandbox(
 
 /// Resolve worktree mode: TOML config > run defaults > Clean.
 fn resolve_worktree_mode(
-    run_cfg: Option<&FabroConfig>,
-    run_defaults: &FabroConfig,
+    run_cfg: Option<&FabroSettings>,
+    run_defaults: &FabroSettings,
 ) -> sandbox_config::WorktreeMode {
     run_cfg
         .and_then(|c| c.sandbox.as_ref())
@@ -196,8 +269,8 @@ fn resolve_worktree_mode(
 
 /// Resolve daytona config: TOML config > run defaults.
 pub(crate) fn resolve_daytona_config(
-    run_cfg: Option<&FabroConfig>,
-    run_defaults: &FabroConfig,
+    run_cfg: Option<&FabroSettings>,
+    run_defaults: &FabroSettings,
 ) -> Option<fabro_sandbox::daytona::DaytonaConfig> {
     run_cfg
         .and_then(|c| c.sandbox.as_ref())
@@ -213,8 +286,8 @@ pub(crate) fn resolve_daytona_config(
 #[cfg(feature = "exedev")]
 /// Resolve exe.dev config: TOML config > run defaults.
 pub(crate) fn resolve_exe_config(
-    run_cfg: Option<&FabroConfig>,
-    run_defaults: &FabroConfig,
+    run_cfg: Option<&FabroSettings>,
+    run_defaults: &FabroSettings,
 ) -> Option<fabro_sandbox::exe::ExeConfig> {
     run_cfg
         .and_then(|c| c.sandbox.as_ref())
@@ -243,8 +316,8 @@ pub(crate) fn resolve_exe_clone_params(
 
 /// Resolve SSH sandbox config: TOML config > run defaults.
 pub(crate) fn resolve_ssh_config(
-    run_cfg: Option<&FabroConfig>,
-    run_defaults: &FabroConfig,
+    run_cfg: Option<&FabroSettings>,
+    run_defaults: &FabroSettings,
 ) -> Option<fabro_sandbox::ssh::SshConfig> {
     run_cfg
         .and_then(|c| c.sandbox.as_ref())
@@ -270,14 +343,11 @@ pub(crate) fn resolve_ssh_clone_params(
     Some(fabro_sandbox::ssh::GitCloneParams { url, branch })
 }
 
-/// Resolve the fallback chain from config.
-///
-/// `merge_overlay` must be called before this — it merges
-/// `run_defaults.llm.fallbacks` into `run_cfg.llm.fallbacks` already.
+/// Resolve the fallback chain from the effective settings.
 pub(crate) fn resolve_fallback_chain(
     provider: Provider,
     model: &str,
-    run_cfg: Option<&FabroConfig>,
+    run_cfg: Option<&FabroSettings>,
 ) -> Vec<FallbackTarget> {
     let fallbacks = run_cfg
         .and_then(|c| c.llm.as_ref())
@@ -386,41 +456,6 @@ pub(crate) fn resolve_workflow_source(
     }
 }
 
-pub(crate) struct ExecutionOverrides<'a> {
-    pub dry_run: bool,
-    pub auto_approve: bool,
-    pub no_retro: bool,
-    pub verbose: bool,
-    pub preserve_sandbox: bool,
-    pub model: Option<&'a str>,
-    pub provider: Option<&'a str>,
-    pub sandbox_provider: SandboxProvider,
-    pub storage_dir: Option<&'a Path>,
-}
-
-pub(crate) fn apply_execution_overrides(config: &mut FabroConfig, overrides: &ExecutionOverrides) {
-    config.dry_run = Some(overrides.dry_run);
-    config.auto_approve = Some(overrides.auto_approve);
-    config.no_retro = Some(overrides.no_retro);
-    config.verbose = Some(overrides.verbose);
-
-    if let Some(model) = overrides.model {
-        config.llm.get_or_insert_default().model = Some(model.to_string());
-    }
-    if let Some(provider) = overrides.provider {
-        config.llm.get_or_insert_default().provider = Some(provider.to_string());
-    }
-
-    config.sandbox.get_or_insert_default().provider = Some(overrides.sandbox_provider.to_string());
-    if overrides.preserve_sandbox {
-        config.sandbox.get_or_insert_default().preserve = Some(true);
-    }
-
-    if let Some(storage_dir) = overrides.storage_dir {
-        config.storage_dir = Some(storage_dir.to_path_buf());
-    }
-}
-
 pub(crate) fn parse_labels(labels: &[String]) -> HashMap<String, String> {
     labels
         .iter()
@@ -481,9 +516,9 @@ pub(crate) fn print_diagnostics_from_error(
 
 pub(crate) struct WorkflowSourceInput {
     pub raw_source: String,
-    pub config: FabroConfig,
+    pub config: FabroSettings,
     pub workflow_slug: Option<String>,
-    pub run_defaults: FabroConfig,
+    pub run_defaults: FabroSettings,
     pub workflow_toml_path: Option<PathBuf>,
     pub dot_path: PathBuf,
     pub goal_override: Option<String>,
@@ -497,33 +532,23 @@ enum WorkflowState {
 
 pub(crate) fn load_workflow_source_input(
     workflow: &Path,
-    goal: Option<&str>,
-    goal_file: Option<&Path>,
-    mut run_defaults: FabroConfig,
+    cli_args_config: FabroConfig,
+    cli_defaults: FabroConfig,
     apply_project_config: bool,
 ) -> anyhow::Result<WorkflowSourceInput> {
-    if apply_project_config {
-        // Apply project-level config overrides (fabro.toml) on top of CLI defaults.
-        if let Ok(Some((_config_path, project_config))) =
-            project_config::discover_project_config(&std::env::current_dir().unwrap_or_default())
-        {
-            tracing::debug!("Applying run defaults from fabro.toml");
-            run_defaults.merge_overlay(project_config);
-        }
-    }
-
-    // Resolve workflow arg, load run config if TOML, merge with defaults.
-    let (resolved_workflow_path, dot_path, config) = {
-        let (resolved, dot, cfg) = resolve_workflow_source(workflow)?;
-        match cfg {
-            Some(cfg) => {
-                let mut merged = run_defaults.clone();
-                merged.merge_overlay(cfg);
-                (resolved, dot, merged)
-            }
-            None => (resolved, dot, run_defaults.clone()),
-        }
+    let project_config = if apply_project_config {
+        project_config::discover_project_config(&std::env::current_dir().unwrap_or_default())?
+            .map(|(_, config)| config)
+    } else {
+        None
     };
+
+    let (resolved_workflow_path, dot_path, workflow_config) = resolve_workflow_source(workflow)?;
+    let config = cli_args_config
+        .combine(workflow_config.unwrap_or_default())
+        .combine(project_config.unwrap_or_default())
+        .combine(cli_defaults);
+    let config: FabroSettings = config.try_into()?;
     let workflow_slug = workflow_slug_from_path(&resolved_workflow_path);
 
     if let Some(dir) = config.work_dir.as_deref() {
@@ -532,8 +557,7 @@ pub(crate) fn load_workflow_source_input(
     }
 
     let raw_source = read_workflow_file(&dot_path)?;
-    let cli_goal = resolve_cli_goal(goal, goal_file)?;
-    let goal_override = cli_goal.or_else(|| config.goal.clone()).or_else(|| {
+    let goal_override = config.goal.clone().or_else(|| {
         config
             .goal_file
             .as_ref()
@@ -551,9 +575,9 @@ pub(crate) fn load_workflow_source_input(
 
     Ok(WorkflowSourceInput {
         raw_source,
-        config,
+        config: config.clone(),
         workflow_slug,
-        run_defaults,
+        run_defaults: config,
         workflow_toml_path,
         dot_path,
         goal_override,
@@ -563,7 +587,7 @@ pub(crate) fn load_workflow_source_input(
 /// Pre-prepared run state, used to skip workflow preparation in `run_command_impl`.
 struct RecordBasedRun {
     workflow: WorkflowState,
-    run_defaults: FabroConfig,
+    run_defaults: FabroSettings,
 }
 
 /// Execute a workflow run from a saved RunRecord, bypassing workflow preparation.
@@ -572,7 +596,7 @@ struct RecordBasedRun {
 pub async fn run_from_record(
     persisted: Persisted,
     _run_dir: PathBuf,
-    run_defaults: FabroConfig,
+    run_defaults: FabroSettings,
     styles: &'static Styles,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     git_author: fabro_workflows::git::GitAuthor,
@@ -647,7 +671,7 @@ pub async fn run_from_record(
 pub async fn resume_from_record(
     persisted: Persisted,
     _run_dir: PathBuf,
-    run_defaults: FabroConfig,
+    run_defaults: FabroSettings,
     styles: &'static Styles,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     git_author: fabro_workflows::git::GitAuthor,
@@ -743,12 +767,13 @@ fn ensure_resume_target_is_not_already_successful(run_dir: &Path) -> anyhow::Res
 pub async fn execute(mut args: RunArgs, _globals: &GlobalArgs) -> anyhow::Result<()> {
     let styles: &'static fabro_util::terminal::Styles =
         Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
-    let cli_config = cli_config::load_cli_config(None)?;
+    let cli_defaults = fabro_config::cli::load_cli_config(None)?;
+    let cli_config: FabroSettings = cli_defaults.clone().try_into()?;
     args.verbose = args.verbose || cli_config.verbose_enabled();
 
     let quiet = args.detach;
     let _prevent_idle_sleep = cli_config.prevent_idle_sleep_enabled();
-    let (run_id, run_dir) = super::create::create_run(&args, cli_config, styles, quiet).await?;
+    let (run_id, run_dir) = super::create::create_run(&args, cli_defaults, styles, quiet).await?;
 
     #[cfg(feature = "sleep_inhibitor")]
     let _sleep_guard = fabro_beastie::guard(_prevent_idle_sleep);
@@ -797,7 +822,6 @@ async fn run_command_impl(
     let auto_approve_flag = args.auto_approve;
     let no_retro_flag = args.no_retro;
     let verbose_flag = args.verbose;
-    let preserve_sandbox_flag = args.preserve_sandbox;
     let label_vec = args.label.clone();
     let run_id = args
         .run_id
@@ -829,30 +853,7 @@ async fn run_command_impl(
             source_input.workflow_toml_path,
         ),
         WorkflowState::Source(source_input) => {
-            let mut config = source_input.config.clone();
-            let sandbox_provider = if dry_run_flag {
-                SandboxProvider::Local
-            } else {
-                resolve_sandbox_provider(
-                    args.sandbox.map(Into::into),
-                    Some(&config),
-                    &source_input.run_defaults,
-                )?
-            };
-            apply_execution_overrides(
-                &mut config,
-                &ExecutionOverrides {
-                    dry_run: dry_run_flag,
-                    auto_approve: auto_approve_flag,
-                    no_retro: no_retro_flag,
-                    verbose: verbose_flag,
-                    preserve_sandbox: preserve_sandbox_flag,
-                    model: args.model.as_deref(),
-                    provider: args.provider.as_deref(),
-                    sandbox_provider,
-                    storage_dir: args.storage_dir.as_deref(),
-                },
-            );
+            let config = source_input.config.clone();
 
             match fabro_workflows::operations::create(
                 &source_input.raw_source,
@@ -942,7 +943,13 @@ async fn run_command_impl(
 
     // Now resolve ${env.VARNAME} references for runtime use.
     if let Some(ref mut cfg) = run_cfg {
-        run_config::resolve_sandbox_env(cfg)?;
+        if let Some(env) = cfg
+            .sandbox
+            .as_mut()
+            .and_then(|sandbox| sandbox.env.as_mut())
+        {
+            run_config::resolve_env_refs(env)?;
+        }
     }
 
     // Create progress UI (used for both normal and verbose modes)
@@ -1448,10 +1455,10 @@ pub(crate) fn print_assets(run_dir: &std::path::Path, styles: &Styles) {
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_preflight(
     graph: &fabro_graphviz::graph::Graph,
-    run_cfg: &Option<FabroConfig>,
+    run_cfg: &Option<FabroSettings>,
     cli_model: Option<&str>,
     cli_provider: Option<&str>,
-    run_defaults: &FabroConfig,
+    run_defaults: &FabroSettings,
     git_status: GitSyncStatus,
     sandbox_provider: SandboxProvider,
     styles: &'static Styles,
@@ -1927,9 +1934,13 @@ include = ["*.md"]
 
         let workflow_path = dir.path().join("workflow.toml");
 
-        let source_input =
-            load_workflow_source_input(&workflow_path, None, None, FabroConfig::default(), false)
-                .unwrap();
+        let source_input = load_workflow_source_input(
+            &workflow_path,
+            FabroConfig::default(),
+            FabroConfig::default(),
+            false,
+        )
+        .unwrap();
         let validated = fabro_workflows::operations::validate(
             &source_input.raw_source,
             fabro_workflows::operations::ValidateOptions {
@@ -2007,7 +2018,7 @@ include = ["*.md"]
     #[test]
     fn resolve_model_provider_defaults() {
         let graph = fabro_graphviz::graph::Graph::new("test");
-        let defaults = FabroConfig::default();
+        let defaults = FabroSettings::default();
         let (model, provider) = resolve_model_provider(None, None, None, &defaults, &graph);
         assert_eq!(model, "claude-sonnet-4-6");
         // Catalog resolves anthropic as the provider for claude-sonnet-4-6
@@ -2017,12 +2028,12 @@ include = ["*.md"]
     #[test]
     fn resolve_model_provider_cli_overrides_toml() {
         let graph = fabro_graphviz::graph::Graph::new("test");
-        let defaults = FabroConfig::default();
-        let cfg = FabroConfig {
+        let defaults = FabroSettings::default();
+        let cfg = FabroSettings {
             version: Some(1),
             goal: Some("test".to_string()),
             graph: Some("test.fabro".to_string()),
-            llm: Some(run_config::LlmConfig {
+            llm: Some(run_config::LlmSettings {
                 model: Some("toml-model".to_string()),
                 provider: Some("openai".to_string()),
                 fallbacks: None,
@@ -2053,12 +2064,12 @@ include = ["*.md"]
             AttrValue::String("gemini".to_string()),
         );
 
-        let defaults = FabroConfig::default();
-        let cfg = FabroConfig {
+        let defaults = FabroSettings::default();
+        let cfg = FabroSettings {
             version: Some(1),
             goal: Some("test".to_string()),
             graph: Some("test.fabro".to_string()),
-            llm: Some(run_config::LlmConfig {
+            llm: Some(run_config::LlmSettings {
                 model: Some("toml-model".to_string()),
                 provider: Some("openai".to_string()),
                 fallbacks: None,
@@ -2083,7 +2094,7 @@ include = ["*.md"]
             AttrValue::String("openai".to_string()),
         );
 
-        let defaults = FabroConfig::default();
+        let defaults = FabroSettings::default();
         let (model, provider) = resolve_model_provider(None, None, None, &defaults, &graph);
         assert_eq!(model, "gpt-5.2");
         assert_eq!(provider, Some("openai".to_string()));
@@ -2092,7 +2103,7 @@ include = ["*.md"]
     #[test]
     fn resolve_model_provider_alias_expansion() {
         let graph = fabro_graphviz::graph::Graph::new("test");
-        let defaults = FabroConfig::default();
+        let defaults = FabroSettings::default();
         let (model, provider) = resolve_model_provider(Some("opus"), None, None, &defaults, &graph);
         assert_eq!(model, "claude-opus-4-6");
         assert_eq!(provider, Some("anthropic".to_string()));
@@ -2101,13 +2112,13 @@ include = ["*.md"]
     #[test]
     fn resolve_model_provider_run_defaults_used() {
         let graph = fabro_graphviz::graph::Graph::new("test");
-        let defaults = FabroConfig {
-            llm: Some(run_config::LlmConfig {
+        let defaults = FabroSettings {
+            llm: Some(run_config::LlmSettings {
                 model: Some("default-model".to_string()),
                 provider: Some("openai".to_string()),
                 fallbacks: None,
             }),
-            ..FabroConfig::default()
+            ..FabroSettings::default()
         };
         let (model, provider) = resolve_model_provider(None, None, None, &defaults, &graph);
         assert_eq!(model, "default-model");
@@ -2117,19 +2128,19 @@ include = ["*.md"]
     #[test]
     fn resolve_model_provider_toml_overrides_run_defaults() {
         let graph = fabro_graphviz::graph::Graph::new("test");
-        let defaults = FabroConfig {
-            llm: Some(run_config::LlmConfig {
+        let defaults = FabroSettings {
+            llm: Some(run_config::LlmSettings {
                 model: Some("default-model".to_string()),
                 provider: Some("anthropic".to_string()),
                 fallbacks: None,
             }),
-            ..FabroConfig::default()
+            ..FabroSettings::default()
         };
-        let cfg = FabroConfig {
+        let cfg = FabroSettings {
             version: Some(1),
             goal: Some("test".to_string()),
             graph: Some("test.fabro".to_string()),
-            llm: Some(run_config::LlmConfig {
+            llm: Some(run_config::LlmSettings {
                 model: Some("toml-model".to_string()),
                 provider: Some("openai".to_string()),
                 fallbacks: None,
@@ -2143,61 +2154,61 @@ include = ["*.md"]
 
     #[test]
     fn resolve_preserve_sandbox_cli_wins() {
-        let cfg = FabroConfig {
-            sandbox: Some(sandbox_config::SandboxConfig {
+        let cfg = FabroSettings {
+            sandbox: Some(sandbox_config::SandboxSettings {
                 provider: None,
                 preserve: Some(false),
                 ..Default::default()
             }),
             ..Default::default()
         };
-        let defaults = FabroConfig::default();
+        let defaults = FabroSettings::default();
         assert!(resolve_preserve_sandbox(true, Some(&cfg), &defaults));
     }
 
     #[test]
     fn resolve_preserve_sandbox_toml_wins_over_defaults() {
-        let cfg = FabroConfig {
-            sandbox: Some(sandbox_config::SandboxConfig {
+        let cfg = FabroSettings {
+            sandbox: Some(sandbox_config::SandboxSettings {
                 provider: None,
                 preserve: Some(true),
                 ..Default::default()
             }),
             ..Default::default()
         };
-        let defaults = FabroConfig {
-            sandbox: Some(sandbox_config::SandboxConfig {
+        let defaults = FabroSettings {
+            sandbox: Some(sandbox_config::SandboxSettings {
                 provider: None,
                 preserve: Some(false),
                 ..Default::default()
             }),
-            ..FabroConfig::default()
+            ..FabroSettings::default()
         };
         assert!(resolve_preserve_sandbox(false, Some(&cfg), &defaults));
     }
 
     #[test]
     fn resolve_preserve_sandbox_defaults_used() {
-        let defaults = FabroConfig {
-            sandbox: Some(sandbox_config::SandboxConfig {
+        let defaults = FabroSettings {
+            sandbox: Some(sandbox_config::SandboxSettings {
                 provider: None,
                 preserve: Some(true),
                 ..Default::default()
             }),
-            ..FabroConfig::default()
+            ..FabroSettings::default()
         };
         assert!(resolve_preserve_sandbox(false, None, &defaults));
     }
 
     #[test]
     fn resolve_preserve_sandbox_defaults_to_false() {
-        let defaults = FabroConfig::default();
+        let defaults = FabroSettings::default();
         assert!(!resolve_preserve_sandbox(false, None, &defaults));
     }
 
     #[test]
     fn resolve_worktree_mode_defaults_to_clean() {
-        let defaults = FabroConfig::default();
+        let defaults = FabroSettings::default();
         assert_eq!(
             resolve_worktree_mode(None, &defaults),
             sandbox_config::WorktreeMode::Clean
@@ -2206,16 +2217,16 @@ include = ["*.md"]
 
     #[test]
     fn resolve_worktree_mode_from_toml() {
-        let cfg = FabroConfig {
-            sandbox: Some(sandbox_config::SandboxConfig {
-                local: Some(sandbox_config::LocalSandboxConfig {
+        let cfg = FabroSettings {
+            sandbox: Some(sandbox_config::SandboxSettings {
+                local: Some(sandbox_config::LocalSandboxSettings {
                     worktree_mode: sandbox_config::WorktreeMode::Always,
                 }),
                 ..Default::default()
             }),
             ..Default::default()
         };
-        let defaults = FabroConfig::default();
+        let defaults = FabroSettings::default();
         assert_eq!(
             resolve_worktree_mode(Some(&cfg), &defaults),
             sandbox_config::WorktreeMode::Always
@@ -2224,17 +2235,17 @@ include = ["*.md"]
 
     #[test]
     fn resolve_worktree_mode_from_defaults() {
-        let defaults = FabroConfig {
-            sandbox: Some(sandbox_config::SandboxConfig {
+        let defaults = FabroSettings {
+            sandbox: Some(sandbox_config::SandboxSettings {
                 provider: None,
                 preserve: None,
                 devcontainer: None,
-                local: Some(sandbox_config::LocalSandboxConfig {
+                local: Some(sandbox_config::LocalSandboxSettings {
                     worktree_mode: sandbox_config::WorktreeMode::Dirty,
                 }),
                 ..Default::default()
             }),
-            ..FabroConfig::default()
+            ..FabroSettings::default()
         };
         assert_eq!(
             resolve_worktree_mode(None, &defaults),
@@ -2244,26 +2255,26 @@ include = ["*.md"]
 
     #[test]
     fn resolve_worktree_mode_toml_overrides_defaults() {
-        let cfg = FabroConfig {
-            sandbox: Some(sandbox_config::SandboxConfig {
-                local: Some(sandbox_config::LocalSandboxConfig {
+        let cfg = FabroSettings {
+            sandbox: Some(sandbox_config::SandboxSettings {
+                local: Some(sandbox_config::LocalSandboxSettings {
                     worktree_mode: sandbox_config::WorktreeMode::Never,
                 }),
                 ..Default::default()
             }),
             ..Default::default()
         };
-        let defaults = FabroConfig {
-            sandbox: Some(sandbox_config::SandboxConfig {
+        let defaults = FabroSettings {
+            sandbox: Some(sandbox_config::SandboxSettings {
                 provider: None,
                 preserve: None,
                 devcontainer: None,
-                local: Some(sandbox_config::LocalSandboxConfig {
+                local: Some(sandbox_config::LocalSandboxSettings {
                     worktree_mode: sandbox_config::WorktreeMode::Dirty,
                 }),
                 ..Default::default()
             }),
-            ..FabroConfig::default()
+            ..FabroSettings::default()
         };
         assert_eq!(
             resolve_worktree_mode(Some(&cfg), &defaults),

@@ -24,7 +24,7 @@ pub async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
         RunCommands::Create(args) => {
             let styles: &'static fabro_util::terminal::Styles =
                 Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
-            let cli_config = crate::cli_config::load_cli_config(None)?;
+            let cli_config = fabro_config::cli::load_cli_config(None)?;
             let (run_id, _run_dir) = create::create_run(&args, cli_config, styles, true).await?;
             println!("{run_id}");
             Ok(())

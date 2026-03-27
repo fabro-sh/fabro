@@ -8,7 +8,7 @@ use fabro_api::jwt_auth::AuthMode;
 use fabro_api::server::{build_router, create_app_state};
 use fabro_api::server_config::*;
 use fabro_config::run::*;
-use fabro_config::sandbox::SandboxConfig;
+use fabro_config::sandbox::SandboxSettings;
 use fabro_hooks::*;
 use fabro_sandbox::daytona::*;
 use fabro_workflows::pipeline::LlmSpec;
@@ -235,59 +235,59 @@ fn compare_schema(
     }
 }
 
-/// Build a FabroConfig with every Option set to Some so all keys appear
+/// Build a FabroSettings with every Option set to Some so all keys appear
 /// in the serialized JSON.
-fn fully_populated_server_config() -> FabroConfig {
-    FabroConfig {
+fn fully_populated_server_config() -> FabroSettings {
+    FabroSettings {
         storage_dir: Some("/data".into()),
         max_concurrent_runs: Some(10),
-        web: Some(WebConfig {
+        web: Some(WebSettings {
             url: "https://example.com".into(),
-            auth: AuthConfig {
+            auth: AuthSettings {
                 provider: AuthProvider::Github,
                 allowed_usernames: vec!["user".into()],
             },
         }),
-        api: Some(ApiConfig {
+        api: Some(ApiSettings {
             base_url: "https://api.example.com".into(),
             authentication_strategies: vec![ApiAuthStrategy::Jwt],
-            tls: Some(TlsConfig {
+            tls: Some(TlsSettings {
                 cert: "c".into(),
                 key: "k".into(),
                 ca: "ca".into(),
             }),
         }),
-        git: Some(GitConfig {
+        git: Some(GitSettings {
             provider: GitProvider::Github,
             app_id: Some("123".into()),
             client_id: Some("456".into()),
             slug: Some("fabro".into()),
-            author: GitAuthorConfig {
+            author: GitAuthorSettings {
                 name: Some("bot".into()),
                 email: Some("bot@x".into()),
             },
-            webhooks: Some(WebhookConfig {
+            webhooks: Some(WebhookSettings {
                 strategy: WebhookStrategy::TailscaleFunnel,
             }),
         }),
-        features: Some(Features {
+        features: Some(FeaturesSettings {
             session_sandboxes: true,
             retros: false,
         }),
-        log: Some(LogConfig {
+        log: Some(LogSettings {
             level: Some("debug".into()),
         }),
         work_dir: Some("/work".into()),
-        llm: Some(LlmConfig {
+        llm: Some(LlmSettings {
             model: Some("m".into()),
             provider: Some("p".into()),
             fallbacks: Some(Default::default()),
         }),
-        setup: Some(SetupConfig {
+        setup: Some(SetupSettings {
             commands: vec!["echo hi".into()],
             timeout_ms: Some(5000),
         }),
-        sandbox: Some(SandboxConfig {
+        sandbox: Some(SandboxSettings {
             provider: Some("daytona".into()),
             preserve: Some(true),
             devcontainer: None,
@@ -310,16 +310,16 @@ fn fully_populated_server_config() -> FabroConfig {
             env: Some(Default::default()),
         }),
         vars: Some(Default::default()),
-        checkpoint: CheckpointConfig {
+        checkpoint: CheckpointSettings {
             exclude_globs: vec!["**/node_modules/**".into()],
         },
-        pull_request: Some(PullRequestConfig {
+        pull_request: Some(PullRequestSettings {
             enabled: true,
             draft: false,
             auto_merge: false,
             merge_strategy: MergeStrategy::Squash,
         }),
-        assets: Some(AssetsConfig {
+        assets: Some(AssetsSettings {
             include: vec!["test-results/**".into()],
         }),
         // One hook per HookType variant so the key union covers all fields.
@@ -388,7 +388,7 @@ fn fully_populated_server_config() -> FabroConfig {
                 tool_timeout_secs: fabro_config::mcp::default_tool_timeout_secs(),
             },
         )]),
-        github: Some(GitHubConfig {
+        github: Some(GitHubSettings {
             permissions: std::collections::HashMap::from([("contents".into(), "read".into())]),
         }),
         ..Default::default()

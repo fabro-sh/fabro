@@ -8,20 +8,33 @@ use crate::config::FabroConfig;
 const CONFIG_FILENAME: &str = "fabro.toml";
 const SUPPORTED_VERSION: u32 = 1;
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct ProjectFabroConfig {
-    #[serde(default = "default_root")]
-    pub root: String,
+    pub root: Option<String>,
 }
 
 fn default_root() -> String {
     ".".to_string()
 }
 
-impl Default for ProjectFabroConfig {
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ProjectFabroSettings {
+    #[serde(default = "default_root")]
+    pub root: String,
+}
+
+impl Default for ProjectFabroSettings {
     fn default() -> Self {
         Self {
             root: default_root(),
+        }
+    }
+}
+
+impl From<ProjectFabroConfig> for ProjectFabroSettings {
+    fn from(value: ProjectFabroConfig) -> Self {
+        Self {
+            root: value.root.unwrap_or_else(default_root),
         }
     }
 }
@@ -46,7 +59,7 @@ pub fn load_project_config(path: &Path) -> anyhow::Result<FabroConfig> {
     let root = config
         .fabro
         .as_ref()
-        .map(|f| f.root.as_str())
+        .and_then(|f| f.root.as_deref())
         .unwrap_or(".");
     tracing::debug!(path = %path.display(), root = %root, "Loaded project config");
     Ok(config)
@@ -295,7 +308,11 @@ fn resolve_workflow_from(
 pub fn is_retro_enabled() -> bool {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     match discover_project_config(&start) {
-        Ok(Some((_path, config))) => config.features.as_ref().map(|f| f.retros).unwrap_or(false),
+        Ok(Some((_path, config))) => config
+            .features
+            .as_ref()
+            .and_then(|f| f.retros)
+            .unwrap_or(false),
         _ => false,
     }
 }
@@ -309,7 +326,7 @@ pub fn resolve_fabro_root(config_path: &Path, config: &FabroConfig) -> PathBuf {
     let root = config
         .fabro
         .as_ref()
-        .map(|f| f.root.as_str())
+        .and_then(|f| f.root.as_deref())
         .unwrap_or(".");
     project_dir.join(root)
 }
@@ -317,7 +334,6 @@ pub fn resolve_fabro_root(config_path: &Path, config: &FabroConfig) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::run::MergeStrategy;
     use std::fs;
     use tempfile::TempDir;
 
@@ -331,22 +347,26 @@ mod tests {
     #[test]
     fn parse_full_config() {
         let config = parse_project_config("version = 1\n[fabro]\nroot = \"fabro/\"\n").unwrap();
-        assert_eq!(config.fabro.unwrap().root, "fabro/");
+        assert_eq!(config.fabro.unwrap().root.as_deref(), Some("fabro/"));
     }
 
     #[test]
     fn parse_retros_default_false() {
         let config = parse_project_config("version = 1\n").unwrap();
         assert_eq!(
-            config.features.as_ref().map(|f| f.retros).unwrap_or(false),
-            false
+            config
+                .features
+                .as_ref()
+                .and_then(|f| f.retros)
+                .unwrap_or(false),
+            false,
         );
     }
 
     #[test]
     fn parse_retros_enabled() {
         let config = parse_project_config("version = 1\n[features]\nretros = true\n").unwrap();
-        assert!(config.features.unwrap().retros);
+        assert_eq!(config.features.unwrap().retros, Some(true));
     }
 
     #[test]
@@ -366,10 +386,10 @@ mod tests {
         assert_eq!(
             config.pull_request,
             Some(crate::run::PullRequestConfig {
-                enabled: true,
-                draft: false,
-                auto_merge: false,
-                merge_strategy: MergeStrategy::Squash,
+                enabled: Some(true),
+                draft: Some(false),
+                auto_merge: None,
+                merge_strategy: None,
             })
         );
     }
@@ -389,7 +409,7 @@ memory = 8
         let sandbox = config.sandbox.unwrap();
         assert_eq!(sandbox.provider.as_deref(), Some("daytona"));
         let snap = sandbox.daytona.unwrap().snapshot.unwrap();
-        assert_eq!(snap.name, "my-snapshot");
+        assert_eq!(snap.name.as_deref(), Some("my-snapshot"));
         assert_eq!(snap.cpu, Some(4));
         assert_eq!(snap.memory, Some(8));
     }
@@ -461,7 +481,7 @@ model = "claude-sonnet-4-6"
         let config = FabroConfig {
             version: Some(1),
             fabro: Some(ProjectFabroConfig {
-                root: "fabro/".to_string(),
+                root: Some("fabro/".to_string()),
                 ..Default::default()
             }),
             ..Default::default()
@@ -478,7 +498,7 @@ model = "claude-sonnet-4-6"
         let config = FabroConfig {
             version: Some(1),
             fabro: Some(ProjectFabroConfig {
-                root: ".".to_string(),
+                root: Some(".".to_string()),
                 ..Default::default()
             }),
             ..Default::default()

@@ -68,7 +68,7 @@ pub fn decode_pem_env(name: &str, value: &str) -> String {
 /// Call this once at startup before serving requests. Panics if the
 /// configuration is invalid (JWT strategy but no public key, or mTLS without TLS config).
 pub fn resolve_auth_mode(
-    api_config: &fabro_config::server::ApiConfig,
+    api_config: &fabro_config::server::ApiSettings,
     allowed_usernames: Vec<String>,
 ) -> AuthMode {
     use fabro_config::server::ApiAuthStrategy;

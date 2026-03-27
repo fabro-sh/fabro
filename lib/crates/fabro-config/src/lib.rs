@@ -1,4 +1,7 @@
+extern crate self as fabro_config;
+
 pub mod cli;
+pub mod combine;
 pub mod config;
 pub mod dotenv;
 pub mod hook;
@@ -7,9 +10,12 @@ pub mod project;
 pub mod run;
 pub mod sandbox;
 pub mod server;
+pub mod settings;
 
 pub use config::FabroConfig;
+pub use fabro_config_derive::Combine;
 pub use fabro_util::path::expand_tilde;
+pub use settings::FabroSettings;
 
 use std::path::Path;
 

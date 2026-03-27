@@ -3,11 +3,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
-
 use tracing::debug;
 
+use crate::combine::Combine;
 use crate::config::FabroConfig;
-use crate::sandbox::DockerfileSource;
 
 const SUPPORTED_VERSION: u32 = 1;
 
@@ -17,12 +16,44 @@ pub struct CheckpointConfig {
     pub exclude_globs: Vec<String>,
 }
 
+impl Combine for CheckpointConfig {
+    fn combine(mut self, other: Self) -> Self {
+        self.exclude_globs.extend(other.exclude_globs);
+        self.exclude_globs.sort();
+        self.exclude_globs.dedup();
+        self
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct CheckpointSettings {
+    #[serde(default)]
+    pub exclude_globs: Vec<String>,
+}
+
+impl From<CheckpointConfig> for CheckpointSettings {
+    fn from(value: CheckpointConfig) -> Self {
+        let mut exclude_globs = value.exclude_globs;
+        exclude_globs.sort();
+        exclude_globs.dedup();
+        Self { exclude_globs }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct PullRequestConfig {
+    pub enabled: Option<bool>,
+    pub draft: Option<bool>,
+    pub auto_merge: Option<bool>,
+    pub merge_strategy: Option<MergeStrategy>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct PullRequestSettings {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default = "default_true")]
@@ -33,7 +64,18 @@ pub struct PullRequestConfig {
     pub merge_strategy: MergeStrategy,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+impl From<PullRequestConfig> for PullRequestSettings {
+    fn from(value: PullRequestConfig) -> Self {
+        Self {
+            enabled: value.enabled.unwrap_or(false),
+            draft: value.draft.unwrap_or(true),
+            auto_merge: value.auto_merge.unwrap_or(false),
+            merge_strategy: value.merge_strategy.unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 #[serde(rename_all = "lowercase")]
 pub enum MergeStrategy {
     #[default]
@@ -42,19 +84,47 @@ pub enum MergeStrategy {
     Rebase,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct AssetsConfig {
     #[serde(default)]
     pub include: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct AssetsSettings {
+    #[serde(default)]
+    pub include: Vec<String>,
+}
+
+impl From<AssetsConfig> for AssetsSettings {
+    fn from(value: AssetsConfig) -> Self {
+        Self {
+            include: value.include,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct GitHubConfig {
     #[serde(default)]
     pub permissions: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct GitHubSettings {
+    #[serde(default)]
+    pub permissions: HashMap<String, String>,
+}
+
+impl From<GitHubConfig> for GitHubSettings {
+    fn from(value: GitHubConfig) -> Self {
+        Self {
+            permissions: value.permissions,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct LlmConfig {
     pub model: Option<String>,
     pub provider: Option<String>,
@@ -62,10 +132,45 @@ pub struct LlmConfig {
     pub fallbacks: Option<HashMap<String, Vec<String>>>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct LlmSettings {
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub fallbacks: Option<HashMap<String, Vec<String>>>,
+}
+
+impl From<LlmConfig> for LlmSettings {
+    fn from(value: LlmConfig) -> Self {
+        Self {
+            model: value.model,
+            provider: value.provider,
+            fallbacks: value.fallbacks,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct SetupConfig {
+    #[serde(default)]
     pub commands: Vec<String>,
     pub timeout_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct SetupSettings {
+    #[serde(default)]
+    pub commands: Vec<String>,
+    pub timeout_ms: Option<u64>,
+}
+
+impl From<SetupConfig> for SetupSettings {
+    fn from(value: SetupConfig) -> Self {
+        Self {
+            commands: value.commands,
+            timeout_ms: value.timeout_ms,
+        }
+    }
 }
 
 /// Load and validate a run config from a TOML file.
@@ -128,12 +233,12 @@ fn resolve_dockerfile(config: &mut FabroConfig, config_dir: &Path) -> anyhow::Re
         .and_then(|d| d.snapshot.as_mut())
         .and_then(|snap| snap.dockerfile.as_mut());
 
-    if let Some(DockerfileSource::Path { path: ref rel }) = source {
+    if let Some(crate::sandbox::DockerfileSource::Path { path: ref rel }) = source {
         let path = config_dir.join(rel);
         let contents = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read dockerfile at {}", path.display()))?;
         debug!(path = %path.display(), "Resolved dockerfile from path");
-        *source.unwrap() = DockerfileSource::Inline(contents);
+        *source.unwrap() = crate::sandbox::DockerfileSource::Inline(contents);
     }
 
     Ok(())
@@ -156,7 +261,6 @@ pub fn parse_run_config(contents: &str) -> anyhow::Result<FabroConfig> {
     let mut config: FabroConfig =
         toml::from_str(contents).context("Failed to parse run config TOML")?;
 
-    // Apply default graph if not specified
     if config.graph.is_none() {
         config.graph = Some("workflow.fabro".to_string());
     }

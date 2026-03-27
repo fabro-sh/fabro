@@ -23,7 +23,7 @@ pub struct StartFinalizeOptions {
 }
 
 pub struct StartPullRequestConfig {
-    pub pr_config: Option<fabro_config::run::PullRequestConfig>,
+    pub pr_config: Option<fabro_config::run::PullRequestSettings>,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
     pub origin_url: Option<String>,
     pub model: String,
@@ -252,7 +252,7 @@ mod tests {
 
     use chrono::Utc;
     use fabro_agent::{LocalSandbox, Sandbox};
-    use fabro_config::config::FabroConfig;
+    use fabro_config::FabroSettings;
 
     use super::*;
     use crate::context::Context;
@@ -274,7 +274,7 @@ mod tests {
         crate::operations::create(
             dot,
             crate::operations::RunCreateOptions {
-                config: FabroConfig::default(),
+                config: FabroSettings::default(),
                 run_dir: Some(run_dir.to_path_buf()),
                 run_id: Some("run-test".to_string()),
                 workflow_slug: Some("test".to_string()),

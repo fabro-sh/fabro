@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use fabro_config::config::FabroConfig;
-use fabro_config::run::PullRequestConfig;
+use fabro_config::run::PullRequestSettings;
+use fabro_config::FabroSettings;
 
 use crate::git::GitAuthor;
 
@@ -19,7 +19,7 @@ pub struct GitCheckpointOptions {
 /// Options for a workflow run.
 #[derive(Clone)]
 pub struct RunOptions {
-    pub config: FabroConfig,
+    pub config: FabroSettings,
     pub run_dir: PathBuf,
     pub cancel_token: Option<Arc<AtomicBool>>,
     pub dry_run: bool,
@@ -49,7 +49,7 @@ impl RunOptions {
     }
 
     /// PR config (already normalized — disabled entries stripped at construction).
-    pub fn pull_request(&self) -> Option<&PullRequestConfig> {
+    pub fn pull_request(&self) -> Option<&PullRequestSettings> {
         self.config.pull_request.as_ref()
     }
 

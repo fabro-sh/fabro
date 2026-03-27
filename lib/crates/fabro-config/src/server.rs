@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 
+use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
 use crate::config::FabroConfig;
+use crate::settings::FabroSettings;
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthProvider {
     #[default]
@@ -12,42 +14,91 @@ pub enum AuthProvider {
     InsecureDisabled,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct AuthConfig {
+    pub provider: Option<AuthProvider>,
+    #[serde(default)]
+    pub allowed_usernames: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+pub struct AuthSettings {
     #[serde(default)]
     pub provider: AuthProvider,
     #[serde(default)]
     pub allowed_usernames: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+impl From<AuthConfig> for AuthSettings {
+    fn from(value: AuthConfig) -> Self {
+        Self {
+            provider: value.provider.unwrap_or_default(),
+            allowed_usernames: value.allowed_usernames,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize, crate::Combine)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiAuthStrategy {
     Jwt,
     Mtls,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct TlsConfig {
+    pub cert: Option<PathBuf>,
+    pub key: Option<PathBuf>,
+    pub ca: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct TlsSettings {
     pub cert: PathBuf,
     pub key: PathBuf,
     pub ca: PathBuf,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+impl TryFrom<TlsConfig> for TlsSettings {
+    type Error = anyhow::Error;
+
+    fn try_from(value: TlsConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
+            cert: value
+                .cert
+                .ok_or_else(|| anyhow!("tls.cert is required when tls is configured"))?,
+            key: value
+                .key
+                .ok_or_else(|| anyhow!("tls.key is required when tls is configured"))?,
+            ca: value
+                .ca
+                .ok_or_else(|| anyhow!("tls.ca is required when tls is configured"))?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct ApiConfig {
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub authentication_strategies: Vec<ApiAuthStrategy>,
+    pub tls: Option<TlsConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct ApiSettings {
     #[serde(default = "default_base_url")]
     pub base_url: String,
     #[serde(default)]
     pub authentication_strategies: Vec<ApiAuthStrategy>,
-    pub tls: Option<TlsConfig>,
+    pub tls: Option<TlsSettings>,
 }
 
 fn default_base_url() -> String {
     "http://localhost:3000".to_string()
 }
 
-impl Default for ApiConfig {
+impl Default for ApiSettings {
     fn default() -> Self {
         Self {
             base_url: default_base_url(),
@@ -57,65 +108,156 @@ impl Default for ApiConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+impl TryFrom<ApiConfig> for ApiSettings {
+    type Error = anyhow::Error;
+
+    fn try_from(value: ApiConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
+            base_url: value.base_url.unwrap_or_else(default_base_url),
+            authentication_strategies: value.authentication_strategies,
+            tls: value.tls.map(TryInto::try_into).transpose()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 #[serde(rename_all = "snake_case")]
 pub enum GitProvider {
     #[default]
     Github,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct GitAuthorConfig {
     pub name: Option<String>,
     pub email: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+pub struct GitAuthorSettings {
+    pub name: Option<String>,
+    pub email: Option<String>,
+}
+
+impl From<GitAuthorConfig> for GitAuthorSettings {
+    fn from(value: GitAuthorConfig) -> Self {
+        Self {
+            name: value.name,
+            email: value.email,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize, crate::Combine)]
 #[serde(rename_all = "snake_case")]
 pub enum WebhookStrategy {
     TailscaleFunnel,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct WebhookConfig {
+    pub strategy: Option<WebhookStrategy>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct WebhookSettings {
     pub strategy: WebhookStrategy,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+impl TryFrom<WebhookConfig> for WebhookSettings {
+    type Error = anyhow::Error;
+
+    fn try_from(value: WebhookConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
+            strategy: value
+                .strategy
+                .ok_or_else(|| anyhow!("git.webhooks.strategy is required"))?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct GitConfig {
+    pub provider: Option<GitProvider>,
+    pub app_id: Option<String>,
+    pub client_id: Option<String>,
+    pub slug: Option<String>,
+    pub author: Option<GitAuthorConfig>,
+    pub webhooks: Option<WebhookConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+pub struct GitSettings {
     #[serde(default)]
     pub provider: GitProvider,
     pub app_id: Option<String>,
     pub client_id: Option<String>,
     pub slug: Option<String>,
     #[serde(default)]
-    pub author: GitAuthorConfig,
-    pub webhooks: Option<WebhookConfig>,
+    pub author: GitAuthorSettings,
+    pub webhooks: Option<WebhookSettings>,
+}
+
+impl TryFrom<GitConfig> for GitSettings {
+    type Error = anyhow::Error;
+
+    fn try_from(value: GitConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
+            provider: value.provider.unwrap_or_default(),
+            app_id: value.app_id,
+            client_id: value.client_id,
+            slug: value.slug,
+            author: value.author.map(Into::into).unwrap_or_default(),
+            webhooks: value.webhooks.map(TryInto::try_into).transpose()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
+pub struct WebConfig {
+    pub url: Option<String>,
+    pub auth: Option<AuthConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct WebConfig {
+pub struct WebSettings {
     #[serde(default = "default_web_url")]
     pub url: String,
     #[serde(default)]
-    pub auth: AuthConfig,
+    pub auth: AuthSettings,
 }
 
 fn default_web_url() -> String {
     "http://localhost:5173".to_string()
 }
 
-impl Default for WebConfig {
+impl Default for WebSettings {
     fn default() -> Self {
         Self {
             url: default_web_url(),
-            auth: AuthConfig::default(),
+            auth: AuthSettings::default(),
         }
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+impl From<WebConfig> for WebSettings {
+    fn from(value: WebConfig) -> Self {
+        Self {
+            url: value.url.unwrap_or_else(default_web_url),
+            auth: value.auth.map(Into::into).unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct Features {
+    pub session_sandboxes: Option<bool>,
+    /// Experimental: enable automatic retro generation after workflow runs.
+    pub retros: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+pub struct FeaturesSettings {
     #[serde(default)]
     pub session_sandboxes: bool,
     /// Experimental: enable automatic retro generation after workflow runs.
@@ -123,9 +265,29 @@ pub struct Features {
     pub retros: bool,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+impl From<Features> for FeaturesSettings {
+    fn from(value: Features) -> Self {
+        Self {
+            session_sandboxes: value.session_sandboxes.unwrap_or(false),
+            retros: value.retros.unwrap_or(false),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct LogConfig {
     pub level: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct LogSettings {
+    pub level: Option<String>,
+}
+
+impl From<LogConfig> for LogSettings {
+    fn from(value: LogConfig) -> Self {
+        Self { level: value.level }
+    }
 }
 
 /// Load server config from an explicit path or `~/.fabro/server.toml`, returning defaults if the
@@ -135,392 +297,6 @@ pub fn load_server_config(path: Option<&Path>) -> anyhow::Result<FabroConfig> {
 }
 
 /// Resolve the storage directory: config value > default `~/.fabro`.
-pub fn resolve_storage_dir(config: &FabroConfig) -> PathBuf {
+pub fn resolve_storage_dir(config: &FabroSettings) -> PathBuf {
     config.storage_dir()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_config_with_storage_dir() {
-        let toml = r#"storage_dir = "/custom/path""#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        assert_eq!(config.storage_dir, Some(PathBuf::from("/custom/path")));
-    }
-
-    #[test]
-    fn parse_config_with_data_dir_alias() {
-        let toml = r#"data_dir = "/custom/path""#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        assert_eq!(config.storage_dir, Some(PathBuf::from("/custom/path")));
-    }
-
-    #[test]
-    fn parse_empty_config_defaults() {
-        let toml = "";
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        assert_eq!(config.storage_dir, None);
-    }
-
-    #[test]
-    fn resolve_storage_dir_uses_config_value() {
-        let config = FabroConfig {
-            storage_dir: Some(PathBuf::from("/my/data")),
-            ..FabroConfig::default()
-        };
-        assert_eq!(resolve_storage_dir(&config), PathBuf::from("/my/data"));
-    }
-
-    #[test]
-    fn resolve_storage_dir_defaults_to_home() {
-        let config = FabroConfig::default();
-        let dir = resolve_storage_dir(&config);
-        // Should end with .fabro
-        assert!(
-            dir.ends_with(".fabro"),
-            "expected path ending with .fabro, got: {}",
-            dir.display()
-        );
-    }
-
-    #[test]
-    fn parse_full_config() {
-        let toml = r#"
-[web]
-url = "https://arc.example.com"
-
-[web.auth]
-provider = "github"
-allowed_usernames = ["brynary", "alice"]
-
-[api]
-base_url = "http://example.com:8080"
-authentication_strategies = ["jwt"]
-
-[git]
-provider = "github"
-app_id = "12345"
-client_id = "Iv1.abc123"
-"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let web = config.web.unwrap();
-        assert_eq!(web.url, "https://arc.example.com");
-        assert_eq!(web.auth.provider, AuthProvider::Github);
-        assert_eq!(web.auth.allowed_usernames, vec!["brynary", "alice"]);
-        let api = config.api.unwrap();
-        assert_eq!(api.base_url, "http://example.com:8080");
-        assert_eq!(api.authentication_strategies, vec![ApiAuthStrategy::Jwt]);
-        let git = config.git.unwrap();
-        assert_eq!(git.provider, GitProvider::Github);
-        assert_eq!(git.app_id.as_deref(), Some("12345"));
-        assert_eq!(git.client_id.as_deref(), Some("Iv1.abc123"));
-    }
-
-    #[test]
-    fn parse_web_defaults() {
-        let toml = "[web]\n";
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let web = config.web.unwrap();
-        assert_eq!(web.url, "http://localhost:5173");
-        assert_eq!(web.auth.provider, AuthProvider::Github);
-        assert!(web.auth.allowed_usernames.is_empty());
-    }
-
-    #[test]
-    fn parse_api_defaults() {
-        let toml = "[api]\n";
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let api = config.api.unwrap();
-        assert_eq!(api.base_url, "http://localhost:3000");
-        assert!(api.authentication_strategies.is_empty());
-        assert!(api.tls.is_none());
-    }
-
-    #[test]
-    fn parse_git_config() {
-        let toml = r#"
-[git]
-provider = "github"
-app_id = "12345"
-client_id = "Iv1.abc123"
-"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let git = config.git.unwrap();
-        assert_eq!(git.provider, GitProvider::Github);
-        assert_eq!(git.app_id.as_deref(), Some("12345"));
-        assert_eq!(git.client_id.as_deref(), Some("Iv1.abc123"));
-    }
-
-    #[test]
-    fn parse_git_defaults() {
-        let toml = "[git]\n";
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let git = config.git.unwrap();
-        assert_eq!(git.provider, GitProvider::Github);
-        assert_eq!(git.app_id, None);
-        assert_eq!(git.client_id, None);
-        assert_eq!(git.author.name, None);
-        assert_eq!(git.author.email, None);
-    }
-
-    #[test]
-    fn parse_git_author_config() {
-        let toml = r#"
-[git.author]
-name = "fabro-bot"
-email = "fabro-bot@company.com"
-"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let git = config.git.unwrap();
-        assert_eq!(git.author.name.as_deref(), Some("fabro-bot"));
-        assert_eq!(git.author.email.as_deref(), Some("fabro-bot@company.com"));
-    }
-
-    #[test]
-    fn parse_git_author_partial() {
-        let toml = r#"
-[git.author]
-name = "custom-name"
-"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let git = config.git.unwrap();
-        assert_eq!(git.author.name.as_deref(), Some("custom-name"));
-        assert_eq!(git.author.email, None);
-    }
-
-    #[test]
-    fn parse_config_with_run_defaults() {
-        let toml = r#"
-[llm]
-model = "claude-haiku"
-provider = "anthropic"
-
-[sandbox]
-provider = "daytona"
-
-[vars]
-repo_url = "https://github.com/org/repo"
-"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let llm = config.llm.unwrap();
-        assert_eq!(llm.model.as_deref(), Some("claude-haiku"));
-        assert_eq!(llm.provider.as_deref(), Some("anthropic"));
-        let sandbox = config.sandbox.unwrap();
-        assert_eq!(sandbox.provider.as_deref(), Some("daytona"));
-        let vars = config.vars.unwrap();
-        assert_eq!(vars["repo_url"], "https://github.com/org/repo");
-    }
-
-    #[test]
-    fn parse_config_server_and_run_defaults_together() {
-        let toml = r#"
-[web.auth]
-provider = "github"
-
-[git]
-provider = "github"
-app_id = "123"
-
-[llm]
-model = "gpt-4"
-"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let web = config.web.unwrap();
-        assert_eq!(web.auth.provider, AuthProvider::Github);
-        let git = config.git.unwrap();
-        assert_eq!(git.app_id.as_deref(), Some("123"));
-        let llm = config.llm.unwrap();
-        assert_eq!(llm.model.as_deref(), Some("gpt-4"));
-    }
-
-    #[test]
-    fn parse_insecure_disabled_auth_provider() {
-        let toml = r#"
-[web.auth]
-provider = "insecure_disabled"
-"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let web = config.web.unwrap();
-        assert_eq!(web.auth.provider, AuthProvider::InsecureDisabled);
-    }
-
-    #[test]
-    fn parse_jwt_and_mtls_strategies() {
-        let toml = r#"
-[api]
-authentication_strategies = ["jwt", "mtls"]
-
-[api.tls]
-cert = "~/.fabro/certs/server.crt"
-key = "~/.fabro/certs/server.key"
-ca = "~/.fabro/certs/ca.crt"
-"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let api = config.api.unwrap();
-        assert_eq!(
-            api.authentication_strategies,
-            vec![ApiAuthStrategy::Jwt, ApiAuthStrategy::Mtls]
-        );
-        let tls = api.tls.unwrap();
-        assert_eq!(tls.cert, PathBuf::from("~/.fabro/certs/server.crt"));
-        assert_eq!(tls.key, PathBuf::from("~/.fabro/certs/server.key"));
-        assert_eq!(tls.ca, PathBuf::from("~/.fabro/certs/ca.crt"));
-    }
-
-    #[test]
-    fn parse_max_concurrent_runs() {
-        let toml = r#"max_concurrent_runs = 8"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        assert_eq!(config.max_concurrent_runs, Some(8));
-    }
-
-    #[test]
-    fn parse_max_concurrent_runs_defaults_to_none() {
-        let toml = "";
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        assert_eq!(config.max_concurrent_runs, None);
-    }
-
-    #[test]
-    fn parse_empty_strategies() {
-        let toml = r#"
-[api]
-authentication_strategies = []
-"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let api = config.api.unwrap();
-        assert!(api.authentication_strategies.is_empty());
-    }
-
-    #[test]
-    fn parse_jwt_only_strategy() {
-        let toml = r#"
-[api]
-authentication_strategies = ["jwt"]
-"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let api = config.api.unwrap();
-        assert_eq!(api.authentication_strategies, vec![ApiAuthStrategy::Jwt]);
-        assert!(api.tls.is_none());
-    }
-
-    #[test]
-    fn load_server_config_from_explicit_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("custom.toml");
-        std::fs::write(&path, r#"max_concurrent_runs = 42"#).unwrap();
-        let config = load_server_config(Some(&path)).unwrap();
-        assert_eq!(config.max_concurrent_runs, Some(42));
-    }
-
-    #[test]
-    fn load_server_config_explicit_path_missing_is_error() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nonexistent.toml");
-        let result = load_server_config(Some(&path));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn parse_config_with_hooks() {
-        let toml = r#"
-[[hooks]]
-event = "run_start"
-command = "echo 'run starting'"
-
-[[hooks]]
-event = "stage_complete"
-command = "echo 'stage done'"
-matcher = "agent_loop"
-"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        assert_eq!(config.hooks.len(), 2);
-        assert_eq!(config.hooks[0].event, crate::hook::HookEvent::RunStart);
-        assert_eq!(
-            config.hooks[0].command.as_deref(),
-            Some("echo 'run starting'")
-        );
-        assert_eq!(config.hooks[1].event, crate::hook::HookEvent::StageComplete);
-        assert_eq!(config.hooks[1].matcher.as_deref(), Some("agent_loop"));
-    }
-
-    #[test]
-    fn parse_features() {
-        let toml = "[features]\nsession_sandboxes = true";
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let features = config.features.unwrap();
-        assert!(features.session_sandboxes);
-    }
-
-    #[test]
-    fn parse_features_defaults() {
-        let toml = "";
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        assert_eq!(config.features, None);
-    }
-
-    #[test]
-    fn parse_config_without_hooks_defaults_empty() {
-        let toml = "";
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        assert!(config.hooks.is_empty());
-    }
-
-    #[test]
-    fn parse_config_with_checkpoint_exclude_globs() {
-        let toml = r#"
-[checkpoint]
-exclude_globs = ["**/node_modules/**", "**/.cache/**"]
-"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        assert_eq!(
-            config.checkpoint.exclude_globs,
-            vec!["**/node_modules/**", "**/.cache/**"]
-        );
-    }
-
-    #[test]
-    fn parse_config_checkpoint_defaults_empty() {
-        let toml = "";
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        assert!(config.checkpoint.exclude_globs.is_empty());
-    }
-
-    #[test]
-    fn parse_git_webhooks_config() {
-        let toml = r#"
-[git]
-provider = "github"
-app_id = "2993730"
-
-[git.webhooks]
-strategy = "tailscale_funnel"
-"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        let webhooks = config.git.unwrap().webhooks.unwrap();
-        assert_eq!(webhooks.strategy, WebhookStrategy::TailscaleFunnel);
-    }
-
-    #[test]
-    fn parse_git_webhooks_missing_is_none() {
-        let toml = r#"
-[git]
-provider = "github"
-app_id = "123"
-"#;
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        assert!(config.git.unwrap().webhooks.is_none());
-    }
-
-    #[test]
-    fn parse_log_config() {
-        let toml = "[log]\nlevel = \"trace\"";
-        let config: FabroConfig = toml::from_str(toml).unwrap();
-        assert_eq!(
-            config.log.as_ref().and_then(|l| l.level.as_deref()),
-            Some("trace")
-        );
-    }
 }
