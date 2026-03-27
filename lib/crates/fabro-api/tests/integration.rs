@@ -427,7 +427,13 @@ mod server_lifecycle {
 
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use fabro_api::server::{build_router, create_app_state};
+    use fabro_api::server::{build_router, create_app_state_with_registry_factory};
+    use fabro_interview::Interviewer;
+    use fabro_workflows::handler::agent::AgentHandler;
+    use fabro_workflows::handler::exit::ExitHandler;
+    use fabro_workflows::handler::human::HumanHandler;
+    use fabro_workflows::handler::start::StartHandler;
+    use fabro_workflows::handler::HandlerRegistry;
     use fabro_workflows::pipeline::LlmSpec;
     use tower::ServiceExt;
 
@@ -439,6 +445,15 @@ mod server_lifecycle {
             mcp_servers: Vec::new(),
             dry_run: true,
         }
+    }
+
+    fn gate_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
+        let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
+        registry.register("start", Box::new(StartHandler));
+        registry.register("exit", Box::new(ExitHandler));
+        registry.register("agent", Box::new(AgentHandler::new(None)));
+        registry.register("human", Box::new(HumanHandler::new(interviewer)));
+        registry
     }
 
     async fn body_json(body: Body) -> serde_json::Value {
@@ -470,7 +485,8 @@ mod server_lifecycle {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn full_http_lifecycle_approve_and_complete() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state =
+            create_app_state_with_registry_factory(test_db().await, test_llm_spec, gate_registry);
         fabro_api::server::spawn_scheduler(Arc::clone(&state));
         let app = build_router(Arc::clone(&state), fabro_api::jwt_auth::AuthMode::Disabled);
 
@@ -566,7 +582,8 @@ mod server_lifecycle {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn full_http_lifecycle_cancel() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state =
+            create_app_state_with_registry_factory(test_db().await, test_llm_spec, gate_registry);
         fabro_api::server::spawn_scheduler(Arc::clone(&state));
         let app = build_router(Arc::clone(&state), fabro_api::jwt_auth::AuthMode::Disabled);
 

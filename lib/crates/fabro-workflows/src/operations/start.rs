@@ -50,7 +50,6 @@ pub struct StartOptions {
     pub git: Option<GitCheckpointOptions>,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
     pub worktree_mode: Option<WorktreeMode>,
-    #[cfg(test)]
     pub registry_override: Option<Arc<crate::handler::HandlerRegistry>>,
 
     // Still external for now — could be derived from RunRecord.config in follow-up
@@ -174,7 +173,6 @@ async fn run_engine(
         devcontainer: options.devcontainer,
         git: options.git,
         worktree_mode: options.worktree_mode,
-        #[cfg(test)]
         registry_override: options.registry_override,
         checkpoint,
         seed_context: options.seed_context,

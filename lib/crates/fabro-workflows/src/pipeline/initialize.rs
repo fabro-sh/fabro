@@ -722,10 +722,10 @@ pub async fn initialize(
         &options.emitter,
     )
     .await?;
-    #[cfg(test)]
     let (registry, llm_client, effective_dry_run) =
         if let Some(registry) = options.registry_override.clone() {
-            (registry, None, options.dry_run || options.llm.dry_run)
+            // A caller-supplied registry owns execution behavior for its handlers.
+            (registry, None, options.dry_run)
         } else {
             build_registry(
                 &options.llm,
@@ -735,14 +735,6 @@ pub async fn initialize(
             )
             .await?
         };
-    #[cfg(not(test))]
-    let (registry, llm_client, effective_dry_run) = build_registry(
-        &options.llm,
-        Arc::clone(&options.interviewer),
-        &env,
-        &options.emitter,
-    )
-    .await?;
     if effective_dry_run {
         options.dry_run = true;
         options.run_options.dry_run = true;

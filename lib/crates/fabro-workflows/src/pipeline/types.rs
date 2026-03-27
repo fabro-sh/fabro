@@ -264,7 +264,6 @@ pub struct InitOptions {
     pub devcontainer: Option<DevcontainerSpec>,
     pub git: Option<crate::run_options::GitCheckpointOptions>,
     pub worktree_mode: Option<WorktreeMode>,
-    #[cfg(test)]
     pub registry_override: Option<Arc<crate::handler::HandlerRegistry>>,
     pub checkpoint: Option<Checkpoint>,
     pub seed_context: Option<Context>,
