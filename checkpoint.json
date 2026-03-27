@@ -1,0 +1,53 @@
+{
+  "timestamp": "2026-03-27T19:07:07.324709Z",
+  "current_node": "fork",
+  "completed_nodes": [
+    "start",
+    "fork"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "internal.retry_count.fork": 0,
+    "internal.run_id": "01KMRB2JHKV51KCH3B5FXPTK85",
+    "failure_class": "",
+    "parallel.results": [
+      {
+        "id": "branch1",
+        "status": "success"
+      },
+      {
+        "id": "branch2",
+        "status": "success"
+      }
+    ],
+    "current.preamble": "Goal: Test parallel and fan-in execution\n",
+    "failure_signature": "",
+    "internal.retry_count.start": 0,
+    "outcome": "success",
+    "current_node": "fork",
+    "parallel.branch_count": 2,
+    "internal.thread_id": "start",
+    "graph.goal": "Test parallel and fan-in execution",
+    "internal.fidelity": "compact",
+    "internal.node_visit_count": 1,
+    "thread.start.current_node": "fork"
+  },
+  "node_outcomes": {
+    "fork": {
+      "status": "success",
+      "jump_to_node": "merge",
+      "notes": "[Simulated] Parallel node dispatched 2 branches",
+      "usage": null
+    },
+    "start": {
+      "status": "success",
+      "notes": "[Simulated] start",
+      "usage": null
+    }
+  },
+  "next_node_id": "merge",
+  "node_visits": {
+    "start": 1,
+    "fork": 1
+  }
+}
