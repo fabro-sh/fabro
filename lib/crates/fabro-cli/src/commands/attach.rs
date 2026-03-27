@@ -56,11 +56,36 @@ pub async fn attach_run(
         });
     }
 
-    // Wait for progress.jsonl to appear
+    // Wait for progress.jsonl to appear.
+    // If the engine dies during early init (before any event is emitted),
+    // progress.jsonl may never be created. Check for terminal status or
+    // engine death so we surface the real failure instead of timing out.
     let mut wait_count = 0;
     while !progress_path.exists() {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         wait_count += 1;
+
+        // Check if engine died before writing any progress
+        if let Some(record) = read_status_record(&status_path) {
+            if record.status.is_terminal() {
+                progress_ui.finish();
+                return Ok(determine_exit_code(&conclusion_path, Some(record)));
+            }
+        }
+
+        if let Some(guard) = engine_guard.as_mut() {
+            if let Some(child) = guard.inner() {
+                if matches!(child.try_wait(), Ok(Some(_))) {
+                    // Engine exited without writing progress.jsonl
+                    progress_ui.finish();
+                    return Ok(determine_exit_code(
+                        &conclusion_path,
+                        read_status_record(&status_path),
+                    ));
+                }
+            }
+        }
+
         if wait_count > 100 {
             // Guard's Drop kills+waits on the engine child
             drop(engine_guard.take());
