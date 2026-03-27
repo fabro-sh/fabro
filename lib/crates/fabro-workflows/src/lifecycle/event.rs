@@ -36,6 +36,7 @@ pub struct EventLifecycle {
     /// Set in on_edge_selected when loop_restart approved; emitted+cleared in on_run_start.
     pub restarted_from: Arc<Mutex<Option<(String, String)>>>,
     // Config for WorkflowRunStarted payload
+    pub base_branch: Option<String>,
     pub base_sha: Option<String>,
     pub run_branch: Option<String>,
     pub worktree_dir: Option<String>,
@@ -70,6 +71,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         self.emitter.emit(&WorkflowRunEvent::WorkflowRunStarted {
             name: self.graph_name.clone(),
             run_id: self.run_id.clone(),
+            base_branch: self.base_branch.clone(),
             base_sha: self.base_sha.clone(),
             run_branch: self.run_branch.clone(),
             worktree_dir: self.worktree_dir.clone(),

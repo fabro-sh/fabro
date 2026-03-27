@@ -1,7 +1,6 @@
 //! Conformance tests: spec ↔ router ↔ Rust struct consistency.
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
@@ -11,18 +10,18 @@ use fabro_api::server_config::*;
 use fabro_config::run::*;
 use fabro_config::sandbox::SandboxConfig;
 use fabro_hooks::*;
-use fabro_interview::Interviewer;
 use fabro_sandbox::daytona::*;
-use fabro_workflows::handler::exit::ExitHandler;
-use fabro_workflows::handler::start::StartHandler;
-use fabro_workflows::handler::HandlerRegistry;
+use fabro_workflows::pipeline::LlmSpec;
 use tower::ServiceExt;
 
-fn test_registry(_interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
-    let mut registry = HandlerRegistry::new(Box::new(StartHandler));
-    registry.register("start", Box::new(StartHandler));
-    registry.register("exit", Box::new(ExitHandler));
-    registry
+fn test_llm_spec() -> LlmSpec {
+    LlmSpec {
+        model: "test-model".to_string(),
+        provider: fabro_llm::Provider::Anthropic,
+        fallback_chain: Vec::new(),
+        mcp_servers: Vec::new(),
+        dry_run: true,
+    }
 }
 
 async fn test_db() -> sqlx::SqlitePool {
@@ -75,7 +74,7 @@ fn methods_for_path_item(item: &openapiv3::PathItem) -> Vec<Method> {
 #[tokio::test]
 async fn all_spec_routes_are_routable() {
     let spec = load_spec();
-    let state = create_app_state(test_db().await, test_registry);
+    let state = create_app_state(test_db().await, test_llm_spec);
     let app = build_router(state, AuthMode::Disabled);
 
     let mut checked = 0;

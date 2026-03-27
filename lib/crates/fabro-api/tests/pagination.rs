@@ -1,22 +1,20 @@
 //! Tests that paginated list endpoints return `{ data, meta: { has_more } }`.
 
-use std::sync::Arc;
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_api::jwt_auth::AuthMode;
 use fabro_api::server::{build_router, create_app_state};
-use fabro_interview::Interviewer;
-use fabro_workflows::handler::exit::ExitHandler;
-use fabro_workflows::handler::start::StartHandler;
-use fabro_workflows::handler::HandlerRegistry;
+use fabro_workflows::pipeline::LlmSpec;
 use tower::ServiceExt;
 
-fn test_registry(_interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
-    let mut registry = HandlerRegistry::new(Box::new(StartHandler));
-    registry.register("start", Box::new(StartHandler));
-    registry.register("exit", Box::new(ExitHandler));
-    registry
+fn test_llm_spec() -> LlmSpec {
+    LlmSpec {
+        model: "test-model".to_string(),
+        provider: fabro_llm::Provider::Anthropic,
+        fallback_chain: Vec::new(),
+        mcp_servers: Vec::new(),
+        dry_run: true,
+    }
 }
 
 async fn test_db() -> sqlx::SqlitePool {
@@ -109,7 +107,7 @@ const ENDPOINTS: &[PaginatedEndpoint] = &[
 
 #[tokio::test]
 async fn paginated_endpoints_return_correct_shape() {
-    let state = create_app_state(test_db().await, test_registry);
+    let state = create_app_state(test_db().await, test_llm_spec);
     let app = build_router(state, AuthMode::Disabled);
 
     for ep in ENDPOINTS {

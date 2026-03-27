@@ -8,7 +8,7 @@ use crate::records::Checkpoint;
 
 use super::types::{Executed, RetroOptions, Retroed};
 
-pub async fn run_retro(options: &RetroOptions) -> Option<Retro> {
+pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
     let cp = match Checkpoint::load(&options.run_dir.join("checkpoint.json")) {
         Ok(cp) => cp,
         Err(e) => {
@@ -43,7 +43,7 @@ pub async fn run_retro(options: &RetroOptions) -> Option<Retro> {
         emitter.emit(&WorkflowRunEvent::RetroStarted);
     }
 
-    let narrative_result = if options.dry_run {
+    let narrative_result = if dry_run {
         Ok(fabro_retro::retro_agent::dry_run_narrative())
     } else if let Some(client) = options.llm_client.as_ref() {
         let emitter_clone = options.emitter.clone();
@@ -122,10 +122,15 @@ pub async fn retro(executed: Executed, options: &RetroOptions) -> Retroed {
         sandbox,
         duration_ms,
         final_context: _,
+        llm_client: _,
+        model: _,
+        provider: _,
     } = executed;
 
+    let dry_run = run_options.dry_run;
+
     let retro = if options.enabled {
-        run_retro(options).await
+        run_retro(options, dry_run).await
     } else {
         None
     };
@@ -189,6 +194,7 @@ mod tests {
             github_app: None,
             host_repo_path: None,
             base_branch: None,
+            display_base_sha: None,
             git: None,
         }
     }
@@ -213,6 +219,9 @@ mod tests {
             sandbox: Arc::clone(&sandbox),
             duration_ms: 1,
             final_context: Context::new(),
+            llm_client: None,
+            model: "test-model".to_string(),
+            provider: fabro_llm::Provider::Anthropic,
         };
 
         let retroed = retro(
@@ -227,7 +236,6 @@ mod tests {
                 failed: false,
                 run_duration_ms: 1,
                 enabled: true,
-                dry_run: true,
                 llm_client: None,
                 provider: fabro_llm::Provider::Anthropic,
                 model: "test-model".to_string(),
@@ -253,23 +261,25 @@ mod tests {
             move |event| seen.lock().unwrap().push(event.clone())
         });
 
-        let retro = run_retro(&RetroOptions {
-            run_id: "run-test".to_string(),
-            workflow_name: "test".to_string(),
-            goal: "Ship it".to_string(),
-            run_dir: run_dir.clone(),
-            sandbox: Arc::new(fabro_agent::LocalSandbox::new(
-                std::env::current_dir().unwrap(),
-            )),
-            emitter: Some(Arc::clone(&emitter)),
-            failed: false,
-            run_duration_ms: 1,
-            enabled: true,
-            dry_run: true,
-            llm_client: None,
-            provider: fabro_llm::Provider::Anthropic,
-            model: "test-model".to_string(),
-        })
+        let retro = run_retro(
+            &RetroOptions {
+                run_id: "run-test".to_string(),
+                workflow_name: "test".to_string(),
+                goal: "Ship it".to_string(),
+                run_dir: run_dir.clone(),
+                sandbox: Arc::new(fabro_agent::LocalSandbox::new(
+                    std::env::current_dir().unwrap(),
+                )),
+                emitter: Some(Arc::clone(&emitter)),
+                failed: false,
+                run_duration_ms: 1,
+                enabled: true,
+                llm_client: None,
+                provider: fabro_llm::Provider::Anthropic,
+                model: "test-model".to_string(),
+            },
+            true,
+        )
         .await;
 
         assert!(retro.is_some());

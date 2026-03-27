@@ -1,6 +1,10 @@
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
+use anyhow::{Context, Result};
+use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::outcome::StageUsage;
@@ -20,6 +24,8 @@ pub enum WorkflowRunEvent {
     WorkflowRunStarted {
         name: String,
         run_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_branch: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         base_sha: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -791,6 +797,80 @@ pub fn flatten_event(
     (event_name, fields)
 }
 
+pub fn build_event_envelope(event: &WorkflowRunEvent, run_id: &str) -> serde_json::Value {
+    let (event_name, event_fields) = flatten_event(event);
+    let mut envelope = serde_json::Map::new();
+    envelope.insert(
+        "ts".to_string(),
+        serde_json::Value::String(Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)),
+    );
+    envelope.insert(
+        "run_id".to_string(),
+        serde_json::Value::String(run_id.to_string()),
+    );
+    envelope.insert("event".to_string(), serde_json::Value::String(event_name));
+    for (k, v) in event_fields {
+        if k != "ts" && k != "run_id" && k != "event" {
+            envelope.insert(k, v);
+        }
+    }
+    serde_json::Value::Object(envelope)
+}
+
+pub fn append_progress_event(run_dir: &Path, run_id: &str, event: &WorkflowRunEvent) -> Result<()> {
+    let envelope = build_event_envelope(event, run_id);
+    let line = serde_json::to_string(&envelope)?;
+    let line = fabro_util::redact::redact_jsonl_line(&line);
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(run_dir.join("progress.jsonl"))
+        .with_context(|| {
+            format!(
+                "Failed to open {}",
+                run_dir.join("progress.jsonl").display()
+            )
+        })?;
+    writeln!(file, "{line}")?;
+
+    let pretty = serde_json::to_string_pretty(&envelope)?;
+    let pretty = fabro_util::redact::redact_jsonl_line(&pretty);
+    std::fs::write(run_dir.join("live.json"), pretty)
+        .with_context(|| format!("Failed to write {}", run_dir.join("live.json").display()))?;
+
+    Ok(())
+}
+
+pub struct ProgressLogger {
+    run_dir: PathBuf,
+    run_id: String,
+}
+
+impl ProgressLogger {
+    #[must_use]
+    pub fn new(run_dir: impl Into<PathBuf>, run_id: impl Into<String>) -> Self {
+        Self {
+            run_dir: run_dir.into(),
+            run_id: run_id.into(),
+        }
+    }
+
+    pub fn register(self, emitter: &EventEmitter) {
+        let run_dir = self.run_dir;
+        let run_id = Arc::new(std::sync::Mutex::new(self.run_id));
+        emitter.on_event(move |event| {
+            if let WorkflowRunEvent::WorkflowRunStarted {
+                run_id: started_run_id,
+                ..
+            } = event
+            {
+                *run_id.lock().unwrap() = started_run_id.clone();
+            }
+            let _ = append_progress_event(&run_dir, &run_id.lock().unwrap(), event);
+        });
+    }
+}
+
 fn flatten_agent(inner: serde_json::Value) -> (String, serde_json::Map<String, serde_json::Value>) {
     let serde_json::Value::Object(mut agent_fields) = inner else {
         return ("Agent".to_string(), serde_json::Map::new());
@@ -1136,6 +1216,7 @@ mod tests {
         emitter.emit(&WorkflowRunEvent::WorkflowRunStarted {
             name: "test".to_string(),
             run_id: "1".to_string(),
+            base_branch: None,
             base_sha: None,
             run_branch: None,
             worktree_dir: None,
@@ -1636,6 +1717,7 @@ mod tests {
         emitter.emit(&WorkflowRunEvent::WorkflowRunStarted {
             name: "test".to_string(),
             run_id: "1".to_string(),
+            base_branch: None,
             base_sha: None,
             run_branch: None,
             worktree_dir: None,
@@ -1823,6 +1905,7 @@ mod tests {
         let event = WorkflowRunEvent::WorkflowRunStarted {
             name: "my_pipeline".to_string(),
             run_id: "r1".to_string(),
+            base_branch: None,
             base_sha: None,
             run_branch: None,
             worktree_dir: None,
@@ -2447,6 +2530,7 @@ mod tests {
         let event = WorkflowRunEvent::WorkflowRunStarted {
             name: "my_workflow".to_string(),
             run_id: "r42".to_string(),
+            base_branch: None,
             base_sha: None,
             run_branch: None,
             worktree_dir: None,
@@ -2476,6 +2560,7 @@ mod tests {
         let event = WorkflowRunEvent::WorkflowRunStarted {
             name: "wf".to_string(),
             run_id: "r1".to_string(),
+            base_branch: None,
             base_sha: None,
             run_branch: None,
             worktree_dir: None,
