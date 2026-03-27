@@ -1043,7 +1043,7 @@ fn start_by_workflow_name_prefers_newly_created_submitted_run() {
         serde_json::json!({
             "run_id": "old-smoke",
             "created_at": "2026-01-01T00:00:00Z",
-            "config": {},
+            "settings": {},
             "graph": {
                 "name": "Smoke",
                 "nodes": {},
@@ -1119,7 +1119,7 @@ digraph G {
     let run_record = serde_json::json!({
         "run_id": "test-bug2",
         "created_at": "2026-01-01T00:00:00Z",
-        "config": {
+        "settings": {
             "dry_run": true,
             "auto_approve": true,
             "no_retro": true,
@@ -1698,5 +1698,5 @@ fn config_show_missing_run_config_errors() {
         .args(["config", "show", "missing.toml"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Failed to read"));
+        .stderr(predicate::str::contains("Workflow not found"));
 }

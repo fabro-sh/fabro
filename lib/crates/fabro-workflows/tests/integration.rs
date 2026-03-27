@@ -10609,7 +10609,7 @@ async fn git_checkpoint_host_writes_shadow_branch() {
     let run_record_json = serde_json::json!({
         "run_id": run_id,
         "created_at": "2025-01-01T00:00:00Z",
-        "config": {},
+        "settings": {},
         "graph": { "name": "ShadowBranchTest", "nodes": {}, "edges": [], "attrs": {} },
         "working_directory": worktree_path.to_str().unwrap(),
     });

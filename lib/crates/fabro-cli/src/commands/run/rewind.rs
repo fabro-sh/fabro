@@ -17,16 +17,24 @@ pub fn run(args: &RewindArgs, styles: &Styles) -> Result<()> {
     let timeline = fabro_workflows::operations::build_timeline(&store, &run_id)?;
 
     if args.list || args.target.is_none() {
-        let parallel_map = fabro_workflows::operations::load_parallel_map(&store, &run_id);
-        print_timeline(&timeline, &parallel_map, styles);
+        print_timeline(&timeline, styles);
         return Ok(());
     }
 
-    let target = fabro_workflows::operations::parse_target(args.target.as_deref().unwrap())?;
-    let parallel_map = fabro_workflows::operations::load_parallel_map(&store, &run_id);
-    let entry = fabro_workflows::operations::resolve_target(&timeline, &target, &parallel_map)?;
+    let target = args
+        .target
+        .as_deref()
+        .unwrap()
+        .parse::<fabro_workflows::operations::RewindTarget>()?;
 
-    fabro_workflows::operations::rewind(&store, &run_id, entry, !args.no_push)?;
+    fabro_workflows::operations::rewind(
+        &store,
+        fabro_workflows::operations::RewindInput {
+            run_id: run_id.clone(),
+            target,
+            push: !args.no_push,
+        },
+    )?;
 
     eprintln!(
         "\nTo resume: fabro resume {}",
@@ -36,12 +44,8 @@ pub fn run(args: &RewindArgs, styles: &Styles) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn print_timeline(
-    timeline: &[fabro_workflows::operations::TimelineEntry],
-    parallel_map: &std::collections::HashMap<String, String>,
-    styles: &Styles,
-) {
-    if timeline.is_empty() {
+pub(crate) fn print_timeline(timeline: &fabro_workflows::operations::RunTimeline, styles: &Styles) {
+    if timeline.entries.is_empty() {
         eprintln!("No checkpoints found.");
         return;
     }
@@ -54,6 +58,7 @@ pub(crate) fn print_timeline(
     ];
 
     let rows: Vec<Vec<CellStruct>> = timeline
+        .entries
         .iter()
         .map(|entry| {
             let ordinal_str = format!("@{}", entry.ordinal);
@@ -61,7 +66,7 @@ pub(crate) fn print_timeline(
             if entry.visit > 1 {
                 details.push(format!("visit {}, loop", entry.visit));
             }
-            if parallel_map.contains_key(&entry.node_name) {
+            if timeline.parallel_map.contains_key(&entry.node_name) {
                 details.push("parallel interior".to_string());
             }
             if entry.run_commit_sha.is_none() {

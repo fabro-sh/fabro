@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::args::RunArgs;
+use fabro_config::project::ResolveSettingsInput;
 use fabro_config::{FabroConfig, FabroSettings};
 
 use fabro_util::terminal::Styles;
@@ -21,19 +22,21 @@ pub async fn create_run(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
     let cli_args_config = FabroConfig::try_from(args)?;
-    let settings: FabroSettings = fabro_workflows::operations::resolve_settings_for_path(
-        workflow_path,
-        cli_defaults,
-        cli_args_config,
-        true,
-    )?;
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let settings: FabroSettings = fabro_config::project::resolve_settings(ResolveSettingsInput {
+        workflow_path: workflow_path.clone(),
+        cwd: cwd.clone(),
+        defaults: cli_defaults,
+        overrides: cli_args_config,
+        apply_project_config: true,
+    })?;
 
     let created =
-        match fabro_workflows::operations::create(fabro_workflows::operations::CreateRequest {
+        match fabro_workflows::operations::create(fabro_workflows::operations::CreateRunInput {
             workflow: fabro_workflows::operations::WorkflowInput::Path(workflow_path.clone()),
             settings,
             cwd,
+            workflow_slug: None,
             run_dir: None,
             run_id: args.run_id.clone(),
             base_branch: None,

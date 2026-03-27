@@ -14,22 +14,23 @@ pub fn run(args: &ForkArgs, styles: &Styles) -> Result<()> {
     let timeline = fabro_workflows::operations::build_timeline(&store, &run_id)?;
 
     if args.list {
-        let parallel_map = fabro_workflows::operations::load_parallel_map(&store, &run_id);
-        super::rewind::print_timeline(&timeline, &parallel_map, styles);
+        super::rewind::print_timeline(&timeline, styles);
         return Ok(());
     }
 
-    let entry = if let Some(target_str) = &args.target {
-        let target = fabro_workflows::operations::parse_target(target_str)?;
-        let parallel_map = fabro_workflows::operations::load_parallel_map(&store, &run_id);
-        fabro_workflows::operations::resolve_target(&timeline, &target, &parallel_map)?
-    } else {
-        timeline
-            .last()
-            .ok_or_else(|| anyhow::anyhow!("no checkpoints found for run {run_id}"))?
-    };
-
-    let new_run_id = fabro_workflows::operations::fork(&store, &run_id, entry, !args.no_push)?;
+    let target = args
+        .target
+        .as_deref()
+        .map(str::parse::<fabro_workflows::operations::RewindTarget>)
+        .transpose()?;
+    let new_run_id = fabro_workflows::operations::fork(
+        &store,
+        fabro_workflows::operations::ForkRunInput {
+            source_run_id: run_id.clone(),
+            target,
+            push: !args.no_push,
+        },
+    )?;
 
     eprintln!(
         "\nForked run {} -> {}",

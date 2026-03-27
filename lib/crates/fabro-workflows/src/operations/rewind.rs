@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use anyhow::{bail, Context, Result};
 use fabro_git_storage::branchstore::{BranchStore, CommitInfo};
@@ -16,6 +17,35 @@ pub enum RewindTarget {
     SpecificVisit(String, usize),
 }
 
+impl FromStr for RewindTarget {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        if let Some(rest) = s.strip_prefix('@') {
+            let n: usize = rest
+                .parse()
+                .with_context(|| format!("invalid ordinal: @{rest}"))?;
+            if n == 0 {
+                bail!("ordinal must be >= 1");
+            }
+            return Ok(Self::Ordinal(n));
+        }
+        if let Some(at_pos) = s.rfind('@') {
+            let name = &s[..at_pos];
+            let visit_str = &s[at_pos + 1..];
+            if !name.is_empty() && !visit_str.is_empty() {
+                if let Ok(visit) = visit_str.parse::<usize>() {
+                    if visit == 0 {
+                        bail!("visit number must be >= 1");
+                    }
+                    return Ok(Self::SpecificVisit(name.to_string(), visit));
+                }
+            }
+        }
+        Ok(Self::LatestVisit(s.to_string()))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TimelineEntry {
     pub ordinal: usize,
@@ -25,32 +55,20 @@ pub struct TimelineEntry {
     pub run_commit_sha: Option<String>,
 }
 
-pub fn parse_target(s: &str) -> Result<RewindTarget> {
-    if let Some(rest) = s.strip_prefix('@') {
-        let n: usize = rest
-            .parse()
-            .with_context(|| format!("invalid ordinal: @{rest}"))?;
-        if n == 0 {
-            bail!("ordinal must be >= 1");
-        }
-        return Ok(RewindTarget::Ordinal(n));
-    }
-    if let Some(at_pos) = s.rfind('@') {
-        let name = &s[..at_pos];
-        let visit_str = &s[at_pos + 1..];
-        if !name.is_empty() && !visit_str.is_empty() {
-            if let Ok(visit) = visit_str.parse::<usize>() {
-                if visit == 0 {
-                    bail!("visit number must be >= 1");
-                }
-                return Ok(RewindTarget::SpecificVisit(name.to_string(), visit));
-            }
-        }
-    }
-    Ok(RewindTarget::LatestVisit(s.to_string()))
+#[derive(Debug, Clone)]
+pub struct RunTimeline {
+    pub entries: Vec<TimelineEntry>,
+    pub parallel_map: HashMap<String, String>,
 }
 
-pub fn build_timeline(store: &Store, run_id: &str) -> Result<Vec<TimelineEntry>> {
+#[derive(Debug, Clone)]
+pub struct RewindInput {
+    pub run_id: String,
+    pub target: RewindTarget,
+    pub push: bool,
+}
+
+pub fn build_timeline(store: &Store, run_id: &str) -> Result<RunTimeline> {
     let branch = MetadataStore::branch_name(run_id);
     let sig = Signature::now("Fabro", "noreply@fabro.sh")?;
     let bs = BranchStore::new(store, &branch, &sig);
@@ -87,7 +105,10 @@ pub fn build_timeline(store: &Store, run_id: &str) -> Result<Vec<TimelineEntry>>
     }
 
     backfill_run_shas(store, run_id, &mut timeline);
-    Ok(timeline)
+    Ok(RunTimeline {
+        entries: timeline,
+        parallel_map: load_parallel_map(store, run_id),
+    })
 }
 
 fn backfill_run_shas(store: &Store, run_id: &str, timeline: &mut [TimelineEntry]) {
@@ -138,7 +159,7 @@ fn backfill_run_shas(store: &Store, run_id: &str, timeline: &mut [TimelineEntry]
     }
 }
 
-pub fn detect_parallel_interior(graph: &Graph) -> HashMap<String, String> {
+fn detect_parallel_interior(graph: &Graph) -> HashMap<String, String> {
     let mut interior_map = HashMap::new();
 
     for node in graph.nodes.values() {
@@ -172,7 +193,7 @@ pub fn detect_parallel_interior(graph: &Graph) -> HashMap<String, String> {
     interior_map
 }
 
-pub fn resolve_target<'a>(
+fn resolve_target<'a>(
     timeline: &'a [TimelineEntry],
     target: &RewindTarget,
     parallel_map: &HashMap<String, String>,
@@ -218,7 +239,13 @@ pub fn resolve_target<'a>(
     }
 }
 
-pub fn rewind(store: &Store, run_id: &str, entry: &TimelineEntry, push: bool) -> Result<()> {
+pub fn rewind(store: &Store, input: RewindInput) -> Result<()> {
+    let timeline = build_timeline(store, &input.run_id)?;
+    let entry = resolve_target(&timeline.entries, &input.target, &timeline.parallel_map)?;
+    rewind_to_entry(store, &input.run_id, entry, input.push)
+}
+
+fn rewind_to_entry(store: &Store, run_id: &str, entry: &TimelineEntry, push: bool) -> Result<()> {
     let meta_branch = MetadataStore::branch_name(run_id);
     store
         .update_ref(&meta_branch, entry.metadata_commit_oid)
@@ -313,7 +340,7 @@ pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<String> 
     }
 }
 
-pub fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String> {
+fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String> {
     let branch = MetadataStore::branch_name(run_id);
     let sig = match Signature::now("Fabro", "noreply@fabro.sh") {
         Ok(s) => s,
@@ -374,13 +401,16 @@ mod tests {
 
     #[test]
     fn parse_target_ordinal() {
-        assert_eq!(parse_target("@4").unwrap(), RewindTarget::Ordinal(4));
+        assert_eq!(
+            "@4".parse::<RewindTarget>().unwrap(),
+            RewindTarget::Ordinal(4)
+        );
     }
 
     #[test]
     fn parse_target_latest_visit() {
         assert_eq!(
-            parse_target("step2").unwrap(),
+            "step2".parse::<RewindTarget>().unwrap(),
             RewindTarget::LatestVisit("step2".to_string())
         );
     }
@@ -402,41 +432,44 @@ mod tests {
             .unwrap();
 
         let timeline = build_timeline(&store, "test-run-1").unwrap();
-        assert_eq!(timeline.len(), 2);
-        assert_eq!(timeline[0].node_name, "start");
-        assert_eq!(timeline[1].node_name, "build");
+        assert_eq!(timeline.entries.len(), 2);
+        assert_eq!(timeline.entries[0].node_name, "start");
+        assert_eq!(timeline.entries[1].node_name, "build");
     }
 
     #[test]
     fn resolve_latest_visit() {
-        let timeline = vec![
-            TimelineEntry {
-                ordinal: 1,
-                node_name: "start".to_string(),
-                visit: 1,
-                metadata_commit_oid: Oid::zero(),
-                run_commit_sha: Some("aaa".to_string()),
-            },
-            TimelineEntry {
-                ordinal: 2,
-                node_name: "build".to_string(),
-                visit: 1,
-                metadata_commit_oid: Oid::zero(),
-                run_commit_sha: Some("bbb".to_string()),
-            },
-            TimelineEntry {
-                ordinal: 3,
-                node_name: "build".to_string(),
-                visit: 2,
-                metadata_commit_oid: Oid::zero(),
-                run_commit_sha: Some("ccc".to_string()),
-            },
-        ];
+        let timeline = RunTimeline {
+            entries: vec![
+                TimelineEntry {
+                    ordinal: 1,
+                    node_name: "start".to_string(),
+                    visit: 1,
+                    metadata_commit_oid: Oid::zero(),
+                    run_commit_sha: Some("aaa".to_string()),
+                },
+                TimelineEntry {
+                    ordinal: 2,
+                    node_name: "build".to_string(),
+                    visit: 1,
+                    metadata_commit_oid: Oid::zero(),
+                    run_commit_sha: Some("bbb".to_string()),
+                },
+                TimelineEntry {
+                    ordinal: 3,
+                    node_name: "build".to_string(),
+                    visit: 2,
+                    metadata_commit_oid: Oid::zero(),
+                    run_commit_sha: Some("ccc".to_string()),
+                },
+            ],
+            parallel_map: HashMap::new(),
+        };
 
         let entry = resolve_target(
-            &timeline,
+            &timeline.entries,
             &RewindTarget::LatestVisit("build".to_string()),
-            &HashMap::new(),
+            &timeline.parallel_map,
         )
         .unwrap();
         assert_eq!(entry.ordinal, 3);
@@ -499,8 +532,15 @@ mod tests {
         bs.write_entry("checkpoint.json", &cp2, "checkpoint")
             .unwrap();
 
-        let timeline = build_timeline(&store, "run-1").unwrap();
-        rewind(&store, "run-1", &timeline[0], false).unwrap();
+        rewind(
+            &store,
+            RewindInput {
+                run_id: "run-1".to_string(),
+                target: RewindTarget::Ordinal(1),
+                push: false,
+            },
+        )
+        .unwrap();
 
         let resolved = store.resolve_ref(&branch).unwrap().unwrap();
         assert_eq!(resolved, oid1);

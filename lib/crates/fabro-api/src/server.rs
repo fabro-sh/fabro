@@ -21,7 +21,7 @@ use crate::jwt_auth::{AuthMode, AuthenticatedService, AuthenticatedUser};
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_workflows::context::Context;
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
-use fabro_workflows::operations::{self, CreateRequest, WorkflowInput};
+use fabro_workflows::operations::{self, CreateRunInput, WorkflowInput};
 use fabro_workflows::pipeline::{
     self, InitOptions, LlmSpec, Persisted, SandboxEnvSpec, SandboxSpec,
 };
@@ -526,14 +526,14 @@ async fn start_run(
         }),
         ..Default::default()
     };
-    let created = match operations::create(CreateRequest {
+    let created = match operations::create(CreateRunInput {
         workflow: WorkflowInput::DotSource {
             source: req.dot_source.clone(),
             base_dir: None,
-            workflow_slug: None,
         },
         settings,
         cwd: std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir()),
+        workflow_slug: None,
         run_dir: Some(run_dir.clone()),
         run_id: Some(run_id.clone()),
         host_repo_path: None,

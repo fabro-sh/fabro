@@ -775,11 +775,10 @@ mod tests {
     }"#;
 
     fn persisted_workflow(dot: &str, run_dir: &Path) -> Persisted {
-        crate::operations::create(crate::operations::CreateRequest {
+        crate::operations::create(crate::operations::CreateRunInput {
             workflow: crate::operations::WorkflowInput::DotSource {
                 source: dot.to_string(),
                 base_dir: None,
-                workflow_slug: Some("test".to_string()),
             },
             settings: FabroSettings {
                 dry_run: Some(true),
@@ -789,6 +788,7 @@ mod tests {
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf(),
+            workflow_slug: Some("test".to_string()),
             run_dir: Some(run_dir.to_path_buf()),
             run_id: Some("run-test".to_string()),
             host_repo_path: None,

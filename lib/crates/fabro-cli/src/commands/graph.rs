@@ -3,6 +3,7 @@ use std::io::Write;
 use std::sync::LazyLock;
 
 use anyhow::bail;
+use fabro_config::project::ResolveSettingsInput;
 use fabro_util::terminal::Styles;
 use fabro_validate::Severity;
 use tracing::debug;
@@ -14,9 +15,23 @@ static RANKDIR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"rankdir\s*=\s*\w+").unwrap());
 
 pub fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
-    let (dot_path, _cfg) = fabro_config::project::resolve_workflow(&args.workflow)?;
-
-    let validated = fabro_workflows::operations::validate_from_file(&dot_path)?;
+    let cwd = std::env::current_dir()?;
+    let cli_defaults = fabro_config::cli::load_cli_config(None)?;
+    let settings = fabro_config::project::resolve_settings(ResolveSettingsInput {
+        workflow_path: args.workflow.clone(),
+        cwd: cwd.clone(),
+        defaults: cli_defaults,
+        overrides: fabro_config::FabroConfig::default(),
+        apply_project_config: true,
+    })?;
+    let resolution = fabro_config::project::resolve_workflow_path(&args.workflow, &cwd)?;
+    let validated =
+        fabro_workflows::operations::validate(fabro_workflows::operations::ValidateInput {
+            workflow: fabro_workflows::operations::WorkflowInput::Path(args.workflow.clone()),
+            settings,
+            cwd,
+            custom_transforms: Vec::new(),
+        })?;
     let diagnostics = validated.diagnostics();
 
     print_diagnostics(diagnostics, styles);
@@ -25,7 +40,7 @@ pub fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
         bail!("Validation failed");
     }
 
-    let source = read_workflow_file(&dot_path)?;
+    let source = read_workflow_file(&resolution.dot_path)?;
     let source = apply_direction(&source, args.direction);
     let rendered = fabro_graphviz::render::render_dot(&source, args.format.into())?;
 
@@ -36,7 +51,7 @@ pub fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
     }
 
     debug!(
-        path = %relative_path(&dot_path),
+        path = %relative_path(&resolution.dot_path),
         format = %args.format,
         "Rendered workflow graph"
     );

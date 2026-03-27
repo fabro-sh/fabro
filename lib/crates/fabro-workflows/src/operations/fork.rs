@@ -7,12 +7,83 @@ use crate::git::MetadataStore;
 use crate::records::RunRecord;
 use crate::records::StartRecord;
 
-use super::rewind::TimelineEntry;
+use super::rewind::{build_timeline, RewindTarget, RunTimeline, TimelineEntry};
+
+#[derive(Debug, Clone)]
+pub struct ForkRunInput {
+    pub source_run_id: String,
+    pub target: Option<RewindTarget>,
+    pub push: bool,
+}
 
 /// Create a new run that branches from an existing run at a specific checkpoint.
 ///
 /// Returns the new run ID.
-pub fn fork(
+pub fn fork(store: &Store, input: ForkRunInput) -> Result<String> {
+    let timeline = build_timeline(store, &input.source_run_id)?;
+    let entry = match input.target.as_ref() {
+        Some(target) => resolve_timeline_entry(&timeline, target)?,
+        None => timeline.entries.last().ok_or_else(|| {
+            anyhow::anyhow!("no checkpoints found for run {}", input.source_run_id)
+        })?,
+    };
+    fork_from_entry(store, &input.source_run_id, entry, input.push)
+}
+
+fn resolve_timeline_entry<'a>(
+    timeline: &'a RunTimeline,
+    target: &RewindTarget,
+) -> Result<&'a TimelineEntry> {
+    match target {
+        RewindTarget::Ordinal(n) => timeline
+            .entries
+            .iter()
+            .find(|e| e.ordinal == *n)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "ordinal @{n} out of range (max @{})",
+                    timeline.entries.len()
+                )
+            }),
+        RewindTarget::LatestVisit(name) => {
+            let effective_name = timeline.parallel_map.get(name).unwrap_or(name);
+            timeline
+                .entries
+                .iter()
+                .rev()
+                .find(|e| e.node_name == *effective_name)
+                .ok_or_else(|| {
+                    if effective_name != name {
+                        anyhow::anyhow!(
+                            "node '{name}' is inside parallel '{effective_name}'; \
+                             no checkpoint found for '{effective_name}'"
+                        )
+                    } else {
+                        anyhow::anyhow!("no checkpoint found for node '{name}'")
+                    }
+                })
+        }
+        RewindTarget::SpecificVisit(name, visit) => {
+            let effective_name = timeline.parallel_map.get(name).unwrap_or(name);
+            timeline
+                .entries
+                .iter()
+                .find(|e| e.node_name == *effective_name && e.visit == *visit)
+                .ok_or_else(|| {
+                    if effective_name != name {
+                        anyhow::anyhow!(
+                            "node '{name}' is inside parallel '{effective_name}'; \
+                             no visit {visit} found for '{effective_name}'"
+                        )
+                    } else {
+                        anyhow::anyhow!("no visit {visit} found for node '{name}'")
+                    }
+                })
+        }
+    }
+}
+
+fn fork_from_entry(
     store: &Store,
     source_run_id: &str,
     entry: &TimelineEntry,
@@ -147,11 +218,12 @@ pub fn fork(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::str::FromStr;
 
     use super::*;
     use git2::Repository;
 
-    use crate::operations::{build_timeline, find_run_id_by_prefix, parse_target, resolve_target};
+    use crate::operations::find_run_id_by_prefix;
 
     fn temp_repo() -> (tempfile::TempDir, Store) {
         let dir = tempfile::TempDir::new().unwrap();
@@ -183,7 +255,7 @@ mod tests {
         let record = serde_json::json!({
             "run_id": run_id,
             "created_at": "2025-01-01T00:00:00Z",
-            "config": {},
+            "settings": {},
             "graph": {
                 "name": "test_workflow",
                 "nodes": {
@@ -264,11 +336,15 @@ mod tests {
         let source_run_id = "run-source";
         let _run_oids = setup_source_run(&store, source_run_id, &["start", "build", "test"]);
 
-        let timeline = build_timeline(&store, source_run_id).unwrap();
-        let entry =
-            resolve_target(&timeline, &parse_target("@2").unwrap(), &HashMap::new()).unwrap();
-
-        let new_run_id = fork(&store, source_run_id, entry, false).unwrap();
+        let new_run_id = fork(
+            &store,
+            ForkRunInput {
+                source_run_id: source_run_id.to_string(),
+                target: Some(RewindTarget::from_str("@2").unwrap()),
+                push: false,
+            },
+        )
+        .unwrap();
 
         let new_run_branch = format!("{}{new_run_id}", crate::git::RUN_BRANCH_PREFIX);
         let new_meta_branch = MetadataStore::branch_name(&new_run_id);
@@ -306,7 +382,9 @@ mod tests {
             run_commit_sha: None,
         };
 
-        let err = fork(&store, run_id, &entry, false).unwrap_err().to_string();
+        let err = fork_from_entry(&store, run_id, &entry, false)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("cannot fork"));
     }
 

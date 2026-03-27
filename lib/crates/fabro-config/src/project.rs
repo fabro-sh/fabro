@@ -4,13 +4,35 @@ use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
 
 use crate::config::FabroConfig;
+use crate::run;
+use crate::FabroSettings;
 
 const CONFIG_FILENAME: &str = "fabro.toml";
 const SUPPORTED_VERSION: u32 = 1;
+const RUN_GRAPH_FILE: &str = "workflow.fabro";
+const LEGACY_RUN_GRAPH_FILE: &str = "graph.fabro";
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct ProjectFabroConfig {
     pub root: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkflowPathResolution {
+    pub resolved_workflow_path: PathBuf,
+    pub dot_path: PathBuf,
+    pub workflow_config: Option<FabroConfig>,
+    pub workflow_toml_path: Option<PathBuf>,
+    pub workflow_slug: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResolveSettingsInput {
+    pub workflow_path: PathBuf,
+    pub cwd: PathBuf,
+    pub defaults: FabroConfig,
+    pub overrides: FabroConfig,
+    pub apply_project_config: bool,
 }
 
 fn default_root() -> String {
@@ -79,6 +101,42 @@ pub fn discover_project_config(start: &Path) -> anyhow::Result<Option<(PathBuf, 
     Ok(None)
 }
 
+fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
+    let file_name = workflow_path.file_name()?.to_string_lossy();
+    if workflow_path.extension().is_none() {
+        return Some(file_name.into_owned());
+    }
+
+    let file_stem = workflow_path.file_stem()?.to_string_lossy();
+    if file_stem == "workflow" {
+        return workflow_path
+            .parent()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .or_else(|| Some(file_stem.into_owned()));
+    }
+
+    Some(file_stem.into_owned())
+}
+
+fn cached_workflow_graph_path(path: &Path) -> Option<PathBuf> {
+    if path.file_name().and_then(|name| name.to_str()) != Some("workflow.toml") {
+        return None;
+    }
+
+    let canonical = path.with_file_name(RUN_GRAPH_FILE);
+    if canonical.exists() {
+        return Some(canonical);
+    }
+
+    let legacy = path.with_file_name(LEGACY_RUN_GRAPH_FILE);
+    if legacy.exists() {
+        return Some(legacy);
+    }
+
+    None
+}
+
 /// Resolve a workflow argument to a path.
 ///
 /// - If the arg has a file extension (`.toml`, `.fabro`, etc.), return it as-is.
@@ -88,6 +146,92 @@ pub fn discover_project_config(start: &Path) -> anyhow::Result<Option<(PathBuf, 
 pub fn resolve_workflow_arg(arg: &Path) -> anyhow::Result<PathBuf> {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     resolve_workflow_arg_from(arg, &start)
+}
+
+pub fn resolve_workflow_path(
+    workflow_path: &Path,
+    cwd: &Path,
+) -> anyhow::Result<WorkflowPathResolution> {
+    let path = resolve_workflow_arg_from(workflow_path, cwd)?;
+    let workflow_slug = workflow_slug_from_path(&path);
+    if path.extension().is_some_and(|ext| ext == "toml") {
+        match run::load_run_config(&path) {
+            Ok(cfg) => {
+                let dot_path =
+                    run::resolve_graph_path(&path, cfg.graph.as_deref().unwrap_or(RUN_GRAPH_FILE));
+                Ok(WorkflowPathResolution {
+                    resolved_workflow_path: path.clone(),
+                    dot_path,
+                    workflow_config: Some(cfg),
+                    workflow_toml_path: Some(path),
+                    workflow_slug,
+                })
+            }
+            Err(_) if !path.exists() => {
+                let Some(dot_path) = cached_workflow_graph_path(&path) else {
+                    anyhow::bail!("Workflow not found: {}", path.display());
+                };
+                Ok(WorkflowPathResolution {
+                    resolved_workflow_path: path,
+                    dot_path,
+                    workflow_config: None,
+                    workflow_toml_path: None,
+                    workflow_slug,
+                })
+            }
+            Err(err) => Err(err),
+        }
+    } else {
+        Ok(WorkflowPathResolution {
+            resolved_workflow_path: path.clone(),
+            dot_path: path,
+            workflow_config: None,
+            workflow_toml_path: None,
+            workflow_slug,
+        })
+    }
+}
+
+pub fn resolve_working_directory(settings: &FabroSettings, caller_cwd: &Path) -> PathBuf {
+    let Some(work_dir) = settings.work_dir.as_deref() else {
+        return caller_cwd.to_path_buf();
+    };
+    let path = PathBuf::from(work_dir);
+    if path.is_absolute() {
+        path
+    } else {
+        caller_cwd.join(path)
+    }
+}
+
+pub fn resolve_settings(input: ResolveSettingsInput) -> anyhow::Result<FabroSettings> {
+    let resolution = resolve_workflow_path(&input.workflow_path, &input.cwd)?;
+    if resolution.workflow_config.is_none() && !resolution.resolved_workflow_path.is_file() {
+        anyhow::bail!(
+            "Workflow not found: {}",
+            resolution.resolved_workflow_path.display()
+        );
+    }
+
+    let project_config = if input.apply_project_config {
+        discover_project_config(
+            resolution
+                .resolved_workflow_path
+                .parent()
+                .unwrap_or_else(|| Path::new(".")),
+        )?
+        .map(|(_, config)| config)
+        .unwrap_or_default()
+    } else {
+        FabroConfig::default()
+    };
+
+    input
+        .overrides
+        .combine(resolution.workflow_config.unwrap_or_default())
+        .combine(project_config)
+        .combine(input.defaults)
+        .try_into()
 }
 
 fn resolve_workflow_arg_from(arg: &Path, start_dir: &Path) -> anyhow::Result<PathBuf> {
@@ -284,22 +428,8 @@ fn find_closest_match(input: &str, candidates: &[String]) -> Option<String> {
 /// loads the run config and resolves the graph path within it.
 pub fn resolve_workflow(arg: &Path) -> anyhow::Result<(PathBuf, Option<FabroConfig>)> {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    resolve_workflow_from(arg, &start)
-}
-
-fn resolve_workflow_from(
-    arg: &Path,
-    start_dir: &Path,
-) -> anyhow::Result<(PathBuf, Option<FabroConfig>)> {
-    let path = resolve_workflow_arg_from(arg, start_dir)?;
-    if path.extension().is_some_and(|ext| ext == "toml") {
-        let cfg = crate::run::load_run_config(&path)?;
-        let dot =
-            crate::run::resolve_graph_path(&path, cfg.graph.as_deref().unwrap_or("workflow.fabro"));
-        Ok((dot, Some(cfg)))
-    } else {
-        Ok((path, None))
-    }
+    let resolution = resolve_workflow_path(arg, &start)?;
+    Ok((resolution.dot_path, resolution.workflow_config))
 }
 
 /// Check whether retros are enabled in the project config.

@@ -2,6 +2,7 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::args::{ConfigCommand, ConfigNamespace, ConfigShowArgs};
+use fabro_config::project::ResolveSettingsInput;
 use fabro_config::{FabroConfig, FabroSettings};
 
 pub fn dispatch(ns: ConfigNamespace) -> anyhow::Result<()> {
@@ -13,13 +14,14 @@ pub fn dispatch(ns: ConfigNamespace) -> anyhow::Result<()> {
 fn merged_config(workflow: Option<&Path>) -> anyhow::Result<FabroSettings> {
     if let Some(workflow) = workflow {
         let cli_config = fabro_config::cli::load_cli_config(None)?;
-        return fabro_workflows::operations::resolve_settings_for_path(
-            workflow,
-            cli_config,
-            FabroConfig::default(),
-            true,
-        )
-        .map_err(Into::into);
+        let cwd = std::env::current_dir()?;
+        return fabro_config::project::resolve_settings(ResolveSettingsInput {
+            workflow_path: workflow.to_path_buf(),
+            cwd,
+            defaults: cli_config,
+            overrides: FabroConfig::default(),
+            apply_project_config: true,
+        });
     }
 
     let cwd = std::env::current_dir()?;

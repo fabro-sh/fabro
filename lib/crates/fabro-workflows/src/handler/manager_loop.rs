@@ -1,16 +1,17 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use fabro_config::FabroSettings;
 
 use crate::condition::evaluate_condition;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
-use crate::operations::{validate, validate_from_file, ValidateOptions};
+use crate::operations::{validate, ValidateInput, WorkflowInput};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline;
 use crate::pipeline::types::Initialized;
@@ -49,12 +50,22 @@ fn parse_duration_str(s: &str) -> Duration {
 /// (with file inlining). `stack.child_workflow` is preferred; `stack.child_dotfile`
 /// is kept for backward compatibility.
 fn parse_child_graph(node: &Node) -> Result<Graph, FabroError> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
     if let Some(dot) = node
         .attrs
         .get("stack.child_dot_source")
         .and_then(|v| v.as_str())
     {
-        let validated = validate(dot, ValidateOptions::default())?;
+        let validated = validate(ValidateInput {
+            workflow: WorkflowInput::DotSource {
+                source: dot.to_string(),
+                base_dir: None,
+            },
+            settings: FabroSettings::default(),
+            cwd: cwd.clone(),
+            custom_transforms: Vec::new(),
+        })?;
         validated.raise_on_errors()?;
         let (graph, _, _) = validated.into_parts();
         return Ok(graph);
@@ -65,7 +76,12 @@ fn parse_child_graph(node: &Node) -> Result<Graph, FabroError> {
         .or_else(|| node.attrs.get("stack.child_dotfile"))
         .and_then(|v| v.as_str())
     {
-        let validated = validate_from_file(std::path::Path::new(path))?;
+        let validated = validate(ValidateInput {
+            workflow: WorkflowInput::Path(PathBuf::from(path)),
+            settings: FabroSettings::default(),
+            cwd,
+            custom_transforms: Vec::new(),
+        })?;
         validated.raise_on_errors()?;
         let (graph, _, _) = validated.into_parts();
         return Ok(graph);

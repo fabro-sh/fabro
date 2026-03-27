@@ -13,23 +13,23 @@ use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunRecord;
 use crate::transforms::{expand_vars, Transform};
 
-use super::source::{resolve_workflow, ResolveWorkflowRequest, WorkflowInput};
+use super::source::{resolve_workflow, ResolveWorkflowInput, WorkflowInput};
 
 const RUN_CONFIG_FILE: &str = "workflow.toml";
 
-#[derive(Default)]
-pub struct ValidateOptions {
-    pub base_dir: Option<PathBuf>,
-    pub custom_transforms: Vec<Box<dyn Transform>>,
-    pub settings: Option<FabroSettings>,
-    pub goal_override: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-pub struct CreateRequest {
+pub struct ValidateInput {
     pub workflow: WorkflowInput,
     pub settings: FabroSettings,
     pub cwd: PathBuf,
+    pub custom_transforms: Vec<Box<dyn Transform>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CreateRunInput {
+    pub workflow: WorkflowInput,
+    pub settings: FabroSettings,
+    pub cwd: PathBuf,
+    pub workflow_slug: Option<String>,
     pub run_dir: Option<PathBuf>,
     pub run_id: Option<String>,
     pub host_repo_path: Option<String>,
@@ -61,33 +61,26 @@ struct PersistCreateOptions {
 ///
 /// Returns `Validated` even when validation produced errors. Call
 /// `validated.raise_on_errors()` if the caller wants to fail fast.
-pub fn validate(dot_source: &str, options: ValidateOptions) -> Result<Validated, FabroError> {
-    preprocess_and_validate(
-        dot_source,
-        options.base_dir,
-        options.custom_transforms,
-        options.settings.as_ref(),
-        options.goal_override.as_deref(),
-    )
-}
+pub fn validate(input: ValidateInput) -> Result<Validated, FabroError> {
+    let resolved = resolve_workflow(ResolveWorkflowInput {
+        workflow: input.workflow,
+        settings: input.settings,
+        cwd: input.cwd,
+    })
+    .map_err(|err| FabroError::Parse(err.to_string()))?;
 
-/// Read a DOT file, apply file inlining from its parent directory, then validate.
-pub fn validate_from_file(path: &Path) -> Result<Validated, FabroError> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|e| FabroError::Parse(format!("Failed to read {}: {e}", path.display())))?;
-    let base_dir = path.parent().unwrap_or(Path::new("."));
-    validate(
-        &source,
-        ValidateOptions {
-            base_dir: Some(base_dir.to_path_buf()),
-            ..Default::default()
-        },
+    preprocess_and_validate(
+        &resolved.raw_source,
+        resolved.base_dir,
+        input.custom_transforms,
+        Some(&resolved.settings),
+        resolved.goal_override.as_deref(),
     )
 }
 
 /// Resolve workflow inputs, normalize settings, and persist a run directory.
-pub fn create(request: CreateRequest) -> Result<CreatedRun, FabroError> {
-    let resolved = resolve_workflow(ResolveWorkflowRequest {
+pub fn create(request: CreateRunInput) -> Result<CreatedRun, FabroError> {
+    let resolved = resolve_workflow(ResolveWorkflowInput {
         workflow: request.workflow,
         settings: request.settings,
         cwd: request.cwd,
@@ -98,10 +91,11 @@ pub fn create(request: CreateRequest) -> Result<CreatedRun, FabroError> {
         validate_sandbox_provider(&resolved.settings)?;
     }
 
-    let CreateRequest {
+    let CreateRunInput {
         workflow: _,
         settings: _,
         cwd: _,
+        workflow_slug,
         run_dir,
         run_id,
         host_repo_path,
@@ -133,7 +127,7 @@ pub fn create(request: CreateRequest) -> Result<CreatedRun, FabroError> {
             settings,
             run_dir: Some(run_dir.clone()),
             run_id: Some(run_id.clone()),
-            workflow_slug: resolved.workflow_slug.clone(),
+            workflow_slug: workflow_slug.or(resolved.workflow_slug.clone()),
             labels: resolved.settings.labels.clone(),
             base_branch,
             working_directory,
@@ -329,11 +323,11 @@ pub(crate) fn resolve_run_settings(mut settings: FabroSettings, graph: &Graph) -
     settings
 }
 
-pub fn default_run_dir(run_id: &str, dry_run: bool) -> PathBuf {
+pub(crate) fn default_run_dir(run_id: &str, dry_run: bool) -> PathBuf {
     make_run_dir(&crate::run_lookup::default_runs_base(), run_id, dry_run)
 }
 
-pub fn make_run_dir(runs_base: &Path, run_id: &str, dry_run: bool) -> PathBuf {
+pub(crate) fn make_run_dir(runs_base: &Path, run_id: &str, dry_run: bool) -> PathBuf {
     if dry_run {
         runs_base.join(format!(
             "{}-dry-run-{}",
@@ -350,6 +344,19 @@ mod tests {
     use super::*;
     use fabro_graphviz::graph::AttrValue;
 
+    fn validate_dot(dot_source: &str, settings: FabroSettings) -> Validated {
+        validate(ValidateInput {
+            workflow: WorkflowInput::DotSource {
+                source: dot_source.to_string(),
+                base_dir: None,
+            },
+            settings,
+            cwd: PathBuf::from("."),
+            custom_transforms: Vec::new(),
+        })
+        .unwrap()
+    }
+
     const MINIMAL_DOT: &str = r#"digraph Test {
         graph [goal="Build feature"]
         start [shape=Mdiamond]
@@ -359,7 +366,7 @@ mod tests {
 
     #[test]
     fn validate_minimal() {
-        let validated = validate(MINIMAL_DOT, ValidateOptions::default()).unwrap();
+        let validated = validate_dot(MINIMAL_DOT, FabroSettings::default());
         validated.raise_on_errors().unwrap();
 
         assert_eq!(validated.graph().name, "Test");
@@ -376,7 +383,7 @@ mod tests {
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate(dot, ValidateOptions::default()).unwrap();
+        let validated = validate_dot(dot, FabroSettings::default());
         validated.raise_on_errors().unwrap();
 
         let prompt = validated.graph().nodes["work"]
@@ -396,7 +403,7 @@ mod tests {
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate(dot, ValidateOptions::default()).unwrap();
+        let validated = validate_dot(dot, FabroSettings::default());
         validated.raise_on_errors().unwrap();
 
         assert_eq!(
@@ -414,18 +421,14 @@ mod tests {
             exit [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate(
+        let validated = validate_dot(
             dot,
-            ValidateOptions {
-                settings: Some(FabroSettings {
-                    vars: Some(HashMap::from([("who".to_string(), "agent".to_string())])),
-                    ..Default::default()
-                }),
-                goal_override: Some("override".to_string()),
+            FabroSettings {
+                vars: Some(HashMap::from([("who".to_string(), "agent".to_string())])),
+                goal: Some("override".to_string()),
                 ..Default::default()
             },
-        )
-        .unwrap();
+        );
         validated.raise_on_errors().unwrap();
 
         assert_eq!(validated.graph().goal(), "override");
@@ -439,7 +442,15 @@ mod tests {
 
     #[test]
     fn validate_returns_error_on_invalid_dot() {
-        let result = validate("not a graph", ValidateOptions::default());
+        let result = validate(ValidateInput {
+            workflow: WorkflowInput::DotSource {
+                source: "not a graph".to_string(),
+                base_dir: None,
+            },
+            settings: FabroSettings::default(),
+            cwd: PathBuf::from("."),
+            custom_transforms: Vec::new(),
+        });
         assert!(result.is_err());
     }
 
@@ -449,7 +460,7 @@ mod tests {
             graph [goal="Test"]
             work [label="Work"]
         }"#;
-        let validated = validate(dot, ValidateOptions::default()).unwrap();
+        let validated = validate_dot(dot, FabroSettings::default());
 
         assert!(validated.has_errors());
         assert!(validated.raise_on_errors().is_err());
@@ -468,13 +479,15 @@ mod tests {
             }
         }
 
-        let validated = validate(
-            MINIMAL_DOT,
-            ValidateOptions {
-                custom_transforms: vec![Box::new(TagTransform)],
-                ..Default::default()
+        let validated = validate(ValidateInput {
+            workflow: WorkflowInput::DotSource {
+                source: MINIMAL_DOT.to_string(),
+                base_dir: None,
             },
-        )
+            settings: FabroSettings::default(),
+            cwd: PathBuf::from("."),
+            custom_transforms: vec![Box::new(TagTransform)],
+        })
         .unwrap();
         validated.raise_on_errors().unwrap();
 
@@ -502,7 +515,13 @@ mod tests {
         )
         .unwrap();
 
-        let validated = validate_from_file(&dot_path).unwrap();
+        let validated = validate(ValidateInput {
+            workflow: WorkflowInput::Path(dot_path),
+            settings: FabroSettings::default(),
+            cwd: dir.path().to_path_buf(),
+            custom_transforms: Vec::new(),
+        })
+        .unwrap();
         validated.raise_on_errors().unwrap();
         assert_eq!(validated.graph().goal(), "ship it");
     }
@@ -514,14 +533,14 @@ mod tests {
             work [label="Work"]
         }"#;
         let dir = tempfile::tempdir().unwrap();
-        let err = create(CreateRequest {
+        let err = create(CreateRunInput {
             workflow: WorkflowInput::DotSource {
                 source: dot.to_string(),
                 base_dir: None,
-                workflow_slug: None,
             },
             settings: FabroSettings::default(),
             cwd: dir.path().to_path_buf(),
+            workflow_slug: None,
             run_dir: Some(dir.path().join("run")),
             run_id: None,
             host_repo_path: None,
@@ -540,11 +559,10 @@ mod tests {
     #[test]
     fn create_persists_normalized_config_and_initial_state() {
         let dir = tempfile::tempdir().unwrap();
-        let created = create(CreateRequest {
+        let created = create(CreateRunInput {
             workflow: WorkflowInput::DotSource {
                 source: MINIMAL_DOT.to_string(),
                 base_dir: None,
-                workflow_slug: Some("slug".to_string()),
             },
             settings: FabroSettings {
                 llm: Some(fabro_config::run::LlmSettings {
@@ -562,6 +580,7 @@ mod tests {
                 ..Default::default()
             },
             cwd: dir.path().to_path_buf(),
+            workflow_slug: Some("slug".to_string()),
             run_dir: Some(dir.path().join("run")),
             run_id: Some("run-123".to_string()),
             host_repo_path: Some(dir.path().display().to_string()),
@@ -626,7 +645,7 @@ mod tests {
         )
         .unwrap();
 
-        let created = create(CreateRequest {
+        let created = create(CreateRunInput {
             workflow: WorkflowInput::Path(workflow_dir.join("workflow.toml")),
             settings: FabroSettings {
                 storage_dir: Some(dir.path().join("storage")),
@@ -634,6 +653,7 @@ mod tests {
                 ..Default::default()
             },
             cwd: dir.path().to_path_buf(),
+            workflow_slug: None,
             run_dir: None,
             run_id: None,
             host_repo_path: None,
@@ -653,11 +673,10 @@ mod tests {
         let workspace = dir.path().join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
 
-        let created = create(CreateRequest {
+        let created = create(CreateRunInput {
             workflow: WorkflowInput::DotSource {
                 source: MINIMAL_DOT.to_string(),
                 base_dir: None,
-                workflow_slug: None,
             },
             settings: FabroSettings {
                 work_dir: Some("workspace".to_string()),
@@ -665,6 +684,7 @@ mod tests {
                 ..Default::default()
             },
             cwd: dir.path().to_path_buf(),
+            workflow_slug: None,
             run_dir: Some(dir.path().join("run")),
             run_id: Some("run-cwd".to_string()),
             host_repo_path: None,
