@@ -536,14 +536,18 @@ pub(crate) fn load_workflow_source_input(
     cli_defaults: FabroConfig,
     apply_project_config: bool,
 ) -> anyhow::Result<WorkflowSourceInput> {
+    let (resolved_workflow_path, dot_path, workflow_config) = resolve_workflow_source(workflow)?;
     let project_config = if apply_project_config {
-        project_config::discover_project_config(&std::env::current_dir().unwrap_or_default())?
-            .map(|(_, config)| config)
+        project_config::discover_project_config(
+            resolved_workflow_path
+                .parent()
+                .unwrap_or_else(|| Path::new(".")),
+        )?
+        .map(|(_, config)| config)
     } else {
         None
     };
 
-    let (resolved_workflow_path, dot_path, workflow_config) = resolve_workflow_source(workflow)?;
     let config = cli_args_config
         .combine(workflow_config.unwrap_or_default())
         .combine(project_config.unwrap_or_default())

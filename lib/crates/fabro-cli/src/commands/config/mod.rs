@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::args::{ConfigCommand, ConfigNamespace, ConfigShowArgs};
 use anyhow::bail;
-use fabro_config::FabroSettings;
+use fabro_config::{FabroConfig, FabroSettings};
 
 pub fn dispatch(ns: ConfigNamespace) -> anyhow::Result<()> {
     match ns.command {
@@ -12,27 +12,34 @@ pub fn dispatch(ns: ConfigNamespace) -> anyhow::Result<()> {
 }
 
 fn merged_config(workflow: Option<&Path>) -> anyhow::Result<FabroSettings> {
-    let mut config = fabro_config::cli::load_cli_config(None)?;
-    let cwd = std::env::current_dir()?;
-
-    if let Some((_config_path, project_config)) =
-        fabro_config::project::discover_project_config(&cwd)?
-    {
-        config = config.combine(project_config);
-    }
-
     if let Some(workflow) = workflow {
         let (resolved_path, _dot_path, run_config) =
             crate::commands::run::execute::resolve_workflow_source(workflow)?;
+        let missing_workflow = run_config.is_none() && !resolved_path.is_file();
+        let project_config = fabro_config::project::discover_project_config(
+            resolved_path.parent().unwrap_or_else(|| Path::new(".")),
+        )?
+        .map(|(_, config)| config)
+        .unwrap_or_default();
+        let cli_config = fabro_config::cli::load_cli_config(None)?;
+        let config = run_config
+            .unwrap_or_default()
+            .combine(project_config)
+            .combine(cli_config);
 
-        if let Some(run_config) = run_config {
-            config = config.combine(run_config);
-        } else if !resolved_path.is_file() {
+        if missing_workflow {
             bail!("Workflow not found: {}", resolved_path.display());
         }
+
+        return config.try_into();
     }
 
-    config.try_into()
+    let cwd = std::env::current_dir()?;
+    let project_config = fabro_config::project::discover_project_config(&cwd)?
+        .map(|(_, config)| config)
+        .unwrap_or_default();
+    let cli_config = fabro_config::cli::load_cli_config(None)?;
+    FabroConfig::combine(project_config, cli_config).try_into()
 }
 
 pub fn show_command(args: &ConfigShowArgs) -> anyhow::Result<()> {
