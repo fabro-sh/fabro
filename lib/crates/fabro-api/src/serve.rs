@@ -14,10 +14,8 @@ use fabro_config::FabroConfig;
 use crate::jwt_auth::{AuthMode, AuthStrategy};
 use crate::server::build_router;
 use crate::tls::ClientAuth;
-use fabro_interview::Interviewer;
 use fabro_sandbox::SandboxProvider;
-use fabro_workflows::handler::default_registry;
-use fabro_workflows::handler::llm::AgentApiBackend;
+use fabro_workflows::pipeline::LlmSpec;
 
 #[derive(Args)]
 pub struct ServeArgs {
@@ -97,23 +95,19 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
 
     // Build registry factory that reads live config
     let config_for_factory = Arc::clone(&shared_config);
-    let factory = move |interviewer: Arc<dyn Interviewer>| {
+    let factory = move || {
         let (model, provider_enum) = resolve_model_provider(
             &config_for_factory,
             cli_model.as_deref(),
             cli_provider.as_deref(),
         );
-        default_registry(interviewer, move || {
-            if dry_run_mode {
-                None
-            } else {
-                Some(Box::new(AgentApiBackend::new(
-                    model.clone(),
-                    provider_enum,
-                    Vec::new(),
-                )))
-            }
-        })
+        LlmSpec {
+            model,
+            provider: provider_enum,
+            fallback_chain: Vec::new(),
+            mcp_servers: Vec::new(),
+            dry_run: dry_run_mode,
+        }
     };
     std::fs::create_dir_all(&data_dir)?;
     let db = fabro_db::connect(&data_dir.join("fabro.db")).await?;

@@ -1,8 +1,7 @@
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use chrono::{SecondsFormat, Utc};
+use chrono::Utc;
 use fabro_workflows::event::{RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::records::Conclusion;
@@ -111,52 +110,12 @@ pub(crate) fn load_run_id(run_dir: &Path) -> Option<String> {
         })
 }
 
-pub(crate) fn build_event_envelope(event: &WorkflowRunEvent, run_id: &str) -> serde_json::Value {
-    let (event_name, event_fields) = fabro_workflows::event::flatten_event(event);
-    let mut envelope = serde_json::Map::new();
-    envelope.insert(
-        "ts".to_string(),
-        serde_json::Value::String(Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)),
-    );
-    envelope.insert(
-        "run_id".to_string(),
-        serde_json::Value::String(run_id.to_string()),
-    );
-    envelope.insert("event".to_string(), serde_json::Value::String(event_name));
-    for (k, v) in event_fields {
-        if k != "ts" && k != "run_id" && k != "event" {
-            envelope.insert(k, v);
-        }
-    }
-    serde_json::Value::Object(envelope)
-}
-
 pub(crate) fn append_progress_event(
     run_dir: &Path,
     run_id: &str,
     event: &WorkflowRunEvent,
 ) -> Result<()> {
-    let envelope = build_event_envelope(event, run_id);
-    let line = serde_json::to_string(&envelope)?;
-    let line = fabro_util::redact::redact_jsonl_line(&line);
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(run_dir.join("progress.jsonl"))
-        .with_context(|| {
-            format!(
-                "Failed to open {}",
-                run_dir.join("progress.jsonl").display()
-            )
-        })?;
-    writeln!(file, "{line}")?;
-
-    let pretty = serde_json::to_string_pretty(&envelope)?;
-    let pretty = fabro_util::redact::redact_jsonl_line(&pretty);
-    std::fs::write(run_dir.join("live.json"), pretty)
-        .with_context(|| format!("Failed to write {}", run_dir.join("live.json").display()))?;
-
-    Ok(())
+    fabro_workflows::event::append_progress_event(run_dir, run_id, event)
 }
 
 pub(crate) fn append_run_notice(

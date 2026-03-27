@@ -430,15 +430,16 @@ mod tests {
     use crate::jwt_auth::AuthMode;
     use crate::server::{build_router, create_app_state_with_options};
 
-    use fabro_workflows::handler::exit::ExitHandler;
-    use fabro_workflows::handler::start::StartHandler;
-    use fabro_workflows::handler::HandlerRegistry;
+    use fabro_workflows::pipeline::LlmSpec;
 
-    fn test_registry(_interviewer: Arc<dyn fabro_interview::Interviewer>) -> HandlerRegistry {
-        let mut registry = HandlerRegistry::new(Box::new(StartHandler));
-        registry.register("start", Box::new(StartHandler));
-        registry.register("exit", Box::new(ExitHandler));
-        registry
+    fn test_llm_spec() -> LlmSpec {
+        LlmSpec {
+            model: "test-model".to_string(),
+            provider: fabro_llm::Provider::Anthropic,
+            fallback_chain: Vec::new(),
+            mcp_servers: Vec::new(),
+            dry_run: true,
+        }
     }
 
     async fn test_db() -> sqlx::SqlitePool {
@@ -451,7 +452,7 @@ mod tests {
         let db = test_db().await;
         let state = create_app_state_with_options(
             db,
-            test_registry,
+            test_llm_spec,
             true,
             5,
             fabro_workflows::git::GitAuthor::default(),

@@ -399,6 +399,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         workflow_slug: None,
         github_app: None,
         base_branch: None,
+        display_base_sha: None,
         host_repo_path: None,
         git: None,
     };
@@ -590,6 +591,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         workflow_slug: None,
         github_app: None,
         base_branch: None,
+        display_base_sha: None,
         host_repo_path: Some(dir.path().to_path_buf()),
         git: Some(GitCheckpointOptions {
             base_sha: Some(base_sha),
@@ -776,6 +778,7 @@ async fn daytona_parallel_git_branching_e2e() {
         workflow_slug: None,
         github_app: None,
         base_branch: None,
+        display_base_sha: None,
         host_repo_path: Some(run_tmp.path().to_path_buf()),
         git: Some(GitCheckpointOptions {
             base_sha: Some(base_sha),
@@ -1152,6 +1155,7 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         workflow_slug: None,
         github_app: None,
         base_branch: None,
+        display_base_sha: None,
         host_repo_path: Some(host_repo.path().to_path_buf()),
         git: Some(GitCheckpointOptions {
             base_sha: Some(base_sha),
@@ -1297,6 +1301,7 @@ async fn daytona_asset_collection() {
         workflow_slug: None,
         github_app: None,
         base_branch: None,
+        display_base_sha: None,
         host_repo_path: None,
         git: None,
     };
@@ -1548,6 +1553,7 @@ async fn daytona_git_push_run_branch_to_origin() {
         workflow_slug: None,
         github_app: None,
         base_branch: None,
+        display_base_sha: None,
         host_repo_path: Some(dir.path().to_path_buf()),
         git: Some(GitCheckpointOptions {
             base_sha: Some(base_sha),

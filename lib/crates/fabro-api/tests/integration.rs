@@ -7,25 +7,22 @@
 mod mtls_e2e {
     use std::path::Path;
     use std::process::{Command, Stdio};
-    use std::sync::Arc;
 
     use fabro_api::jwt_auth::{AuthMode, AuthStrategy};
     use fabro_api::server::{build_router, create_app_state};
     use fabro_api::server_config::TlsConfig;
     use fabro_api::tls::{build_rustls_config, ClientAuth};
-    use fabro_interview::Interviewer;
-    use fabro_workflows::handler::agent::AgentHandler;
-    use fabro_workflows::handler::exit::ExitHandler;
-    use fabro_workflows::handler::start::StartHandler;
-    use fabro_workflows::handler::HandlerRegistry;
+    use fabro_workflows::pipeline::LlmSpec;
     use tokio::net::TcpListener;
 
-    fn simple_registry(_interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
-        let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
-        registry.register("start", Box::new(StartHandler));
-        registry.register("exit", Box::new(ExitHandler));
-        registry.register("agent", Box::new(AgentHandler::new(None)));
-        registry
+    fn test_llm_spec() -> LlmSpec {
+        LlmSpec {
+            model: "test-model".to_string(),
+            provider: fabro_llm::Provider::Anthropic,
+            fallback_chain: Vec::new(),
+            mcp_servers: Vec::new(),
+            dry_run: true,
+        }
     }
 
     async fn test_db() -> sqlx::SqlitePool {
@@ -194,7 +191,7 @@ mod mtls_e2e {
         let rustls_config = build_rustls_config(tls_config, client_auth);
         let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
 
-        let state = create_app_state(test_db().await, simple_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         let router = build_router(state, auth_mode);
 
         tokio::spawn(async move {
@@ -431,21 +428,17 @@ mod server_lifecycle {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use fabro_api::server::{build_router, create_app_state};
-    use fabro_interview::Interviewer;
-    use fabro_workflows::handler::agent::AgentHandler;
-    use fabro_workflows::handler::exit::ExitHandler;
-    use fabro_workflows::handler::human::HumanHandler;
-    use fabro_workflows::handler::start::StartHandler;
-    use fabro_workflows::handler::HandlerRegistry;
+    use fabro_workflows::pipeline::LlmSpec;
     use tower::ServiceExt;
 
-    fn gate_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
-        let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
-        registry.register("start", Box::new(StartHandler));
-        registry.register("exit", Box::new(ExitHandler));
-        registry.register("agent", Box::new(AgentHandler::new(None)));
-        registry.register("human", Box::new(HumanHandler::new(interviewer)));
-        registry
+    fn test_llm_spec() -> LlmSpec {
+        LlmSpec {
+            model: "test-model".to_string(),
+            provider: fabro_llm::Provider::Anthropic,
+            fallback_chain: Vec::new(),
+            mcp_servers: Vec::new(),
+            dry_run: true,
+        }
     }
 
     async fn body_json(body: Body) -> serde_json::Value {
@@ -477,7 +470,7 @@ mod server_lifecycle {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn full_http_lifecycle_approve_and_complete() {
-        let state = create_app_state(test_db().await, gate_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         fabro_api::server::spawn_scheduler(Arc::clone(&state));
         let app = build_router(Arc::clone(&state), fabro_api::jwt_auth::AuthMode::Disabled);
 
@@ -573,7 +566,7 @@ mod server_lifecycle {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn full_http_lifecycle_cancel() {
-        let state = create_app_state(test_db().await, gate_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         fabro_api::server::spawn_scheduler(Arc::clone(&state));
         let app = build_router(Arc::clone(&state), fabro_api::jwt_auth::AuthMode::Disabled);
 
@@ -627,20 +620,18 @@ mod sse_events {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use fabro_api::server::{build_router, create_app_state};
-    use fabro_interview::Interviewer;
-    use fabro_workflows::handler::agent::AgentHandler;
-    use fabro_workflows::handler::exit::ExitHandler;
-    use fabro_workflows::handler::start::StartHandler;
-    use fabro_workflows::handler::HandlerRegistry;
+    use fabro_workflows::pipeline::LlmSpec;
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    fn simple_registry(_interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
-        let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
-        registry.register("start", Box::new(StartHandler));
-        registry.register("exit", Box::new(ExitHandler));
-        registry.register("agent", Box::new(AgentHandler::new(None)));
-        registry
+    fn test_llm_spec() -> LlmSpec {
+        LlmSpec {
+            model: "test-model".to_string(),
+            provider: fabro_llm::Provider::Anthropic,
+            fallback_chain: Vec::new(),
+            mcp_servers: Vec::new(),
+            dry_run: true,
+        }
     }
 
     const SIMPLE_DOT: &str = r#"digraph SSETest {
@@ -659,7 +650,7 @@ mod sse_events {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sse_stream_contains_expected_event_types() {
-        let state = create_app_state(test_db().await, simple_registry);
+        let state = create_app_state(test_db().await, test_llm_spec);
         fabro_api::server::spawn_scheduler(Arc::clone(&state));
         let app = build_router(Arc::clone(&state), fabro_api::jwt_auth::AuthMode::Disabled);
 
@@ -789,8 +780,7 @@ mod serve_dry_run {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use fabro_api::server::{build_router, create_app_state};
-    use fabro_interview::Interviewer;
-    use fabro_workflows::handler::default_registry;
+    use fabro_workflows::pipeline::LlmSpec;
     use tower::ServiceExt;
 
     const MINIMAL_DOT: &str = r#"digraph Test {
@@ -806,10 +796,19 @@ mod serve_dry_run {
         pool
     }
 
+    fn test_llm_spec() -> LlmSpec {
+        LlmSpec {
+            model: "test-model".to_string(),
+            provider: fabro_llm::Provider::Anthropic,
+            fallback_chain: Vec::new(),
+            mcp_servers: Vec::new(),
+            dry_run: true,
+        }
+    }
+
     /// Build the router exactly as `serve_command` does in dry-run mode.
     async fn dry_run_app() -> axum::Router {
-        let factory = |interviewer: Arc<dyn Interviewer>| default_registry(interviewer, || None);
-        let state = create_app_state(test_db().await, factory);
+        let state = create_app_state(test_db().await, test_llm_spec);
         fabro_api::server::spawn_scheduler(Arc::clone(&state));
         build_router(state, fabro_api::jwt_auth::AuthMode::Disabled)
     }
