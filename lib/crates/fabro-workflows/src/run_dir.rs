@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
+use fabro_types::NodeStatusRecord;
 
 use crate::context::Context;
 use crate::outcome::{Outcome, OutcomeExt};
@@ -50,12 +51,12 @@ pub fn visit_from_context(context: &Context) -> usize {
 pub(crate) fn write_node_status(run_dir: &Path, node_id: &str, visit: usize, outcome: &Outcome) {
     let node_dir = node_dir(run_dir, node_id, visit);
     let _ = std::fs::create_dir_all(&node_dir);
-    let status = serde_json::json!({
-        "status": outcome.status.to_string(),
-        "notes": outcome.notes,
-        "failure_reason": outcome.failure_reason(),
-        "timestamp": Utc::now().to_rfc3339(),
-    });
+    let status = NodeStatusRecord {
+        status: outcome.status.clone(),
+        notes: outcome.notes.clone(),
+        failure_reason: outcome.failure_reason().map(ToOwned::to_owned),
+        timestamp: Utc::now(),
+    };
     if let Ok(json) = serde_json::to_string_pretty(&status) {
         let _ = std::fs::write(node_dir.join("status.json"), json);
     }
@@ -65,6 +66,9 @@ pub(crate) fn write_node_status(run_dir: &Path, node_id: &str, visit: usize, out
 mod tests {
     use super::*;
     use std::path::Path;
+
+    use fabro_types::StageStatus;
+    use tempfile::TempDir;
 
     use crate::context::Context;
 
@@ -106,5 +110,31 @@ mod tests {
             node_dir(root, "work", 5),
             root.join("nodes").join("work-visit_5")
         );
+    }
+
+    #[test]
+    fn write_node_status_uses_typed_record_with_legacy_shape() {
+        let temp = TempDir::new().unwrap();
+        let outcome = Outcome {
+            status: StageStatus::Fail,
+            notes: Some("needs retry".to_string()),
+            failure: Some(crate::outcome::FailureDetail::new(
+                "boom",
+                crate::outcome::FailureCategory::Deterministic,
+            )),
+            ..Outcome::default()
+        };
+
+        write_node_status(temp.path(), "work", 1, &outcome);
+
+        let data = std::fs::read_to_string(temp.path().join("nodes/work/status.json")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&data).unwrap();
+        assert_eq!(value.get("status"), Some(&serde_json::json!("fail")));
+        assert_eq!(value.get("notes"), Some(&serde_json::json!("needs retry")));
+        assert_eq!(
+            value.get("failure_reason"),
+            Some(&serde_json::json!("boom"))
+        );
+        assert!(value.get("timestamp").and_then(|v| v.as_str()).is_some());
     }
 }

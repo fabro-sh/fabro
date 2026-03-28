@@ -5,6 +5,7 @@ pub mod combine;
 pub mod conclusion;
 pub mod failure_signature;
 pub mod graph;
+pub mod node_status;
 pub mod outcome;
 pub mod retro;
 pub mod run;
@@ -18,6 +19,7 @@ pub use checkpoint::Checkpoint;
 pub use conclusion::{Conclusion, StageSummary};
 pub use failure_signature::FailureSignature;
 pub use graph::{is_llm_handler_type, shape_to_handler_type, AttrValue, Edge, Graph, Node};
+pub use node_status::NodeStatusRecord;
 pub use outcome::{FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageStatus};
 pub use retro::{
     AggregateStats, FrictionKind, FrictionPoint, Learning, LearningCategory, OpenItem,
