@@ -150,7 +150,7 @@ mod tests {
     use crate::graph::WorkflowGraph;
 
     /// Minimal spike handler that always succeeds — proves the trait plumbing.
-    pub struct SpikeHandler;
+    pub(crate) struct SpikeHandler;
 
     #[async_trait]
     impl NodeHandler<WorkflowGraph> for SpikeHandler {

@@ -120,7 +120,7 @@ pub(crate) fn parse_node_key(key: &str) -> Option<(String, u32, String)> {
 }
 
 #[cfg(test)]
-pub fn parse_node_asset_key(key: &str) -> Option<(String, u32, String)> {
+pub(crate) fn parse_node_asset_key(key: &str) -> Option<(String, u32, String)> {
     parse_visit_scoped_key(key, ARTIFACT_NODES_PREFIX)
 }
 
