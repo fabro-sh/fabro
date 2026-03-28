@@ -1,18 +1,19 @@
 {
-  "timestamp": "2026-03-28T21:16:25.496162Z",
-  "current_node": "run_tests",
+  "timestamp": "2026-03-28T21:16:26.410695Z",
+  "current_node": "report",
   "completed_nodes": [
     "start",
-    "run_tests"
+    "run_tests",
+    "report"
   ],
   "node_retries": {},
   "context_values": {
     "internal.retry_count.start": 0,
-    "current_node": "run_tests",
+    "current_node": "report",
     "failure_class": "",
     "internal.work_dir": "/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpdIjCe8/fabro-data/runs/20260328-dry-run-01KMV4W9HGQZSVSXHY9HAE1E6P/worktree",
     "graph.goal": "Run tests and report results",
-    "last_stage": "run_tests",
+    "last_stage": "report",
     "internal.retry_count.run_tests": 0,
     "failure_signature": "",
     "outcome": "success",
@@ -20,13 +21,26 @@
     "internal.fidelity": "compact",
     "internal.node_visit_count": 1,
     "response.run_tests": "[Simulated] Response for stage: run_tests",
-    "current.preamble": "Goal: Run tests and report results\n",
-    "internal.thread_id": "start",
+    "thread.run_tests.current_node": "report",
+    "response.report": "[Simulated] Response for stage: report",
+    "current.preamble": "Goal: Run tests and report results\n\n## Completed stages\n- **run_tests**: success\n",
+    "internal.thread_id": "run_tests",
     "thread.start.current_node": "run_tests",
-    "last_response": "[Simulated] Response for stage: run_tests",
-    "graph.rankdir": "LR"
+    "last_response": "[Simulated] Response for stage: report",
+    "graph.rankdir": "LR",
+    "internal.retry_count.report": 0
   },
   "node_outcomes": {
+    "report": {
+      "status": "success",
+      "context_updates": {
+        "response.report": "[Simulated] Response for stage: report",
+        "last_stage": "report",
+        "last_response": "[Simulated] Response for stage: report"
+      },
+      "notes": "[Simulated] report",
+      "usage": null
+    },
     "run_tests": {
       "status": "success",
       "context_updates": {
@@ -43,9 +57,10 @@
       "usage": null
     }
   },
-  "next_node_id": "report",
+  "next_node_id": "exit",
   "node_visits": {
     "run_tests": 1,
-    "start": 1
+    "start": 1,
+    "report": 1
   }
 }
