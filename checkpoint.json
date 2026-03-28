@@ -1,19 +1,23 @@
 {
-  "timestamp": "2026-03-28T19:27:09.119078Z",
-  "current_node": "run_tests",
+  "timestamp": "2026-03-28T19:27:09.477200Z",
+  "current_node": "report",
   "completed_nodes": [
     "start",
-    "run_tests"
+    "run_tests",
+    "report"
   ],
   "node_retries": {},
   "context_values": {
+    "thread.run_tests.current_node": "report",
     "failure_class": "",
     "failure_signature": "",
     "graph.rankdir": "LR",
-    "last_stage": "run_tests",
-    "current.preamble": "Goal: Run tests and report results\n",
+    "last_stage": "report",
+    "response.report": "[Simulated] Response for stage: report",
+    "current.preamble": "Goal: Run tests and report results\n\n## Completed stages\n- **run_tests**: success\n",
+    "internal.retry_count.report": 0,
     "graph.goal": "Run tests and report results",
-    "current_node": "run_tests",
+    "current_node": "report",
     "internal.node_visit_count": 1,
     "internal.work_dir": "/Users/bhelmkamp/.fabro/runs/20260328-dry-run-01KMTYM72JFY4JWGH10RAS5J0Q/worktree",
     "internal.run_id": "01KMTYM72JFY4JWGH10RAS5J0Q",
@@ -21,17 +25,12 @@
     "internal.retry_count.run_tests": 0,
     "internal.retry_count.start": 0,
     "outcome": "success",
-    "last_response": "[Simulated] Response for stage: run_tests",
+    "last_response": "[Simulated] Response for stage: report",
     "thread.start.current_node": "run_tests",
-    "internal.thread_id": "start",
+    "internal.thread_id": "run_tests",
     "response.run_tests": "[Simulated] Response for stage: run_tests"
   },
   "node_outcomes": {
-    "start": {
-      "status": "success",
-      "notes": "[Simulated] start",
-      "usage": null
-    },
     "run_tests": {
       "status": "success",
       "context_updates": {
@@ -41,11 +40,27 @@
       },
       "notes": "[Simulated] run_tests",
       "usage": null
+    },
+    "start": {
+      "status": "success",
+      "notes": "[Simulated] start",
+      "usage": null
+    },
+    "report": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "report",
+        "response.report": "[Simulated] Response for stage: report",
+        "last_response": "[Simulated] Response for stage: report"
+      },
+      "notes": "[Simulated] report",
+      "usage": null
     }
   },
-  "next_node_id": "report",
+  "next_node_id": "exit",
   "node_visits": {
     "start": 1,
-    "run_tests": 1
+    "run_tests": 1,
+    "report": 1
   }
 }
