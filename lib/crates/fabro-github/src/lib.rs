@@ -913,20 +913,8 @@ mod tests {
     // sign_app_jwt
     // -----------------------------------------------------------------------
 
-    fn test_rsa_key() -> String {
-        use std::process::Command;
-        let output = Command::new("openssl")
-            .args([
-                "genpkey",
-                "-algorithm",
-                "RSA",
-                "-pkeyopt",
-                "rsa_keygen_bits:2048",
-            ])
-            .output()
-            .expect("openssl should be available");
-        assert!(output.status.success(), "openssl keygen failed");
-        String::from_utf8(output.stdout).unwrap()
+    fn test_rsa_key() -> &'static str {
+        include_str!("testdata/rsa_private.pem")
     }
 
     #[test]
@@ -1165,7 +1153,7 @@ mod tests {
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
-            private_key_pem: pem,
+            private_key_pem: pem.to_string(),
         };
         let result = branch_exists(&creds, "owner", "repo", "my-branch", &server.url()).await;
         assert_eq!(result.unwrap(), true);
@@ -1196,7 +1184,7 @@ mod tests {
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
-            private_key_pem: pem,
+            private_key_pem: pem.to_string(),
         };
         let result = branch_exists(&creds, "owner", "repo", "no-such-branch", &server.url()).await;
         assert_eq!(result.unwrap(), false);
@@ -1227,7 +1215,7 @@ mod tests {
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
-            private_key_pem: pem,
+            private_key_pem: pem.to_string(),
         };
         let result = branch_exists(&creds, "owner", "repo", "broken", &server.url()).await;
         assert!(result.is_err());
@@ -1437,7 +1425,7 @@ mod tests {
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
-            private_key_pem: pem,
+            private_key_pem: pem.to_string(),
         };
         let detail = get_pull_request(&creds, "owner", "repo", 42, &server.url())
             .await
@@ -1479,7 +1467,7 @@ mod tests {
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
-            private_key_pem: pem,
+            private_key_pem: pem.to_string(),
         };
         let err = get_pull_request(&creds, "owner", "repo", 999, &server.url())
             .await
@@ -1518,7 +1506,7 @@ mod tests {
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
-            private_key_pem: pem,
+            private_key_pem: pem.to_string(),
         };
         merge_pull_request(&creds, "owner", "repo", 42, "squash", &server.url())
             .await
@@ -1550,7 +1538,7 @@ mod tests {
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
-            private_key_pem: pem,
+            private_key_pem: pem.to_string(),
         };
         let err = merge_pull_request(&creds, "owner", "repo", 42, "squash", &server.url())
             .await
@@ -1583,7 +1571,7 @@ mod tests {
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
-            private_key_pem: pem,
+            private_key_pem: pem.to_string(),
         };
         let err = merge_pull_request(&creds, "owner", "repo", 42, "squash", &server.url())
             .await
@@ -1621,7 +1609,7 @@ mod tests {
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
-            private_key_pem: pem,
+            private_key_pem: pem.to_string(),
         };
         close_pull_request(&creds, "owner", "repo", 42, &server.url())
             .await
@@ -1653,7 +1641,7 @@ mod tests {
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
-            private_key_pem: pem,
+            private_key_pem: pem.to_string(),
         };
         let err = close_pull_request(&creds, "owner", "repo", 999, &server.url())
             .await
