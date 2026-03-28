@@ -1,0 +1,51 @@
+{
+  "timestamp": "2026-03-28T21:02:49.952023Z",
+  "current_node": "run_tests",
+  "completed_nodes": [
+    "start",
+    "run_tests"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "internal.retry_count.run_tests": 0,
+    "internal.run_id": "01KMV43D46K0K2KST66HVXJPQ3",
+    "thread.start.current_node": "run_tests",
+    "response.run_tests": "[Simulated] Response for stage: run_tests",
+    "internal.fidelity": "compact",
+    "outcome": "success",
+    "failure_signature": "",
+    "failure_class": "",
+    "graph.rankdir": "LR",
+    "last_response": "[Simulated] Response for stage: run_tests",
+    "internal.node_visit_count": 1,
+    "internal.retry_count.start": 0,
+    "internal.thread_id": "start",
+    "current_node": "run_tests",
+    "graph.goal": "Run tests and report results",
+    "last_stage": "run_tests",
+    "internal.work_dir": "/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpul2H80/fabro-data/runs/20260328-dry-run-01KMV43D46K0K2KST66HVXJPQ3/worktree",
+    "current.preamble": "Goal: Run tests and report results\n"
+  },
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "notes": "[Simulated] start",
+      "usage": null
+    },
+    "run_tests": {
+      "status": "success",
+      "context_updates": {
+        "last_response": "[Simulated] Response for stage: run_tests",
+        "last_stage": "run_tests",
+        "response.run_tests": "[Simulated] Response for stage: run_tests"
+      },
+      "notes": "[Simulated] run_tests",
+      "usage": null
+    }
+  },
+  "next_node_id": "report",
+  "node_visits": {
+    "start": 1,
+    "run_tests": 1
+  }
+}
