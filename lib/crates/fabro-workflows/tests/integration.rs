@@ -3892,95 +3892,84 @@ async fn manager_loop_child_dotfile_e2e() {
 }
 
 // ===========================================================================
-// 19c. GraphMerge E2E (TS Scenario 11)
+// 19c. ImportTransform E2E (TS Scenario 11)
 // ===========================================================================
 
 #[tokio::test]
-async fn graph_merge_e2e_through_engine() {
-    use fabro_workflows::transform::GraphMergeTransform;
-
-    // Module "val": lint -> test
-    let mut val_graph = Graph::new("val");
-    let mut lint = Node::new("lint");
-    lint.attrs
-        .insert("shape".to_string(), AttrValue::String("box".to_string()));
-    lint.attrs.insert(
-        "prompt".to_string(),
-        AttrValue::String("Lint the code".to_string()),
-    );
-    val_graph.nodes.insert("lint".to_string(), lint);
-
-    let mut test_node = Node::new("test");
-    test_node
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("box".to_string()));
-    test_node.attrs.insert(
-        "prompt".to_string(),
-        AttrValue::String("Run tests".to_string()),
-    );
-    val_graph.nodes.insert("test".to_string(), test_node);
-    val_graph.edges.push(Edge::new("lint", "test"));
-
-    // Module "dep": stage -> release
-    let mut dep_graph = Graph::new("dep");
-    let mut stage = Node::new("stage");
-    stage
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("box".to_string()));
-    stage.attrs.insert(
-        "prompt".to_string(),
-        AttrValue::String("Stage the release".to_string()),
-    );
-    dep_graph.nodes.insert("stage".to_string(), stage);
-
-    let mut release = Node::new("release");
-    release
-        .attrs
-        .insert("shape".to_string(), AttrValue::String("box".to_string()));
-    release.attrs.insert(
-        "prompt".to_string(),
-        AttrValue::String("Release it".to_string()),
-    );
-    dep_graph.nodes.insert("release".to_string(), release);
-    dep_graph.edges.push(Edge::new("stage", "release"));
-
-    // Main graph: start, exit; edges connect modules
-    let mut main_graph = Graph::new("MergeE2E");
-    main_graph.attrs.insert(
-        "goal".to_string(),
-        AttrValue::String("Test graph merge".to_string()),
-    );
-
-    let mut start = Node::new("start");
-    start.attrs.insert(
-        "shape".to_string(),
-        AttrValue::String("Mdiamond".to_string()),
-    );
-    main_graph.nodes.insert("start".to_string(), start);
-
-    let mut exit = Node::new("exit");
-    exit.attrs.insert(
-        "shape".to_string(),
-        AttrValue::String("Msquare".to_string()),
-    );
-    main_graph.nodes.insert("exit".to_string(), exit);
-
-    // Apply merge transform
-    let merge = GraphMergeTransform::new(vec![val_graph, dep_graph]);
-    merge.apply(&mut main_graph);
-
-    // Add cross-module edges
-    main_graph.edges.push(Edge::new("start", "val.lint"));
-    main_graph.edges.push(Edge::new("val.test", "dep.stage"));
-    main_graph.edges.push(Edge::new("dep.release", "exit"));
-
-    // Verify merged nodes exist
-    assert!(main_graph.nodes.contains_key("val.lint"));
-    assert!(main_graph.nodes.contains_key("val.test"));
-    assert!(main_graph.nodes.contains_key("dep.stage"));
-    assert!(main_graph.nodes.contains_key("dep.release"));
+async fn import_e2e_through_engine() {
+    use fabro_workflows::pipeline::{TransformOptions, transform, validate};
 
     let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("val.fabro"),
+        r#"digraph validate {
+            start [shape=Mdiamond]
+            lint [prompt="Lint the code"]
+            test [prompt="Run tests"]
+            exit [shape=Msquare]
+            start -> lint -> test -> exit
+        }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("dep.fabro"),
+        r#"digraph deploy {
+            start [shape=Mdiamond]
+            stage [prompt="Stage the release"]
+            release [prompt="Release it"]
+            exit [shape=Msquare]
+            start -> stage -> release -> exit
+        }"#,
+    )
+    .unwrap();
+
+    let parsed = fabro_workflows::pipeline::parse(
+        r#"digraph MergeE2E {
+            graph [goal="Test file imports"]
+            start [shape=Mdiamond]
+            validate [import="./val.fabro"]
+            deploy [import="./dep.fabro"]
+            exit [shape=Msquare]
+            start -> validate -> deploy -> exit
+        }"#,
+    )
+    .expect("parse should succeed");
+    let transformed = transform(
+        parsed,
+        &TransformOptions {
+            base_dir: Some(dir.path().to_path_buf()),
+            custom_transforms: vec![],
+        },
+    );
+    let validated = validate(transformed, &[]);
+    validated
+        .raise_on_errors()
+        .expect("validation should pass after imports expand");
+    let (graph, _, _) = validated.into_parts();
+
+    assert!(graph.nodes.contains_key("validate.lint"));
+    assert!(graph.nodes.contains_key("validate.test"));
+    assert!(graph.nodes.contains_key("deploy.stage"));
+    assert!(graph.nodes.contains_key("deploy.release"));
+    assert!(
+        graph
+            .edges
+            .iter()
+            .any(|edge| edge.from == "start" && edge.to == "validate.lint")
+    );
+    assert!(
+        graph
+            .edges
+            .iter()
+            .any(|edge| edge.from == "validate.test" && edge.to == "deploy.stage")
+    );
+    assert!(
+        graph
+            .edges
+            .iter()
+            .any(|edge| edge.from == "deploy.release" && edge.to == "exit")
+    );
+
     let engine = WorkflowRunner::new(
         make_linear_registry(),
         Arc::new(EventEmitter::new()),
@@ -4001,47 +3990,51 @@ async fn graph_merge_e2e_through_engine() {
         git: None,
     };
     let outcome = engine
-        .run(&main_graph, &run_options)
+        .run(&graph, &run_options)
         .await
-        .expect("graph merge E2E should succeed");
+        .expect("import E2E should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
-        checkpoint.completed_nodes.contains(&"val.lint".to_string()),
-        "val.lint should be completed"
-    );
-    assert!(
-        checkpoint.completed_nodes.contains(&"val.test".to_string()),
-        "val.test should be completed"
+        checkpoint
+            .completed_nodes
+            .contains(&"validate.lint".to_string()),
+        "validate.lint should be completed"
     );
     assert!(
         checkpoint
             .completed_nodes
-            .contains(&"dep.stage".to_string()),
-        "dep.stage should be completed"
+            .contains(&"validate.test".to_string()),
+        "validate.test should be completed"
     );
     assert!(
         checkpoint
             .completed_nodes
-            .contains(&"dep.release".to_string()),
-        "dep.release should be completed"
+            .contains(&"deploy.stage".to_string()),
+        "deploy.stage should be completed"
+    );
+    assert!(
+        checkpoint
+            .completed_nodes
+            .contains(&"deploy.release".to_string()),
+        "deploy.release should be completed"
     );
 
-    // Verify ordering: val.test appears before dep.stage
+    // Verify ordering: validate.test appears before deploy.stage
     let val_test_pos = checkpoint
         .completed_nodes
         .iter()
-        .position(|n| n == "val.test")
-        .expect("val.test should be in completed_nodes");
+        .position(|n| n == "validate.test")
+        .expect("validate.test should be in completed_nodes");
     let dep_stage_pos = checkpoint
         .completed_nodes
         .iter()
-        .position(|n| n == "dep.stage")
-        .expect("dep.stage should be in completed_nodes");
+        .position(|n| n == "deploy.stage")
+        .expect("deploy.stage should be in completed_nodes");
     assert!(
         val_test_pos < dep_stage_pos,
-        "val.test ({val_test_pos}) should execute before dep.stage ({dep_stage_pos})"
+        "validate.test ({val_test_pos}) should execute before deploy.stage ({dep_stage_pos})"
     );
 }
 
