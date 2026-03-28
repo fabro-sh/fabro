@@ -1,0 +1,156 @@
+{
+  "run_id": "01KMV9NT0T4Q3DJ64Y7AHGB8PZ",
+  "created_at": "2026-03-28T22:40:14.876185Z",
+  "settings": {
+    "version": 1,
+    "goal": "Run tests and report results",
+    "llm": {
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "fallbacks": null
+    },
+    "sandbox": {
+      "provider": "daytona",
+      "preserve": null,
+      "devcontainer": null,
+      "local": null,
+      "daytona": {
+        "auto_stop_interval": 30,
+        "labels": {
+          "repo": "fabro-sh/fabro"
+        },
+        "snapshot": {
+          "name": "fabro-v6",
+          "cpu": 4,
+          "memory": 8,
+          "disk": 20,
+          "dockerfile": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+        },
+        "network": null,
+        "skip_clone": false
+      },
+      "exe": null,
+      "ssh": null,
+      "env": null
+    },
+    "pull_request": {
+      "enabled": true,
+      "draft": false,
+      "auto_merge": false,
+      "merge_strategy": "squash"
+    },
+    "hooks": [
+      {
+        "name": "cargo-fmt",
+        "event": "post_tool_use",
+        "command": "cargo fmt",
+        "matcher": "write_file|edit_file|apply_patch",
+        "blocking": true,
+        "timeout_ms": null,
+        "sandbox": null
+      }
+    ],
+    "dry_run": true,
+    "auto_approve": true,
+    "storage_dir": "/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpAmpkBG/fabro-data",
+    "features": {
+      "session_sandboxes": false,
+      "retros": false
+    },
+    "log": {
+      "level": "debug"
+    },
+    "git": {
+      "provider": "github",
+      "app_id": "2993730",
+      "client_id": "Iv23li3Pu4pCpsmPopVN",
+      "slug": "brynary-fabro",
+      "author": {
+        "name": null,
+        "email": null
+      },
+      "webhooks": null
+    },
+    "fabro": {
+      "root": "fabro/"
+    }
+  },
+  "graph": {
+    "name": "Simple",
+    "nodes": {
+      "run_tests": {
+        "id": "run_tests",
+        "attrs": {
+          "label": {
+            "String": "Run Tests"
+          },
+          "prompt": {
+            "String": "Run the test suite and report results"
+          }
+        }
+      },
+      "report": {
+        "id": "report",
+        "attrs": {
+          "label": {
+            "String": "Report"
+          },
+          "prompt": {
+            "String": "Summarize the test results"
+          }
+        }
+      },
+      "start": {
+        "id": "start",
+        "attrs": {
+          "shape": {
+            "String": "Mdiamond"
+          },
+          "label": {
+            "String": "Start"
+          }
+        }
+      },
+      "exit": {
+        "id": "exit",
+        "attrs": {
+          "label": {
+            "String": "Exit"
+          },
+          "shape": {
+            "String": "Msquare"
+          }
+        }
+      }
+    },
+    "edges": [
+      {
+        "from": "start",
+        "to": "run_tests",
+        "attrs": {}
+      },
+      {
+        "from": "run_tests",
+        "to": "report",
+        "attrs": {}
+      },
+      {
+        "from": "report",
+        "to": "exit",
+        "attrs": {}
+      }
+    ],
+    "attrs": {
+      "goal": {
+        "String": "Run tests and report results"
+      },
+      "rankdir": {
+        "String": "LR"
+      }
+    }
+  },
+  "workflow_slug": "simple",
+  "working_directory": "/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-cli",
+  "host_repo_path": "/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-cli",
+  "base_branch": "fabro-core"
+}
