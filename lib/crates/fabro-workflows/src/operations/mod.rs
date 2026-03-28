@@ -4,6 +4,8 @@ mod resume;
 mod rewind;
 mod source;
 mod start;
+#[cfg(test)]
+mod test_support;
 mod validate;
 
 pub use crate::pipeline::{DevcontainerSpec, LlmSpec, SandboxEnvSpec, SandboxSpec};
