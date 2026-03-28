@@ -1,0 +1,26 @@
+[package]
+name = "fabro-store"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+fabro-types = { path = "../fabro-types" }
+slatedb.workspace = true
+object_store.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tokio-stream.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+bytes.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+futures.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }

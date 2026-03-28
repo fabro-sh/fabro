@@ -1,0 +1,635 @@
+mod catalog;
+mod run_store;
+
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use futures::TryStreamExt;
+use object_store::path::Path;
+use object_store::ObjectStore;
+
+use crate::keys;
+use crate::{CatalogRecord, ListRunsQuery, Result, RunStore, RunSummary, Store, StoreError};
+use run_store::SlateRunStore;
+
+#[derive(Clone)]
+pub struct SlateStore {
+    object_store: Arc<dyn ObjectStore>,
+    base_prefix: String,
+}
+
+impl std::fmt::Debug for SlateStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SlateStore")
+            .field("base_prefix", &self.base_prefix)
+            .finish()
+    }
+}
+
+impl SlateStore {
+    pub fn new(object_store: Arc<dyn ObjectStore>, base_prefix: impl Into<String>) -> Self {
+        Self {
+            object_store,
+            base_prefix: normalize_base_prefix(base_prefix.into()),
+        }
+    }
+
+    pub async fn repair_catalog(&self) -> Result<()> {
+        catalog::repair_catalog(self.object_store.clone(), &self.base_prefix).await
+    }
+
+    async fn open_db(&self, db_prefix: &str) -> Result<slatedb::Db> {
+        Ok(slatedb::Db::open(db_prefix.to_string(), self.object_store.clone()).await?)
+    }
+
+    async fn open_run_store(&self, record: &CatalogRecord) -> Result<Option<SlateRunStore>> {
+        let db = self.open_db(&record.db_prefix).await?;
+        if !SlateRunStore::has_init(&db).await? {
+            let _ = db.close().await;
+            return Ok(None);
+        }
+        Ok(Some(
+            SlateRunStore::open(record.run_id.clone(), record.created_at, db).await?,
+        ))
+    }
+
+    async fn delete_db_prefix(&self, db_prefix: &str) -> Result<()> {
+        let prefix = Path::from(db_prefix.to_string());
+        let metas = self
+            .object_store
+            .list(Some(&prefix))
+            .try_collect::<Vec<_>>()
+            .await?;
+        for meta in metas {
+            delete_path(self.object_store.clone(), &meta.location).await?;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Store for SlateStore {
+    async fn create_run(
+        &self,
+        run_id: &str,
+        created_at: DateTime<Utc>,
+    ) -> Result<Box<dyn RunStore>> {
+        let locator =
+            catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id).await?;
+        let db_prefix = match locator {
+            Some(existing) if existing.created_at != created_at => {
+                return Err(StoreError::RunAlreadyExists(run_id.to_string()));
+            }
+            Some(existing) => existing.db_prefix,
+            None => catalog::db_prefix(&self.base_prefix, created_at, run_id),
+        };
+
+        let record = CatalogRecord {
+            run_id: run_id.to_string(),
+            created_at,
+            db_prefix: db_prefix.clone(),
+        };
+
+        let db = self.open_db(&db_prefix).await?;
+        db.put(keys::init(), serde_json::to_vec(&record)?).await?;
+        catalog::write_catalog(
+            self.object_store.clone(),
+            &self.base_prefix,
+            run_id,
+            created_at,
+            &db_prefix,
+        )
+        .await?;
+        Ok(Box::new(
+            SlateRunStore::open(run_id.to_string(), created_at, db).await?,
+        ))
+    }
+
+    async fn open_run(&self, run_id: &str) -> Result<Option<Box<dyn RunStore>>> {
+        let Some(locator) =
+            catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id).await?
+        else {
+            return Ok(None);
+        };
+
+        let Some(run_store) = self.open_run_store(&locator).await? else {
+            return Ok(None);
+        };
+        Ok(Some(Box::new(run_store)))
+    }
+
+    async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>> {
+        let catalogs =
+            catalog::list_catalogs(self.object_store.clone(), &self.base_prefix, query).await?;
+        let mut summaries = Vec::new();
+        for record in catalogs {
+            let db = self.open_db(&record.db_prefix).await?;
+            if !SlateRunStore::has_init(&db).await? {
+                let _ = db.close().await;
+                continue;
+            }
+            let summary = SlateRunStore::build_summary(&db, &record).await?;
+            let _ = db.close().await;
+            summaries.push(summary);
+        }
+        summaries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(summaries)
+    }
+
+    async fn delete_run(&self, run_id: &str) -> Result<()> {
+        if let Some(locator) =
+            catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id).await?
+        {
+            delete_path(
+                self.object_store.clone(),
+                &catalog::by_start_path(&self.base_prefix, locator.created_at, run_id),
+            )
+            .await?;
+            self.delete_db_prefix(&locator.db_prefix).await?;
+            delete_path(
+                self.object_store.clone(),
+                &catalog::by_id_path(&self.base_prefix, run_id),
+            )
+            .await?;
+            return Ok(());
+        }
+
+        let by_start_prefix = Path::from(format!("{}by-start", self.base_prefix));
+        let metas = self
+            .object_store
+            .list(Some(&by_start_prefix))
+            .try_collect::<Vec<_>>()
+            .await?;
+        let expected_name = format!("{run_id}.json");
+        for meta in metas {
+            if meta.location.filename() != Some(expected_name.as_str()) {
+                continue;
+            }
+            let Some(record) =
+                catalog::read_catalog_path(self.object_store.clone(), meta.location.clone())
+                    .await?
+            else {
+                delete_path(self.object_store.clone(), &meta.location).await?;
+                continue;
+            };
+            self.delete_db_prefix(&record.db_prefix).await?;
+            delete_path(self.object_store.clone(), &meta.location).await?;
+        }
+        Ok(())
+    }
+}
+
+async fn delete_path(store: Arc<dyn ObjectStore>, path: &Path) -> Result<()> {
+    match store.delete(path).await {
+        Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
+        Err(err) => Err(err.into()),
+    }
+}
+
+pub(crate) fn normalize_base_prefix(prefix: String) -> String {
+    if prefix.is_empty() {
+        return String::new();
+    }
+    if prefix.ends_with('/') {
+        prefix
+    } else {
+        format!("{prefix}/")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    use bytes::Bytes;
+    use fabro_types::{
+        AttrValue, Checkpoint, Conclusion, FabroSettings, Graph, NodeStatusRecord, RunRecord,
+        RunStatus, RunStatusRecord, StageStatus, StartRecord, StatusReason,
+    };
+    use object_store::memory::InMemory;
+
+    use crate::{EventPayload, NodeVisitRef};
+
+    fn dt(rfc3339: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(rfc3339)
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    fn make_store() -> (Arc<dyn ObjectStore>, SlateStore) {
+        let object_store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let store = SlateStore::new(object_store.clone(), "runs/");
+        (object_store, store)
+    }
+
+    fn sample_run_record(run_id: &str, created_at: DateTime<Utc>) -> RunRecord {
+        let mut graph = Graph::new("night-sky");
+        graph.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("map the constellations".to_string()),
+        );
+        RunRecord {
+            run_id: run_id.to_string(),
+            created_at,
+            settings: FabroSettings::default(),
+            graph,
+            workflow_slug: Some("night-sky".to_string()),
+            working_directory: PathBuf::from("/tmp/night-sky"),
+            host_repo_path: Some("github.com/fabro-sh/fabro".to_string()),
+            base_branch: Some("main".to_string()),
+            labels: std::collections::HashMap::from([("team".to_string(), "infra".to_string())]),
+        }
+    }
+
+    fn sample_start_record(run_id: &str, created_at: DateTime<Utc>) -> StartRecord {
+        StartRecord {
+            run_id: run_id.to_string(),
+            start_time: created_at + chrono::Duration::seconds(5),
+            run_branch: Some("fabro/run/demo".to_string()),
+            base_sha: Some("abc123".to_string()),
+        }
+    }
+
+    fn sample_status(status: RunStatus, reason: Option<StatusReason>) -> RunStatusRecord {
+        RunStatusRecord {
+            status,
+            reason,
+            updated_at: dt("2026-03-27T12:05:00Z"),
+        }
+    }
+
+    fn sample_checkpoint() -> Checkpoint {
+        Checkpoint {
+            timestamp: dt("2026-03-27T12:10:00Z"),
+            current_node: "code".to_string(),
+            completed_nodes: vec!["plan".to_string()],
+            node_retries: std::collections::HashMap::from([("code".to_string(), 1)]),
+            context_values: std::collections::HashMap::new(),
+            node_outcomes: std::collections::HashMap::new(),
+            next_node_id: Some("review".to_string()),
+            git_commit_sha: Some("def456".to_string()),
+            loop_failure_signatures: std::collections::HashMap::new(),
+            restart_failure_signatures: std::collections::HashMap::new(),
+            node_visits: std::collections::HashMap::from([("code".to_string(), 2)]),
+        }
+    }
+
+    fn sample_conclusion() -> Conclusion {
+        Conclusion {
+            timestamp: dt("2026-03-27T12:15:00Z"),
+            status: StageStatus::Success,
+            duration_ms: 3210,
+            failure_reason: None,
+            final_git_commit_sha: Some("feedbeef".to_string()),
+            stages: Vec::new(),
+            total_cost: Some(1.25),
+            total_retries: 2,
+            total_input_tokens: 10,
+            total_output_tokens: 20,
+            total_cache_read_tokens: 30,
+            total_cache_write_tokens: 40,
+            total_reasoning_tokens: 50,
+            has_pricing: true,
+        }
+    }
+
+    fn sample_node_status() -> NodeStatusRecord {
+        NodeStatusRecord {
+            status: StageStatus::Success,
+            notes: Some("done".to_string()),
+            failure_reason: None,
+            timestamp: dt("2026-03-27T12:12:00Z"),
+        }
+    }
+
+    fn event_payload(run_id: &str, ts: &str, event: &str) -> EventPayload {
+        EventPayload::new(
+            serde_json::json!({
+                "ts": ts,
+                "run_id": run_id,
+                "event": event
+            }),
+            run_id,
+        )
+        .unwrap()
+    }
+
+    async fn list_paths(store: Arc<dyn ObjectStore>, prefix: &str) -> Vec<String> {
+        let mut items = store
+            .list(Some(&Path::from(prefix.to_string())))
+            .map_ok(|meta| meta.location.to_string())
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+        items.sort();
+        items
+    }
+
+    async fn object_exists(store: Arc<dyn ObjectStore>, path: &Path) -> bool {
+        store.head(path).await.is_ok()
+    }
+
+    async fn seed_db(
+        object_store: Arc<dyn ObjectStore>,
+        record: &CatalogRecord,
+        include_init: bool,
+    ) -> slatedb::Db {
+        let db = slatedb::Db::open(record.db_prefix.clone(), object_store)
+            .await
+            .unwrap();
+        if include_init {
+            db.put(keys::init(), serde_json::to_vec(record).unwrap())
+                .await
+                .unwrap();
+        }
+        db
+    }
+
+    #[tokio::test]
+    async fn create_open_list_and_delete_full_lifecycle() {
+        let (object_store, store) = make_store();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let run = store.create_run("run-1", created_at).await.unwrap();
+
+        run.put_run(&sample_run_record("run-1", created_at))
+            .await
+            .unwrap();
+        run.put_start(&sample_start_record("run-1", created_at))
+            .await
+            .unwrap();
+        run.put_status(&sample_status(
+            RunStatus::Succeeded,
+            Some(StatusReason::Completed),
+        ))
+        .await
+        .unwrap();
+        run.put_conclusion(&sample_conclusion()).await.unwrap();
+
+        let by_id = catalog::by_id_path("runs/", "run-1");
+        let by_start = catalog::by_start_path("runs/", created_at, "run-1");
+        assert!(object_exists(object_store.clone(), &by_id).await);
+        assert!(object_exists(object_store.clone(), &by_start).await);
+
+        let summary = store.list_runs(&ListRunsQuery::default()).await.unwrap();
+        assert_eq!(summary.len(), 1);
+        assert_eq!(summary[0].run_id, "run-1");
+        assert_eq!(summary[0].workflow_name, Some("night-sky".to_string()));
+        assert_eq!(summary[0].goal, Some("map the constellations".to_string()));
+        assert_eq!(summary[0].status, Some(RunStatus::Succeeded));
+        assert_eq!(summary[0].status_reason, Some(StatusReason::Completed));
+
+        let reopened = store.open_run("run-1").await.unwrap().unwrap();
+        let stored = reopened.get_run().await.unwrap().unwrap();
+        assert_eq!(stored.run_id, "run-1");
+
+        store.delete_run("run-1").await.unwrap();
+        assert!(store.open_run("run-1").await.unwrap().is_none());
+        assert!(!object_exists(object_store.clone(), &by_id).await);
+        assert!(!object_exists(object_store.clone(), &by_start).await);
+        assert!(list_paths(object_store, "runs/db").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn by_id_without_by_start_opens_but_is_omitted_from_list_and_repair_restores_index() {
+        let (object_store, store) = make_store();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let record = CatalogRecord {
+            run_id: "run-1".to_string(),
+            created_at,
+            db_prefix: catalog::db_prefix("runs/", created_at, "run-1"),
+        };
+
+        let db = seed_db(object_store.clone(), &record, true).await;
+        db.put(
+            keys::run(),
+            serde_json::to_vec(&sample_run_record("run-1", created_at)).unwrap(),
+        )
+        .await
+        .unwrap();
+        db.close().await.unwrap();
+
+        object_store
+            .put(
+                &catalog::by_id_path("runs/", "run-1"),
+                serde_json::to_vec(&record).unwrap().into(),
+            )
+            .await
+            .unwrap();
+
+        assert!(store.open_run("run-1").await.unwrap().is_some());
+        assert!(store
+            .list_runs(&ListRunsQuery::default())
+            .await
+            .unwrap()
+            .is_empty());
+
+        store.repair_catalog().await.unwrap();
+        let listed = store.list_runs(&ListRunsQuery::default()).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(
+            object_exists(
+                object_store,
+                &catalog::by_start_path("runs/", created_at, "run-1")
+            )
+            .await
+        );
+    }
+
+    #[tokio::test]
+    async fn reopen_recovers_event_and_checkpoint_sequences() {
+        let (_object_store, store) = make_store();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let run = store.create_run("run-1", created_at).await.unwrap();
+        run.put_run(&sample_run_record("run-1", created_at))
+            .await
+            .unwrap();
+        run.append_event(&event_payload("run-1", "2026-03-27T12:00:00Z", "Started"))
+            .await
+            .unwrap();
+        run.append_event(&event_payload("run-1", "2026-03-27T12:00:01Z", "Next"))
+            .await
+            .unwrap();
+        run.append_checkpoint(&sample_checkpoint()).await.unwrap();
+        drop(run);
+
+        let reopened = store.open_run("run-1").await.unwrap().unwrap();
+        let next_event = reopened
+            .append_event(&event_payload(
+                "run-1",
+                "2026-03-27T12:00:02Z",
+                "AfterReopen",
+            ))
+            .await
+            .unwrap();
+        let next_checkpoint = reopened
+            .append_checkpoint(&sample_checkpoint())
+            .await
+            .unwrap();
+        assert_eq!(next_event, 3);
+        assert_eq!(next_checkpoint, 2);
+    }
+
+    #[tokio::test]
+    async fn open_run_and_list_runs_skip_empty_databases_without_init() {
+        let (object_store, store) = make_store();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let record = CatalogRecord {
+            run_id: "run-1".to_string(),
+            created_at,
+            db_prefix: catalog::db_prefix("runs/", created_at, "run-1"),
+        };
+
+        let db = seed_db(object_store.clone(), &record, false).await;
+        db.close().await.unwrap();
+        object_store
+            .put(
+                &catalog::by_id_path("runs/", "run-1"),
+                serde_json::to_vec(&record).unwrap().into(),
+            )
+            .await
+            .unwrap();
+        object_store
+            .put(
+                &catalog::by_start_path("runs/", created_at, "run-1"),
+                serde_json::to_vec(&record).unwrap().into(),
+            )
+            .await
+            .unwrap();
+
+        assert!(store.open_run("run-1").await.unwrap().is_none());
+        assert!(store
+            .list_runs(&ListRunsQuery::default())
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_run_allows_idempotent_retry_and_rejects_conflict() {
+        let (_object_store, store) = make_store();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        store.create_run("run-1", created_at).await.unwrap();
+        store.create_run("run-1", created_at).await.unwrap();
+
+        let conflict = store
+            .create_run("run-1", created_at + chrono::Duration::seconds(1))
+            .await;
+        assert!(matches!(conflict, Err(StoreError::RunAlreadyExists(_))));
+    }
+
+    #[tokio::test]
+    async fn watch_events_from_polls_new_events() {
+        let (_object_store, store) = make_store();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let run = store.create_run("run-1", created_at).await.unwrap();
+        let mut stream = run.watch_events_from(1).await.unwrap();
+
+        run.append_event(&event_payload("run-1", "2026-03-27T12:00:00Z", "Started"))
+            .await
+            .unwrap();
+
+        let event = tokio::time::timeout(
+            Duration::from_secs(2),
+            futures::StreamExt::next(&mut stream),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+        assert_eq!(event.seq, 1);
+    }
+
+    #[tokio::test]
+    async fn delete_run_is_idempotent_and_fallback_cleans_by_start_orphans() {
+        let (object_store, store) = make_store();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let record = CatalogRecord {
+            run_id: "run-1".to_string(),
+            created_at,
+            db_prefix: catalog::db_prefix("runs/", created_at, "run-1"),
+        };
+        let db = seed_db(object_store.clone(), &record, true).await;
+        db.put(
+            keys::run(),
+            serde_json::to_vec(&sample_run_record("run-1", created_at)).unwrap(),
+        )
+        .await
+        .unwrap();
+        db.close().await.unwrap();
+        object_store
+            .put(
+                &catalog::by_start_path("runs/", created_at, "run-1"),
+                serde_json::to_vec(&record).unwrap().into(),
+            )
+            .await
+            .unwrap();
+
+        store.delete_run("run-1").await.unwrap();
+        store.delete_run("run-1").await.unwrap();
+        assert!(list_paths(object_store, "runs").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn repair_catalog_removes_stale_wrong_time_prefixes() {
+        let (object_store, store) = make_store();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let wrong_time = dt("2026-03-27T11:00:00Z");
+        let run = store.create_run("run-1", created_at).await.unwrap();
+        run.put_run(&sample_run_record("run-1", created_at))
+            .await
+            .unwrap();
+
+        let locator = catalog::read_locator(object_store.clone(), "runs/", "run-1")
+            .await
+            .unwrap()
+            .unwrap();
+        object_store
+            .put(
+                &catalog::by_start_path("runs/", wrong_time, "run-1"),
+                serde_json::to_vec(&locator).unwrap().into(),
+            )
+            .await
+            .unwrap();
+
+        store.repair_catalog().await.unwrap();
+        let paths = list_paths(object_store, "runs/by-start").await;
+        assert_eq!(paths.len(), 1);
+        assert!(paths[0].contains("2026-03-27-12-00/run-1.json"));
+    }
+
+    #[tokio::test]
+    async fn slate_run_store_round_trips_node_data_and_assets() {
+        let (_object_store, store) = make_store();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let run = store.create_run("run-1", created_at).await.unwrap();
+        run.put_run(&sample_run_record("run-1", created_at))
+            .await
+            .unwrap();
+        let node = NodeVisitRef {
+            node_id: "code",
+            visit: 2,
+        };
+        run.put_node_prompt(&node, "Plan").await.unwrap();
+        run.put_node_status(&node, &sample_node_status())
+            .await
+            .unwrap();
+        run.put_asset(&node, "src/lib.rs", b"fn main() {}")
+            .await
+            .unwrap();
+
+        let snapshot = run.get_node(&node).await.unwrap();
+        assert_eq!(snapshot.prompt, Some("Plan".to_string()));
+        assert_eq!(
+            run.get_asset(&node, "src/lib.rs").await.unwrap(),
+            Some(Bytes::from_static(b"fn main() {}"))
+        );
+        assert_eq!(
+            run.list_assets(&node).await.unwrap(),
+            vec!["src/lib.rs".to_string()]
+        );
+    }
+}

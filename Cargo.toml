@@ -62,6 +62,8 @@ daytona-api-client = { git = "https://github.com/brynary/daytona-sdk-rust", rev 
 sentry = { version = "0.35", default-features = false, features = ["backtrace", "contexts", "ureq", "rustls"] }
 fork = "0.2"
 exec = "0.3"
+slatedb = "0.11.2"
+object_store = "0.12.5"
 
 [profile.release]
 lto = "thin"
