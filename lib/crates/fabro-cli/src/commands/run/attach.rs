@@ -39,7 +39,6 @@ pub(crate) async fn attach_run(
     let status_path = run_dir.join("status.json");
     let runtime_state = RuntimeState::new(run_dir);
     let runtime_interview_paths = InterviewPaths::from_runtime_state(&runtime_state);
-    let legacy_interview_paths = InterviewPaths::from_base_dir(run_dir);
 
     let mut engine_guard = engine_child.map(EngineChildGuard::new);
 
@@ -167,11 +166,11 @@ pub(crate) async fn attach_run(
         }
 
         // Check for interview request
-        if let Some(interview_paths) =
-            active_interview_paths(&runtime_interview_paths, &legacy_interview_paths)
-        {
+        if runtime_interview_paths.request_path.exists() {
+            let interview_paths = &runtime_interview_paths;
             if !interview_paths.response_path.exists() {
-                if let Some(_claim_guard) = InterviewClaimGuard::acquire(&interview_paths.base_dir)
+                if let Some(_claim_guard) =
+                    InterviewClaimGuard::acquire(&interview_paths.claim_path)
                 {
                     if let Ok(request_data) = std::fs::read_to_string(&interview_paths.request_path)
                     {
@@ -283,13 +282,7 @@ fn read_status_record(path: &Path) -> Option<RunStatusRecord> {
 }
 
 fn read_launcher_pid(run_dir: &Path) -> Option<u32> {
-    super::launcher::active_launcher_record_for_run(run_dir)
-        .map(|record| record.pid)
-        .or_else(|| {
-            std::fs::read_to_string(run_dir.join("run.pid"))
-                .ok()
-                .and_then(|pid| pid.trim().parse::<u32>().ok())
-        })
+    super::launcher::active_launcher_record_for_run(run_dir).map(|record| record.pid)
 }
 
 fn progress_file_is_empty(path: &Path) -> bool {
@@ -298,47 +291,22 @@ fn progress_file_is_empty(path: &Path) -> bool {
         .unwrap_or(true)
 }
 
+#[allow(clippy::struct_field_names)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct InterviewPaths {
-    base_dir: PathBuf,
+    claim_path: PathBuf,
     request_path: PathBuf,
     response_path: PathBuf,
 }
 
 impl InterviewPaths {
-    fn from_base_dir(base_dir: &Path) -> Self {
-        let base_dir = base_dir.to_path_buf();
-        Self {
-            request_path: base_dir.join("interview_request.json"),
-            response_path: base_dir.join("interview_response.json"),
-            base_dir,
-        }
-    }
-
     fn from_runtime_state(runtime_state: &RuntimeState) -> Self {
         Self {
-            base_dir: runtime_state.runtime_dir(),
+            claim_path: runtime_state.interview_claim_path(),
             request_path: runtime_state.interview_request_path(),
             response_path: runtime_state.interview_response_path(),
         }
     }
-}
-
-fn active_interview_paths(
-    runtime_paths: &InterviewPaths,
-    legacy_paths: &InterviewPaths,
-) -> Option<InterviewPaths> {
-    if runtime_paths.request_path.exists() {
-        Some(runtime_paths.clone())
-    } else if legacy_paths.request_path.exists() {
-        Some(legacy_paths.clone())
-    } else {
-        None
-    }
-}
-
-fn interview_claim_path(base_dir: &Path) -> PathBuf {
-    base_dir.join("interview_request.claim")
 }
 
 struct InterviewClaimGuard {
@@ -346,10 +314,10 @@ struct InterviewClaimGuard {
 }
 
 impl InterviewClaimGuard {
-    fn acquire(base_dir: &Path) -> Option<Self> {
-        if try_claim_interview_request(base_dir) {
+    fn acquire(claim_path: &Path) -> Option<Self> {
+        if try_claim_interview_request(claim_path) {
             Some(Self {
-                claim_path: interview_claim_path(base_dir),
+                claim_path: claim_path.to_path_buf(),
             })
         } else {
             None
@@ -390,25 +358,26 @@ impl Drop for EngineChildGuard {
     }
 }
 
-fn try_claim_interview_request(base_dir: &Path) -> bool {
-    if std::fs::create_dir_all(base_dir).is_err() {
-        return false;
+fn try_claim_interview_request(claim_path: &Path) -> bool {
+    if let Some(parent) = claim_path.parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            return false;
+        }
     }
 
-    let claim_path = interview_claim_path(base_dir);
-    if let Ok(existing) = std::fs::read_to_string(&claim_path) {
+    if let Ok(existing) = std::fs::read_to_string(claim_path) {
         if let Ok(pid) = existing.trim().parse::<u32>() {
             if process_alive(pid) {
                 return pid == std::process::id();
             }
         }
-        let _ = std::fs::remove_file(&claim_path);
+        let _ = std::fs::remove_file(claim_path);
     }
 
     match std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
-        .open(&claim_path)
+        .open(claim_path)
     {
         Ok(mut file) => {
             let _ = writeln!(file, "{}", std::process::id());
@@ -559,11 +528,13 @@ mod tests {
     #[test]
     fn try_claim_interview_request_reclaims_stale_claim() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(interview_claim_path(dir.path()), "999999\n").unwrap();
+        let claim_path = dir.path().join("runtime").join("interview_request.claim");
+        std::fs::create_dir_all(claim_path.parent().unwrap()).unwrap();
+        std::fs::write(&claim_path, "999999\n").unwrap();
 
-        assert!(try_claim_interview_request(dir.path()));
+        assert!(try_claim_interview_request(&claim_path));
         assert_eq!(
-            std::fs::read_to_string(interview_claim_path(dir.path())).unwrap(),
+            std::fs::read_to_string(claim_path).unwrap(),
             format!("{}\n", std::process::id())
         );
     }
@@ -571,45 +542,14 @@ mod tests {
     #[test]
     fn interview_claim_guard_releases_claim_on_drop() {
         let dir = tempfile::tempdir().unwrap();
+        let claim_path = dir.path().join("runtime").join("interview_request.claim");
 
         {
-            let _guard = InterviewClaimGuard::acquire(dir.path()).unwrap();
-            assert!(interview_claim_path(dir.path()).exists());
+            let _guard = InterviewClaimGuard::acquire(&claim_path).unwrap();
+            assert!(claim_path.exists());
         }
 
-        assert!(!interview_claim_path(dir.path()).exists());
-    }
-
-    #[test]
-    fn active_interview_paths_prefers_runtime_paths() {
-        let dir = tempfile::tempdir().unwrap();
-        let runtime_state = RuntimeState::new(dir.path());
-        let runtime_paths = InterviewPaths::from_runtime_state(&runtime_state);
-        let legacy_paths = InterviewPaths::from_base_dir(dir.path());
-
-        std::fs::create_dir_all(runtime_state.runtime_dir()).unwrap();
-        std::fs::write(&runtime_paths.request_path, "{}").unwrap();
-        std::fs::write(&legacy_paths.request_path, "{}").unwrap();
-
-        assert_eq!(
-            active_interview_paths(&runtime_paths, &legacy_paths),
-            Some(runtime_paths)
-        );
-    }
-
-    #[test]
-    fn active_interview_paths_falls_back_to_legacy_paths() {
-        let dir = tempfile::tempdir().unwrap();
-        let runtime_state = RuntimeState::new(dir.path());
-        let runtime_paths = InterviewPaths::from_runtime_state(&runtime_state);
-        let legacy_paths = InterviewPaths::from_base_dir(dir.path());
-
-        std::fs::write(&legacy_paths.request_path, "{}").unwrap();
-
-        assert_eq!(
-            active_interview_paths(&runtime_paths, &legacy_paths),
-            Some(legacy_paths)
-        );
+        assert!(!claim_path.exists());
     }
 
     #[test]

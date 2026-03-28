@@ -15,7 +15,7 @@ const REATTACH_WINDOW: Duration = Duration::from_secs(30);
 #[cfg(test)]
 use std::path::Path;
 
-/// An interviewer that communicates via JSON files in the run directory.
+/// An interviewer that communicates via JSON files in the runtime directory.
 ///
 /// The engine process writes `interview_request.json` and polls for
 /// `interview_response.json`. The attach process watches for the request
@@ -148,10 +148,11 @@ mod tests {
     use crate::{AnswerValue, QuestionType};
 
     fn interviewer_paths(run_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
+        let runtime_dir = run_dir.join("runtime");
         (
-            run_dir.join("interview_request.json"),
-            run_dir.join("interview_response.json"),
-            run_dir.join("interview_request.claim"),
+            runtime_dir.join("interview_request.json"),
+            runtime_dir.join("interview_response.json"),
+            runtime_dir.join("interview_request.claim"),
         )
     }
 

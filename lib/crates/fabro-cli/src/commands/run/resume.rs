@@ -46,14 +46,7 @@ pub(crate) async fn resume_command(
 
 fn launcher_pid_alive(run_dir: &std::path::Path) -> bool {
     super::launcher::active_launcher_record_for_run(run_dir)
-        .map(|record| process_alive(record.pid))
-        .or_else(|| {
-            std::fs::read_to_string(run_dir.join("run.pid"))
-                .ok()
-                .and_then(|pid| pid.trim().parse::<u32>().ok())
-                .map(process_alive)
-        })
-        .unwrap_or(false)
+        .is_some_and(|record| process_alive(record.pid))
 }
 
 #[cfg(test)]

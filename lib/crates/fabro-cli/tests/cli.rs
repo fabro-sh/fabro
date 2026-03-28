@@ -1286,10 +1286,11 @@ fn bug3_attach_leaves_interview_request_until_engine_consumes_response() {
         ],
     );
 
-    // Status: running
+    // Terminal status still allows attach to answer the interview once before exiting.
     std::fs::write(
         run_dir.join("status.json"),
-        serde_json::json!({"status": "running", "updated_at": "2026-01-01T00:00:00Z"}).to_string(),
+        serde_json::json!({"status": "succeeded", "updated_at": "2026-01-01T00:00:00Z"})
+            .to_string(),
     )
     .unwrap();
 
@@ -1311,9 +1312,6 @@ fn bug3_attach_leaves_interview_request_until_engine_consumes_response() {
         serde_json::to_string(&question).unwrap(),
     )
     .unwrap();
-
-    // Dead engine so attach exits after one iteration
-    std::fs::write(run_dir.join("run.pid"), "99999999").unwrap();
 
     // Pipe "y\n" so ConsoleInterviewer doesn't block on stdin
     let _ = arc()
@@ -1375,8 +1373,6 @@ fn attach_closed_stdin_keeps_interview_pending() {
     )
     .unwrap();
 
-    std::fs::write(run_dir.join("run.pid"), "99999999").unwrap();
-
     let assert = arc()
         .env("HOME", home.path())
         .env("NO_COLOR", "1")
@@ -1401,59 +1397,6 @@ fn attach_closed_stdin_keeps_interview_pending() {
     assert!(
         !runtime_state.interview_claim_path().exists(),
         "attach with closed stdin must release the claim so a later attach can answer"
-    );
-}
-
-#[test]
-fn attach_supports_legacy_root_interview_paths() {
-    let home = tempfile::tempdir().unwrap();
-
-    let run_dir = setup_run_dir(
-        home.path(),
-        "attach-legacy-interview-paths",
-        serde_json::json!({}),
-        &[
-            r#"{"ts":"2026-01-01T00:00:01Z","run_id":"attach-legacy-interview-paths","event":"StageStarted","node_id":"gate","name":"Gate","index":0,"attempt":1,"max_attempts":1}"#,
-        ],
-    );
-
-    std::fs::write(
-        run_dir.join("status.json"),
-        serde_json::json!({"status": "running", "updated_at": "2026-01-01T00:00:00Z"}).to_string(),
-    )
-    .unwrap();
-
-    let question = serde_json::json!({
-        "text": "Approve?",
-        "question_type": "YesNo",
-        "options": [],
-        "allow_freeform": false,
-        "default": {"value": "Yes", "selected_option": null, "text": null},
-        "timeout_seconds": 1.0,
-        "stage": "gate",
-        "metadata": {}
-    });
-    std::fs::write(
-        run_dir.join("interview_request.json"),
-        serde_json::to_string(&question).unwrap(),
-    )
-    .unwrap();
-    std::fs::write(run_dir.join("run.pid"), "99999999").unwrap();
-
-    let _ = arc()
-        .env("HOME", home.path())
-        .env("NO_COLOR", "1")
-        .args(["attach", "attach-legacy-interview-paths"])
-        .write_stdin("y\n")
-        .timeout(std::time::Duration::from_secs(5))
-        .output();
-
-    assert!(run_dir.join("interview_request.json").exists());
-    assert!(run_dir.join("interview_response.json").exists());
-    assert!(
-        !RuntimeState::new(&run_dir)
-            .interview_response_path()
-            .exists()
     );
 }
 

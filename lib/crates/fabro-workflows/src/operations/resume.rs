@@ -53,9 +53,6 @@ fn cleanup_resume_artifacts(run_dir: &Path) {
         "conclusion.json",
         "pull_request.json",
         "detached_failure.json",
-        "interview_request.json",
-        "interview_response.json",
-        "interview_request.claim",
         "progress.jsonl",
     ] {
         let _ = std::fs::remove_file(run_dir.join(name));
