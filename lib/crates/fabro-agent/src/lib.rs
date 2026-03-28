@@ -59,4 +59,5 @@ pub use truncation::{
 pub use types::{AgentEvent, SessionEvent, SessionState, Turn};
 
 #[cfg(test)]
+#[allow(unreachable_pub)]
 pub(crate) mod test_support;

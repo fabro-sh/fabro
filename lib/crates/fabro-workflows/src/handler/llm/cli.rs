@@ -966,6 +966,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(unsafe_code)]
     async fn ensure_cli_skips_install_when_present() {
         let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(vec![ok_result()]));
         let emitter = Arc::new(EventEmitter::new());
@@ -980,6 +981,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(unsafe_code)]
     async fn ensure_cli_installs_when_missing() {
         // version check fails, combined install succeeds
         let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(vec![

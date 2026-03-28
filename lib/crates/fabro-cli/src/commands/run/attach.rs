@@ -591,6 +591,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(unsafe_code)]
     fn engine_child_guard_defuse_keeps_alive() {
         let child = std::process::Command::new("sleep")
             .arg("60")
