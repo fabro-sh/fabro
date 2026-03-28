@@ -26,22 +26,7 @@ use crate::records::{Checkpoint, Conclusion, ConclusionExt, RunRecordExt};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{self, RunStatus, RunStatusRecordExt, StatusReason};
 
-struct StartRetroOptions {
-    enabled: bool,
-}
-
-struct StartFinalizeOptions {
-    preserve_sandbox: bool,
-}
-
-struct StartPullRequestConfig {
-    pr_config: Option<fabro_config::run::PullRequestSettings>,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
-    origin_url: Option<String>,
-    model: String,
-}
-
-struct InternalStartOptions {
+struct RunSession {
     cancel_token: Option<Arc<AtomicBool>>,
     emitter: Arc<EventEmitter>,
     sandbox: SandboxSpec,
@@ -57,9 +42,12 @@ struct InternalStartOptions {
     github_app: Option<fabro_github::GitHubAppCredentials>,
     worktree_mode: Option<WorktreeMode>,
     registry_override: Option<Arc<crate::handler::HandlerRegistry>>,
-    retro: StartRetroOptions,
-    finalize: StartFinalizeOptions,
-    pull_request: StartPullRequestConfig,
+    retro_enabled: bool,
+    preserve_sandbox: bool,
+    pr_config: Option<fabro_config::run::PullRequestSettings>,
+    pr_github_app: Option<fabro_github::GitHubAppCredentials>,
+    pr_origin_url: Option<String>,
+    pr_model: String,
 }
 
 pub struct StartServices {
@@ -114,8 +102,8 @@ pub(super) async fn execute_persisted_run(
         }
     };
 
-    let options = match derive_start_options(&persisted, services) {
-        Ok(options) => options,
+    let session = match RunSession::new(&persisted, services) {
+        Ok(session) => session,
         Err(err) => {
             let _ =
                 persist_detached_failure(run_dir, "bootstrap", StatusReason::BootstrapFailed, &err);
@@ -127,7 +115,7 @@ pub(super) async fn execute_persisted_run(
     bootstrap_guard.defuse();
     let mut completion_guard = DetachedRunCompletionGuard::arm(run_dir);
     let run_start = Instant::now();
-    let started = run_engine(persisted, checkpoint, options).await;
+    let started = session.run(persisted, checkpoint).await;
 
     match started {
         Ok(started) => {
@@ -156,167 +144,162 @@ fn persist_terminal_engine_failure(run_dir: &Path, error: &FabroError, duration:
     persist_terminal_outcome(run_dir, &conclusion, run_status, status_reason);
 }
 
-fn derive_start_options(
-    persisted: &Persisted,
-    services: StartServices,
-) -> Result<InternalStartOptions, FabroError> {
-    let record = persisted.run_record();
-    let mut settings = record.settings.clone();
-    let working_directory = record.working_directory.clone();
+impl RunSession {
+    fn new(persisted: &Persisted, services: StartServices) -> Result<Self, FabroError> {
+        let record = persisted.run_record();
+        let mut settings = record.settings.clone();
+        let working_directory = record.working_directory.clone();
 
-    if let Some(env) = settings
-        .sandbox
-        .as_mut()
-        .and_then(|sandbox| sandbox.env.as_mut())
-    {
-        run_config::resolve_env_refs(env)
-            .map_err(|err| FabroError::Precondition(err.to_string()))?;
-    }
-
-    let (origin_url, detected_base_branch) =
-        fabro_sandbox::daytona::detect_repo_info(&working_directory)
-            .map(|(url, branch)| (Some(url), branch))
-            .unwrap_or((None, None));
-
-    let sandbox_provider = resolve_sandbox_provider(&settings)?;
-    let sandbox_provider =
-        if settings.dry_run_enabled() && !matches!(sandbox_provider, SandboxProvider::Local) {
-            SandboxProvider::Local
-        } else {
-            sandbox_provider
-        };
-    let model = settings
-        .llm
-        .as_ref()
-        .and_then(|llm| llm.model.clone())
-        .unwrap_or_else(|| Catalog::builtin().default_from_env().id.clone());
-    let provider = settings
-        .llm
-        .as_ref()
-        .and_then(|llm| llm.provider.clone())
-        .filter(|value| !value.is_empty());
-
-    let provider_enum: Provider = provider
-        .as_deref()
-        .map(|value| value.parse::<Provider>())
-        .transpose()
-        .map_err(|err| FabroError::Precondition(err.to_string()))?
-        .unwrap_or_else(Provider::default_from_env);
-
-    let fallback_chain = resolve_fallback_chain(provider_enum, &model, &settings);
-    let mcp_servers = settings
-        .mcp_server_entries()
-        .clone()
-        .into_iter()
-        .map(|(name, entry)| entry.into_config(name))
-        .collect();
-
-    let sandbox = match sandbox_provider {
-        SandboxProvider::Local => SandboxSpec::Local {
-            working_directory: working_directory.clone(),
-        },
-        SandboxProvider::Docker => SandboxSpec::Docker {
-            config: fabro_agent::DockerSandboxConfig {
-                host_working_directory: working_directory.to_string_lossy().to_string(),
-                ..Default::default()
-            },
-        },
-        SandboxProvider::Daytona => SandboxSpec::Daytona {
-            config: resolve_daytona_config(&settings).unwrap_or_default(),
-            github_app: services.github_app.clone(),
-            run_id: Some(record.run_id.clone()),
-            clone_branch: detected_base_branch.or_else(|| record.base_branch.clone()),
-        },
-        #[cfg(feature = "exedev")]
-        SandboxProvider::Exe => SandboxSpec::Exe {
-            config: resolve_exe_config(&settings).unwrap_or_default(),
-            clone_params: resolve_exe_clone_params(&working_directory),
-            run_id: Some(record.run_id.clone()),
-            github_app: services.github_app.clone(),
-            mgmt_destination: "exe.dev".to_string(),
-        },
-        #[cfg(not(feature = "exedev"))]
-        SandboxProvider::Exe => {
-            return Err(FabroError::Precondition(
-                "exe sandbox requires the exedev feature".to_string(),
-            ));
+        if let Some(env) = settings
+            .sandbox
+            .as_mut()
+            .and_then(|sandbox| sandbox.env.as_mut())
+        {
+            run_config::resolve_env_refs(env)
+                .map_err(|err| FabroError::Precondition(err.to_string()))?;
         }
-        SandboxProvider::Ssh => SandboxSpec::Ssh {
-            config: resolve_ssh_config(&settings).ok_or_else(|| {
-                FabroError::Precondition("--sandbox ssh requires [sandbox.ssh] config".to_string())
-            })?,
-            clone_params: resolve_ssh_clone_params(&working_directory),
-            run_id: Some(record.run_id.clone()),
-            github_app: services.github_app.clone(),
-        },
-    };
 
-    let sandbox_env = SandboxEnvSpec {
-        devcontainer_env: HashMap::new(),
-        toml_env: settings
+        let (origin_url, detected_base_branch) =
+            fabro_sandbox::daytona::detect_repo_info(&working_directory)
+                .map(|(url, branch)| (Some(url), branch))
+                .unwrap_or((None, None));
+
+        let sandbox_provider = resolve_sandbox_provider(&settings)?;
+        let sandbox_provider =
+            if settings.dry_run_enabled() && !matches!(sandbox_provider, SandboxProvider::Local) {
+                SandboxProvider::Local
+            } else {
+                sandbox_provider
+            };
+        let model = settings
+            .llm
+            .as_ref()
+            .and_then(|llm| llm.model.clone())
+            .unwrap_or_else(|| Catalog::builtin().default_from_env().id.clone());
+        let provider = settings
+            .llm
+            .as_ref()
+            .and_then(|llm| llm.provider.clone())
+            .filter(|value| !value.is_empty());
+
+        let provider_enum: Provider = provider
+            .as_deref()
+            .map(|value| value.parse::<Provider>())
+            .transpose()
+            .map_err(|err| FabroError::Precondition(err.to_string()))?
+            .unwrap_or_else(Provider::default_from_env);
+
+        let fallback_chain = resolve_fallback_chain(provider_enum, &model, &settings);
+        let mcp_servers = settings
+            .mcp_server_entries()
+            .clone()
+            .into_iter()
+            .map(|(name, entry)| entry.into_config(name))
+            .collect();
+
+        let sandbox = match sandbox_provider {
+            SandboxProvider::Local => SandboxSpec::Local {
+                working_directory: working_directory.clone(),
+            },
+            SandboxProvider::Docker => SandboxSpec::Docker {
+                config: fabro_agent::DockerSandboxConfig {
+                    host_working_directory: working_directory.to_string_lossy().to_string(),
+                    ..Default::default()
+                },
+            },
+            SandboxProvider::Daytona => SandboxSpec::Daytona {
+                config: resolve_daytona_config(&settings).unwrap_or_default(),
+                github_app: services.github_app.clone(),
+                run_id: Some(record.run_id.clone()),
+                clone_branch: detected_base_branch.or_else(|| record.base_branch.clone()),
+            },
+            #[cfg(feature = "exedev")]
+            SandboxProvider::Exe => SandboxSpec::Exe {
+                config: resolve_exe_config(&settings).unwrap_or_default(),
+                clone_params: resolve_exe_clone_params(&working_directory),
+                run_id: Some(record.run_id.clone()),
+                github_app: services.github_app.clone(),
+                mgmt_destination: "exe.dev".to_string(),
+            },
+            #[cfg(not(feature = "exedev"))]
+            SandboxProvider::Exe => {
+                return Err(FabroError::Precondition(
+                    "exe sandbox requires the exedev feature".to_string(),
+                ));
+            }
+            SandboxProvider::Ssh => SandboxSpec::Ssh {
+                config: resolve_ssh_config(&settings).ok_or_else(|| {
+                    FabroError::Precondition(
+                        "--sandbox ssh requires [sandbox.ssh] config".to_string(),
+                    )
+                })?,
+                clone_params: resolve_ssh_clone_params(&working_directory),
+                run_id: Some(record.run_id.clone()),
+                github_app: services.github_app.clone(),
+            },
+        };
+
+        let sandbox_env = SandboxEnvSpec {
+            devcontainer_env: HashMap::new(),
+            toml_env: settings
+                .sandbox_settings()
+                .and_then(|sandbox| sandbox.env.clone())
+                .unwrap_or_default(),
+            github_permissions: settings.github_permissions().cloned(),
+            origin_url: origin_url.clone(),
+        };
+
+        let devcontainer = settings
             .sandbox_settings()
-            .and_then(|sandbox| sandbox.env.clone())
-            .unwrap_or_default(),
-        github_permissions: settings.github_permissions().cloned(),
-        origin_url: origin_url.clone(),
-    };
+            .and_then(|sandbox| sandbox.devcontainer)
+            .unwrap_or(false)
+            .then(|| DevcontainerSpec {
+                enabled: true,
+                resolve_dir: working_directory.clone(),
+            });
 
-    let devcontainer = settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.devcontainer)
-        .unwrap_or(false)
-        .then(|| DevcontainerSpec {
-            enabled: true,
-            resolve_dir: working_directory.clone(),
-        });
+        let interviewer: Arc<dyn Interviewer> = if settings.auto_approve_enabled() {
+            Arc::new(AutoApproveInterviewer)
+        } else {
+            services.interviewer
+        };
 
-    let interviewer: Arc<dyn Interviewer> = if settings.auto_approve_enabled() {
-        Arc::new(AutoApproveInterviewer)
-    } else {
-        services.interviewer
-    };
-
-    Ok(InternalStartOptions {
-        cancel_token: services.cancel_token,
-        emitter: services.emitter,
-        sandbox,
-        llm: LlmSpec {
-            model: model.clone(),
-            provider: provider_enum,
-            fallback_chain,
-            mcp_servers,
-            dry_run: settings.dry_run_enabled(),
-        },
-        interviewer,
-        lifecycle: LifecycleOptions {
-            setup_commands: settings.setup_commands().to_vec(),
-            setup_command_timeout_ms: settings.setup_timeout_ms().unwrap_or(300_000),
-            devcontainer_phases: Vec::new(),
-        },
-        hooks: fabro_hooks::HookConfig {
-            hooks: settings.hooks.clone(),
-        },
-        sandbox_env,
-        devcontainer,
-        seed_context: None,
-        git_author: services.git_author,
-        git: None,
-        github_app: services.github_app.clone(),
-        worktree_mode: Some(resolve_worktree_mode(&settings)),
-        registry_override: services.registry_override,
-        retro: StartRetroOptions {
-            enabled: !settings.no_retro_enabled() && project_config::is_retro_enabled(),
-        },
-        finalize: StartFinalizeOptions {
+        Ok(RunSession {
+            cancel_token: services.cancel_token,
+            emitter: services.emitter,
+            sandbox,
+            llm: LlmSpec {
+                model: model.clone(),
+                provider: provider_enum,
+                fallback_chain,
+                mcp_servers,
+                dry_run: settings.dry_run_enabled(),
+            },
+            interviewer,
+            lifecycle: LifecycleOptions {
+                setup_commands: settings.setup_commands().to_vec(),
+                setup_command_timeout_ms: settings.setup_timeout_ms().unwrap_or(300_000),
+                devcontainer_phases: Vec::new(),
+            },
+            hooks: fabro_hooks::HookConfig {
+                hooks: settings.hooks.clone(),
+            },
+            sandbox_env,
+            devcontainer,
+            seed_context: None,
+            git_author: services.git_author,
+            git: None,
+            github_app: services.github_app.clone(),
+            worktree_mode: Some(resolve_worktree_mode(&settings)),
+            registry_override: services.registry_override,
+            retro_enabled: !settings.no_retro_enabled() && project_config::is_retro_enabled(),
             preserve_sandbox: resolve_preserve_sandbox(&settings),
-        },
-        pull_request: StartPullRequestConfig {
             pr_config: settings.pull_request.clone(),
-            github_app: services.github_app,
-            origin_url,
-            model,
-        },
-    })
+            pr_github_app: services.github_app,
+            pr_origin_url: origin_url,
+            pr_model: model,
+        })
+    }
 }
 
 fn resolve_sandbox_provider(settings: &FabroSettings) -> Result<SandboxProvider, FabroError> {
@@ -400,136 +383,138 @@ fn resolve_fallback_chain(
     }
 }
 
-/// Shared engine: initialize, execute, retro, finalize, pull_request.
-async fn run_engine(
-    persisted: Persisted,
-    checkpoint: Option<Checkpoint>,
-    options: InternalStartOptions,
-) -> Result<Started, FabroError> {
-    let preserve_sandbox = options.finalize.preserve_sandbox;
+impl RunSession {
+    /// Shared engine: initialize, execute, retro, finalize, pull_request.
+    async fn run(
+        self,
+        persisted: Persisted,
+        checkpoint: Option<Checkpoint>,
+    ) -> Result<Started, FabroError> {
+        let preserve_sandbox = self.preserve_sandbox;
 
-    let record = persisted.run_record();
-    let run_options = RunOptions {
-        settings: record.settings.clone(),
-        run_dir: persisted.run_dir().to_path_buf(),
-        cancel_token: options.cancel_token,
-        run_id: record.run_id.clone(),
-        labels: record.labels.clone(),
-        git_author: options.git_author,
-        workflow_slug: record.workflow_slug.clone(),
-        github_app: options.github_app.clone(),
-        host_repo_path: record.host_repo_path.as_deref().map(PathBuf::from),
-        base_branch: record.base_branch.clone(),
-        display_base_sha: None,
-        git: options.git.clone(),
-    };
+        let record = persisted.run_record();
+        let run_options = RunOptions {
+            settings: record.settings.clone(),
+            run_dir: persisted.run_dir().to_path_buf(),
+            cancel_token: self.cancel_token,
+            run_id: record.run_id.clone(),
+            labels: record.labels.clone(),
+            git_author: self.git_author,
+            workflow_slug: record.workflow_slug.clone(),
+            github_app: self.github_app.clone(),
+            host_repo_path: record.host_repo_path.as_deref().map(PathBuf::from),
+            base_branch: record.base_branch.clone(),
+            display_base_sha: None,
+            git: self.git.clone(),
+        };
 
-    let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    {
-        let sha_clone = Arc::clone(&last_git_sha);
-        options.emitter.on_event(move |event| match event {
-            WorkflowRunEvent::CheckpointCompleted {
-                git_commit_sha: Some(sha),
-                ..
-            }
-            | WorkflowRunEvent::WorkflowRunCompleted {
-                final_git_commit_sha: Some(sha),
-                ..
-            }
-            | WorkflowRunEvent::GitCommit { sha, .. } => {
-                *sha_clone.lock().unwrap() = Some(sha.clone());
-            }
-            _ => {}
-        });
-    }
-
-    ProgressLogger::new(persisted.run_dir(), record.run_id.clone())
-        .register(options.emitter.as_ref());
-
-    let init_options = InitOptions {
-        run_id: record.run_id.clone(),
-        dry_run: run_options.dry_run_enabled(),
-        emitter: options.emitter,
-        sandbox: options.sandbox,
-        llm: options.llm,
-        interviewer: options.interviewer,
-        lifecycle: options.lifecycle,
-        run_options,
-        hooks: options.hooks,
-        sandbox_env: options.sandbox_env,
-        devcontainer: options.devcontainer,
-        git: options.git,
-        worktree_mode: options.worktree_mode,
-        registry_override: options.registry_override,
-        checkpoint,
-        seed_context: options.seed_context,
-    };
-    let initialized = pipeline::initialize(persisted, init_options).await?;
-
-    let sandbox_for_cleanup = Arc::clone(&initialized.sandbox);
-    let cleanup_guard = scopeguard::guard((), move |()| {
-        if preserve_sandbox {
-            return;
-        }
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
-                let _ = sandbox_for_cleanup.cleanup().await;
+        let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        {
+            let sha_clone = Arc::clone(&last_git_sha);
+            self.emitter.on_event(move |event| match event {
+                WorkflowRunEvent::CheckpointCompleted {
+                    git_commit_sha: Some(sha),
+                    ..
+                }
+                | WorkflowRunEvent::WorkflowRunCompleted {
+                    final_git_commit_sha: Some(sha),
+                    ..
+                }
+                | WorkflowRunEvent::GitCommit { sha, .. } => {
+                    *sha_clone.lock().unwrap() = Some(sha.clone());
+                }
+                _ => {}
             });
         }
-    });
 
-    let executed = pipeline::execute(initialized).await;
-    let failed = !matches!(
-        executed.outcome.as_ref().map(|outcome| &outcome.status),
-        Ok(StageStatus::Success) | Ok(StageStatus::PartialSuccess)
-    );
+        ProgressLogger::new(persisted.run_dir(), record.run_id.clone())
+            .register(self.emitter.as_ref());
 
-    let retro_opts = RetroOptions {
-        run_id: executed.run_options.run_id.clone(),
-        workflow_name: executed.graph.name.clone(),
-        goal: executed.graph.goal().to_string(),
-        run_dir: executed.run_options.run_dir.clone(),
-        sandbox: Arc::clone(&executed.sandbox),
-        emitter: Some(Arc::clone(&executed.emitter)),
-        failed,
-        run_duration_ms: executed.duration_ms,
-        enabled: options.retro.enabled,
-        llm_client: executed.llm_client.clone(),
-        provider: executed.provider,
-        model: executed.model.clone(),
-    };
+        let init_options = InitOptions {
+            run_id: record.run_id.clone(),
+            dry_run: run_options.dry_run_enabled(),
+            emitter: self.emitter,
+            sandbox: self.sandbox,
+            llm: self.llm,
+            interviewer: self.interviewer,
+            lifecycle: self.lifecycle,
+            run_options,
+            hooks: self.hooks,
+            sandbox_env: self.sandbox_env,
+            devcontainer: self.devcontainer,
+            git: self.git,
+            worktree_mode: self.worktree_mode,
+            registry_override: self.registry_override,
+            checkpoint,
+            seed_context: self.seed_context,
+        };
+        let initialized = pipeline::initialize(persisted, init_options).await?;
 
-    let retro_start = Instant::now();
-    let retroed = pipeline::retro(executed, &retro_opts).await;
-    let retro_duration = retro_start.elapsed();
+        let sandbox_for_cleanup = Arc::clone(&initialized.sandbox);
+        let cleanup_guard = scopeguard::guard((), move |()| {
+            if preserve_sandbox {
+                return;
+            }
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = sandbox_for_cleanup.cleanup().await;
+                });
+            }
+        });
 
-    let finalize_opts = FinalizeOptions {
-        run_dir: retroed.run_options.run_dir.clone(),
-        run_id: retroed.run_options.run_id.clone(),
-        workflow_name: retroed.graph.name.clone(),
-        hook_runner: retroed.hook_runner.clone(),
-        preserve_sandbox: options.finalize.preserve_sandbox,
-        last_git_sha: last_git_sha.lock().unwrap().clone(),
-    };
-    let pr_opts = PullRequestOptions {
-        run_dir: retroed.run_options.run_dir.clone(),
-        pr_config: options.pull_request.pr_config,
-        github_app: options.pull_request.github_app,
-        origin_url: options.pull_request.origin_url,
-        model: options.pull_request.model,
-    };
+        let executed = pipeline::execute(initialized).await;
+        let failed = !matches!(
+            executed.outcome.as_ref().map(|outcome| &outcome.status),
+            Ok(StageStatus::Success) | Ok(StageStatus::PartialSuccess)
+        );
 
-    let retro = retroed.retro.clone();
-    let concluded = pipeline::finalize(retroed, &finalize_opts).await?;
-    let finalized = pipeline::pull_request(concluded, &pr_opts).await;
+        let retro_opts = RetroOptions {
+            run_id: executed.run_options.run_id.clone(),
+            workflow_name: executed.graph.name.clone(),
+            goal: executed.graph.goal().to_string(),
+            run_dir: executed.run_options.run_dir.clone(),
+            sandbox: Arc::clone(&executed.sandbox),
+            emitter: Some(Arc::clone(&executed.emitter)),
+            failed,
+            run_duration_ms: executed.duration_ms,
+            enabled: self.retro_enabled,
+            llm_client: executed.llm_client.clone(),
+            provider: executed.provider,
+            model: executed.model.clone(),
+        };
 
-    scopeguard::ScopeGuard::into_inner(cleanup_guard);
+        let retro_start = Instant::now();
+        let retroed = pipeline::retro(executed, &retro_opts).await;
+        let retro_duration = retro_start.elapsed();
 
-    Ok(Started {
-        finalized,
-        retro,
-        retro_duration,
-    })
+        let finalize_opts = FinalizeOptions {
+            run_dir: retroed.run_options.run_dir.clone(),
+            run_id: retroed.run_options.run_id.clone(),
+            workflow_name: retroed.graph.name.clone(),
+            hook_runner: retroed.hook_runner.clone(),
+            preserve_sandbox: self.preserve_sandbox,
+            last_git_sha: last_git_sha.lock().unwrap().clone(),
+        };
+        let pr_opts = PullRequestOptions {
+            run_dir: retroed.run_options.run_dir.clone(),
+            pr_config: self.pr_config,
+            github_app: self.pr_github_app,
+            origin_url: self.pr_origin_url,
+            model: self.pr_model,
+        };
+
+        let retro = retroed.retro.clone();
+        let concluded = pipeline::finalize(retroed, &finalize_opts).await?;
+        let finalized = pipeline::pull_request(concluded, &pr_opts).await;
+
+        scopeguard::ScopeGuard::into_inner(cleanup_guard);
+
+        Ok(Started {
+            finalized,
+            retro,
+            retro_duration,
+        })
+    }
 }
 
 struct DetachedRunBootstrapGuard {
