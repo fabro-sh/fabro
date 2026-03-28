@@ -32,6 +32,7 @@ pub fn built_in_rules() -> Vec<Box<dyn LintRule>> {
         Box::new(ScriptAbsoluteCdRule),
         Box::new(StylesheetModelKnownRule),
         Box::new(NodeModelKnownRule),
+        Box::new(ImportErrorRule),
         Box::new(UnresolvedFileRefRule),
         Box::new(ThreadIdRequiresFidelityFullRule),
         Box::new(SelectionValidRule),
@@ -1033,7 +1034,50 @@ impl LintRule for NodeModelKnownRule {
     }
 }
 
-// --- Rule 22: unresolved_file_ref (ERROR) ---
+// --- Rule 22: import_error (ERROR) ---
+
+struct ImportErrorRule;
+
+impl LintRule for ImportErrorRule {
+    fn name(&self) -> &'static str {
+        "import_error"
+    }
+
+    fn apply(&self, graph: &Graph) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+
+        for node in graph.nodes.values() {
+            if let Some(AttrValue::String(message)) = node.attrs.get("import_error") {
+                diagnostics.push(Diagnostic {
+                    rule: self.name().to_string(),
+                    severity: Severity::Error,
+                    message: message.clone(),
+                    node_id: Some(node.id.clone()),
+                    edge: None,
+                    fix: Some("Fix the imported workflow or import path".to_string()),
+                });
+            }
+
+            if node.attrs.contains_key("import") {
+                diagnostics.push(Diagnostic {
+                    rule: self.name().to_string(),
+                    severity: Severity::Error,
+                    message: "unresolved import (no base directory available)".to_string(),
+                    node_id: Some(node.id.clone()),
+                    edge: None,
+                    fix: Some(
+                        "Load the workflow from a file so imports can resolve relative to it"
+                            .to_string(),
+                    ),
+                });
+            }
+        }
+
+        diagnostics
+    }
+}
+
+// --- Rule 23: unresolved_file_ref (ERROR) ---
 
 struct UnresolvedFileRefRule;
 
@@ -1080,7 +1124,7 @@ impl LintRule for UnresolvedFileRefRule {
     }
 }
 
-// --- Rule 22: thread_id_requires_fidelity_full (WARNING) ---
+// --- Rule 24: thread_id_requires_fidelity_full (WARNING) ---
 
 struct ThreadIdRequiresFidelityFullRule;
 
@@ -3158,6 +3202,55 @@ mod tests {
     fn node_model_known_rule_no_model_no_provider() {
         let g = minimal_graph();
         let rule = NodeModelKnownRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // import_error rule tests
+
+    #[test]
+    fn import_error_rule_fires_on_import_error_attr() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "import_error".to_string(),
+            AttrValue::String("file not found: ./missing.fabro".to_string()),
+        );
+        g.nodes.insert("work".to_string(), node);
+
+        let rule = ImportErrorRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
+        assert_eq!(d[0].message, "file not found: ./missing.fabro");
+        assert_eq!(d[0].node_id.as_deref(), Some("work"));
+    }
+
+    #[test]
+    fn import_error_rule_fires_on_unresolved_import_attr() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "import".to_string(),
+            AttrValue::String("./validate.fabro".to_string()),
+        );
+        g.nodes.insert("work".to_string(), node);
+
+        let rule = ImportErrorRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
+        assert_eq!(
+            d[0].message,
+            "unresolved import (no base directory available)"
+        );
+        assert_eq!(d[0].node_id.as_deref(), Some("work"));
+    }
+
+    #[test]
+    fn import_error_rule_silent_for_clean_nodes() {
+        let g = minimal_graph();
+        let rule = ImportErrorRule;
         let d = rule.apply(&g);
         assert!(d.is_empty());
     }

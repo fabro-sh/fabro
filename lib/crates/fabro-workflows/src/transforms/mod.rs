@@ -6,7 +6,7 @@ pub trait Transform {
 }
 
 mod file_inlining;
-mod graph_merge;
+mod import;
 mod model_resolution;
 mod preamble;
 pub mod stylesheet;
@@ -14,7 +14,7 @@ mod stylesheet_application;
 pub mod variable_expansion;
 
 pub use file_inlining::{FileInliningTransform, resolve_file_ref};
-pub use graph_merge::GraphMergeTransform;
+pub use import::ImportTransform;
 pub use model_resolution::ModelResolutionTransform;
 pub use preamble::PreambleTransform;
 pub use stylesheet_application::StylesheetApplicationTransform;
