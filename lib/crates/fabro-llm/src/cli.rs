@@ -626,9 +626,6 @@ async fn stream_session_text(response: reqwest::Response) -> Result<()> {
                     }
                 }
             }
-            "assistant_turn" => {
-                // Text already printed via content_delta events
-            }
             "done" => {
                 println!();
                 return Ok(false);

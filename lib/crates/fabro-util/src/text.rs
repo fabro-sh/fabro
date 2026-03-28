@@ -5,7 +5,7 @@
 pub fn strip_goal_decoration(goal: &str) -> &str {
     let line = goal.lines().next().unwrap_or("");
     let line = line.trim_start_matches('#').trim();
-    line.strip_prefix("Plan:").map(str::trim).unwrap_or(line)
+    line.strip_prefix("Plan:").map_or(line, str::trim)
 }
 
 #[cfg(test)]

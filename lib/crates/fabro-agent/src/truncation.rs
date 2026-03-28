@@ -24,12 +24,9 @@ fn default_char_limit(tool_name: &str) -> Option<usize> {
     match tool_name {
         "read_file" => Some(50_000),
         "shell" => Some(30_000),
-        "grep" => Some(20_000),
-        "glob" => Some(20_000),
-        "edit_file" => Some(10_000),
+        "grep" | "glob" | "spawn_agent" => Some(20_000),
+        "edit_file" | "apply_patch" => Some(10_000),
         "write_file" => Some(1_000),
-        "apply_patch" => Some(10_000),
-        "spawn_agent" => Some(20_000),
         _ => None,
     }
 }

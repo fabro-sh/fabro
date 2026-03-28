@@ -563,8 +563,7 @@ impl WorkflowRunEvent {
             Self::Prompt { stage, text } => {
                 debug!(stage, text_len = text.len(), "Prompt sent");
             }
-            Self::Agent { .. } => {}
-            Self::Sandbox { .. } => {}
+            Self::Agent { .. } | Self::Sandbox { .. } => {}
             Self::SandboxInitialized {
                 working_directory, ..
             } => {

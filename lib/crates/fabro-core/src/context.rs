@@ -65,8 +65,7 @@ impl Context {
     pub fn node_visit_count(&self) -> usize {
         self.get("internal.node_visit_count")
             .and_then(|v| v.as_u64())
-            .map(|v| usize::try_from(v).unwrap())
-            .unwrap_or(0)
+            .map_or(0, |v| usize::try_from(v).unwrap())
     }
 }
 

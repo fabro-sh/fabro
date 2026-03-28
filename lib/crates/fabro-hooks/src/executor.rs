@@ -220,7 +220,7 @@ impl HookExecutorImpl {
 
     /// Resolve a model alias (e.g. "haiku") to a concrete model ID.
     fn resolve_model(model: Option<&String>) -> String {
-        let model_id = model.map(String::as_str).unwrap_or("haiku");
+        let model_id = model.map_or("haiku", String::as_str);
         let model_info = fabro_model::Catalog::builtin().get(model_id);
         model_info.map_or(model_id, |m| m.id.as_str()).to_string()
     }

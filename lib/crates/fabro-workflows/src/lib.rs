@@ -40,9 +40,7 @@ pub fn build_completed_stages(cp: &records::Checkpoint, run_failed: bool) -> Vec
         let outcome = cp.node_outcomes.get(node_id);
         let retries = cp.node_retries.get(node_id).copied().unwrap_or(0);
 
-        let status = outcome
-            .map(|o| o.status.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
+        let status = outcome.map_or_else(|| "unknown".to_string(), |o| o.status.to_string());
 
         let succeeded = matches!(
             outcome.map(|o| &o.status),

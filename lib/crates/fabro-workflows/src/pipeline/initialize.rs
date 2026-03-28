@@ -142,8 +142,9 @@ async fn resolve_worktree_plan(
     let host_repo_path = host_repo_path_for_planning(&options.run_options, &options.sandbox);
     let git_status = host_repo_path
         .as_ref()
-        .map(|path| git::sync_status(path, "origin", options.run_options.base_branch.as_deref()))
-        .unwrap_or(GitSyncStatus::Dirty);
+        .map_or(GitSyncStatus::Dirty, |path| {
+            git::sync_status(path, "origin", options.run_options.base_branch.as_deref())
+        });
     let strategy = resolve_workdir_strategy(
         &options.sandbox,
         worktree_mode,

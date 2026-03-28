@@ -219,7 +219,6 @@ impl AgentEvent {
             Self::AssistantTextStart => {
                 debug!(session_id, "Assistant response started");
             }
-            Self::AssistantOutputReplace { .. } => {}
             Self::AssistantMessage {
                 model,
                 usage,
@@ -235,8 +234,11 @@ impl AgentEvent {
                     "Assistant message"
                 );
             }
-            Self::TextDelta { .. } => {}
-            Self::ReasoningDelta { .. } => {}
+            Self::TextDelta { .. }
+            | Self::ReasoningDelta { .. }
+            | Self::AssistantOutputReplace { .. }
+            | Self::ToolCallOutputDelta { .. }
+            | Self::SubAgentEvent { .. } => {}
             Self::ToolCallStarted {
                 tool_name,
                 tool_call_id,
@@ -249,7 +251,6 @@ impl AgentEvent {
                     "Tool call started"
                 );
             }
-            Self::ToolCallOutputDelta { .. } => {}
             Self::ToolCallCompleted {
                 tool_name,
                 tool_call_id,
@@ -362,7 +363,6 @@ impl AgentEvent {
             Self::SubAgentClosed { agent_id, depth } => {
                 debug!(session_id, agent_id, depth, "Sub-agent closed");
             }
-            Self::SubAgentEvent { .. } => {}
             Self::McpServerReady {
                 server_name,
                 tool_count,

@@ -166,8 +166,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 max_attempts: ctx.result.max_attempts as usize,
                 delay_ms: ctx
                     .backoff_delay
-                    .map(|d| u64::try_from(d.as_millis()).unwrap())
-                    .unwrap_or(0),
+                    .map_or(0, |d| u64::try_from(d.as_millis()).unwrap()),
             });
         }
         Ok(())
@@ -320,8 +319,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             let error_msg = outcome
                 .failure
                 .as_ref()
-                .map(|f| f.message.clone())
-                .unwrap_or_else(|| "run failed".to_string());
+                .map_or_else(|| "run failed".to_string(), |f| f.message.clone());
             self.emitter.emit(&WorkflowRunEvent::WorkflowRunFailed {
                 error: FabroError::engine(error_msg),
                 duration_ms,

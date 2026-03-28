@@ -263,10 +263,8 @@ pub(crate) fn resolve_run_settings(mut settings: FabroSettings, graph: &Graph) -
 
     let provider = configured_provider.or(graph_provider).map(str::to_string);
 
-    let model = configured_model
-        .or(graph_model)
-        .map(str::to_string)
-        .unwrap_or_else(|| {
+    let model = configured_model.or(graph_model).map_or_else(
+        || {
             let catalog = Catalog::builtin();
             provider
                 .as_deref()
@@ -275,7 +273,9 @@ pub(crate) fn resolve_run_settings(mut settings: FabroSettings, graph: &Graph) -
                 .unwrap_or_else(|| catalog.default_from_env())
                 .id
                 .clone()
-        });
+        },
+        str::to_string,
+    );
 
     let (resolved_model, resolved_provider) = match Catalog::builtin().get(&model) {
         Some(info) => (

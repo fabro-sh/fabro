@@ -81,13 +81,13 @@ impl RunTimeline {
                     .rev()
                     .find(|e| e.node_name == *effective_name)
                     .ok_or_else(|| {
-                        if effective_name != name {
+                        if effective_name == name {
+                            anyhow::anyhow!("no checkpoint found for node '{name}'")
+                        } else {
                             anyhow::anyhow!(
                                 "node '{name}' is inside parallel '{effective_name}'; \
                                  no checkpoint found for '{effective_name}'"
                             )
-                        } else {
-                            anyhow::anyhow!("no checkpoint found for node '{name}'")
                         }
                     })
             }
@@ -97,13 +97,13 @@ impl RunTimeline {
                     .iter()
                     .find(|e| e.node_name == *effective_name && e.visit == *visit)
                     .ok_or_else(|| {
-                        if effective_name != name {
+                        if effective_name == name {
+                            anyhow::anyhow!("no visit {visit} found for node '{name}'")
+                        } else {
                             anyhow::anyhow!(
                                 "node '{name}' is inside parallel '{effective_name}'; \
                                  no visit {visit} found for '{effective_name}'"
                             )
-                        } else {
-                            anyhow::anyhow!("no visit {visit} found for node '{name}'")
                         }
                     })
             }

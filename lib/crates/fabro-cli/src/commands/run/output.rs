@@ -30,9 +30,7 @@ fn print_workflow_header(
             graph.edges.len()
         )),
     );
-    let graph_path = dot_path
-        .map(relative_path)
-        .unwrap_or_else(|| "<inline>".to_string());
+    let graph_path = dot_path.map_or_else(|| "<inline>".to_string(), relative_path);
     eprintln!(
         "{} {}",
         styles.dim.apply_to("Graph:"),

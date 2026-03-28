@@ -138,8 +138,7 @@ pub(crate) async fn attach_run(
                 for _ in 0..20 {
                     if conclusion_path.exists()
                         || read_status_record(&status_path)
-                            .map(|record| record.status.is_terminal())
-                            .unwrap_or(false)
+                            .is_some_and(|record| record.status.is_terminal())
                     {
                         break;
                     }
@@ -214,9 +213,8 @@ pub(crate) async fn attach_run(
 
         let child_alive_via_handle = engine_guard.as_mut().and_then(|guard| {
             guard.inner().map(|child| match child.try_wait() {
-                Ok(Some(_)) => false, // child exited
-                Ok(None) => true,     // still running
-                Err(_) => false,      // error, treat as dead
+                Ok(None) => true,              // still running
+                Ok(Some(_)) | Err(_) => false, // exited or error
             })
         });
 
@@ -269,14 +267,13 @@ fn drain_remaining(
     loop {
         line.clear();
         match reader.read_line(line) {
-            Ok(0) => break,
+            Ok(0) | Err(_) => break,
             Ok(_) => {
                 let trimmed = line.trim();
                 if !trimmed.is_empty() {
                     progress_ui.handle_json_line(trimmed);
                 }
             }
-            Err(_) => break,
         }
     }
 }

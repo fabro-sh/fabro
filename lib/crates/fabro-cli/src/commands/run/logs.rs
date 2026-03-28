@@ -80,11 +80,7 @@ fn apply_filters(
     let filtered: Vec<String> = match since {
         Some(cutoff) => lines
             .iter()
-            .filter(|line| {
-                extract_timestamp(line)
-                    .map(|ts| ts >= *cutoff)
-                    .unwrap_or(true)
-            })
+            .filter(|line| extract_timestamp(line).is_none_or(|ts| ts >= *cutoff))
             .cloned()
             .collect(),
         None => lines.to_vec(),
@@ -556,29 +552,6 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
             styles.dim.apply_to(&ts),
             styles.bold_cyan.apply_to("\u{25b6}"),
         )),
-        "Agent.SessionStarted"
-        | "Agent.SessionEnded"
-        | "Agent.AssistantTextStart"
-        | "Agent.AssistantOutputReplace"
-        | "Agent.TextDelta"
-        | "Agent.ReasoningDelta"
-        | "Agent.ToolCallOutputDelta"
-        | "Sandbox.Initializing"
-        | "Sandbox.Pulling"
-        | "Sandbox.Creating"
-        | "SetupStarted"
-        | "SetupCommandStarted"
-        | "SetupCommandCompleted"
-        | "CheckpointCompleted"
-        | "CheckpointFailed"
-        | "GitCommit"
-        | "GitPush"
-        | "GitBranch"
-        | "GitWorktreeAdd"
-        | "GitWorktreeRemove"
-        | "GitFetch"
-        | "GitReset"
-        | "AssetsCaptured" => None,
         _ => None,
     }
 }
@@ -589,8 +562,7 @@ fn str_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
 
 fn format_timestamp(ts: &str) -> String {
     ts.parse::<DateTime<Utc>>()
-        .map(|dt| dt.format("%H:%M:%S").to_string())
-        .unwrap_or_else(|_| ts.to_string())
+        .map_or_else(|_| ts.to_string(), |dt| dt.format("%H:%M:%S").to_string())
 }
 
 fn format_duration_ms(value: Option<&serde_json::Value>) -> String {

@@ -866,10 +866,10 @@ async fn probe_daytona() -> Option<Result<(), String>> {
 }
 
 pub(crate) fn probe_model(provider: Provider) -> String {
-    Catalog::builtin()
-        .probe_for_provider(provider)
-        .map(|m| m.id.clone())
-        .unwrap_or_else(|| format!("unknown-{}", provider.as_str()))
+    Catalog::builtin().probe_for_provider(provider).map_or_else(
+        || format!("unknown-{}", provider.as_str()),
+        |m| m.id.clone(),
+    )
 }
 
 async fn probe_llm_provider(

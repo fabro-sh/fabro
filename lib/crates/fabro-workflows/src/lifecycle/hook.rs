@@ -177,8 +177,7 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
             let error_msg = outcome
                 .failure
                 .as_ref()
-                .map(|f| f.message.clone())
-                .unwrap_or_else(|| "run failed".to_string());
+                .map_or_else(|| "run failed".to_string(), |f| f.message.clone());
             let mut hook_ctx = HookContext::new(
                 HookEvent::RunFailed,
                 self.run_id.clone(),

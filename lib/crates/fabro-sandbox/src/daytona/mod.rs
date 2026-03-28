@@ -927,9 +927,8 @@ impl Sandbox for DaytonaSandbox {
         let sandbox = self.sandbox()?;
         let start = Instant::now();
 
-        let cwd = working_dir
-            .map(|d| self.resolve_path(d))
-            .unwrap_or_else(|| WORKING_DIRECTORY.to_string());
+        let cwd =
+            working_dir.map_or_else(|| WORKING_DIRECTORY.to_string(), |d| self.resolve_path(d));
 
         let process_svc = sandbox
             .process()
@@ -952,14 +951,14 @@ impl Sandbox for DaytonaSandbox {
         // prepend `export` statements as a fallback until server support
         // lands. The SDK sends `envs` too for forward compatibility.
         let command_with_env = if let Some(vars) = env_vars {
-            if !vars.is_empty() {
+            if vars.is_empty() {
+                command.to_string()
+            } else {
                 let exports: Vec<String> = vars
                     .iter()
                     .map(|(k, v)| format!("export {}={}", shell_quote(k), shell_quote(v)))
                     .collect();
                 format!("{}\n{}", exports.join("\n"), command)
-            } else {
-                command.to_string()
             }
         } else {
             command.to_string()
@@ -1098,9 +1097,7 @@ impl Sandbox for DaytonaSandbox {
     }
 
     async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String> {
-        let base = path
-            .map(|p| self.resolve_path(p))
-            .unwrap_or_else(|| WORKING_DIRECTORY.to_string());
+        let base = path.map_or_else(|| WORKING_DIRECTORY.to_string(), |p| self.resolve_path(p));
 
         let cmd = format!(
             "find {} -name {} -type f | sort",
