@@ -168,8 +168,8 @@ impl ImportTransform {
             let import_base_dir = resolved_path
                 .parent()
                 .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-            FileInliningTransform::new(import_base_dir.clone(), self.fallback_dir.clone())
-                .apply(&mut graph);
+            graph = FileInliningTransform::new(import_base_dir.clone(), self.fallback_dir.clone())
+                .apply(graph);
 
             if let Some(message) = Self::unresolved_imported_prompt_error(&graph) {
                 return Err(message);
@@ -585,19 +585,22 @@ impl PreparedImport {
 }
 
 impl Transform for ImportTransform {
-    fn apply(&self, graph: &mut Graph) {
-        let imports = Self::collect_import_nodes(graph);
+    fn apply(&self, graph: Graph) -> Graph {
+        let mut graph = graph;
+        let imports = Self::collect_import_nodes(&graph);
         let mut import_stack = Vec::new();
 
         for (placeholder_id, import_path) in imports {
             self.expand_import(
-                graph,
+                &mut graph,
                 &placeholder_id,
                 &import_path,
                 &self.base_dir,
                 &mut import_stack,
             );
         }
+
+        graph
     }
 }
 
@@ -622,10 +625,9 @@ mod tests {
     }
 
     fn apply_import(dot: &str, base_dir: &Path, fallback_dir: Option<&Path>) -> Graph {
-        let mut graph = parse_graph(dot);
+        let graph = parse_graph(dot);
         ImportTransform::new(base_dir.to_path_buf(), fallback_dir.map(Path::to_path_buf))
-            .apply(&mut graph);
-        graph
+            .apply(graph)
     }
 
     fn basic_import_source() -> &'static str {
@@ -1327,7 +1329,7 @@ mod tests {
         graph
             .nodes
             .insert("validate.lint".to_string(), colliding_node);
-        ImportTransform::new(dir.path().to_path_buf(), None).apply(&mut graph);
+        let graph = ImportTransform::new(dir.path().to_path_buf(), None).apply(graph);
 
         assert_eq!(
             graph.nodes["validate"]

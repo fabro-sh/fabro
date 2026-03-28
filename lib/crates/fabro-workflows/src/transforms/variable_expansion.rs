@@ -49,7 +49,8 @@ pub fn expand_vars(source: &str, vars: &HashMap<String, String>) -> anyhow::Resu
 pub struct VariableExpansionTransform;
 
 impl Transform for VariableExpansionTransform {
-    fn apply(&self, graph: &mut Graph) {
+    fn apply(&self, graph: Graph) -> Graph {
+        let mut graph = graph;
         let goal = graph.goal().to_string();
         let vars = HashMap::from([("goal".to_string(), goal)]);
         for node in graph.nodes.values_mut() {
@@ -62,6 +63,8 @@ impl Transform for VariableExpansionTransform {
                 }
             }
         }
+
+        graph
     }
 }
 
@@ -126,7 +129,7 @@ mod tests {
         graph.nodes.insert("plan".to_string(), node);
 
         let transform = VariableExpansionTransform;
-        transform.apply(&mut graph);
+        let graph = transform.apply(graph);
 
         let prompt = graph.nodes["plan"]
             .attrs
@@ -152,7 +155,7 @@ mod tests {
         graph.nodes.insert("plan".to_string(), node);
 
         let transform = VariableExpansionTransform;
-        transform.apply(&mut graph);
+        let graph = transform.apply(graph);
 
         let prompt = graph.nodes["plan"]
             .attrs
@@ -173,7 +176,7 @@ mod tests {
         graph.nodes.insert("plan".to_string(), node);
 
         let transform = VariableExpansionTransform;
-        transform.apply(&mut graph);
+        let graph = transform.apply(graph);
 
         let prompt = graph.nodes["plan"]
             .attrs
@@ -195,7 +198,7 @@ mod tests {
 
         let transform = VariableExpansionTransform;
         // Should not panic
-        transform.apply(&mut graph);
+        let graph = transform.apply(graph);
         assert!(!graph.nodes["plan"].attrs.contains_key("prompt"));
     }
 
@@ -215,7 +218,7 @@ mod tests {
         graph.nodes.insert("plan".to_string(), node);
 
         let transform = VariableExpansionTransform;
-        transform.apply(&mut graph);
+        let graph = transform.apply(graph);
 
         let prompt = graph.nodes["plan"]
             .attrs

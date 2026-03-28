@@ -963,7 +963,7 @@ fn variable_expansion_replaces_goal_in_prompts() {
     graph.nodes.insert("report".to_string(), no_var_node);
 
     let transform = VariableExpansionTransform;
-    transform.apply(&mut graph);
+    let graph = transform.apply(graph);
 
     let plan_prompt = graph.nodes["plan"]
         .attrs
@@ -1028,7 +1028,7 @@ fn stylesheet_application_by_specificity() {
     graph.nodes.insert("explicit_node".to_string(), explicit);
 
     let transform = StylesheetApplicationTransform;
-    transform.apply(&mut graph);
+    let graph = transform.apply(graph);
 
     // plan: universal -> claude-sonnet-4-5
     assert_eq!(
@@ -1084,11 +1084,11 @@ fn stylesheet_application_via_parsed_graph() {
         start -> work -> exit
     }"#;
 
-    let mut graph = parse(input).expect("parse should succeed");
+    let graph = parse(input).expect("parse should succeed");
     validate_or_raise(&graph, &[]).expect("validation should pass");
 
     let transform = StylesheetApplicationTransform;
-    transform.apply(&mut graph);
+    let graph = transform.apply(graph);
 
     // All nodes without explicit model should get "sonnet"
     assert_eq!(
@@ -2482,9 +2482,9 @@ async fn scenario_ship_a_feature() {
         review -> exit [label="[A] Approve"]
         review -> implement [label="[F] Fix"]
     }"#;
-    let mut graph = parse(dot).expect("parse");
+    let graph = parse(dot).expect("parse");
     validate_or_raise(&graph, &[]).expect("validate");
-    VariableExpansionTransform.apply(&mut graph);
+    let graph = VariableExpansionTransform.apply(graph);
     assert_eq!(
         graph.nodes["plan"].prompt().unwrap(),
         "Plan to achieve: Ship the widget"
@@ -3418,9 +3418,9 @@ async fn stylesheet_applies_model_override() {
         work  [shape=box, prompt="Do work"]
         start -> work -> exit
     }"#;
-    let mut graph = parse(input).expect("parse");
+    let graph = parse(input).expect("parse");
     validate_or_raise(&graph, &[]).expect("validate");
-    StylesheetApplicationTransform.apply(&mut graph);
+    let graph = StylesheetApplicationTransform.apply(graph);
     assert_eq!(graph.nodes["work"].model(), Some("custom-model"));
 
     let dir = tempfile::tempdir().unwrap();
@@ -3527,7 +3527,7 @@ async fn integration_smoke_plan_implement_review_done() {
     }"#;
 
     // Parse and validate
-    let mut graph = parse(dot).expect("parse");
+    let graph = parse(dot).expect("parse");
     let diagnostics = validate_or_raise(&graph, &[]).expect("validate");
     let errors: Vec<_> = diagnostics
         .iter()
@@ -3536,8 +3536,8 @@ async fn integration_smoke_plan_implement_review_done() {
     assert!(errors.is_empty());
 
     // Apply transforms
-    VariableExpansionTransform.apply(&mut graph);
-    StylesheetApplicationTransform.apply(&mut graph);
+    let graph = VariableExpansionTransform.apply(graph);
+    let graph = StylesheetApplicationTransform.apply(graph);
 
     // Verify transforms applied
     assert_eq!(

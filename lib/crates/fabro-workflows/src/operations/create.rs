@@ -450,11 +450,14 @@ mod tests {
         struct TagTransform;
 
         impl Transform for TagTransform {
-            fn apply(&self, graph: &mut fabro_graphviz::graph::Graph) {
+            fn apply(&self, graph: fabro_graphviz::graph::Graph) -> fabro_graphviz::graph::Graph {
+                let mut graph = graph;
                 for node in graph.nodes.values_mut() {
                     node.attrs
                         .insert("tagged".to_string(), AttrValue::Boolean(true));
                 }
+
+                graph
             }
         }
 
