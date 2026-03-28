@@ -1,9 +1,10 @@
 {
-  "timestamp": "2026-03-28T22:40:16.012436Z",
-  "current_node": "run_tests",
+  "timestamp": "2026-03-28T22:40:16.627680Z",
+  "current_node": "report",
   "completed_nodes": [
     "start",
-    "run_tests"
+    "run_tests",
+    "report"
   ],
   "node_retries": {},
   "context_values": {
@@ -12,24 +13,32 @@
     "internal.retry_count.start": 0,
     "internal.node_visit_count": 1,
     "internal.run_id": "01KMV9NT0T4Q3DJ64Y7AHGB8PZ",
-    "last_stage": "run_tests",
+    "last_stage": "report",
     "failure_signature": "",
     "graph.goal": "Run tests and report results",
     "response.run_tests": "[Simulated] Response for stage: run_tests",
+    "internal.retry_count.report": 0,
     "outcome": "success",
-    "last_response": "[Simulated] Response for stage: run_tests",
-    "internal.thread_id": "start",
+    "last_response": "[Simulated] Response for stage: report",
+    "internal.thread_id": "run_tests",
+    "thread.run_tests.current_node": "report",
     "graph.rankdir": "LR",
     "internal.fidelity": "compact",
     "internal.retry_count.run_tests": 0,
-    "current_node": "run_tests",
+    "current_node": "report",
+    "response.report": "[Simulated] Response for stage: report",
     "thread.start.current_node": "run_tests",
-    "current.preamble": "Goal: Run tests and report results\n"
+    "current.preamble": "Goal: Run tests and report results\n\n## Completed stages\n- **run_tests**: success\n"
   },
   "node_outcomes": {
-    "start": {
+    "report": {
       "status": "success",
-      "notes": "[Simulated] start",
+      "context_updates": {
+        "response.report": "[Simulated] Response for stage: report",
+        "last_response": "[Simulated] Response for stage: report",
+        "last_stage": "report"
+      },
+      "notes": "[Simulated] report",
       "usage": null
     },
     "run_tests": {
@@ -41,11 +50,17 @@
       },
       "notes": "[Simulated] run_tests",
       "usage": null
+    },
+    "start": {
+      "status": "success",
+      "notes": "[Simulated] start",
+      "usage": null
     }
   },
-  "next_node_id": "report",
+  "next_node_id": "exit",
   "node_visits": {
     "run_tests": 1,
+    "report": 1,
     "start": 1
   }
 }
