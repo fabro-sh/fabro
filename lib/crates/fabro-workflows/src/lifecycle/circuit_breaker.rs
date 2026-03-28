@@ -18,14 +18,14 @@ type WfNodeResult = NodeResult<Option<StageUsage>>;
 
 /// Sub-lifecycle responsible for tracking failure signatures and tripping the
 /// circuit breaker when deterministic failure cycles are detected.
-pub struct CircuitBreakerLifecycle {
+pub(crate) struct CircuitBreakerLifecycle {
     loop_failure_signatures: Mutex<HashMap<FailureSignature, usize>>,
     restart_failure_signatures: Mutex<HashMap<FailureSignature, usize>>,
     loop_restart_signature_limit: usize,
 }
 
 impl CircuitBreakerLifecycle {
-    pub fn new(loop_restart_signature_limit: usize) -> Self {
+    pub(crate) fn new(loop_restart_signature_limit: usize) -> Self {
         Self {
             loop_failure_signatures: Mutex::new(HashMap::new()),
             restart_failure_signatures: Mutex::new(HashMap::new()),
@@ -34,7 +34,7 @@ impl CircuitBreakerLifecycle {
     }
 
     /// Restore circuit breaker state from a checkpoint (for resume).
-    pub fn restore(
+    pub(crate) fn restore(
         &self,
         loop_sigs: HashMap<FailureSignature, usize>,
         restart_sigs: HashMap<FailureSignature, usize>,
@@ -44,7 +44,7 @@ impl CircuitBreakerLifecycle {
     }
 
     /// Snapshot current state for checkpoint building.
-    pub fn snapshot(
+    pub(crate) fn snapshot(
         &self,
     ) -> (
         HashMap<FailureSignature, usize>,

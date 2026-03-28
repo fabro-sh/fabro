@@ -9,7 +9,7 @@ use fabro_workflows::run_lookup::runs_base;
 use crate::args::PrMergeArgs;
 use crate::cli_config::load_cli_settings;
 
-pub async fn merge_command(
+pub(super) async fn merge_command(
     args: PrMergeArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {

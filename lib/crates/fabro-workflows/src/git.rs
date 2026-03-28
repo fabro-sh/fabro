@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::path::Path;
 use std::process::Command;
 
@@ -54,10 +55,11 @@ impl GitAuthor {
         message.push_str("\n\u{2692}\u{fe0f} Generated with [Fabro](https://fabro.sh)\n");
         if !self.is_default() {
             let defaults = Self::default();
-            message.push_str(&format!(
+            let _ = write!(
+                message,
                 "\nCo-Authored-By: {} <{}>\n",
                 defaults.name, defaults.email
-            ));
+            );
         }
     }
 }
@@ -207,6 +209,7 @@ pub fn push_branch(repo: &Path, remote: &str, branch: &str) -> Result<()> {
 /// Push run and metadata branches to origin if a remote tracking branch exists.
 ///
 /// Callers supply pre-built refspecs so they control force-push (`+` prefix).
+#[allow(clippy::print_stderr)]
 pub fn push_run_branches(
     store: &Store,
     probe_branch: &str,
@@ -363,9 +366,8 @@ const MAX_NODE_FILE_SIZE: u64 = 512 * 1024;
 /// `("nodes/{subdir}/{filename}", bytes)` entries suitable for the shadow tree.
 pub fn scan_node_files(run_dir: &Path) -> Vec<(String, Vec<u8>)> {
     let nodes_dir = run_dir.join("nodes");
-    let entries = match std::fs::read_dir(&nodes_dir) {
-        Ok(e) => e,
-        Err(_) => return Vec::new(),
+    let Ok(entries) = std::fs::read_dir(&nodes_dir) else {
+        return Vec::new();
     };
 
     let mut result = Vec::new();
@@ -484,9 +486,8 @@ impl MetadataStore {
 
     /// Read a single file from the metadata branch. Returns `None` if branch or path doesn't exist.
     fn read_file(repo_path: &Path, run_id: &str, path: &str) -> Result<Option<Vec<u8>>> {
-        let repo = match Repository::discover(repo_path) {
-            Ok(r) => r,
-            Err(_) => return Ok(None),
+        let Ok(repo) = Repository::discover(repo_path) else {
+            return Ok(None);
         };
         let store = Store::new(repo);
         let sig = Signature::now("Fabro", "noreply@fabro.sh")

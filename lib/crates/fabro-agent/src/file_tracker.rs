@@ -1,5 +1,7 @@
-use fabro_llm::types::{ToolCall, ToolResult};
 use std::collections::BTreeMap;
+use std::fmt::Write;
+
+use fabro_llm::types::{ToolCall, ToolResult};
 
 #[derive(Debug, Clone, Copy, Default)]
 struct FileOps {
@@ -47,7 +49,7 @@ impl FileTracker {
             if ops.edited {
                 labels.push("edited");
             }
-            output.push_str(&format!("- {path} ({})\n", labels.join(", ")));
+            let _ = writeln!(output, "- {path} ({})", labels.join(", "));
         }
         output
     }

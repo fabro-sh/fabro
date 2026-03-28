@@ -6,7 +6,7 @@ use fabro_llm::cli::{ServerConnection, run_prompt_via_server};
 
 use crate::args::GlobalArgs;
 
-pub async fn execute(
+pub(super) async fn execute(
     mut args: PromptArgs,
     cli_config: &FabroSettings,
     globals: &GlobalArgs,

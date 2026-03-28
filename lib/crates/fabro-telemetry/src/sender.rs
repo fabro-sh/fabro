@@ -94,9 +94,8 @@ pub fn upload_blocking(tracks: &[Track]) -> anyhow::Result<()> {
         .collect();
 
     let content = lines.join("\n");
-    let payload = match build_segment_batch(&content) {
-        Some(p) => p,
-        None => return Ok(()),
+    let Some(payload) = build_segment_batch(&content) else {
+        return Ok(());
     };
 
     let auth = STANDARD.encode(format!("{write_key}:"));
@@ -123,9 +122,8 @@ pub async fn upload(path: &Path) -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("SEGMENT_WRITE_KEY not set at compile time"))?;
 
     let content = std::fs::read_to_string(path)?;
-    let payload = match build_segment_batch(&content) {
-        Some(p) => p,
-        None => return Ok(()),
+    let Some(payload) = build_segment_batch(&content) else {
+        return Ok(());
     };
 
     let auth = STANDARD.encode(format!("{write_key}:"));

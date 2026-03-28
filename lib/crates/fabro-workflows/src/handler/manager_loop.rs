@@ -252,12 +252,12 @@ impl Handler for SubWorkflowHandler {
                     };
 
                     if child_outcome.status == StageStatus::Fail {
-                        outcome.failure = child_outcome.failure.clone();
+                        outcome.failure.clone_from(&child_outcome.failure);
                     }
 
                     return Ok(outcome);
                 }
-                _ = sleep(poll_interval) => {
+                () = sleep(poll_interval) => {
                     // Check stop condition
                     if !stop_condition.is_empty() {
                         let dummy_outcome = Outcome::success();

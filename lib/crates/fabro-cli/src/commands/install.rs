@@ -286,9 +286,11 @@ async fn setup_github_app(
 ) -> Result<Vec<(String, String)>> {
     // Random suffix so app names don't collide
     let mut rng = rand::thread_rng();
-    let suffix: String = (0..6)
-        .map(|_| format!("{:x}", rng.gen::<u8>() % 16))
-        .collect();
+    let suffix: String = (0..6).fold(String::with_capacity(6), |mut s, _| {
+        use std::fmt::Write;
+        let _ = write!(s, "{:x}", rng.gen::<u8>() % 16);
+        s
+    });
     let app_name = format!("Arc-{suffix}");
 
     // Bind to random port
@@ -441,14 +443,14 @@ async fn setup_github_app(
     let cli_toml_path = arc_dir.join("cli.toml");
     let existing = std::fs::read_to_string(&cli_toml_path).unwrap_or_default();
     let mut doc: toml::Value = if existing.is_empty() {
-        toml::Value::Table(Default::default())
+        toml::Value::Table(toml::Table::default())
     } else {
         toml::from_str(&existing).context("failed to parse existing cli.toml")?
     };
     let table = doc.as_table_mut().context("cli.toml root is not a table")?;
     let git = table
         .entry("git")
-        .or_insert(toml::Value::Table(Default::default()));
+        .or_insert(toml::Value::Table(toml::Table::default()));
     let git_table = git
         .as_table_mut()
         .context("cli.toml [git] is not a table")?;
@@ -480,7 +482,7 @@ async fn setup_github_app(
     Ok(env_pairs)
 }
 
-pub async fn run_install(web_url: &str) -> Result<()> {
+pub(crate) async fn run_install(web_url: &str) -> Result<()> {
     let s = Styles::detect_stderr();
     let emoji = console::Emoji("⚒️  ", "");
 
@@ -649,8 +651,8 @@ pub async fn run_install(web_url: &str) -> Result<()> {
             let slug = {
                 let cli_toml_path = arc_dir.join("cli.toml");
                 let toml_content = std::fs::read_to_string(&cli_toml_path).unwrap_or_default();
-                let doc: toml::Value =
-                    toml::from_str(&toml_content).unwrap_or(toml::Value::Table(Default::default()));
+                let doc: toml::Value = toml::from_str(&toml_content)
+                    .unwrap_or(toml::Value::Table(toml::Table::default()));
                 doc.get("git")
                     .and_then(|g| g.get("slug"))
                     .and_then(|s| s.as_str())

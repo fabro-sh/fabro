@@ -58,7 +58,7 @@ struct GitleaksEngine {
 }
 
 impl GitleaksEngine {
-    fn build() -> Option<GitleaksEngine> {
+    fn build() -> Option<Self> {
         let mut rules = Vec::new();
         let mut all_keywords: Vec<String> = Vec::new();
         let mut keyword_to_rules: Vec<Vec<usize>> = Vec::new();
@@ -109,7 +109,7 @@ impl GitleaksEngine {
             .map(|_| OnceLock::new())
             .collect();
 
-        Some(GitleaksEngine {
+        Some(Self {
             keyword_filter,
             keyword_to_rules,
             no_keyword_rules,
@@ -152,9 +152,8 @@ impl GitleaksEngine {
             let rule = &self.rules[idx];
 
             // Lazy-compile the regex on first use; skip if invalid.
-            let regex = match rule.regex() {
-                Some(r) => r,
-                None => continue,
+            let Some(regex) = rule.regex() else {
+                continue;
             };
             let secret_group = rule.secret_group();
 
@@ -226,7 +225,7 @@ impl GitleaksEngine {
 static ENGINE: LazyLock<Option<GitleaksEngine>> = LazyLock::new(GitleaksEngine::build);
 
 /// Find regions matching gitleaks rules.
-pub fn find_gitleaks_regions(s: &str) -> Vec<Region> {
+pub(super) fn find_gitleaks_regions(s: &str) -> Vec<Region> {
     match ENGINE.as_ref() {
         Some(engine) => engine.find_regions(s),
         None => Vec::new(),

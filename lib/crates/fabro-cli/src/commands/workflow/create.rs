@@ -7,15 +7,14 @@ use fabro_config::project::{discover_project_config, resolve_fabro_root};
 use crate::args::WorkflowCreateArgs;
 use crate::shared::relative_path;
 
-pub fn create_command(args: &WorkflowCreateArgs) -> Result<()> {
+pub(super) fn create_command(args: &WorkflowCreateArgs) -> Result<()> {
     let cwd = std::env::current_dir()?;
 
-    let (config_path, config) = match discover_project_config(&cwd)? {
-        Some(found) => found,
-        None => bail!(
+    let Some((config_path, config)) = discover_project_config(&cwd)? else {
+        bail!(
             "No fabro.toml found in {cwd} or any parent directory",
             cwd = cwd.display()
-        ),
+        );
     };
 
     let fabro_root = resolve_fabro_root(&config_path, &config);

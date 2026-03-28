@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::features::FeatureLayer;
 
 /// Generate a combined Dockerfile from base + features + env + user.
-pub fn generate(
+pub(crate) fn generate(
     base_dockerfile: &str,
     feature_layers: &[FeatureLayer],
     container_env: &HashMap<String, String>,

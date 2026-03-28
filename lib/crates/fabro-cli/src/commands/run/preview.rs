@@ -9,7 +9,7 @@ use crate::args::PreviewArgs;
 use crate::cli_config::load_cli_settings;
 use crate::shared::validate_daytona_provider;
 
-pub async fn run(args: PreviewArgs) -> Result<()> {
+pub(crate) async fn run(args: PreviewArgs) -> Result<()> {
     let cli_config = load_cli_settings(None)?;
     let base = runs_base(&cli_config.storage_dir());
     let run_dir = resolve_run(&base, &args.run)?.path;
@@ -56,10 +56,12 @@ pub async fn run(args: PreviewArgs) -> Result<()> {
 }
 
 fn format_standard_output(url: &str, token: &str) -> String {
+    use std::fmt::Write;
     let mut out = format!("URL:   {url}\nToken: {token}\n");
-    out.push_str(&format!(
+    let _ = write!(
+        out,
         "\ncurl -H \"x-daytona-preview-token: {token}\" \\\n     -H \"X-Daytona-Skip-Preview-Warning: true\" \\\n     {url}\n"
-    ));
+    );
     out
 }
 

@@ -11,7 +11,10 @@ const LEGACY_GRAPH_FILE_NAME: &str = "graph.fabro";
 /// PERSIST phase: create run directory, write workflow.fabro and run.json to disk.
 ///
 /// Overwrites `run_record.graph` with the validated graph before saving.
-pub fn persist(validated: Validated, mut options: PersistOptions) -> Result<Persisted, FabroError> {
+pub(crate) fn persist(
+    validated: Validated,
+    mut options: PersistOptions,
+) -> Result<Persisted, FabroError> {
     let (graph, source, diagnostics) = validated.into_parts();
     options.run_record.graph = graph.clone();
 

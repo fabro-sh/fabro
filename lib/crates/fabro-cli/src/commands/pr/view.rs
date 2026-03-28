@@ -9,7 +9,7 @@ use fabro_workflows::run_lookup::runs_base;
 use crate::args::PrViewArgs;
 use crate::cli_config::load_cli_settings;
 
-pub async fn view_command(
+pub(super) async fn view_command(
     args: PrViewArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {

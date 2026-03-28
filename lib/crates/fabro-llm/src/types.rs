@@ -244,7 +244,7 @@ impl ContentPart {
     /// Returns `true` if this is an opaque OpenAI item (reasoning or message)
     /// that should be round-tripped verbatim through the API.
     pub fn is_opaque_openai(&self) -> bool {
-        matches!(self, ContentPart::Other { kind, .. } if kind == Self::OPENAI_REASONING || kind == Self::OPENAI_MESSAGE)
+        matches!(self, Self::Other { kind, .. } if kind == Self::OPENAI_REASONING || kind == Self::OPENAI_MESSAGE)
     }
 }
 

@@ -52,7 +52,9 @@ fn normalize_issue(node: &Value) -> Result<Issue, String> {
         .as_str()
         .ok_or("Missing issue title")?
         .to_string();
-    let description = node["description"].as_str().map(|s| s.to_string());
+    let description = node["description"]
+        .as_str()
+        .map(std::string::ToString::to_string);
     let priority = match node["priority"].as_i64() {
         Some(0) | None => None,
         Some(n) => Some(n as i32),
@@ -61,16 +63,20 @@ fn normalize_issue(node: &Value) -> Result<Issue, String> {
         .as_str()
         .ok_or("Missing issue state name")?
         .to_string();
-    let branch_name = node["branchName"].as_str().map(|s| s.to_string());
+    let branch_name = node["branchName"]
+        .as_str()
+        .map(std::string::ToString::to_string);
     let url = node["url"].as_str().ok_or("Missing issue url")?.to_string();
-    let assignee_id = node["assignee"]["id"].as_str().map(|s| s.to_string());
+    let assignee_id = node["assignee"]["id"]
+        .as_str()
+        .map(std::string::ToString::to_string);
 
     let labels = node["labels"]["nodes"]
         .as_array()
         .map(|arr| {
             arr.iter()
                 .filter_map(|l| l["name"].as_str())
-                .map(|s| s.to_lowercase())
+                .map(str::to_lowercase)
                 .collect()
         })
         .unwrap_or_default();
@@ -96,8 +102,12 @@ fn normalize_issue(node: &Value) -> Result<Issue, String> {
         })
         .unwrap_or_default();
 
-    let created_at = node["createdAt"].as_str().map(|s| s.to_string());
-    let updated_at = node["updatedAt"].as_str().map(|s| s.to_string());
+    let created_at = node["createdAt"]
+        .as_str()
+        .map(std::string::ToString::to_string);
+    let updated_at = node["updatedAt"]
+        .as_str()
+        .map(std::string::ToString::to_string);
 
     Ok(Issue {
         id,
@@ -169,19 +179,19 @@ impl Tracker for LinearTracker {
 
         response["data"]["viewer"]["id"]
             .as_str()
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .ok_or_else(|| "Missing viewer id in response".to_string())
     }
 
     async fn create_comment(&self, issue: &Issue, body: &str) -> Result<(), String> {
         tracing::debug!(issue_id = %issue.id, "Creating comment on Linear issue");
-        let query = r#"
+        let query = r"
             mutation($issueId: String!, $body: String!) {
                 commentCreate(input: { issueId: $issueId, body: $body }) {
                     success
                 }
             }
-        "#;
+        ";
 
         let variables = serde_json::json!({
             "issueId": issue.id,
@@ -203,7 +213,7 @@ impl Tracker for LinearTracker {
     async fn update_issue_state(&self, issue: &Issue, state_name: &str) -> Result<(), String> {
         tracing::debug!(issue_id = %issue.id, state_name, "Updating Linear issue state");
         // Step 1: Resolve state name to ID via the issue's team
-        let resolve_query = r#"
+        let resolve_query = r"
             query($issueId: String!, $stateName: String!) {
                 issue(id: $issueId) {
                     team {
@@ -213,7 +223,7 @@ impl Tracker for LinearTracker {
                     }
                 }
             }
-        "#;
+        ";
 
         let resolve_vars = serde_json::json!({
             "issueId": issue.id,
@@ -231,13 +241,13 @@ impl Tracker for LinearTracker {
             .to_string();
 
         // Step 2: Update the issue
-        let update_query = r#"
+        let update_query = r"
             mutation($issueId: String!, $stateId: String!) {
                 issueUpdate(id: $issueId, input: { stateId: $stateId }) {
                     success
                 }
             }
-        "#;
+        ";
 
         let update_vars = serde_json::json!({
             "issueId": issue.id,
@@ -265,7 +275,7 @@ impl Tracker for LinearTracker {
         );
 
         let query = format!(
-            r#"
+            r"
             query($slug: String!, $states: [String!]!, $cursor: String) {{
                 issues(
                     first: 50
@@ -279,7 +289,7 @@ impl Tracker for LinearTracker {
                     pageInfo {{ hasNextPage endCursor }}
                 }}
             }}
-            "#
+            "
         );
 
         let mut all_issues = Vec::new();
@@ -298,7 +308,9 @@ impl Tracker for LinearTracker {
 
             let page_info = &response["data"]["issues"]["pageInfo"];
             if page_info["hasNextPage"].as_bool() == Some(true) {
-                cursor = page_info["endCursor"].as_str().map(|s| s.to_string());
+                cursor = page_info["endCursor"]
+                    .as_str()
+                    .map(std::string::ToString::to_string);
             } else {
                 break;
             }
@@ -315,13 +327,13 @@ impl Tracker for LinearTracker {
         tracing::debug!(count = ids.len(), "Fetching issues by ID from Linear");
 
         let query = format!(
-            r#"
+            r"
             query($ids: [ID!]!) {{
                 issues(filter: {{ id: {{ in: $ids }} }}) {{
                     nodes {{ {ISSUE_FIELDS} }}
                 }}
             }}
-            "#
+            "
         );
 
         let mut issue_map: HashMap<String, Issue> = HashMap::with_capacity(ids.len());

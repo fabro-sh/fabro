@@ -84,13 +84,13 @@ impl GitHubTracker {
                     "Resolving GitHub project node ID"
                 );
                 let graphql_url = self.graphql_url();
-                let query = r#"
+                let query = r"
                     query($owner: String!, $number: Int!) {
                         organization(login: $owner) {
                             projectV2(number: $number) { id }
                         }
                     }
-                "#;
+                ";
                 let variables = serde_json::json!({
                     "owner": self.owner,
                     "number": self.project_number,
@@ -110,13 +110,13 @@ impl GitHubTracker {
                     return Ok(id.to_string());
                 }
 
-                let user_query = r#"
+                let user_query = r"
                     query($owner: String!, $number: Int!) {
                         user(login: $owner) {
                             projectV2(number: $number) { id }
                         }
                     }
-                "#;
+                ";
                 let user_resp = execute_github_graphql(
                     &self.client,
                     token,
@@ -128,7 +128,7 @@ impl GitHubTracker {
 
                 user_resp["data"]["user"]["projectV2"]["id"]
                     .as_str()
-                    .map(|s| s.to_string())
+                    .map(std::string::ToString::to_string)
                     .ok_or_else(|| {
                         format!(
                             "Project #{} not found for owner '{}'",
@@ -137,7 +137,7 @@ impl GitHubTracker {
                     })
             })
             .await
-            .map(|s| s.as_str())
+            .map(std::string::String::as_str)
     }
 }
 
@@ -150,7 +150,9 @@ fn normalize_github_item(item: &serde_json::Value) -> Option<Issue> {
     let identifier = format!("#{number}");
     let title = content["title"].as_str()?.to_string();
     let url = content["url"].as_str()?.to_string();
-    let description = content["body"].as_str().map(|s| s.to_string());
+    let description = content["body"]
+        .as_str()
+        .map(std::string::ToString::to_string);
 
     let state = item["fieldValueByName"]["name"]
         .as_str()
@@ -161,20 +163,24 @@ fn normalize_github_item(item: &serde_json::Value) -> Option<Issue> {
         .as_array()
         .and_then(|arr| arr.first())
         .and_then(|a| a["id"].as_str())
-        .map(|s| s.to_string());
+        .map(std::string::ToString::to_string);
 
     let labels = content["labels"]["nodes"]
         .as_array()
         .map(|arr| {
             arr.iter()
                 .filter_map(|l| l["name"].as_str())
-                .map(|s| s.to_lowercase())
+                .map(str::to_lowercase)
                 .collect()
         })
         .unwrap_or_default();
 
-    let created_at = content["createdAt"].as_str().map(|s| s.to_string());
-    let updated_at = content["updatedAt"].as_str().map(|s| s.to_string());
+    let created_at = content["createdAt"]
+        .as_str()
+        .map(std::string::ToString::to_string);
+    let updated_at = content["updatedAt"]
+        .as_str()
+        .map(std::string::ToString::to_string);
 
     Some(Issue {
         id,
@@ -247,7 +253,7 @@ async fn fetch_project_items_page(
         .unwrap_or(false);
     let end_cursor = resp["data"]["node"]["items"]["pageInfo"]["endCursor"]
         .as_str()
-        .map(|s| s.to_string());
+        .map(std::string::ToString::to_string);
 
     // Take ownership of the nodes array in-place instead of deep-cloning it.
     let nodes = resp
@@ -276,20 +282,20 @@ impl Tracker for GitHubTracker {
 
         resp["data"]["viewer"]["id"]
             .as_str()
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .ok_or_else(|| "Missing viewer id in GitHub response".to_string())
     }
 
     async fn create_comment(&self, issue: &Issue, body: &str) -> Result<(), String> {
         tracing::debug!(issue_id = %issue.id, "Creating comment on GitHub issue");
         let token = self.fresh_token().await?;
-        let query = r#"
+        let query = r"
             mutation($subjectId: ID!, $body: String!) {
                 addComment(input: { subjectId: $subjectId, body: $body }) {
                     clientMutationId
                 }
             }
-        "#;
+        ";
         let variables = serde_json::json!({
             "subjectId": issue.id,
             "body": body,
@@ -358,7 +364,7 @@ impl Tracker for GitHubTracker {
             .to_string();
 
         // Step 2: Update the field value
-        let update_query = r#"
+        let update_query = r"
             mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
                 updateProjectV2ItemFieldValue(input: {
                     projectId: $projectId
@@ -369,7 +375,7 @@ impl Tracker for GitHubTracker {
                     projectV2Item { id }
                 }
             }
-        "#;
+        ";
         execute_github_graphql(
             &self.client,
             &token,

@@ -226,7 +226,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedService {
             .expect("AuthMode extension must be added to the router");
 
         let strategies = match auth_mode {
-            AuthMode::Disabled => return Ok(AuthenticatedService),
+            AuthMode::Disabled => return Ok(Self),
             AuthMode::Strategies(strategies) => strategies,
         };
 
@@ -246,7 +246,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedService {
                 } => try_jwt(parts, key, validation, allowed_usernames),
             };
             match result {
-                Ok(()) => return Ok(AuthenticatedService),
+                Ok(()) => return Ok(Self),
                 Err(e) => last_err = e,
             }
         }
@@ -275,7 +275,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
 
         let strategies = match auth_mode {
             AuthMode::Disabled => {
-                return Ok(AuthenticatedUser {
+                return Ok(Self {
                     login: "demo".to_string(),
                 });
             }
@@ -297,7 +297,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
                 } => {
                     if try_jwt(parts, key, validation, allowed_usernames).is_ok() {
                         if let Some(login) = extract_jwt_login(parts, key, validation) {
-                            return Ok(AuthenticatedUser { login });
+                            return Ok(Self { login });
                         }
                     }
                     last_err = ApiError::unauthorized();
@@ -305,7 +305,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
                 AuthStrategy::Mtls => {
                     if try_mtls(parts).is_ok() {
                         if let Some(login) = extract_mtls_cn(parts) {
-                            return Ok(AuthenticatedUser { login });
+                            return Ok(Self { login });
                         }
                     }
                     last_err = ApiError::unauthorized();

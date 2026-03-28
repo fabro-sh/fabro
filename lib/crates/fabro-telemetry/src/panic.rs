@@ -98,9 +98,8 @@ fn report_panic(info: &PanicHookInfo<'_>) {
 
 /// Serialize the Sentry event to a temp file and spawn `fabro __send_panic <path>`.
 fn spawn_panic_sender(event: Event<'static>) {
-    let json = match serde_json::to_vec(&event) {
-        Ok(j) => j,
-        Err(_) => return,
+    let Ok(json) = serde_json::to_vec(&event) else {
+        return;
     };
 
     let filename = format!("fabro-panic-{}.json", event.event_id);
@@ -111,7 +110,7 @@ fn spawn_panic_sender(event: Event<'static>) {
 ///
 /// Reads the JSON event from `path` and sends it to Sentry.
 /// No-ops if `SENTRY_DSN` was not set at compile time.
-pub async fn capture(path: &Path) -> anyhow::Result<()> {
+pub fn capture(path: &Path) -> anyhow::Result<()> {
     let dsn = SENTRY_DSN.ok_or_else(|| anyhow::anyhow!("SENTRY_DSN not set at compile time"))?;
 
     let json = std::fs::read(path)?;

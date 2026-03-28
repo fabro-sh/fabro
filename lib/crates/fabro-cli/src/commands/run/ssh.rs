@@ -9,7 +9,7 @@ use crate::args::SshArgs;
 use crate::cli_config::load_cli_settings;
 use crate::shared::validate_daytona_provider;
 
-pub async fn run(args: SshArgs) -> Result<()> {
+pub(crate) async fn run(args: SshArgs) -> Result<()> {
     let cli_config = load_cli_settings(None)?;
     let base = runs_base(&cli_config.storage_dir());
     let run_dir = resolve_run(&base, &args.run)?.path;

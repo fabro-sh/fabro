@@ -6,7 +6,7 @@ use fabro_config::cli::load_cli_config;
 use fabro_config::project::{ResolveSettingsInput, discover_project_config, resolve_settings};
 use fabro_config::{FabroConfig, FabroSettings};
 
-pub fn dispatch(ns: ConfigNamespace) -> anyhow::Result<()> {
+pub(crate) fn dispatch(ns: ConfigNamespace) -> anyhow::Result<()> {
     match ns.command {
         ConfigCommand::Show(args) => show_command(&args),
     }
@@ -33,7 +33,7 @@ fn merged_config(workflow: Option<&Path>) -> anyhow::Result<FabroSettings> {
     FabroConfig::combine(project_config, cli_config).try_into()
 }
 
-pub fn show_command(args: &ConfigShowArgs) -> anyhow::Result<()> {
+pub(crate) fn show_command(args: &ConfigShowArgs) -> anyhow::Result<()> {
     let config = merged_config(args.workflow.as_deref())?;
     let mut yaml = serde_yaml::to_string(&config)?;
     if !yaml.ends_with('\n') {

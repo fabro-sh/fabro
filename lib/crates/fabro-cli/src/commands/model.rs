@@ -7,7 +7,7 @@ use crate::args::GlobalArgs;
 #[cfg(feature = "server")]
 use crate::cli_config;
 
-pub async fn execute(command: Option<ModelsCommand>, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn execute(command: Option<ModelsCommand>, globals: &GlobalArgs) -> Result<()> {
     let server = {
         #[cfg(feature = "server")]
         {

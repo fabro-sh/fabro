@@ -26,7 +26,7 @@ pub(crate) fn write_start_record(run_dir: &Path, settings: &RunOptions) -> Start
 ///
 /// First visit (`visit <= 1`): `{run_dir}/nodes/{node_id}`
 /// Subsequent visits: `{run_dir}/nodes/{node_id}-visit_{visit}`
-pub fn node_dir(run_dir: &Path, node_id: &str, visit: usize) -> PathBuf {
+pub(crate) fn node_dir(run_dir: &Path, node_id: &str, visit: usize) -> PathBuf {
     if visit <= 1 {
         run_dir.join("nodes").join(node_id)
     } else {
@@ -40,7 +40,7 @@ pub fn node_dir(run_dir: &Path, node_id: &str, visit: usize) -> PathBuf {
 ///
 /// The raw context value is `0` when unset; workflow execution code treats
 /// missing counts as the first visit for stage/log naming.
-pub fn visit_from_context(context: &Context) -> usize {
+pub(crate) fn visit_from_context(context: &Context) -> usize {
     context.node_visit_count().max(1)
 }
 

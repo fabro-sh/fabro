@@ -3,7 +3,7 @@ use anyhow::{Result, bail};
 use crate::args::SecretListArgs;
 use fabro_config::dotenv;
 
-pub fn list_command(args: &SecretListArgs) -> Result<()> {
+pub(super) fn list_command(args: &SecretListArgs) -> Result<()> {
     let path = dotenv::env_file_path()?;
     let contents = match std::fs::read_to_string(&path) {
         Ok(c) => c,

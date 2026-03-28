@@ -151,7 +151,7 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
                 model = %params.model,
                 provider = ?params.provider,
                 messages = messages.len(),
-                tools = tool_definitions.as_ref().map_or(0, |t| t.len()),
+                tools = tool_definitions.as_ref().map_or(0, std::vec::Vec::len),
                 "Sending LLM request"
             );
 

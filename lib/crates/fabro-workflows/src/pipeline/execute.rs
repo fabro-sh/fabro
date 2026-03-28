@@ -114,27 +114,27 @@ pub async fn execute(init: Initialized) -> Executed {
                 for (k, v) in &cp.context_values {
                     s.context.set(k.clone(), v.clone());
                 }
-                s.completed_nodes = cp.completed_nodes.clone();
-                s.node_retries = cp.node_retries.clone();
+                s.completed_nodes.clone_from(&cp.completed_nodes);
+                s.node_retries.clone_from(&cp.node_retries);
                 if cp.node_visits.is_empty() {
                     for id in &cp.completed_nodes {
                         *s.node_visits.entry(id.clone()).or_insert(0) += 1;
                     }
                 } else {
-                    s.node_visits = cp.node_visits.clone();
+                    s.node_visits.clone_from(&cp.node_visits);
                 }
                 for (k, v) in &cp.node_outcomes {
                     s.node_outcomes.insert(k.clone(), v.clone());
                 }
                 s.stage_index = cp.completed_nodes.len();
                 if let Some(ref next) = cp.next_node_id {
-                    s.current_node_id = next.clone();
+                    s.current_node_id.clone_from(next);
                 } else {
                     let edges = graph.outgoing_edges(&cp.current_node);
                     if let Some(edge) = edges.first() {
-                        s.current_node_id = edge.to.clone();
+                        s.current_node_id.clone_from(&edge.to);
                     } else {
-                        s.current_node_id = cp.current_node.clone();
+                        s.current_node_id.clone_from(&cp.current_node);
                     }
                 }
                 s
@@ -223,7 +223,7 @@ pub async fn execute(init: Initialized) -> Executed {
             tokio::spawn(async move {
                 loop {
                     tokio::select! {
-                        _ = sleep(stall_timeout) => {
+                        () = sleep(stall_timeout) => {
                             if shutdown_clone.is_cancelled() {
                                 return;
                             }
@@ -238,7 +238,7 @@ pub async fn execute(init: Initialized) -> Executed {
                                 return;
                             }
                         }
-                        _ = shutdown_clone.cancelled() => {
+                        () = shutdown_clone.cancelled() => {
                             return;
                         }
                     }

@@ -21,9 +21,9 @@ use crate::error::GraphvizError;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConditionExpr {
     Clause(Clause),
-    Not(Box<ConditionExpr>),
-    And(Vec<ConditionExpr>),
-    Or(Vec<ConditionExpr>),
+    Not(Box<Self>),
+    And(Vec<Self>),
+    Or(Vec<Self>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

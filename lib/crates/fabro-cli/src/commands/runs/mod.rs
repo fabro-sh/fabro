@@ -7,7 +7,7 @@ pub(crate) mod inspect;
 pub(crate) mod list;
 pub(crate) mod rm;
 
-pub async fn dispatch(cmd: RunsCommands) -> Result<()> {
+pub(crate) async fn dispatch(cmd: RunsCommands) -> Result<()> {
     match cmd {
         RunsCommands::Ps(args) => {
             let styles = Styles::detect_stdout();

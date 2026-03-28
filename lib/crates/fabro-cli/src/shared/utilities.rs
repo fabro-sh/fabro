@@ -6,12 +6,12 @@ use cli_table::Color;
 use fabro_util::terminal::Styles;
 use fabro_validate::{Diagnostic, Severity};
 
-pub fn read_workflow_file(path: &Path) -> anyhow::Result<String> {
+pub(crate) fn read_workflow_file(path: &Path) -> anyhow::Result<String> {
     std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("Failed to read {}: {e}", path.display()))
 }
 
-pub fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles) {
+pub(crate) fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles) {
     for d in diagnostics {
         let location = match (&d.node_id, &d.edge) {
             (Some(node), _) => format!(" [node: {node}]"),
@@ -41,7 +41,7 @@ pub fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles) {
     }
 }
 
-pub fn relative_path(path: &Path) -> String {
+pub(crate) fn relative_path(path: &Path) -> String {
     if let Ok(cwd) = std::env::current_dir() {
         if let Ok(rel) = path.strip_prefix(&cwd) {
             return rel.display().to_string();
@@ -50,7 +50,7 @@ pub fn relative_path(path: &Path) -> String {
     tilde_path(path)
 }
 
-pub fn format_tokens_human(tokens: i64) -> String {
+pub(crate) fn format_tokens_human(tokens: i64) -> String {
     if tokens >= 1_000_000 {
         format!("{:.1}m", tokens as f64 / 1_000_000.0)
     } else if tokens >= 1000 {
@@ -60,7 +60,7 @@ pub fn format_tokens_human(tokens: i64) -> String {
     }
 }
 
-pub fn tilde_path(path: &Path) -> String {
+pub(crate) fn tilde_path(path: &Path) -> String {
     if let Some(home) = dirs::home_dir() {
         if let Ok(suffix) = path.strip_prefix(&home) {
             return format!("~/{}", suffix.display());
@@ -69,18 +69,18 @@ pub fn tilde_path(path: &Path) -> String {
     path.display().to_string()
 }
 
-pub fn color_if(use_color: bool, color: Color) -> Option<Color> {
+pub(crate) fn color_if(use_color: bool, color: Color) -> Option<Color> {
     if use_color { Some(color) } else { None }
 }
 
-pub fn split_run_path(s: &str) -> Option<(&str, &str)> {
+pub(crate) fn split_run_path(s: &str) -> Option<(&str, &str)> {
     if s.starts_with('/') || s.starts_with("./") || s.starts_with("../") {
         return None;
     }
     s.split_once(':')
 }
 
-pub fn validate_daytona_provider(
+pub(crate) fn validate_daytona_provider(
     record: &fabro_sandbox::SandboxRecord,
     feature: &str,
 ) -> Result<()> {
@@ -93,7 +93,7 @@ pub fn validate_daytona_provider(
     Ok(())
 }
 
-pub fn format_duration_ms(ms: u64) -> String {
+pub(crate) fn format_duration_ms(ms: u64) -> String {
     let duration = Duration::from_millis(ms);
     let secs = duration.as_secs();
     if secs >= 60 {
@@ -105,7 +105,7 @@ pub fn format_duration_ms(ms: u64) -> String {
     }
 }
 
-pub fn format_size(bytes: u64) -> String {
+pub(crate) fn format_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = 1024 * KB;
     const GB: u64 = 1024 * MB;

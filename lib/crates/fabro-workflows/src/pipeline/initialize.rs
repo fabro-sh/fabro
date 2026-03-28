@@ -410,9 +410,9 @@ async fn mint_github_token(
 ) -> Result<String, FabroError> {
     let https_url = fabro_github::ssh_url_to_https(origin_url);
     let (owner, repo) = fabro_github::parse_github_owner_repo(&https_url)
-        .map_err(|e| FabroError::engine(e.to_string()))?;
+        .map_err(|e| FabroError::engine(e.clone()))?;
     let jwt = fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem)
-        .map_err(|e| FabroError::engine(e.to_string()))?;
+        .map_err(|e| FabroError::engine(e.clone()))?;
     let client = reqwest::Client::new();
     let perms_json =
         serde_json::to_value(permissions).map_err(|e| FabroError::engine(e.to_string()))?;
@@ -425,7 +425,7 @@ async fn mint_github_token(
         perms_json,
     )
     .await
-    .map_err(|e| FabroError::engine(e.to_string()))
+    .map_err(|e| FabroError::engine(e.clone()))
 }
 
 async fn build_sandbox_env(
@@ -586,7 +586,10 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), FabroErro
         }
     }
 
-    options.sandbox_env.devcontainer_env = config.environment.clone();
+    options
+        .sandbox_env
+        .devcontainer_env
+        .clone_from(&config.environment);
     options.lifecycle.devcontainer_phases = vec![
         ("on_create".to_string(), config.on_create_commands.clone()),
         (
@@ -753,7 +756,7 @@ pub async fn initialize(
                     .as_ref()
                     .and_then(|g| g.base_sha.clone())
                     .or(Some(info.base_sha.clone()));
-                options.run_options.display_base_sha = base_sha.clone();
+                options.run_options.display_base_sha.clone_from(&base_sha);
                 options.run_options.git = Some(GitCheckpointOptions {
                     base_sha,
                     run_branch: Some(info.run_branch.clone()),

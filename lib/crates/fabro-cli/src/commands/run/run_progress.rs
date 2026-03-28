@@ -179,7 +179,7 @@ enum ProgressRenderer {
 
 // ── ProgressUI ──────────────────────────────────────────────────────────
 
-pub struct ProgressUI {
+pub(crate) struct ProgressUI {
     renderer: ProgressRenderer,
     verbose: bool,
     active_stages: HashMap<String, ActiveStage>,
@@ -199,7 +199,7 @@ pub struct ProgressUI {
 
 #[allow(dead_code)]
 impl ProgressUI {
-    pub fn new(is_tty: bool, verbose: bool) -> Self {
+    pub(crate) fn new(is_tty: bool, verbose: bool) -> Self {
         let renderer = if is_tty {
             ProgressRenderer::Tty(TtyRenderer {
                 multi: MultiProgress::new(),
@@ -224,7 +224,7 @@ impl ProgressUI {
         }
     }
 
-    pub fn set_working_directory(&mut self, dir: String) {
+    pub(crate) fn set_working_directory(&mut self, dir: String) {
         self.working_directory = Some(dir);
     }
 
@@ -266,7 +266,7 @@ impl ProgressUI {
     }
 
     /// Register event handlers on the emitter.
-    pub fn register(progress: &Arc<Mutex<Self>>, emitter: &EventEmitter) {
+    pub(crate) fn register(progress: &Arc<Mutex<Self>>, emitter: &EventEmitter) {
         let p = Arc::clone(progress);
         emitter.on_event(move |event| {
             let mut ui = p.lock().expect("progress lock poisoned");
@@ -275,21 +275,21 @@ impl ProgressUI {
     }
 
     /// Hide indicatif progress bars (for interview prompts in attach mode).
-    pub fn hide_bars(&self) {
+    pub(crate) fn hide_bars(&self) {
         if let ProgressRenderer::Tty(tty) = &self.renderer {
             tty.multi.set_draw_target(ProgressDrawTarget::hidden());
         }
     }
 
     /// Show indicatif progress bars after an interview prompt.
-    pub fn show_bars(&self) {
+    pub(crate) fn show_bars(&self) {
         if let ProgressRenderer::Tty(tty) = &self.renderer {
             tty.multi.set_draw_target(ProgressDrawTarget::stderr());
         }
     }
 
     /// Clear all active bars and release the terminal for normal stderr output.
-    pub fn finish(&mut self) {
+    pub(crate) fn finish(&mut self) {
         for (_id, stage) in self.active_stages.drain() {
             for entry in &stage.tool_calls {
                 if entry.is_branch || self.verbose {
@@ -662,19 +662,22 @@ impl ProgressUI {
 
     /// Parse a JSONL envelope line and dispatch to internal rendering methods.
     /// Used by the attach loop to render events from progress.jsonl.
-    pub fn handle_json_line(&mut self, line: &str) {
+    pub(crate) fn handle_json_line(&mut self, line: &str) {
         let envelope: serde_json::Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(_) => return,
         };
-        let event_name = match envelope.get("event").and_then(|v| v.as_str()) {
-            Some(name) => name,
-            None => return,
+        let Some(event_name) = envelope.get("event").and_then(|v| v.as_str()) else {
+            return;
         };
 
         let str_field = |key: &str| -> Option<&str> { envelope.get(key).and_then(|v| v.as_str()) };
-        let u64_field =
-            |key: &str| -> u64 { envelope.get(key).and_then(|v| v.as_u64()).unwrap_or(0) };
+        let u64_field = |key: &str| -> u64 {
+            envelope
+                .get(key)
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0)
+        };
 
         match event_name {
             "WorkflowRunStarted" => {
@@ -697,8 +700,8 @@ impl ProgressUI {
                     .to_string();
                 let duration_ms = u64_field("duration_ms");
                 let name = str_field("name").map(String::from);
-                let cpu = envelope.get("cpu").and_then(|v| v.as_f64());
-                let memory = envelope.get("memory").and_then(|v| v.as_f64());
+                let cpu = envelope.get("cpu").and_then(serde_json::Value::as_f64);
+                let memory = envelope.get("memory").and_then(serde_json::Value::as_f64);
                 let url = str_field("url").map(String::from);
                 self.on_sandbox_event(&fabro_agent::SandboxEvent::Ready {
                     provider,
@@ -741,7 +744,7 @@ impl ProgressUI {
                 let cost_str = envelope
                     .get("usage")
                     .and_then(|u| u.get("cost"))
-                    .and_then(|c| c.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .map(|c| format!("{}   ", format_cost(c)))
                     .unwrap_or_default();
 
@@ -752,8 +755,12 @@ impl ProgressUI {
                     let total_tokens = envelope
                         .get("usage")
                         .map(|u| {
-                            u.get("input_tokens").and_then(|v| v.as_i64()).unwrap_or(0)
-                                + u.get("output_tokens").and_then(|v| v.as_i64()).unwrap_or(0)
+                            u.get("input_tokens")
+                                .and_then(serde_json::Value::as_i64)
+                                .unwrap_or(0)
+                                + u.get("output_tokens")
+                                    .and_then(serde_json::Value::as_i64)
+                                    .unwrap_or(0)
                         })
                         .unwrap_or(0);
                     if turn_count > 0 || tool_call_count > 0 || total_tokens > 0 {
@@ -833,7 +840,7 @@ impl ProgressUI {
                 let tool_call_id = str_field("tool_call_id").unwrap_or("?");
                 let is_error = envelope
                     .get("is_error")
-                    .and_then(|v| v.as_bool())
+                    .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
                 self.on_tool_call_completed(stage, tool_call_id, is_error);
             }
@@ -931,7 +938,7 @@ impl ProgressUI {
                 let pr_url = str_field("pr_url").unwrap_or("?");
                 let draft = envelope
                     .get("draft")
-                    .and_then(|value| value.as_bool())
+                    .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
                 self.on_pull_request_created(pr_url, draft);
             }
@@ -1027,7 +1034,7 @@ impl ProgressUI {
                 if let Some(cli_name) = str_field("cli_name") {
                     let already_installed = envelope
                         .get("already_installed")
-                        .and_then(|v| v.as_bool())
+                        .and_then(serde_json::Value::as_bool)
                         .unwrap_or(false);
                     let duration_ms = u64_field("duration_ms");
                     self.on_cli_ensure_completed(cli_name, already_installed, duration_ms);
@@ -1213,7 +1220,7 @@ impl ProgressUI {
 
     // ── Logs dir (called externally) ────────────────────────────────────
 
-    pub fn show_run_dir(&mut self, run_dir: &Path) {
+    pub(crate) fn show_run_dir(&mut self, run_dir: &Path) {
         let path_str = tilde_path(run_dir);
         match &self.renderer {
             ProgressRenderer::Tty(tty) => {
@@ -1227,7 +1234,7 @@ impl ProgressUI {
         }
     }
 
-    pub fn show_version(&mut self) {
+    pub(crate) fn show_version(&mut self) {
         let version = FABRO_VERSION;
         match &self.renderer {
             ProgressRenderer::Tty(tty) => {
@@ -1241,7 +1248,7 @@ impl ProgressUI {
         }
     }
 
-    pub fn show_run_id(&mut self, run_id: &str) {
+    pub(crate) fn show_run_id(&mut self, run_id: &str) {
         match &self.renderer {
             ProgressRenderer::Tty(tty) => {
                 let bar = tty.multi.add(ProgressBar::new_spinner());
@@ -1254,7 +1261,7 @@ impl ProgressUI {
         }
     }
 
-    pub fn show_time(&mut self, time: &str) {
+    pub(crate) fn show_time(&mut self, time: &str) {
         match &self.renderer {
             ProgressRenderer::Tty(tty) => {
                 let bar = tty.multi.add(ProgressBar::new_spinner());
@@ -1267,7 +1274,7 @@ impl ProgressUI {
         }
     }
 
-    pub fn show_worktree(&mut self, path: &Path) {
+    pub(crate) fn show_worktree(&mut self, path: &Path) {
         let path_str = tilde_path(path);
         match &self.renderer {
             ProgressRenderer::Tty(tty) => {
@@ -1281,7 +1288,7 @@ impl ProgressUI {
         }
     }
 
-    pub fn show_base_info(&mut self, branch: Option<&str>, sha: &str) {
+    pub(crate) fn show_base_info(&mut self, branch: Option<&str>, sha: &str) {
         let short_sha = &sha[..sha.len().min(12)];
         let text = match branch {
             Some(b) => format!("Base: {b} ({short_sha})"),
@@ -1408,7 +1415,7 @@ impl ProgressUI {
             {
                 let usage_percent = details
                     .get("usage_percent")
-                    .and_then(|v| v.as_u64())
+                    .and_then(serde_json::Value::as_u64)
                     .unwrap_or(0);
                 let yellow = Style::new().yellow();
                 self.insert_info_line_for_stage(
@@ -1725,14 +1732,14 @@ impl ProgressUI {
 /// Wraps a `ConsoleInterviewer` so that progress bars are hidden during
 /// interactive prompts (avoids garbled output from concurrent writes).
 #[allow(dead_code)]
-pub struct ProgressAwareInterviewer {
+pub(crate) struct ProgressAwareInterviewer {
     inner: ConsoleInterviewer,
     progress: Arc<Mutex<ProgressUI>>,
 }
 
 #[allow(dead_code)]
 impl ProgressAwareInterviewer {
-    pub fn new(inner: ConsoleInterviewer, progress: Arc<Mutex<ProgressUI>>) -> Self {
+    pub(crate) fn new(inner: ConsoleInterviewer, progress: Arc<Mutex<ProgressUI>>) -> Self {
         Self { inner, progress }
     }
 }

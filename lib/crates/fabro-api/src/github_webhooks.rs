@@ -17,19 +17,16 @@ type HmacSha256 = Hmac<Sha256>;
 /// `signature_header` is the value of the `X-Hub-Signature-256` header,
 /// expected in the form `sha256=<hex-digest>`.
 pub fn verify_signature(secret: &[u8], body: &[u8], signature_header: &str) -> bool {
-    let hex_digest = match signature_header.strip_prefix("sha256=") {
-        Some(h) => h,
-        None => return false,
+    let Some(hex_digest) = signature_header.strip_prefix("sha256=") else {
+        return false;
     };
 
-    let expected = match hex::decode(hex_digest) {
-        Ok(b) => b,
-        Err(_) => return false,
+    let Ok(expected) = hex::decode(hex_digest) else {
+        return false;
     };
 
-    let mut mac = match HmacSha256::new_from_slice(secret) {
-        Ok(m) => m,
-        Err(_) => return false,
+    let Ok(mut mac) = HmacSha256::new_from_slice(secret) else {
+        return false;
     };
     mac.update(body);
     mac.verify_slice(&expected).is_ok()
@@ -50,15 +47,12 @@ async fn webhook_handler(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unknown");
 
-    let signature = match headers
+    let Some(signature) = headers
         .get("x-hub-signature-256")
         .and_then(|v| v.to_str().ok())
-    {
-        Some(s) => s,
-        None => {
-            warn!(delivery = %delivery_id, "Webhook signature verification failed");
-            return StatusCode::UNAUTHORIZED;
-        }
+    else {
+        warn!(delivery = %delivery_id, "Webhook signature verification failed");
+        return StatusCode::UNAUTHORIZED;
     };
 
     if !verify_signature(&state.secret, &body, signature) {

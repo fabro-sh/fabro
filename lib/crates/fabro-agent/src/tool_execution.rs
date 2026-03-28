@@ -238,12 +238,11 @@ async fn execute_and_emit_one_tool_with_lookup(
     // Post-tool-use hooks
     if let Some(hooks) = tool_hooks {
         let fallback;
-        let content_str = match result.content.as_str() {
-            Some(s) => s,
-            None => {
-                fallback = result.content.to_string();
-                &fallback
-            }
+        let content_str = if let Some(s) = result.content.as_str() {
+            s
+        } else {
+            fallback = result.content.to_string();
+            &fallback
         };
         if result.is_error {
             debug!(tool = %tc.name, hook_event = "post_tool_use_failure", "Calling tool hook");

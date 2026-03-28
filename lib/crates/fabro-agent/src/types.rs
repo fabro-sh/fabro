@@ -10,7 +10,7 @@ mod system_time_iso8601 {
     use serde::{self, Deserialize, Deserializer, Serializer};
     use std::time::SystemTime;
 
-    pub fn serialize<S>(time: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
+    pub(super) fn serialize<S>(time: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -18,7 +18,7 @@ mod system_time_iso8601 {
         serializer.serialize_str(&dt.to_rfc3339_opts(SecondsFormat::Millis, true))
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -67,7 +67,7 @@ impl Turn {
     /// `provider_parts`, if any.
     #[must_use]
     pub fn reasoning_text(&self) -> Option<&str> {
-        let Turn::Assistant { provider_parts, .. } = self else {
+        let Self::Assistant { provider_parts, .. } = self else {
             return None;
         };
         provider_parts.iter().find_map(|p| match p {
@@ -188,7 +188,7 @@ pub enum AgentEvent {
     SubAgentEvent {
         agent_id: String,
         depth: usize,
-        event: Box<AgentEvent>,
+        event: Box<Self>,
     },
     McpServerReady {
         server_name: String,

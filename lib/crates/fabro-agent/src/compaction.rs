@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use crate::agent_profile::AgentProfile;
 use crate::error::AgentError;
 use crate::event::EventEmitter;
@@ -198,7 +200,7 @@ pub fn render_turns_for_summary(turns: &[Turn]) -> String {
     for turn in turns {
         match turn {
             Turn::User { content, .. } => {
-                out.push_str(&format!("User: {content}\n"));
+                let _ = writeln!(out, "User: {content}");
             }
             Turn::Assistant {
                 content,
@@ -206,7 +208,7 @@ pub fn render_turns_for_summary(turns: &[Turn]) -> String {
                 ..
             } => {
                 if !content.is_empty() {
-                    out.push_str(&format!("Assistant: {content}\n"));
+                    let _ = writeln!(out, "Assistant: {content}");
                 }
                 for tc in tool_calls {
                     let args_str = tc.arguments.to_string();
@@ -218,7 +220,7 @@ pub fn render_turns_for_summary(turns: &[Turn]) -> String {
                     } else {
                         args_str
                     };
-                    out.push_str(&format!("[Tool call: {}] {truncated}\n", tc.name));
+                    let _ = writeln!(out, "[Tool call: {}] {truncated}", tc.name);
                 }
             }
             Turn::ToolResults { results, .. } => {
@@ -232,14 +234,14 @@ pub fn render_turns_for_summary(turns: &[Turn]) -> String {
                     } else {
                         content_str
                     };
-                    out.push_str(&format!("[Tool result: {}] {truncated}\n", r.tool_call_id));
+                    let _ = writeln!(out, "[Tool result: {}] {truncated}", r.tool_call_id);
                 }
             }
             Turn::System { content, .. } => {
-                out.push_str(&format!("System: {content}\n"));
+                let _ = writeln!(out, "System: {content}");
             }
             Turn::Steering { content, .. } => {
-                out.push_str(&format!("Steering: {content}\n"));
+                let _ = writeln!(out, "Steering: {content}");
             }
         }
     }

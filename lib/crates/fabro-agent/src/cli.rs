@@ -117,6 +117,7 @@ fn is_auto_approved(level: PermissionLevel, category: &str) -> bool {
     )
 }
 
+#[allow(clippy::print_stderr)]
 fn build_tool_approval(
     permissions: PermissionLevel,
     is_interactive: bool,
@@ -237,6 +238,7 @@ fn format_tool_args(args: &serde_json::Value, cwd: &str) -> String {
         .join(", ")
 }
 
+#[allow(clippy::print_stdout)]
 fn print_output(session: &Session, styles: &Styles) {
     for turn in session.history().turns() {
         if let Turn::Assistant { content, .. } = turn {
@@ -247,6 +249,7 @@ fn print_output(session: &Session, styles: &Styles) {
     }
 }
 
+#[allow(clippy::print_stderr)]
 fn print_summary(session: &Session, styles: &Styles) {
     let (mut turn_count, mut tool_call_count, mut total_tokens) = (0usize, 0usize, 0i64);
     for turn in session.history().turns() {
@@ -281,6 +284,7 @@ struct DebugMiddleware {
 
 #[async_trait::async_trait]
 impl Middleware for DebugMiddleware {
+    #[allow(clippy::print_stderr)]
     async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, SdkError> {
         let s = self.styles;
         eprintln!(
@@ -323,6 +327,7 @@ struct VerboseMiddleware {
 
 #[async_trait::async_trait]
 impl Middleware for VerboseMiddleware {
+    #[allow(clippy::print_stderr)]
     async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, SdkError> {
         let s = self.styles;
         eprintln!(
@@ -357,6 +362,7 @@ pub async fn run_with_args(
     run_with_args_and_client(args, None, mcp_servers).await
 }
 
+#[allow(clippy::print_stdout, clippy::print_stderr)]
 pub async fn run_with_args_and_client(
     args: AgentArgs,
     llm_client: Option<Client>,
@@ -429,7 +435,7 @@ pub async fn run_with_args_and_client(
     )));
     let manager_for_callback = manager.clone();
     let factory_client = client.clone();
-    let factory_model = model.to_string();
+    let factory_model = model.clone();
     let factory_env = Arc::clone(&env);
     let factory_hooks = config.tool_hooks.clone();
     let factory: SessionFactory = Arc::new(move || {
@@ -490,7 +496,9 @@ pub async fn run_with_args_and_client(
     tokio::spawn(async move {
         signal::ctrl_c().await.ok();
         {
-            let mut guard = abort_reason.lock().unwrap_or_else(|e| e.into_inner());
+            let mut guard = abort_reason
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if guard.is_none() {
                 *guard = Some(AbortReason::Cancelled);
             }

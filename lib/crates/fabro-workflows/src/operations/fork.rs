@@ -87,7 +87,7 @@ fn fork_from_entry(
 
     let mut run_record: RunRecord =
         serde_json::from_slice(&run_record_bytes).context("failed to parse source run.json")?;
-    run_record.run_id = new_run_id.clone();
+    run_record.run_id.clone_from(&new_run_id);
     run_record.created_at = now;
     let new_run_record_bytes =
         serde_json::to_vec_pretty(&run_record).context("failed to serialize new run.json")?;

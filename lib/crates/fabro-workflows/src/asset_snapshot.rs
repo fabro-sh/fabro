@@ -116,13 +116,11 @@ fn parse_find_output_linux(output: &str) -> Vec<DiscoveredFile> {
         if parts.len() != 3 {
             continue;
         }
-        let size = match parts[0].parse::<u64>() {
-            Ok(s) => s,
-            Err(_) => continue,
+        let Ok(size) = parts[0].parse::<u64>() else {
+            continue;
         };
-        let mtime = match parts[1].parse::<f64>() {
-            Ok(m) => m,
-            Err(_) => continue,
+        let Ok(mtime) = parts[1].parse::<f64>() else {
+            continue;
         };
         let path = parts[2].to_string();
         if path.is_empty() {
@@ -156,13 +154,11 @@ fn parse_find_output_darwin(output: &str) -> Vec<DiscoveredFile> {
             continue;
         }
 
-        let size = match stat_parts[0].parse::<u64>() {
-            Ok(s) => s,
-            Err(_) => continue,
+        let Ok(size) = stat_parts[0].parse::<u64>() else {
+            continue;
         };
-        let mtime = match stat_parts[1].parse::<f64>() {
-            Ok(m) => m,
-            Err(_) => continue,
+        let Ok(mtime) = stat_parts[1].parse::<f64>() else {
+            continue;
         };
 
         files.push(DiscoveredFile {

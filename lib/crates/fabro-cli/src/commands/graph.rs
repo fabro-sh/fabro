@@ -17,7 +17,7 @@ use crate::shared::{print_diagnostics, read_workflow_file, relative_path};
 static RANKDIR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"rankdir\s*=\s*\w+").unwrap());
 
-pub fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
+pub(crate) fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
     let cli_defaults = load_cli_config(None)?;
     let settings = resolve_settings(ResolveSettingsInput {
@@ -61,7 +61,7 @@ pub fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn apply_direction<'a>(source: &'a str, direction: Option<GraphDirection>) -> Cow<'a, str> {
+fn apply_direction(source: &str, direction: Option<GraphDirection>) -> Cow<'_, str> {
     match direction {
         Some(dir) => {
             let replacement = format!("rankdir={dir}");

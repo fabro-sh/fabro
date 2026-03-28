@@ -6,7 +6,7 @@ use tokio::task::spawn_blocking;
 use crate::args::ProviderLoginArgs;
 use crate::shared::provider_auth;
 
-pub async fn login_command(args: ProviderLoginArgs) -> Result<()> {
+pub(super) async fn login_command(args: ProviderLoginArgs) -> Result<()> {
     let s = Styles::detect_stderr();
     let arc_dir = dirs::home_dir()
         .context("could not determine home directory")?

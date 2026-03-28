@@ -12,7 +12,7 @@ use super::output::{print_diagnostics_from_error, print_workflow_report_from_per
 /// Create a workflow run: allocate run directory, persist RunRecord, return (run_id, run_dir).
 ///
 /// This does NOT execute the workflow — it only prepares the run directory.
-pub async fn create_run(
+pub(crate) fn create_run(
     args: &RunArgs,
     cli_defaults: FabroConfig,
     styles: &Styles,

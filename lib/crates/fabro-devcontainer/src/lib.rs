@@ -252,20 +252,26 @@ impl DevcontainerResolver {
                 build_args: HashMap::new(),
                 build_target: None,
                 initialize_commands: Self::collect_commands(
-                    &devcontainer.initialize_command,
+                    devcontainer.initialize_command.as_ref(),
                     &vars,
                 ),
-                on_create_commands: Self::collect_commands(&devcontainer.on_create_command, &vars),
+                on_create_commands: Self::collect_commands(
+                    devcontainer.on_create_command.as_ref(),
+                    &vars,
+                ),
                 post_create_commands: Self::collect_commands(
-                    &devcontainer.post_create_command,
+                    devcontainer.post_create_command.as_ref(),
                     &vars,
                 ),
                 post_start_commands: Self::collect_commands(
-                    &devcontainer.post_start_command,
+                    devcontainer.post_start_command.as_ref(),
                     &vars,
                 ),
                 environment,
-                container_env: Self::collect_container_env(&devcontainer.container_env, &vars),
+                container_env: Self::collect_container_env(
+                    devcontainer.container_env.as_ref(),
+                    &vars,
+                ),
                 remote_user: devcontainer.remote_user.clone().or(compose_config.user),
                 workspace_folder,
                 forwarded_ports: {
@@ -362,11 +368,12 @@ impl DevcontainerResolver {
         let forwarded_ports = Self::parse_forward_ports(&devcontainer.forward_ports);
 
         // Collect devcontainer.json lifecycle commands, then append feature lifecycle commands
-        let mut on_create_commands = Self::collect_commands(&devcontainer.on_create_command, &vars);
+        let mut on_create_commands =
+            Self::collect_commands(devcontainer.on_create_command.as_ref(), &vars);
         let mut post_create_commands =
-            Self::collect_commands(&devcontainer.post_create_command, &vars);
+            Self::collect_commands(devcontainer.post_create_command.as_ref(), &vars);
         let mut post_start_commands =
-            Self::collect_commands(&devcontainer.post_start_command, &vars);
+            Self::collect_commands(devcontainer.post_start_command.as_ref(), &vars);
 
         for cmd in &resolved_features.on_create_commands {
             on_create_commands.push(Self::convert_lifecycle_command(cmd));
@@ -383,7 +390,10 @@ impl DevcontainerResolver {
             build_context,
             build_args,
             build_target,
-            initialize_commands: Self::collect_commands(&devcontainer.initialize_command, &vars),
+            initialize_commands: Self::collect_commands(
+                devcontainer.initialize_command.as_ref(),
+                &vars,
+            ),
             on_create_commands,
             post_create_commands,
             post_start_commands,
@@ -438,7 +448,7 @@ impl DevcontainerResolver {
                     path: devcontainer_dir.clone(),
                     source,
                 })?
-                .filter_map(|entry| entry.ok())
+                .filter_map(std::result::Result::ok)
                 .filter(|entry| entry.path().is_dir())
                 .map(|entry| entry.path())
                 .filter(|dir| dir.join("devcontainer.json").exists())
@@ -487,7 +497,7 @@ impl DevcontainerResolver {
     }
 
     fn collect_container_env(
-        env: &Option<HashMap<String, String>>,
+        env: Option<&HashMap<String, String>>,
         vars: &variables::VariableContext,
     ) -> HashMap<String, String> {
         match env {
@@ -508,7 +518,7 @@ impl DevcontainerResolver {
     }
 
     fn collect_commands(
-        cmd: &Option<types::LifecycleCommand>,
+        cmd: Option<&types::LifecycleCommand>,
         vars: &variables::VariableContext,
     ) -> Vec<Command> {
         match cmd {

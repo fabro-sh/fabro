@@ -26,7 +26,7 @@ use tokio::time::timeout;
 ///
 /// On each `execute()` call, forks the context, runs the handler,
 /// then diffs and applies changes back.
-pub struct WorkflowNodeHandler {
+pub(crate) struct WorkflowNodeHandler {
     pub services: Arc<EngineServices>,
     pub run_dir: PathBuf,
     pub graph: Arc<GvGraph>,

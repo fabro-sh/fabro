@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
@@ -265,7 +266,7 @@ fn resolve_workflow_arg_impl(
                 available.join(", ")
             );
             if let Some(suggestion) = find_closest_match(&name, &available) {
-                msg.push_str(&format!("\n\nDid you mean '{suggestion}'?"));
+                let _ = write!(msg, "\n\nDid you mean '{suggestion}'?");
             }
             bail!("{msg}");
         }

@@ -3,7 +3,11 @@ use fabro_util::run_log;
 use tracing_appender::rolling;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
-pub fn init_tracing(debug: bool, config_log_level: Option<&str>, log_prefix: &str) -> Result<()> {
+pub(crate) fn init_tracing(
+    debug: bool,
+    config_log_level: Option<&str>,
+    log_prefix: &str,
+) -> Result<()> {
     let default_level = if debug {
         "debug"
     } else {

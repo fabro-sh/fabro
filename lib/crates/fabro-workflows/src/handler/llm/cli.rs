@@ -241,11 +241,11 @@ fn parse_claude_ndjson(output: &str) -> Option<CliResponse> {
         .to_string();
     let input_tokens = result
         .pointer("/usage/input_tokens")
-        .and_then(|v| v.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .unwrap_or(0);
     let output_tokens = result
         .pointer("/usage/output_tokens")
-        .and_then(|v| v.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .unwrap_or(0);
 
     Some(CliResponse {
@@ -293,11 +293,11 @@ fn parse_codex_ndjson(output: &str) -> Option<CliResponse> {
             "turn.completed" => {
                 input_tokens = value
                     .pointer("/usage/input_tokens")
-                    .and_then(|v| v.as_i64())
+                    .and_then(serde_json::Value::as_i64)
                     .unwrap_or(0);
                 output_tokens = value
                     .pointer("/usage/output_tokens")
-                    .and_then(|v| v.as_i64())
+                    .and_then(serde_json::Value::as_i64)
                     .unwrap_or(0);
                 found_anything = true;
             }
@@ -336,11 +336,11 @@ fn parse_gemini_json(output: &str) -> Option<CliResponse> {
         .map(|model_stats| {
             let input = model_stats
                 .pointer("/tokens/input")
-                .and_then(|v| v.as_i64())
+                .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0);
             let output = model_stats
                 .pointer("/tokens/candidates")
-                .and_then(|v| v.as_i64())
+                .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0);
             (input, output)
         })
@@ -694,7 +694,7 @@ impl CodergenBackend for AgentCliBackend {
         let last_file_touched = if !files_touched.is_empty() {
             let quoted_files: Vec<String> = files_touched
                 .iter()
-                .filter_map(|f| shlex::try_quote(f).ok().map(|q| q.into_owned()))
+                .filter_map(|f| shlex::try_quote(f).ok().map(std::borrow::Cow::into_owned))
                 .collect();
             let cmd = format!("ls -t {} | head -1", quoted_files.join(" "));
             if let Ok(result) = sandbox.exec_command(&cmd, 5_000, None, None, None).await {
@@ -748,6 +748,7 @@ impl BackendRouter {
         }
     }
 
+    #[allow(clippy::unused_self)]
     fn should_use_cli(&self, node: &Node) -> bool {
         // Explicit backend="cli" attribute on the node
         if node.backend() == Some("cli") {

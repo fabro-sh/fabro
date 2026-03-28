@@ -1,11 +1,11 @@
-pub mod deinit;
-pub mod init;
+pub(crate) mod deinit;
+pub(crate) mod init;
 
 use anyhow::Result;
 
 use crate::args::{RepoCommand, RepoNamespace};
 
-pub async fn dispatch(ns: RepoNamespace) -> Result<()> {
+pub(crate) async fn dispatch(ns: RepoNamespace) -> Result<()> {
     match ns.command {
         RepoCommand::Init { skill } => {
             init::run_init().await?;

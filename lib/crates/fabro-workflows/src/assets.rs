@@ -21,9 +21,8 @@ fn serialize_path<S: serde::Serializer>(path: &Path, serializer: S) -> Result<S:
 
 /// Walk `{assets_dir}/*/retry_*/manifest.json`, stat each file, and return entries.
 pub fn scan_assets(assets_dir: &Path, node_filter: Option<&str>) -> Result<Vec<AssetEntry>> {
-    let nodes = match std::fs::read_dir(assets_dir) {
-        Ok(read_dir) => read_dir,
-        Err(_) => return Ok(Vec::new()),
+    let Ok(nodes) = std::fs::read_dir(assets_dir) else {
+        return Ok(Vec::new());
     };
 
     let mut entries = Vec::new();

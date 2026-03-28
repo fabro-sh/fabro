@@ -13,7 +13,7 @@ type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
 
 /// Sub-lifecycle responsible for auto-status override on nodes with `auto_status=true`.
-pub struct AutoStatusLifecycle;
+pub(crate) struct AutoStatusLifecycle;
 
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for AutoStatusLifecycle {

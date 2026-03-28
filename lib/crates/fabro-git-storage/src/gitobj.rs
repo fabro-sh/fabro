@@ -16,17 +16,17 @@ pub enum FileMode {
 impl FileMode {
     fn as_i32(self) -> i32 {
         match self {
-            FileMode::Blob => 0o100644,
-            FileMode::BlobExecutable => 0o100755,
-            FileMode::Tree => 0o040000,
+            Self::Blob => 0o100644,
+            Self::BlobExecutable => 0o100755,
+            Self::Tree => 0o040000,
         }
     }
 
     fn from_i32(mode: i32) -> Self {
         match mode {
-            0o100755 => FileMode::BlobExecutable,
-            0o040000 => FileMode::Tree,
-            _ => FileMode::Blob,
+            0o100755 => Self::BlobExecutable,
+            0o040000 => Self::Tree,
+            _ => Self::Blob,
         }
     }
 }
@@ -62,7 +62,7 @@ impl TreeEntries {
         self.0.get(path)
     }
 
-    pub fn merge(&mut self, other: &TreeEntries) {
+    pub fn merge(&mut self, other: &Self) {
         for (path, entry) in &other.0 {
             self.0.insert(path.clone(), entry.clone());
         }
@@ -224,7 +224,7 @@ fn read_tree_recursive(
     prefix: &str,
     entries: &mut TreeEntries,
 ) -> Result<()> {
-    for entry in tree.iter() {
+    for entry in tree {
         let name = entry.name().unwrap_or("");
         let path = if prefix.is_empty() {
             name.to_string()
@@ -246,7 +246,7 @@ fn read_tree_recursive(
 /// Intermediate structure for building nested git trees from flat paths.
 struct DirNode {
     files: BTreeMap<String, TreeEntry>,
-    dirs: BTreeMap<String, DirNode>,
+    dirs: BTreeMap<String, Self>,
 }
 
 impl DirNode {

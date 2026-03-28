@@ -62,6 +62,7 @@ pub struct ServeArgs {
 /// # Errors
 ///
 /// Returns an error if the server fails to bind or encounters a fatal error.
+#[allow(clippy::print_stderr)]
 pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::Result<()> {
     // Resolve dry-run mode (same pattern as run.rs)
     let dry_run_mode = if args.dry_run {
@@ -186,22 +187,19 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         Some(app_id) => {
             let secret = std::env::var("GITHUB_APP_WEBHOOK_SECRET").ok();
             let private_key_pem = read_github_private_key();
-            match (secret, private_key_pem) {
-                (Some(secret), Some(pem)) => {
-                    match WebhookManager::start(secret.into_bytes(), &app_id, &pem).await {
-                        Ok(manager) => Some(manager),
-                        Err(err) => {
-                            error!(error = %err, "Failed to start webhook listener");
-                            None
-                        }
+            if let (Some(secret), Some(pem)) = (secret, private_key_pem) {
+                match WebhookManager::start(secret.into_bytes(), &app_id, &pem).await {
+                    Ok(manager) => Some(manager),
+                    Err(err) => {
+                        error!(error = %err, "Failed to start webhook listener");
+                        None
                     }
                 }
-                _ => {
-                    warn!(
-                        "Webhook config present but GITHUB_APP_WEBHOOK_SECRET or GITHUB_APP_PRIVATE_KEY not set; skipping webhook listener"
-                    );
-                    None
-                }
+            } else {
+                warn!(
+                    "Webhook config present but GITHUB_APP_WEBHOOK_SECRET or GITHUB_APP_PRIVATE_KEY not set; skipping webhook listener"
+                );
+                None
             }
         }
         None => None,
@@ -274,8 +272,8 @@ fn resolve_model_provider(
 
     let provider_str = cli_provider.or(config_provider);
     let model = cli_model
-        .map(|s| s.to_string())
-        .or_else(|| config_model.map(|s| s.to_string()))
+        .map(std::string::ToString::to_string)
+        .or_else(|| config_model.map(std::string::ToString::to_string))
         .unwrap_or_else(|| {
             // Look up default model from catalog for the given provider,
             // falling back to the best provider with an API key configured.
@@ -292,10 +290,10 @@ fn resolve_model_provider(
         Some(info) => (
             info.id.clone(),
             provider_str
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
                 .or(Some(info.provider.to_string())),
         ),
-        None => (model, provider_str.map(|s| s.to_string())),
+        None => (model, provider_str.map(std::string::ToString::to_string)),
     };
 
     let provider_enum: Provider = provider_str

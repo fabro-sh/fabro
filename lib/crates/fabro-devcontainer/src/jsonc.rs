@@ -1,5 +1,5 @@
 /// Strip JSONC comments and trailing commas, producing valid JSON.
-pub fn strip_jsonc(input: &str) -> String {
+pub(crate) fn strip_jsonc(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let bytes = input.as_bytes();
     let len = bytes.len();

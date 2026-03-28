@@ -16,7 +16,7 @@ use tokio::task::JoinHandle;
 
 use crate::retro::{RetroNarrative, SmoothnessRating};
 
-const RETRO_SYSTEM_PROMPT: &str = r#"You are a workflow run retrospective analyst. Your job is to analyze a completed workflow run and generate a structured retrospective.
+const RETRO_SYSTEM_PROMPT: &str = r"You are a workflow run retrospective analyst. Your job is to analyze a completed workflow run and generate a structured retrospective.
 
 You have access to the run's data files:
 - `progress.jsonl` — the full event stream (stage starts/completions, agent tool calls, errors, retries)
@@ -54,7 +54,7 @@ Consider the full context: not just stage pass/fail, but the quality of the jour
 - **friction_points**: Where did things get stuck? What caused slowdowns?
 - **open_items**: What follow-up work, tech debt, or gaps were identified?
 
-Be specific and concise. Reference actual stage names, file paths, and error messages where relevant."#;
+Be specific and concise. Reference actual stage names, file paths, and error messages where relevant.";
 
 const SUBMIT_RETRO_SCHEMA: &str = r#"{
   "type": "object",
@@ -148,7 +148,7 @@ pub async fn run_retro_agent(
             Box::pin(async move {
                 let narrative: RetroNarrative = serde_json::from_value(args)
                     .map_err(|e| format!("Invalid retro submission: {e}"))?;
-                *captured.lock().unwrap_or_else(|e| e.into_inner()) = Some(narrative);
+                *captured.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(narrative);
                 Ok("Retrospective submitted successfully.".to_string())
             })
         }),
@@ -217,7 +217,10 @@ pub async fn run_retro_agent(
     // Extract result / determine outcome
     let (outcome, failure_reason, narrative_result) = match process_result {
         Ok(()) => {
-            let maybe_narrative = captured.lock().unwrap_or_else(|e| e.into_inner()).take();
+            let maybe_narrative = captured
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
             match maybe_narrative {
                 Some(narrative) => ("success", None, Ok(narrative)),
                 None => (

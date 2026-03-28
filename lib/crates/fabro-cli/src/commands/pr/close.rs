@@ -8,7 +8,7 @@ use tracing::info;
 use crate::args::PrCloseArgs;
 use crate::cli_config::load_cli_settings;
 
-pub async fn close_command(
+pub(super) async fn close_command(
     args: PrCloseArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {

@@ -10,9 +10,8 @@ use super::Transform;
 /// contents are returned (inlined). Otherwise the original value is returned
 /// unchanged.
 pub fn resolve_file_ref(value: &str, base_dir: &Path, fallback_dir: Option<&Path>) -> String {
-    let path_str = match value.strip_prefix('@') {
-        Some(p) => p,
-        None => return value.to_string(),
+    let Some(path_str) = value.strip_prefix('@') else {
+        return value.to_string();
     };
 
     // Build the raw path: expand ~ then resolve relative to base_dir

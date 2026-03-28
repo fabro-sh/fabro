@@ -1,5 +1,6 @@
 //! Demo mode handlers that return static data for all API endpoints.
 //! Activated per-request via the `X-Fabro-Demo: 1` header to showcase the UI without a real backend.
+#![allow(clippy::default_trait_access)]
 
 use std::sync::Arc;
 
@@ -14,7 +15,7 @@ use crate::jwt_auth::AuthenticatedService;
 use crate::server::{AppState, PaginationParams};
 
 #[derive(serde::Deserialize)]
-pub struct RetroListParams {
+pub(crate) struct RetroListParams {
     #[serde(rename = "page[limit]", default = "crate::server::default_page_limit")]
     limit: u32,
     #[serde(rename = "page[offset]", default)]
@@ -41,7 +42,7 @@ fn paginated_response<T: serde::Serialize>(
 
 // ── Runs ───────────────────────────────────────────────────────────────
 
-pub async fn list_runs(
+pub(crate) async fn list_runs(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
@@ -49,7 +50,7 @@ pub async fn list_runs(
     paginated_response(runs::list_items(), &pagination)
 }
 
-pub async fn start_run_stub(
+pub(crate) async fn start_run_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
@@ -60,7 +61,7 @@ pub async fn start_run_stub(
         .into_response()
 }
 
-pub async fn get_run_stages(
+pub(crate) async fn get_run_stages(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -69,7 +70,7 @@ pub async fn get_run_stages(
     paginated_response(runs::stages(), &pagination)
 }
 
-pub async fn get_stage_turns(
+pub(crate) async fn get_stage_turns(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path((_id, _stage_id)): Path<(String, String)>,
@@ -78,7 +79,7 @@ pub async fn get_stage_turns(
     paginated_response(runs::turns(), &pagination)
 }
 
-pub async fn get_run_files(
+pub(crate) async fn get_run_files(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -87,7 +88,7 @@ pub async fn get_run_files(
     paginated_response(runs::files(), &pagination)
 }
 
-pub async fn get_run_usage(
+pub(crate) async fn get_run_usage(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -95,7 +96,7 @@ pub async fn get_run_usage(
     (StatusCode::OK, Json(runs::usage())).into_response()
 }
 
-pub async fn get_run_verification(
+pub(crate) async fn get_run_verification(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -104,7 +105,7 @@ pub async fn get_run_verification(
     paginated_response(runs::verifications(), &pagination)
 }
 
-pub async fn get_run_settings(
+pub(crate) async fn get_run_settings(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -112,7 +113,7 @@ pub async fn get_run_settings(
     (StatusCode::OK, Json(runs::settings())).into_response()
 }
 
-pub async fn steer_run_stub(
+pub(crate) async fn steer_run_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -120,7 +121,7 @@ pub async fn steer_run_stub(
     StatusCode::ACCEPTED.into_response()
 }
 
-pub async fn generate_preview_url_stub(
+pub(crate) async fn generate_preview_url_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -132,7 +133,7 @@ pub async fn generate_preview_url_stub(
         .into_response()
 }
 
-pub async fn get_run_status(
+pub(crate) async fn get_run_status(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -153,7 +154,7 @@ pub async fn get_run_status(
     }
 }
 
-pub async fn get_questions_stub(
+pub(crate) async fn get_questions_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -162,7 +163,7 @@ pub async fn get_questions_stub(
     paginated_response(runs::questions(), &pagination)
 }
 
-pub async fn answer_stub(
+pub(crate) async fn answer_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path((_id, _qid)): Path<(String, String)>,
@@ -170,7 +171,7 @@ pub async fn answer_stub(
     StatusCode::NO_CONTENT.into_response()
 }
 
-pub async fn run_events_stub(
+pub(crate) async fn run_events_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -178,7 +179,7 @@ pub async fn run_events_stub(
     ApiError::new(StatusCode::GONE, "Event stream closed.").into_response()
 }
 
-pub async fn checkpoint_stub(
+pub(crate) async fn checkpoint_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -186,7 +187,7 @@ pub async fn checkpoint_stub(
     (StatusCode::OK, Json(serde_json::json!(null))).into_response()
 }
 
-pub async fn context_stub(
+pub(crate) async fn context_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -194,7 +195,7 @@ pub async fn context_stub(
     (StatusCode::OK, Json(serde_json::json!({}))).into_response()
 }
 
-pub async fn cancel_stub(
+pub(crate) async fn cancel_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -202,7 +203,7 @@ pub async fn cancel_stub(
     (StatusCode::OK, Json(serde_json::json!({"id": _id, "status": "cancelled", "created_at": "2026-03-06T14:30:00Z"}))).into_response()
 }
 
-pub async fn pause_stub(
+pub(crate) async fn pause_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -210,7 +211,7 @@ pub async fn pause_stub(
     (StatusCode::OK, Json(serde_json::json!({"id": _id, "status": "paused", "created_at": "2026-03-06T14:30:00Z"}))).into_response()
 }
 
-pub async fn unpause_stub(
+pub(crate) async fn unpause_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -218,7 +219,7 @@ pub async fn unpause_stub(
     (StatusCode::OK, Json(serde_json::json!({"id": _id, "status": "running", "created_at": "2026-03-06T14:30:00Z"}))).into_response()
 }
 
-pub async fn get_run_graph(
+pub(crate) async fn get_run_graph(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -229,7 +230,7 @@ pub async fn get_run_graph(
     crate::server::render_dot_svg(dot_source).await
 }
 
-pub async fn get_run_retro(
+pub(crate) async fn get_run_retro(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -242,7 +243,7 @@ pub async fn get_run_retro(
 
 // ── Workflows ──────────────────────────────────────────────────────────
 
-pub async fn list_workflows(
+pub(crate) async fn list_workflows(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
@@ -250,7 +251,7 @@ pub async fn list_workflows(
     paginated_response(workflows::list_items(), &pagination)
 }
 
-pub async fn get_workflow(
+pub(crate) async fn get_workflow(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(name): Path<String>,
@@ -261,7 +262,7 @@ pub async fn get_workflow(
     }
 }
 
-pub async fn list_workflow_runs(
+pub(crate) async fn list_workflow_runs(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(name): Path<String>,
@@ -276,7 +277,7 @@ pub async fn list_workflow_runs(
 
 // ── Verification ──────────────────────────────────────────────────────
 
-pub async fn list_verification_criteria(
+pub(crate) async fn list_verification_criteria(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
@@ -284,7 +285,7 @@ pub async fn list_verification_criteria(
     paginated_response(verifications::criteria(), &pagination)
 }
 
-pub async fn get_verification_criterion(
+pub(crate) async fn get_verification_criterion(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -295,7 +296,7 @@ pub async fn get_verification_criterion(
     }
 }
 
-pub async fn list_verification_controls(
+pub(crate) async fn list_verification_controls(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
@@ -303,7 +304,7 @@ pub async fn list_verification_controls(
     paginated_response(verifications::controls(), &pagination)
 }
 
-pub async fn get_verification_control(
+pub(crate) async fn get_verification_control(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -317,7 +318,7 @@ pub async fn get_verification_control(
 // ── Signoffs ──────────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
-pub struct SignoffListParams {
+pub(crate) struct SignoffListParams {
     #[serde(rename = "page[limit]", default = "crate::server::default_page_limit")]
     limit: u32,
     #[serde(rename = "page[offset]", default)]
@@ -327,7 +328,7 @@ pub struct SignoffListParams {
     commit_sha: Option<String>,
 }
 
-pub async fn list_signoffs(
+pub(crate) async fn list_signoffs(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Query(params): Query<SignoffListParams>,
@@ -346,7 +347,7 @@ pub async fn list_signoffs(
     )
 }
 
-pub async fn get_signoff(
+pub(crate) async fn get_signoff(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -357,7 +358,7 @@ pub async fn get_signoff(
     }
 }
 
-pub async fn create_signoff_stub(
+pub(crate) async fn create_signoff_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
@@ -366,7 +367,7 @@ pub async fn create_signoff_stub(
 
 // ── Retros ─────────────────────────────────────────────────────────────
 
-pub async fn list_retros(
+pub(crate) async fn list_retros(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Query(params): Query<RetroListParams>,
@@ -397,7 +398,7 @@ pub async fn list_retros(
 
 // ── Sessions ───────────────────────────────────────────────────────────
 
-pub async fn list_sessions(
+pub(crate) async fn list_sessions(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
@@ -405,7 +406,7 @@ pub async fn list_sessions(
     paginated_response(sessions::list_items(), &pagination)
 }
 
-pub async fn create_session_stub(
+pub(crate) async fn create_session_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
@@ -418,7 +419,7 @@ pub async fn create_session_stub(
         .into_response()
 }
 
-pub async fn get_session(
+pub(crate) async fn get_session(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -429,7 +430,7 @@ pub async fn get_session(
     }
 }
 
-pub async fn send_message_stub(
+pub(crate) async fn send_message_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -441,7 +442,7 @@ pub async fn send_message_stub(
         .into_response()
 }
 
-pub async fn session_events_stub(
+pub(crate) async fn session_events_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
@@ -449,9 +450,8 @@ pub async fn session_events_stub(
 ) -> Response {
     use axum::response::sse::{Event, Sse};
 
-    let session = match sessions::detail(&id) {
-        Some(s) => s,
-        None => return ApiError::not_found("Session not found.").into_response(),
+    let Some(session) = sessions::detail(&id) else {
+        return ApiError::not_found("Session not found.").into_response();
     };
 
     let last_event_id: Option<usize> = headers
@@ -495,7 +495,7 @@ pub async fn session_events_stub(
 
 // ── Insights ───────────────────────────────────────────────────────────
 
-pub async fn list_saved_queries(
+pub(crate) async fn list_saved_queries(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
@@ -503,7 +503,7 @@ pub async fn list_saved_queries(
     paginated_response(insights::saved_queries(), &pagination)
 }
 
-pub async fn save_query_stub(
+pub(crate) async fn save_query_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
@@ -514,7 +514,7 @@ pub async fn save_query_stub(
         .into_response()
 }
 
-pub async fn get_saved_query(
+pub(crate) async fn get_saved_query(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -525,7 +525,7 @@ pub async fn get_saved_query(
     }
 }
 
-pub async fn update_query_stub(
+pub(crate) async fn update_query_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -537,7 +537,7 @@ pub async fn update_query_stub(
         .into_response()
 }
 
-pub async fn delete_query_stub(
+pub(crate) async fn delete_query_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
@@ -545,7 +545,7 @@ pub async fn delete_query_stub(
     StatusCode::NO_CONTENT.into_response()
 }
 
-pub async fn execute_query_stub(
+pub(crate) async fn execute_query_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
@@ -561,7 +561,7 @@ pub async fn execute_query_stub(
         .into_response()
 }
 
-pub async fn list_query_history(
+pub(crate) async fn list_query_history(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
@@ -571,7 +571,7 @@ pub async fn list_query_history(
 
 // ── Models ────────────────────────────────────────────────────────────
 
-pub async fn list_models(
+pub(crate) async fn list_models(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
@@ -588,7 +588,7 @@ pub async fn list_models(
 
 // ── Settings ───────────────────────────────────────────────────────────
 
-pub async fn get_server_settings(
+pub(crate) async fn get_server_settings(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
@@ -597,7 +597,7 @@ pub async fn get_server_settings(
 
 // ── Usage ──────────────────────────────────────────────────────────────
 
-pub async fn get_aggregate_usage(
+pub(crate) async fn get_aggregate_usage(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
@@ -616,7 +616,7 @@ mod runs {
     use super::ts;
     use fabro_api_types::*;
 
-    pub fn list_items() -> Vec<RunListItem> {
+    pub(super) fn list_items() -> Vec<RunListItem> {
         vec![
             RunListItem {
                 id: "run-1".into(),
@@ -1062,7 +1062,7 @@ mod runs {
         ]
     }
 
-    pub fn stages() -> Vec<RunStage> {
+    pub(super) fn stages() -> Vec<RunStage> {
         vec![
             RunStage {
                 id: "detect-drift".into(),
@@ -1095,7 +1095,7 @@ mod runs {
         ]
     }
 
-    pub fn turns() -> Vec<StageTurn> {
+    pub(super) fn turns() -> Vec<StageTurn> {
         vec![
             StageTurn::SystemStageTurn(SystemStageTurn { kind: SystemStageTurnKind::System, content: "You are a drift detection agent. Compare the production and staging environments and identify any configuration or code drift.".into() }),
             StageTurn::AssistantStageTurn(AssistantStageTurn { kind: AssistantStageTurnKind::Assistant, content: "I'll start by loading the environment configurations for both production and staging to compare them.".into() }),
@@ -1110,14 +1110,14 @@ mod runs {
         ]
     }
 
-    pub fn files() -> Vec<FileDiff> {
+    pub(super) fn files() -> Vec<FileDiff> {
         vec![
                 FileDiff {
                     old_file: DiffFile { name: "src/commands/run.ts".into(), contents: "import { parseArgs } from \"node:util\";\nimport { loadConfig } from \"../config.js\";\nimport { execute } from \"../executor.js\";\n\ninterface RunOptions {\n  config: string;\n  dryRun: boolean;\n}\n\nexport async function run(argv: string[]) {\n  const { values } = parseArgs({\n    args: argv,\n    options: {\n      config: { type: \"string\", short: \"c\", default: \"fabro.toml\" },\n      \"dry-run\": { type: \"boolean\", default: false },\n    },\n  });\n\n  const opts: RunOptions = {\n    config: values.config ?? \"fabro.toml\",\n    dryRun: values[\"dry-run\"] ?? false,\n  };\n\n  const config = await loadConfig(opts.config);\n  const result = await execute(config, { dryRun: opts.dryRun });\n\n  if (result.success) {\n    console.log(\"Run completed successfully.\");\n  } else {\n    console.error(\"Run failed:\", result.error);\n    process.exitCode = 1;\n  }\n}\n".into() },
                     new_file: DiffFile { name: "src/commands/run.ts".into(), contents: "import { parseArgs } from \"node:util\";\nimport { loadConfig } from \"../config.js\";\nimport { execute } from \"../executor.js\";\nimport { createLogger, type Logger } from \"../logger.js\";\n\ninterface RunOptions {\n  config: string;\n  dryRun: boolean;\n  verbose: boolean;\n}\n\nexport async function run(argv: string[]) {\n  const { values } = parseArgs({\n    args: argv,\n    options: {\n      config: { type: \"string\", short: \"c\", default: \"fabro.toml\" },\n      \"dry-run\": { type: \"boolean\", default: false },\n      verbose: { type: \"boolean\", short: \"v\", default: false },\n    },\n  });\n\n  const opts: RunOptions = {\n    config: values.config ?? \"fabro.toml\",\n    dryRun: values[\"dry-run\"] ?? false,\n    verbose: values.verbose ?? false,\n  };\n\n  const logger: Logger = createLogger({ verbose: opts.verbose });\n\n  const config = await loadConfig(opts.config);\n  logger.debug(\"Loaded config from %s\", opts.config);\n\n  const result = await execute(config, { dryRun: opts.dryRun, logger });\n  logger.debug(\"Execution finished in %dms\", result.elapsed);\n\n  if (result.success) {\n    console.log(\"Run completed successfully.\");\n  } else {\n    console.error(\"Run failed:\", result.error);\n    process.exitCode = 1;\n  }\n}\n".into() },
                 },
                 FileDiff {
-                    old_file: DiffFile { name: "src/logger.ts".into(), contents: "".into() },
+                    old_file: DiffFile { name: "src/logger.ts".into(), contents: String::new() },
                     new_file: DiffFile { name: "src/logger.ts".into(), contents: "export interface Logger {\n  info(message: string, ...args: unknown[]): void;\n  debug(message: string, ...args: unknown[]): void;\n  error(message: string, ...args: unknown[]): void;\n}\n\ninterface LoggerOptions {\n  verbose: boolean;\n}\n\nexport function createLogger({ verbose }: LoggerOptions): Logger {\n  return {\n    info(message, ...args) {\n      console.log(message, ...args);\n    },\n    debug(message, ...args) {\n      if (verbose) {\n        console.log(\"[debug]\", message, ...args);\n      }\n    },\n    error(message, ...args) {\n      console.error(message, ...args);\n    },\n  };\n}\n".into() },
                 },
                 FileDiff {
@@ -1127,7 +1127,7 @@ mod runs {
         ]
     }
 
-    pub fn usage() -> RunUsage {
+    pub(super) fn usage() -> RunUsage {
         RunUsage {
             stages: vec![
                 UsageStage {
@@ -1235,11 +1235,11 @@ mod runs {
         }
     }
 
-    pub fn verifications() -> Vec<fabro_api_types::RunVerification> {
+    pub(super) fn verifications() -> Vec<fabro_api_types::RunVerification> {
         super::verifications::run_verifications()
     }
 
-    pub fn questions() -> Vec<ApiQuestion> {
+    pub(super) fn questions() -> Vec<ApiQuestion> {
         vec![
             ApiQuestion {
                 id: "q-001".into(),
@@ -1276,7 +1276,7 @@ mod runs {
         ]
     }
 
-    pub fn settings() -> serde_json::Value {
+    pub(super) fn settings() -> serde_json::Value {
         serde_json::to_value(fabro_config::FabroSettings {
             version: Some(1),
             goal: Some("Add rate limiting to auth endpoints".into()),
@@ -1338,7 +1338,7 @@ mod runs {
 mod usage {
     use fabro_api_types::*;
 
-    pub fn aggregate() -> AggregateUsage {
+    pub(super) fn aggregate() -> AggregateUsage {
         AggregateUsage {
             totals: AggregateUsageTotals {
                 runs: 9,
@@ -1390,7 +1390,7 @@ mod workflows {
     use super::ts;
     use fabro_api_types::*;
 
-    pub fn list_items() -> Vec<WorkflowListItem> {
+    pub(super) fn list_items() -> Vec<WorkflowListItem> {
         vec![
             WorkflowListItem {
                 name: "Fix Build".into(),
@@ -1450,7 +1450,7 @@ mod workflows {
         serde_json::from_value(val).unwrap()
     }
 
-    pub fn detail(name: &str) -> Option<WorkflowDetail> {
+    pub(super) fn detail(name: &str) -> Option<WorkflowDetail> {
         let items = [
             WorkflowDetail {
                 name: "Fix Build".into(), slug: "fix_build".into(), filename: "fix_build.fabro".into(),
@@ -2679,7 +2679,7 @@ mod verifications {
 
     // ── Public API ──────────────────────────────────────────────────────
 
-    pub fn criteria() -> Vec<VerificationCriterion> {
+    pub(super) fn criteria() -> Vec<VerificationCriterion> {
         ALL_CATEGORIES
             .iter()
             .map(|cat| VerificationCriterion {
@@ -2703,7 +2703,7 @@ mod verifications {
             .collect()
     }
 
-    pub fn criterion_detail(id: &str) -> Option<VerificationCriterionDetail> {
+    pub(super) fn criterion_detail(id: &str) -> Option<VerificationCriterionDetail> {
         ALL_CATEGORIES
             .iter()
             .find(|cat| slugify(cat.name) == id)
@@ -2727,7 +2727,7 @@ mod verifications {
             })
     }
 
-    pub fn controls() -> Vec<VerificationControlListItem> {
+    pub(super) fn controls() -> Vec<VerificationControlListItem> {
         ALL_CATEGORIES
             .iter()
             .flat_map(|cat| {
@@ -2749,7 +2749,7 @@ mod verifications {
             .collect()
     }
 
-    pub fn control_detail(slug: &str) -> Option<VerificationDetailResponse> {
+    pub(super) fn control_detail(slug: &str) -> Option<VerificationDetailResponse> {
         for cat in ALL_CATEGORIES {
             for (idx, ctrl) in cat.controls.iter().enumerate() {
                 if ctrl.slug == slug {
@@ -2802,7 +2802,7 @@ mod verifications {
         None
     }
 
-    pub fn run_verifications() -> Vec<RunVerification> {
+    pub(super) fn run_verifications() -> Vec<RunVerification> {
         ALL_CATEGORIES
             .iter()
             .map(|cat| RunVerification {
@@ -2917,7 +2917,7 @@ mod signoffs {
         }
     }
 
-    pub fn list_items(
+    pub(super) fn list_items(
         control: Option<&str>,
         repository: Option<&str>,
         commit_sha: Option<&str>,
@@ -2931,11 +2931,11 @@ mod signoffs {
             .collect()
     }
 
-    pub fn detail(id: &str) -> Option<Signoff> {
+    pub(super) fn detail(id: &str) -> Option<Signoff> {
         ALL_SIGNOFFS.iter().find(|s| s.id == id).map(to_signoff)
     }
 
-    pub fn stub_created() -> Signoff {
+    pub(super) fn stub_created() -> Signoff {
         to_signoff(&ALL_SIGNOFFS[0])
     }
 }
@@ -2969,7 +2969,7 @@ mod retros {
         }
     }
 
-    pub fn detail(run_id: &str) -> Option<RetroDetail> {
+    pub(super) fn detail(run_id: &str) -> Option<RetroDetail> {
         match run_id {
             "run-1" => Some(RetroDetail {
                 run_id: "run-1".into(),
@@ -3141,7 +3141,7 @@ mod retros {
         }
     }
 
-    pub fn list_items() -> Vec<RetroListItem> {
+    pub(super) fn list_items() -> Vec<RetroListItem> {
         vec![
             RetroListItem {
                 run: RunReference {
@@ -3292,7 +3292,7 @@ mod sessions {
     const S7: u128 = 0x10000000_0000_4000_8000_000000000007;
     const S8: u128 = 0x10000000_0000_4000_8000_000000000008;
 
-    pub fn list_items() -> Vec<SessionListItem> {
+    pub(super) fn list_items() -> Vec<SessionListItem> {
         vec![
             SessionListItem {
                 id: uid(S1),
@@ -3361,7 +3361,7 @@ mod sessions {
         ]
     }
 
-    pub fn detail(id: &str) -> Option<SessionDetail> {
+    pub(super) fn detail(id: &str) -> Option<SessionDetail> {
         let parsed = id.parse::<Uuid>().ok()?;
         match parsed.as_u128() {
             S1 => Some(SessionDetail {
@@ -3420,7 +3420,7 @@ mod insights {
     use super::ts;
     use fabro_api_types::*;
 
-    pub fn saved_queries() -> Vec<SavedQuery> {
+    pub(super) fn saved_queries() -> Vec<SavedQuery> {
         vec![
             SavedQuery { id: "1".into(), name: "Run duration by workflow".into(), sql: "SELECT workflow_name, AVG(duration_seconds) as avg_duration,\n       COUNT(*) as run_count\nFROM runs\nGROUP BY workflow_name\nORDER BY avg_duration DESC\nLIMIT 20".into(), created_at: ts("2026-03-01T10:00:00Z"), updated_at: ts("2026-03-05T14:30:00Z") },
             SavedQuery { id: "2".into(), name: "Daily failure rate".into(), sql: "SELECT date_trunc('day', created_at) as day,\n       COUNT(*) FILTER (WHERE status = 'failed') as failures,\n       COUNT(*) as total\nFROM runs\nGROUP BY 1\nORDER BY 1 DESC\nLIMIT 30".into(), created_at: ts("2026-03-02T09:00:00Z"), updated_at: ts("2026-03-02T09:00:00Z") },
@@ -3428,7 +3428,7 @@ mod insights {
         ]
     }
 
-    pub fn history() -> Vec<HistoryEntry> {
+    pub(super) fn history() -> Vec<HistoryEntry> {
         vec![
             HistoryEntry {
                 id: "h1".into(),
@@ -3460,7 +3460,7 @@ mod settings {
     use fabro_config::FabroSettings;
     use fabro_config::server::*;
 
-    pub fn server_settings() -> serde_json::Value {
+    pub(super) fn server_settings() -> serde_json::Value {
         serde_json::to_value(FabroSettings {
             storage_dir: Some("/home/fabro/.fabro".into()),
             max_concurrent_runs: Some(10),

@@ -28,7 +28,7 @@ const INTERVIEW_UNANSWERED_MESSAGE: &str =
 /// Attach to a running (or finished) workflow run, rendering progress live.
 ///
 /// Returns exit code 0 for success/partial_success, 1 otherwise.
-pub async fn attach_run(
+pub(crate) async fn attach_run(
     run_dir: &Path,
     kill_on_detach: bool,
     styles: &'static Styles,
@@ -460,6 +460,7 @@ fn determine_exit_code(conclusion_path: &Path, status_record: Option<RunStatusRe
     }
 }
 
+#[allow(unsafe_code)]
 fn kill_engine(run_dir: &Path) {
     if let Some(pid) = read_launcher_pid(run_dir).map(|pid| pid as i32) {
         #[cfg(unix)]
@@ -470,6 +471,7 @@ fn kill_engine(run_dir: &Path) {
     }
 }
 
+#[allow(unsafe_code)]
 fn process_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt::Write;
 use std::path::Path;
 
 use tokio::fs;
@@ -10,7 +11,7 @@ use crate::types::{FeatureMetadata, LifecycleCommand};
 
 /// A resolved feature layer ready to be inserted into a Dockerfile.
 #[derive(Debug, Clone)]
-pub struct FeatureLayer {
+pub(crate) struct FeatureLayer {
     /// Feature identifier (e.g. "ghcr.io/devcontainers/features/node:1")
     pub id: String,
     /// Directory name for COPY
@@ -21,7 +22,7 @@ pub struct FeatureLayer {
 
 /// All resolved feature data: layers, environment, and lifecycle hooks.
 #[derive(Debug, Clone, Default)]
-pub struct ResolvedFeatures {
+pub(crate) struct ResolvedFeatures {
     pub layers: Vec<FeatureLayer>,
     pub container_env: HashMap<String, String>,
     pub on_create_commands: Vec<LifecycleCommand>,
@@ -133,7 +134,10 @@ async fn find_tgz(dir: &Path) -> Option<String> {
     let mut entries = fs::read_dir(dir).await.ok()?;
     while let Ok(Some(entry)) = entries.next_entry().await {
         if let Some(name) = entry.file_name().to_str() {
-            if name.ends_with(".tgz") {
+            if Path::new(name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("tgz"))
+            {
                 return Some(name.to_string());
             }
         }
@@ -332,7 +336,10 @@ fn topo_sort(
         return Vec::new();
     }
 
-    let id_set: HashSet<&str> = feature_ids.iter().map(|s| s.as_str()).collect();
+    let id_set: HashSet<&str> = feature_ids
+        .iter()
+        .map(std::string::String::as_str)
+        .collect();
 
     // Build adjacency list and in-degree count.
     // An edge from A -> B means "A must be installed before B".
@@ -350,7 +357,11 @@ fn topo_sort(
     for id in feature_ids {
         if let Some(meta) = metadata_map.get(id) {
             // Collect dependency refs from both installsAfter and dependsOn
-            let mut dep_refs: Vec<&str> = meta.installs_after.iter().map(|s| s.as_str()).collect();
+            let mut dep_refs: Vec<&str> = meta
+                .installs_after
+                .iter()
+                .map(std::string::String::as_str)
+                .collect();
             for dep_id in meta.depends_on.keys() {
                 dep_refs.push(dep_id.as_str());
             }
@@ -511,12 +522,14 @@ fn generate_layer(
     }
 
     let mut snippet = format!("# Feature: {feature_id}\n");
-    snippet.push_str(&format!(
-        "COPY {dir_name}/ /tmp/devcontainer-features/{dir_name}/\n"
-    ));
-    snippet.push_str(&format!(
-        "RUN cd /tmp/devcontainer-features/{dir_name} && \\\n"
-    ));
+    let _ = writeln!(
+        snippet,
+        "COPY {dir_name}/ /tmp/devcontainer-features/{dir_name}/"
+    );
+    let _ = writeln!(
+        snippet,
+        "RUN cd /tmp/devcontainer-features/{dir_name} && \\"
+    );
     for line in &env_lines {
         snippet.push_str(line);
         snippet.push('\n');
@@ -528,7 +541,7 @@ fn generate_layer(
 }
 
 /// Fetch, order, and resolve features into Dockerfile layers.
-pub async fn resolve_features(
+pub(crate) async fn resolve_features(
     features: &HashMap<String, serde_json::Value>,
     devcontainer_dir: &Path,
     remote_user: Option<&str>,

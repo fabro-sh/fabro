@@ -26,13 +26,13 @@ pub(crate) mod ssh;
 pub(crate) mod start;
 pub(crate) mod wait;
 
-pub async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
     match cmd {
         RunCommands::Run(args) => command::execute(args, globals).await,
         RunCommands::Create(args) => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             let cli_defaults = load_cli_config(None)?;
-            let (run_id, _run_dir) = create::create_run(&args, cli_defaults, styles, true).await?;
+            let (run_id, _run_dir) = create::create_run(&args, cli_defaults, styles, true)?;
             println!("{run_id}");
             Ok(())
         }

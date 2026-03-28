@@ -92,9 +92,8 @@ fn spawn_generation(store: SessionStore, session_id: uuid::Uuid, dry_run: bool, 
     tokio::spawn(async move {
         let (event_tx, model_id, model_provider, system_prompt, messages, generation_seq) = {
             let store = store.read().expect("session store lock poisoned");
-            let session = match store.get(&session_id) {
-                Some(s) => s,
-                None => return,
+            let Some(session) = store.get(&session_id) else {
+                return;
             };
             (
                 session.event_tx.clone(),

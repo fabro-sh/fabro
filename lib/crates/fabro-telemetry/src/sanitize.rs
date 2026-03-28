@@ -29,7 +29,7 @@ pub fn sanitize_command(args: &[String], subcommand: &str) -> String {
     let skip = 1 + sub_tokens.len(); // argv[0] + subcommand tokens
 
     // Add subcommand tokens verbatim
-    parts.extend(sub_tokens.iter().map(|s| s.to_string()));
+    parts.extend(sub_tokens.iter().map(std::string::ToString::to_string));
 
     // Sanitize remaining args
     for arg in args.iter().skip(skip) {

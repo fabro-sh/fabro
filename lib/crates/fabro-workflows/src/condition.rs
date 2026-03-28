@@ -119,14 +119,12 @@ fn eval_clause(clause: &Clause, outcome: &Outcome, context: &Context) -> bool {
         }
         Op::Contains => {
             let raw = resolve_key_value(&clause.key, outcome, context);
-            match &raw {
-                serde_json::Value::Array(arr) => arr
-                    .iter()
-                    .any(|elem| json_value_to_string(elem) == clause.value),
-                _ => {
-                    let s = json_value_to_string(&raw);
-                    s.contains(&clause.value)
-                }
+            if let serde_json::Value::Array(arr) = &raw {
+                arr.iter()
+                    .any(|elem| json_value_to_string(elem) == clause.value)
+            } else {
+                let s = json_value_to_string(&raw);
+                s.contains(&clause.value)
             }
         }
         Op::Matches => {
@@ -142,7 +140,7 @@ fn eval_clause(clause: &Clause, outcome: &Outcome, context: &Context) -> bool {
 /// Evaluate a condition expression against an outcome and context.
 /// Empty conditions always return true.
 #[must_use]
-pub fn evaluate_condition(expr: &str, outcome: &Outcome, context: &Context) -> bool {
+pub(crate) fn evaluate_condition(expr: &str, outcome: &Outcome, context: &Context) -> bool {
     use fabro_graphviz::condition::parse_condition_expr;
     let Ok(parsed) = parse_condition_expr(expr) else {
         return false;

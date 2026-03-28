@@ -21,7 +21,7 @@ pub(super) fn git_repo_root() -> Result<PathBuf> {
     ))
 }
 
-pub async fn run_init() -> Result<()> {
+pub(crate) async fn run_init() -> Result<()> {
     let repo_root = git_repo_root()?;
 
     let fabro_toml = repo_root.join("fabro.toml");
@@ -148,46 +148,40 @@ async fn check_github_app_installation() {
 
     // Convert SSH URL to HTTPS and parse owner/repo
     let https_url = fabro_github::ssh_url_to_https(&remote_url);
-    let (owner, repo) = match fabro_github::parse_github_owner_repo(&https_url) {
-        Ok(pair) => pair,
-        Err(_) => return, // Not a GitHub repo — skip silently
+    let Ok((owner, repo)) = fabro_github::parse_github_owner_repo(&https_url) else {
+        return; // Not a GitHub repo — skip silently
     };
 
     // Load CLI config to get app_id and slug
-    let cli_config = match load_cli_settings(None) {
-        Ok(c) => c,
-        Err(_) => return,
+    let Ok(cli_config) = load_cli_settings(None) else {
+        return;
     };
 
-    let app_id = match cli_config.app_id() {
-        Some(id) => id.to_string(),
-        None => {
-            eprintln!(
-                "\n  Run {} to set up the GitHub App",
-                console::Style::new()
-                    .cyan()
-                    .bold()
-                    .apply_to("fabro install")
-            );
-            return;
-        }
+    let app_id = if let Some(id) = cli_config.app_id() {
+        id.to_string()
+    } else {
+        eprintln!(
+            "\n  Run {} to set up the GitHub App",
+            console::Style::new()
+                .cyan()
+                .bold()
+                .apply_to("fabro install")
+        );
+        return;
     };
 
     let slug = cli_config.slug().map(String::from);
 
     // Build GitHub App credentials
-    let creds = match build_github_app_credentials(Some(&app_id)) {
-        Some(c) => c,
-        None => {
-            eprintln!(
-                "\n  Set {} to enable GitHub App integration",
-                console::Style::new()
-                    .cyan()
-                    .bold()
-                    .apply_to("GITHUB_APP_PRIVATE_KEY")
-            );
-            return;
-        }
+    let Some(creds) = build_github_app_credentials(Some(&app_id)) else {
+        eprintln!(
+            "\n  Set {} to enable GitHub App integration",
+            console::Style::new()
+                .cyan()
+                .bold()
+                .apply_to("GITHUB_APP_PRIVATE_KEY")
+        );
+        return;
     };
 
     let jwt = match fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem) {

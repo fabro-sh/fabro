@@ -24,14 +24,14 @@ pub enum Provider {
 
 impl Provider {
     /// All known provider variants, for use in guardrail tests and iteration.
-    pub const ALL: &[Provider] = &[
-        Provider::Anthropic,
-        Provider::OpenAi,
-        Provider::Gemini,
-        Provider::Kimi,
-        Provider::Zai,
-        Provider::Minimax,
-        Provider::Inception,
+    pub const ALL: &[Self] = &[
+        Self::Anthropic,
+        Self::OpenAi,
+        Self::Gemini,
+        Self::Kimi,
+        Self::Zai,
+        Self::Minimax,
+        Self::Inception,
     ];
 
     /// Environment variable names that can provide the API key for this provider.
@@ -75,7 +75,7 @@ impl Provider {
             .iter()
             .copied()
             .find(|&p| is_configured(p))
-            .unwrap_or(Provider::Anthropic)
+            .unwrap_or(Self::Anthropic)
     }
 
     /// Stable lowercase string representation used in `Request.provider`,

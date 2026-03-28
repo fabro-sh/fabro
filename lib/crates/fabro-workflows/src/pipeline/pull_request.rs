@@ -249,7 +249,7 @@ fn read_dot_source(run_dir: &Path) -> Option<String> {
 fn read_plan_text(run_dir: &Path) -> Option<String> {
     let nodes_dir = run_dir.join("nodes");
     let mut entries: Vec<_> = std::fs::read_dir(&nodes_dir).ok()?.flatten().collect();
-    entries.sort_by_key(|e| e.file_name());
+    entries.sort_by_key(std::fs::DirEntry::file_name);
     for entry in entries {
         let dir_name = entry.file_name();
         let dir_name_str = dir_name.to_string_lossy();
@@ -548,9 +548,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                         }
                         Ok(None) => {}
                         Err(e) => {
-                            emitter.emit(&WorkflowRunEvent::PullRequestFailed {
-                                error: e.to_string(),
-                            });
+                            emitter.emit(&WorkflowRunEvent::PullRequestFailed { error: e.clone() });
                             emit_run_notice(
                                 &emitter,
                                 RunNoticeLevel::Warn,
