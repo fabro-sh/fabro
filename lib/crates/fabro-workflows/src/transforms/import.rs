@@ -204,8 +204,30 @@ impl ImportTransform {
             .into_iter()
             .cloned()
             .collect::<Vec<_>>();
+        let is_empty = prepared.is_empty();
 
-        if prepared.is_empty() {
+        let PreparedImport {
+            graph: imported_graph,
+            start_id,
+            exit_id,
+            entry_id,
+            exit_predecessor_id,
+        } = prepared;
+
+        for node_id in imported_graph.nodes.keys() {
+            if node_id == &start_id || node_id == &exit_id {
+                continue;
+            }
+
+            let prefixed_id = format!("{placeholder_id}.{node_id}");
+            if graph.nodes.contains_key(&prefixed_id) {
+                return Err(format!(
+                    "import placeholder '{placeholder_id}' would overwrite existing node '{prefixed_id}'"
+                ));
+            }
+        }
+
+        if is_empty {
             if incoming_edges.iter().any(Self::has_semantic_edge_attrs)
                 || outgoing_edges.iter().any(Self::has_semantic_edge_attrs)
             {
@@ -237,14 +259,6 @@ impl ImportTransform {
         graph
             .edges
             .retain(|edge| edge.from != placeholder_id && edge.to != placeholder_id);
-
-        let PreparedImport {
-            graph: imported_graph,
-            start_id,
-            exit_id,
-            entry_id,
-            exit_predecessor_id,
-        } = prepared;
 
         for (node_id, node) in imported_graph.nodes {
             if node_id == start_id || node_id == exit_id {
@@ -359,6 +373,9 @@ impl ImportTransform {
     }
 
     fn validate_imported_graph(graph: Graph) -> Result<PreparedImport, String> {
+        let has_non_sentinel_nodes = graph.nodes.iter().any(|(id, node)| {
+            !Self::is_start_sentinel(id, node) && !Self::is_exit_sentinel(id, node)
+        });
         let start_ids = graph
             .nodes
             .iter()
@@ -410,6 +427,12 @@ impl ImportTransform {
             ));
         }
         let entry_id = start_edges[0].to.clone();
+        if has_non_sentinel_nodes && entry_id == exit_id {
+            return Err(
+                "imported start node cannot route directly to exit when non-sentinel nodes exist"
+                    .to_string(),
+            );
+        }
 
         let exit_edges = graph.incoming_edges(&exit_id);
         if exit_edges.len() != 1 {
@@ -424,6 +447,12 @@ impl ImportTransform {
             ));
         }
         let exit_predecessor_id = exit_edges[0].from.clone();
+        if has_non_sentinel_nodes && exit_predecessor_id == start_id {
+            return Err(
+                "imported exit node cannot be reached directly from start when non-sentinel nodes exist"
+                    .to_string(),
+            );
+        }
 
         Ok(PreparedImport {
             graph,
@@ -1223,5 +1252,83 @@ mod tests {
         );
 
         assert!(graph.nodes.contains_key("validate.lint"));
+    }
+
+    #[test]
+    fn start_to_exit_with_orphan_nodes_poison_placeholder() {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(
+            &dir.path().join("broken.fabro"),
+            r#"digraph broken {
+                start [shape=Mdiamond]
+                orphan [prompt="Never connected"]
+                exit [shape=Msquare]
+                start -> exit
+            }"#,
+        );
+
+        let graph = apply_import(
+            r#"digraph Host {
+                start [shape=Mdiamond]
+                broken [import="./broken.fabro"]
+                exit [shape=Msquare]
+                start -> broken -> exit
+            }"#,
+            dir.path(),
+            None,
+        );
+
+        assert_eq!(
+            graph.nodes["broken"]
+                .attrs
+                .get("import_error")
+                .and_then(AttrValue::as_str),
+            Some("imported start node cannot route directly to exit when non-sentinel nodes exist")
+        );
+        assert!(
+            !graph
+                .edges
+                .iter()
+                .any(|edge| edge.to == "broken.exit" || edge.from == "broken.start")
+        );
+    }
+
+    #[test]
+    fn namespace_collision_poison_placeholder() {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(&dir.path().join("validate.fabro"), basic_import_source());
+
+        let mut graph = parse_graph(
+            r#"digraph Host {
+                start [shape=Mdiamond]
+                validate [import="./validate.fabro"]
+                exit [shape=Msquare]
+                start -> validate -> exit
+            }"#,
+        );
+        let mut colliding_node = Node::new("validate.lint");
+        colliding_node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Preexisting host node".to_string()),
+        );
+        graph
+            .nodes
+            .insert("validate.lint".to_string(), colliding_node);
+        ImportTransform::new(dir.path().to_path_buf(), None).apply(&mut graph);
+
+        assert_eq!(
+            graph.nodes["validate"]
+                .attrs
+                .get("import_error")
+                .and_then(AttrValue::as_str),
+            Some("import placeholder 'validate' would overwrite existing node 'validate.lint'")
+        );
+        assert_eq!(
+            graph.nodes["validate.lint"]
+                .attrs
+                .get("prompt")
+                .and_then(AttrValue::as_str),
+            Some("Preexisting host node")
+        );
     }
 }
