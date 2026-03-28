@@ -14,7 +14,6 @@ pub mod worktree;
 #[cfg(feature = "ssh")]
 pub(crate) mod ssh_common;
 
-#[cfg(feature = "local")]
 pub mod local;
 
 #[cfg(feature = "docker")]
@@ -47,7 +46,6 @@ pub use sandbox_provider::SandboxProvider;
 
 pub use worktree::{WorktreeConfig, WorktreeEvent, WorktreeEventCallback, WorktreeSandbox};
 
-#[cfg(feature = "local")]
 pub use local::LocalSandbox;
 
 #[cfg(feature = "docker")]

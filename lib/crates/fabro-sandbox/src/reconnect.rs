@@ -17,7 +17,6 @@ use crate::ssh::{OpensshRunner, SshConfig, SshSandbox};
 /// Returns a sandbox that can perform file operations.
 pub async fn reconnect(record: &SandboxRecord) -> Result<Box<dyn crate::Sandbox>> {
     match record.provider.as_str() {
-        #[cfg(feature = "local")]
         "local" => {
             let sandbox = LocalSandbox::new(PathBuf::from(&record.working_directory));
             Ok(Box::new(sandbox))

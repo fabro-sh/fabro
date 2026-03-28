@@ -1,7 +1,9 @@
 //! Shared types and utilities for SSH-based sandbox implementations (exe, ssh).
 
-use std::path::Path;
 use std::time::Instant;
+
+#[cfg(feature = "daytona")]
+use std::path::Path;
 
 use async_trait::async_trait;
 use base64::Engine;
