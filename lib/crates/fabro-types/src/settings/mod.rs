@@ -138,8 +138,7 @@ impl FabroSettings {
     pub fn setup_commands(&self) -> &[String] {
         self.setup
             .as_ref()
-            .map(|setup| setup.commands.as_slice())
-            .unwrap_or(&[])
+            .map_or(&[], |setup| setup.commands.as_slice())
     }
 
     pub fn setup_timeout_ms(&self) -> Option<u64> {

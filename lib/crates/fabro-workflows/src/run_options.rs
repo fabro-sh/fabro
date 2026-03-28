@@ -60,8 +60,7 @@ impl RunOptions {
         self.settings
             .assets
             .as_ref()
-            .map(|a| a.include.as_slice())
-            .unwrap_or(&[])
+            .map_or(&[], |a| a.include.as_slice())
     }
 }
 

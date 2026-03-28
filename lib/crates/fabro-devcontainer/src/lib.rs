@@ -291,11 +291,10 @@ impl DevcontainerResolver {
         // Image or Dockerfile mode
         let (base_dockerfile, build_context, build_args, build_target) =
             if let Some(build) = &devcontainer.build {
-                let context_dir = build
-                    .context
-                    .as_ref()
-                    .map(|c| base_dir.join(variables::substitute(c, &vars)))
-                    .unwrap_or_else(|| base_dir.to_path_buf());
+                let context_dir = build.context.as_ref().map_or_else(
+                    || base_dir.to_path_buf(),
+                    |c| base_dir.join(variables::substitute(c, &vars)),
+                );
                 let df_path = base_dir.join(variables::substitute(
                     build.dockerfile.as_deref().unwrap_or("Dockerfile"),
                     &vars,
@@ -331,15 +330,15 @@ impl DevcontainerResolver {
             };
 
         // Features
-        let resolved_features = if !devcontainer.features.is_empty() {
+        let resolved_features = if devcontainer.features.is_empty() {
+            features::ResolvedFeatures::default()
+        } else {
             features::resolve_features(
                 &devcontainer.features,
                 base_dir,
                 devcontainer.remote_user.as_deref(),
             )
             .await?
-        } else {
-            features::ResolvedFeatures::default()
         };
 
         // Merge feature containerEnv with devcontainer.json containerEnv

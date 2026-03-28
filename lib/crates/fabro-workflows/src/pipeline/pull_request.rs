@@ -64,8 +64,7 @@ fn truncate_pr_body(body: &str) -> String {
 
 /// Format an optional cost as `$X.XX` or an en-dash when absent.
 fn format_cost(cost: Option<f64>) -> String {
-    cost.map(outcome_format_cost)
-        .unwrap_or_else(|| "\u{2013}".to_string())
+    cost.map_or_else(|| "\u{2013}".to_string(), outcome_format_cost)
 }
 
 /// Format a duration in milliseconds as a human-readable string.

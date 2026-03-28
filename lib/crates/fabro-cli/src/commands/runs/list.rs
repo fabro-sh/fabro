@@ -88,8 +88,7 @@ pub(crate) fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
             let dir_display = run
                 .host_repo_path
                 .as_deref()
-                .map(|p| tilde_path(Path::new(p)))
-                .unwrap_or_else(|| "-".to_string());
+                .map_or_else(|| "-".to_string(), |p| tilde_path(Path::new(p)));
 
             vec![
                 short_run_id(&run.run_id)

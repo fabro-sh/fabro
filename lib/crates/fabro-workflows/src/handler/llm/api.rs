@@ -68,13 +68,11 @@ fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
             is_error,
             ..
         } => {
-            if !*is_error {
-                if let Some(path) = state.pending.remove(tool_call_id) {
+            if let Some(path) = state.pending.remove(tool_call_id) {
+                if !*is_error {
                     state.touched.insert(path.clone());
                     state.last = Some(path);
                 }
-            } else {
-                state.pending.remove(tool_call_id);
             }
         }
         AgentEvent::SubAgentEvent { event: inner, .. } => {

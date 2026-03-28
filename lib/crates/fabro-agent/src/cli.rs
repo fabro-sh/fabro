@@ -170,14 +170,13 @@ fn summarizer_model_id(provider: Provider) -> ModelRef {
     ModelRef::ByName {
         provider,
         model: match provider {
-            Provider::OpenAi => "gpt-4o-mini",
+            Provider::OpenAi | Provider::OpenAiCompatible => "gpt-4o-mini",
             Provider::Gemini => "gemini-2.0-flash",
             Provider::Anthropic => "claude-haiku-4-5",
             Provider::Kimi => "kimi-k2.5",
             Provider::Zai => "glm-4.7",
             Provider::Minimax => "minimax-m2.5",
             Provider::Inception => "mercury",
-            Provider::OpenAiCompatible => "gpt-4o-mini",
         }
         .to_string(),
     }

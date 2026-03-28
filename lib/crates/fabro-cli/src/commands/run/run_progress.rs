@@ -244,10 +244,8 @@ impl ProgressUI {
             "bash" | "shell" | "execute_command" => arg("command").map(|c| truncate(c, 60)),
             "glob" => arg("pattern").map(String::from),
             "grep" | "ripgrep" => arg("pattern").map(|p| truncate(p, 40)),
-            "read_file" | "read" => path_arg(),
-            "write_file" | "write" | "create_file" => path_arg(),
-            "edit_file" | "edit" => path_arg(),
-            "list_dir" => path_arg(),
+            "read_file" | "read" | "write_file" | "write" | "create_file" | "edit_file"
+            | "edit" | "list_dir" => path_arg(),
             "web_search" => arg("query").map(|q| truncate(q, 60)),
             "web_fetch" => arg("url").map(|u| truncate(u, 60)),
             "spawn_agent" => arg("task").map(|t| truncate(t, 60)),
@@ -371,8 +369,7 @@ impl ProgressUI {
                     let tool_call_count = counts.map_or(0, |c| c.1);
                     let total_tokens = usage
                         .as_ref()
-                        .map(|u| u.input_tokens + u.output_tokens)
-                        .unwrap_or(0);
+                        .map_or(0, |u| u.input_tokens + u.output_tokens);
                     if turn_count > 0 || tool_call_count > 0 || total_tokens > 0 {
                         let dim = Style::new().dim();
                         format!(
@@ -754,17 +751,14 @@ impl ProgressUI {
                     let counts = self.stage_counts.get(node_id);
                     let turn_count = counts.map_or(0, |c| c.0);
                     let tool_call_count = counts.map_or(0, |c| c.1);
-                    let total_tokens = envelope
-                        .get("usage")
-                        .map(|u| {
-                            u.get("input_tokens")
+                    let total_tokens = envelope.get("usage").map_or(0, |u| {
+                        u.get("input_tokens")
+                            .and_then(serde_json::Value::as_i64)
+                            .unwrap_or(0)
+                            + u.get("output_tokens")
                                 .and_then(serde_json::Value::as_i64)
                                 .unwrap_or(0)
-                                + u.get("output_tokens")
-                                    .and_then(serde_json::Value::as_i64)
-                                    .unwrap_or(0)
-                        })
-                        .unwrap_or(0);
+                    });
                     if turn_count > 0 || tool_call_count > 0 || total_tokens > 0 {
                         let dim = Style::new().dim();
                         format!(

@@ -38,8 +38,7 @@ pub trait AgentProfile: Send + Sync {
     fn context_window_size(&self) -> usize {
         Catalog::builtin()
             .get(self.model())
-            .map(|m| usize::try_from(m.context_window()).unwrap())
-            .unwrap_or(200_000)
+            .map_or(200_000, |m| usize::try_from(m.context_window()).unwrap())
     }
 
     fn register_subagent_tools(

@@ -198,25 +198,31 @@ pub(crate) async fn context_stub(
 pub(crate) async fn cancel_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
-    Path(_id): Path<String>,
+    Path(id): Path<String>,
 ) -> Response {
-    (StatusCode::OK, Json(serde_json::json!({"id": _id, "status": "cancelled", "created_at": "2026-03-06T14:30:00Z"}))).into_response()
+    (StatusCode::OK, Json(serde_json::json!({"id": id, "status": "cancelled", "created_at": "2026-03-06T14:30:00Z"}))).into_response()
 }
 
 pub(crate) async fn pause_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
-    Path(_id): Path<String>,
+    Path(id): Path<String>,
 ) -> Response {
-    (StatusCode::OK, Json(serde_json::json!({"id": _id, "status": "paused", "created_at": "2026-03-06T14:30:00Z"}))).into_response()
+    (
+        StatusCode::OK,
+        Json(
+            serde_json::json!({"id": id, "status": "paused", "created_at": "2026-03-06T14:30:00Z"}),
+        ),
+    )
+        .into_response()
 }
 
 pub(crate) async fn unpause_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
-    Path(_id): Path<String>,
+    Path(id): Path<String>,
 ) -> Response {
-    (StatusCode::OK, Json(serde_json::json!({"id": _id, "status": "running", "created_at": "2026-03-06T14:30:00Z"}))).into_response()
+    (StatusCode::OK, Json(serde_json::json!({"id": id, "status": "running", "created_at": "2026-03-06T14:30:00Z"}))).into_response()
 }
 
 pub(crate) async fn get_run_graph(

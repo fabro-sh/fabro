@@ -46,8 +46,7 @@ pub(super) fn list_command(_args: &WorkflowListArgs) -> Result<()> {
 
     let user_path = user_wf_dir
         .as_deref()
-        .map(relative_path)
-        .unwrap_or_else(|| "~/.fabro/workflows".to_string());
+        .map_or_else(|| "~/.fabro/workflows".to_string(), relative_path);
     print_section("User Workflows", &user_path, &user, name_width, &styles);
 
     eprintln!();

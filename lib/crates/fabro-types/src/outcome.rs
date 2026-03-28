@@ -85,13 +85,8 @@ impl FromStr for FailureCategory {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let normalized = s.trim().to_lowercase();
         Ok(match normalized.as_str() {
-            "transient_infra" => Self::TransientInfra,
-            "deterministic" => Self::Deterministic,
-            "budget_exhausted" => Self::BudgetExhausted,
-            "compilation_loop" => Self::CompilationLoop,
-            "canceled" => Self::Canceled,
-            "structural" => Self::Structural,
-            "transient"
+            "transient_infra"
+            | "transient"
             | "transient-infra"
             | "infra_transient"
             | "transient infra"
@@ -101,15 +96,16 @@ impl FromStr for FailureCategory {
             | "toolchain-workspace-io"
             | "toolchain_or_dependency_registry_unavailable"
             | "toolchain-dependency-registry-unavailable" => Self::TransientInfra,
-            "non_transient" | "non-transient" | "permanent" | "logic" | "product" => {
-                Self::Deterministic
+            "budget_exhausted" | "budget-exhausted" | "budget exhausted" | "budget" => {
+                Self::BudgetExhausted
             }
-            "cancelled" => Self::Canceled,
-            "budget-exhausted" | "budget exhausted" | "budget" => Self::BudgetExhausted,
-            "compilation-loop" | "compilation loop" | "compile_loop" | "compile-loop" => {
-                Self::CompilationLoop
+            "compilation_loop" | "compilation-loop" | "compilation loop" | "compile_loop"
+            | "compile-loop" => Self::CompilationLoop,
+            "canceled" | "cancelled" => Self::Canceled,
+            "structural" | "structure" | "scope_violation" | "write_scope_violation" => {
+                Self::Structural
             }
-            "structure" | "scope_violation" | "write_scope_violation" => Self::Structural,
+            // "deterministic" and all unrecognized values
             _ => Self::Deterministic,
         })
     }

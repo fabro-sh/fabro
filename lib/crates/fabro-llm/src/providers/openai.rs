@@ -267,9 +267,6 @@ fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Val
                                 "content": [{"type": "output_text", "text": text}],
                             }));
                         }
-                        ContentPart::Text(_) => {
-                            // Skip — using preserved opaque message item instead
-                        }
                         ContentPart::ToolCall(tc) if !tc.name.is_empty() => {
                             let args = tc
                                 .raw_arguments
@@ -653,9 +650,7 @@ fn process_sse_event(
                 });
             }
         }
-        "response.reasoning_summary_part.added" => {
-            // Recognized but no-op — ReasoningStart is emitted on the first delta instead.
-        }
+        // response.reasoning_summary_part.added and other unrecognized events are no-ops
         _ => {}
     }
 

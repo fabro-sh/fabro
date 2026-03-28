@@ -97,16 +97,18 @@ fn resolve_model_provider(
     let model = cli_model
         .or(configured_model)
         .or_else(|| graph.attrs.get("default_model").and_then(|v| v.as_str()))
-        .map(String::from)
-        .unwrap_or_else(|| {
-            let catalog = Catalog::builtin();
-            let info = provider
-                .as_deref()
-                .and_then(|s| s.parse::<Provider>().ok())
-                .and_then(|p| catalog.default_for_provider(p))
-                .unwrap_or_else(|| catalog.default_from_env());
-            info.id.clone()
-        });
+        .map_or_else(
+            || {
+                let catalog = Catalog::builtin();
+                let info = provider
+                    .as_deref()
+                    .and_then(|s| s.parse::<Provider>().ok())
+                    .and_then(|p| catalog.default_for_provider(p))
+                    .unwrap_or_else(|| catalog.default_from_env());
+                info.id.clone()
+            },
+            String::from,
+        );
 
     match Catalog::builtin().get(&model) {
         Some(info) => (
@@ -233,14 +235,16 @@ async fn run_preflight(
     let mut checks: Vec<CheckResult> = Vec::new();
 
     let setup_command_count = settings.setup_commands().len();
-    let repo_summary = origin_url
-        .map(|url| {
+    let repo_summary = origin_url.map_or_else(
+        || "unknown".into(),
+        |url| {
             let https = fabro_github::ssh_url_to_https(url);
-            fabro_github::parse_github_owner_repo(&https)
-                .map(|(owner, repo)| format!("{owner}/{repo}"))
-                .unwrap_or_else(|_| url.to_string())
-        })
-        .unwrap_or_else(|| "unknown".into());
+            fabro_github::parse_github_owner_repo(&https).map_or_else(
+                |_| url.to_string(),
+                |(owner, repo)| format!("{owner}/{repo}"),
+            )
+        },
+    );
 
     checks.push(CheckResult {
         name: "Repository".into(),

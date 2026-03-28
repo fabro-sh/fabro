@@ -252,19 +252,19 @@ pub async fn finalize(
 
     if options.preserve_sandbox {
         let info = sandbox.sandbox_info();
-        if !info.is_empty() {
+        if info.is_empty() {
             emit_run_notice(
                 &emitter,
                 RunNoticeLevel::Info,
                 "sandbox_preserved",
-                format!("sandbox preserved: {info}"),
+                "sandbox preserved",
             );
         } else {
             emit_run_notice(
                 &emitter,
                 RunNoticeLevel::Info,
                 "sandbox_preserved",
-                "sandbox preserved",
+                format!("sandbox preserved: {info}"),
             );
         }
     }

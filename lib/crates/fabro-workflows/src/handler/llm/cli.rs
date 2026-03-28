@@ -333,7 +333,7 @@ fn parse_gemini_json(output: &str) -> Option<CliResponse> {
         .pointer("/stats/models")
         .and_then(|m| m.as_object())
         .and_then(|models| models.values().next())
-        .map(|model_stats| {
+        .map_or((0, 0), |model_stats| {
             let input = model_stats
                 .pointer("/tokens/input")
                 .and_then(serde_json::Value::as_i64)
@@ -343,8 +343,7 @@ fn parse_gemini_json(output: &str) -> Option<CliResponse> {
                 .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0);
             (input, output)
-        })
-        .unwrap_or((0, 0));
+        });
 
     Some(CliResponse {
         text,
@@ -691,7 +690,9 @@ impl CodergenBackend for AgentCliBackend {
             .collect();
 
         // Find the most recently modified file by mtime
-        let last_file_touched = if !files_touched.is_empty() {
+        let last_file_touched = if files_touched.is_empty() {
+            None
+        } else {
             let quoted_files: Vec<String> = files_touched
                 .iter()
                 .filter_map(|f| shlex::try_quote(f).ok().map(std::borrow::Cow::into_owned))
@@ -707,8 +708,6 @@ impl CodergenBackend for AgentCliBackend {
             } else {
                 None
             }
-        } else {
-            None
         };
 
         let mut stage_usage = StageUsage {

@@ -115,8 +115,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
             let mtime = mtime_dt.map(|dt| dt.to_rfc3339()).unwrap_or_default();
 
             let run_id = std::fs::read_to_string(path.join("id.txt"))
-                .map(|s| s.trim().to_string())
-                .unwrap_or_else(|_| dir_name.clone());
+                .map_or_else(|_| dir_name.clone(), |s| s.trim().to_string());
 
             let status_info = read_status(&path);
             let is_orphan = matches!(status_info.status, RunStatus::Dead);

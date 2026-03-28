@@ -448,9 +448,10 @@ impl Sandbox for SshSandbox {
     }
 
     async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String> {
-        let base = path
-            .map(|p| self.resolve_path(p))
-            .unwrap_or_else(|| self.config.working_directory.clone());
+        let base = path.map_or_else(
+            || self.config.working_directory.clone(),
+            |p| self.resolve_path(p),
+        );
 
         let cmd = format!(
             "find {} -name {} -type f | sort",
