@@ -1,6 +1,7 @@
 mod catalog;
 mod run_store;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -8,15 +9,18 @@ use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use object_store::path::Path;
 use object_store::ObjectStore;
+use slatedb::DbReader;
+use tokio::sync::Mutex;
 
 use crate::keys;
 use crate::{CatalogRecord, ListRunsQuery, Result, RunStore, RunSummary, Store, StoreError};
-use run_store::SlateRunStore;
+use run_store::{SlateRunStore, SlateRunStoreInner};
 
 #[derive(Clone)]
 pub struct SlateStore {
     object_store: Arc<dyn ObjectStore>,
     base_prefix: String,
+    active_runs: Arc<Mutex<HashMap<String, std::sync::Weak<SlateRunStoreInner>>>>,
 }
 
 impl std::fmt::Debug for SlateStore {
@@ -32,6 +36,7 @@ impl SlateStore {
         Self {
             object_store,
             base_prefix: normalize_base_prefix(base_prefix.into()),
+            active_runs: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -43,15 +48,74 @@ impl SlateStore {
         Ok(slatedb::Db::open(db_prefix.to_string(), self.object_store.clone()).await?)
     }
 
+    async fn open_reader(&self, db_prefix: &str) -> Result<DbReader> {
+        Ok(DbReader::open(
+            db_prefix.to_string(),
+            self.object_store.clone(),
+            None,
+            slatedb::config::DbReaderOptions::default(),
+        )
+        .await?)
+    }
+
+    async fn db_prefix_has_objects(&self, db_prefix: &str) -> Result<bool> {
+        let prefix = Path::from(db_prefix.to_string());
+        let mut items = self.object_store.list(Some(&prefix));
+        Ok(items.try_next().await?.is_some())
+    }
+
+    async fn get_active_run(&self, run_id: &str) -> Option<SlateRunStore> {
+        let mut active_runs = self.active_runs.lock().await;
+        let weak = active_runs.get(run_id).cloned()?;
+        match weak.upgrade() {
+            Some(inner) => Some(SlateRunStore::from_inner(inner)),
+            None => {
+                active_runs.remove(run_id);
+                None
+            }
+        }
+    }
+
+    async fn cache_active_run(&self, run_store: &SlateRunStore) {
+        self.active_runs
+            .lock()
+            .await
+            .insert(run_store.record().run_id.clone(), run_store.downgrade());
+    }
+
+    async fn remove_active_run(&self, run_id: &str) -> Option<SlateRunStore> {
+        let weak = self.active_runs.lock().await.remove(run_id)?;
+        weak.upgrade().map(SlateRunStore::from_inner)
+    }
+
     async fn open_run_store(&self, record: &CatalogRecord) -> Result<Option<SlateRunStore>> {
+        if let Some(active) = self.get_active_run(&record.run_id).await {
+            if active.matches_record(record) {
+                return Ok(Some(active));
+            }
+            return Err(StoreError::Other(format!(
+                "active run cache mismatch for run_id {:?}",
+                record.run_id
+            )));
+        }
+        if !self.db_prefix_has_objects(&record.db_prefix).await? {
+            return Ok(None);
+        }
         let db = self.open_db(&record.db_prefix).await?;
-        if !SlateRunStore::has_init(&db).await? {
+        let has_init = match SlateRunStore::validate_init(&db, record).await {
+            Ok(has_init) => has_init,
+            Err(err) => {
+                let _ = db.close().await;
+                return Err(err);
+            }
+        };
+        if !has_init {
             let _ = db.close().await;
             return Ok(None);
         }
-        Ok(Some(
-            SlateRunStore::open(record.run_id.clone(), record.created_at, db).await?,
-        ))
+        let run_store = SlateRunStore::open(record.clone(), db).await?;
+        self.cache_active_run(&run_store).await;
+        Ok(Some(run_store))
     }
 
     async fn delete_db_prefix(&self, db_prefix: &str) -> Result<()> {
@@ -77,6 +141,26 @@ impl Store for SlateStore {
     ) -> Result<Box<dyn RunStore>> {
         let locator =
             catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id).await?;
+        if let Some(active) = self.get_active_run(run_id).await {
+            if active.created_at() != created_at
+                || locator
+                    .as_ref()
+                    .is_some_and(|existing| existing.created_at != created_at)
+            {
+                return Err(StoreError::RunAlreadyExists(run_id.to_string()));
+            }
+            let record = active.record();
+            catalog::write_catalog(
+                self.object_store.clone(),
+                &self.base_prefix,
+                run_id,
+                created_at,
+                &record.db_prefix,
+            )
+            .await?;
+            return Ok(Box::new(active));
+        }
+
         let db_prefix = match locator {
             Some(existing) if existing.created_at != created_at => {
                 return Err(StoreError::RunAlreadyExists(run_id.to_string()));
@@ -92,7 +176,10 @@ impl Store for SlateStore {
         };
 
         let db = self.open_db(&db_prefix).await?;
+        SlateRunStore::validate_init(&db, &record).await?;
         db.put(keys::init(), serde_json::to_vec(&record)?).await?;
+        let run_store = SlateRunStore::open(record.clone(), db).await?;
+        self.cache_active_run(&run_store).await;
         catalog::write_catalog(
             self.object_store.clone(),
             &self.base_prefix,
@@ -101,9 +188,7 @@ impl Store for SlateStore {
             &db_prefix,
         )
         .await?;
-        Ok(Box::new(
-            SlateRunStore::open(run_id.to_string(), created_at, db).await?,
-        ))
+        Ok(Box::new(run_store))
     }
 
     async fn open_run(&self, run_id: &str) -> Result<Option<Box<dyn RunStore>>> {
@@ -124,13 +209,28 @@ impl Store for SlateStore {
             catalog::list_catalogs(self.object_store.clone(), &self.base_prefix, query).await?;
         let mut summaries = Vec::new();
         for record in catalogs {
-            let db = self.open_db(&record.db_prefix).await?;
-            if !SlateRunStore::has_init(&db).await? {
-                let _ = db.close().await;
+            if let Some(active) = self.get_active_run(&record.run_id).await {
+                if !active.matches_record(&record) {
+                    return Err(StoreError::Other(format!(
+                        "active run cache mismatch for run_id {:?}",
+                        record.run_id
+                    )));
+                }
+                let snapshot = active.snapshot().await?;
+                summaries.push(SlateRunStore::build_summary(snapshot.as_ref(), &record).await?);
                 continue;
             }
-            let summary = SlateRunStore::build_summary(&db, &record).await?;
-            let _ = db.close().await;
+            if !self.db_prefix_has_objects(&record.db_prefix).await? {
+                continue;
+            }
+            let reader = self.open_reader(&record.db_prefix).await?;
+            if !SlateRunStore::validate_init(&reader, &record).await? {
+                let _ = reader.close().await;
+                continue;
+            }
+            let summary = SlateRunStore::build_summary(&reader, &record).await;
+            let _ = reader.close().await;
+            let summary = summary?;
             summaries.push(summary);
         }
         summaries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -138,6 +238,12 @@ impl Store for SlateStore {
     }
 
     async fn delete_run(&self, run_id: &str) -> Result<()> {
+        let active = self.remove_active_run(run_id).await;
+        let active_record = active.as_ref().map(SlateRunStore::record);
+        if let Some(active) = &active {
+            active.close().await?;
+        }
+
         if let Some(locator) =
             catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id).await?
         {
@@ -147,6 +253,21 @@ impl Store for SlateStore {
             )
             .await?;
             self.delete_db_prefix(&locator.db_prefix).await?;
+            delete_path(
+                self.object_store.clone(),
+                &catalog::by_id_path(&self.base_prefix, run_id),
+            )
+            .await?;
+            return Ok(());
+        }
+
+        if let Some(record) = active_record {
+            delete_path(
+                self.object_store.clone(),
+                &catalog::by_start_path(&self.base_prefix, record.created_at, run_id),
+            )
+            .await?;
+            self.delete_db_prefix(&record.db_prefix).await?;
             delete_path(
                 self.object_store.clone(),
                 &catalog::by_id_path(&self.base_prefix, run_id),
@@ -211,6 +332,7 @@ mod tests {
         RunStatus, RunStatusRecord, StageStatus, StartRecord, StatusReason,
     };
     use object_store::memory::InMemory;
+    use slatedb::{CloseReason, ErrorKind};
 
     use crate::{EventPayload, NodeVisitRef};
 
@@ -522,6 +644,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_runs_and_open_run_reuse_active_handle_without_fencing() {
+        let (_object_store, store) = make_store();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let run = store.create_run("run-1", created_at).await.unwrap();
+        run.put_run(&sample_run_record("run-1", created_at))
+            .await
+            .unwrap();
+
+        let listed = store.list_runs(&ListRunsQuery::default()).await.unwrap();
+        assert_eq!(listed.len(), 1);
+
+        let reopened = store.open_run("run-1").await.unwrap().unwrap();
+        let first_event = run
+            .append_event(&event_payload("run-1", "2026-03-27T12:00:00Z", "Started"))
+            .await
+            .unwrap();
+        let second_event = reopened
+            .append_event(&event_payload("run-1", "2026-03-27T12:00:01Z", "Continued"))
+            .await
+            .unwrap();
+        let first_checkpoint = run.append_checkpoint(&sample_checkpoint()).await.unwrap();
+        let second_checkpoint = reopened
+            .append_checkpoint(&sample_checkpoint())
+            .await
+            .unwrap();
+
+        assert_eq!(first_event, 1);
+        assert_eq!(second_event, 2);
+        assert_eq!(first_checkpoint, 1);
+        assert_eq!(second_checkpoint, 2);
+    }
+
+    #[tokio::test]
     async fn watch_events_from_polls_new_events() {
         let (_object_store, store) = make_store();
         let created_at = dt("2026-03-27T12:00:00Z");
@@ -574,6 +729,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn delete_run_closes_active_handles() {
+        let (object_store, store) = make_store();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let run = store.create_run("run-1", created_at).await.unwrap();
+        run.put_run(&sample_run_record("run-1", created_at))
+            .await
+            .unwrap();
+
+        store.delete_run("run-1").await.unwrap();
+
+        let err = run.put_graph("digraph night_sky {}").await.unwrap_err();
+        assert!(matches!(
+            err,
+            StoreError::Slate(err) if matches!(err.kind(), ErrorKind::Closed(CloseReason::Clean))
+        ));
+        assert!(store.open_run("run-1").await.unwrap().is_none());
+        assert!(list_paths(object_store, "runs").await.is_empty());
+    }
+
+    #[tokio::test]
     async fn repair_catalog_removes_stale_wrong_time_prefixes() {
         let (object_store, store) = make_store();
         let created_at = dt("2026-03-27T12:00:00Z");
@@ -599,6 +774,62 @@ mod tests {
         let paths = list_paths(object_store, "runs/by-start").await;
         assert_eq!(paths.len(), 1);
         assert!(paths[0].contains("2026-03-27-12-00/run-1.json"));
+    }
+
+    #[tokio::test]
+    async fn create_run_uses_distinct_db_prefix_for_same_minute_orphan() {
+        let (object_store, store) = make_store();
+        let old_created_at = dt("2026-03-27T12:00:00Z");
+        let new_created_at = dt("2026-03-27T12:00:30Z");
+        let orphan = CatalogRecord {
+            run_id: "run-1".to_string(),
+            created_at: old_created_at,
+            db_prefix: catalog::db_prefix("runs/", old_created_at, "run-1"),
+        };
+        let new_prefix = catalog::db_prefix("runs/", new_created_at, "run-1");
+        assert_ne!(orphan.db_prefix, new_prefix);
+
+        let db = seed_db(object_store.clone(), &orphan, true).await;
+        db.put(keys::graph(), b"stale graph").await.unwrap();
+        db.close().await.unwrap();
+
+        let run = store.create_run("run-1", new_created_at).await.unwrap();
+        assert_eq!(run.get_graph().await.unwrap(), None);
+
+        let locator = catalog::read_locator(object_store, "runs/", "run-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(locator.created_at, new_created_at);
+        assert_eq!(locator.db_prefix, new_prefix);
+    }
+
+    #[tokio::test]
+    async fn create_run_rejects_mismatched_init_for_existing_prefix() {
+        let (object_store, store) = make_store();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let db_prefix = catalog::db_prefix("runs/", created_at, "run-1");
+        let db = slatedb::Db::open(db_prefix.clone(), object_store)
+            .await
+            .unwrap();
+        let mismatched = CatalogRecord {
+            run_id: "other-run".to_string(),
+            created_at,
+            db_prefix,
+        };
+        db.put(keys::init(), serde_json::to_vec(&mismatched).unwrap())
+            .await
+            .unwrap();
+        db.close().await.unwrap();
+
+        let err = match store.create_run("run-1", created_at).await {
+            Ok(_) => panic!("expected create_run to reject mismatched _init.json"),
+            Err(err) => err,
+        };
+        assert!(matches!(
+            err,
+            StoreError::Other(message) if message.contains("_init.json")
+        ));
     }
 
     #[tokio::test]

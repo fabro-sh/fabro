@@ -130,7 +130,7 @@ pub async fn repair_catalog(store: Arc<dyn ObjectStore>, base_prefix: &str) -> R
 pub(crate) fn db_prefix(base_prefix: &str, created_at: DateTime<Utc>, run_id: &str) -> String {
     format!(
         "{base_prefix}db/{}/{run_id}/",
-        created_at.format("%Y-%m-%d-%H-%M")
+        created_at.format("%Y-%m-%d-%H-%M-%S-%3f")
     )
 }
 

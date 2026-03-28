@@ -137,4 +137,20 @@ mod tests {
         );
         assert!(value.get("timestamp").and_then(|v| v.as_str()).is_some());
     }
+
+    #[test]
+    fn write_node_status_preserves_null_optional_fields() {
+        let temp = TempDir::new().unwrap();
+        let outcome = Outcome {
+            status: StageStatus::Success,
+            ..Outcome::default()
+        };
+
+        write_node_status(temp.path(), "work", 1, &outcome);
+
+        let data = std::fs::read_to_string(temp.path().join("nodes/work/status.json")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&data).unwrap();
+        assert_eq!(value.get("notes"), Some(&serde_json::Value::Null));
+        assert_eq!(value.get("failure_reason"), Some(&serde_json::Value::Null));
+    }
 }
