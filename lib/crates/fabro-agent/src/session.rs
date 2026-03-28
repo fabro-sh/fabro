@@ -1,27 +1,37 @@
 use crate::agent_profile::AgentProfile;
+use crate::compaction::{check_context_usage, compact_context};
 use crate::config::SessionConfig;
 use crate::error::{AbortReason, AgentError};
 use crate::event::EventEmitter;
 use crate::file_tracker::FileTracker;
 use crate::history::History;
 use crate::loop_detection::detect_loop;
+use crate::mcp_integration;
 use crate::memory::discover_memory;
 use crate::profiles::EnvContext;
 use crate::sandbox::Sandbox;
 use crate::skills::{
-    default_skill_dirs, discover_skills, expand_skill, make_use_skill_tool, Skill,
+    default_skill_dirs, discover_skills, expand_skill, make_use_skill_tool, ExpandedInput, Skill,
 };
-use crate::types::{AgentEvent, SessionState, Turn};
+use crate::subagent::{SubAgentEventCallback, SubAgentManager};
+use crate::tool_execution::execute_tool_calls;
+use crate::types::{AgentEvent, SessionEvent, SessionState, Turn};
 use fabro_llm::client::Client;
 use fabro_llm::error::{ProviderErrorKind, SdkError};
 use fabro_llm::generate::StreamAccumulator;
 use fabro_llm::provider::StreamEventStream;
-use fabro_llm::types::{Message, Request, StreamEvent, ToolChoice};
-use fabro_mcp::config::McpServerConfig;
+use fabro_llm::retry;
+use fabro_llm::types::{
+    ContentPart, Message, ReasoningEffort, Request, RetryPolicy, StreamEvent, ToolChoice,
+};
+use fabro_mcp::config::{McpServerConfig, McpTransport};
+use fabro_mcp::connection_manager::McpConnectionManager;
 use futures::StreamExt;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
+use tokio::sync::{broadcast, Mutex as AsyncMutex};
+use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
@@ -43,8 +53,8 @@ pub struct Session {
     skills: Vec<Skill>,
     system_prompt: String,
     file_tracker: FileTracker,
-    tool_env: Option<std::collections::HashMap<String, String>>,
-    subagent_manager: Option<Arc<tokio::sync::Mutex<crate::subagent::SubAgentManager>>>,
+    tool_env: Option<HashMap<String, String>>,
+    subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
 }
 
 impl Session {
@@ -54,7 +64,7 @@ impl Session {
         provider_profile: Arc<dyn AgentProfile>,
         sandbox: Arc<dyn Sandbox>,
         config: SessionConfig,
-        subagent_manager: Option<Arc<tokio::sync::Mutex<crate::subagent::SubAgentManager>>>,
+        subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
     ) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
@@ -79,7 +89,7 @@ impl Session {
         }
     }
 
-    pub fn set_tool_env(&mut self, env: std::collections::HashMap<String, String>) {
+    pub fn set_tool_env(&mut self, env: HashMap<String, String>) {
         self.tool_env = Some(env);
     }
 
@@ -129,7 +139,7 @@ impl Session {
             // then rewrite the config to Http using the sandbox's preview URL.
             let mcp_servers = self.resolve_sandbox_mcp_servers().await;
 
-            let mut manager = fabro_mcp::connection_manager::McpConnectionManager::new();
+            let mut manager = McpConnectionManager::new();
             let results = manager.start_servers(&mcp_servers).await;
 
             for (server_name, result) in &results {
@@ -156,7 +166,7 @@ impl Session {
             }
 
             let manager = Arc::new(manager);
-            let mcp_tools = crate::mcp_integration::make_mcp_tools(manager);
+            let mcp_tools = mcp_integration::make_mcp_tools(manager);
             if let Some(profile) = Arc::get_mut(&mut self.provider_profile) {
                 for tool in mcp_tools {
                     profile.tool_registry_mut().register(tool);
@@ -189,7 +199,7 @@ impl Session {
 
         for config in &self.config.mcp_servers {
             match &config.transport {
-                fabro_mcp::config::McpTransport::Sandbox { command, port, env } => {
+                McpTransport::Sandbox { command, port, env } => {
                     let port = *port;
                     match self.start_sandbox_mcp_server(command, port, env).await {
                         Ok((url, headers)) => {
@@ -200,7 +210,7 @@ impl Session {
                             );
                             resolved.push(McpServerConfig {
                                 name: config.name.clone(),
-                                transport: fabro_mcp::config::McpTransport::Http { url, headers },
+                                transport: McpTransport::Http { url, headers },
                                 startup_timeout_secs: config.startup_timeout_secs,
                                 tool_timeout_secs: config.tool_timeout_secs,
                             });
@@ -347,7 +357,7 @@ impl Session {
     }
 
     #[must_use]
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<crate::types::SessionEvent> {
+    pub fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
         self.event_emitter.subscribe()
     }
 
@@ -410,9 +420,9 @@ impl Session {
         &mut self,
         client: &Client,
         request: &Request,
-        retry_policy: &fabro_llm::types::RetryPolicy,
+        retry_policy: &RetryPolicy,
     ) -> Result<StreamEventStream, AgentError> {
-        let stream_result = fabro_llm::retry::retry(retry_policy, || {
+        let stream_result = retry::retry(retry_policy, || {
             let client = client.clone();
             let request = request.clone();
             async move { client.stream(&request).await }
@@ -442,7 +452,7 @@ impl Session {
 
     /// Build a callback that forwards `AgentEvent`s through this session's emitter.
     #[must_use]
-    pub fn event_callback(&self) -> crate::subagent::SubAgentEventCallback {
+    pub fn event_callback(&self) -> SubAgentEventCallback {
         let emitter = self.event_emitter.clone();
         let session_id = self.id.clone();
         Arc::new(move |event| {
@@ -498,7 +508,7 @@ impl Session {
         self.transition(SessionState::Closed);
     }
 
-    pub fn set_reasoning_effort(&mut self, effort: Option<fabro_llm::types::ReasoningEffort>) {
+    pub fn set_reasoning_effort(&mut self, effort: Option<ReasoningEffort>) {
         self.config.reasoning_effort = effort;
     }
 
@@ -530,7 +540,7 @@ impl Session {
             let token = self.cancel_token.clone();
             let reason_handle = self.abort_reason.clone();
             tokio::spawn(async move {
-                tokio::time::sleep(duration).await;
+                time::sleep(duration).await;
                 {
                     let mut guard = reason_handle.lock().unwrap_or_else(|e| e.into_inner());
                     if guard.is_none() {
@@ -581,7 +591,7 @@ impl Session {
 
         // Expand skill references in input
         let expanded = if self.skills.is_empty() {
-            crate::skills::ExpandedInput {
+            ExpandedInput {
                 text: input.to_string(),
                 skill_name: None,
             }
@@ -661,7 +671,7 @@ impl Session {
             let retry_session_id = self.id.clone();
             let retry_provider = self.provider_profile.provider().as_str().to_string();
             let retry_model = self.provider_profile.model().to_string();
-            let retry_policy = fabro_llm::types::RetryPolicy {
+            let retry_policy = RetryPolicy {
                 max_retries: 3,
                 on_retry: Some(std::sync::Arc::new(move |err, attempt, delay| {
                     retry_emitter.emit(
@@ -782,13 +792,7 @@ impl Session {
                 .message
                 .content
                 .iter()
-                .filter(|p| {
-                    matches!(
-                        p,
-                        fabro_llm::types::ContentPart::Other { .. }
-                            | fabro_llm::types::ContentPart::Thinking(_)
-                    )
-                })
+                .filter(|p| matches!(p, ContentPart::Other { .. } | ContentPart::Thinking(_)))
                 .cloned()
                 .collect();
             let usage = response.usage.clone();
@@ -824,7 +828,7 @@ impl Session {
             round_count += 1;
 
             // Execute tool calls (parallel or sequential based on provider)
-            let results = crate::tool_execution::execute_tool_calls(
+            let results = execute_tool_calls(
                 &tool_calls,
                 true,
                 self.provider_profile.tool_registry(),
@@ -878,7 +882,7 @@ impl Session {
     }
 
     async fn compact_if_needed(&mut self) {
-        let over_threshold = crate::compaction::check_context_usage(
+        let over_threshold = check_context_usage(
             &self.system_prompt,
             &self.history,
             self.provider_profile.as_ref(),
@@ -887,7 +891,7 @@ impl Session {
             &self.id,
         );
         if over_threshold && self.config.enable_context_compaction {
-            if let Err(e) = crate::compaction::compact_context(
+            if let Err(e) = compact_context(
                 &mut self.history,
                 &self.llm_client,
                 self.provider_profile.as_ref(),

@@ -3,18 +3,20 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use fabro_config::FabroSettingsExt;
 use fabro_store::RuntimeState;
+use fabro_workflows::assets::{scan_assets, AssetEntry};
+use fabro_workflows::run_lookup::{resolve_run, runs_base};
 
 use crate::args::AssetCpArgs;
+use crate::cli_config::load_cli_settings;
 use crate::shared::split_run_path;
 
 pub fn cp_command(args: &AssetCpArgs) -> Result<()> {
-    let cli_config = crate::cli_config::load_cli_settings(None)?;
-    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
+    let cli_config = load_cli_settings(None)?;
+    let base = runs_base(&cli_config.storage_dir());
     let (run_id, asset_path) = parse_source(&args.source);
-    let run = fabro_workflows::run_lookup::resolve_run(&base, run_id)?;
+    let run = resolve_run(&base, run_id)?;
     let runtime_state = RuntimeState::new(&run.path);
-    let entries =
-        fabro_workflows::assets::scan_assets(&runtime_state.assets_dir(), args.node.as_deref())?;
+    let entries = scan_assets(&runtime_state.assets_dir(), args.node.as_deref())?;
 
     if entries.is_empty() {
         bail!("No assets found for this run");
@@ -80,8 +82,7 @@ pub fn cp_command(args: &AssetCpArgs) -> Result<()> {
             })?;
         }
     } else {
-        let mut by_filename: Vec<(String, &fabro_workflows::assets::AssetEntry)> =
-            Vec::with_capacity(entries.len());
+        let mut by_filename: Vec<(String, &AssetEntry)> = Vec::with_capacity(entries.len());
         for entry in &entries {
             let filename = Path::new(&entry.relative_path)
                 .file_name()

@@ -1,17 +1,21 @@
 use std::path::Path;
 use std::time::Duration;
 
+use fabro_graphviz::graph::Graph;
 use fabro_store::RuntimeState;
 use fabro_util::terminal::Styles;
+use fabro_util::text::strip_goal_decoration;
+use fabro_workflows::asset_snapshot::collect_asset_paths;
 use fabro_workflows::outcome::{format_cost, StageStatus};
 use fabro_workflows::pipeline::{Persisted, Validated};
-use fabro_workflows::records::{Checkpoint, CheckpointExt, ConclusionExt};
+use fabro_workflows::pull_request::PullRequestRecord;
+use fabro_workflows::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt};
 use indicatif::HumanDuration;
 
 use crate::shared::{format_tokens_human, print_diagnostics, relative_path, tilde_path};
 
 fn print_workflow_header(
-    graph: &fabro_graphviz::graph::Graph,
+    graph: &Graph,
     diagnostics: &[fabro_validate::Diagnostic],
     dot_path: Option<&Path>,
     styles: &Styles,
@@ -37,7 +41,7 @@ fn print_workflow_header(
 
     let goal = graph.goal();
     if !goal.is_empty() {
-        let stripped = fabro_util::text::strip_goal_decoration(goal);
+        let stripped = strip_goal_decoration(goal);
         eprintln!("{} {stripped}\n", styles.bold.apply_to("Goal:"));
     }
 
@@ -69,14 +73,14 @@ pub(crate) fn print_diagnostics_from_error(
 
 pub(crate) fn print_run_summary(run_dir: &Path, run_id: &str, styles: &Styles) {
     let conclusion_path = run_dir.join("conclusion.json");
-    let Ok(conclusion) = fabro_workflows::records::Conclusion::load(&conclusion_path) else {
+    let Ok(conclusion) = Conclusion::load(&conclusion_path) else {
         return;
     };
 
     let pr_url = std::fs::read_to_string(run_dir.join("pull_request.json"))
         .ok()
         .and_then(|content| {
-            serde_json::from_str::<fabro_workflows::pull_request::PullRequestRecord>(&content)
+            serde_json::from_str::<PullRequestRecord>(&content)
                 .ok()
                 .map(|record| record.html_url)
         });
@@ -94,7 +98,7 @@ pub(crate) fn print_run_summary(run_dir: &Path, run_id: &str, styles: &Styles) {
 }
 
 pub(crate) fn print_run_conclusion(
-    conclusion: &fabro_workflows::records::Conclusion,
+    conclusion: &Conclusion,
     run_id: &str,
     run_dir: &Path,
     pushed_branch: Option<&str>,
@@ -201,7 +205,7 @@ pub(crate) fn print_final_output(run_dir: &Path, styles: &Styles) {
 
 pub(crate) fn print_assets(run_dir: &Path, styles: &Styles) {
     let runtime_state = RuntimeState::new(run_dir);
-    let paths = fabro_workflows::asset_snapshot::collect_asset_paths(&runtime_state.assets_dir());
+    let paths = collect_asset_paths(&runtime_state.assets_dir());
     if paths.is_empty() {
         return;
     }

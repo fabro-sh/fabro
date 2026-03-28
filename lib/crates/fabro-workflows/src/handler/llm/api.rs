@@ -9,13 +9,18 @@ use fabro_agent::{
     SessionConfig, Turn,
 };
 use fabro_llm::client::Client;
+use fabro_llm::types::{Message, Request, Usage};
+use fabro_mcp::config::McpServerConfig;
 use fabro_model::FallbackTarget;
 use fabro_model::Provider;
+use tokio::fs;
+use tokio::sync::Mutex as TokioMutex;
 
 use super::super::agent::{CodergenBackend, CodergenResult};
+use crate::context::keys::Fidelity;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
-use crate::event::WorkflowRunEvent;
+use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::outcome::compute_stage_cost;
 use crate::outcome::StageUsage;
 use fabro_graphviz::graph::Node;
@@ -85,7 +90,7 @@ fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
 fn spawn_event_forwarder(
     session: &Session,
     node_id: String,
-    emitter: Arc<crate::event::EventEmitter>,
+    emitter: Arc<EventEmitter>,
     file_tracking: Arc<Mutex<FileTracking>>,
 ) {
     let mut rx = session.subscribe();
@@ -129,7 +134,7 @@ pub struct AgentApiBackend {
     fallback_chain: Vec<FallbackTarget>,
     sessions: Mutex<HashMap<String, Session>>,
     env: HashMap<String, String>,
-    mcp_servers: Vec<fabro_mcp::config::McpServerConfig>,
+    mcp_servers: Vec<McpServerConfig>,
 }
 
 impl AgentApiBackend {
@@ -152,7 +157,7 @@ impl AgentApiBackend {
     }
 
     #[must_use]
-    pub fn with_mcp_servers(mut self, servers: Vec<fabro_mcp::config::McpServerConfig>) -> Self {
+    pub fn with_mcp_servers(mut self, servers: Vec<McpServerConfig>) -> Self {
         self.mcp_servers = servers;
         self
     }
@@ -187,7 +192,7 @@ impl AgentApiBackend {
         sandbox: &Arc<dyn Sandbox>,
         env: &HashMap<String, String>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        mcp_servers: Vec<fabro_mcp::config::McpServerConfig>,
+        mcp_servers: Vec<McpServerConfig>,
     ) -> Result<Session, FabroError> {
         let client = Client::from_env()
             .await
@@ -204,7 +209,7 @@ impl AgentApiBackend {
             ..SessionConfig::default()
         };
 
-        let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(
+        let manager = Arc::new(TokioMutex::new(SubAgentManager::new(
             config.max_subagent_depth,
         )));
         let manager_for_callback = manager.clone();
@@ -291,11 +296,11 @@ impl CodergenBackend for AgentApiBackend {
 
         let mut messages = Vec::new();
         if let Some(sys) = system_prompt {
-            messages.push(fabro_llm::types::Message::system(sys));
+            messages.push(Message::system(sys));
         }
-        messages.push(fabro_llm::types::Message::user(prompt));
+        messages.push(Message::user(prompt));
 
-        let request = fabro_llm::types::Request {
+        let request = Request {
             model: model.to_string(),
             messages,
             provider,
@@ -312,9 +317,9 @@ impl CodergenBackend for AgentApiBackend {
             provider_options: None,
         };
 
-        let _ = tokio::fs::create_dir_all(stage_dir).await;
+        let _ = fs::create_dir_all(stage_dir).await;
         if let Ok(json) = serde_json::to_string_pretty(&request) {
-            let _ = tokio::fs::write(stage_dir.join("api_request.json"), json).await;
+            let _ = fs::write(stage_dir.join("api_request.json"), json).await;
         }
 
         // Build per-request fallback chain: if the node overrides the provider,
@@ -366,7 +371,7 @@ impl CodergenBackend for AgentApiBackend {
                             .and_then(|m| m.limits.max_output)
                     });
 
-                    let fallback_request = fabro_llm::types::Request {
+                    let fallback_request = Request {
                         model: target.model.clone(),
                         provider: Some(target.provider.clone()),
                         max_tokens,
@@ -394,7 +399,7 @@ impl CodergenBackend for AgentApiBackend {
         };
 
         if let Ok(json) = serde_json::to_string_pretty(&response) {
-            let _ = tokio::fs::write(stage_dir.join("api_response.json"), json).await;
+            let _ = fs::write(stage_dir.join("api_response.json"), json).await;
         }
 
         let provider_used = serde_json::json!({
@@ -403,7 +408,7 @@ impl CodergenBackend for AgentApiBackend {
             "model": &actual_model,
         });
         if let Ok(json) = serde_json::to_string_pretty(&provider_used) {
-            let _ = tokio::fs::write(stage_dir.join("provider_used.json"), json).await;
+            let _ = fs::write(stage_dir.join("provider_used.json"), json).await;
         }
 
         let mut stage_usage = StageUsage {
@@ -432,7 +437,7 @@ impl CodergenBackend for AgentApiBackend {
         prompt: &str,
         context: &Context,
         thread_id: Option<&str>,
-        emitter: &Arc<crate::event::EventEmitter>,
+        emitter: &Arc<EventEmitter>,
         stage_dir: &std::path::Path,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
@@ -444,7 +449,7 @@ impl CodergenBackend for AgentApiBackend {
             .unwrap_or(self.provider);
 
         let fidelity = context.fidelity();
-        let reuse_key = if fidelity == crate::context::keys::Fidelity::Full {
+        let reuse_key = if fidelity == Fidelity::Full {
             thread_id.map(String::from)
         } else {
             None
@@ -493,7 +498,7 @@ impl CodergenBackend for AgentApiBackend {
         );
 
         // Emit Prompt event before processing
-        emitter.emit(&crate::event::WorkflowRunEvent::Prompt {
+        emitter.emit(&WorkflowRunEvent::Prompt {
             stage: node.id.clone(),
             text: prompt.to_string(),
         });
@@ -600,7 +605,7 @@ impl CodergenBackend for AgentApiBackend {
         result?;
 
         // Aggregate token usage only from new turns (prevents double-counting on reuse).
-        let mut total_usage = fabro_llm::types::Usage::default();
+        let mut total_usage = Usage::default();
         for turn in &session.history().turns()[turns_before..] {
             if let Turn::Assistant { usage, .. } = turn {
                 total_usage = total_usage + *usage.clone();
@@ -865,7 +870,7 @@ mod tests {
     #[test]
     fn build_profile_can_register_subagent_tools() {
         let mut profile = build_profile("claude-opus-4-6", Provider::Anthropic);
-        let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(1)));
+        let manager = Arc::new(TokioMutex::new(SubAgentManager::new(1)));
         let factory: SessionFactory = Arc::new(|| {
             panic!("factory should not be called in this test");
         });

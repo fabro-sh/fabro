@@ -1,11 +1,12 @@
 use anyhow::Result;
+use fabro_config::cli::load_cli_config;
+use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, RunArgs};
 
 pub async fn execute(mut args: RunArgs, _globals: &GlobalArgs) -> Result<()> {
-    let styles: &'static fabro_util::terminal::Styles =
-        Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
-    let cli_defaults = fabro_config::cli::load_cli_config(None)?;
+    let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
+    let cli_defaults = load_cli_config(None)?;
     let cli_config: fabro_config::FabroSettings = cli_defaults.clone().try_into()?;
     args.verbose = args.verbose || cli_config.verbose_enabled();
 

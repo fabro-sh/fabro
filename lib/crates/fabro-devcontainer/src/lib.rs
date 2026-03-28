@@ -10,6 +10,7 @@ mod variables;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use fabro_util::env::SystemEnv;
 pub use types::DevcontainerJson;
 
 /// Lifecycle command — string, array, or object (parallel) form.
@@ -174,7 +175,7 @@ impl DevcontainerResolver {
             .clone()
             .unwrap_or_else(|| format!("/workspaces/{repo_name}"));
 
-        let system_env = fabro_util::env::SystemEnv;
+        let system_env = SystemEnv;
         let preliminary_vars = variables::VariableContext {
             local_workspace_folder: repo_root.to_string_lossy().to_string(),
             local_workspace_folder_basename: repo_name.clone(),

@@ -7,11 +7,14 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use fabro_llm::generate::{stream as llm_stream, GenerateParams};
+use fabro_llm::types::{Message as LlmMessage, StreamEvent};
 use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
 
 use crate::error::ApiError;
 use crate::jwt_auth::AuthenticatedService;
-use crate::server::PaginationParams;
+use crate::server::{AppState, PaginationParams};
 
 pub type SessionStore = Arc<RwLock<HashMap<uuid::Uuid, SessionState>>>;
 
@@ -72,15 +75,13 @@ fn resolve_model(model_arg: Option<String>) -> (String, Option<String>) {
     }
 }
 
-fn turns_to_messages(turns: &[fabro_api_types::SessionTurn]) -> Vec<fabro_llm::types::Message> {
+fn turns_to_messages(turns: &[fabro_api_types::SessionTurn]) -> Vec<LlmMessage> {
     turns
         .iter()
         .filter_map(|turn| match turn {
-            fabro_api_types::SessionTurn::UserTurn(t) => {
-                Some(fabro_llm::types::Message::user(&t.content))
-            }
+            fabro_api_types::SessionTurn::UserTurn(t) => Some(LlmMessage::user(&t.content)),
             fabro_api_types::SessionTurn::AssistantTurn(t) => {
-                Some(fabro_llm::types::Message::assistant(&t.content))
+                Some(LlmMessage::assistant(&t.content))
             }
             fabro_api_types::SessionTurn::ToolTurn(_) => None,
         })
@@ -136,7 +137,7 @@ fn spawn_generation(store: SessionStore, session_id: uuid::Uuid, dry_run: bool, 
             return;
         }
 
-        let mut params = fabro_llm::generate::GenerateParams::new(&model_id)
+        let mut params = GenerateParams::new(&model_id)
             .messages(messages)
             .max_tokens(4096);
         if let Some(ref provider) = model_provider {
@@ -146,7 +147,7 @@ fn spawn_generation(store: SessionStore, session_id: uuid::Uuid, dry_run: bool, 
             params = params.system(system);
         }
 
-        let stream_result = match fabro_llm::generate::stream(params).await {
+        let stream_result = match llm_stream(params).await {
             Ok(s) => s,
             Err(e) => {
                 let _ = event_tx.send(SessionEvent::Error {
@@ -165,7 +166,7 @@ fn spawn_generation(store: SessionStore, session_id: uuid::Uuid, dry_run: bool, 
                 return;
             }
             match event {
-                Ok(fabro_llm::types::StreamEvent::TextDelta { delta, .. }) => {
+                Ok(StreamEvent::TextDelta { delta, .. }) => {
                     full_text.push_str(&delta);
                     let _ = event_tx.send(SessionEvent::TextDelta { delta });
                 }
@@ -207,7 +208,7 @@ fn spawn_generation(store: SessionStore, session_id: uuid::Uuid, dry_run: bool, 
 
 pub async fn create_session(
     _auth: AuthenticatedService,
-    State(state): State<Arc<crate::server::AppState>>,
+    State(state): State<Arc<AppState>>,
     Json(req): Json<fabro_api_types::CreateSessionRequest>,
 ) -> Response {
     let (model_id, model_provider) = resolve_model(req.model);
@@ -259,7 +260,7 @@ pub async fn create_session(
 
 pub async fn retrieve_session(
     _auth: AuthenticatedService,
-    State(state): State<Arc<crate::server::AppState>>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<uuid::Uuid>,
 ) -> Response {
     let store = state.sessions.read().expect("session store lock poisoned");
@@ -284,7 +285,7 @@ pub async fn retrieve_session(
 
 pub async fn send_message(
     _auth: AuthenticatedService,
-    State(state): State<Arc<crate::server::AppState>>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<uuid::Uuid>,
     Json(req): Json<fabro_api_types::SendMessageRequest>,
 ) -> Response {
@@ -318,7 +319,7 @@ pub async fn send_message(
 
 pub async fn stream_session_events(
     _auth: AuthenticatedService,
-    State(state): State<Arc<crate::server::AppState>>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<uuid::Uuid>,
 ) -> Response {
     let rx = {
@@ -331,46 +332,45 @@ pub async fn stream_session_events(
 
     use tokio_stream::StreamExt;
 
-    let stream =
-        tokio_stream::wrappers::BroadcastStream::new(rx).filter_map(|result| match result {
-            Ok(event) => {
-                let sse: Option<Event> = match event {
-                    SessionEvent::TextDelta { delta } => Some(
-                        Event::default()
-                            .event("content_delta")
-                            .data(serde_json::json!({"delta": delta}).to_string()),
+    let stream = BroadcastStream::new(rx).filter_map(|result| match result {
+        Ok(event) => {
+            let sse: Option<Event> = match event {
+                SessionEvent::TextDelta { delta } => Some(
+                    Event::default()
+                        .event("content_delta")
+                        .data(serde_json::json!({"delta": delta}).to_string()),
+                ),
+                SessionEvent::AssistantTurnComplete {
+                    content,
+                    created_at,
+                } => Some(
+                    Event::default().event("assistant_turn").data(
+                        serde_json::json!({
+                            "kind": "assistant",
+                            "content": content,
+                            "created_at": created_at,
+                        })
+                        .to_string(),
                     ),
-                    SessionEvent::AssistantTurnComplete {
-                        content,
-                        created_at,
-                    } => Some(
-                        Event::default().event("assistant_turn").data(
-                            serde_json::json!({
-                                "kind": "assistant",
-                                "content": content,
-                                "created_at": created_at,
-                            })
-                            .to_string(),
-                        ),
-                    ),
-                    SessionEvent::Done => Some(Event::default().event("done").data("{}")),
-                    SessionEvent::Error { message } => Some(
-                        Event::default()
-                            .event("error")
-                            .data(serde_json::json!({"message": message}).to_string()),
-                    ),
-                };
-                sse.map(Ok::<_, std::convert::Infallible>)
-            }
-            Err(_) => None,
-        });
+                ),
+                SessionEvent::Done => Some(Event::default().event("done").data("{}")),
+                SessionEvent::Error { message } => Some(
+                    Event::default()
+                        .event("error")
+                        .data(serde_json::json!({"message": message}).to_string()),
+                ),
+            };
+            sse.map(Ok::<_, std::convert::Infallible>)
+        }
+        Err(_) => None,
+    });
 
     Sse::new(stream).into_response()
 }
 
 pub async fn list_sessions(
     _auth: AuthenticatedService,
-    State(state): State<Arc<crate::server::AppState>>,
+    State(state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Response {
     let store = state.sessions.read().expect("session store lock poisoned");

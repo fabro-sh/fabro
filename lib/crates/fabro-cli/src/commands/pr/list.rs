@@ -2,16 +2,20 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use fabro_config::FabroSettingsExt;
+use fabro_workflows::pull_request::PullRequestRecord;
+use fabro_workflows::run_lookup::{runs_base, scan_runs};
+use futures::future::join_all;
 use tracing::info;
 
 use crate::args::PrListArgs;
+use crate::cli_config::load_cli_settings;
 
 pub async fn list_command(
     args: PrListArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {
-    let cli_config = crate::cli_config::load_cli_settings(None)?;
-    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
+    let cli_config = load_cli_settings(None)?;
+    let base = runs_base(&cli_config.storage_dir());
     list_from(&base, args, github_app).await
 }
 
@@ -24,15 +28,13 @@ async fn list_from(
         "GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id",
     )?;
 
-    let runs = fabro_workflows::run_lookup::scan_runs(base).context("Failed to scan runs")?;
+    let runs = scan_runs(base).context("Failed to scan runs")?;
 
-    let mut entries: Vec<(String, fabro_workflows::pull_request::PullRequestRecord)> = Vec::new();
+    let mut entries: Vec<(String, PullRequestRecord)> = Vec::new();
     for run in &runs {
         let pr_path = run.path.join("pull_request.json");
         if let Ok(content) = std::fs::read_to_string(&pr_path) {
-            if let Ok(record) =
-                serde_json::from_str::<fabro_workflows::pull_request::PullRequestRecord>(&content)
-            {
+            if let Ok(record) = serde_json::from_str::<PullRequestRecord>(&content) {
                 entries.push((run.run_id.clone(), record));
             }
         }
@@ -93,7 +95,7 @@ async fn list_from(
         })
         .collect();
 
-    let all_rows = futures::future::join_all(futures).await;
+    let all_rows = join_all(futures).await;
     let rows: Vec<_> = if args.all {
         all_rows
     } else {

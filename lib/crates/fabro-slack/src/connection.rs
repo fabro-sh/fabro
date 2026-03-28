@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use fabro_interview::WebInterviewer;
 use futures_util::{SinkExt, StreamExt};
+use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
@@ -164,7 +165,7 @@ pub async fn run(
             }
             Err(e) => {
                 error!("Failed to open Socket Mode connection: {e}");
-                tokio::time::sleep(backoff).await;
+                sleep(backoff).await;
                 backoff = (backoff * 2).min(max_backoff);
                 continue;
             }
@@ -177,7 +178,7 @@ pub async fn run(
             }
             Err(e) => {
                 error!("Event loop error: {e}, reconnecting...");
-                tokio::time::sleep(backoff).await;
+                sleep(backoff).await;
                 backoff = (backoff * 2).min(max_backoff);
             }
         }

@@ -4,7 +4,7 @@ use std::path::Path;
 pub use fabro_types::checkpoint::Checkpoint;
 
 use crate::context::Context;
-use crate::error::FailureSignature;
+use crate::error::{FailureSignature, Result as CrateResult};
 use crate::outcome::Outcome;
 
 pub trait CheckpointExt {
@@ -22,8 +22,8 @@ pub trait CheckpointExt {
     ) -> Self
     where
         Self: Sized;
-    fn save(&self, path: &Path) -> crate::error::Result<()>;
-    fn load(path: &Path) -> crate::error::Result<Self>
+    fn save(&self, path: &Path) -> CrateResult<()>;
+    fn load(path: &Path) -> CrateResult<Self>
     where
         Self: Sized;
 }
@@ -55,12 +55,12 @@ impl CheckpointExt for Checkpoint {
         }
     }
 
-    fn save(&self, path: &Path) -> crate::error::Result<()> {
+    fn save(&self, path: &Path) -> CrateResult<()> {
         tracing::debug!(path = %path.display(), node = %self.current_node, "Saving checkpoint");
         crate::save_json(self, path, "checkpoint")
     }
 
-    fn load(path: &Path) -> crate::error::Result<Self> {
+    fn load(path: &Path) -> CrateResult<Self> {
         tracing::debug!(path = %path.display(), "Loading checkpoint");
         crate::load_json(path, "checkpoint")
     }

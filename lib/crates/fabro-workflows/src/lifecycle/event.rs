@@ -3,13 +3,17 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 
+use fabro_core::error::Result as CoreResult;
 use fabro_core::graph::NodeSpec;
-use fabro_core::lifecycle::{AttemptContext, AttemptResultContext, EdgeContext, RunLifecycle};
+use fabro_core::lifecycle::{
+    AttemptContext, AttemptResultContext, EdgeContext, EdgeDecision, NodeDecision, RunLifecycle,
+};
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::RunState;
 
 use super::git::GitCheckpointResult;
 use crate::artifact::ArtifactStore;
+use crate::error::FabroError;
 use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
@@ -52,11 +56,7 @@ pub struct EventLifecycle {
 
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for EventLifecycle {
-    async fn on_run_start(
-        &self,
-        _graph: &WorkflowGraph,
-        _state: &WfRunState,
-    ) -> fabro_core::error::Result<()> {
+    async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
         // If restarted_from is Some, emit LoopRestart and clear it
         {
             let mut restarted = self.restarted_from.lock().unwrap();
@@ -124,7 +124,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         &self,
         ctx: &AttemptContext<'_, WorkflowGraph>,
         state: &WfRunState,
-    ) -> fabro_core::error::Result<fabro_core::lifecycle::NodeDecision<Option<StageUsage>>> {
+    ) -> CoreResult<NodeDecision<Option<StageUsage>>> {
         let gv = ctx.node.inner();
         self.emitter.emit(&WorkflowRunEvent::StageStarted {
             node_id: gv.id.clone(),
@@ -135,14 +135,14 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             attempt: ctx.attempt as usize,
             max_attempts: ctx.max_attempts as usize,
         });
-        Ok(fabro_core::lifecycle::NodeDecision::Continue)
+        Ok(NodeDecision::Continue)
     }
 
     async fn after_attempt(
         &self,
         ctx: &AttemptResultContext<'_, WorkflowGraph>,
         state: &WfRunState,
-    ) -> fabro_core::error::Result<()> {
+    ) -> CoreResult<()> {
         if ctx.will_retry {
             let gv = ctx.node.inner();
             let outcome = &ctx.result.outcome;
@@ -175,7 +175,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         node: &WorkflowNode,
         result: &mut WfNodeResult,
         state: &WfRunState,
-    ) -> fabro_core::error::Result<()> {
+    ) -> CoreResult<()> {
         let outcome = &result.outcome;
         // Skipped nodes had no StageStarted, so skip completion events (engine.rs:2080)
         if outcome.status == StageStatus::Skipped {
@@ -219,7 +219,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         &self,
         ctx: &EdgeContext<'_, WorkflowGraph>,
         _state: &WfRunState,
-    ) -> fabro_core::error::Result<fabro_core::lifecycle::EdgeDecision> {
+    ) -> CoreResult<EdgeDecision> {
         let outcome = ctx.outcome;
         let label = ctx
             .edge
@@ -240,7 +240,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             stage_status: outcome.status.to_string(),
             is_jump: ctx.is_jump,
         });
-        Ok(fabro_core::lifecycle::EdgeDecision::Continue)
+        Ok(EdgeDecision::Continue)
     }
 
     async fn on_checkpoint(
@@ -249,7 +249,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         result: &WfNodeResult,
         _next_node_id: Option<&str>,
         _state: &WfRunState,
-    ) -> fabro_core::error::Result<()> {
+    ) -> CoreResult<()> {
         let status = result.outcome.status.to_string();
 
         // Read git checkpoint result (set by GitLifecycle)
@@ -323,7 +323,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 .map(|f| f.message.clone())
                 .unwrap_or_else(|| "run failed".to_string());
             self.emitter.emit(&WorkflowRunEvent::WorkflowRunFailed {
-                error: crate::error::FabroError::engine(error_msg),
+                error: FabroError::engine(error_msg),
                 duration_ms,
                 git_commit_sha: last_sha,
             });

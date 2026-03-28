@@ -1,10 +1,13 @@
 use anyhow::Result;
 use fabro_config::FabroSettings;
+use fabro_llm::cli::{run_prompt, PromptArgs};
+#[cfg(feature = "server")]
+use fabro_llm::cli::{run_prompt_via_server, ServerConnection};
 
 use crate::args::GlobalArgs;
 
 pub async fn execute(
-    mut args: fabro_llm::cli::PromptArgs,
+    mut args: PromptArgs,
     cli_config: &FabroSettings,
     globals: &GlobalArgs,
 ) -> Result<()> {
@@ -23,14 +26,14 @@ pub async fn execute(
         match resolved.mode {
             crate::cli_config::ExecutionMode::Server => {
                 let client = crate::cli_config::build_server_client(resolved.tls.as_ref())?;
-                let server = fabro_llm::cli::ServerConnection {
+                let server = ServerConnection {
                     client,
                     base_url: resolved.server_base_url,
                 };
-                fabro_llm::cli::run_prompt_via_server(args, &server).await?;
+                run_prompt_via_server(args, &server).await?;
             }
             crate::cli_config::ExecutionMode::Standalone => {
-                fabro_llm::cli::run_prompt(args).await?;
+                run_prompt(args).await?;
             }
         }
     }
@@ -38,7 +41,7 @@ pub async fn execute(
     #[cfg(not(feature = "server"))]
     {
         let _ = globals;
-        fabro_llm::cli::run_prompt(args).await?;
+        run_prompt(args).await?;
     }
 
     Ok(())

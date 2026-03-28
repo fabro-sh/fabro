@@ -1,9 +1,11 @@
+use fabro_util::env::Env;
+
 /// Context for variable substitution.
 pub struct VariableContext<'a> {
     pub local_workspace_folder: String,
     pub local_workspace_folder_basename: String,
     pub container_workspace_folder: String,
-    pub env: &'a dyn fabro_util::env::Env,
+    pub env: &'a dyn Env,
 }
 
 /// Replace devcontainer variables in a string value.

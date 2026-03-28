@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 
+use fabro_core::error::Result as CoreResult;
 use fabro_core::lifecycle::RunLifecycle;
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::RunState;
@@ -21,7 +22,7 @@ impl RunLifecycle<WorkflowGraph> for AutoStatusLifecycle {
         node: &WorkflowNode,
         result: &mut WfNodeResult,
         _state: &WfRunState,
-    ) -> fabro_core::error::Result<()> {
+    ) -> CoreResult<()> {
         let gv = node.inner();
         let outcome = &mut result.outcome;
         if gv.auto_status()

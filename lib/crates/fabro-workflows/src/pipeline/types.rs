@@ -20,9 +20,14 @@ use fabro_validate::Diagnostic;
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::EventEmitter;
+use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::records::{Checkpoint, Conclusion, RunRecord};
-use crate::run_options::{LifecycleOptions, RunOptions};
+use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
+use crate::transforms::Transform;
+use fabro_config::run::PullRequestSettings;
+use fabro_llm::client::Client;
+use fabro_retro::retro::Retro;
 use fabro_validate::Severity;
 
 /// Output of the PARSE phase.
@@ -262,9 +267,9 @@ pub struct InitOptions {
     pub hooks: fabro_hooks::HookConfig,
     pub sandbox_env: SandboxEnvSpec,
     pub devcontainer: Option<DevcontainerSpec>,
-    pub git: Option<crate::run_options::GitCheckpointOptions>,
+    pub git: Option<GitCheckpointOptions>,
     pub worktree_mode: Option<WorktreeMode>,
-    pub registry_override: Option<Arc<crate::handler::HandlerRegistry>>,
+    pub registry_override: Option<Arc<HandlerRegistry>>,
     pub checkpoint: Option<Checkpoint>,
     pub seed_context: Option<Context>,
 }
@@ -279,11 +284,11 @@ pub struct Initialized {
     pub(crate) seed_context: Option<Context>,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
-    pub registry: Arc<crate::handler::HandlerRegistry>,
+    pub registry: Arc<HandlerRegistry>,
     pub hook_runner: Option<Arc<HookRunner>>,
     pub env: HashMap<String, String>,
     pub dry_run: bool,
-    pub llm_client: Option<fabro_llm::client::Client>,
+    pub llm_client: Option<Client>,
     pub model: String,
     pub provider: Provider,
 }
@@ -299,7 +304,7 @@ pub struct Executed {
     pub sandbox: Arc<dyn Sandbox>,
     pub duration_ms: u64,
     pub final_context: Context,
-    pub llm_client: Option<fabro_llm::client::Client>,
+    pub llm_client: Option<Client>,
     pub model: String,
     pub provider: Provider,
 }
@@ -314,7 +319,7 @@ pub struct Retroed {
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
     pub duration_ms: u64,
-    pub retro: Option<fabro_retro::retro::Retro>,
+    pub retro: Option<Retro>,
 }
 
 /// Output of the FINALIZE phase.
@@ -342,7 +347,7 @@ pub struct Finalized {
 /// Options for the TRANSFORM phase.
 pub struct TransformOptions {
     pub base_dir: Option<PathBuf>,
-    pub custom_transforms: Vec<Box<dyn crate::transforms::Transform>>,
+    pub custom_transforms: Vec<Box<dyn Transform>>,
 }
 
 /// Options for the RETRO phase.
@@ -356,7 +361,7 @@ pub struct RetroOptions {
     pub failed: bool,
     pub run_duration_ms: u64,
     pub enabled: bool,
-    pub llm_client: Option<fabro_llm::client::Client>,
+    pub llm_client: Option<Client>,
     pub provider: Provider,
     pub model: String,
 }
@@ -374,7 +379,7 @@ pub struct FinalizeOptions {
 /// Options for the PULL_REQUEST phase.
 pub struct PullRequestOptions {
     pub run_dir: PathBuf,
-    pub pr_config: Option<fabro_config::run::PullRequestSettings>,
+    pub pr_config: Option<PullRequestSettings>,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
     pub origin_url: Option<String>,
     pub model: String,

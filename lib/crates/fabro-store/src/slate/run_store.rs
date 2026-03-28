@@ -11,6 +11,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use slatedb::{CloseReason, DbRead, ErrorKind};
 use tokio::sync::{mpsc, Mutex};
+use tokio::time;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::keys;
@@ -341,7 +342,7 @@ impl RunStore for SlateRunStore {
                 match list_events_from(&db, next_seq).await {
                     Ok(events) => {
                         if events.is_empty() {
-                            tokio::time::sleep(Duration::from_millis(100)).await;
+                            time::sleep(Duration::from_millis(100)).await;
                             continue;
                         }
                         for event in events {

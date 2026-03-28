@@ -9,6 +9,9 @@ mod sleep_inhibitor;
 use anyhow::Result;
 use args::{Commands, GlobalArgs, RunCommands, LONG_VERSION};
 use clap::Parser;
+use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
+use fabro_util::terminal::Styles;
+use rustls::crypto::ring::default_provider;
 use tracing::debug;
 
 #[derive(Parser)]
@@ -23,7 +26,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() {
-    fabro_telemetry::panic::install_panic_hook();
+    tel_panic::install_panic_hook();
     fabro_telemetry::init_cli();
 
     let start = std::time::Instant::now();
@@ -33,8 +36,8 @@ async fn main() {
     let duration_ms = start.elapsed().as_millis() as u64;
 
     let is_error = result.is_err();
-    let command = fabro_telemetry::sanitize::sanitize_command(&raw_args, &command_name);
-    let repository = fabro_telemetry::git::repository_identifier();
+    let command = sanitize::sanitize_command(&raw_args, &command_name);
+    let repository = git::repository_identifier();
     let ci = std::env::var("CI").is_ok();
     if is_error {
         fabro_telemetry::track!("CLI Errored", {
@@ -82,7 +85,7 @@ async fn main() {
 }
 
 async fn main_inner() -> (String, Result<()>) {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    let _ = default_provider().install_default();
 
     let cli = Cli::parse();
     if let Some(home) = dirs::home_dir() {
@@ -107,7 +110,7 @@ async fn main_inner() -> (String, Result<()>) {
                     Err(err) => return (command_name, Err(err)),
                 }
             } else {
-                match crate::cli_config::load_cli_settings(None) {
+                match cli_config::load_cli_settings(None) {
                     Ok(cli_config) => (
                         cli_config.log.as_ref().and_then(|l| l.level.clone()),
                         cli_config.upgrade_check_enabled(),
@@ -118,7 +121,7 @@ async fn main_inner() -> (String, Result<()>) {
         }
         #[cfg(not(feature = "server"))]
         {
-            match crate::cli_config::load_cli_settings(None) {
+            match cli_config::load_cli_settings(None) {
                 Ok(cli_config) => (
                     cli_config.log.as_ref().and_then(|l| l.level.clone()),
                     cli_config.upgrade_check_enabled(),
@@ -160,11 +163,11 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::RunCmd(cmd) => commands::run::dispatch(cmd, &globals).await?,
             Commands::Preflight(args) => commands::preflight::execute(args).await?,
             Commands::Validate(args) => {
-                let styles = fabro_util::terminal::Styles::detect_stderr();
+                let styles = Styles::detect_stderr();
                 commands::validate::run(&args, &styles)?;
             }
             Commands::Graph(args) => {
-                let styles = fabro_util::terminal::Styles::detect_stderr();
+                let styles = Styles::detect_stderr();
                 commands::graph::run(&args, &styles)?;
             }
             Commands::Parse(args) => {
@@ -175,8 +178,7 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Model { command } => commands::model::execute(command, &globals).await?,
             #[cfg(feature = "server")]
             Commands::Serve(args) => {
-                let styles: &'static fabro_util::terminal::Styles =
-                    Box::leak(Box::new(fabro_util::terminal::Styles::detect_stderr()));
+                let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
                 fabro_api::serve::serve_command(args, styles).await?;
             }
             Commands::Doctor { verbose, dry_run } => {
@@ -213,12 +215,12 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Provider(ns) => commands::provider::dispatch(ns).await?,
             Commands::System(ns) => commands::system::dispatch(ns)?,
             Commands::SendAnalytics { path } => {
-                let result = fabro_telemetry::sender::upload(&path).await;
+                let result = sender::upload(&path).await;
                 let _ = std::fs::remove_file(&path);
                 result?;
             }
             Commands::SendPanic { path } => {
-                let result = fabro_telemetry::panic::capture(&path).await;
+                let result = tel_panic::capture(&path).await;
                 let _ = std::fs::remove_file(&path);
                 result?;
             }

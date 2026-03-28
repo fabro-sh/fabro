@@ -1,14 +1,16 @@
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
+use futures::stream;
 
-use crate::error::SdkError;
-use crate::provider::{ProviderAdapter, StreamEventStream};
+use crate::error::{error_from_status_code, SdkError};
+use crate::provider::{validate_tool_choice, ProviderAdapter, StreamEventStream};
 use crate::providers::common::{
-    extract_system_prompt, parse_error_body, parse_rate_limit_headers, parse_retry_after,
-    send_and_read_response,
+    self as common, extract_system_prompt, parse_error_body, parse_rate_limit_headers,
+    parse_retry_after, send_and_read_response,
 };
 use crate::types::{
-    ContentPart, FinishReason, Message, Request, Response, ResponseFormatType, Role, StreamEvent,
-    ThinkingData, ToolCall, ToolChoice, ToolDefinition, Usage,
+    AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response,
+    ResponseFormatType, Role, StreamEvent, ThinkingData, ToolCall, ToolChoice, ToolDefinition,
+    Usage,
 };
 
 /// Provider adapter for the Anthropic Messages API.
@@ -47,7 +49,7 @@ impl Adapter {
     }
 
     #[must_use]
-    pub fn with_timeout(self, timeout: crate::types::AdapterTimeout) -> Self {
+    pub fn with_timeout(self, timeout: AdapterTimeout) -> Self {
         Self {
             http: self.http.with_timeout(timeout),
             ..self
@@ -266,8 +268,8 @@ fn content_part_to_api(part: &ContentPart) -> Option<serde_json::Value> {
         }
         ContentPart::Image(img) => {
             if let Some(url) = &img.url {
-                if crate::providers::common::is_file_path(url) {
-                    return match crate::providers::common::load_file_as_base64(url) {
+                if common::is_file_path(url) {
+                    return match common::load_file_as_base64(url) {
                         Ok((b64, mime)) => Some(serde_json::json!({
                             "type": "image",
                             "source": {"type": "base64", "media_type": mime, "data": b64}
@@ -286,8 +288,8 @@ fn content_part_to_api(part: &ContentPart) -> Option<serde_json::Value> {
         }
         ContentPart::Document(doc) => {
             if let Some(url) = &doc.url {
-                if crate::providers::common::is_file_path(url) {
-                    return match crate::providers::common::load_file_as_base64(url) {
+                if common::is_file_path(url) {
+                    return match common::load_file_as_base64(url) {
                         Ok((b64, mime)) => Some(serde_json::json!({
                             "type": "document",
                             "source": {"type": "base64", "media_type": mime, "data": b64}
@@ -669,11 +671,11 @@ struct StreamAccumulator {
     /// Accumulated raw JSON arguments for the current `tool_use` block.
     current_tool_args: String,
     /// Rate limit info parsed from the initial HTTP response headers.
-    rate_limit: Option<crate::types::RateLimitInfo>,
+    rate_limit: Option<RateLimitInfo>,
 }
 
 impl StreamAccumulator {
-    fn new(rate_limit: Option<crate::types::RateLimitInfo>) -> Self {
+    fn new(rate_limit: Option<RateLimitInfo>) -> Self {
         Self {
             id: String::new(),
             model: String::new(),
@@ -974,7 +976,7 @@ struct SseReaderState {
 impl SseReaderState {
     fn new(
         http_resp: reqwest::Response,
-        rate_limit: Option<crate::types::RateLimitInfo>,
+        rate_limit: Option<RateLimitInfo>,
         json_schema_mode: bool,
         stream_read_timeout: Option<std::time::Duration>,
     ) -> Self {
@@ -1214,7 +1216,7 @@ impl ProviderAdapter for Adapter {
 
     async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
         if let Some(tc) = &request.tool_choice {
-            crate::provider::validate_tool_choice(self, tc)?;
+            validate_tool_choice(self, tc)?;
         }
 
         // Non-Anthropic providers (e.g. Kimi) require stream=true even for
@@ -1290,7 +1292,7 @@ impl ProviderAdapter for Adapter {
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
         if let Some(tc) = &request.tool_choice {
-            crate::provider::validate_tool_choice(self, tc)?;
+            validate_tool_choice(self, tc)?;
         }
         let (_api_request, req_builder) = build_api_request(self, request, true);
 
@@ -1307,7 +1309,7 @@ impl ProviderAdapter for Adapter {
                 .await
                 .map_err(|e| SdkError::network(e.to_string(), e))?;
             let (msg, code, raw) = parse_error_body(&body, "type");
-            return Err(crate::error::error_from_status_code(
+            return Err(error_from_status_code(
                 status.as_u16(),
                 msg,
                 self.provider_name.clone(),
@@ -1321,7 +1323,7 @@ impl ProviderAdapter for Adapter {
         let json_schema_mode = uses_json_schema_format(request);
         let stream_read_timeout = self.http.stream_read_timeout;
 
-        let stream = futures::stream::unfold(
+        let stream = stream::unfold(
             SseReaderState::new(http_resp, rate_limit, json_schema_mode, stream_read_timeout),
             |mut state| async move {
                 loop {

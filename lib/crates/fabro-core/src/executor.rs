@@ -5,7 +5,7 @@ use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::context::Context;
-use crate::error::{CoreError, Result};
+use crate::error::{CoreError, Result, VisitLimitSource};
 use crate::graph::{EdgeSpec, Graph, NodeSpec};
 use crate::handler::NodeHandler;
 use crate::lifecycle::{
@@ -14,6 +14,7 @@ use crate::lifecycle::{
 };
 use crate::outcome::{NodeResult, NodeResultExt, Outcome, StageStatus};
 use crate::state::RunState;
+use tokio::time::sleep;
 
 #[derive(Default)]
 pub struct ExecutorOptions {
@@ -147,7 +148,7 @@ impl<G: Graph + 'static> Executor<G> {
                         node_id: node.id().to_string(),
                         visits,
                         limit: max,
-                        limit_source: crate::error::VisitLimitSource::Node,
+                        limit_source: VisitLimitSource::Node,
                     });
                 }
             }
@@ -157,7 +158,7 @@ impl<G: Graph + 'static> Executor<G> {
                         node_id: node.id().to_string(),
                         visits,
                         limit: global_max,
-                        limit_source: crate::error::VisitLimitSource::Graph,
+                        limit_source: VisitLimitSource::Graph,
                     });
                 }
             }
@@ -276,7 +277,7 @@ impl<G: Graph + 'static> Executor<G> {
                         backoff_delay: Some(delay),
                     };
                     self.lifecycle.after_attempt(&ctx, state).await?;
-                    tokio::time::sleep(delay).await;
+                    sleep(delay).await;
                 }
                 Ok(outcome) if outcome.status == StageStatus::Retry => {
                     let final_outcome = self.handler.on_retries_exhausted(node, outcome);
@@ -321,7 +322,7 @@ impl<G: Graph + 'static> Executor<G> {
                         backoff_delay: Some(delay),
                     };
                     self.lifecycle.after_attempt(&ctx, state).await?;
-                    tokio::time::sleep(delay).await;
+                    sleep(delay).await;
                 }
                 Err(e) => {
                     // Convert handler error to fail outcome so routing continues
@@ -1876,7 +1877,7 @@ mod tests {
                 // Cancel stall token while "running"
                 self.0.cancel();
                 // Simulate long work
-                tokio::time::sleep(Duration::from_secs(10)).await;
+                sleep(Duration::from_secs(10)).await;
                 Ok(Outcome::success())
             }
         }
@@ -1973,7 +1974,7 @@ mod tests {
                 _s: &RunState,
             ) -> Result<NodeDecision> {
                 self.0.cancel();
-                tokio::time::sleep(Duration::from_secs(10)).await;
+                sleep(Duration::from_secs(10)).await;
                 Ok(NodeDecision::Continue)
             }
         }

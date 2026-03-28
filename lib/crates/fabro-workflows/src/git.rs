@@ -6,7 +6,9 @@ use fabro_git_storage::gitobj::Store;
 use git2::{Repository, Signature};
 
 use crate::error::{FabroError, Result};
-use crate::records::Checkpoint;
+use crate::records::{Checkpoint, RunRecord, StartRecord};
+use tokio::task::{spawn_blocking, JoinError};
+use tokio::time::timeout;
 
 /// Branch prefix for workflow run branches (e.g. `fabro/run/{run_id}`).
 pub const RUN_BRANCH_PREFIX: &str = "fabro/run/";
@@ -231,9 +233,9 @@ pub fn push_run_branches(
 /// Error from [`blocking_push_with_timeout`].
 pub enum BlockingPushError {
     /// The git push itself failed.
-    Push(crate::error::FabroError),
+    Push(FabroError),
     /// The spawned blocking task panicked.
-    Panicked(tokio::task::JoinError),
+    Panicked(JoinError),
     /// The push did not complete within the timeout.
     TimedOut,
 }
@@ -256,9 +258,9 @@ pub async fn blocking_push_with_timeout<F>(
 where
     F: FnOnce() -> Result<()> + Send + 'static,
 {
-    match tokio::time::timeout(
+    match timeout(
         std::time::Duration::from_secs(timeout_secs),
-        tokio::task::spawn_blocking(f),
+        spawn_blocking(f),
     )
     .await
     {
@@ -508,13 +510,10 @@ impl MetadataStore {
     }
 
     /// Read the run record from the metadata branch. Returns `None` if not found.
-    pub fn read_run_record(
-        repo_path: &Path,
-        run_id: &str,
-    ) -> Result<Option<crate::records::RunRecord>> {
+    pub fn read_run_record(repo_path: &Path, run_id: &str) -> Result<Option<RunRecord>> {
         match Self::read_file(repo_path, run_id, "run.json")? {
             Some(bytes) => {
-                let record: crate::records::RunRecord = serde_json::from_slice(&bytes)
+                let record: RunRecord = serde_json::from_slice(&bytes)
                     .map_err(|e| git_error(format!("run record deserialize failed: {e}")))?;
                 Ok(Some(record))
             }
@@ -523,13 +522,10 @@ impl MetadataStore {
     }
 
     /// Read the start record from the metadata branch. Returns `None` if not found.
-    pub fn read_start_record(
-        repo_path: &Path,
-        run_id: &str,
-    ) -> Result<Option<crate::records::StartRecord>> {
+    pub fn read_start_record(repo_path: &Path, run_id: &str) -> Result<Option<StartRecord>> {
         match Self::read_file(repo_path, run_id, "start.json")? {
             Some(bytes) => {
-                let record: crate::records::StartRecord = serde_json::from_slice(&bytes)
+                let record: StartRecord = serde_json::from_slice(&bytes)
                     .map_err(|e| git_error(format!("start record deserialize failed: {e}")))?;
                 Ok(Some(record))
             }

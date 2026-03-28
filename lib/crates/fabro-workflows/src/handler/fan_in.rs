@@ -9,7 +9,10 @@ use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::EventEmitter;
 use crate::outcome::{Outcome, OutcomeExt};
+use crate::run_dir::{node_dir, visit_from_context};
+use crate::sandbox_git::git_merge_ff_only;
 use fabro_graphviz::graph::{Graph, Node};
+use tokio::fs;
 
 use super::agent::{CodergenBackend, CodergenResult};
 use super::{EngineServices, Handler};
@@ -116,7 +119,7 @@ impl Handler for FanInHandler {
         };
 
         if let (Some(ref sha), Some(_)) = (&best_head_sha, services.git_state()) {
-            crate::sandbox_git::git_merge_ff_only(&*services.sandbox, sha).await;
+            git_merge_ff_only(&*services.sandbox, sha).await;
         }
 
         let mut outcome = Outcome::success();
@@ -231,10 +234,10 @@ async fn llm_evaluate(
     );
 
     // Write prompt to logs
-    let visit = crate::run_dir::visit_from_context(context);
-    let stage_dir = crate::run_dir::node_dir(run_dir, node_id, visit);
-    tokio::fs::create_dir_all(&stage_dir).await?;
-    tokio::fs::write(stage_dir.join("prompt.md"), &full_prompt).await?;
+    let visit = visit_from_context(context);
+    let stage_dir = node_dir(run_dir, node_id, visit);
+    fs::create_dir_all(&stage_dir).await?;
+    fs::write(stage_dir.join("prompt.md"), &full_prompt).await?;
 
     // Build a synthetic node for the backend call
     let eval_node = Node::new("fan_in_eval");
@@ -264,7 +267,7 @@ async fn llm_evaluate(
                 .unwrap_or_else(|| "unknown".to_string());
             let response_text =
                 serde_json::to_string_pretty(&outcome).unwrap_or_else(|_| "{}".to_string());
-            tokio::fs::write(stage_dir.join("response.md"), &response_text).await?;
+            fs::write(stage_dir.join("response.md"), &response_text).await?;
             Ok(Candidate {
                 id: best_id,
                 status: outcome.status.to_string(),
@@ -273,7 +276,7 @@ async fn llm_evaluate(
         }
         Ok(CodergenResult::Text { text, .. }) => {
             // Write response to logs
-            tokio::fs::write(stage_dir.join("response.md"), &text).await?;
+            fs::write(stage_dir.join("response.md"), &text).await?;
 
             // The LLM responded with text; try to find a matching candidate ID
             let text = text.trim().to_string();

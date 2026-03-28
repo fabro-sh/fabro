@@ -2,9 +2,10 @@ pub use fabro_core::outcome::{FailureCategory, FailureDetail, OutcomeMeta, Stage
 pub use fabro_types::usage::StageUsage;
 
 use crate::error::classify_failure_reason;
+use fabro_llm::types::Usage as LlmUsage;
 
-pub fn stage_usage_to_llm(u: &StageUsage) -> fabro_llm::types::Usage {
-    fabro_llm::types::Usage {
+pub fn stage_usage_to_llm(u: &StageUsage) -> LlmUsage {
+    LlmUsage {
         input_tokens: u.input_tokens,
         output_tokens: u.output_tokens,
         total_tokens: u.input_tokens + u.output_tokens,

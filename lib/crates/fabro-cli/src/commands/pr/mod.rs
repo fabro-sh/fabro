@@ -8,11 +8,16 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use fabro_workflows::pull_request::PullRequestRecord;
+use fabro_workflows::run_lookup::resolve_run;
+
 use crate::args::{PrCommand, PrNamespace};
+use crate::cli_config::load_cli_settings;
+use crate::shared::github::build_github_app_credentials;
 
 pub async fn dispatch(ns: PrNamespace) -> Result<()> {
-    let cli_config = crate::cli_config::load_cli_settings(None)?;
-    let github_app = crate::shared::github::build_github_app_credentials(cli_config.app_id());
+    let cli_config = load_cli_settings(None)?;
+    let github_app = build_github_app_credentials(cli_config.app_id());
 
     match ns.command {
         PrCommand::Create(args) => create::create_command(args, github_app).await,
@@ -23,11 +28,8 @@ pub async fn dispatch(ns: PrNamespace) -> Result<()> {
     }
 }
 
-pub(crate) fn load_pr_record(
-    base: &Path,
-    run_id: &str,
-) -> Result<(fabro_workflows::pull_request::PullRequestRecord, PathBuf)> {
-    let run_dir = fabro_workflows::run_lookup::resolve_run(base, run_id)?.path;
+pub(crate) fn load_pr_record(base: &Path, run_id: &str) -> Result<(PullRequestRecord, PathBuf)> {
+    let run_dir = resolve_run(base, run_id)?.path;
     let pr_path = run_dir.join("pull_request.json");
     let content = std::fs::read_to_string(&pr_path).with_context(|| {
         format!(
@@ -35,7 +37,7 @@ pub(crate) fn load_pr_record(
              Create one first with: fabro pr create {run_id}"
         )
     })?;
-    let record: fabro_workflows::pull_request::PullRequestRecord =
+    let record: PullRequestRecord =
         serde_json::from_str(&content).context("Failed to parse pull_request.json")?;
     Ok((record, run_dir))
 }

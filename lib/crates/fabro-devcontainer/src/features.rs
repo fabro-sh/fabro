@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
+use tokio::fs;
+use tokio::process::Command;
 use tracing::info;
 
 use crate::types::{FeatureMetadata, LifecycleCommand};
@@ -61,7 +63,7 @@ fn dir_name_from_id(feature_id: &str) -> String {
 
 /// Ensure `oras` CLI is available, installing it if necessary.
 async fn ensure_oras() -> crate::Result<()> {
-    let check = tokio::process::Command::new("which")
+    let check = Command::new("which")
         .arg("oras")
         .output()
         .await
@@ -74,7 +76,7 @@ async fn ensure_oras() -> crate::Result<()> {
     info!("oras not found, attempting to install");
 
     if cfg!(target_os = "macos") {
-        let status = tokio::process::Command::new("brew")
+        let status = Command::new("brew")
             .args(["install", "oras"])
             .status()
             .await
@@ -93,7 +95,7 @@ async fn ensure_oras() -> crate::Result<()> {
             .map_err(|_| DevcontainerError::OrasInstall("HOME not set".to_string()))?;
         let bin_dir = format!("{home}/.local/bin");
 
-        tokio::fs::create_dir_all(&bin_dir).await.map_err(|e| {
+        fs::create_dir_all(&bin_dir).await.map_err(|e| {
             DevcontainerError::OrasInstall(format!("failed to create {bin_dir}: {e}"))
         })?;
 
@@ -107,7 +109,7 @@ async fn ensure_oras() -> crate::Result<()> {
             "https://github.com/oras-project/oras/releases/download/v{version}/oras_{version}_linux_{arch}.tar.gz"
         );
 
-        let status = tokio::process::Command::new("sh")
+        let status = Command::new("sh")
             .args([
                 "-c",
                 &format!("curl -fsSL '{url}' | tar xzf - -C '{bin_dir}' oras"),
@@ -128,7 +130,7 @@ async fn ensure_oras() -> crate::Result<()> {
 
 /// Find the first `.tgz` file in a directory.
 async fn find_tgz(dir: &Path) -> Option<String> {
-    let mut entries = tokio::fs::read_dir(dir).await.ok()?;
+    let mut entries = fs::read_dir(dir).await.ok()?;
     while let Ok(Some(entry)) = entries.next_entry().await {
         if let Some(name) = entry.file_name().to_str() {
             if name.ends_with(".tgz") {
@@ -141,7 +143,7 @@ async fn find_tgz(dir: &Path) -> Option<String> {
 
 /// Extract a tgz archive in the given directory.
 async fn extract_tgz(feature_dir: &Path, tgz_name: &str, feature_id: &str) -> crate::Result<()> {
-    let status = tokio::process::Command::new("tar")
+    let status = Command::new("tar")
         .args(["xzf", tgz_name])
         .current_dir(feature_dir)
         .status()
@@ -159,11 +161,9 @@ async fn extract_tgz(feature_dir: &Path, tgz_name: &str, feature_id: &str) -> cr
 /// Read and parse devcontainer-feature.json from a feature directory.
 async fn read_feature_metadata(feature_dir: &Path) -> crate::Result<FeatureMetadata> {
     let metadata_path = feature_dir.join("devcontainer-feature.json");
-    let metadata_str = tokio::fs::read_to_string(&metadata_path)
-        .await
-        .map_err(|e| {
-            DevcontainerError::Feature(format!("failed to read {}: {e}", metadata_path.display()))
-        })?;
+    let metadata_str = fs::read_to_string(&metadata_path).await.map_err(|e| {
+        DevcontainerError::Feature(format!("failed to read {}: {e}", metadata_path.display()))
+    })?;
 
     serde_json::from_str(&metadata_str).map_err(|e| {
         DevcontainerError::Feature(format!("failed to parse {}: {e}", metadata_path.display()))
@@ -177,7 +177,7 @@ async fn create_feature_dir(
 ) -> crate::Result<std::path::PathBuf> {
     let dir_name = dir_name_from_id(feature_id);
     let feature_dir = output_dir.join(&dir_name);
-    tokio::fs::create_dir_all(&feature_dir).await.map_err(|e| {
+    fs::create_dir_all(&feature_dir).await.map_err(|e| {
         DevcontainerError::Feature(format!(
             "failed to create dir {}: {e}",
             feature_dir.display()
@@ -192,7 +192,7 @@ async fn fetch_feature_oci(feature_id: &str, output_dir: &Path) -> crate::Result
 
     info!(feature_id, "pulling feature with oras");
 
-    let output = tokio::process::Command::new("oras")
+    let output = Command::new("oras")
         .args(["pull", feature_id, "-o"])
         .arg(&feature_dir)
         .output()
@@ -259,7 +259,7 @@ async fn fetch_feature_https(
     })?;
 
     let tgz_path = feature_dir.join("devcontainer-feature.tgz");
-    tokio::fs::write(&tgz_path, &bytes).await.map_err(|e| {
+    fs::write(&tgz_path, &bytes).await.map_err(|e| {
         DevcontainerError::Feature(format!("failed to write {}: {e}", tgz_path.display()))
     })?;
 
@@ -290,11 +290,11 @@ async fn fetch_feature_dispatch(
 
 /// Recursively copy a directory.
 async fn copy_dir_recursive(src: &Path, dst: &Path) -> crate::Result<()> {
-    tokio::fs::create_dir_all(dst).await.map_err(|e| {
+    fs::create_dir_all(dst).await.map_err(|e| {
         DevcontainerError::Feature(format!("failed to create dir {}: {e}", dst.display()))
     })?;
 
-    let mut entries = tokio::fs::read_dir(src).await.map_err(|e| {
+    let mut entries = fs::read_dir(src).await.map_err(|e| {
         DevcontainerError::Feature(format!("failed to read dir {}: {e}", src.display()))
     })?;
 
@@ -309,15 +309,13 @@ async fn copy_dir_recursive(src: &Path, dst: &Path) -> crate::Result<()> {
         if entry_path.is_dir() {
             Box::pin(copy_dir_recursive(&entry_path, &dest_path)).await?;
         } else {
-            tokio::fs::copy(&entry_path, &dest_path)
-                .await
-                .map_err(|e| {
-                    DevcontainerError::Feature(format!(
-                        "failed to copy {} to {}: {e}",
-                        entry_path.display(),
-                        dest_path.display()
-                    ))
-                })?;
+            fs::copy(&entry_path, &dest_path).await.map_err(|e| {
+                DevcontainerError::Feature(format!(
+                    "failed to copy {} to {}: {e}",
+                    entry_path.display(),
+                    dest_path.display()
+                ))
+            })?;
         }
     }
 
@@ -548,7 +546,7 @@ pub async fn resolve_features(
             .as_nanos()
     );
     let tmp_dir = std::env::temp_dir().join(unique_id);
-    tokio::fs::create_dir_all(&tmp_dir)
+    fs::create_dir_all(&tmp_dir)
         .await
         .map_err(|e| DevcontainerError::Feature(format!("failed to create temp dir: {e}")))?;
 

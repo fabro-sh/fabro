@@ -8,12 +8,17 @@ use anyhow::{bail, Context, Result};
 use axum::extract::Query;
 use axum::response::Html;
 use axum::routing::get;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine as _;
+use dialoguer::console::Term;
+use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
 use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 use rand::Rng;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+use tokio::task::spawn_blocking;
 
 use super::doctor;
 use crate::shared::provider_auth::{
@@ -224,29 +229,23 @@ fn detect_binary_on_path(binary: &str) -> bool {
 
 #[cfg(feature = "server")]
 fn prompt_input(prompt: &str) -> Result<String> {
-    Ok(
-        dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            .with_prompt(prompt)
-            .interact_on(&dialoguer::console::Term::stderr())?,
-    )
+    Ok(dialoguer::Input::with_theme(&ColorfulTheme::default())
+        .with_prompt(prompt)
+        .interact_on(&Term::stderr())?)
 }
 
 fn prompt_select(prompt: &str, items: &[String]) -> Result<usize> {
-    Ok(
-        Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            .with_prompt(prompt)
-            .items(items)
-            .interact_on(&dialoguer::console::Term::stderr())?,
-    )
+    Ok(Select::with_theme(&ColorfulTheme::default())
+        .with_prompt(prompt)
+        .items(items)
+        .interact_on(&Term::stderr())?)
 }
 
 fn prompt_multiselect(prompt: &str, items: &[String]) -> Result<Vec<usize>> {
-    Ok(
-        MultiSelect::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            .with_prompt(prompt)
-            .items(items)
-            .interact_on(&dialoguer::console::Term::stderr())?,
-    )
+    Ok(MultiSelect::with_theme(&ColorfulTheme::default())
+        .with_prompt(prompt)
+        .items(items)
+        .interact_on(&Term::stderr())?)
 }
 
 // ---------------------------------------------------------------------------
@@ -468,8 +467,7 @@ async fn setup_github_app(
     );
 
     // Return secrets as env pairs
-    let pem_b64 =
-        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, pem.as_bytes());
+    let pem_b64 = BASE64_STANDARD.encode(pem.as_bytes());
 
     let mut env_pairs = vec![
         ("GITHUB_APP_PRIVATE_KEY".to_string(), pem_b64),
@@ -524,7 +522,7 @@ pub async fn run_install(web_url: &str) -> Result<()> {
         let dot_idx = doctor::DEP_SPECS.iter().position(|s| s.name == "dot");
         if let Some(idx) = dot_idx {
             if matches!(dep_outcomes[idx], doctor::ProbeOutcome::NotFound) {
-                let install = tokio::task::spawn_blocking(|| {
+                let install = spawn_blocking(|| {
                     prompt_confirm("Graphviz (dot) not found. Install via Homebrew?", true)
                 })
                 .await??;
@@ -560,7 +558,7 @@ pub async fn run_install(web_url: &str) -> Result<()> {
 
     if codex_detected {
         tracing::debug!("Codex binary detected on PATH");
-        let use_oauth = tokio::task::spawn_blocking(|| {
+        let use_oauth = spawn_blocking(|| {
             prompt_confirm(
                 "OpenAI (Codex) detected. Set up OpenAI via browser login?",
                 true,
@@ -584,7 +582,7 @@ pub async fn run_install(web_url: &str) -> Result<()> {
             .map(|p| provider_display_name(*p).to_string())
             .collect();
 
-        let primary_idx: usize = tokio::task::spawn_blocking({
+        let primary_idx: usize = spawn_blocking({
             let labels = primary_labels.clone();
             move || prompt_select("Choose your first LLM provider", &labels)
         })
@@ -601,8 +599,7 @@ pub async fn run_install(web_url: &str) -> Result<()> {
     // Additional providers
     eprintln!();
     let add_more =
-        tokio::task::spawn_blocking(|| prompt_confirm("Set up additional LLM providers?", false))
-            .await??;
+        spawn_blocking(|| prompt_confirm("Set up additional LLM providers?", false)).await??;
 
     if add_more {
         let remaining_labels: Vec<String> = Provider::ALL
@@ -619,7 +616,7 @@ pub async fn run_install(web_url: &str) -> Result<()> {
             .copied()
             .collect();
 
-        let selected_indices: Vec<usize> = tokio::task::spawn_blocking({
+        let selected_indices: Vec<usize> = spawn_blocking({
             let labels = remaining_labels.clone();
             move || prompt_multiselect("Which additional LLM providers?", &labels)
         })
@@ -644,10 +641,8 @@ pub async fn run_install(web_url: &str) -> Result<()> {
     eprintln!();
 
     {
-        let setup_github = tokio::task::spawn_blocking(|| {
-            prompt_confirm("Set up a GitHub App? (Recommended)", true)
-        })
-        .await??;
+        let setup_github =
+            spawn_blocking(|| prompt_confirm("Set up a GitHub App? (Recommended)", true)).await??;
 
         if setup_github {
             let github_env_pairs = setup_github_app(&arc_dir, &s, web_url).await?;
@@ -686,7 +681,7 @@ pub async fn run_install(web_url: &str) -> Result<()> {
 
         let config_path = arc_dir.join("server.toml");
         let write_config = if config_path.exists() {
-            tokio::task::spawn_blocking(|| {
+            spawn_blocking(|| {
                 prompt_confirm("~/.fabro/server.toml already exists. Overwrite?", false)
             })
             .await??
@@ -696,8 +691,7 @@ pub async fn run_install(web_url: &str) -> Result<()> {
 
         if write_config {
             let username: String =
-                tokio::task::spawn_blocking(|| prompt_input("GitHub username for allowed access"))
-                    .await??;
+                spawn_blocking(|| prompt_input("GitHub username for allowed access")).await??;
 
             let toml_content = format_config_toml(&username);
             std::fs::write(&config_path, &toml_content)?;
@@ -732,14 +726,8 @@ pub async fn run_install(web_url: &str) -> Result<()> {
             s.green.apply_to("✔")
         );
 
-        let jwt_private_b64 = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            jwt_private_pem.as_bytes(),
-        );
-        let jwt_public_b64 = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            jwt_public_pem.as_bytes(),
-        );
+        let jwt_private_b64 = BASE64_STANDARD.encode(jwt_private_pem.as_bytes());
+        let jwt_public_b64 = BASE64_STANDARD.encode(jwt_public_pem.as_bytes());
 
         let server_env_pairs = vec![
             ("FABRO_JWT_PRIVATE_KEY".to_string(), jwt_private_b64),
@@ -759,8 +747,7 @@ pub async fn run_install(web_url: &str) -> Result<()> {
     // Verify setup
     let env_path = arc_dir.join(".env");
     let run_doctor =
-        tokio::task::spawn_blocking(|| prompt_confirm("Run fabro doctor to verify?", true))
-            .await??;
+        spawn_blocking(|| prompt_confirm("Run fabro doctor to verify?", true)).await??;
 
     if run_doctor {
         // Reload .env so doctor sees the values we just wrote

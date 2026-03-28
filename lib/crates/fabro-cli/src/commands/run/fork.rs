@@ -2,16 +2,19 @@ use anyhow::Context;
 use anyhow::Result;
 use fabro_git_storage::gitobj::Store;
 use fabro_util::terminal::Styles;
+use fabro_workflows::operations::{
+    build_timeline, find_run_id_by_prefix, fork, ForkRunInput, RewindTarget,
+};
 use git2::Repository;
 
 use crate::args::ForkArgs;
 
 pub fn run(args: &ForkArgs, styles: &Styles) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let run_id = fabro_workflows::operations::find_run_id_by_prefix(&repo, &args.run_id)?;
+    let run_id = find_run_id_by_prefix(&repo, &args.run_id)?;
     let store = Store::new(repo);
 
-    let timeline = fabro_workflows::operations::build_timeline(&store, &run_id)?;
+    let timeline = build_timeline(&store, &run_id)?;
 
     if args.list {
         super::rewind::print_timeline(&timeline, styles);
@@ -21,11 +24,11 @@ pub fn run(args: &ForkArgs, styles: &Styles) -> Result<()> {
     let target = args
         .target
         .as_deref()
-        .map(str::parse::<fabro_workflows::operations::RewindTarget>)
+        .map(str::parse::<RewindTarget>)
         .transpose()?;
-    let new_run_id = fabro_workflows::operations::fork(
+    let new_run_id = fork(
         &store,
-        fabro_workflows::operations::ForkRunInput {
+        ForkRunInput {
             source_run_id: run_id.clone(),
             target,
             push: !args.no_push,

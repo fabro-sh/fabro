@@ -6,9 +6,10 @@ use fabro_git_storage::branchstore::{BranchStore, CommitInfo};
 use fabro_git_storage::gitobj::Store;
 use git2::{Oid, Repository, Signature};
 
-use crate::git::MetadataStore;
-use crate::records::Checkpoint;
+use crate::git::{push_run_branches, MetadataStore, RUN_BRANCH_PREFIX};
+use crate::records::{Checkpoint, RunRecord};
 use fabro_graphviz::graph::Graph;
+use fabro_graphviz::parser;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RewindTarget {
@@ -164,7 +165,7 @@ fn backfill_run_shas(store: &Store, run_id: &str, timeline: &mut [TimelineEntry]
         return;
     }
 
-    let run_branch = format!("{}{run_id}", crate::git::RUN_BRANCH_PREFIX);
+    let run_branch = format!("{}{run_id}", RUN_BRANCH_PREFIX);
     let sig = match Signature::now("Fabro", "noreply@fabro.sh") {
         Ok(s) => s,
         Err(_) => return,
@@ -257,7 +258,7 @@ fn rewind_to_entry(store: &Store, run_id: &str, entry: &TimelineEntry, push: boo
         entry.ordinal, entry.node_name
     );
 
-    let run_branch = format!("{}{run_id}", crate::git::RUN_BRANCH_PREFIX);
+    let run_branch = format!("{}{run_id}", RUN_BRANCH_PREFIX);
     match &entry.run_commit_sha {
         Some(sha) => {
             let oid =
@@ -267,7 +268,7 @@ fn rewind_to_entry(store: &Store, run_id: &str, entry: &TimelineEntry, push: boo
                 .map_err(|e| anyhow::anyhow!("failed to update run branch ref: {e}"))?;
             eprintln!(
                 "Rewound run branch {}{run_id} to {}",
-                crate::git::RUN_BRANCH_PREFIX,
+                RUN_BRANCH_PREFIX,
                 &sha[..8]
             );
         }
@@ -285,7 +286,7 @@ fn rewind_to_entry(store: &Store, run_id: &str, entry: &TimelineEntry, push: boo
             .as_ref()
             .map(|_| format!("+refs/heads/{run_branch}:refs/heads/{run_branch}"));
         let meta_refspec = format!("+refs/heads/{meta_branch}:refs/heads/{meta_branch}");
-        crate::git::push_run_branches(
+        push_run_branches(
             store,
             &run_branch,
             run_refspec.as_deref(),
@@ -339,7 +340,7 @@ fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String> {
     let bs = BranchStore::new(store, &branch, &sig);
 
     if let Ok(Some(run_bytes)) = bs.read_entry("run.json") {
-        if let Ok(record) = serde_json::from_slice::<crate::records::RunRecord>(&run_bytes) {
+        if let Ok(record) = serde_json::from_slice::<RunRecord>(&run_bytes) {
             return detect_parallel_interior(&record.graph);
         }
     }
@@ -352,7 +353,7 @@ fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String> {
         },
     };
     let dot_source = String::from_utf8_lossy(&graph_bytes);
-    let graph = match fabro_graphviz::parser::parse(&dot_source) {
+    let graph = match parser::parse(&dot_source) {
         Ok(g) => g,
         Err(_) => return HashMap::new(),
     };

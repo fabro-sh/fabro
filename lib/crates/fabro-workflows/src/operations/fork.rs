@@ -3,7 +3,7 @@ use fabro_git_storage::branchstore::BranchStore;
 use fabro_git_storage::gitobj::Store;
 use git2::{Oid, Signature};
 
-use crate::git::MetadataStore;
+use crate::git::{push_run_branches, MetadataStore, RUN_BRANCH_PREFIX};
 use crate::records::RunRecord;
 use crate::records::StartRecord;
 
@@ -39,7 +39,7 @@ fn fork_from_entry(
     let new_run_id = ulid::Ulid::new().to_string();
     let sig = Signature::now("Fabro", "noreply@fabro.sh")?;
 
-    let new_run_branch = format!("{}{new_run_id}", crate::git::RUN_BRANCH_PREFIX);
+    let new_run_branch = format!("{}{new_run_id}", RUN_BRANCH_PREFIX);
     match &entry.run_commit_sha {
         Some(sha) => {
             let oid =
@@ -134,10 +134,10 @@ fn fork_from_entry(
         .map_err(|e| anyhow::anyhow!("failed to write metadata entries: {e}"))?;
 
     if push {
-        let source_run_branch = format!("{}{source_run_id}", crate::git::RUN_BRANCH_PREFIX);
+        let source_run_branch = format!("{}{source_run_id}", RUN_BRANCH_PREFIX);
         let run_refspec = format!("refs/heads/{new_run_branch}:refs/heads/{new_run_branch}");
         let meta_refspec = format!("refs/heads/{new_meta_branch}:refs/heads/{new_meta_branch}");
-        crate::git::push_run_branches(
+        push_run_branches(
             store,
             &source_run_branch,
             Some(&run_refspec),
@@ -186,7 +186,7 @@ mod tests {
         let record = serde_json::json!({
             "run_id": run_id,
             "start_time": "2025-01-01T00:00:00Z",
-            "run_branch": format!("{}{}", crate::git::RUN_BRANCH_PREFIX, run_id),
+            "run_branch": format!("{}{}", RUN_BRANCH_PREFIX, run_id),
         });
         serde_json::to_vec_pretty(&record).unwrap()
     }
@@ -194,7 +194,7 @@ mod tests {
     fn setup_source_run(store: &Store, run_id: &str, nodes: &[&str]) -> Vec<Oid> {
         let sig = test_sig();
 
-        let run_branch = format!("{}{run_id}", crate::git::RUN_BRANCH_PREFIX);
+        let run_branch = format!("{}{run_id}", RUN_BRANCH_PREFIX);
         let empty_tree = store.write_empty_tree().unwrap();
         let mut run_oids = Vec::new();
         let mut parent: Option<Oid> = None;
@@ -254,7 +254,7 @@ mod tests {
         )
         .unwrap();
 
-        let new_run_branch = format!("{}{new_run_id}", crate::git::RUN_BRANCH_PREFIX);
+        let new_run_branch = format!("{}{new_run_id}", RUN_BRANCH_PREFIX);
         let new_meta_branch = MetadataStore::branch_name(&new_run_id);
 
         assert!(store.resolve_ref(&new_run_branch).unwrap().is_some());

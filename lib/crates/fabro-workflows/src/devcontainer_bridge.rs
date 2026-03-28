@@ -5,7 +5,9 @@ use sha2::{Digest, Sha256};
 use fabro_devcontainer::DevcontainerConfig;
 
 use crate::event::{EventEmitter, WorkflowRunEvent};
+use fabro_agent::sandbox::Sandbox;
 use fabro_sandbox::daytona::{DaytonaSnapshotConfig, DockerfileSource};
+use futures::future::try_join_all;
 
 /// Compute a deterministic snapshot name from Dockerfile content.
 pub fn snapshot_name_for_dockerfile(dockerfile: &str) -> String {
@@ -29,7 +31,7 @@ pub fn devcontainer_to_snapshot_config(dc: &DevcontainerConfig) -> DaytonaSnapsh
 ///
 /// Follows the same pattern as setup commands in `run.rs`.
 pub async fn run_devcontainer_lifecycle(
-    sandbox: &dyn fabro_agent::sandbox::Sandbox,
+    sandbox: &dyn Sandbox,
     emitter: &EventEmitter,
     phase: &str,
     commands: &[fabro_devcontainer::Command],
@@ -122,7 +124,7 @@ pub async fn run_devcontainer_lifecycle(
                         }
                     })
                     .collect();
-                futures::future::try_join_all(futs).await?;
+                try_join_all(futs).await?;
             }
         }
     }
@@ -136,7 +138,7 @@ pub async fn run_devcontainer_lifecycle(
 }
 
 async fn run_single_lifecycle_command(
-    sandbox: &dyn fabro_agent::sandbox::Sandbox,
+    sandbox: &dyn Sandbox,
     emitter: &EventEmitter,
     phase: &str,
     command: &str,

@@ -5,12 +5,16 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 use fabro_github::{self as github_app, ssh_url_to_https, GitHubAppCredentials};
+use fabro_graphviz::parser;
+use fabro_llm::generate::{generate, GenerateParams};
 use fabro_retro::RetroExt;
+use fabro_util::text::strip_goal_decoration;
 
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
-use crate::outcome::StageStatus;
+use crate::outcome::{format_cost as outcome_format_cost, StageStatus};
 use crate::records::{Conclusion, ConclusionExt, RunRecord, RunRecordExt};
 use fabro_retro::retro::Retro;
+use tokio::fs::read_to_string;
 
 use super::types::{Concluded, Finalized, PullRequestOptions};
 
@@ -38,7 +42,7 @@ impl PullRequestRecord {
 ///
 /// Uses the first line, truncated to 120 characters for readability.
 fn pr_title_from_goal(goal: &str) -> String {
-    let stripped = fabro_util::text::strip_goal_decoration(goal);
+    let stripped = strip_goal_decoration(goal);
     if stripped.chars().count() > 120 {
         let truncated: String = stripped.chars().take(119).collect();
         format!("{truncated}…")
@@ -60,7 +64,7 @@ fn truncate_pr_body(body: &str) -> String {
 
 /// Format an optional cost as `$X.XX` or an en-dash when absent.
 fn format_cost(cost: Option<f64>) -> String {
-    cost.map(crate::outcome::format_cost)
+    cost.map(outcome_format_cost)
         .unwrap_or_else(|| "\u{2013}".to_string())
 }
 
@@ -205,7 +209,7 @@ fn format_arc_details_section(
 
 /// Parse a DOT source string to extract graph name, node count, and edge count.
 fn parse_dot_summary(dot: &str) -> (String, usize, usize) {
-    match fabro_graphviz::parser::parse(dot) {
+    match parser::parse(dot) {
         Ok(graph) => (
             format!("{}.fabro", graph.name),
             graph.nodes.len(),
@@ -362,11 +366,9 @@ pub async fn build_pr_body(
         format!("Goal: {goal}\n\nDiff:\n```\n{truncated_diff}\n```")
     };
 
-    let params = fabro_llm::generate::GenerateParams::new(model)
-        .system(system)
-        .prompt(prompt);
+    let params = GenerateParams::new(model).system(system).prompt(prompt);
 
-    let result = fabro_llm::generate::generate(params)
+    let result = generate(params)
         .await
         .map_err(|e| format!("LLM generation failed: {e}"))?;
 
@@ -498,7 +500,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                 result.status,
                 StageStatus::Success | StageStatus::PartialSuccess
             ) {
-                let diff = tokio::fs::read_to_string(options.run_dir.join("final.patch"))
+                let diff = read_to_string(options.run_dir.join("final.patch"))
                     .await
                     .unwrap_or_default();
                 if let (Some(base_branch), Some(run_branch), Some(creds), Some(origin)) = (

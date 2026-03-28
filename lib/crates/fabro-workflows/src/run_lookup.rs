@@ -5,7 +5,9 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use crate::records::{ConclusionExt, RunRecord, RunRecordExt, StartRecord, StartRecordExt};
+use crate::records::{
+    Conclusion, ConclusionExt, RunRecord, RunRecordExt, StartRecord, StartRecordExt,
+};
 use crate::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt, StatusReason};
 
 #[derive(Debug, Clone, Serialize)]
@@ -171,9 +173,7 @@ impl StatusInfo {
 fn read_status(run_dir: &Path) -> StatusInfo {
     if let Ok(record) = RunStatusRecord::load(&run_dir.join("status.json")) {
         if record.status.is_terminal() {
-            if let Ok(conclusion) =
-                crate::records::Conclusion::load(&run_dir.join("conclusion.json"))
-            {
+            if let Ok(conclusion) = Conclusion::load(&run_dir.join("conclusion.json")) {
                 return StatusInfo {
                     status: record.status,
                     reason: record.reason,

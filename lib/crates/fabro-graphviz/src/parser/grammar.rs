@@ -1,6 +1,8 @@
 use nom::branch::alt;
-use nom::character::complete::char;
+use nom::bytes::complete::tag;
+use nom::character::complete::{char, multispace0};
 use nom::combinator::opt;
+use nom::error::{Error, ParseError};
 use nom::multi::{many0, separated_list0};
 use nom::sequence::{delimited, preceded, tuple};
 use nom::IResult;
@@ -83,11 +85,11 @@ fn node_or_edge_stmt(input: &str) -> IResult<&str, Statement> {
     let (rest, first_id) = preceded(ws, identifier)(input)?;
 
     // Try to parse as edge: first_id (-> id)+ [attrs]? ;?
-    if let Ok((rest2, _)) = arrow::<nom::error::Error<&str>>(rest) {
+    if let Ok((rest2, _)) = arrow::<Error<&str>>(rest) {
         let (rest2, second_id) = preceded(ws, identifier)(rest2)?;
         let mut nodes = vec![first_id.to_string(), second_id.to_string()];
         let mut remaining = rest2;
-        while let Ok((r, _)) = arrow::<nom::error::Error<&str>>(remaining) {
+        while let Ok((r, _)) = arrow::<Error<&str>>(remaining) {
             let (r, next_id) = preceded(ws, identifier)(r)?;
             nodes.push(next_id.to_string());
             remaining = r;
@@ -148,11 +150,8 @@ pub fn parse_dot_graph(input: &str) -> IResult<&str, DotGraph> {
 }
 
 // We need arrow to work with explicit error types
-fn arrow<'a, E: nom::error::ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, &'a str, E> {
-    preceded(
-        nom::character::complete::multispace0,
-        nom::bytes::complete::tag("->"),
-    )(input)
+fn arrow<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, &'a str, E> {
+    preceded(multispace0, tag("->"))(input)
 }
 
 #[cfg(test)]

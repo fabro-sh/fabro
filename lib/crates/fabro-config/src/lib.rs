@@ -19,13 +19,15 @@ pub use settings::{FabroSettings, FabroSettingsExt};
 
 use std::path::Path;
 
+use serde::de::DeserializeOwned;
+
 /// Load a TOML config from an explicit path or `~/.fabro/{filename}`.
 ///
 /// Returns `T::default()` when no explicit path is given and the default file
 /// doesn't exist. An explicit path that doesn't exist is an error.
 pub fn load_config_file<T>(path: Option<&Path>, filename: &str) -> anyhow::Result<T>
 where
-    T: Default + serde::de::DeserializeOwned,
+    T: Default + DeserializeOwned,
 {
     if let Some(explicit) = path {
         tracing::debug!(path = %explicit.display(), "Loading config from explicit path");

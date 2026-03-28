@@ -2,12 +2,14 @@ use std::sync::Arc;
 
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use rustls_pki_types::CertificateDer;
 use serde::Deserialize;
 use tracing::warn;
 
 use crate::error::ApiError;
+use fabro_config::server::ApiSettings;
 
 /// JWT claims for service-to-service authentication.
 #[derive(Debug, Deserialize)]
@@ -57,7 +59,7 @@ pub fn decode_pem_env(name: &str, value: &str) -> String {
     if value.starts_with("-----") {
         return value.to_string();
     }
-    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, value)
+    let bytes = base64::Engine::decode(&BASE64_STANDARD, value)
         .unwrap_or_else(|e| panic!("{name} is not valid PEM or base64: {e}"));
     String::from_utf8(bytes)
         .unwrap_or_else(|e| panic!("{name} base64 decoded to invalid UTF-8: {e}"))
@@ -67,10 +69,7 @@ pub fn decode_pem_env(name: &str, value: &str) -> String {
 ///
 /// Call this once at startup before serving requests. Panics if the
 /// configuration is invalid (JWT strategy but no public key, or mTLS without TLS config).
-pub fn resolve_auth_mode(
-    api_config: &fabro_config::server::ApiSettings,
-    allowed_usernames: Vec<String>,
-) -> AuthMode {
+pub fn resolve_auth_mode(api_config: &ApiSettings, allowed_usernames: Vec<String>) -> AuthMode {
     use fabro_config::server::ApiAuthStrategy;
 
     if api_config.authentication_strategies.is_empty() {

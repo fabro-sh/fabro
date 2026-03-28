@@ -3,9 +3,12 @@ use std::io::Write;
 use std::sync::LazyLock;
 
 use anyhow::bail;
-use fabro_config::project::ResolveSettingsInput;
+use fabro_config::cli::load_cli_config;
+use fabro_config::project::{resolve_settings, resolve_workflow_path, ResolveSettingsInput};
+use fabro_graphviz::render::render_dot;
 use fabro_util::terminal::Styles;
 use fabro_validate::Severity;
+use fabro_workflows::operations::{validate, ValidateInput, WorkflowInput};
 use tracing::debug;
 
 use crate::args::{GraphArgs, GraphDirection};
@@ -16,22 +19,21 @@ static RANKDIR_RE: LazyLock<regex::Regex> =
 
 pub fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
-    let cli_defaults = fabro_config::cli::load_cli_config(None)?;
-    let settings = fabro_config::project::resolve_settings(ResolveSettingsInput {
+    let cli_defaults = load_cli_config(None)?;
+    let settings = resolve_settings(ResolveSettingsInput {
         workflow_path: args.workflow.clone(),
         cwd: cwd.clone(),
         defaults: cli_defaults,
         overrides: fabro_config::FabroConfig::default(),
         apply_project_config: true,
     })?;
-    let resolution = fabro_config::project::resolve_workflow_path(&args.workflow, &cwd)?;
-    let validated =
-        fabro_workflows::operations::validate(fabro_workflows::operations::ValidateInput {
-            workflow: fabro_workflows::operations::WorkflowInput::Path(args.workflow.clone()),
-            settings,
-            cwd,
-            custom_transforms: Vec::new(),
-        })?;
+    let resolution = resolve_workflow_path(&args.workflow, &cwd)?;
+    let validated = validate(ValidateInput {
+        workflow: WorkflowInput::Path(args.workflow.clone()),
+        settings,
+        cwd,
+        custom_transforms: Vec::new(),
+    })?;
     let diagnostics = validated.diagnostics();
 
     print_diagnostics(diagnostics, styles);
@@ -42,7 +44,7 @@ pub fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
 
     let source = read_workflow_file(&resolution.dot_path)?;
     let source = apply_direction(&source, args.direction);
-    let rendered = fabro_graphviz::render::render_dot(&source, args.format.into())?;
+    let rendered = render_dot(&source, args.format.into())?;
 
     if let Some(ref output_path) = args.output {
         std::fs::write(output_path, &rendered)?;

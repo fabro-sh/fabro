@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fabro_llm::types::ReasoningEffort;
 use fabro_mcp::config::McpServerConfig;
 
 /// Callback invoked before each tool execution. Return `Ok(())` to allow,
@@ -63,7 +64,7 @@ pub struct SessionConfig {
     pub max_tool_rounds_per_input: usize,
     pub default_command_timeout_ms: u64,
     pub max_command_timeout_ms: u64,
-    pub reasoning_effort: Option<fabro_llm::types::ReasoningEffort>,
+    pub reasoning_effort: Option<ReasoningEffort>,
     pub speed: Option<String>,
     pub tool_output_limits: HashMap<String, usize>,
     pub tool_line_limits: HashMap<String, usize>,
@@ -187,14 +188,11 @@ mod tests {
     fn config_with_custom_values() {
         let config = SessionConfig {
             max_turns: 50,
-            reasoning_effort: Some(fabro_llm::types::ReasoningEffort::High),
+            reasoning_effort: Some(ReasoningEffort::High),
             ..Default::default()
         };
         assert_eq!(config.max_turns, 50);
-        assert_eq!(
-            config.reasoning_effort,
-            Some(fabro_llm::types::ReasoningEffort::High)
-        );
+        assert_eq!(config.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(config.max_tool_rounds_per_input, 0);
     }
 

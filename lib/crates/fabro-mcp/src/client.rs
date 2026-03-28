@@ -3,13 +3,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use rmcp::model::{CallToolRequestParams, CallToolResult};
-use rmcp::service::{RoleClient, RunningService};
+use rmcp::service::{serve_client, RoleClient, RunningService};
 use rmcp::transport::child_process::TokioChildProcess;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::transport::StreamableHttpClientTransport;
 use tokio::process::Command;
 use tokio::sync::Mutex;
+use tokio::time;
 use tracing::{debug, error, info, warn};
 
 use crate::client_handler::LoggingClientHandler;
@@ -65,11 +67,11 @@ impl McpClient {
 
                 let mut builder = reqwest::Client::builder();
                 if !headers.is_empty() {
-                    let mut header_map = reqwest::header::HeaderMap::new();
+                    let mut header_map = HeaderMap::new();
                     for (key, value) in headers {
-                        let name = reqwest::header::HeaderName::from_bytes(key.as_bytes())
+                        let name = HeaderName::from_bytes(key.as_bytes())
                             .map_err(|e| anyhow!("invalid header name '{}': {}", key, e))?;
-                        let val = reqwest::header::HeaderValue::from_str(value)
+                        let val = HeaderValue::from_str(value)
                             .map_err(|e| anyhow!("invalid header value for '{}': {}", key, e))?;
                         header_map.insert(name, val);
                     }
@@ -122,16 +124,12 @@ impl McpClient {
 
             let handshake = async {
                 match transport {
-                    PendingTransport::Stdio(t) => {
-                        rmcp::service::serve_client(handler.clone(), t).await
-                    }
-                    PendingTransport::Http(t) => {
-                        rmcp::service::serve_client(handler.clone(), t).await
-                    }
+                    PendingTransport::Stdio(t) => serve_client(handler.clone(), t).await,
+                    PendingTransport::Http(t) => serve_client(handler.clone(), t).await,
                 }
             };
 
-            let service = tokio::time::timeout(timeout, handshake)
+            let service = time::timeout(timeout, handshake)
                 .await
                 .map_err(|_| {
                     error!(server = %self.server_name, timeout_secs = timeout.as_secs(), "MCP server handshake timed out");
@@ -224,7 +222,7 @@ impl McpClient {
 
         debug!(server = %self.server_name, tool = %name, "Calling MCP tool");
 
-        let result = tokio::time::timeout(timeout, service.call_tool(params))
+        let result = time::timeout(timeout, service.call_tool(params))
             .await
             .map_err(|_| {
                 warn!(server = %self.server_name, tool = %name, timeout_secs = timeout.as_secs(), "MCP tool call timed out");

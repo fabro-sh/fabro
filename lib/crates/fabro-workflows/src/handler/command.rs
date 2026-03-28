@@ -6,7 +6,9 @@ use crate::context::keys;
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::outcome::{Outcome, OutcomeExt};
+use crate::run_dir::{node_dir, visit_from_context};
 use fabro_graphviz::graph::{Graph, Node};
+use tokio::fs;
 
 use super::{EngineServices, Handler};
 
@@ -84,16 +86,16 @@ impl Handler for CommandHandler {
             )));
         }
 
-        let visit = crate::run_dir::visit_from_context(context);
-        let stage_dir = crate::run_dir::node_dir(run_dir, &node.id, visit);
-        tokio::fs::create_dir_all(&stage_dir).await?;
+        let visit = visit_from_context(context);
+        let stage_dir = node_dir(run_dir, &node.id, visit);
+        fs::create_dir_all(&stage_dir).await?;
 
         let invocation = serde_json::json!({
             "command": script,
             "language": language,
             "timeout_ms": timeout_ms(node),
         });
-        tokio::fs::write(
+        fs::write(
             stage_dir.join("script_invocation.json"),
             serde_json::to_string_pretty(&invocation).unwrap(),
         )
@@ -118,15 +120,15 @@ impl Handler for CommandHandler {
             .await
             .map_err(|e| FabroError::handler(format!("Failed to spawn script: {e}")))?;
 
-        tokio::fs::write(stage_dir.join("stdout.log"), &result.stdout).await?;
-        tokio::fs::write(stage_dir.join("stderr.log"), &result.stderr).await?;
+        fs::write(stage_dir.join("stdout.log"), &result.stdout).await?;
+        fs::write(stage_dir.join("stderr.log"), &result.stderr).await?;
 
         let timing = serde_json::json!({
             "duration_ms": result.duration_ms,
             "exit_code": if result.timed_out { serde_json::Value::Null } else { serde_json::json!(result.exit_code) },
             "timed_out": result.timed_out,
         });
-        tokio::fs::write(
+        fs::write(
             stage_dir.join("script_timing.json"),
             serde_json::to_string_pretty(&timing).unwrap(),
         )

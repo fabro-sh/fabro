@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use fabro_agent::tool_registry::RegisteredTool;
 use fabro_agent::{
     AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session, SessionConfig,
     SessionEvent, Turn,
@@ -9,9 +10,11 @@ use fabro_agent::{
 use fabro_llm::client::Client;
 use fabro_llm::provider::Provider;
 use fabro_llm::types::ToolDefinition;
+use fabro_util::redact::redact_jsonl_line;
+use tokio::sync::broadcast::Receiver;
 use tokio::task::JoinHandle;
 
-use crate::retro::RetroNarrative;
+use crate::retro::{RetroNarrative, SmoothnessRating};
 
 const RETRO_SYSTEM_PROMPT: &str = r#"You are a workflow run retrospective analyst. Your job is to analyze a completed workflow run and generate a structured retrospective.
 
@@ -133,7 +136,7 @@ pub async fn run_retro_agent(
     let mut profile = build_profile(provider, model);
 
     // Register submit_retro tool
-    let submit_tool = fabro_agent::tool_registry::RegisteredTool {
+    let submit_tool = RegisteredTool {
         definition: ToolDefinition {
             name: "submit_retro".to_string(),
             description: "Submit the structured retrospective analysis. Call this once you have analyzed the workflow run data.".to_string(),
@@ -254,7 +257,7 @@ pub async fn run_retro_agent(
 /// derive → apply_narrative → save path without making LLM calls.
 pub fn dry_run_narrative() -> RetroNarrative {
     RetroNarrative {
-        smoothness: crate::retro::SmoothnessRating::Smooth,
+        smoothness: SmoothnessRating::Smooth,
         intent: "[dry-run] No LLM analysis performed".to_string(),
         outcome: "[dry-run] Run completed in simulated mode".to_string(),
         learnings: vec![],
@@ -296,15 +299,12 @@ fn write_retro_artifacts(
 
 /// Spawn a background task that reads `SessionEvent`s from the broadcast receiver
 /// and appends them as JSONL to the given path.
-fn spawn_retro_event_writer(
-    mut rx: tokio::sync::broadcast::Receiver<SessionEvent>,
-    path: PathBuf,
-) -> JoinHandle<()> {
+fn spawn_retro_event_writer(mut rx: Receiver<SessionEvent>, path: PathBuf) -> JoinHandle<()> {
     tokio::spawn(async move {
         use std::io::Write;
         while let Ok(event) = rx.recv().await {
             if let Ok(line) = serde_json::to_string(&event) {
-                let line = fabro_util::redact::redact_jsonl_line(&line);
+                let line = redact_jsonl_line(&line);
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
@@ -407,7 +407,7 @@ mod tests {
         });
 
         let narrative: RetroNarrative = serde_json::from_value(args).unwrap();
-        assert_eq!(narrative.smoothness, crate::retro::SmoothnessRating::Smooth);
+        assert_eq!(narrative.smoothness, SmoothnessRating::Smooth);
         assert_eq!(narrative.intent, "Fix the login bug");
         assert_eq!(narrative.learnings.len(), 1);
         assert_eq!(narrative.friction_points.len(), 1);
@@ -423,10 +423,7 @@ mod tests {
         });
 
         let narrative: RetroNarrative = serde_json::from_value(args).unwrap();
-        assert_eq!(
-            narrative.smoothness,
-            crate::retro::SmoothnessRating::Effortless
-        );
+        assert_eq!(narrative.smoothness, SmoothnessRating::Effortless);
         assert!(narrative.learnings.is_empty());
         assert!(narrative.friction_points.is_empty());
         assert!(narrative.open_items.is_empty());

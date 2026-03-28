@@ -1,13 +1,13 @@
 use anyhow::Result;
+#[cfg(feature = "server")]
+use fabro_llm::cli::ServerConnection;
+use fabro_llm::cli::{run_models, ModelsCommand};
 
 use crate::args::GlobalArgs;
 #[cfg(feature = "server")]
 use crate::cli_config;
 
-pub async fn execute(
-    command: Option<fabro_llm::cli::ModelsCommand>,
-    globals: &GlobalArgs,
-) -> Result<()> {
+pub async fn execute(command: Option<ModelsCommand>, globals: &GlobalArgs) -> Result<()> {
     let server = {
         #[cfg(feature = "server")]
         {
@@ -20,7 +20,7 @@ pub async fn execute(
             match resolved.mode {
                 cli_config::ExecutionMode::Server => {
                     let client = cli_config::build_server_client(resolved.tls.as_ref())?;
-                    Some(fabro_llm::cli::ServerConnection {
+                    Some(ServerConnection {
                         client,
                         base_url: resolved.server_base_url,
                     })
@@ -35,5 +35,5 @@ pub async fn execute(
         }
     };
 
-    fabro_llm::cli::run_models(command, server).await
+    run_models(command, server).await
 }

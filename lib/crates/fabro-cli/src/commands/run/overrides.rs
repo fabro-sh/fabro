@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
+use fabro_config::run::LlmConfig;
 use fabro_config::{sandbox as sandbox_config, FabroConfig};
 use fabro_sandbox::SandboxProvider;
 
@@ -23,7 +24,7 @@ impl TryFrom<&RunArgs> for FabroConfig {
 
     fn try_from(args: &RunArgs) -> Result<Self, Self::Error> {
         let llm = if args.model.is_some() || args.provider.is_some() {
-            Some(fabro_config::run::LlmConfig {
+            Some(LlmConfig {
                 model: args.model.clone(),
                 provider: args.provider.clone(),
                 fallbacks: None,
@@ -65,7 +66,7 @@ impl TryFrom<&PreflightArgs> for FabroConfig {
 
     fn try_from(args: &PreflightArgs) -> Result<Self, Self::Error> {
         let llm = if args.model.is_some() || args.provider.is_some() {
-            Some(fabro_config::run::LlmConfig {
+            Some(LlmConfig {
                 model: args.model.clone(),
                 provider: args.provider.clone(),
                 fallbacks: None,

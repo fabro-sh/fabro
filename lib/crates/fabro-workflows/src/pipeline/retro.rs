@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use fabro_agent::SessionEvent;
-use fabro_retro::retro::Retro;
+use fabro_retro::retro::{derive_retro, extract_stage_durations, Retro};
+use fabro_retro::retro_agent::{dry_run_narrative, run_retro_agent};
 use fabro_retro::RetroExt;
 
 use crate::event::WorkflowRunEvent;
@@ -25,8 +26,8 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
     };
 
     let completed_stages = crate::build_completed_stages(&cp, options.failed);
-    let stage_durations = fabro_retro::retro::extract_stage_durations(&options.run_dir);
-    let mut retro = fabro_retro::retro::derive_retro(
+    let stage_durations = extract_stage_durations(&options.run_dir);
+    let mut retro = derive_retro(
         &options.run_id,
         &options.workflow_name,
         &options.goal,
@@ -45,7 +46,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
     }
 
     let narrative_result = if dry_run {
-        Ok(fabro_retro::retro_agent::dry_run_narrative())
+        Ok(dry_run_narrative())
     } else if let Some(client) = options.llm_client.as_ref() {
         let emitter_clone = options.emitter.clone();
         let event_callback: Option<Arc<dyn Fn(SessionEvent) + Send + Sync>> =
@@ -70,7 +71,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
                     }
                 })
             });
-        fabro_retro::retro_agent::run_retro_agent(
+        run_retro_agent(
             &options.sandbox,
             &options.run_dir,
             client,

@@ -7,26 +7,31 @@ use cli_table::{print_stdout, Cell, CellStruct, Color, Style, Table};
 use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 
+use fabro_util::text::strip_goal_decoration;
+use fabro_workflows::run_lookup::{filter_runs, runs_base, scan_runs, StatusFilter};
+use fabro_workflows::run_status::RunStatus;
+
 use crate::args::RunsListArgs;
+use crate::cli_config::load_cli_settings;
 use crate::shared::{color_if, format_duration_ms, tilde_path};
 
 use super::short_run_id;
 
 pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
-    let cli_config = crate::cli_config::load_cli_settings(None)?;
-    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
-    let runs = fabro_workflows::run_lookup::scan_runs(&base)?;
+    let cli_config = load_cli_settings(None)?;
+    let base = runs_base(&cli_config.storage_dir());
+    let runs = scan_runs(&base)?;
     let label_filters = parse_label_filters(&args.filter.label);
-    let filtered = fabro_workflows::run_lookup::filter_runs(
+    let filtered = filter_runs(
         &runs,
         args.filter.before.as_deref(),
         args.filter.workflow.as_deref(),
         &label_filters,
         args.filter.orphans,
         if args.all {
-            fabro_workflows::run_lookup::StatusFilter::All
+            StatusFilter::All
         } else {
-            fabro_workflows::run_lookup::StatusFilter::RunningOnly
+            StatusFilter::RunningOnly
         },
     );
 
@@ -110,17 +115,15 @@ pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
     Ok(())
 }
 
-fn status_cell(status: fabro_workflows::run_status::RunStatus, use_color: bool) -> CellStruct {
+fn status_cell(status: RunStatus, use_color: bool) -> CellStruct {
     let text = status.to_string();
     let color = match status {
-        fabro_workflows::run_status::RunStatus::Succeeded => Some(Color::Green),
-        fabro_workflows::run_status::RunStatus::Failed => Some(Color::Red),
-        fabro_workflows::run_status::RunStatus::Running
-        | fabro_workflows::run_status::RunStatus::Starting
-        | fabro_workflows::run_status::RunStatus::Submitted => Some(Color::Cyan),
-        fabro_workflows::run_status::RunStatus::Removing => Some(Color::Yellow),
-        fabro_workflows::run_status::RunStatus::Paused => Some(Color::Magenta),
-        fabro_workflows::run_status::RunStatus::Dead => Some(Color::Ansi256(8)),
+        RunStatus::Succeeded => Some(Color::Green),
+        RunStatus::Failed => Some(Color::Red),
+        RunStatus::Running | RunStatus::Starting | RunStatus::Submitted => Some(Color::Cyan),
+        RunStatus::Removing => Some(Color::Yellow),
+        RunStatus::Paused => Some(Color::Magenta),
+        RunStatus::Dead => Some(Color::Ansi256(8)),
     };
     text.cell()
         .bold(use_color && color != Some(Color::Ansi256(8)))
@@ -136,7 +139,7 @@ fn parse_label_filters(label_args: &[String]) -> Vec<(String, String)> {
 }
 
 fn truncate_goal(goal: &str, max_len: usize) -> String {
-    truncate_str(fabro_util::text::strip_goal_decoration(goal), max_len)
+    truncate_str(strip_goal_decoration(goal), max_len)
 }
 
 fn truncate_str(s: &str, max_len: usize) -> String {

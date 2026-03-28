@@ -8,7 +8,9 @@ use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
 use crate::outcome::Outcome;
+use crate::run_dir::{node_dir, visit_from_context};
 use fabro_graphviz::graph::{Graph, Node};
+use tokio::fs;
 
 use super::agent::{
     expand_variables, extract_status_fields, truncate, CodergenBackend, CodergenResult,
@@ -86,10 +88,10 @@ impl Handler for PromptHandler {
         };
 
         // 2. Write prompt to logs
-        let visit = crate::run_dir::visit_from_context(context);
-        let stage_dir = crate::run_dir::node_dir(run_dir, &node.id, visit);
-        tokio::fs::create_dir_all(&stage_dir).await?;
-        tokio::fs::write(stage_dir.join("prompt.md"), &prompt).await?;
+        let visit = visit_from_context(context);
+        let stage_dir = node_dir(run_dir, &node.id, visit);
+        fs::create_dir_all(&stage_dir).await?;
+        fs::write(stage_dir.join("prompt.md"), &prompt).await?;
 
         // 3. Call LLM backend (one_shot)
         let (response_text, stage_usage, backend_files_touched) =
@@ -101,7 +103,7 @@ impl Handler for PromptHandler {
                     Ok(CodergenResult::Full(outcome)) => {
                         let status_json = serde_json::to_string_pretty(&outcome)
                             .unwrap_or_else(|_| "{}".to_string());
-                        tokio::fs::write(stage_dir.join("status.json"), &status_json).await?;
+                        fs::write(stage_dir.join("status.json"), &status_json).await?;
                         return Ok(outcome);
                     }
                     Ok(CodergenResult::Text {
@@ -126,7 +128,7 @@ impl Handler for PromptHandler {
             };
 
         // 4. Write response to logs
-        tokio::fs::write(stage_dir.join("response.md"), &response_text).await?;
+        fs::write(stage_dir.join("response.md"), &response_text).await?;
 
         // 5. Build and write status
         let mut outcome = Outcome::success();
@@ -149,7 +151,7 @@ impl Handler for PromptHandler {
 
         let status_json =
             serde_json::to_string_pretty(&outcome).unwrap_or_else(|_| "{}".to_string());
-        tokio::fs::write(stage_dir.join("status.json"), &status_json).await?;
+        fs::write(stage_dir.join("status.json"), &status_json).await?;
 
         Ok(outcome)
     }

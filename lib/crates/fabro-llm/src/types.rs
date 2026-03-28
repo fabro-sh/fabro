@@ -1,4 +1,6 @@
 use crate::error::SdkError;
+use fabro_util::backoff::BackoffPolicy;
+use serde::de;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -188,7 +190,7 @@ impl<'de> Deserialize<'de> for ContentPart {
         let kind = value
             .get("kind")
             .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| serde::de::Error::missing_field("kind"))?;
+            .ok_or_else(|| de::Error::missing_field("kind"))?;
         let data = value
             .get("data")
             .cloned()
@@ -196,31 +198,31 @@ impl<'de> Deserialize<'de> for ContentPart {
         match kind {
             "text" => serde_json::from_value(data)
                 .map(Self::Text)
-                .map_err(serde::de::Error::custom),
+                .map_err(de::Error::custom),
             "image" => serde_json::from_value(data)
                 .map(Self::Image)
-                .map_err(serde::de::Error::custom),
+                .map_err(de::Error::custom),
             "audio" => serde_json::from_value(data)
                 .map(Self::Audio)
-                .map_err(serde::de::Error::custom),
+                .map_err(de::Error::custom),
             "document" => serde_json::from_value(data)
                 .map(Self::Document)
-                .map_err(serde::de::Error::custom),
+                .map_err(de::Error::custom),
             "tool_call" => serde_json::from_value(data)
                 .map(Self::ToolCall)
-                .map_err(serde::de::Error::custom),
+                .map_err(de::Error::custom),
             "tool_result" => serde_json::from_value(data)
                 .map(Self::ToolResult)
-                .map_err(serde::de::Error::custom),
+                .map_err(de::Error::custom),
             "thinking" => serde_json::from_value(data)
                 .map(Self::Thinking)
-                .map_err(serde::de::Error::custom),
+                .map_err(de::Error::custom),
             "redacted_thinking" => serde_json::from_value::<ThinkingData>(data)
                 .map(|mut td| {
                     td.redacted = true;
                     Self::Thinking(td)
                 })
-                .map_err(serde::de::Error::custom),
+                .map_err(de::Error::custom),
             other => Ok(Self::Other {
                 kind: other.to_string(),
                 data,
@@ -733,7 +735,7 @@ pub type OnRetryCallback = Arc<dyn Fn(&SdkError, u32, std::time::Duration) + Sen
 #[derive(Clone)]
 pub struct RetryPolicy {
     pub max_retries: u32,
-    pub backoff: fabro_util::backoff::BackoffPolicy,
+    pub backoff: BackoffPolicy,
     /// Called before each retry with (error, attempt number, delay).
     pub on_retry: Option<OnRetryCallback>,
 }
@@ -752,7 +754,7 @@ impl Default for RetryPolicy {
     fn default() -> Self {
         Self {
             max_retries: 2,
-            backoff: fabro_util::backoff::BackoffPolicy {
+            backoff: BackoffPolicy {
                 initial_delay: std::time::Duration::from_secs(1),
                 factor: 2.0,
                 max_delay: std::time::Duration::from_secs(60),

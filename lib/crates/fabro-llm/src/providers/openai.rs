@@ -1,14 +1,16 @@
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
-use futures::StreamExt;
+use futures::{stream, StreamExt};
 
-use crate::error::SdkError;
-use crate::provider::{ProviderAdapter, StreamEventStream};
+use crate::error::{error_from_status_code, SdkError};
+use crate::provider::{validate_tool_choice, ProviderAdapter, StreamEventStream};
 use crate::providers::common::{
-    parse_error_body, parse_rate_limit_headers, parse_retry_after, send_and_read_response,
+    self as common, parse_error_body, parse_rate_limit_headers, parse_retry_after,
+    send_and_read_response,
 };
 use crate::types::{
-    ContentPart, FinishReason, Message, Request, Response, ResponseFormat, ResponseFormatType,
-    Role, StreamEvent, ToolCall, ToolChoice, ToolDefinition, Usage,
+    AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response,
+    ResponseFormat, ResponseFormatType, Role, StreamEvent, ToolCall, ToolChoice, ToolDefinition,
+    Usage,
 };
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
@@ -69,7 +71,7 @@ impl Adapter {
     }
 
     #[must_use]
-    pub fn with_timeout(self, timeout: crate::types::AdapterTimeout) -> Self {
+    pub fn with_timeout(self, timeout: AdapterTimeout) -> Self {
         Self {
             http: self.http.with_timeout(timeout),
             ..self
@@ -216,8 +218,8 @@ fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Val
                                     })
                                 },
                                 |url| {
-                                    if crate::providers::common::is_file_path(url) {
-                                        match crate::providers::common::load_file_as_base64(url) {
+                                    if common::is_file_path(url) {
+                                        match common::load_file_as_base64(url) {
                                             Ok((b64, mime)) => Some(serde_json::json!({"type": "input_image", "image_url": format!("data:{mime};base64,{b64}")})),
                                             Err(_) => None,
                                         }
@@ -550,7 +552,7 @@ struct SseStreamState {
     emitted_text_start: bool,
     emitted_reasoning_start: bool,
     raw_response: Option<serde_json::Value>,
-    rate_limit: Option<crate::types::RateLimitInfo>,
+    rate_limit: Option<RateLimitInfo>,
 }
 
 /// Parse a single SSE message block into an (`event_type`, `data`) pair.
@@ -944,7 +946,7 @@ impl ProviderAdapter for Adapter {
         }
 
         if let Some(tc) = &request.tool_choice {
-            crate::provider::validate_tool_choice(self, tc)?;
+            validate_tool_choice(self, tc)?;
         }
         let request_body = build_request_body(request, false, false);
         let url = format!("{}/responses", self.http.base_url);
@@ -999,7 +1001,7 @@ impl ProviderAdapter for Adapter {
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
         if let Some(tc) = &request.tool_choice {
-            crate::provider::validate_tool_choice(self, tc)?;
+            validate_tool_choice(self, tc)?;
         }
         let request_body = build_request_body(request, true, self.codex_mode);
         let url = format!("{}/responses", self.http.base_url);
@@ -1019,7 +1021,7 @@ impl ProviderAdapter for Adapter {
                 .await
                 .map_err(|e| SdkError::network(e.to_string(), e))?;
             let (msg, code, raw) = parse_error_body(&body, "type");
-            return Err(crate::error::error_from_status_code(
+            return Err(error_from_status_code(
                 status.as_u16(),
                 msg,
                 "openai".to_string(),
@@ -1051,14 +1053,14 @@ impl ProviderAdapter for Adapter {
             rate_limit,
         };
 
-        let stream = futures::stream::unfold(state, |mut state| async move {
+        let stream = stream::unfold(state, |mut state| async move {
             let events = process_next_sse_events(&mut state).await;
             let items: Vec<Result<StreamEvent, SdkError>> = match events {
                 Ok(events) if events.is_empty() => return None,
                 Ok(events) => events.into_iter().map(Ok).collect(),
                 Err(e) => vec![Err(e)],
             };
-            Some((futures::stream::iter(items), state))
+            Some((stream::iter(items), state))
         })
         .flatten();
 

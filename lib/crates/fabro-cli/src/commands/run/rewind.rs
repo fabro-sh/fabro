@@ -4,6 +4,9 @@ use cli_table::format::{Border, Separator};
 use cli_table::{print_stderr, Cell, CellStruct, Color, Style, Table};
 use fabro_git_storage::gitobj::Store;
 use fabro_util::terminal::Styles;
+use fabro_workflows::operations::{
+    build_timeline, find_run_id_by_prefix, rewind, RewindInput, RewindTarget, RunTimeline,
+};
 use git2::Repository;
 
 use crate::args::RewindArgs;
@@ -11,25 +14,21 @@ use crate::shared::color_if;
 
 pub fn run(args: &RewindArgs, styles: &Styles) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let run_id = fabro_workflows::operations::find_run_id_by_prefix(&repo, &args.run_id)?;
+    let run_id = find_run_id_by_prefix(&repo, &args.run_id)?;
     let store = Store::new(repo);
 
-    let timeline = fabro_workflows::operations::build_timeline(&store, &run_id)?;
+    let timeline = build_timeline(&store, &run_id)?;
 
     if args.list || args.target.is_none() {
         print_timeline(&timeline, styles);
         return Ok(());
     }
 
-    let target = args
-        .target
-        .as_deref()
-        .unwrap()
-        .parse::<fabro_workflows::operations::RewindTarget>()?;
+    let target = args.target.as_deref().unwrap().parse::<RewindTarget>()?;
 
-    fabro_workflows::operations::rewind(
+    rewind(
         &store,
-        fabro_workflows::operations::RewindInput {
+        RewindInput {
             run_id: run_id.clone(),
             target,
             push: !args.no_push,
@@ -44,7 +43,7 @@ pub fn run(args: &RewindArgs, styles: &Styles) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn print_timeline(timeline: &fabro_workflows::operations::RunTimeline, styles: &Styles) {
+pub(crate) fn print_timeline(timeline: &RunTimeline, styles: &Styles) {
     if timeline.entries.is_empty() {
         eprintln!("No checkpoints found.");
         return;

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_agent::Sandbox;
+use fabro_graphviz::graph::Graph as GvGraph;
 
 use crate::error::Result;
 use crate::event::EventEmitter;
@@ -22,7 +23,7 @@ fn initialized(
     registry: HandlerRegistry,
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
-    graph: &fabro_graphviz::graph::Graph,
+    graph: &GvGraph,
     run_options: &RunOptions,
     options: InitializedOptions,
 ) -> Initialized {
@@ -49,7 +50,7 @@ pub async fn run_graph(
     registry: HandlerRegistry,
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
-    graph: &fabro_graphviz::graph::Graph,
+    graph: &GvGraph,
     run_options: &RunOptions,
 ) -> Result<Outcome> {
     let executed = pipeline::execute(initialized(
@@ -72,7 +73,7 @@ pub async fn run_graph_with_hooks(
     registry: HandlerRegistry,
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
-    graph: &fabro_graphviz::graph::Graph,
+    graph: &GvGraph,
     run_options: &RunOptions,
     hook_runner: Arc<fabro_hooks::HookRunner>,
     env: Option<HashMap<String, String>>,
@@ -97,7 +98,7 @@ pub async fn run_graph_from_checkpoint(
     registry: HandlerRegistry,
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
-    graph: &fabro_graphviz::graph::Graph,
+    graph: &GvGraph,
     run_options: &RunOptions,
     checkpoint: &Checkpoint,
 ) -> Result<Outcome> {
@@ -137,11 +138,7 @@ impl WorkflowRunner {
         }
     }
 
-    pub async fn run(
-        &self,
-        graph: &fabro_graphviz::graph::Graph,
-        run_options: &RunOptions,
-    ) -> Result<Outcome> {
+    pub async fn run(&self, graph: &GvGraph, run_options: &RunOptions) -> Result<Outcome> {
         let registry = self
             .registry
             .lock()
@@ -160,7 +157,7 @@ impl WorkflowRunner {
 
     pub async fn run_from_checkpoint(
         &self,
-        graph: &fabro_graphviz::graph::Graph,
+        graph: &GvGraph,
         run_options: &RunOptions,
         checkpoint: &Checkpoint,
     ) -> Result<Outcome> {

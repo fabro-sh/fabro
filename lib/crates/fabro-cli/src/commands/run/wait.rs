@@ -3,17 +3,19 @@ use std::io::Write;
 use anyhow::{bail, Result};
 use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
-use fabro_workflows::records::ConclusionExt;
+use fabro_workflows::records::{Conclusion, ConclusionExt};
+use fabro_workflows::run_lookup::{resolve_run, runs_base};
 use fabro_workflows::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
 use tracing::info;
 
 use crate::args::WaitArgs;
+use crate::cli_config::load_cli_settings;
 use crate::shared::format_duration_ms;
 
 pub fn run(args: WaitArgs, styles: &Styles) -> Result<()> {
-    let cli_config = crate::cli_config::load_cli_settings(None)?;
-    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
-    let run_info = fabro_workflows::run_lookup::resolve_run(&base, &args.run)?;
+    let cli_config = load_cli_settings(None)?;
+    let base = runs_base(&cli_config.storage_dir());
+    let run_info = resolve_run(&base, &args.run)?;
 
     info!(run_id = %run_info.run_id, "Waiting for run to complete");
 
@@ -49,7 +51,7 @@ pub fn run(args: WaitArgs, styles: &Styles) -> Result<()> {
     };
 
     let conclusion_path = run_info.path.join("conclusion.json");
-    let conclusion = fabro_workflows::records::Conclusion::load(&conclusion_path).ok();
+    let conclusion = Conclusion::load(&conclusion_path).ok();
 
     if args.json {
         let json_value = build_json_output(final_status, &run_info.run_id, conclusion.as_ref());
@@ -70,7 +72,7 @@ pub fn run(args: WaitArgs, styles: &Styles) -> Result<()> {
 fn build_json_output(
     status: RunStatus,
     run_id: &str,
-    conclusion: Option<&fabro_workflows::records::Conclusion>,
+    conclusion: Option<&Conclusion>,
 ) -> serde_json::Value {
     let mut value = serde_json::json!({
         "run_id": run_id,
@@ -88,7 +90,7 @@ fn build_json_output(
 fn print_human_output(
     status: RunStatus,
     run_id: &str,
-    conclusion: Option<&fabro_workflows::records::Conclusion>,
+    conclusion: Option<&Conclusion>,
     styles: &Styles,
 ) {
     let (style, label) = match status {

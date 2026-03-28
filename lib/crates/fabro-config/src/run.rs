@@ -7,6 +7,7 @@ use tracing::debug;
 
 use crate::combine::Combine;
 use crate::config::FabroConfig;
+use crate::sandbox::DockerfileSource;
 pub use fabro_types::settings::run::{
     AssetsSettings, CheckpointSettings, GitHubSettings, LlmSettings, MergeStrategy,
     PullRequestSettings, SetupSettings,
@@ -179,12 +180,12 @@ fn resolve_dockerfile(config: &mut FabroConfig, config_dir: &Path) -> anyhow::Re
         .and_then(|d| d.snapshot.as_mut())
         .and_then(|snap| snap.dockerfile.as_mut());
 
-    if let Some(crate::sandbox::DockerfileSource::Path { path: ref rel }) = source {
+    if let Some(DockerfileSource::Path { path: ref rel }) = source {
         let path = config_dir.join(rel);
         let contents = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read dockerfile at {}", path.display()))?;
         debug!(path = %path.display(), "Resolved dockerfile from path");
-        *source.unwrap() = crate::sandbox::DockerfileSource::Inline(contents);
+        *source.unwrap() = DockerfileSource::Inline(contents);
     }
 
     Ok(())

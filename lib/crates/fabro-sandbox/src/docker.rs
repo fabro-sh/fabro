@@ -3,16 +3,21 @@ use crate::{
     SandboxEventCallback,
 };
 use async_trait::async_trait;
+use bollard::container::LogOutput;
 use bollard::container::{
     Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
     StopContainerOptions, UploadToContainerOptions,
 };
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
+use bollard::models::HostConfig;
 use bollard::Docker;
 use futures::StreamExt;
 use std::collections::HashMap;
 use std::time::Instant;
+use tokio::fs;
+use tokio::sync::OnceCell;
+use tokio::time;
 use tokio_util::sync::CancellationToken;
 
 /// Configuration for a Docker-based sandbox.
@@ -60,10 +65,10 @@ impl Default for DockerSandboxConfig {
 pub struct DockerSandbox {
     docker: Docker,
     config: DockerSandboxConfig,
-    container_id: tokio::sync::OnceCell<String>,
+    container_id: OnceCell<String>,
     cached_platform: std::sync::OnceLock<String>,
     cached_os_version: std::sync::OnceLock<String>,
-    rg_available: tokio::sync::OnceCell<bool>,
+    rg_available: OnceCell<bool>,
     event_callback: Option<SandboxEventCallback>,
 }
 
@@ -78,10 +83,10 @@ impl DockerSandbox {
         Ok(Self {
             docker,
             config,
-            container_id: tokio::sync::OnceCell::new(),
+            container_id: OnceCell::new(),
             cached_platform: std::sync::OnceLock::new(),
             cached_os_version: std::sync::OnceLock::new(),
-            rg_available: tokio::sync::OnceCell::const_new(),
+            rg_available: OnceCell::const_new(),
             event_callback: None,
         })
     }
@@ -166,10 +171,10 @@ impl DockerSandbox {
         if let StartExecResults::Attached { mut output, .. } = start_result {
             while let Some(chunk) = output.next().await {
                 match chunk {
-                    Ok(bollard::container::LogOutput::StdOut { message }) => {
+                    Ok(LogOutput::StdOut { message }) => {
                         stdout.push_str(&String::from_utf8_lossy(&message));
                     }
-                    Ok(bollard::container::LogOutput::StdErr { message }) => {
+                    Ok(LogOutput::StdErr { message }) => {
                         stderr.push_str(&String::from_utf8_lossy(&message));
                     }
                     Ok(_) => {}
@@ -228,7 +233,7 @@ impl DockerSandbox {
                     duration_ms,
                 })
             }
-            () = tokio::time::sleep(timeout_duration) => {
+            () = time::sleep(timeout_duration) => {
                 let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                 Ok(ExecResult {
                     stdout: String::new(),
@@ -294,11 +299,11 @@ impl Sandbox for DockerSandbox {
         let host_path = self.container_to_host_path(remote_path)?;
 
         if let Some(parent) = local_path.parent() {
-            tokio::fs::create_dir_all(parent)
+            fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
         }
-        tokio::fs::copy(&host_path, local_path).await.map_err(|e| {
+        fs::copy(&host_path, local_path).await.map_err(|e| {
             format!(
                 "Failed to copy {} to {}: {e}",
                 host_path.display(),
@@ -316,11 +321,11 @@ impl Sandbox for DockerSandbox {
         let host_path = self.container_to_host_path(remote_path)?;
 
         if let Some(parent) = host_path.parent() {
-            tokio::fs::create_dir_all(parent)
+            fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
         }
-        tokio::fs::copy(local_path, &host_path).await.map_err(|e| {
+        fs::copy(local_path, &host_path).await.map_err(|e| {
             format!(
                 "Failed to copy {} to {}: {e}",
                 local_path.display(),
@@ -363,7 +368,7 @@ impl Sandbox for DockerSandbox {
             binds.push(extra.clone());
         }
 
-        let host_config = bollard::models::HostConfig {
+        let host_config = HostConfig {
             binds: Some(binds),
             network_mode: self.config.network_mode.clone(),
             memory: self.config.memory_limit,

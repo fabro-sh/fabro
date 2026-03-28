@@ -7,8 +7,11 @@ use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::outcome::StageUsage;
+use crate::error::FabroError;
+use crate::outcome::{FailureDetail, StageUsage};
 use fabro_agent::{AgentEvent, SandboxEvent, WorktreeEvent, WorktreeEventCallback};
+use fabro_llm::types::Usage as LlmUsage;
+use fabro_util::redact::redact_jsonl_line;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -45,10 +48,10 @@ pub enum WorkflowRunEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         final_git_commit_sha: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        usage: Option<fabro_llm::types::Usage>,
+        usage: Option<LlmUsage>,
     },
     WorkflowRunFailed {
-        error: crate::error::FabroError,
+        error: FabroError,
         duration_ms: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         git_commit_sha: Option<String>,
@@ -78,7 +81,7 @@ pub enum WorkflowRunEvent {
         suggested_next_ids: Vec<String>,
         usage: Option<StageUsage>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        failure: Option<crate::outcome::FailureDetail>,
+        failure: Option<FailureDetail>,
         notes: Option<String>,
         files_touched: Vec<String>,
         attempt: usize,
@@ -88,7 +91,7 @@ pub enum WorkflowRunEvent {
         node_id: String,
         name: String,
         index: usize,
-        failure: crate::outcome::FailureDetail,
+        failure: FailureDetail,
         will_retry: bool,
     },
     StageRetrying {
@@ -820,7 +823,7 @@ pub fn build_event_envelope(event: &WorkflowRunEvent, run_id: &str) -> serde_jso
 pub fn append_progress_event(run_dir: &Path, run_id: &str, event: &WorkflowRunEvent) -> Result<()> {
     let envelope = build_event_envelope(event, run_id);
     let line = serde_json::to_string(&envelope)?;
-    let line = fabro_util::redact::redact_jsonl_line(&line);
+    let line = redact_jsonl_line(&line);
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -834,7 +837,7 @@ pub fn append_progress_event(run_dir: &Path, run_id: &str, event: &WorkflowRunEv
     writeln!(file, "{line}")?;
 
     let pretty = serde_json::to_string_pretty(&envelope)?;
-    let pretty = fabro_util::redact::redact_jsonl_line(&pretty);
+    let pretty = redact_jsonl_line(&pretty);
     std::fs::write(run_dir.join("live.json"), pretty)
         .with_context(|| format!("Failed to write {}", run_dir.join("live.json").display()))?;
 

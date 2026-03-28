@@ -5,12 +5,15 @@ use chrono::Utc;
 use fabro_config::FabroSettingsExt;
 use tracing::{debug, info};
 
+use fabro_workflows::run_lookup::{filter_runs, runs_base, scan_runs, StatusFilter};
+
 use crate::args::RunsPruneArgs;
+use crate::cli_config::load_cli_settings;
 use crate::shared::format_size;
 
 pub fn prune_command(args: &RunsPruneArgs) -> Result<()> {
-    let cli_config = crate::cli_config::load_cli_settings(None)?;
-    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
+    let cli_config = load_cli_settings(None)?;
+    let base = runs_base(&cli_config.storage_dir());
     prune_from(args, &base)
 }
 
@@ -31,15 +34,15 @@ pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
 }
 
 fn prune_from(args: &RunsPruneArgs, base: &Path) -> Result<()> {
-    let runs = fabro_workflows::run_lookup::scan_runs(base)?;
+    let runs = scan_runs(base)?;
     let label_filters = parse_label_filters(&args.filter.label);
-    let mut filtered = fabro_workflows::run_lookup::filter_runs(
+    let mut filtered = filter_runs(
         &runs,
         args.filter.before.as_deref(),
         args.filter.workflow.as_deref(),
         &label_filters,
         args.filter.orphans,
-        fabro_workflows::run_lookup::StatusFilter::All,
+        StatusFilter::All,
     );
 
     let has_explicit_filters =

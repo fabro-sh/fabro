@@ -11,7 +11,10 @@ use crate::error::FabroError;
 use crate::pipeline::types::PersistOptions;
 use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunRecord;
+use crate::run_lookup::default_runs_base;
+use crate::run_status::{write_run_status, RunStatus};
 use crate::transforms::{expand_vars, Transform};
+use fabro_sandbox::daytona::detect_repo_info;
 
 use super::source::{resolve_workflow, ResolveWorkflowInput, WorkflowInput};
 
@@ -86,7 +89,7 @@ pub fn create(request: CreateRunInput) -> Result<CreatedRun, FabroError> {
     let host_repo_path =
         host_repo_path.or_else(|| Some(working_directory.to_string_lossy().to_string()));
     let base_branch = base_branch.or_else(|| {
-        fabro_sandbox::daytona::detect_repo_info(&working_directory)
+        detect_repo_info(&working_directory)
             .ok()
             .and_then(|(_, branch)| branch)
     });
@@ -111,7 +114,7 @@ pub fn create(request: CreateRunInput) -> Result<CreatedRun, FabroError> {
     )?;
 
     write_run_config_snapshot(&run_dir, resolved.workflow_toml_path.as_deref())?;
-    crate::run_status::write_run_status(&run_dir, crate::run_status::RunStatus::Submitted, None);
+    write_run_status(&run_dir, RunStatus::Submitted, None);
 
     Ok(CreatedRun {
         persisted,
@@ -297,7 +300,7 @@ pub(crate) fn resolve_run_settings(mut settings: FabroSettings, graph: &Graph) -
 }
 
 pub(crate) fn default_run_dir(run_id: &str, dry_run: bool) -> PathBuf {
-    make_run_dir(&crate::run_lookup::default_runs_base(), run_id, dry_run)
+    make_run_dir(&default_runs_base(), run_id, dry_run)
 }
 
 pub(crate) fn make_run_dir(runs_base: &Path, run_id: &str, dry_run: bool) -> PathBuf {

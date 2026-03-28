@@ -2,6 +2,9 @@ use std::fmt;
 use std::path::PathBuf;
 
 use clap::{Args, Subcommand, ValueEnum};
+use fabro_agent::cli::AgentArgs;
+use fabro_graphviz::render::GraphFormat;
+use fabro_llm::cli::{ChatArgs, ModelsCommand, PromptArgs};
 
 #[cfg(feature = "server")]
 use crate::cli_config;
@@ -273,7 +276,7 @@ pub(crate) enum GraphOutputFormat {
     Png,
 }
 
-impl From<GraphOutputFormat> for fabro_graphviz::render::GraphFormat {
+impl From<GraphOutputFormat> for GraphFormat {
     fn from(value: GraphOutputFormat) -> Self {
         match value {
             GraphOutputFormat::Svg => Self::Svg,
@@ -726,7 +729,7 @@ pub(crate) enum Commands {
     Llm(LlmNamespace),
     /// Run an agentic coding session
     #[command(hide = true)]
-    Exec(fabro_agent::cli::AgentArgs),
+    Exec(AgentArgs),
     #[command(flatten)]
     RunCmd(RunCommands),
     /// Validate run configuration without executing
@@ -745,7 +748,7 @@ pub(crate) enum Commands {
     /// List and test LLM models
     Model {
         #[command(subcommand)]
-        command: Option<fabro_llm::cli::ModelsCommand>,
+        command: Option<ModelsCommand>,
     },
     /// Start the HTTP API server
     #[cfg(feature = "server")]
@@ -825,8 +828,8 @@ impl Commands {
             Self::Parse(_) => "parse",
             Self::RunsCmd(cmd) => cmd.name(),
             Self::Model { command } => match command {
-                Some(fabro_llm::cli::ModelsCommand::List { .. }) => "model list",
-                Some(fabro_llm::cli::ModelsCommand::Test { .. }) => "model test",
+                Some(ModelsCommand::List { .. }) => "model list",
+                Some(ModelsCommand::Test { .. }) => "model test",
                 None => "model",
             },
             #[cfg(feature = "server")]
@@ -1009,9 +1012,9 @@ pub(crate) struct LlmNamespace {
 #[derive(Subcommand)]
 pub(crate) enum LlmCommand {
     /// Execute a prompt
-    Prompt(fabro_llm::cli::PromptArgs),
+    Prompt(PromptArgs),
     /// Interactive multi-turn chat
-    Chat(fabro_llm::cli::ChatArgs),
+    Chat(ChatArgs),
 }
 
 #[derive(Args)]

@@ -1,4 +1,6 @@
 use anyhow::{Context, Result};
+use fabro_util::run_log;
+use tracing_appender::rolling;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 pub fn init_tracing(debug: bool, config_log_level: Option<&str>, log_prefix: &str) -> Result<()> {
@@ -20,9 +22,9 @@ pub fn init_tracing(debug: bool, config_log_level: Option<&str>, log_prefix: &st
     let filename = chrono::Local::now()
         .format(&format!("{log_prefix}-%Y-%m-%d.log"))
         .to_string();
-    let file_appender = tracing_appender::rolling::never(&log_dir, &filename);
+    let file_appender = rolling::never(&log_dir, &filename);
 
-    let run_log_writer = fabro_util::run_log::init();
+    let run_log_writer = run_log::init();
 
     tracing_subscriber::registry()
         .with(filter)

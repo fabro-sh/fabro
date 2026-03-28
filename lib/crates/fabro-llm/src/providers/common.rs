@@ -2,6 +2,8 @@ use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
 
 use crate::error::{error_from_status_code, SdkError};
 use crate::types::{Message, RateLimitInfo, Role};
+use reqwest::header::HeaderMap;
+use tokio::time;
 use tracing::warn;
 
 /// Parse an error response body, extracting the message and error code.
@@ -104,7 +106,7 @@ pub fn load_file_as_base64(path: &str) -> Result<(String, String), std::io::Erro
 
 /// Extract the `Retry-After` header value from an HTTP response as seconds.
 #[must_use]
-pub fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<f64> {
+pub fn parse_retry_after(headers: &HeaderMap) -> Option<f64> {
     headers
         .get("retry-after")
         .and_then(|v| v.to_str().ok())
@@ -115,15 +117,15 @@ pub fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<f64> {
 ///
 /// Returns `None` if no rate limit headers are present.
 #[must_use]
-pub fn parse_rate_limit_headers(headers: &reqwest::header::HeaderMap) -> Option<RateLimitInfo> {
-    fn header_i64(headers: &reqwest::header::HeaderMap, name: &str) -> Option<i64> {
+pub fn parse_rate_limit_headers(headers: &HeaderMap) -> Option<RateLimitInfo> {
+    fn header_i64(headers: &HeaderMap, name: &str) -> Option<i64> {
         headers
             .get(name)
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<i64>().ok())
     }
 
-    fn header_str(headers: &reqwest::header::HeaderMap, name: &str) -> Option<String> {
+    fn header_str(headers: &HeaderMap, name: &str) -> Option<String> {
         headers
             .get(name)
             .and_then(|v| v.to_str().ok())
@@ -166,7 +168,7 @@ pub async fn send_and_read_response(
     request: reqwest::RequestBuilder,
     provider: &str,
     error_code_field: &str,
-) -> Result<(String, reqwest::header::HeaderMap), SdkError> {
+) -> Result<(String, HeaderMap), SdkError> {
     let http_resp = request.send().await.map_err(|e| {
         if e.is_timeout() {
             warn!(provider = %provider, error = %e, "Provider request timed out");
@@ -239,7 +241,7 @@ impl LineReader {
             }
 
             let chunk_result = match self.stream_read_timeout {
-                Some(timeout) => tokio::time::timeout(timeout, self.response.chunk()).await,
+                Some(timeout) => time::timeout(timeout, self.response.chunk()).await,
                 None => Ok(self.response.chunk().await),
             };
             match chunk_result {
@@ -317,7 +319,7 @@ mod tests {
 
     #[test]
     fn parse_rate_limit_headers_all_present() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = HeaderMap::new();
         headers.insert("x-ratelimit-remaining-requests", "99".parse().unwrap());
         headers.insert("x-ratelimit-limit-requests", "100".parse().unwrap());
         headers.insert("x-ratelimit-remaining-tokens", "9000".parse().unwrap());
@@ -337,13 +339,13 @@ mod tests {
 
     #[test]
     fn parse_rate_limit_headers_none_present() {
-        let headers = reqwest::header::HeaderMap::new();
+        let headers = HeaderMap::new();
         assert!(parse_rate_limit_headers(&headers).is_none());
     }
 
     #[test]
     fn parse_rate_limit_headers_partial() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = HeaderMap::new();
         headers.insert("x-ratelimit-remaining-requests", "50".parse().unwrap());
 
         let info = parse_rate_limit_headers(&headers).unwrap();
@@ -356,7 +358,7 @@ mod tests {
 
     #[test]
     fn parse_rate_limit_headers_reset_tokens_fallback() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = HeaderMap::new();
         headers.insert("x-ratelimit-limit-tokens", "5000".parse().unwrap());
         headers.insert(
             "x-ratelimit-reset-tokens",
@@ -370,7 +372,7 @@ mod tests {
 
     #[test]
     fn parse_rate_limit_headers_invalid_values_ignored() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = HeaderMap::new();
         headers.insert(
             "x-ratelimit-remaining-requests",
             "not-a-number".parse().unwrap(),
@@ -499,27 +501,27 @@ mod tests {
 
     #[test]
     fn parse_retry_after_valid() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = HeaderMap::new();
         headers.insert("retry-after", "2.5".parse().unwrap());
         assert_eq!(parse_retry_after(&headers), Some(2.5));
     }
 
     #[test]
     fn parse_retry_after_missing() {
-        let headers = reqwest::header::HeaderMap::new();
+        let headers = HeaderMap::new();
         assert_eq!(parse_retry_after(&headers), None);
     }
 
     #[test]
     fn parse_retry_after_invalid() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = HeaderMap::new();
         headers.insert("retry-after", "not-a-number".parse().unwrap());
         assert_eq!(parse_retry_after(&headers), None);
     }
 
     #[test]
     fn parse_retry_after_integer() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = HeaderMap::new();
         headers.insert("retry-after", "5".parse().unwrap());
         assert_eq!(parse_retry_after(&headers), Some(5.0));
     }

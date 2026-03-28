@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use fabro_config::{project as project_config, FabroSettings};
+use fabro_util::path::expand_tilde;
 
 #[derive(Clone, Debug)]
 pub enum WorkflowInput {
@@ -38,7 +39,7 @@ fn resolve_goal_file(
     let Some(goal_file) = goal_file else {
         return Ok(None);
     };
-    let expanded = fabro_util::path::expand_tilde(goal_file);
+    let expanded = expand_tilde(goal_file);
     let goal_path = if expanded.is_absolute() {
         expanded
     } else {

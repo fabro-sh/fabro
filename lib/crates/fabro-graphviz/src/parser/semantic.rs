@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use crate::error::GraphvizError;
 use crate::graph::types::{AttrValue, Edge, Graph, Node};
-use crate::parser::ast::{AstValue, AttrBlock, DotGraph, Statement};
+use crate::parser::ast::{AstValue, AttrBlock, DotGraph, EdgeStmt, NodeStmt, Statement};
 
 /// Convert an AST `AstValue` to a semantic `AttrValue`.
 fn convert_value(ast_val: &AstValue) -> AttrValue {
@@ -89,11 +89,7 @@ impl SemanticState {
         }
     }
 
-    fn process_node(
-        &mut self,
-        node_stmt: &crate::parser::ast::NodeStmt,
-        subgraph_class: Option<&str>,
-    ) {
+    fn process_node(&mut self, node_stmt: &NodeStmt, subgraph_class: Option<&str>) {
         self.ensure_node(&node_stmt.id);
         let node = self
             .graph
@@ -141,11 +137,7 @@ impl SemanticState {
         }
     }
 
-    fn process_edge(
-        &mut self,
-        edge_stmt: &crate::parser::ast::EdgeStmt,
-        subgraph_class: Option<&str>,
-    ) {
+    fn process_edge(&mut self, edge_stmt: &EdgeStmt, subgraph_class: Option<&str>) {
         for id in &edge_stmt.nodes {
             self.ensure_node(id);
             if let Some(cls) = subgraph_class {

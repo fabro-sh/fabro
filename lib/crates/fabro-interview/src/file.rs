@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tokio::fs;
+use tokio::time;
 
 use crate::{Answer, Interviewer, Question};
 
@@ -49,17 +51,17 @@ impl FileInterviewer {
         let json = serde_json::to_string_pretty(question).expect("Question serialization failed");
         let request_path = self.request_path();
         if let Some(parent) = request_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
+            fs::create_dir_all(parent).await?;
         }
         let temp_path = request_path.with_extension("json.tmp");
-        tokio::fs::write(&temp_path, json).await?;
-        tokio::fs::rename(temp_path, request_path).await
+        fs::write(&temp_path, json).await?;
+        fs::rename(temp_path, request_path).await
     }
 
     async fn cleanup_ipc_files(&self) {
-        let _ = tokio::fs::remove_file(self.request_path()).await;
-        let _ = tokio::fs::remove_file(self.response_path()).await;
-        let _ = tokio::fs::remove_file(self.claim_path()).await;
+        let _ = fs::remove_file(self.request_path()).await;
+        let _ = fs::remove_file(self.response_path()).await;
+        let _ = fs::remove_file(self.claim_path()).await;
     }
 }
 
@@ -81,9 +83,9 @@ impl Interviewer for FileInterviewer {
             let response_path = self.response_path();
             let claim_path = self.claim_path();
             let mut claim_was_seen = false;
-            let mut reattach_deadline: Option<tokio::time::Instant> = None;
+            let mut reattach_deadline: Option<time::Instant> = None;
             loop {
-                match tokio::fs::read_to_string(&response_path).await {
+                match fs::read_to_string(&response_path).await {
                     Ok(data) => match serde_json::from_str::<Answer>(&data) {
                         Ok(answer) => {
                             self.cleanup_ipc_files().await;
@@ -107,23 +109,23 @@ impl Interviewer for FileInterviewer {
                     claim_was_seen = true;
                     reattach_deadline = None;
                 } else if claim_was_seen && reattach_deadline.is_none() {
-                    reattach_deadline = Some(tokio::time::Instant::now() + REATTACH_WINDOW);
+                    reattach_deadline = Some(time::Instant::now() + REATTACH_WINDOW);
                 }
 
                 if let Some(deadline) = reattach_deadline {
-                    if tokio::time::Instant::now() >= deadline {
+                    if time::Instant::now() >= deadline {
                         self.cleanup_ipc_files().await;
                         return default_for_claim_timeout.unwrap_or_else(Answer::timeout);
                     }
                 }
 
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                time::sleep(Duration::from_millis(100)).await;
             }
         };
 
         if let Some(secs) = timeout_secs {
             let duration = std::time::Duration::from_secs_f64(secs);
-            match tokio::time::timeout(duration, poll).await {
+            match time::timeout(duration, poll).await {
                 Ok(answer) => answer,
                 Err(_) => {
                     self.cleanup_ipc_files().await;

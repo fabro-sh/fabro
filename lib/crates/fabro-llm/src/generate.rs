@@ -8,11 +8,14 @@ use crate::types::{
     ResponseFormat, ResponseFormatType, RetryPolicy, StepResult, StreamEvent, TimeoutConfig,
     ToolCall, ToolChoice, ToolDefinition, Usage,
 };
-use futures::{Stream, StreamExt};
+use fabro_util::backoff::BackoffPolicy;
+use futures::{future, stream, Stream, StreamExt};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tokio::sync::OnceCell;
+use tokio::sync::{mpsc, OnceCell};
+use tokio::time;
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
@@ -109,7 +112,7 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
     };
     let retry_policy = RetryPolicy {
         max_retries: params.max_retries,
-        backoff: fabro_util::backoff::BackoffPolicy {
+        backoff: BackoffPolicy {
             initial_delay: std::time::Duration::from_micros(1),
             jitter: false,
             ..Default::default()
@@ -156,7 +159,7 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
             let response = if let Some(per_step) = params.timeout.as_ref().and_then(|t| t.per_step)
             {
                 let duration = std::time::Duration::from_secs_f64(per_step);
-                tokio::time::timeout(
+                time::timeout(
                     duration,
                     retry(&retry_policy, || {
                         let c = client_ref.clone();
@@ -262,7 +265,7 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
 
     if let Some(total) = params.timeout.as_ref().and_then(|t| t.total) {
         let duration = std::time::Duration::from_secs_f64(total);
-        tokio::time::timeout(duration, generate_future)
+        time::timeout(duration, generate_future)
             .await
             .map_err(|_| {
                 warn!(timeout_secs = total, "Total generation timeout exceeded");
@@ -583,7 +586,7 @@ impl StreamResult {
     #[must_use]
     pub fn text_stream(self) -> Pin<Box<dyn Stream<Item = Result<String, SdkError>> + Send>> {
         Box::pin(self.filter_map(|result| {
-            futures::future::ready(match result {
+            future::ready(match result {
                 Ok(StreamEvent::TextDelta { delta, .. }) => Some(Ok(delta)),
                 Err(e) => Some(Err(e)),
                 _ => None,
@@ -661,12 +664,12 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
     }
 
     // Tool loop: collect events from each round, execute tools, continue
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<StreamEvent, SdkError>>(64);
+    let (tx, rx) = mpsc::channel::<Result<StreamEvent, SdkError>>(64);
 
     let tools = params.tools.clone();
     let retry_policy = RetryPolicy {
         max_retries: params.max_retries,
-        backoff: fabro_util::backoff::BackoffPolicy {
+        backoff: BackoffPolicy {
             initial_delay: std::time::Duration::from_micros(1),
             jitter: false,
             ..Default::default()
@@ -703,7 +706,7 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
                 let stream_result =
                     if let Some(per_step) = params.timeout.as_ref().and_then(|t| t.per_step) {
                         let duration = std::time::Duration::from_secs_f64(per_step);
-                        tokio::time::timeout(duration, stream_connect)
+                        time::timeout(duration, stream_connect)
                             .await
                             .unwrap_or_else(|_| {
                                 Err(SdkError::RequestTimeout {
@@ -832,10 +835,7 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
         // Apply total timeout if configured (Section 4.7)
         if let Some(total) = params.timeout.as_ref().and_then(|t| t.total) {
             let duration = std::time::Duration::from_secs_f64(total);
-            if tokio::time::timeout(duration, tool_loop_future)
-                .await
-                .is_err()
-            {
+            if time::timeout(duration, tool_loop_future).await.is_err() {
                 let _ = tx
                     .send(Err(SdkError::RequestTimeout {
                         message: format!("Total timeout of {total}s exceeded"),
@@ -848,7 +848,7 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
         }
     });
 
-    Ok(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)))
+    Ok(Box::pin(ReceiverStream::new(rx)))
 }
 
 /// Internal single-round streaming (no tool loop). Used by `stream_object()`.
@@ -863,7 +863,7 @@ async fn stream_generate_raw(
     // Apply per_step timeout to the initial connection (Section 4.7)
     let inner_stream = if let Some(per_step) = params.timeout.as_ref().and_then(|t| t.per_step) {
         let duration = std::time::Duration::from_secs_f64(per_step);
-        tokio::time::timeout(duration, client.stream(&request))
+        time::timeout(duration, client.stream(&request))
             .await
             .map_err(|_| SdkError::RequestTimeout {
                 message: format!("Per-step timeout of {per_step}s exceeded"),
@@ -892,25 +892,24 @@ async fn stream_generate_raw(
     // Apply total timeout to the stream (Section 4.7)
     if let Some(total) = params.timeout.as_ref().and_then(|t| t.total) {
         let duration = std::time::Duration::from_secs_f64(total);
-        let deadline = tokio::time::Instant::now() + duration;
+        let deadline = time::Instant::now() + duration;
         let total_copy = total;
-        let timed_stream =
-            futures::stream::unfold((stream, false), move |(mut stream, done)| async move {
-                if done {
-                    return None;
-                }
-                match tokio::time::timeout_at(deadline, stream.next()).await {
-                    Ok(Some(item)) => Some((item, (stream, false))),
-                    Ok(None) => None, // stream completed naturally
-                    Err(_) => Some((
-                        Err(SdkError::RequestTimeout {
-                            message: format!("Total timeout of {total_copy}s exceeded"),
-                            source: None,
-                        }),
-                        (stream, true),
-                    )),
-                }
-            });
+        let timed_stream = stream::unfold((stream, false), move |(mut stream, done)| async move {
+            if done {
+                return None;
+            }
+            match time::timeout_at(deadline, stream.next()).await {
+                Ok(Some(item)) => Some((item, (stream, false))),
+                Ok(None) => None, // stream completed naturally
+                Err(_) => Some((
+                    Err(SdkError::RequestTimeout {
+                        message: format!("Total timeout of {total_copy}s exceeded"),
+                        source: None,
+                    }),
+                    (stream, true),
+                )),
+            }
+        });
         Ok(Box::pin(timed_stream))
     } else {
         Ok(stream)
@@ -1099,7 +1098,7 @@ pub async fn stream_object(
                 }
             }
 
-            futures::future::ready(Some(futures::stream::iter(events)))
+            future::ready(Some(stream::iter(events)))
         },
     );
 
@@ -1672,7 +1671,7 @@ mod tests {
         .unwrap();
 
         let events: Vec<ObjectStreamEvent> = obj_stream
-            .filter_map(|r| futures::future::ready(r.ok()))
+            .filter_map(|r| future::ready(r.ok()))
             .collect()
             .await;
 
@@ -1710,7 +1709,7 @@ mod tests {
         .unwrap();
 
         let events: Vec<ObjectStreamEvent> = obj_stream
-            .filter_map(|r| futures::future::ready(r.ok()))
+            .filter_map(|r| future::ready(r.ok()))
             .collect()
             .await;
 
@@ -1967,7 +1966,7 @@ mod tests {
 
         let texts: Vec<String> = result
             .text_stream()
-            .filter_map(|r| futures::future::ready(r.ok()))
+            .filter_map(|r| future::ready(r.ok()))
             .collect()
             .await;
 

@@ -9,10 +9,12 @@ use fabro_core::outcome::NodeResult;
 use fabro_core::state::RunState;
 
 use crate::artifact::{offload_large_values, sync_artifacts_to_env, ArtifactStore};
+use crate::asset_snapshot::collect_assets;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::StageUsage;
+use fabro_core::error::Result as CoreResult;
 use fabro_core::lifecycle::NodeDecision;
 
 type WfRunState = RunState<Option<StageUsage>>;
@@ -55,11 +57,7 @@ impl ArtifactLifecycle {
 
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
-    async fn on_run_start(
-        &self,
-        _graph: &WorkflowGraph,
-        _state: &WfRunState,
-    ) -> fabro_core::error::Result<()> {
+    async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
         // Swap in a fresh artifact store on restart (don't call clear() — preserves files on disk)
         let mut store = self.artifact_store.lock().unwrap();
         *store = ArtifactStore::new(self.artifact_values_dir.clone());
@@ -71,7 +69,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         &self,
         _ctx: &AttemptContext<'_, WorkflowGraph>,
         _state: &WfRunState,
-    ) -> fabro_core::error::Result<WfNodeDecision> {
+    ) -> CoreResult<WfNodeDecision> {
         // Record epoch seconds (floored to integer for macOS stat mtime parity)
         let epoch = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -85,7 +83,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         &self,
         ctx: &AttemptResultContext<'_, WorkflowGraph>,
         state: &WfRunState,
-    ) -> fabro_core::error::Result<()> {
+    ) -> CoreResult<()> {
         if self.asset_globs.is_empty() {
             return Ok(());
         }
@@ -103,14 +101,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
             .join(format!("retry_{}", ctx.attempt));
         let _ = std::fs::create_dir_all(&stage_dir);
 
-        match crate::asset_snapshot::collect_assets(
-            &*self.sandbox,
-            &stage_dir,
-            &self.asset_globs,
-            epoch,
-        )
-        .await
-        {
+        match collect_assets(&*self.sandbox, &stage_dir, &self.asset_globs, epoch).await {
             Ok(summary) if summary.files_copied > 0 => {
                 self.emitter.emit(&WorkflowRunEvent::AssetsCaptured {
                     node_id: node_id.to_string(),
@@ -137,7 +128,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         node: &WorkflowNode,
         result: &mut WfNodeResult,
         _state: &WfRunState,
-    ) -> fabro_core::error::Result<()> {
+    ) -> CoreResult<()> {
         let node_id = node.id();
 
         // Offload large context_updates values to artifact store

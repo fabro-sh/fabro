@@ -10,8 +10,11 @@ use anyhow::{bail, Result};
 use fabro_interview::{AnswerValue, ConsoleInterviewer};
 use fabro_store::RuntimeState;
 use fabro_util::terminal::Styles;
-use fabro_workflows::records::{ConclusionExt, RunRecordExt};
+use fabro_workflows::outcome::StageStatus;
+use fabro_workflows::records::{Conclusion, ConclusionExt, RunRecord, RunRecordExt};
 use fabro_workflows::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
+use tokio::signal::ctrl_c;
+use tokio::time::sleep;
 
 use super::run_progress;
 
@@ -41,7 +44,7 @@ pub async fn attach_run(
     let mut engine_guard = engine_child.map(EngineChildGuard::new);
 
     let is_tty = std::io::stderr().is_terminal();
-    let verbose = fabro_workflows::records::RunRecord::load(run_dir)
+    let verbose = RunRecord::load(run_dir)
         .map(|record| record.settings.verbose_enabled())
         .unwrap_or(false);
     let mut progress_ui = run_progress::ProgressUI::new(is_tty, verbose);
@@ -51,7 +54,7 @@ pub async fn attach_run(
     {
         let cancelled = Arc::clone(&cancelled);
         tokio::spawn(async move {
-            let _ = tokio::signal::ctrl_c().await;
+            let _ = ctrl_c().await;
             cancelled.store(true, Ordering::Relaxed);
         });
     }
@@ -62,7 +65,7 @@ pub async fn attach_run(
     // engine death so we surface the real failure instead of timing out.
     let mut wait_count = 0;
     while !progress_path.exists() {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        sleep(std::time::Duration::from_millis(100)).await;
         wait_count += 1;
 
         // Check if engine died before writing any progress
@@ -140,7 +143,7 @@ pub async fn attach_run(
                     {
                         break;
                     }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    sleep(Duration::from_millis(100)).await;
                 }
             } else {
                 if let Some(guard) = engine_guard.as_mut() {
@@ -246,7 +249,7 @@ pub async fn attach_run(
             }
         }
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        sleep(Duration::from_millis(100)).await;
     }
 
     // Finish progress bars
@@ -438,11 +441,10 @@ fn write_interview_response_atomically(
 
 fn determine_exit_code(conclusion_path: &Path, status_record: Option<RunStatusRecord>) -> ExitCode {
     if conclusion_path.exists() {
-        if let Ok(conclusion) = fabro_workflows::records::Conclusion::load(conclusion_path) {
+        if let Ok(conclusion) = Conclusion::load(conclusion_path) {
             let success = matches!(
                 conclusion.status,
-                fabro_workflows::outcome::StageStatus::Success
-                    | fabro_workflows::outcome::StageStatus::PartialSuccess
+                StageStatus::Success | StageStatus::PartialSuccess
             );
             return if success {
                 ExitCode::from(0)

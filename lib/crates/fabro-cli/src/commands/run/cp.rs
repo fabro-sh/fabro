@@ -1,11 +1,16 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+use fabro_agent::sandbox::Sandbox;
 use fabro_config::FabroSettingsExt;
+use fabro_sandbox::reconnect::reconnect;
 use fabro_sandbox::SandboxRecordExt;
+use fabro_workflows::run_lookup::{resolve_run, runs_base};
+use tokio::fs;
 use tracing::{debug, info};
 
 use crate::args::CpArgs;
+use crate::cli_config::load_cli_settings;
 use crate::shared::split_run_path;
 
 enum CopyDirection {
@@ -23,8 +28,8 @@ enum CopyDirection {
 
 pub async fn cp_command(args: CpArgs) -> Result<()> {
     let direction = parse_direction(&args.src, &args.dst)?;
-    let cli_config = crate::cli_config::load_cli_settings(None)?;
-    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
+    let cli_config = load_cli_settings(None)?;
+    let base = runs_base(&cli_config.storage_dir());
 
     match direction {
         CopyDirection::Download {
@@ -90,11 +95,8 @@ fn parse_direction(src: &str, dst: &str) -> Result<CopyDirection> {
     }
 }
 
-async fn load_sandbox(
-    base: &Path,
-    run_prefix: &str,
-) -> Result<Box<dyn fabro_agent::sandbox::Sandbox>> {
-    let run_dir = fabro_workflows::run_lookup::resolve_run(base, run_prefix)?.path;
+async fn load_sandbox(base: &Path, run_prefix: &str) -> Result<Box<dyn Sandbox>> {
+    let run_dir = resolve_run(base, run_prefix)?.path;
     let sandbox_json = run_dir.join("sandbox.json");
     debug!(path = %sandbox_json.display(), "Loading sandbox record");
     let record = fabro_sandbox::SandboxRecord::load(&sandbox_json).context(
@@ -102,11 +104,11 @@ async fn load_sandbox(
     )?;
 
     info!(run_id = %run_prefix, provider = %record.provider, "Connecting to sandbox");
-    fabro_sandbox::reconnect::reconnect(&record).await
+    reconnect(&record).await
 }
 
 async fn download_recursive(
-    sandbox: &dyn fabro_agent::sandbox::Sandbox,
+    sandbox: &dyn Sandbox,
     remote_path: &str,
     local_path: &Path,
 ) -> Result<()> {
@@ -123,7 +125,7 @@ async fn download_recursive(
         let remote_file = format!("{remote_path}/{}", entry.name);
         let local_file = local_path.join(&entry.name);
         if let Some(parent) = local_file.parent() {
-            tokio::fs::create_dir_all(parent)
+            fs::create_dir_all(parent)
                 .await
                 .with_context(|| format!("Failed to create directory {}", parent.display()))?;
         }
@@ -139,7 +141,7 @@ async fn download_recursive(
 }
 
 async fn upload_recursive(
-    sandbox: &dyn fabro_agent::sandbox::Sandbox,
+    sandbox: &dyn Sandbox,
     local_path: &Path,
     remote_path: &str,
 ) -> Result<()> {
@@ -147,7 +149,7 @@ async fn upload_recursive(
     let mut stack = vec![(local_path.to_path_buf(), remote_path.to_string())];
 
     while let Some((dir_path, dir_remote)) = stack.pop() {
-        let mut entries = tokio::fs::read_dir(&dir_path)
+        let mut entries = fs::read_dir(&dir_path)
             .await
             .with_context(|| format!("Failed to read directory {}", dir_path.display()))?;
 

@@ -9,6 +9,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 
 use fabro_agent::AgentEvent;
 use fabro_interview::{Answer, ConsoleInterviewer, Interviewer, Question};
+use fabro_util::version::FABRO_VERSION;
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::outcome::StageStatus;
 
@@ -1227,7 +1228,7 @@ impl ProgressUI {
     }
 
     pub fn show_version(&mut self) {
-        let version = fabro_util::version::FABRO_VERSION;
+        let version = FABRO_VERSION;
         match &self.renderer {
             ProgressRenderer::Tty(tty) => {
                 let bar = tty.multi.add(ProgressBar::new_spinner());

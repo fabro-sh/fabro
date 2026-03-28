@@ -3,6 +3,7 @@ use crate::error::AgentError;
 use crate::event::EventEmitter;
 use crate::file_tracker::FileTracker;
 use crate::history::History;
+use crate::truncation;
 use crate::types::{AgentEvent, Turn};
 use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request};
@@ -212,7 +213,7 @@ pub fn render_turns_for_summary(turns: &[Turn]) -> String {
                     let truncated = if args_str.len() > 500 {
                         format!(
                             "{}...",
-                            &args_str[..crate::truncation::floor_char_boundary(&args_str, 500)]
+                            &args_str[..truncation::floor_char_boundary(&args_str, 500)]
                         )
                     } else {
                         args_str
@@ -226,8 +227,7 @@ pub fn render_turns_for_summary(turns: &[Turn]) -> String {
                     let truncated = if content_str.len() > 500 {
                         format!(
                             "{}...",
-                            &content_str
-                                [..crate::truncation::floor_char_boundary(&content_str, 500)]
+                            &content_str[..truncation::floor_char_boundary(&content_str, 500)]
                         )
                     } else {
                         content_str

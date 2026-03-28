@@ -2,18 +2,23 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use fabro_config::server::{load_server_settings, resolve_storage_dir};
 use fabro_model::{Catalog, Provider};
 use fabro_util::terminal::Styles;
+use fabro_workflows::git::GitAuthor;
 use tokio::net::TcpListener;
+use tokio::time::interval;
 use tracing::{error, info, warn};
 
 use clap::Args;
 
 use fabro_config::FabroSettings;
 
-use crate::jwt_auth::{AuthMode, AuthStrategy};
-use crate::server::build_router;
-use crate::tls::ClientAuth;
+use crate::github_webhooks::WebhookManager;
+use crate::jwt_auth::{decode_pem_env, resolve_auth_mode, AuthMode, AuthStrategy};
+use crate::server::{build_router, create_app_state_with_options, spawn_scheduler};
+use crate::tls::{build_rustls_config, serve_tls, ClientAuth};
+use fabro_llm::client::Client as LlmClient;
 use fabro_sandbox::SandboxProvider;
 use fabro_workflows::pipeline::LlmSpec;
 
@@ -62,7 +67,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     let dry_run_mode = if args.dry_run {
         true
     } else {
-        match fabro_llm::client::Client::from_env().await {
+        match LlmClient::from_env().await {
             Ok(c) if c.provider_names().is_empty() => {
                 eprintln!(
                     "{} No LLM providers configured. Running in dry-run mode.",
@@ -83,8 +88,8 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
 
     // Initialize data directory and SQLite database
     let config_path = args.config;
-    let server_settings = fabro_config::server::load_server_settings(config_path.as_deref())?;
-    let data_dir = fabro_config::server::resolve_storage_dir(&server_settings);
+    let server_settings = load_server_settings(config_path.as_deref())?;
+    let data_dir = resolve_storage_dir(&server_settings);
 
     // Shared config for live reloading
     let shared_config = Arc::new(RwLock::new(server_settings));
@@ -121,7 +126,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
             .as_ref()
             .map(|w| w.auth.allowed_usernames.clone())
             .unwrap_or_default();
-        let auth_mode = crate::jwt_auth::resolve_auth_mode(&api, allowed_usernames);
+        let auth_mode = resolve_auth_mode(&api, allowed_usernames);
         let client_auth = api.tls.as_ref().map(|_| client_auth_from_mode(&auth_mode));
         let max_concurrent_runs = args
             .max_concurrent_runs
@@ -133,7 +138,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     let git_author = {
         let cfg = shared_config.read().expect("config lock poisoned");
         let author = cfg.git_author();
-        fabro_workflows::git::GitAuthor::from_options(
+        GitAuthor::from_options(
             author.and_then(|a| a.name.clone()),
             author.and_then(|a| a.email.clone()),
         )
@@ -142,7 +147,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         let cfg = shared_config.read().expect("config lock poisoned");
         cfg.hooks.clone()
     };
-    let state = crate::server::create_app_state_with_options(
+    let state = create_app_state_with_options(
         db,
         factory,
         dry_run_mode,
@@ -150,7 +155,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         git_author,
         hooks,
     );
-    crate::server::spawn_scheduler(Arc::clone(&state));
+    spawn_scheduler(Arc::clone(&state));
     let router = build_router(state, auth_mode);
 
     let addr = format!("{}:{}", args.host, args.port);
@@ -183,13 +188,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
             let private_key_pem = read_github_private_key();
             match (secret, private_key_pem) {
                 (Some(secret), Some(pem)) => {
-                    match crate::github_webhooks::WebhookManager::start(
-                        secret.into_bytes(),
-                        &app_id,
-                        &pem,
-                    )
-                    .await
-                    {
+                    match WebhookManager::start(secret.into_bytes(), &app_id, &pem).await {
                         Ok(manager) => Some(manager),
                         Err(err) => {
                             error!(error = %err, "Failed to start webhook listener");
@@ -210,11 +209,11 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     let config_for_poll = Arc::clone(&shared_config);
     let config_path_for_poll = config_path.clone();
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        let mut interval = interval(Duration::from_secs(5));
         interval.tick().await; // skip first immediate tick
         loop {
             interval.tick().await;
-            match fabro_config::server::load_server_settings(config_path_for_poll.as_deref()) {
+            match load_server_settings(config_path_for_poll.as_deref()) {
                 Ok(new_config) => {
                     let changed = {
                         let cfg = config_for_poll.read().expect("config lock poisoned");
@@ -243,12 +242,12 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     if let Some(ref tls_config) = tls_config {
         let client_auth = client_auth.unwrap();
 
-        let rustls_config = crate::tls::build_rustls_config(tls_config, client_auth);
+        let rustls_config = build_rustls_config(tls_config, client_auth);
         let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
 
         info!("TLS enabled");
 
-        crate::tls::serve_tls(listener, tls_acceptor, router).await?;
+        serve_tls(listener, tls_acceptor, router).await?;
     } else {
         axum::serve(listener, router).await?;
     }
@@ -308,10 +307,7 @@ fn resolve_model_provider(
 /// Read the GitHub App private key from the environment, decoding base64 if needed.
 fn read_github_private_key() -> Option<String> {
     let raw = std::env::var("GITHUB_APP_PRIVATE_KEY").ok()?;
-    Some(crate::jwt_auth::decode_pem_env(
-        "GITHUB_APP_PRIVATE_KEY",
-        &raw,
-    ))
+    Some(decode_pem_env("GITHUB_APP_PRIVATE_KEY", &raw))
 }
 
 /// Derive client certificate verification mode from the resolved auth strategies.

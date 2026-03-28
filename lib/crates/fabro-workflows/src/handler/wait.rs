@@ -6,6 +6,7 @@ use crate::context::Context;
 use crate::error::FabroError;
 use crate::outcome::Outcome;
 use fabro_graphviz::graph::{AttrValue, Graph, Node};
+use tokio::time::sleep;
 
 use super::{EngineServices, Handler};
 
@@ -32,7 +33,7 @@ impl Handler for WaitHandler {
                     node.id
                 ))
             })?;
-        tokio::time::sleep(duration).await;
+        sleep(duration).await;
         Ok(Outcome::success())
     }
 }
