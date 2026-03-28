@@ -6,7 +6,8 @@ use super::Transform;
 pub struct ModelResolutionTransform;
 
 impl Transform for ModelResolutionTransform {
-    fn apply(&self, graph: &mut Graph) {
+    fn apply(&self, graph: Graph) -> Graph {
+        let mut graph = graph;
         for node in graph.nodes.values_mut() {
             let model = node
                 .attrs
@@ -29,6 +30,8 @@ impl Transform for ModelResolutionTransform {
                 }
             }
         }
+
+        graph
     }
 }
 
@@ -48,7 +51,7 @@ mod tests {
         );
         graph.nodes.insert("a".to_string(), node);
 
-        ModelResolutionTransform.apply(&mut graph);
+        let graph = ModelResolutionTransform.apply(graph);
 
         assert_eq!(
             graph.nodes["a"]
@@ -73,7 +76,7 @@ mod tests {
         );
         graph.nodes.insert("a".to_string(), node);
 
-        ModelResolutionTransform.apply(&mut graph);
+        let graph = ModelResolutionTransform.apply(graph);
 
         assert_eq!(
             graph.nodes["a"]
@@ -94,7 +97,7 @@ mod tests {
         );
         graph.nodes.insert("a".to_string(), node);
 
-        ModelResolutionTransform.apply(&mut graph);
+        let graph = ModelResolutionTransform.apply(graph);
 
         assert_eq!(graph.nodes["a"].attrs.get("provider"), None);
     }
@@ -105,7 +108,7 @@ mod tests {
         let node = Node::new("a");
         graph.nodes.insert("a".to_string(), node);
 
-        ModelResolutionTransform.apply(&mut graph);
+        let graph = ModelResolutionTransform.apply(graph);
 
         assert_eq!(graph.nodes["a"].attrs.get("provider"), None);
     }
@@ -118,7 +121,7 @@ mod tests {
             .insert("model".to_string(), AttrValue::String("gpt-54".to_string()));
         graph.nodes.insert("a".to_string(), node);
 
-        ModelResolutionTransform.apply(&mut graph);
+        let graph = ModelResolutionTransform.apply(graph);
 
         assert_eq!(
             graph.nodes["a"]
@@ -146,7 +149,7 @@ mod tests {
         );
         graph.nodes.insert("a".to_string(), node);
 
-        ModelResolutionTransform.apply(&mut graph);
+        let graph = ModelResolutionTransform.apply(graph);
 
         assert_eq!(
             graph.nodes["a"]

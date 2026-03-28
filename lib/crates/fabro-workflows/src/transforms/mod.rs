@@ -2,7 +2,8 @@ use fabro_graphviz::graph::Graph;
 
 /// A transform that modifies the pipeline graph after parsing and before validation.
 pub trait Transform {
-    fn apply(&self, graph: &mut Graph);
+    #[must_use]
+    fn apply(&self, graph: Graph) -> Graph;
 }
 
 mod file_inlining;

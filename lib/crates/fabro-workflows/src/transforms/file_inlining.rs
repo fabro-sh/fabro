@@ -72,7 +72,8 @@ impl FileInliningTransform {
 }
 
 impl Transform for FileInliningTransform {
-    fn apply(&self, graph: &mut Graph) {
+    fn apply(&self, graph: Graph) -> Graph {
+        let mut graph = graph;
         let fallback = self.fallback_dir.as_deref();
 
         // Inline @file refs in node prompts
@@ -95,6 +96,8 @@ impl Transform for FileInliningTransform {
                     .insert("goal".to_string(), AttrValue::String(resolved));
             }
         }
+
+        graph
     }
 }
 
@@ -173,7 +176,7 @@ mod tests {
         graph.nodes.insert("work".to_string(), node);
 
         let transform = FileInliningTransform::new(dir.path().to_path_buf(), None);
-        transform.apply(&mut graph);
+        let graph = transform.apply(graph);
 
         assert_eq!(
             graph.nodes["work"]
@@ -284,7 +287,7 @@ mod tests {
             base.path().to_path_buf(),
             Some(fallback.path().to_path_buf()),
         );
-        transform.apply(&mut graph);
+        let graph = transform.apply(graph);
 
         assert_eq!(
             graph.nodes["work"]
