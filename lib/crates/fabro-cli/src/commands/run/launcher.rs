@@ -64,7 +64,10 @@ pub(crate) fn launcher_record_is_running(record: &LauncherRecord) -> bool {
 #[cfg(unix)]
 #[allow(unsafe_code)]
 fn process_alive(pid: u32) -> bool {
-    unsafe { libc::kill(i32::try_from(pid).unwrap(), 0) == 0 }
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    unsafe { libc::kill(pid, 0) == 0 }
 }
 
 #[cfg(not(unix))]
