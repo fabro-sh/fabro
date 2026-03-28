@@ -110,8 +110,7 @@ fn tool_category(name: &str) -> &'static str {
 fn is_auto_approved(level: PermissionLevel, category: &str) -> bool {
     matches!(
         (level, category),
-        (_, "read")
-            | (_, "subagent")
+        (_, "read" | "subagent")
             | (PermissionLevel::ReadWrite | PermissionLevel::Full, "write")
             | (PermissionLevel::Full, "shell")
     )

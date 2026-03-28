@@ -1100,10 +1100,11 @@ fn rename_fields(event_name: &str, fields: &mut serde_json::Map<String, serde_js
 
 /// Current time as epoch milliseconds.
 fn epoch_millis() -> i64 {
-    std::time::SystemTime::now()
+    let millis = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_millis() as i64
+        .as_millis();
+    i64::try_from(millis).unwrap()
 }
 
 /// Listener callback type for workflow run events.

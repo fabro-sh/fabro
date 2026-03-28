@@ -165,7 +165,7 @@ impl Session {
             }
 
             let manager = Arc::new(manager);
-            let mcp_tools = mcp_integration::make_mcp_tools(manager);
+            let mcp_tools = mcp_integration::make_mcp_tools(&manager);
             if let Some(profile) = Arc::get_mut(&mut self.provider_profile) {
                 for tool in mcp_tools {
                     profile.tool_registry_mut().register(tool);
@@ -588,6 +588,8 @@ impl Session {
     }
 
     async fn run_single_input(&mut self, input: &str) -> Result<(), AgentError> {
+        const STREAM_CONSUME_RETRIES: usize = 3;
+
         if self.state == SessionState::Closed {
             return Err(AgentError::SessionClosed);
         }
@@ -700,7 +702,6 @@ impl Session {
             // Consume the stream, retrying up to 3 times if the provider
             // closes the stream without sending a Finish event. If visible
             // output was already emitted, clear it before replaying the turn.
-            const STREAM_CONSUME_RETRIES: usize = 3;
             let mut response = None;
 
             for stream_attempt in 0..=STREAM_CONSUME_RETRIES {

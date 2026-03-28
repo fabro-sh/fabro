@@ -121,7 +121,7 @@ impl HookExecutorImpl {
         work_dir: Option<&Path>,
     ) -> HookDecision {
         let context_json = serde_json::to_string(context).unwrap_or_default();
-        let timeout_ms = definition.timeout().as_millis() as u64;
+        let timeout_ms = u64::try_from(definition.timeout().as_millis()).unwrap();
 
         let mut env_vars = HashMap::new();
         env_vars.insert("FABRO_EVENT".to_string(), context.event.to_string());
@@ -589,7 +589,7 @@ impl HookExecutor for HookExecutorImpl {
             },
         };
 
-        let duration_ms = start.elapsed().as_millis() as u64;
+        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap();
         HookResult {
             hook_name: definition.name.clone(),
             decision,

@@ -46,6 +46,7 @@ impl Context {
 
     /// Deep copy for parallel branch isolation.
     /// `.clone()` shares state (Arc clone); `.fork()` creates an independent copy.
+    #[must_use]
     pub fn fork(&self) -> Self {
         Self {
             values: Arc::new(RwLock::new(self.snapshot())),
@@ -64,7 +65,8 @@ impl Context {
     pub fn node_visit_count(&self) -> usize {
         self.get("internal.node_visit_count")
             .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize
+            .map(|v| usize::try_from(v).unwrap())
+            .unwrap_or(0)
     }
 }
 

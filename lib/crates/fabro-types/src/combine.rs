@@ -3,6 +3,7 @@ use std::hash::Hash;
 use std::path::PathBuf;
 
 pub trait Combine {
+    #[must_use]
     fn combine(self, other: Self) -> Self;
 }
 

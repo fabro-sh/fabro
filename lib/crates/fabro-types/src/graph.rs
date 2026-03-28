@@ -72,7 +72,7 @@ impl AttrValue {
 pub fn is_llm_handler_type(handler_type: Option<&str>) -> bool {
     matches!(
         handler_type,
-        Some("agent") | Some("agent_loop") | Some("prompt") | Some("one_shot")
+        Some("agent" | "agent_loop" | "prompt" | "one_shot")
     )
 }
 
@@ -428,6 +428,7 @@ impl Graph {
     /// Graph-level `loop_restart_signature_limit` (default 3).
     /// When the same failure signature repeats this many times, the pipeline aborts.
     pub fn loop_restart_signature_limit(&self) -> usize {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // filtered >= 1 above
         self.attrs
             .get("loop_restart_signature_limit")
             .and_then(AttrValue::as_i64)

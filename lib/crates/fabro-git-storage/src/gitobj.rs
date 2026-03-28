@@ -16,16 +16,16 @@ pub enum FileMode {
 impl FileMode {
     fn as_i32(self) -> i32 {
         match self {
-            Self::Blob => 0o100644,
-            Self::BlobExecutable => 0o100755,
-            Self::Tree => 0o040000,
+            Self::Blob => 0o100_644,
+            Self::BlobExecutable => 0o100_755,
+            Self::Tree => 0o040_000,
         }
     }
 
     fn from_i32(mode: i32) -> Self {
         match mode {
-            0o100755 => Self::BlobExecutable,
-            0o040000 => Self::Tree,
+            0o100_755 => Self::BlobExecutable,
+            0o040_000 => Self::Tree,
             _ => Self::Blob,
         }
     }

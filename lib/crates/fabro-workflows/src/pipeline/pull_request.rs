@@ -74,7 +74,7 @@ fn format_duration_ms(ms: u64) -> String {
     if secs >= 60 {
         format!("{}m {}s", secs / 60, secs % 60)
     } else {
-        format!("{}s", secs)
+        format!("{secs}s")
     }
 }
 

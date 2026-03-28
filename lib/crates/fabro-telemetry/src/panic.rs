@@ -93,11 +93,11 @@ fn report_panic(info: &PanicHookInfo<'_>) {
     }
 
     let event = build_event(&message);
-    spawn_panic_sender(event);
+    spawn_panic_sender(&event);
 }
 
 /// Serialize the Sentry event to a temp file and spawn `fabro __send_panic <path>`.
-fn spawn_panic_sender(event: Event<'static>) {
+fn spawn_panic_sender(event: &Event<'static>) {
     let Ok(json) = serde_json::to_vec(&event) else {
         return;
     };
@@ -174,8 +174,7 @@ mod tests {
     #[test]
     fn send_panic_noops_without_dsn() {
         // SENTRY_DSN is not set at compile time in tests, so this should error.
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(capture(Path::new("/nonexistent")));
+        let result = capture(Path::new("/nonexistent"));
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("SENTRY_DSN not set"));

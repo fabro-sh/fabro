@@ -69,7 +69,7 @@ pub fn decode_pem_env(name: &str, value: &str) -> String {
 ///
 /// Call this once at startup before serving requests. Panics if the
 /// configuration is invalid (JWT strategy but no public key, or mTLS without TLS config).
-pub fn resolve_auth_mode(api_config: &ApiSettings, allowed_usernames: Vec<String>) -> AuthMode {
+pub fn resolve_auth_mode(api_config: &ApiSettings, allowed_usernames: &[String]) -> AuthMode {
     use fabro_config::server::ApiAuthStrategy;
 
     if api_config.authentication_strategies.is_empty() {
@@ -93,7 +93,7 @@ pub fn resolve_auth_mode(api_config: &ApiSettings, allowed_usernames: Vec<String
                 AuthStrategy::Jwt {
                     key: Arc::new(key),
                     validation: Arc::new(jwt_validation()),
-                    allowed_usernames: allowed_usernames.clone(),
+                    allowed_usernames: allowed_usernames.to_vec(),
                 }
             }
             ApiAuthStrategy::Mtls => {

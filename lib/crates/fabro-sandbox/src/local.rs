@@ -118,9 +118,6 @@ impl Sandbox for LocalSandbox {
         path: &str,
         depth: Option<usize>,
     ) -> Result<Vec<DirEntry>, String> {
-        let full_path = self.resolve_path(path);
-        let max_depth = depth.unwrap_or(1);
-
         fn list_recursive(
             base: &std::path::Path,
             prefix: &str,
@@ -160,6 +157,8 @@ impl Sandbox for LocalSandbox {
             Ok(())
         }
 
+        let full_path = self.resolve_path(path);
+        let max_depth = depth.unwrap_or(1);
         let mut entries = Vec::new();
         list_recursive(&full_path, "", 0, max_depth, &mut entries)?;
         Ok(entries)

@@ -66,7 +66,7 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         RunCommands::Diff(args) => diff::run(args).await,
         RunCommands::Logs(args) => {
             let styles = Styles::detect_stdout();
-            logs::run(args, &styles)
+            logs::run(&args, &styles)
         }
         RunCommands::Resume(args) => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
@@ -87,7 +87,7 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         }
         RunCommands::Wait(args) => {
             let styles = Styles::detect_stderr();
-            wait::run(args, &styles)
+            wait::run(&args, &styles)
         }
     }
 }

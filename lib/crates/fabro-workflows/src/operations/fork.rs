@@ -19,7 +19,7 @@ pub struct ForkRunInput {
 /// Create a new run that branches from an existing run at a specific checkpoint.
 ///
 /// Returns the new run ID.
-pub fn fork(store: &Store, input: ForkRunInput) -> Result<String> {
+pub fn fork(store: &Store, input: &ForkRunInput) -> Result<String> {
     let timeline = build_timeline(store, &input.source_run_id)?;
     let entry = match input.target.as_ref() {
         Some(target) => timeline.resolve(target)?,
@@ -39,7 +39,7 @@ fn fork_from_entry(
     let new_run_id = ulid::Ulid::new().to_string();
     let sig = Signature::now("Fabro", "noreply@fabro.sh")?;
 
-    let new_run_branch = format!("{}{new_run_id}", RUN_BRANCH_PREFIX);
+    let new_run_branch = format!("{RUN_BRANCH_PREFIX}{new_run_id}");
     match &entry.run_commit_sha {
         Some(sha) => {
             let oid =
@@ -134,7 +134,7 @@ fn fork_from_entry(
         .map_err(|e| anyhow::anyhow!("failed to write metadata entries: {e}"))?;
 
     if push {
-        let source_run_branch = format!("{}{source_run_id}", RUN_BRANCH_PREFIX);
+        let source_run_branch = format!("{RUN_BRANCH_PREFIX}{source_run_id}");
         let run_refspec = format!("refs/heads/{new_run_branch}:refs/heads/{new_run_branch}");
         let meta_refspec = format!("refs/heads/{new_meta_branch}:refs/heads/{new_meta_branch}");
         push_run_branches(
@@ -246,7 +246,7 @@ mod tests {
 
         let new_run_id = fork(
             &store,
-            ForkRunInput {
+            &ForkRunInput {
                 source_run_id: source_run_id.to_string(),
                 target: Some(RewindTarget::from_str("@2").unwrap()),
                 push: false,

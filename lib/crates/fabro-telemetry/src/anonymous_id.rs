@@ -46,7 +46,7 @@ pub fn compute_cli_id() -> Result<String> {
         .context("no MAC address found")?;
 
     let digest = md5::compute(mac.bytes());
-    Ok(format!("{:x}", digest))
+    Ok(format!("{digest:x}"))
 }
 
 #[cfg(test)]

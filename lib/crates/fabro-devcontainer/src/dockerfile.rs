@@ -29,7 +29,7 @@ pub(crate) fn generate(
     }
 
     if let Some(user) = remote_user {
-        sections.push(format!("USER {}", user));
+        sections.push(format!("USER {user}"));
     }
 
     let mut result = sections.join("\n\n");

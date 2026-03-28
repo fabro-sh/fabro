@@ -290,6 +290,13 @@ pub async fn create_pull_request(
     body: &str,
     draft: bool,
 ) -> Result<CreatedPullRequest, String> {
+    #[derive(Deserialize)]
+    struct PullRequestResponse {
+        html_url: String,
+        number: u64,
+        node_id: String,
+    }
+
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
     let client = reqwest::Client::new();
 
@@ -329,8 +336,7 @@ pub async fn create_pull_request(
         }
         401 | 403 => {
             return Err(format!(
-                "Authentication failed creating pull request ({})",
-                status
+                "Authentication failed creating pull request ({status})"
             ));
         }
         _ => {
@@ -339,13 +345,6 @@ pub async fn create_pull_request(
                 "Unexpected status {status} creating pull request: {body_text}"
             ));
         }
-    }
-
-    #[derive(Deserialize)]
-    struct PullRequestResponse {
-        html_url: String,
-        number: u64,
-        node_id: String,
     }
 
     let pr: PullRequestResponse = resp

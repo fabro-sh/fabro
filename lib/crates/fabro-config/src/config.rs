@@ -183,6 +183,7 @@ impl Combine for FabroConfig {
 }
 
 impl FabroConfig {
+    #[must_use]
     pub fn combine(self, other: Self) -> Self {
         Combine::combine(self, other)
     }

@@ -90,6 +90,7 @@ fn turns_to_messages(turns: &[fabro_api_types::SessionTurn]) -> Vec<LlmMessage> 
 
 fn spawn_generation(store: SessionStore, session_id: uuid::Uuid, dry_run: bool, seq_at_start: u64) {
     tokio::spawn(async move {
+        use futures_util::StreamExt;
         let (event_tx, model_id, model_provider, system_prompt, messages, generation_seq) = {
             let store = store.read().expect("session store lock poisoned");
             let Some(session) = store.get(&session_id) else {
@@ -156,7 +157,6 @@ fn spawn_generation(store: SessionStore, session_id: uuid::Uuid, dry_run: bool, 
             }
         };
 
-        use futures_util::StreamExt;
         let mut stream_result = stream_result;
         let mut full_text = String::new();
         while let Some(event) = stream_result.next().await {
@@ -321,6 +321,7 @@ pub async fn stream_session_events(
     State(state): State<Arc<AppState>>,
     Path(id): Path<uuid::Uuid>,
 ) -> Response {
+    use tokio_stream::StreamExt;
     let rx = {
         let store = state.sessions.read().expect("session store lock poisoned");
         match store.get(&id) {
@@ -328,8 +329,6 @@ pub async fn stream_session_events(
             None => return ApiError::not_found("Session not found.").into_response(),
         }
     };
-
-    use tokio_stream::StreamExt;
 
     let stream = BroadcastStream::new(rx).filter_map(|result| match result {
         Ok(event) => {

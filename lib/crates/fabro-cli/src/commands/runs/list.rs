@@ -78,7 +78,9 @@ pub(crate) fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
                 None => match run.start_time_dt {
                     Some(start) => {
                         let elapsed = now.signed_duration_since(start);
-                        format_duration_ms(elapsed.num_milliseconds().max(0) as u64)
+                        format_duration_ms(
+                            u64::try_from(elapsed.num_milliseconds().max(0)).unwrap(),
+                        )
                     }
                     None => "-".to_string(),
                 },

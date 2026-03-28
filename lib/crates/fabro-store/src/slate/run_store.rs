@@ -295,7 +295,7 @@ impl RunStore for SlateRunStore {
         let mut iter = self.inner.db.scan_prefix(prefix.as_bytes()).await?;
         let mut visits = BTreeSet::new();
         while let Some(entry) = iter.next().await? {
-            let key = key_to_string(entry.key)?;
+            let key = key_to_string(&entry.key)?;
             if let Some((current_node_id, visit, _)) = keys::parse_node_key(&key) {
                 if current_node_id == node_id {
                     visits.insert(visit);
@@ -400,7 +400,7 @@ impl RunStore for SlateRunStore {
         let mut iter = self.inner.db.scan_prefix(prefix.as_bytes()).await?;
         let mut assets = Vec::new();
         while let Some(entry) = iter.next().await? {
-            let key = key_to_string(entry.key)?;
+            let key = key_to_string(&entry.key)?;
             if let Some(asset) = key.strip_prefix(&prefix) {
                 assets.push(asset.to_string());
             }
@@ -417,7 +417,7 @@ impl RunStore for SlateRunStore {
         let mut iter = self.inner.db.scan_prefix(b"nodes/").await?;
         let mut visits = BTreeSet::new();
         while let Some(entry) = iter.next().await? {
-            let key = key_to_string(entry.key)?;
+            let key = key_to_string(&entry.key)?;
             if let Some((node_id, visit, _)) = keys::parse_node_key(&key) {
                 visits.insert((node_id, visit));
             }
@@ -497,7 +497,7 @@ where
     let mut iter = db.scan_prefix(prefix.as_bytes()).await?;
     let mut max_seq = 0;
     while let Some(entry) = iter.next().await? {
-        let key = key_to_string(entry.key)?;
+        let key = key_to_string(&entry.key)?;
         if let Some(seq) = parse(&key) {
             max_seq = max_seq.max(seq);
         }
@@ -512,7 +512,7 @@ where
     let mut iter = db.scan_prefix(keys::EVENTS_PREFIX.as_bytes()).await?;
     let mut events = Vec::new();
     while let Some(entry) = iter.next().await? {
-        let key = key_to_string(entry.key)?;
+        let key = key_to_string(&entry.key)?;
         let Some(seq) = keys::parse_event_seq(&key) else {
             continue;
         };
@@ -535,7 +535,7 @@ where
     let mut iter = db.scan_prefix(keys::CHECKPOINTS_PREFIX.as_bytes()).await?;
     let mut checkpoints = Vec::new();
     while let Some(entry) = iter.next().await? {
-        let key = key_to_string(entry.key)?;
+        let key = key_to_string(&entry.key)?;
         let Some(seq) = keys::parse_checkpoint_seq(&key) else {
             continue;
         };
@@ -545,7 +545,7 @@ where
     Ok(checkpoints)
 }
 
-fn key_to_string(key: Bytes) -> Result<String> {
+fn key_to_string(key: &Bytes) -> Result<String> {
     String::from_utf8(key.to_vec())
         .map_err(|err| StoreError::Other(format!("stored key is not valid UTF-8: {err}")))
 }

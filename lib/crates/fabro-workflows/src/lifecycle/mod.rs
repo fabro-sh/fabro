@@ -77,15 +77,15 @@ pub(crate) struct WorkflowLifecycle {
 impl WorkflowLifecycle {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        emitter: Arc<EventEmitter>,
+        emitter: &Arc<EventEmitter>,
         hook_runner: Option<Arc<HookRunner>>,
-        sandbox: Arc<dyn Sandbox>,
+        sandbox: &Arc<dyn Sandbox>,
         graph: Arc<GvGraph>,
-        run_dir: PathBuf,
-        run_options: Arc<RunOptions>,
+        run_dir: &PathBuf,
+        run_options: &Arc<RunOptions>,
         is_resume: bool,
     ) -> Self {
-        let runtime_state = RuntimeState::new(&run_dir);
+        let runtime_state = RuntimeState::new(run_dir);
         let restarted_from: Arc<Mutex<Option<(String, String)>>> = Arc::new(Mutex::new(None));
         let loop_restart_signature_limit = graph.loop_restart_signature_limit();
         let checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>> =
@@ -110,7 +110,7 @@ impl WorkflowLifecycle {
         };
 
         let event = EventLifecycle {
-            emitter: Arc::clone(&emitter),
+            emitter: Arc::clone(emitter),
             graph_name: graph.name.clone(),
             run_id: run_options.run_id.clone(),
             run_start: Mutex::new(Instant::now()),
@@ -127,7 +127,7 @@ impl WorkflowLifecycle {
 
         let hook = HookLifecycle {
             hook_runner,
-            sandbox: Arc::clone(&sandbox),
+            sandbox: Arc::clone(sandbox),
             hook_work_dir: working_directory.clone().map(PathBuf::from),
             run_id: run_options.run_id.clone(),
             graph_name: graph.name.clone(),
@@ -139,8 +139,8 @@ impl WorkflowLifecycle {
             run_dir: run_dir.clone(),
             run_id: run_options.run_id.clone(),
             graph: Arc::clone(&graph),
-            run_options: Arc::clone(&run_options),
-            emitter: Arc::clone(&emitter),
+            run_options: Arc::clone(run_options),
+            emitter: Arc::clone(emitter),
             circuit_breaker: Arc::clone(&circuit_breaker),
             checkpoint_enabled: true,
         };
@@ -148,22 +148,22 @@ impl WorkflowLifecycle {
         let start_node_id = graph.find_start_node().map(|n| n.id.clone());
 
         let git = GitLifecycle {
-            sandbox: Arc::clone(&sandbox),
+            sandbox: Arc::clone(sandbox),
             artifact_store: Arc::clone(&artifact_store),
-            emitter: Arc::clone(&emitter),
+            emitter: Arc::clone(emitter),
             run_dir: run_dir.clone(),
             run_id: run_options.run_id.clone(),
-            run_options: Arc::clone(&run_options),
+            run_options: Arc::clone(run_options),
             start_node_id,
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
             last_git_sha: Arc::clone(&last_git_sha),
         };
 
         let artifact = ArtifactLifecycle::new(
-            Arc::clone(&sandbox),
+            Arc::clone(sandbox),
             Arc::clone(&artifact_store),
             Some(runtime_state.artifact_values_dir()),
-            Arc::clone(&emitter),
+            Arc::clone(emitter),
             runtime_state.assets_dir(),
             run_options.asset_globs().to_vec(),
         );

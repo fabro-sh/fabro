@@ -99,10 +99,7 @@ fn build_live_diff_cmd(base_sha: &str, stat: bool, shortstat: bool) -> String {
         |_| format!("'{}'", base_sha.replace('\'', "'\\''")),
         |q| q.to_string(),
     );
-    format!(
-        "{} add -N . && {} diff{flags} {quoted_sha}",
-        GIT_REMOTE, GIT_REMOTE
-    )
+    format!("{GIT_REMOTE} add -N . && {GIT_REMOTE} diff{flags} {quoted_sha}")
 }
 
 fn colorize_diff_line(line: &str) -> String {

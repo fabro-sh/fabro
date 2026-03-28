@@ -11,7 +11,7 @@ use tracing::{debug, info};
 use crate::args::LogsArgs;
 use crate::cli_config::load_cli_settings;
 
-pub(crate) fn run(args: LogsArgs, styles: &Styles) -> Result<()> {
+pub(crate) fn run(args: &LogsArgs, styles: &Styles) -> Result<()> {
     let cli_config = load_cli_settings(None)?;
     let base = runs_base(&cli_config.storage_dir());
     let run = resolve_run(&base, &args.run)?;
@@ -241,9 +241,10 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                     lines.push(format!(
                         "{}{}",
                         pad,
-                        styles
-                            .dim
-                            .apply_to(format!("Tokens: {}", format_tokens(total as u64)))
+                        styles.dim.apply_to(format!(
+                            "Tokens: {}",
+                            format_tokens(u64::try_from(total).unwrap())
+                        ))
                     ));
                 }
                 if let Some(cache_read) = usage
@@ -259,8 +260,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                         pad,
                         styles.dim.apply_to(format!(
                             "Cache:  {} read, {} write",
-                            format_tokens(cache_read as u64),
-                            format_tokens(cache_write as u64)
+                            format_tokens(u64::try_from(cache_read).unwrap()),
+                            format_tokens(u64::try_from(cache_write).unwrap())
                         ))
                     ));
                 }
@@ -274,7 +275,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                             pad,
                             styles.dim.apply_to(format!(
                                 "Reasoning: {} tokens",
-                                format_tokens(reasoning as u64)
+                                format_tokens(u64::try_from(reasoning).unwrap())
                             ))
                         ));
                     }

@@ -180,8 +180,7 @@ impl HookDefinition {
                 format!("{event_str}:{short}")
             }
             Some(HookType::Http { ref url, .. }) => format!("{event_str}:{url}"),
-            Some(HookType::Prompt { ref prompt, .. })
-            | Some(HookType::Agent { ref prompt, .. }) => {
+            Some(HookType::Prompt { ref prompt, .. } | HookType::Agent { ref prompt, .. }) => {
                 let short = &prompt[..prompt.floor_char_boundary(20)];
                 format!("{event_str}:{short}")
             }

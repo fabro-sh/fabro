@@ -81,7 +81,7 @@ fn init_inner(level: TelemetryLevel, anonymous_id: String) {
         .name("telemetry".to_string())
         .spawn(move || {
             buffer::consumer_loop(
-                rx,
+                &rx,
                 buffer::BufferPolicy::default(),
                 |tracks| {
                     if let Err(err) = sender::upload_blocking(tracks) {

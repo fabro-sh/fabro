@@ -113,6 +113,7 @@ fn format_cost(cost: Option<f64>) -> String {
 fn format_speed(tps: Option<f64>) -> String {
     match tps {
         None => "-".to_string(),
+        #[allow(clippy::cast_possible_truncation)] // f64-to-integer: fractional loss is fine
         Some(t) => format!("{} tok/s", t as i64),
     }
 }

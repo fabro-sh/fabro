@@ -164,7 +164,10 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 index: stage_index,
                 attempt: ctx.attempt as usize,
                 max_attempts: ctx.result.max_attempts as usize,
-                delay_ms: ctx.backoff_delay.map(|d| d.as_millis() as u64).unwrap_or(0),
+                delay_ms: ctx
+                    .backoff_delay
+                    .map(|d| u64::try_from(d.as_millis()).unwrap())
+                    .unwrap_or(0),
             });
         }
         Ok(())
@@ -183,7 +186,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         }
         let gv = node.inner();
         let stage_index = state.stage_index;
-        let duration_ms = result.duration.as_millis() as u64;
+        let duration_ms = u64::try_from(result.duration.as_millis()).unwrap();
 
         if outcome.status == StageStatus::Fail {
             self.emitter.emit(&WorkflowRunEvent::StageFailed {
@@ -286,7 +289,8 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         if state.cancelled {
             return;
         }
-        let duration_ms = self.run_start.lock().unwrap().elapsed().as_millis() as u64;
+        let duration_ms =
+            u64::try_from(self.run_start.lock().unwrap().elapsed().as_millis()).unwrap();
         let artifact_count = self.artifact_store.lock().unwrap().list().len();
         let last_sha = self.last_git_sha.lock().unwrap().clone();
         let total_cost = {

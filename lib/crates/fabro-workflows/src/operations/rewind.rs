@@ -166,7 +166,7 @@ fn backfill_run_shas(store: &Store, run_id: &str, timeline: &mut [TimelineEntry]
         return;
     }
 
-    let run_branch = format!("{}{run_id}", RUN_BRANCH_PREFIX);
+    let run_branch = format!("{RUN_BRANCH_PREFIX}{run_id}");
     let Ok(sig) = Signature::now("Fabro", "noreply@fabro.sh") else {
         return;
     };
@@ -241,7 +241,7 @@ fn detect_parallel_interior(graph: &Graph) -> HashMap<String, String> {
     interior_map
 }
 
-pub fn rewind(store: &Store, input: RewindInput) -> Result<()> {
+pub fn rewind(store: &Store, input: &RewindInput) -> Result<()> {
     let timeline = build_timeline(store, &input.run_id)?;
     let entry = timeline.resolve(&input.target)?;
     rewind_to_entry(store, &input.run_id, entry, input.push)
@@ -258,7 +258,7 @@ fn rewind_to_entry(store: &Store, run_id: &str, entry: &TimelineEntry, push: boo
         entry.ordinal, entry.node_name
     );
 
-    let run_branch = format!("{}{run_id}", RUN_BRANCH_PREFIX);
+    let run_branch = format!("{RUN_BRANCH_PREFIX}{run_id}");
     match &entry.run_commit_sha {
         Some(sha) => {
             let oid =
@@ -494,7 +494,7 @@ mod tests {
 
         rewind(
             &store,
-            RewindInput {
+            &RewindInput {
                 run_id: "run-1".to_string(),
                 target: RewindTarget::Ordinal(1),
                 push: false,

@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use crate::event::Track;
 
+#[derive(Clone, Copy)]
 pub(crate) struct BufferPolicy {
     pub count_threshold: usize,
     pub time_threshold: Duration,
@@ -18,7 +19,7 @@ impl Default for BufferPolicy {
 }
 
 pub(crate) fn consumer_loop(
-    rx: Receiver<Track>,
+    rx: &Receiver<Track>,
     config: BufferPolicy,
     mid_flush: impl Fn(&[Track]),
     final_flush: impl Fn(&[Track]),
@@ -92,7 +93,7 @@ mod tests {
         drop(tx);
 
         consumer_loop(
-            rx,
+            &rx,
             BufferPolicy {
                 count_threshold: 2,
                 time_threshold: Duration::from_secs(60),
@@ -127,7 +128,7 @@ mod tests {
         drop(tx);
 
         consumer_loop(
-            rx,
+            &rx,
             BufferPolicy {
                 count_threshold: 2,
                 time_threshold: Duration::from_secs(60),
@@ -157,7 +158,7 @@ mod tests {
         // Don't drop yet — let time threshold fire
         let handle = std::thread::spawn(move || {
             consumer_loop(
-                rx,
+                &rx,
                 BufferPolicy {
                     count_threshold: 100, // won't trigger
                     time_threshold: Duration::from_millis(50),
@@ -196,7 +197,7 @@ mod tests {
         drop(tx); // disconnect immediately, below count threshold
 
         consumer_loop(
-            rx,
+            &rx,
             BufferPolicy {
                 count_threshold: 100, // won't trigger
                 time_threshold: Duration::from_secs(60),

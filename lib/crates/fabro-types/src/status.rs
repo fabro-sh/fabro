@@ -39,16 +39,16 @@ impl RunStatus {
         matches!(
             (self, to),
             (Self::Submitted, Self::Starting)
-                | (Self::Starting, Self::Running)
-                | (Self::Starting, Self::Failed)
-                | (Self::Running, Self::Succeeded)
-                | (Self::Running, Self::Failed)
-                | (Self::Running, Self::Paused)
-                | (Self::Running, Self::Removing)
-                | (Self::Paused, Self::Running)
-                | (Self::Paused, Self::Failed)
+                | (Self::Starting | Self::Paused, Self::Running)
+                | (
+                    Self::Starting | Self::Running | Self::Paused | Self::Removing,
+                    Self::Failed
+                )
+                | (
+                    Self::Running,
+                    Self::Succeeded | Self::Paused | Self::Removing
+                )
                 | (Self::Paused, Self::Removing)
-                | (Self::Removing, Self::Failed)
         )
     }
 

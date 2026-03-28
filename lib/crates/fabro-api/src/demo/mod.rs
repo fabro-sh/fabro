@@ -1,6 +1,6 @@
 //! Demo mode handlers that return static data for all API endpoints.
 //! Activated per-request via the `X-Fabro-Demo: 1` header to showcase the UI without a real backend.
-#![allow(clippy::default_trait_access)]
+#![allow(clippy::default_trait_access, clippy::unreadable_literal)]
 
 use std::sync::Arc;
 

@@ -7,7 +7,7 @@ pub struct Trailer<'a> {
 }
 
 /// Append a trailer to a commit message, inserting a blank-line separator if needed.
-pub fn append(message: &str, trailer: Trailer<'_>) -> String {
+pub fn append(message: &str, trailer: &Trailer<'_>) -> String {
     let trailer_line = format!("{}: {}", trailer.key, trailer.value);
     let trimmed = message.trim_end();
 
@@ -93,7 +93,7 @@ mod tests {
     fn append_to_simple_message() {
         let result = append(
             "Initial commit",
-            Trailer {
+            &Trailer {
                 key: "My-Checkpoint",
                 value: "abc123",
             },
@@ -106,7 +106,7 @@ mod tests {
         let msg = "Initial commit\n\nSigned-off-by: Alice <alice@example.com>\n";
         let result = append(
             msg,
-            Trailer {
+            &Trailer {
                 key: "My-Checkpoint",
                 value: "abc123",
             },
@@ -122,7 +122,7 @@ mod tests {
         let msg = "Initial commit\n\nThis is a longer description of the change.\n";
         let result = append(
             msg,
-            Trailer {
+            &Trailer {
                 key: "My-Checkpoint",
                 value: "abc123",
             },

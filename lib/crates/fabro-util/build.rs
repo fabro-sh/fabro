@@ -122,7 +122,7 @@ fn main() {
         // Entropy
         match rule.entropy {
             Some(e) => {
-                let _ = writeln!(code, "        entropy: Some({:.1}),", e);
+                let _ = writeln!(code, "        entropy: Some({e:.1}),");
             }
             None => code.push_str("        entropy: None,\n"),
         }

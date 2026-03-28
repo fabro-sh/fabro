@@ -88,8 +88,8 @@ pub fn make_read_file_tool() -> RegisteredTool {
                 let offset = args.get("offset").and_then(serde_json::Value::as_u64);
                 let limit = args.get("limit").and_then(serde_json::Value::as_u64);
 
-                let offset_usize = offset.map(|v| v as usize);
-                let limit_usize = limit.map(|v| v as usize);
+                let offset_usize = offset.map(|v| usize::try_from(v).unwrap());
+                let limit_usize = limit.map(|v| usize::try_from(v).unwrap());
 
                 let content = ctx
                     .env
@@ -279,6 +279,10 @@ pub fn make_grep_tool() -> RegisteredTool {
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or(".");
 
+                let max_results = args
+                    .get("max_results")
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|v| usize::try_from(v).unwrap());
                 let options = GrepOptions {
                     glob_filter: args
                         .get("glob_filter")
@@ -288,10 +292,7 @@ pub fn make_grep_tool() -> RegisteredTool {
                         .get("case_insensitive")
                         .and_then(serde_json::Value::as_bool)
                         .unwrap_or(false),
-                    max_results: args
-                        .get("max_results")
-                        .and_then(serde_json::Value::as_u64)
-                        .map(|v| v as usize),
+                    max_results,
                 };
 
                 let results = ctx.env.grep(pattern, path, &options).await?;
@@ -402,7 +403,7 @@ pub(crate) fn make_list_dir_tool() -> RegisteredTool {
                 let depth = args
                     .get("depth")
                     .and_then(serde_json::Value::as_u64)
-                    .map(|v| v as usize);
+                    .map(|v| usize::try_from(v).unwrap());
 
                 let entries = ctx.env.list_directory(path, depth).await?;
                 let lines: Vec<String> = entries

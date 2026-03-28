@@ -906,7 +906,7 @@ impl Sandbox for DaytonaSandbox {
                 name: f.name,
                 is_dir: f.is_dir,
                 size: if f.size > 0 {
-                    Some(f.size as u64)
+                    Some(u64::try_from(f.size).unwrap())
                 } else {
                     None
                 },
@@ -937,7 +937,7 @@ impl Sandbox for DaytonaSandbox {
             .map_err(|e| format!("Failed to get process service: {e}"))?;
 
         tracing::info!(
-            elapsed_ms = start.elapsed().as_millis() as u64,
+            elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap(),
             "exec_command: process service acquired, starting select"
         );
 
@@ -976,7 +976,7 @@ impl Sandbox for DaytonaSandbox {
         let result = tokio::select! {
             res = exec_future => {
                 tracing::info!(
-                    elapsed_ms = start.elapsed().as_millis() as u64,
+                    elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap(),
                     ok = res.is_ok(),
                     "exec_command: HTTP response received"
                 );
@@ -984,7 +984,7 @@ impl Sandbox for DaytonaSandbox {
             }
             () = time::sleep(timeout_duration) => {
                 tracing::info!(
-                    elapsed_ms = start.elapsed().as_millis() as u64,
+                    elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap(),
                     timeout_ms,
                     "exec_command: client-side timeout fired"
                 );
@@ -993,12 +993,12 @@ impl Sandbox for DaytonaSandbox {
                     stderr: "Command timed out locally".to_string(),
                     exit_code: -1,
                     timed_out: true,
-                    duration_ms: start.elapsed().as_millis() as u64,
+                    duration_ms: u64::try_from(start.elapsed().as_millis()).unwrap(),
                 });
             }
             () = token.cancelled() => {
                 tracing::info!(
-                    elapsed_ms = start.elapsed().as_millis() as u64,
+                    elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap(),
                     "exec_command: cancelled via token"
                 );
                 return Ok(ExecResult {
@@ -1006,12 +1006,12 @@ impl Sandbox for DaytonaSandbox {
                     stderr: "Command cancelled".to_string(),
                     exit_code: -1,
                     timed_out: true,
-                    duration_ms: start.elapsed().as_millis() as u64,
+                    duration_ms: u64::try_from(start.elapsed().as_millis()).unwrap(),
                 });
             }
         };
 
-        let duration_ms = start.elapsed().as_millis() as u64;
+        let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap();
 
         // The Daytona SDK returns combined output in `result` field.
         // Separate stderr isn't available in the simple execute_command API.

@@ -30,50 +30,49 @@ fn should_skip_object(obj: &serde_json::Map<String, Value>) -> bool {
     }
 }
 
+fn walk_replacements(
+    v: &Value,
+    seen: &mut std::collections::HashSet<String>,
+    repls: &mut Vec<(String, String)>,
+) {
+    match v {
+        Value::Object(obj) => {
+            if should_skip_object(obj) {
+                return;
+            }
+            for (k, child) in obj {
+                if should_skip_field(k) {
+                    continue;
+                }
+                walk_replacements(child, seen, repls);
+            }
+        }
+        Value::Array(arr) => {
+            for child in arr {
+                walk_replacements(child, seen, repls);
+            }
+        }
+        Value::String(s) => {
+            let redacted = super::redact_string(s);
+            if redacted != *s && seen.insert(s.clone()) {
+                repls.push((s.clone(), redacted));
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Walk a parsed JSON value and collect (original, redacted) string pairs.
 fn collect_replacements(v: &Value) -> Vec<(String, String)> {
     let mut seen = std::collections::HashSet::new();
     let mut repls = Vec::new();
-
-    fn walk(
-        v: &Value,
-        seen: &mut std::collections::HashSet<String>,
-        repls: &mut Vec<(String, String)>,
-    ) {
-        match v {
-            Value::Object(obj) => {
-                if should_skip_object(obj) {
-                    return;
-                }
-                for (k, child) in obj {
-                    if should_skip_field(k) {
-                        continue;
-                    }
-                    walk(child, seen, repls);
-                }
-            }
-            Value::Array(arr) => {
-                for child in arr {
-                    walk(child, seen, repls);
-                }
-            }
-            Value::String(s) => {
-                let redacted = super::redact_string(s);
-                if redacted != *s && seen.insert(s.clone()) {
-                    repls.push((s.clone(), redacted));
-                }
-            }
-            _ => {}
-        }
-    }
-
-    walk(v, &mut seen, &mut repls);
+    walk_replacements(v, &mut seen, &mut repls);
     repls
 }
 
 /// JSON-encode a string value (with quotes), without HTML escaping.
 fn json_encode_string(s: &str) -> String {
-    serde_json::to_string(s).unwrap_or_else(|_| format!("\"{}\"", s))
+    serde_json::to_string(s).unwrap_or_else(|_| format!("\"{s}\""))
 }
 
 /// Redact secrets in a single JSONL line.
