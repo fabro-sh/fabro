@@ -42,6 +42,7 @@ struct RunSession {
     sandbox: SandboxSpec,
     llm: LlmSpec,
     interviewer: Arc<dyn Interviewer>,
+    on_node: Option<Arc<dyn Fn(&str) + Send + Sync>>,
     lifecycle: LifecycleOptions,
     hooks: fabro_hooks::HookConfig,
     sandbox_env: SandboxEnvSpec,
@@ -66,6 +67,7 @@ pub struct StartServices {
     pub interviewer: Arc<dyn Interviewer>,
     pub git_author: GitAuthor,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
+    pub on_node: Option<Arc<dyn Fn(&str) + Send + Sync>>,
     pub registry_override: Option<Arc<HandlerRegistry>>,
 }
 
@@ -284,6 +286,7 @@ impl RunSession {
                 dry_run: settings.dry_run_enabled(),
             },
             interviewer,
+            on_node: services.on_node,
             lifecycle: LifecycleOptions {
                 setup_commands: settings.setup_commands().to_vec(),
                 setup_command_timeout_ms: settings.setup_timeout_ms().unwrap_or(300_000),
@@ -372,6 +375,7 @@ impl RunSession {
         checkpoint: Option<Checkpoint>,
     ) -> Result<Started, FabroError> {
         let preserve_sandbox = self.preserve_sandbox;
+        let on_node = self.on_node.clone();
 
         let record = persisted.run_record();
         let run_options = RunOptions {
@@ -429,7 +433,8 @@ impl RunSession {
             checkpoint,
             seed_context: self.seed_context,
         };
-        let initialized = pipeline::initialize(persisted, init_options).await?;
+        let mut initialized = pipeline::initialize(persisted, init_options).await?;
+        initialized.on_node = on_node;
 
         let sandbox_for_cleanup = Arc::clone(&initialized.sandbox);
         let cleanup_guard = scopeguard::guard((), move |()| {
@@ -739,6 +744,7 @@ mod tests {
             interviewer: Arc::new(fabro_interview::AutoApproveInterviewer),
             git_author: crate::git::GitAuthor::default(),
             github_app: None,
+            on_node: None,
             registry_override: Some(registry),
         }
     }
@@ -799,6 +805,35 @@ mod tests {
 
         assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
         assert!(run_dir.join("conclusion.json").exists());
+    }
+
+    #[tokio::test]
+    async fn start_invokes_on_node_callback_before_execution() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        let emitter = Arc::new(EventEmitter::new());
+        let registry = Arc::new(test_registry());
+        let visited = Arc::new(Mutex::new(Vec::new()));
+
+        persisted_workflow(MINIMAL_DOT, &run_dir);
+
+        let started = start(
+            &run_dir,
+            StartServices {
+                on_node: Some(Arc::new({
+                    let visited = Arc::clone(&visited);
+                    move |node_id: &str| {
+                        visited.lock().unwrap().push(node_id.to_string());
+                    }
+                })),
+                ..test_start_services(emitter, registry)
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
+        assert_eq!(*visited.lock().unwrap(), vec!["start".to_string()]);
     }
 
     #[tokio::test]

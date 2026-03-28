@@ -29,6 +29,7 @@ fabro-devcontainer = { path = "../fabro-devcontainer" }
 fabro-hooks = { path = "../fabro-hooks" }
 fabro-interview = { path = "../fabro-interview" }
 fabro-mcp = { path = "../fabro-mcp" }
+fabro-proctitle = { path = "../fabro-proctitle" }
 fabro-retro = { path = "../fabro-retro" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["ssh", "daytona"] }
 fabro-git-storage = { path = "../fabro-git-storage" }

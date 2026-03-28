@@ -635,6 +635,7 @@ pub async fn initialize(
         emitter: options.emitter,
         sandbox,
         registry,
+        on_node: None,
         hook_runner,
         env,
         dry_run: options.dry_run,

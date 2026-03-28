@@ -1553,6 +1553,7 @@ dependencies = [
  "fabro-mcp",
  "fabro-model",
  "fabro-openai-oauth",
+ "fabro-proctitle",
  "fabro-retro",
  "fabro-sandbox",
  "fabro-store",
@@ -1800,6 +1801,14 @@ dependencies = [
  "sha2",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "fabro-proctitle"
+version = "0.176.2"
+dependencies = [
+ "cc",
+ "libc",
 ]
 
 [[package]]
