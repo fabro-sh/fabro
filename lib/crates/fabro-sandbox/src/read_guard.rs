@@ -1,4 +1,4 @@
-use crate::*;
+use crate::Sandbox;
 use std::collections::HashSet;
 use std::path::{Component, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -101,6 +101,7 @@ crate::delegate_sandbox! {
 mod tests {
     use super::*;
     use crate::test_support::MockSandbox;
+    use crate::GrepOptions;
     use std::collections::HashMap;
 
     fn mock_with_files(files: HashMap<String, String>) -> MockSandbox {

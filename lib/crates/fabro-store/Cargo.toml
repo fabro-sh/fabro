@@ -7,6 +7,9 @@ license.workspace = true
 [lib]
 doctest = false
 
+[lints]
+workspace = true
+
 [dependencies]
 fabro-types = { path = "../fabro-types" }
 slatedb.workspace = true

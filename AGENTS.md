@@ -88,6 +88,12 @@ When working on Rust crates, read the relevant strategy doc **before** making ch
 
 When interpolating values into shell command strings (in `fabro-exe` and `fabro-workflows`), always use the `shell_quote()` helper (backed by `shlex::try_quote`). Never use manual `replace('\'', "'\\''")` or unquoted interpolation. This applies to file paths, branch names, URLs, env vars, image names, glob patterns, and any other user-controlled input assembled into a shell script.
 
+## Rust import style
+
+- **Types** (structs, enums, traits): import by name — `use crate::outcome::Outcome;`
+- **Functions**: import the parent module, call as `module::function()` — `use fabro_workflows::operations; operations::create(...)`
+- **No glob imports** in production code (`use foo::*`). Globs are acceptable in test modules and preludes. Enforced by clippy `wildcard_imports` lint.
+
 ## Testing workflows
 
 - `fabro run <name>` — run a workflow by name (resolves `fabro/workflows/<name>/workflow.toml`), e.g. `fabro run repl`

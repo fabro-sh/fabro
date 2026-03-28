@@ -16,6 +16,9 @@ doctest = false
 default = []
 exedev = ["fabro-sandbox/exe", "fabro-config/exedev", "fabro-types/exedev"]
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 dotenvy.workspace = true

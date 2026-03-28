@@ -7,7 +7,7 @@ mod shared;
 mod sleep_inhibitor;
 
 use anyhow::Result;
-use args::*;
+use args::{Commands, GlobalArgs, RunCommands, LONG_VERSION};
 use clap::Parser;
 use tracing::debug;
 
@@ -239,6 +239,7 @@ async fn main_inner() -> (String, Result<()>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use args::{ConfigCommand, ConfigNamespace, ProviderCommand, ProviderNamespace};
     use clap::Parser;
 
     #[test]

@@ -8,6 +8,9 @@ description = "Validation and lint rules for Fabro workflow graphs"
 [lib]
 doctest = false
 
+[lints]
+workspace = true
+
 [dependencies]
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-model = { path = "../fabro-model" }

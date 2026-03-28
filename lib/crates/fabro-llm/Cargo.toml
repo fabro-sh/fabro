@@ -12,6 +12,9 @@ categories = ["api-bindings"]
 [lib]
 doctest = false
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 thiserror.workspace = true

@@ -13,6 +13,9 @@ default = []
 exedev = ["fabro-types/exedev"]
 clap = ["dep:clap", "fabro-types/clap"]
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 clap = { workspace = true, optional = true }
