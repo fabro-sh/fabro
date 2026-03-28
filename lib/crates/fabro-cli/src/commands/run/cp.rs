@@ -28,8 +28,8 @@ enum CopyDirection {
 
 pub(crate) async fn cp_command(args: CpArgs) -> Result<()> {
     let direction = parse_direction(&args.src, &args.dst)?;
-    let cli_config = load_cli_settings(None)?;
-    let base = runs_base(&cli_config.storage_dir());
+    let cli_settings = load_cli_settings(None)?;
+    let base = runs_base(&cli_settings.storage_dir());
 
     match direction {
         CopyDirection::Download {

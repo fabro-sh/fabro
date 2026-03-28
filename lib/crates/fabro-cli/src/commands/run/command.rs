@@ -7,11 +7,11 @@ use crate::args::{GlobalArgs, RunArgs};
 pub(crate) async fn execute(mut args: RunArgs, _globals: &GlobalArgs) -> Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
     let cli_defaults = load_cli_config(None)?;
-    let cli_config: fabro_config::FabroSettings = cli_defaults.clone().try_into()?;
-    args.verbose = args.verbose || cli_config.verbose_enabled();
+    let cli_settings: fabro_config::FabroSettings = cli_defaults.clone().try_into()?;
+    args.verbose = args.verbose || cli_settings.verbose_enabled();
 
     let quiet = args.detach;
-    let prevent_idle_sleep = cli_config.prevent_idle_sleep_enabled();
+    let prevent_idle_sleep = cli_settings.prevent_idle_sleep_enabled();
     let (run_id, run_dir) = super::create::create_run(&args, cli_defaults, styles, quiet)?;
 
     #[cfg(feature = "sleep_inhibitor")]

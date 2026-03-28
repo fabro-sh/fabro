@@ -153,11 +153,11 @@ async fn check_github_app_installation() {
     };
 
     // Load CLI config to get app_id and slug
-    let Ok(cli_config) = load_cli_settings(None) else {
+    let Ok(cli_settings) = load_cli_settings(None) else {
         return;
     };
 
-    let app_id = if let Some(id) = cli_config.app_id() {
+    let app_id = if let Some(id) = cli_settings.app_id() {
         id.to_string()
     } else {
         eprintln!(
@@ -170,7 +170,7 @@ async fn check_github_app_installation() {
         return;
     };
 
-    let slug = cli_config.slug().map(String::from);
+    let slug = cli_settings.slug().map(String::from);
 
     // Build GitHub App credentials
     let Some(creds) = build_github_app_credentials(Some(&app_id)) else {

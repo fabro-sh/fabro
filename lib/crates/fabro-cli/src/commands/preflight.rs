@@ -24,10 +24,10 @@ use crate::shared::github::build_github_app_credentials;
 pub(crate) async fn execute(mut args: PreflightArgs) -> anyhow::Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
     let cli_defaults = load_cli_config(None)?;
-    let cli_config: FabroSettings = cli_defaults.clone().try_into()?;
-    args.verbose = args.verbose || cli_config.verbose_enabled();
+    let cli_settings: FabroSettings = cli_defaults.clone().try_into()?;
+    args.verbose = args.verbose || cli_settings.verbose_enabled();
 
-    let github_app = build_github_app_credentials(cli_config.app_id());
+    let github_app = build_github_app_credentials(cli_settings.app_id());
     let cli_args_config = FabroConfig::try_from(&args)?;
     let cwd = std::env::current_dir()?;
     let settings = resolve_settings(ResolveSettingsInput {

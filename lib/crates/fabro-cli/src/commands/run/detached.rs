@@ -12,11 +12,11 @@ use crate::cli_config;
 use crate::shared;
 
 pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bool) -> Result<()> {
-    let cli_config = cli_config::load_cli_settings(None)?;
-    let github_app = shared::github::build_github_app_credentials(cli_config.app_id());
+    let cli_settings = cli_config::load_cli_settings(None)?;
+    let github_app = shared::github::build_github_app_credentials(cli_settings.app_id());
     let git_author = GitAuthor::from_options(
-        cli_config.git_author().and_then(|a| a.name.clone()),
-        cli_config.git_author().and_then(|a| a.email.clone()),
+        cli_settings.git_author().and_then(|a| a.name.clone()),
+        cli_settings.git_author().and_then(|a| a.email.clone()),
     );
 
     let _launcher_guard = scopeguard::guard(launcher_path.clone(), |path| {

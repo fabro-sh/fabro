@@ -12,8 +12,8 @@ use crate::args::LogsArgs;
 use crate::cli_config::load_cli_settings;
 
 pub(crate) fn run(args: &LogsArgs, styles: &Styles) -> Result<()> {
-    let cli_config = load_cli_settings(None)?;
-    let base = runs_base(&cli_config.storage_dir());
+    let cli_settings = load_cli_settings(None)?;
+    let base = runs_base(&cli_settings.storage_dir());
     let run = resolve_run(&base, &args.run)?;
 
     info!(run_id = %run.run_id, "Showing logs");

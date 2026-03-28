@@ -113,9 +113,9 @@ async fn main_inner() -> (String, Result<()>) {
                 }
             } else {
                 match cli_config::load_cli_settings(None) {
-                    Ok(cli_config) => (
-                        cli_config.log.as_ref().and_then(|l| l.level.clone()),
-                        cli_config.upgrade_check_enabled(),
+                    Ok(cli_settings) => (
+                        cli_settings.log.as_ref().and_then(|l| l.level.clone()),
+                        cli_settings.upgrade_check_enabled(),
                     ),
                     Err(err) => return (command_name, Err(err)),
                 }
@@ -124,9 +124,9 @@ async fn main_inner() -> (String, Result<()>) {
         #[cfg(not(feature = "server"))]
         {
             match cli_config::load_cli_settings(None) {
-                Ok(cli_config) => (
-                    cli_config.log.as_ref().and_then(|l| l.level.clone()),
-                    cli_config.upgrade_check_enabled(),
+                Ok(cli_settings) => (
+                    cli_settings.log.as_ref().and_then(|l| l.level.clone()),
+                    cli_settings.upgrade_check_enabled(),
                 ),
                 Err(err) => return (command_name, Err(err)),
             }
@@ -184,8 +184,8 @@ async fn main_inner() -> (String, Result<()>) {
                 fabro_api::serve::serve_command(args, styles).await?;
             }
             Commands::Doctor { verbose, dry_run } => {
-                let cli_config = cli_config::load_cli_settings(None)?;
-                let verbose = verbose || cli_config.verbose_enabled();
+                let cli_settings = cli_config::load_cli_settings(None)?;
+                let verbose = verbose || cli_settings.verbose_enabled();
                 let exit_code = commands::doctor::run_doctor(verbose, !dry_run).await;
                 std::process::exit(exit_code);
             }

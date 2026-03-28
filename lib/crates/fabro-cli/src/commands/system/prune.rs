@@ -12,8 +12,8 @@ use crate::cli_config::load_cli_settings;
 use crate::shared::format_size;
 
 pub(super) fn prune_command(args: &RunsPruneArgs) -> Result<()> {
-    let cli_config = load_cli_settings(None)?;
-    let base = runs_base(&cli_config.storage_dir());
+    let cli_settings = load_cli_settings(None)?;
+    let base = runs_base(&cli_settings.storage_dir());
     prune_from(args, &base)
 }
 

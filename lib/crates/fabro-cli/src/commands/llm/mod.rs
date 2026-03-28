@@ -7,10 +7,10 @@ use crate::args::{GlobalArgs, LlmCommand, LlmNamespace};
 use crate::cli_config::load_cli_settings;
 
 pub(crate) async fn dispatch(ns: LlmNamespace, globals: &GlobalArgs) -> Result<()> {
-    let cli_config = load_cli_settings(None)?;
+    let cli_settings = load_cli_settings(None)?;
 
     match ns.command {
-        LlmCommand::Prompt(args) => prompt::execute(args, &cli_config, globals).await,
-        LlmCommand::Chat(args) => chat::execute(args, &cli_config, globals).await,
+        LlmCommand::Prompt(args) => prompt::execute(args, &cli_settings, globals).await,
+        LlmCommand::Chat(args) => chat::execute(args, &cli_settings, globals).await,
     }
 }
