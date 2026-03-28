@@ -53,6 +53,76 @@ pub struct GitHubAppCredentials {
     pub private_key_pem: String,
 }
 
+/// HTTP method used in GitHub API calls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HttpMethod {
+    Get,
+    Post,
+    Put,
+    Patch,
+}
+
+/// A minimal HTTP response for testability.
+pub struct HttpResponse {
+    pub status: u16,
+    body: String,
+}
+
+impl HttpResponse {
+    pub fn new(status: u16, body: String) -> Self {
+        Self { status, body }
+    }
+
+    pub fn json<T: for<'de> Deserialize<'de>>(&self) -> Result<T, String> {
+        serde_json::from_str(&self.body).map_err(|e| format!("Failed to parse response: {e}"))
+    }
+
+    pub fn text(&self) -> &str {
+        &self.body
+    }
+}
+
+/// Abstract HTTP client for GitHub API calls.
+///
+/// Implemented for `reqwest::Client` in production; tests use a mock
+/// to avoid TCP/process overhead.
+pub trait HttpClient: Send + Sync {
+    fn request(
+        &self,
+        method: HttpMethod,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: Option<&serde_json::Value>,
+    ) -> impl std::future::Future<Output = Result<HttpResponse, String>> + Send;
+}
+
+impl HttpClient for reqwest::Client {
+    async fn request(
+        &self,
+        method: HttpMethod,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: Option<&serde_json::Value>,
+    ) -> Result<HttpResponse, String> {
+        let mut builder = match method {
+            HttpMethod::Get => self.get(url),
+            HttpMethod::Post => self.post(url),
+            HttpMethod::Put => self.put(url),
+            HttpMethod::Patch => self.patch(url),
+        };
+        for &(key, value) in headers {
+            builder = builder.header(key, value);
+        }
+        if let Some(json_body) = body {
+            builder = builder.json(json_body);
+        }
+        let resp = builder.send().await.map_err(|e| e.to_string())?;
+        let status = resp.status().as_u16();
+        let text = resp.text().await.map_err(|e| e.to_string())?;
+        Ok(HttpResponse::new(status, text))
+    }
+}
+
 /// Parse `owner` and `repo` from a GitHub HTTPS URL.
 ///
 /// Accepts URLs like:
@@ -116,12 +186,21 @@ pub fn sign_app_jwt(app_id: &str, private_key_pem: &str) -> Result<String, Strin
     Ok(jwt)
 }
 
+/// Standard GitHub API headers for authenticated requests.
+fn github_headers(auth: &str) -> [(&str, &str); 3] {
+    [
+        ("Authorization", auth),
+        ("Accept", "application/vnd.github+json"),
+        ("User-Agent", "fabro"),
+    ]
+}
+
 /// Request a scoped Installation Access Token for a specific repository.
 ///
 /// Uses the App JWT to find the installation for `owner/repo`, then requests
 /// a token scoped to the given `permissions` on that single repository.
 pub async fn create_installation_access_token_with_permissions(
-    client: &reqwest::Client,
+    client: &impl HttpClient,
     jwt: &str,
     owner: &str,
     repo: &str,
@@ -140,17 +219,13 @@ pub async fn create_installation_access_token_with_permissions(
 
     // Step 1: Find the installation for this repo
     let install_url = format!("{base_url}/repos/{owner}/{repo}/installation");
-    let install_resp = client
-        .get(&install_url)
-        .header("Authorization", format!("Bearer {jwt}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "fabro")
-        .send()
+    let auth = format!("Bearer {jwt}");
+    let resp = client
+        .request(HttpMethod::Get, &install_url, &github_headers(&auth), None)
         .await
         .map_err(|e| format!("Failed to look up GitHub App installation: {e}"))?;
 
-    let status = install_resp.status();
-    match status.as_u16() {
+    match resp.status {
         200 => {}
         404 => {
             return Err(format!(
@@ -170,14 +245,14 @@ pub async fn create_installation_access_token_with_permissions(
         }
         _ => {
             return Err(format!(
-                "Unexpected status {status} looking up GitHub App installation"
+                "Unexpected status {} looking up GitHub App installation",
+                resp.status
             ));
         }
     }
 
-    let installation: Installation = install_resp
+    let installation: Installation = resp
         .json()
-        .await
         .map_err(|e| format!("Failed to parse installation response: {e}"))?;
 
     // Step 2: Create a scoped access token
@@ -191,17 +266,16 @@ pub async fn create_installation_access_token_with_permissions(
     });
 
     let token_resp = client
-        .post(&token_url)
-        .header("Authorization", format!("Bearer {jwt}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "fabro")
-        .json(&body)
-        .send()
+        .request(
+            HttpMethod::Post,
+            &token_url,
+            &github_headers(&auth),
+            Some(&body),
+        )
         .await
         .map_err(|e| format!("Failed to create installation access token: {e}"))?;
 
-    let token_status = token_resp.status();
-    match token_status.as_u16() {
+    match token_resp.status {
         201 => {}
         422 => {
             return Err(format!(
@@ -216,14 +290,14 @@ pub async fn create_installation_access_token_with_permissions(
         }
         _ => {
             return Err(format!(
-                "Unexpected status {token_status} creating installation access token"
+                "Unexpected status {} creating installation access token",
+                token_resp.status
             ));
         }
     }
 
     let access_token: AccessToken = token_resp
         .json()
-        .await
         .map_err(|e| format!("Failed to parse access token response: {e}"))?;
 
     Ok(access_token.token)
@@ -231,7 +305,7 @@ pub async fn create_installation_access_token_with_permissions(
 
 /// Request a scoped Installation Access Token with `contents: write`.
 pub async fn create_installation_access_token(
-    client: &reqwest::Client,
+    client: &impl HttpClient,
     jwt: &str,
     owner: &str,
     repo: &str,
@@ -251,7 +325,7 @@ pub async fn create_installation_access_token(
 /// Request a scoped Installation Access Token with `contents: write`
 /// and `pull_requests: write`. Used for creating pull requests.
 pub async fn create_installation_access_token_for_pr(
-    client: &reqwest::Client,
+    client: &impl HttpClient,
     jwt: &str,
     owner: &str,
     repo: &str,
@@ -315,41 +389,42 @@ pub async fn create_pull_request(
     });
 
     let url = format!("{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/pulls");
-    let resp = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "fabro")
-        .json(&pr_body)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to create pull request: {e}"))?;
+    let auth = format!("Bearer {token}");
+    let resp = HttpClient::request(
+        &client,
+        HttpMethod::Post,
+        &url,
+        &github_headers(&auth),
+        Some(&pr_body),
+    )
+    .await
+    .map_err(|e| format!("Failed to create pull request: {e}"))?;
 
-    let status = resp.status();
-    match status.as_u16() {
+    match resp.status {
         201 => {}
         422 => {
-            let body_text = resp.text().await.unwrap_or_default();
             return Err(format!(
-                "Pull request could not be created (422): {body_text}"
+                "Pull request could not be created (422): {}",
+                resp.text()
             ));
         }
         401 | 403 => {
             return Err(format!(
-                "Authentication failed creating pull request ({status})"
+                "Authentication failed creating pull request ({})",
+                resp.status
             ));
         }
         _ => {
-            let body_text = resp.text().await.unwrap_or_default();
             return Err(format!(
-                "Unexpected status {status} creating pull request: {body_text}"
+                "Unexpected status {} creating pull request: {}",
+                resp.status,
+                resp.text()
             ));
         }
     }
 
     let pr: PullRequestResponse = resp
         .json()
-        .await
         .map_err(|e| format!("Failed to parse pull request response: {e}"))?;
 
     Ok(CreatedPullRequest {
@@ -415,22 +490,25 @@ pub async fn enable_auto_merge(
         "Enabling auto-merge"
     );
 
-    let resp = client
-        .post(format!("{GITHUB_API_BASE_URL}/graphql"))
-        .header("Authorization", format!("Bearer {token}"))
-        .header("User-Agent", "fabro")
-        .json(&serde_json::json!({ "query": query }))
-        .send()
-        .await
-        .map_err(|e| format!("Failed to enable auto-merge: {e}"))?;
+    let graphql_url = format!("{GITHUB_API_BASE_URL}/graphql");
+    let auth = format!("Bearer {token}");
+    let graphql_body = serde_json::json!({ "query": query });
+    let resp = HttpClient::request(
+        &client,
+        HttpMethod::Post,
+        &graphql_url,
+        &[("Authorization", auth.as_str()), ("User-Agent", "fabro")],
+        Some(&graphql_body),
+    )
+    .await
+    .map_err(|e| format!("Failed to enable auto-merge: {e}"))?;
 
-    let status = resp.status();
+    let status = resp.status;
     let body: serde_json::Value = resp
         .json()
-        .await
         .map_err(|e| format!("Failed to parse auto-merge response: {e}"))?;
 
-    if !status.is_success() {
+    if !(200..300).contains(&status) {
         return Err(format!("Auto-merge request failed ({status}): {body}"));
     }
 
@@ -472,22 +550,36 @@ pub async fn branch_exists(
     branch: &str,
     base_url: &str,
 ) -> Result<bool, String> {
-    let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
-    let client = reqwest::Client::new();
+    branch_exists_with_client(
+        &reqwest::Client::new(),
+        creds,
+        owner,
+        repo,
+        branch,
+        base_url,
+    )
+    .await
+}
 
-    let token = create_installation_access_token(&client, &jwt, owner, repo, base_url).await?;
+async fn branch_exists_with_client(
+    client: &impl HttpClient,
+    creds: &GitHubAppCredentials,
+    owner: &str,
+    repo: &str,
+    branch: &str,
+    base_url: &str,
+) -> Result<bool, String> {
+    let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
+    let token = create_installation_access_token(client, &jwt, owner, repo, base_url).await?;
 
     let url = format!("{base_url}/repos/{owner}/{repo}/branches/{branch}");
+    let auth = format!("Bearer {token}");
     let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "fabro")
-        .send()
+        .request(HttpMethod::Get, &url, &github_headers(&auth), None)
         .await
         .map_err(|e| format!("Failed to check branch existence: {e}"))?;
 
-    match resp.status().as_u16() {
+    match resp.status {
         200 => Ok(true),
         404 => Ok(false),
         status => Err(format!(
@@ -501,23 +593,20 @@ pub async fn branch_exists(
 /// Uses the App JWT to query `GET /repos/{owner}/{repo}/installation`.
 /// Returns `Ok(true)` on 200, `Ok(false)` on 404.
 pub async fn check_app_installed(
-    client: &reqwest::Client,
+    client: &impl HttpClient,
     jwt: &str,
     owner: &str,
     repo: &str,
     base_url: &str,
 ) -> Result<bool, String> {
     let url = format!("{base_url}/repos/{owner}/{repo}/installation");
+    let auth = format!("Bearer {jwt}");
     let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {jwt}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "fabro")
-        .send()
+        .request(HttpMethod::Get, &url, &github_headers(&auth), None)
         .await
         .map_err(|e| format!("Failed to check GitHub App installation: {e}"))?;
 
-    match resp.status().as_u16() {
+    match resp.status {
         200 => Ok(true),
         404 => Ok(false),
         401 => Err("GitHub App authentication failed. \
@@ -536,21 +625,18 @@ pub async fn check_app_installed(
 ///
 /// Uses the App JWT to call `GET /app` and returns the app's slug and owner.
 pub async fn get_authenticated_app(
-    client: &reqwest::Client,
+    client: &impl HttpClient,
     jwt: &str,
     base_url: &str,
 ) -> Result<AppInfo, String> {
     let url = format!("{base_url}/app");
+    let auth = format!("Bearer {jwt}");
     let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {jwt}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "fabro")
-        .send()
+        .request(HttpMethod::Get, &url, &github_headers(&auth), None)
         .await
         .map_err(|e| format!("Failed to fetch GitHub App info: {e}"))?;
 
-    match resp.status().as_u16() {
+    match resp.status {
         200 => {}
         401 => {
             return Err("GitHub App authentication failed. \
@@ -565,7 +651,6 @@ pub async fn get_authenticated_app(
     }
 
     resp.json::<AppInfo>()
-        .await
         .map_err(|e| format!("Failed to parse GitHub App info: {e}"))
 }
 
@@ -574,20 +659,25 @@ pub async fn get_authenticated_app(
 /// Calls `GET /apps/{slug}` **without** authentication. Public apps return 200,
 /// private apps return 404 to unauthenticated requests.
 pub async fn is_app_public(
-    client: &reqwest::Client,
+    client: &impl HttpClient,
     slug: &str,
     base_url: &str,
 ) -> Result<bool, String> {
     let url = format!("{base_url}/apps/{slug}");
     let resp = client
-        .get(&url)
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "fabro")
-        .send()
+        .request(
+            HttpMethod::Get,
+            &url,
+            &[
+                ("Accept", "application/vnd.github+json"),
+                ("User-Agent", "fabro"),
+            ],
+            None,
+        )
         .await
         .map_err(|e| format!("Failed to check GitHub App visibility: {e}"))?;
 
-    match resp.status().as_u16() {
+    match resp.status {
         200 => Ok(true),
         404 => Ok(false),
         status => Err(format!(
@@ -647,24 +737,39 @@ pub async fn get_pull_request(
     number: u64,
     base_url: &str,
 ) -> Result<PullRequestDetail, String> {
+    get_pull_request_with_client(
+        &reqwest::Client::new(),
+        creds,
+        owner,
+        repo,
+        number,
+        base_url,
+    )
+    .await
+}
+
+async fn get_pull_request_with_client(
+    client: &impl HttpClient,
+    creds: &GitHubAppCredentials,
+    owner: &str,
+    repo: &str,
+    number: u64,
+    base_url: &str,
+) -> Result<PullRequestDetail, String> {
     tracing::debug!(owner, repo, number, "Fetching pull request");
 
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
-    let client = reqwest::Client::new();
     let token =
-        create_installation_access_token_for_pr(&client, &jwt, owner, repo, base_url).await?;
+        create_installation_access_token_for_pr(client, &jwt, owner, repo, base_url).await?;
 
     let url = format!("{base_url}/repos/{owner}/{repo}/pulls/{number}");
+    let auth = format!("Bearer {token}");
     let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "fabro")
-        .send()
+        .request(HttpMethod::Get, &url, &github_headers(&auth), None)
         .await
         .map_err(|e| format!("Failed to fetch pull request: {e}"))?;
 
-    match resp.status().as_u16() {
+    match resp.status {
         200 => {}
         404 => {
             return Err(format!(
@@ -674,19 +779,18 @@ pub async fn get_pull_request(
         401 | 403 => {
             return Err(format!(
                 "Authentication failed fetching pull request ({})",
-                resp.status()
+                resp.status
             ));
         }
         status => {
-            let body = resp.text().await.unwrap_or_default();
             return Err(format!(
-                "Unexpected status {status} fetching pull request: {body}"
+                "Unexpected status {status} fetching pull request: {}",
+                resp.text()
             ));
         }
     }
 
     resp.json::<PullRequestDetail>()
-        .await
         .map_err(|e| format!("Failed to parse pull request response: {e}"))
 }
 
@@ -699,27 +803,44 @@ pub async fn merge_pull_request(
     method: &str,
     base_url: &str,
 ) -> Result<(), String> {
+    merge_pull_request_with_client(
+        &reqwest::Client::new(),
+        creds,
+        owner,
+        repo,
+        number,
+        method,
+        base_url,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn merge_pull_request_with_client(
+    client: &impl HttpClient,
+    creds: &GitHubAppCredentials,
+    owner: &str,
+    repo: &str,
+    number: u64,
+    method: &str,
+    base_url: &str,
+) -> Result<(), String> {
     tracing::debug!(owner, repo, number, method, "Merging pull request");
 
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
-    let client = reqwest::Client::new();
     let token =
-        create_installation_access_token_for_pr(&client, &jwt, owner, repo, base_url).await?;
+        create_installation_access_token_for_pr(client, &jwt, owner, repo, base_url).await?;
 
     let url = format!("{base_url}/repos/{owner}/{repo}/pulls/{number}/merge");
     let body = serde_json::json!({ "merge_method": method });
+    let auth = format!("Bearer {token}");
 
     let resp = client
-        .put(&url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "fabro")
-        .json(&body)
-        .send()
+        .request(HttpMethod::Put, &url, &github_headers(&auth), Some(&body))
         .await
         .map_err(|e| format!("Failed to merge pull request: {e}"))?;
 
-    match resp.status().as_u16() {
+    match resp.status {
         200 => Ok(()),
         405 => Err(format!(
             "Pull request #{number} is not mergeable (method may not be allowed)"
@@ -730,14 +851,12 @@ pub async fn merge_pull_request(
         )),
         401 | 403 => Err(format!(
             "Authentication failed merging pull request ({})",
-            resp.status()
+            resp.status
         )),
-        status => {
-            let body_text = resp.text().await.unwrap_or_default();
-            Err(format!(
-                "Unexpected status {status} merging pull request: {body_text}"
-            ))
-        }
+        status => Err(format!(
+            "Unexpected status {status} merging pull request: {}",
+            resp.text()
+        )),
     }
 }
 
@@ -749,48 +868,60 @@ pub async fn close_pull_request(
     number: u64,
     base_url: &str,
 ) -> Result<(), String> {
+    close_pull_request_with_client(
+        &reqwest::Client::new(),
+        creds,
+        owner,
+        repo,
+        number,
+        base_url,
+    )
+    .await
+}
+
+async fn close_pull_request_with_client(
+    client: &impl HttpClient,
+    creds: &GitHubAppCredentials,
+    owner: &str,
+    repo: &str,
+    number: u64,
+    base_url: &str,
+) -> Result<(), String> {
     tracing::debug!(owner, repo, number, "Closing pull request");
 
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
-    let client = reqwest::Client::new();
     let token =
-        create_installation_access_token_for_pr(&client, &jwt, owner, repo, base_url).await?;
+        create_installation_access_token_for_pr(client, &jwt, owner, repo, base_url).await?;
 
     let url = format!("{base_url}/repos/{owner}/{repo}/pulls/{number}");
     let body = serde_json::json!({ "state": "closed" });
+    let auth = format!("Bearer {token}");
 
     let resp = client
-        .patch(&url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "fabro")
-        .json(&body)
-        .send()
+        .request(HttpMethod::Patch, &url, &github_headers(&auth), Some(&body))
         .await
         .map_err(|e| format!("Failed to close pull request: {e}"))?;
 
-    match resp.status().as_u16() {
+    match resp.status {
         200 => Ok(()),
         404 => Err(format!(
             "Pull request #{number} not found in {owner}/{repo}"
         )),
         401 | 403 => Err(format!(
             "Authentication failed closing pull request ({})",
-            resp.status()
+            resp.status
         )),
-        status => {
-            let body_text = resp.text().await.unwrap_or_default();
-            Err(format!(
-                "Unexpected status {status} closing pull request: {body_text}"
-            ))
-        }
+        status => Err(format!(
+            "Unexpected status {status} closing pull request: {}",
+            resp.text()
+        )),
     }
 }
 
 /// Request a scoped Installation Access Token with `issues: write`
 /// and `organization_projects: write`. Used for GitHub Projects V2.
 pub async fn create_installation_access_token_for_projects(
-    client: &reqwest::Client,
+    client: &impl HttpClient,
     jwt: &str,
     owner: &str,
     repo: &str,
@@ -920,14 +1051,14 @@ mod tests {
     #[test]
     fn jwt_is_three_part_string() {
         let pem = test_rsa_key();
-        let jwt = sign_app_jwt("12345", &pem).unwrap();
+        let jwt = sign_app_jwt("12345", pem).unwrap();
         assert_eq!(jwt.split('.').count(), 3);
     }
 
     #[test]
     fn jwt_has_rs256_header() {
         let pem = test_rsa_key();
-        let jwt = sign_app_jwt("12345", &pem).unwrap();
+        let jwt = sign_app_jwt("12345", pem).unwrap();
         let header_b64 = jwt.split('.').next().unwrap();
         let header_json = base64::Engine::decode(
             &base64::engine::general_purpose::URL_SAFE_NO_PAD,
@@ -941,7 +1072,7 @@ mod tests {
     #[test]
     fn jwt_has_correct_claims() {
         let pem = test_rsa_key();
-        let jwt = sign_app_jwt("99999", &pem).unwrap();
+        let jwt = sign_app_jwt("99999", pem).unwrap();
         let payload_b64 = jwt.split('.').nth(1).unwrap();
         let payload_json = base64::Engine::decode(
             &base64::engine::general_purpose::URL_SAFE_NO_PAD,
@@ -968,41 +1099,139 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // MockHttpClient
+    // -----------------------------------------------------------------------
+
+    struct MockRoute {
+        method: HttpMethod,
+        path: String,
+        status: u16,
+        response_body: String,
+        assert_header: Option<(String, MockHeaderCheck)>,
+        assert_body_json: Option<serde_json::Value>,
+    }
+
+    enum MockHeaderCheck {
+        Equals(String),
+        Missing,
+    }
+
+    struct MockHttpClient {
+        routes: Vec<MockRoute>,
+    }
+
+    impl MockHttpClient {
+        fn new() -> Self {
+            Self { routes: vec![] }
+        }
+
+        fn on(mut self, method: HttpMethod, path: &str, status: u16, body: &str) -> Self {
+            self.routes.push(MockRoute {
+                method,
+                path: path.to_string(),
+                status,
+                response_body: body.to_string(),
+                assert_header: None,
+                assert_body_json: None,
+            });
+            self
+        }
+
+        fn with_req_header(mut self, name: &str, value: &str) -> Self {
+            self.routes.last_mut().unwrap().assert_header =
+                Some((name.to_string(), MockHeaderCheck::Equals(value.to_string())));
+            self
+        }
+
+        fn with_req_header_missing(mut self, name: &str) -> Self {
+            self.routes.last_mut().unwrap().assert_header =
+                Some((name.to_string(), MockHeaderCheck::Missing));
+            self
+        }
+
+        fn with_req_body(mut self, json_str: &str) -> Self {
+            self.routes.last_mut().unwrap().assert_body_json =
+                Some(serde_json::from_str(json_str).unwrap());
+            self
+        }
+    }
+
+    impl HttpClient for MockHttpClient {
+        async fn request(
+            &self,
+            method: HttpMethod,
+            url: &str,
+            headers: &[(&str, &str)],
+            body: Option<&serde_json::Value>,
+        ) -> Result<HttpResponse, String> {
+            for route in &self.routes {
+                if method == route.method && url.ends_with(&route.path) {
+                    if let Some((name, check)) = &route.assert_header {
+                        let found = headers.iter().find(|(k, _)| *k == name.as_str());
+                        match check {
+                            MockHeaderCheck::Equals(expected) => {
+                                let (_, v) = found.unwrap_or_else(|| {
+                                    panic!("Expected header '{name}' not found in request to {url}")
+                                });
+                                assert_eq!(
+                                    *v,
+                                    expected.as_str(),
+                                    "Header '{name}' mismatch for {url}"
+                                );
+                            }
+                            MockHeaderCheck::Missing => {
+                                assert!(
+                                    found.is_none(),
+                                    "Header '{name}' should be absent for {url}"
+                                );
+                            }
+                        }
+                    }
+                    if let Some(expected_body) = &route.assert_body_json {
+                        let actual = body.expect("Expected request body");
+                        assert_eq!(actual, expected_body, "Request body mismatch for {url}");
+                    }
+                    return Ok(HttpResponse::new(route.status, route.response_body.clone()));
+                }
+            }
+            panic!(
+                "No mock route for {:?} {url}\nRegistered routes: {:?}",
+                method,
+                self.routes
+                    .iter()
+                    .map(|r| format!("{:?} {}", r.method, r.path))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // create_installation_access_token — success
     // -----------------------------------------------------------------------
 
     #[tokio::test]
     async fn create_iat_success() {
-        let mut server = mockito::Server::new_async().await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/installation",
+                200,
+                r#"{"id": 123}"#,
+            )
+            .with_req_header("Authorization", "Bearer test-jwt")
+            .on(
+                HttpMethod::Post,
+                "/app/installations/123/access_tokens",
+                201,
+                r#"{"token": "ghs_xxx"}"#,
+            )
+            .with_req_header("Authorization", "Bearer test-jwt")
+            .with_req_body(r#"{"permissions":{"contents":"write"},"repositories":["repo"]}"#);
 
-        let install_mock = server
-            .mock("GET", "/repos/owner/repo/installation")
-            .match_header("Authorization", "Bearer test-jwt")
-            .with_status(200)
-            .with_body(r#"{"id": 123}"#)
-            .create_async()
-            .await;
-
-        let token_mock = server
-            .mock("POST", "/app/installations/123/access_tokens")
-            .match_header("Authorization", "Bearer test-jwt")
-            .match_body(mockito::Matcher::JsonString(
-                r#"{"repositories":["repo"],"permissions":{"contents":"write"}}"#.to_string(),
-            ))
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_xxx"}"#)
-            .create_async()
-            .await;
-
-        let client = reqwest::Client::new();
-        let token =
-            create_installation_access_token(&client, "test-jwt", "owner", "repo", &server.url())
-                .await
-                .unwrap();
+        let token = create_installation_access_token(&mock, "test-jwt", "owner", "repo", "")
+            .await
+            .unwrap();
         assert_eq!(token, "ghs_xxx");
-
-        install_mock.assert_async().await;
-        token_mock.assert_async().await;
     }
 
     // -----------------------------------------------------------------------
@@ -1011,15 +1240,10 @@ mod tests {
 
     #[tokio::test]
     async fn create_iat_not_installed() {
-        let mut server = mockito::Server::new_async().await;
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(404)
-            .create_async()
-            .await;
+        let mock =
+            MockHttpClient::new().on(HttpMethod::Get, "/repos/owner/repo/installation", 404, "");
 
-        let client = reqwest::Client::new();
-        let err = create_installation_access_token(&client, "jwt", "owner", "repo", &server.url())
+        let err = create_installation_access_token(&mock, "jwt", "owner", "repo", "")
             .await
             .unwrap_err();
         assert!(err.contains("not installed"), "got: {err}");
@@ -1028,15 +1252,10 @@ mod tests {
 
     #[tokio::test]
     async fn create_iat_suspended() {
-        let mut server = mockito::Server::new_async().await;
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(403)
-            .create_async()
-            .await;
+        let mock =
+            MockHttpClient::new().on(HttpMethod::Get, "/repos/owner/repo/installation", 403, "");
 
-        let client = reqwest::Client::new();
-        let err = create_installation_access_token(&client, "jwt", "owner", "repo", &server.url())
+        let err = create_installation_access_token(&mock, "jwt", "owner", "repo", "")
             .await
             .unwrap_err();
         assert!(err.contains("suspended"), "got: {err}");
@@ -1044,21 +1263,21 @@ mod tests {
 
     #[tokio::test]
     async fn create_iat_no_repo_access() {
-        let mut server = mockito::Server::new_async().await;
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 123}"#)
-            .create_async()
-            .await;
-        server
-            .mock("POST", "/app/installations/123/access_tokens")
-            .with_status(422)
-            .create_async()
-            .await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/installation",
+                200,
+                r#"{"id": 123}"#,
+            )
+            .on(
+                HttpMethod::Post,
+                "/app/installations/123/access_tokens",
+                422,
+                "",
+            );
 
-        let client = reqwest::Client::new();
-        let err = create_installation_access_token(&client, "jwt", "owner", "repo", &server.url())
+        let err = create_installation_access_token(&mock, "jwt", "owner", "repo", "")
             .await
             .unwrap_err();
         assert!(err.contains("does not have access"), "got: {err}");
@@ -1067,15 +1286,10 @@ mod tests {
 
     #[tokio::test]
     async fn create_iat_auth_failed() {
-        let mut server = mockito::Server::new_async().await;
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(401)
-            .create_async()
-            .await;
+        let mock =
+            MockHttpClient::new().on(HttpMethod::Get, "/repos/owner/repo/installation", 401, "");
 
-        let client = reqwest::Client::new();
-        let err = create_installation_access_token(&client, "jwt", "owner", "repo", &server.url())
+        let err = create_installation_access_token(&mock, "jwt", "owner", "repo", "")
             .await
             .unwrap_err();
         assert!(err.contains("authentication failed"), "got: {err}");
@@ -1087,40 +1301,29 @@ mod tests {
 
     #[tokio::test]
     async fn create_iat_for_pr_requests_pr_permissions() {
-        let mut server = mockito::Server::new_async().await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/installation",
+                200,
+                r#"{"id": 456}"#,
+            )
+            .with_req_header("Authorization", "Bearer test-jwt")
+            .on(
+                HttpMethod::Post,
+                "/app/installations/456/access_tokens",
+                201,
+                r#"{"token": "ghs_pr_token"}"#,
+            )
+            .with_req_header("Authorization", "Bearer test-jwt")
+            .with_req_body(
+                r#"{"permissions":{"contents":"write","pull_requests":"write"},"repositories":["repo"]}"#,
+            );
 
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .match_header("Authorization", "Bearer test-jwt")
-            .with_status(200)
-            .with_body(r#"{"id": 456}"#)
-            .create_async()
-            .await;
-
-        let token_mock = server
-            .mock("POST", "/app/installations/456/access_tokens")
-            .match_header("Authorization", "Bearer test-jwt")
-            .match_body(mockito::Matcher::JsonString(
-                r#"{"repositories":["repo"],"permissions":{"contents":"write","pull_requests":"write"}}"#.to_string(),
-            ))
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_pr_token"}"#)
-            .create_async()
-            .await;
-
-        let client = reqwest::Client::new();
-        let token = create_installation_access_token_for_pr(
-            &client,
-            "test-jwt",
-            "owner",
-            "repo",
-            &server.url(),
-        )
-        .await
-        .unwrap();
+        let token = create_installation_access_token_for_pr(&mock, "test-jwt", "owner", "repo", "")
+            .await
+            .unwrap();
         assert_eq!(token, "ghs_pr_token");
-
-        token_mock.assert_async().await;
     }
 
     // -----------------------------------------------------------------------
@@ -1129,95 +1332,96 @@ mod tests {
 
     #[tokio::test]
     async fn branch_exists_returns_true_on_200() {
-        let mut server = mockito::Server::new_async().await;
-
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
-            .await;
-        server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
-            .await;
-        server
-            .mock("GET", "/repos/owner/repo/branches/my-branch")
-            .with_status(200)
-            .with_body(r#"{"name": "my-branch"}"#)
-            .create_async()
-            .await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/installation",
+                200,
+                r#"{"id": 1}"#,
+            )
+            .on(
+                HttpMethod::Post,
+                "/app/installations/1/access_tokens",
+                201,
+                r#"{"token": "ghs_test"}"#,
+            )
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/branches/my-branch",
+                200,
+                r#"{"name": "my-branch"}"#,
+            );
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
             private_key_pem: pem.to_string(),
         };
-        let result = branch_exists(&creds, "owner", "repo", "my-branch", &server.url()).await;
+        let result =
+            branch_exists_with_client(&mock, &creds, "owner", "repo", "my-branch", "").await;
         assert_eq!(result.unwrap(), true);
     }
 
     #[tokio::test]
     async fn branch_exists_returns_false_on_404() {
-        let mut server = mockito::Server::new_async().await;
-
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
-            .await;
-        server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
-            .await;
-        server
-            .mock("GET", "/repos/owner/repo/branches/no-such-branch")
-            .with_status(404)
-            .create_async()
-            .await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/installation",
+                200,
+                r#"{"id": 1}"#,
+            )
+            .on(
+                HttpMethod::Post,
+                "/app/installations/1/access_tokens",
+                201,
+                r#"{"token": "ghs_test"}"#,
+            )
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/branches/no-such-branch",
+                404,
+                "",
+            );
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
             private_key_pem: pem.to_string(),
         };
-        let result = branch_exists(&creds, "owner", "repo", "no-such-branch", &server.url()).await;
+        let result =
+            branch_exists_with_client(&mock, &creds, "owner", "repo", "no-such-branch", "").await;
         assert_eq!(result.unwrap(), false);
     }
 
     #[tokio::test]
     async fn branch_exists_returns_error_on_500() {
-        let mut server = mockito::Server::new_async().await;
-
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
-            .await;
-        server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
-            .await;
-        server
-            .mock("GET", "/repos/owner/repo/branches/broken")
-            .with_status(500)
-            .create_async()
-            .await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/installation",
+                200,
+                r#"{"id": 1}"#,
+            )
+            .on(
+                HttpMethod::Post,
+                "/app/installations/1/access_tokens",
+                201,
+                r#"{"token": "ghs_test"}"#,
+            )
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/branches/broken",
+                500,
+                "",
+            );
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
             private_key_pem: pem.to_string(),
         };
-        let result = branch_exists(&creds, "owner", "repo", "broken", &server.url()).await;
+        let result = branch_exists_with_client(&mock, &creds, "owner", "repo", "broken", "").await;
         assert!(result.is_err());
     }
 
@@ -1227,48 +1431,34 @@ mod tests {
 
     #[tokio::test]
     async fn check_app_installed_returns_true_on_200() {
-        let mut server = mockito::Server::new_async().await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/installation",
+                200,
+                r#"{"id": 1}"#,
+            )
+            .with_req_header("Authorization", "Bearer test-jwt");
 
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .match_header("Authorization", "Bearer test-jwt")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
-            .await;
-
-        let client = reqwest::Client::new();
-        let result = check_app_installed(&client, "test-jwt", "owner", "repo", &server.url()).await;
+        let result = check_app_installed(&mock, "test-jwt", "owner", "repo", "").await;
         assert_eq!(result.unwrap(), true);
     }
 
     #[tokio::test]
     async fn check_app_installed_returns_false_on_404() {
-        let mut server = mockito::Server::new_async().await;
+        let mock =
+            MockHttpClient::new().on(HttpMethod::Get, "/repos/owner/repo/installation", 404, "");
 
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(404)
-            .create_async()
-            .await;
-
-        let client = reqwest::Client::new();
-        let result = check_app_installed(&client, "test-jwt", "owner", "repo", &server.url()).await;
+        let result = check_app_installed(&mock, "test-jwt", "owner", "repo", "").await;
         assert_eq!(result.unwrap(), false);
     }
 
     #[tokio::test]
     async fn check_app_installed_returns_error_on_401() {
-        let mut server = mockito::Server::new_async().await;
+        let mock =
+            MockHttpClient::new().on(HttpMethod::Get, "/repos/owner/repo/installation", 401, "");
 
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(401)
-            .create_async()
-            .await;
-
-        let client = reqwest::Client::new();
-        let result = check_app_installed(&client, "test-jwt", "owner", "repo", &server.url()).await;
+        let result = check_app_installed(&mock, "test-jwt", "owner", "repo", "").await;
         assert!(result.is_err());
         assert!(
             result.unwrap_err().contains("authentication failed"),
@@ -1282,36 +1472,25 @@ mod tests {
 
     #[tokio::test]
     async fn get_authenticated_app_success() {
-        let mut server = mockito::Server::new_async().await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/app",
+                200,
+                r#"{"slug": "my-fabro-app", "owner": {"login": "my-org"}}"#,
+            )
+            .with_req_header("Authorization", "Bearer test-jwt");
 
-        server
-            .mock("GET", "/app")
-            .match_header("Authorization", "Bearer test-jwt")
-            .with_status(200)
-            .with_body(r#"{"slug": "my-fabro-app", "owner": {"login": "my-org"}}"#)
-            .create_async()
-            .await;
-
-        let client = reqwest::Client::new();
-        let info = get_authenticated_app(&client, "test-jwt", &server.url())
-            .await
-            .unwrap();
+        let info = get_authenticated_app(&mock, "test-jwt", "").await.unwrap();
         assert_eq!(info.slug, "my-fabro-app");
         assert_eq!(info.owner.login, "my-org");
     }
 
     #[tokio::test]
     async fn get_authenticated_app_auth_failure() {
-        let mut server = mockito::Server::new_async().await;
+        let mock = MockHttpClient::new().on(HttpMethod::Get, "/app", 401, "");
 
-        server
-            .mock("GET", "/app")
-            .with_status(401)
-            .create_async()
-            .await;
-
-        let client = reqwest::Client::new();
-        let result = get_authenticated_app(&client, "bad-jwt", &server.url()).await;
+        let result = get_authenticated_app(&mock, "bad-jwt", "").await;
         assert!(result.is_err());
         assert!(
             result.unwrap_err().contains("authentication failed"),
@@ -1325,60 +1504,45 @@ mod tests {
 
     #[tokio::test]
     async fn is_app_public_returns_true_on_200() {
-        let mut server = mockito::Server::new_async().await;
+        let mock = MockHttpClient::new().on(
+            HttpMethod::Get,
+            "/apps/my-fabro-app",
+            200,
+            r#"{"slug": "my-fabro-app"}"#,
+        );
 
-        server
-            .mock("GET", "/apps/my-fabro-app")
-            .with_status(200)
-            .with_body(r#"{"slug": "my-fabro-app"}"#)
-            .create_async()
-            .await;
-
-        let client = reqwest::Client::new();
-        let result = is_app_public(&client, "my-fabro-app", &server.url()).await;
+        let result = is_app_public(&mock, "my-fabro-app", "").await;
         assert_eq!(result.unwrap(), true);
     }
 
     #[tokio::test]
     async fn is_app_public_returns_false_on_404() {
-        let mut server = mockito::Server::new_async().await;
+        let mock = MockHttpClient::new().on(HttpMethod::Get, "/apps/my-private-app", 404, "");
 
-        server
-            .mock("GET", "/apps/my-private-app")
-            .with_status(404)
-            .create_async()
-            .await;
-
-        let client = reqwest::Client::new();
-        let result = is_app_public(&client, "my-private-app", &server.url()).await;
+        let result = is_app_public(&mock, "my-private-app", "").await;
         assert_eq!(result.unwrap(), false);
     }
 
     #[tokio::test]
     async fn is_app_public_no_auth_header() {
-        let mut server = mockito::Server::new_async().await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/apps/my-app",
+                200,
+                r#"{"slug": "my-app"}"#,
+            )
+            .with_req_header_missing("Authorization");
 
-        // Verify the request does NOT include an Authorization header
-        let mock = server
-            .mock("GET", "/apps/my-app")
-            .match_header("Authorization", mockito::Matcher::Missing)
-            .with_status(200)
-            .with_body(r#"{"slug": "my-app"}"#)
-            .create_async()
-            .await;
-
-        let client = reqwest::Client::new();
-        let result = is_app_public(&client, "my-app", &server.url()).await;
+        let result = is_app_public(&mock, "my-app", "").await;
         assert_eq!(result.unwrap(), true);
-
-        mock.assert_async().await;
     }
 
     // -----------------------------------------------------------------------
     // get_pull_request
     // -----------------------------------------------------------------------
 
-    fn mock_pr_json() -> String {
+    fn mock_pr_json() -> &'static str {
         r#"{
             "number": 42,
             "title": "Fix the bug",
@@ -1396,38 +1560,36 @@ mod tests {
             "created_at": "2026-01-01T12:00:00Z",
             "updated_at": "2026-01-02T12:00:00Z"
         }"#
-        .to_string()
     }
 
     #[tokio::test]
     async fn get_pr_success() {
-        let mut server = mockito::Server::new_async().await;
-
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
-            .await;
-        server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
-            .await;
-        server
-            .mock("GET", "/repos/owner/repo/pulls/42")
-            .with_status(200)
-            .with_body(mock_pr_json())
-            .create_async()
-            .await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/installation",
+                200,
+                r#"{"id": 1}"#,
+            )
+            .on(
+                HttpMethod::Post,
+                "/app/installations/1/access_tokens",
+                201,
+                r#"{"token": "ghs_test"}"#,
+            )
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/pulls/42",
+                200,
+                mock_pr_json(),
+            );
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
             private_key_pem: pem.to_string(),
         };
-        let detail = get_pull_request(&creds, "owner", "repo", 42, &server.url())
+        let detail = get_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "")
             .await
             .unwrap();
 
@@ -1444,32 +1606,27 @@ mod tests {
 
     #[tokio::test]
     async fn get_pr_not_found() {
-        let mut server = mockito::Server::new_async().await;
-
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
-            .await;
-        server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
-            .await;
-        server
-            .mock("GET", "/repos/owner/repo/pulls/999")
-            .with_status(404)
-            .create_async()
-            .await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/installation",
+                200,
+                r#"{"id": 1}"#,
+            )
+            .on(
+                HttpMethod::Post,
+                "/app/installations/1/access_tokens",
+                201,
+                r#"{"token": "ghs_test"}"#,
+            )
+            .on(HttpMethod::Get, "/repos/owner/repo/pulls/999", 404, "");
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
             private_key_pem: pem.to_string(),
         };
-        let err = get_pull_request(&creds, "owner", "repo", 999, &server.url())
+        let err = get_pull_request_with_client(&mock, &creds, "owner", "repo", 999, "")
             .await
             .unwrap_err();
         assert!(err.contains("not found"), "got: {err}");
@@ -1482,65 +1639,59 @@ mod tests {
 
     #[tokio::test]
     async fn merge_pr_success() {
-        let mut server = mockito::Server::new_async().await;
-
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
-            .await;
-        server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
-            .await;
-        server
-            .mock("PUT", "/repos/owner/repo/pulls/42/merge")
-            .with_status(200)
-            .with_body(r#"{"merged": true}"#)
-            .create_async()
-            .await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/installation",
+                200,
+                r#"{"id": 1}"#,
+            )
+            .on(
+                HttpMethod::Post,
+                "/app/installations/1/access_tokens",
+                201,
+                r#"{"token": "ghs_test"}"#,
+            )
+            .on(
+                HttpMethod::Put,
+                "/repos/owner/repo/pulls/42/merge",
+                200,
+                r#"{"merged": true}"#,
+            );
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
             private_key_pem: pem.to_string(),
         };
-        merge_pull_request(&creds, "owner", "repo", 42, "squash", &server.url())
+        merge_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "squash", "")
             .await
             .unwrap();
     }
 
     #[tokio::test]
     async fn merge_pr_not_mergeable() {
-        let mut server = mockito::Server::new_async().await;
-
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
-            .await;
-        server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
-            .await;
-        server
-            .mock("PUT", "/repos/owner/repo/pulls/42/merge")
-            .with_status(405)
-            .create_async()
-            .await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/installation",
+                200,
+                r#"{"id": 1}"#,
+            )
+            .on(
+                HttpMethod::Post,
+                "/app/installations/1/access_tokens",
+                201,
+                r#"{"token": "ghs_test"}"#,
+            )
+            .on(HttpMethod::Put, "/repos/owner/repo/pulls/42/merge", 405, "");
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
             private_key_pem: pem.to_string(),
         };
-        let err = merge_pull_request(&creds, "owner", "repo", 42, "squash", &server.url())
+        let err = merge_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "squash", "")
             .await
             .unwrap_err();
         assert!(err.contains("not mergeable"), "got: {err}");
@@ -1548,32 +1699,27 @@ mod tests {
 
     #[tokio::test]
     async fn merge_pr_conflict() {
-        let mut server = mockito::Server::new_async().await;
-
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
-            .await;
-        server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
-            .await;
-        server
-            .mock("PUT", "/repos/owner/repo/pulls/42/merge")
-            .with_status(409)
-            .create_async()
-            .await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/installation",
+                200,
+                r#"{"id": 1}"#,
+            )
+            .on(
+                HttpMethod::Post,
+                "/app/installations/1/access_tokens",
+                201,
+                r#"{"token": "ghs_test"}"#,
+            )
+            .on(HttpMethod::Put, "/repos/owner/repo/pulls/42/merge", 409, "");
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
             private_key_pem: pem.to_string(),
         };
-        let err = merge_pull_request(&creds, "owner", "repo", 42, "squash", &server.url())
+        let err = merge_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "squash", "")
             .await
             .unwrap_err();
         assert!(err.contains("merge conflict"), "got: {err}");
@@ -1585,65 +1731,59 @@ mod tests {
 
     #[tokio::test]
     async fn close_pr_success() {
-        let mut server = mockito::Server::new_async().await;
-
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
-            .await;
-        server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
-            .await;
-        server
-            .mock("PATCH", "/repos/owner/repo/pulls/42")
-            .with_status(200)
-            .with_body(mock_pr_json())
-            .create_async()
-            .await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/installation",
+                200,
+                r#"{"id": 1}"#,
+            )
+            .on(
+                HttpMethod::Post,
+                "/app/installations/1/access_tokens",
+                201,
+                r#"{"token": "ghs_test"}"#,
+            )
+            .on(
+                HttpMethod::Patch,
+                "/repos/owner/repo/pulls/42",
+                200,
+                mock_pr_json(),
+            );
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
             private_key_pem: pem.to_string(),
         };
-        close_pull_request(&creds, "owner", "repo", 42, &server.url())
+        close_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "")
             .await
             .unwrap();
     }
 
     #[tokio::test]
     async fn close_pr_not_found() {
-        let mut server = mockito::Server::new_async().await;
-
-        server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
-            .await;
-        server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
-            .await;
-        server
-            .mock("PATCH", "/repos/owner/repo/pulls/999")
-            .with_status(404)
-            .create_async()
-            .await;
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/installation",
+                200,
+                r#"{"id": 1}"#,
+            )
+            .on(
+                HttpMethod::Post,
+                "/app/installations/1/access_tokens",
+                201,
+                r#"{"token": "ghs_test"}"#,
+            )
+            .on(HttpMethod::Patch, "/repos/owner/repo/pulls/999", 404, "");
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
             app_id: "test".to_string(),
             private_key_pem: pem.to_string(),
         };
-        let err = close_pull_request(&creds, "owner", "repo", 999, &server.url())
+        let err = close_pull_request_with_client(&mock, &creds, "owner", "repo", 999, "")
             .await
             .unwrap_err();
         assert!(err.contains("not found"), "got: {err}");

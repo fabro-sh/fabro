@@ -21,6 +21,5 @@ tracing.workspace = true
 tokio = { workspace = true }
 
 [dev-dependencies]
-mockito = "1"
 tokio = { workspace = true, features = ["test-util", "macros"] }
 base64.workspace = true

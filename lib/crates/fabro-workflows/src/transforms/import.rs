@@ -88,6 +88,19 @@ impl ImportTransform {
             return;
         }
 
+        if graph
+            .edges
+            .iter()
+            .any(|edge| edge.from == placeholder_id && edge.to == placeholder_id)
+        {
+            Self::poison_placeholder(
+                graph,
+                placeholder_id,
+                &format!("import placeholder '{placeholder_id}' cannot have a self-loop"),
+            );
+            return;
+        }
+
         let placeholder = match Self::placeholder_config(graph, placeholder_id) {
             Ok(placeholder) => placeholder,
             Err(message) => {

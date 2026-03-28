@@ -1673,7 +1673,6 @@ dependencies = [
  "base64",
  "chrono",
  "jsonwebtoken",
- "mockito",
  "reqwest",
  "serde",
  "serde_json",
