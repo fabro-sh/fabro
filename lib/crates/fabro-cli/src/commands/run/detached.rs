@@ -20,14 +20,13 @@ pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bo
     });
 
     let cli_settings = cli_config::load_cli_settings(None)?;
-    let on_node: Option<Arc<dyn Fn(&str) + Send + Sync>> =
-        RunRecord::load(&run_dir).ok().map(|record| {
-            let short_id = super::short_run_id(&record.run_id).to_string();
-            fabro_proctitle::set(&format!("fabro: {short_id}"));
-            Arc::new(move |node_id: &str| {
-                fabro_proctitle::set(&format!("fabro: {short_id} {node_id}"));
-            }) as Arc<dyn Fn(&str) + Send + Sync>
-        });
+    let on_node: fabro_workflows::OnNodeCallback = RunRecord::load(&run_dir).ok().map(|record| {
+        let short_id = super::short_run_id(&record.run_id).to_string();
+        fabro_proctitle::set(&format!("fabro: {short_id}"));
+        Arc::new(move |node_id: &str| {
+            fabro_proctitle::set(&format!("fabro: {short_id} {node_id}"));
+        }) as Arc<dyn Fn(&str) + Send + Sync>
+    });
 
     let github_app = shared::github::build_github_app_credentials(cli_settings.app_id());
     let git_author = GitAuthor::from_options(

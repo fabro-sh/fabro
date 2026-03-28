@@ -251,7 +251,7 @@ pub struct Initialized {
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
     pub registry: Arc<HandlerRegistry>,
-    pub on_node: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    pub on_node: crate::OnNodeCallback,
     pub hook_runner: Option<Arc<HookRunner>>,
     pub env: HashMap<String, String>,
     pub dry_run: bool,

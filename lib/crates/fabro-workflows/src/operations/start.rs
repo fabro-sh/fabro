@@ -42,7 +42,7 @@ struct RunSession {
     sandbox: SandboxSpec,
     llm: LlmSpec,
     interviewer: Arc<dyn Interviewer>,
-    on_node: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    on_node: crate::OnNodeCallback,
     lifecycle: LifecycleOptions,
     hooks: fabro_hooks::HookConfig,
     sandbox_env: SandboxEnvSpec,
@@ -67,7 +67,7 @@ pub struct StartServices {
     pub interviewer: Arc<dyn Interviewer>,
     pub git_author: GitAuthor,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
-    pub on_node: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    pub on_node: crate::OnNodeCallback,
     pub registry_override: Option<Arc<HandlerRegistry>>,
 }
 
