@@ -22,9 +22,9 @@ use crate::pipeline::{
     FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted, PullRequestOptions, RetroOptions,
     SandboxEnvSpec, SandboxSpec,
 };
-use crate::records::{Checkpoint, Conclusion};
+use crate::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt, RunRecordExt};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
-use crate::run_status::{self, RunStatus, StatusReason};
+use crate::run_status::{self, RunStatus, RunStatusRecordExt, StatusReason};
 
 struct StartRetroOptions {
     enabled: bool,

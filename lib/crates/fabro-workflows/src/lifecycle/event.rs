@@ -13,7 +13,9 @@ use crate::artifact::ArtifactStore;
 use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::outcome::{FailureCategory, FailureDetail, Outcome, StageStatus, StageUsage};
+use crate::outcome::{
+    stage_usage_to_llm, FailureCategory, FailureDetail, Outcome, StageStatus, StageUsage,
+};
 use fabro_graphviz::graph::types::Node as GvNode;
 
 type WfRunState = RunState<Option<StageUsage>>;
@@ -302,7 +304,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         let run_usage = state
             .node_outcomes
             .values()
-            .filter_map(|o| o.usage.as_ref().map(fabro_llm::types::Usage::from))
+            .filter_map(|o| o.usage.as_ref().map(stage_usage_to_llm))
             .reduce(|a, b| a + b);
 
         if outcome.status == StageStatus::Success || outcome.status == StageStatus::PartialSuccess {

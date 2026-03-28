@@ -1,0 +1,21 @@
+[package]
+name = "fabro-types"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Shared record structs and enums for Fabro"
+
+[lib]
+doctest = false
+
+[features]
+default = []
+exedev = []
+clap = ["dep:clap"]
+
+[dependencies]
+chrono = { workspace = true, features = ["serde"] }
+clap = { workspace = true, optional = true }
+fabro-types-derive = { path = "../fabro-types-derive" }
+serde.workspace = true
+serde_json.workspace = true

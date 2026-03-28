@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use fabro_config::FabroSettingsExt;
+use fabro_sandbox::SandboxRecordExt;
+use fabro_workflows::records::{CheckpointExt, ConclusionExt, RunRecordExt, StartRecordExt};
 use serde::Serialize;
 
 use crate::args::InspectArgs;

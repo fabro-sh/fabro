@@ -51,4 +51,4 @@ pub use local::LocalSandbox;
 #[cfg(feature = "docker")]
 pub use docker::{DockerSandbox, DockerSandboxConfig};
 
-pub use sandbox_record::SandboxRecord;
+pub use sandbox_record::{SandboxRecord, SandboxRecordExt};

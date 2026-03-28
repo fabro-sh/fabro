@@ -3,43 +3,15 @@ use std::path::{Path, PathBuf};
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, crate::Combine)]
-#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
-#[serde(rename_all = "kebab-case")]
-pub enum OutputFormat {
-    Text,
-    Json,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, crate::Combine)]
-#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
-#[serde(rename_all = "kebab-case")]
-pub enum PermissionLevel {
-    ReadOnly,
-    ReadWrite,
-    Full,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-#[serde(rename_all = "lowercase")]
-pub enum ExecutionMode {
-    #[default]
-    Standalone,
-    Server,
-}
+pub use fabro_types::settings::cli::{
+    ClientTlsSettings, ExecSettings, ExecutionMode, OutputFormat, PermissionLevel, ServerSettings,
+};
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct ClientTlsConfig {
     pub cert: Option<PathBuf>,
     pub key: Option<PathBuf>,
     pub ca: Option<PathBuf>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct ClientTlsSettings {
-    pub cert: PathBuf,
-    pub key: PathBuf,
-    pub ca: PathBuf,
 }
 
 impl TryFrom<ClientTlsConfig> for ClientTlsSettings {
@@ -66,12 +38,6 @@ pub struct ServerConfig {
     pub tls: Option<ClientTlsConfig>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct ServerSettings {
-    pub base_url: Option<String>,
-    pub tls: Option<ClientTlsSettings>,
-}
-
 impl TryFrom<ServerConfig> for ServerSettings {
     type Error = anyhow::Error;
 
@@ -85,14 +51,6 @@ impl TryFrom<ServerConfig> for ServerSettings {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct ExecConfig {
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    pub permissions: Option<PermissionLevel>,
-    pub output_format: Option<OutputFormat>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct ExecSettings {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub permissions: Option<PermissionLevel>,

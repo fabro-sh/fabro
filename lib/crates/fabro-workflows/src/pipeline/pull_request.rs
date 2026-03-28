@@ -5,10 +5,11 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 use fabro_github::{self as github_app, ssh_url_to_https, GitHubAppCredentials};
+use fabro_retro::RetroExt;
 
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::outcome::StageStatus;
-use crate::records::{Conclusion, RunRecord};
+use crate::records::{Conclusion, ConclusionExt, RunRecord, RunRecordExt};
 use fabro_retro::retro::Retro;
 
 use super::types::{Concluded, Finalized, PullRequestOptions};

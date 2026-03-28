@@ -4,7 +4,7 @@ use std::time::Duration;
 use fabro_util::terminal::Styles;
 use fabro_workflows::outcome::{format_cost, StageStatus};
 use fabro_workflows::pipeline::{Persisted, Validated};
-use fabro_workflows::records::Checkpoint;
+use fabro_workflows::records::{Checkpoint, CheckpointExt, ConclusionExt};
 use indicatif::HumanDuration;
 
 use crate::shared::{format_tokens_human, print_diagnostics, relative_path, tilde_path};

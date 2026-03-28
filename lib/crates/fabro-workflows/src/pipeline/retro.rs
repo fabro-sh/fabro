@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use fabro_agent::SessionEvent;
 use fabro_retro::retro::Retro;
+use fabro_retro::RetroExt;
 
 use crate::event::WorkflowRunEvent;
-use crate::records::Checkpoint;
+use crate::records::{Checkpoint, CheckpointExt};
 
 use super::types::{Executed, RetroOptions, Retroed};
 

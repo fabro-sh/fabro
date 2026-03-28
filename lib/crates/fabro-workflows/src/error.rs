@@ -1,11 +1,10 @@
-use std::fmt;
-
 use fabro_llm::error::{ProviderErrorKind, SdkError};
 use fabro_validate::Diagnostic;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub use fabro_core::outcome::FailureCategory;
+pub use fabro_types::failure_signature::FailureSignature;
+pub use fabro_types::outcome::FailureCategory;
 
 /// Classify an `SdkError` into a `FailureCategory` based on its structure.
 #[must_use]
@@ -160,22 +159,17 @@ pub fn normalize_failure_reason(reason: &str) -> String {
     }
 }
 
-/// Composite key that uniquely identifies a specific recurring failure.
-///
-/// Format: `node_id|failure_class|normalized_reason`
-///
-/// Used by circuit breakers to detect when the same failure keeps repeating,
-/// e.g. "verify|deterministic|assertion failed in foo_test".
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct FailureSignature(String);
+pub trait FailureSignatureExt {
+    fn new(
+        node_id: &str,
+        failure_class: FailureCategory,
+        signature_hint: Option<&str>,
+        failure_reason: Option<&str>,
+    ) -> Self;
+}
 
-impl FailureSignature {
-    /// Build a signature from failure context.
-    ///
-    /// The signature hint from `outcome.context_updates["failure_signature"]` takes
-    /// priority over the raw `failure_reason`, allowing handlers to provide explicit
-    /// grouping keys.
-    pub fn new(
+impl FailureSignatureExt for FailureSignature {
+    fn new(
         node_id: &str,
         failure_class: FailureCategory,
         signature_hint: Option<&str>,
@@ -188,12 +182,6 @@ impl FailureSignature {
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "unknown".to_string());
         Self(format!("{}|{}|{}", node_id.trim(), failure_class, reason))
-    }
-}
-
-impl fmt::Display for FailureSignature {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
     }
 }
 

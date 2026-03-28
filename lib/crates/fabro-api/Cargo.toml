@@ -20,6 +20,7 @@ fabro-agent = { path = "../fabro-agent" }
 fabro-llm = { path = "../fabro-llm" }
 fabro-model = { path = "../fabro-model" }
 fabro-retro = { path = "../fabro-retro" }
+fabro-types = { path = "../fabro-types", features = ["exedev"] }
 fabro-util = { path = "../fabro-util" }
 fabro-db = { path = "../fabro-db" }
 fabro-api-types = { path = "../fabro-api-types" }

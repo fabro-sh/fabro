@@ -12,7 +12,7 @@ path = "src/main.rs"
 [features]
 default = []
 server = ["dep:fabro-api"]
-exedev = ["fabro-sandbox/exe", "fabro-config/exedev", "fabro-workflows/exedev"]
+exedev = ["fabro-sandbox/exe", "fabro-config/exedev", "fabro-workflows/exedev", "fabro-types/exedev"]
 sleep_inhibitor = ["dep:core-foundation"]
 
 [dependencies]
@@ -34,6 +34,7 @@ fabro-validate = { path = "../fabro-validate" }
 fabro-workflows = { path = "../fabro-workflows" }
 fabro-api = { path = "../fabro-api", optional = true }
 fabro-telemetry = { path = "../fabro-telemetry" }
+fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 clap.workspace = true
 cli-table.workspace = true

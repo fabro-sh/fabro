@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+use fabro_config::FabroSettingsExt;
+use fabro_sandbox::SandboxRecordExt;
 use tracing::{debug, info};
 
 use crate::args::CpArgs;

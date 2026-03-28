@@ -2,6 +2,9 @@ use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
+use fabro_config::FabroSettingsExt;
+use fabro_sandbox::SandboxRecordExt;
+use fabro_workflows::records::StartRecordExt;
 use tracing::{debug, info};
 
 use crate::args::DiffArgs;

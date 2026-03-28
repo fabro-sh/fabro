@@ -14,7 +14,7 @@ doctest = false
 
 [features]
 default = []
-exedev = ["fabro-sandbox/exe", "fabro-config/exedev"]
+exedev = ["fabro-sandbox/exe", "fabro-config/exedev", "fabro-types/exedev"]
 
 [dependencies]
 anyhow.workspace = true
@@ -35,6 +35,7 @@ fabro-llm = { path = "../fabro-llm" }
 fabro-model = { path = "../fabro-model" }
 fabro-retro = { path = "../fabro-retro" }
 fabro-core = { path = "../fabro-core" }
+fabro-types = { path = "../fabro-types" }
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true

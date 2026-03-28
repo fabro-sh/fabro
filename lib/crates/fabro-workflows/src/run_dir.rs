@@ -4,6 +4,7 @@ use chrono::Utc;
 
 use crate::context::Context;
 use crate::outcome::{Outcome, OutcomeExt};
+use crate::records::StartRecordExt;
 use crate::run_options::RunOptions;
 
 /// Write start.json at the start of a workflow run. Returns the StartRecord.

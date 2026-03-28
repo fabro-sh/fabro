@@ -1,4 +1,6 @@
 use anyhow::{bail, Context, Result};
+use fabro_config::FabroSettingsExt;
+use fabro_sandbox::SandboxRecordExt;
 use tracing::info;
 
 use crate::args::SshArgs;

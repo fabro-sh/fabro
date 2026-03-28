@@ -7,6 +7,10 @@ use tracing::debug;
 
 use crate::combine::Combine;
 use crate::config::FabroConfig;
+pub use fabro_types::settings::run::{
+    AssetsSettings, CheckpointSettings, GitHubSettings, LlmSettings, MergeStrategy,
+    PullRequestSettings, SetupSettings,
+};
 
 const SUPPORTED_VERSION: u32 = 1;
 
@@ -25,12 +29,6 @@ impl Combine for CheckpointConfig {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct CheckpointSettings {
-    #[serde(default)]
-    pub exclude_globs: Vec<String>,
-}
-
 impl From<CheckpointConfig> for CheckpointSettings {
     fn from(value: CheckpointConfig) -> Self {
         let mut exclude_globs = value.exclude_globs;
@@ -40,28 +38,12 @@ impl From<CheckpointConfig> for CheckpointSettings {
     }
 }
 
-fn default_true() -> bool {
-    true
-}
-
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct PullRequestConfig {
     pub enabled: Option<bool>,
     pub draft: Option<bool>,
     pub auto_merge: Option<bool>,
     pub merge_strategy: Option<MergeStrategy>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct PullRequestSettings {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_true")]
-    pub draft: bool,
-    #[serde(default)]
-    pub auto_merge: bool,
-    #[serde(default)]
-    pub merge_strategy: MergeStrategy,
 }
 
 impl From<PullRequestConfig> for PullRequestSettings {
@@ -75,23 +57,8 @@ impl From<PullRequestConfig> for PullRequestSettings {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-#[serde(rename_all = "lowercase")]
-pub enum MergeStrategy {
-    #[default]
-    Squash,
-    Merge,
-    Rebase,
-}
-
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct AssetsConfig {
-    #[serde(default)]
-    pub include: Vec<String>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct AssetsSettings {
     #[serde(default)]
     pub include: Vec<String>,
 }
@@ -106,12 +73,6 @@ impl From<AssetsConfig> for AssetsSettings {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct GitHubConfig {
-    #[serde(default)]
-    pub permissions: HashMap<String, String>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct GitHubSettings {
     #[serde(default)]
     pub permissions: HashMap<String, String>,
 }
@@ -132,14 +93,6 @@ pub struct LlmConfig {
     pub fallbacks: Option<HashMap<String, Vec<String>>>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct LlmSettings {
-    pub model: Option<String>,
-    pub provider: Option<String>,
-    #[serde(default)]
-    pub fallbacks: Option<HashMap<String, Vec<String>>>,
-}
-
 impl From<LlmConfig> for LlmSettings {
     fn from(value: LlmConfig) -> Self {
         Self {
@@ -152,13 +105,6 @@ impl From<LlmConfig> for LlmSettings {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct SetupConfig {
-    #[serde(default)]
-    pub commands: Vec<String>,
-    pub timeout_ms: Option<u64>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct SetupSettings {
     #[serde(default)]
     pub commands: Vec<String>,
     pub timeout_ms: Option<u64>,

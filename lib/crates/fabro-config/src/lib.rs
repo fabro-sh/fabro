@@ -13,9 +13,9 @@ pub mod server;
 pub mod settings;
 
 pub use config::FabroConfig;
-pub use fabro_config_derive::Combine;
+pub use fabro_types::Combine;
 pub use fabro_util::path::expand_tilde;
-pub use settings::FabroSettings;
+pub use settings::{FabroSettings, FabroSettingsExt};
 
 use std::path::Path;
 

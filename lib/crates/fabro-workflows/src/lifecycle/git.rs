@@ -14,6 +14,7 @@ use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageStatus, StageUsage};
+use crate::records::CheckpointExt;
 use crate::run_dir::node_dir;
 use crate::run_options::RunOptions;
 use crate::sandbox_git::{git_checkpoint, git_diff, git_push_host};

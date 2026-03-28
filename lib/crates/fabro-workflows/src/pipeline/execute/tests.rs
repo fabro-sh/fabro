@@ -21,7 +21,7 @@ use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline::initialize;
 use crate::pipeline::types::{InitOptions, LlmSpec, Persisted, SandboxEnvSpec, SandboxSpec};
-use crate::records::{Checkpoint, RunRecord};
+use crate::records::{Checkpoint, CheckpointExt, RunRecord, StartRecordExt};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::test_support::run_graph;
 

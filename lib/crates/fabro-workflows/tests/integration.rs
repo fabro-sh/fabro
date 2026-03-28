@@ -13,7 +13,7 @@ use fabro_interview::{
 use fabro_llm::provider::Provider;
 use fabro_validate::{validate, validate_or_raise, Severity};
 use fabro_workflows::context::Context;
-use fabro_workflows::error::FabroError;
+use fabro_workflows::error::{FabroError, FailureSignatureExt};
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
 use fabro_workflows::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
 use fabro_workflows::handler::command::CommandHandler;
@@ -28,7 +28,7 @@ use fabro_workflows::handler::start::StartHandler;
 use fabro_workflows::handler::wait::WaitHandler;
 use fabro_workflows::handler::{Handler, HandlerRegistry};
 use fabro_workflows::outcome::{Outcome, OutcomeExt, StageStatus};
-use fabro_workflows::records::Checkpoint;
+use fabro_workflows::records::{Checkpoint, CheckpointExt};
 use fabro_workflows::run_options::{GitCheckpointOptions, RunOptions};
 use fabro_workflows::stylesheet::{apply_stylesheet, parse_stylesheet};
 use fabro_workflows::test_support::{run_graph_with_hooks, WorkflowRunner};
@@ -5973,7 +5973,7 @@ mod real_llm {
     use fabro_workflows::handler::start::StartHandler;
     use fabro_workflows::handler::HandlerRegistry;
     use fabro_workflows::outcome::StageStatus;
-    use fabro_workflows::records::Checkpoint;
+    use fabro_workflows::records::{Checkpoint, CheckpointExt};
     use fabro_workflows::run_options::RunOptions;
     use fabro_workflows::test_support::WorkflowRunner;
 

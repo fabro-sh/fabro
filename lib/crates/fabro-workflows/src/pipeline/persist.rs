@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::error::FabroError;
+use crate::records::RunRecordExt;
 
 use super::types::{PersistOptions, Persisted, Validated};
 

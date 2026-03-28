@@ -4,6 +4,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{print_stdout, Cell, CellStruct, Style, Table};
+use fabro_config::FabroSettingsExt;
 
 use crate::args::DfArgs;
 use crate::shared::format_size;

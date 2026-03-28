@@ -14,7 +14,7 @@ pub fn derive_combine(input: TokenStream) -> TokenStream {
                 let combined = fields.named.into_iter().map(|field| {
                     let ident = field.ident.expect("named field");
                     quote! {
-                        #ident: ::fabro_config::combine::Combine::combine(self.#ident, other.#ident)
+                        #ident: ::fabro_types::combine::Combine::combine(self.#ident, other.#ident)
                     }
                 });
                 quote! {
@@ -27,7 +27,7 @@ pub fn derive_combine(input: TokenStream) -> TokenStream {
                 let combined = fields.unnamed.iter().enumerate().map(|(index, _)| {
                     let index = syn::Index::from(index);
                     quote! {
-                        ::fabro_config::combine::Combine::combine(self.#index, other.#index)
+                        ::fabro_types::combine::Combine::combine(self.#index, other.#index)
                     }
                 });
                 quote! {
@@ -42,7 +42,7 @@ pub fn derive_combine(input: TokenStream) -> TokenStream {
     };
 
     quote! {
-        impl #impl_generics ::fabro_config::combine::Combine for #ident #ty_generics #where_clause {
+        impl #impl_generics ::fabro_types::combine::Combine for #ident #ty_generics #where_clause {
             fn combine(self, other: Self) -> Self {
                 #body
             }

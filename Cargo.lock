@@ -1276,6 +1276,7 @@ dependencies = [
  "fabro-model",
  "fabro-retro",
  "fabro-sandbox",
+ "fabro-types",
  "fabro-util",
  "fabro-workflows",
  "futures-util",
@@ -1357,6 +1358,7 @@ dependencies = [
  "fabro-retro",
  "fabro-sandbox",
  "fabro-telemetry",
+ "fabro-types",
  "fabro-util",
  "fabro-validate",
  "fabro-workflows",
@@ -1401,7 +1403,7 @@ dependencies = [
  "anyhow",
  "clap",
  "dirs",
- "fabro-config-derive",
+ "fabro-types",
  "fabro-util",
  "serde",
  "serde_json",
@@ -1412,19 +1414,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "fabro-config-derive"
-version = "0.176.2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "fabro-core"
 version = "0.176.2"
 dependencies = [
  "async-trait",
+ "fabro-types",
  "fabro-util",
  "serde",
  "serde_json",
@@ -1492,6 +1486,7 @@ name = "fabro-graphviz"
 version = "0.176.2"
 dependencies = [
  "anyhow",
+ "fabro-types",
  "nom",
  "regex",
  "serde",
@@ -1507,6 +1502,7 @@ dependencies = [
  "fabro-config",
  "fabro-llm",
  "fabro-model",
+ "fabro-types",
  "fabro-util",
  "mockito",
  "regex",
@@ -1570,6 +1566,7 @@ version = "0.176.2"
 dependencies = [
  "anyhow",
  "fabro-config",
+ "fabro-types",
  "futures",
  "reqwest",
  "rmcp",
@@ -1614,6 +1611,7 @@ dependencies = [
  "chrono",
  "fabro-agent",
  "fabro-llm",
+ "fabro-types",
  "fabro-util",
  "serde",
  "serde_json",
@@ -1634,6 +1632,7 @@ dependencies = [
  "daytona-sdk",
  "fabro-config",
  "fabro-github",
+ "fabro-types",
  "futures",
  "git2",
  "glob",
@@ -1709,6 +1708,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-types"
+version = "0.176.2"
+dependencies = [
+ "chrono",
+ "clap",
+ "fabro-types-derive",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "fabro-types-derive"
+version = "0.176.2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "fabro-util"
 version = "0.176.2"
 dependencies = [
@@ -1764,6 +1783,7 @@ dependencies = [
  "fabro-model",
  "fabro-retro",
  "fabro-sandbox",
+ "fabro-types",
  "fabro-util",
  "fabro-validate",
  "futures",

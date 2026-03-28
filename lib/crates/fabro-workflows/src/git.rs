@@ -522,6 +522,8 @@ mod tests {
     use super::*;
     use std::fs;
 
+    use crate::records::{CheckpointExt, RunRecordExt};
+
     /// Create a temporary git repo with an initial commit.
     fn init_repo(dir: &Path) {
         Command::new("git")

@@ -1,6 +1,7 @@
 use anyhow::bail;
+use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
-use fabro_workflows::records::RunRecord;
+use fabro_workflows::records::{RunRecord, RunRecordExt};
 
 use crate::args::ResumeArgs;
 

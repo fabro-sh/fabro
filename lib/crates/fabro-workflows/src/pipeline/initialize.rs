@@ -8,8 +8,8 @@ use fabro_config::sandbox::WorktreeMode;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_llm::client::Client;
 use fabro_sandbox::{
-    DockerSandbox, LocalSandbox, ReadBeforeWriteSandbox, SandboxRecord, WorktreeConfig,
-    WorktreeSandbox,
+    DockerSandbox, LocalSandbox, ReadBeforeWriteSandbox, SandboxRecord, SandboxRecordExt,
+    WorktreeConfig, WorktreeSandbox,
 };
 use shlex::try_quote;
 

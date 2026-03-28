@@ -3,6 +3,7 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
+use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 use tracing::{debug, info};
 

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::FabroConfig;
 use crate::run;
 use crate::FabroSettings;
+pub use fabro_types::settings::project::ProjectFabroSettings;
 
 const CONFIG_FILENAME: &str = "fabro.toml";
 const SUPPORTED_VERSION: u32 = 1;
@@ -37,20 +38,6 @@ pub struct ResolveSettingsInput {
 
 fn default_root() -> String {
     ".".to_string()
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ProjectFabroSettings {
-    #[serde(default = "default_root")]
-    pub root: String,
-}
-
-impl Default for ProjectFabroSettings {
-    fn default() -> Self {
-        Self {
-            root: default_root(),
-        }
-    }
 }
 
 impl From<ProjectFabroConfig> for ProjectFabroSettings {

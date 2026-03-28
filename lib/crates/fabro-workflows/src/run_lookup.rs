@@ -5,9 +5,8 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use crate::records::RunRecord;
-use crate::records::StartRecord;
-use crate::run_status::{RunStatus, RunStatusRecord, StatusReason};
+use crate::records::{ConclusionExt, RunRecord, RunRecordExt, StartRecord, StartRecordExt};
+use crate::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt, StatusReason};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunInfo {

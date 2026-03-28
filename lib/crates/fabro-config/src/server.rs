@@ -4,27 +4,16 @@ use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
 use crate::config::FabroConfig;
-use crate::settings::FabroSettings;
-
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthProvider {
-    #[default]
-    Github,
-    InsecureDisabled,
-}
+use crate::settings::{FabroSettings, FabroSettingsExt};
+pub use fabro_types::settings::server::{
+    ApiAuthStrategy, ApiSettings, AuthProvider, AuthSettings, FeaturesSettings, GitAuthorSettings,
+    GitProvider, GitSettings, LogSettings, TlsSettings, WebSettings, WebhookSettings,
+    WebhookStrategy,
+};
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct AuthConfig {
     pub provider: Option<AuthProvider>,
-    #[serde(default)]
-    pub allowed_usernames: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
-pub struct AuthSettings {
-    #[serde(default)]
-    pub provider: AuthProvider,
     #[serde(default)]
     pub allowed_usernames: Vec<String>,
 }
@@ -38,25 +27,11 @@ impl From<AuthConfig> for AuthSettings {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize, crate::Combine)]
-#[serde(rename_all = "snake_case")]
-pub enum ApiAuthStrategy {
-    Jwt,
-    Mtls,
-}
-
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct TlsConfig {
     pub cert: Option<PathBuf>,
     pub key: Option<PathBuf>,
     pub ca: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct TlsSettings {
-    pub cert: PathBuf,
-    pub key: PathBuf,
-    pub ca: PathBuf,
 }
 
 impl TryFrom<TlsConfig> for TlsSettings {
@@ -85,27 +60,8 @@ pub struct ApiConfig {
     pub tls: Option<TlsConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct ApiSettings {
-    #[serde(default = "default_base_url")]
-    pub base_url: String,
-    #[serde(default)]
-    pub authentication_strategies: Vec<ApiAuthStrategy>,
-    pub tls: Option<TlsSettings>,
-}
-
 fn default_base_url() -> String {
     "http://localhost:3000".to_string()
-}
-
-impl Default for ApiSettings {
-    fn default() -> Self {
-        Self {
-            base_url: default_base_url(),
-            authentication_strategies: Vec::new(),
-            tls: None,
-        }
-    }
 }
 
 impl TryFrom<ApiConfig> for ApiSettings {
@@ -121,20 +77,7 @@ impl TryFrom<ApiConfig> for ApiSettings {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-#[serde(rename_all = "snake_case")]
-pub enum GitProvider {
-    #[default]
-    Github,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct GitAuthorConfig {
-    pub name: Option<String>,
-    pub email: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
-pub struct GitAuthorSettings {
     pub name: Option<String>,
     pub email: Option<String>,
 }
@@ -148,20 +91,9 @@ impl From<GitAuthorConfig> for GitAuthorSettings {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize, crate::Combine)]
-#[serde(rename_all = "snake_case")]
-pub enum WebhookStrategy {
-    TailscaleFunnel,
-}
-
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct WebhookConfig {
     pub strategy: Option<WebhookStrategy>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct WebhookSettings {
-    pub strategy: WebhookStrategy,
 }
 
 impl TryFrom<WebhookConfig> for WebhookSettings {
@@ -186,18 +118,6 @@ pub struct GitConfig {
     pub webhooks: Option<WebhookConfig>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
-pub struct GitSettings {
-    #[serde(default)]
-    pub provider: GitProvider,
-    pub app_id: Option<String>,
-    pub client_id: Option<String>,
-    pub slug: Option<String>,
-    #[serde(default)]
-    pub author: GitAuthorSettings,
-    pub webhooks: Option<WebhookSettings>,
-}
-
 impl TryFrom<GitConfig> for GitSettings {
     type Error = anyhow::Error;
 
@@ -219,25 +139,8 @@ pub struct WebConfig {
     pub auth: Option<AuthConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct WebSettings {
-    #[serde(default = "default_web_url")]
-    pub url: String,
-    #[serde(default)]
-    pub auth: AuthSettings,
-}
-
 fn default_web_url() -> String {
     "http://localhost:5173".to_string()
-}
-
-impl Default for WebSettings {
-    fn default() -> Self {
-        Self {
-            url: default_web_url(),
-            auth: AuthSettings::default(),
-        }
-    }
 }
 
 impl From<WebConfig> for WebSettings {
@@ -256,15 +159,6 @@ pub struct Features {
     pub retros: Option<bool>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
-pub struct FeaturesSettings {
-    #[serde(default)]
-    pub session_sandboxes: bool,
-    /// Experimental: enable automatic retro generation after workflow runs.
-    #[serde(default)]
-    pub retros: bool,
-}
-
 impl From<Features> for FeaturesSettings {
     fn from(value: Features) -> Self {
         Self {
@@ -276,11 +170,6 @@ impl From<Features> for FeaturesSettings {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct LogConfig {
-    pub level: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct LogSettings {
     pub level: Option<String>,
 }
 

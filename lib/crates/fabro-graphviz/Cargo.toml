@@ -10,6 +10,7 @@ doctest = false
 
 [dependencies]
 anyhow.workspace = true
+fabro-types = { path = "../fabro-types" }
 nom = "7"
 regex = { workspace = true }
 serde = { workspace = true }

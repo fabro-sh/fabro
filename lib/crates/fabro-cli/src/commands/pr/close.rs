@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use fabro_config::FabroSettingsExt;
 use tracing::info;
 
 use crate::args::PrCloseArgs;

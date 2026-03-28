@@ -1,4 +1,5 @@
 use anyhow::Result;
+use fabro_config::FabroSettingsExt;
 
 use crate::args::AssetListArgs;
 use crate::shared::format_size;

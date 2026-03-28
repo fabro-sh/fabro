@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+use fabro_config::FabroSettingsExt;
 
 use crate::args::AssetCpArgs;
 use crate::shared::split_run_path;

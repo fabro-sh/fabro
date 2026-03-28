@@ -25,6 +25,7 @@ use fabro_core::state::RunState;
 
 use crate::artifact::ArtifactStore;
 use crate::context;
+use crate::error::FailureSignatureExt;
 use crate::event::EventEmitter;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;

@@ -13,6 +13,7 @@ anyhow = "1"
 chrono = { workspace = true, features = ["serde"] }
 fabro-agent = { path = "../fabro-agent" }
 fabro-llm = { path = "../fabro-llm" }
+fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 serde.workspace = true
 serde_json.workspace = true

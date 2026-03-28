@@ -12,7 +12,7 @@ use crate::lifecycle::{
     AttemptContext, AttemptResultContext, EdgeContext, EdgeDecision, NodeDecision, NoopLifecycle,
     RunLifecycle,
 };
-use crate::outcome::{NodeResult, Outcome, StageStatus};
+use crate::outcome::{NodeResult, NodeResultExt, Outcome, StageStatus};
 use crate::state::RunState;
 
 #[derive(Default)]

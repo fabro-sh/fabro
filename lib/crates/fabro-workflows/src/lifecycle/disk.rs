@@ -13,7 +13,7 @@ use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::StageUsage;
-use crate::records::Checkpoint;
+use crate::records::{Checkpoint, CheckpointExt};
 use crate::run_dir::{write_node_status, write_start_record};
 use crate::run_options::RunOptions;
 

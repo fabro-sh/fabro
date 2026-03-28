@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use chrono::{Local, Utc};
-use fabro_config::FabroSettings;
+use fabro_config::{FabroSettings, FabroSettingsExt};
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
@@ -343,6 +343,8 @@ pub(crate) fn make_run_dir(runs_base: &Path, run_id: &str, dry_run: bool) -> Pat
 mod tests {
     use super::*;
     use fabro_graphviz::graph::AttrValue;
+
+    use crate::run_status::RunStatusRecordExt;
 
     fn validate_dot(dot_source: &str, settings: FabroSettings) -> Validated {
         validate(ValidateInput {

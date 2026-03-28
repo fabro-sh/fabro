@@ -12,6 +12,7 @@ use fabro_config::FabroSettings;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_llm::provider::Provider;
 use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
+use fabro_sandbox::SandboxRecordExt;
 use fabro_workflows::artifact::sync_artifacts_to_env;
 use fabro_workflows::context::Context;
 use fabro_workflows::error::FabroError;
@@ -20,7 +21,7 @@ use fabro_workflows::handler::exit::ExitHandler;
 use fabro_workflows::handler::start::StartHandler;
 use fabro_workflows::handler::{Handler, HandlerRegistry};
 use fabro_workflows::outcome::{Outcome, OutcomeExt, StageStatus};
-use fabro_workflows::records::Checkpoint;
+use fabro_workflows::records::{Checkpoint, CheckpointExt};
 use fabro_workflows::run_options::{GitCheckpointOptions, RunOptions};
 use fabro_workflows::test_support::WorkflowRunner;
 

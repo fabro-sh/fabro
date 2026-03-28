@@ -1,8 +1,10 @@
 use std::io::Write;
 
 use anyhow::{bail, Result};
+use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
-use fabro_workflows::run_status::{RunStatus, RunStatusRecord};
+use fabro_workflows::records::ConclusionExt;
+use fabro_workflows::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
 use tracing::info;
 
 use crate::args::WaitArgs;

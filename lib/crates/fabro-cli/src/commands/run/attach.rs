@@ -9,7 +9,8 @@ use anyhow::{bail, Result};
 
 use fabro_interview::{AnswerValue, ConsoleInterviewer};
 use fabro_util::terminal::Styles;
-use fabro_workflows::run_status::{RunStatus, RunStatusRecord};
+use fabro_workflows::records::{ConclusionExt, RunRecordExt};
+use fabro_workflows::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
 
 use super::run_progress;
 

@@ -10,13 +10,13 @@ doctest = false
 
 [features]
 default = []
-exedev = []
-clap = ["dep:clap"]
+exedev = ["fabro-types/exedev"]
+clap = ["dep:clap", "fabro-types/clap"]
 
 [dependencies]
 anyhow.workspace = true
 clap = { workspace = true, optional = true }
-fabro-config-derive = { path = "../fabro-config-derive" }
+fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 dirs.workspace = true
 serde.workspace = true

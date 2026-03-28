@@ -10,7 +10,7 @@ default = ["local"]
 local = ["dep:glob", "dep:libc"]
 docker = ["dep:bollard", "dep:tar", "dep:futures"]
 ssh = ["dep:openssh", "dep:fabro-github", "dep:fabro-config"]
-exe = ["ssh", "fabro-config/exedev"]
+exe = ["ssh", "fabro-config/exedev", "fabro-types/exedev"]
 sprites = ["dep:chrono", "dep:rand"]
 daytona = ["dep:daytona-sdk", "dep:daytona-api-client", "dep:git2", "dep:fabro-github", "dep:fabro-config", "dep:chrono", "dep:rand"]
 test-support = []
@@ -41,6 +41,7 @@ futures = { workspace = true, optional = true }
 openssh = { workspace = true, optional = true }
 fabro-config = { path = "../fabro-config", optional = true }
 fabro-github = { path = "../fabro-github", optional = true }
+fabro-types = { path = "../fabro-types" }
 
 # sprites
 chrono = { workspace = true, optional = true }

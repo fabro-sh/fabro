@@ -2,6 +2,7 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
+use fabro_config::FabroSettingsExt;
 use tracing::{debug, info};
 
 use crate::args::RunsPruneArgs;
