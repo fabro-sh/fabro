@@ -22,7 +22,7 @@ use crate::pipeline::{
     FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted, PullRequestOptions, RetroOptions,
     SandboxEnvSpec, SandboxSpec,
 };
-use crate::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt, RunRecordExt};
+use crate::records::{Checkpoint, Conclusion, ConclusionExt, RunRecordExt};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{self, RunStatus, RunStatusRecordExt, StatusReason};
 
@@ -97,37 +97,7 @@ pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, F
     execute_persisted_run(run_dir, None, services).await
 }
 
-/// Resume a workflow run from its checkpoint. Errors if no checkpoint is found.
-pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, FabroError> {
-    if let Ok(record) = run_status::RunStatusRecord::load(&run_dir.join("status.json")) {
-        if record.status == RunStatus::Succeeded {
-            return Err(FabroError::Precondition(
-                "run already finished successfully — nothing to resume".to_string(),
-            ));
-        }
-    }
-    if let Ok(conclusion) = Conclusion::load(&run_dir.join("conclusion.json")) {
-        if matches!(
-            conclusion.status,
-            StageStatus::Success | StageStatus::PartialSuccess | StageStatus::Skipped
-        ) {
-            return Err(FabroError::Precondition(
-                "run already finished successfully — nothing to resume".to_string(),
-            ));
-        }
-    }
-
-    let cp_path = run_dir.join("checkpoint.json");
-    let checkpoint = Checkpoint::load(&cp_path)
-        .map_err(|e| FabroError::Precondition(format!("no checkpoint to resume from: {e}")))?;
-
-    cleanup_resume_artifacts(run_dir);
-    run_status::write_run_status(run_dir, RunStatus::Submitted, None);
-
-    execute_persisted_run(run_dir, Some(checkpoint), services).await
-}
-
-async fn execute_persisted_run(
+pub(super) async fn execute_persisted_run(
     run_dir: &Path,
     checkpoint: Option<Checkpoint>,
     services: StartServices,
@@ -184,20 +154,6 @@ fn persist_terminal_engine_failure(run_dir: &Path, error: &FabroError, duration:
         None,
     );
     persist_terminal_outcome(run_dir, &conclusion, run_status, status_reason);
-}
-
-fn cleanup_resume_artifacts(run_dir: &Path) {
-    for name in [
-        "conclusion.json",
-        "pull_request.json",
-        "detached_failure.json",
-        "interview_request.json",
-        "interview_response.json",
-        "interview_request.claim",
-        "progress.jsonl",
-    ] {
-        let _ = std::fs::remove_file(run_dir.join(name));
-    }
 }
 
 fn derive_start_options(
@@ -766,6 +722,8 @@ mod tests {
     use crate::handler::exit::ExitHandler;
     use crate::handler::start::StartHandler;
     use crate::handler::HandlerRegistry;
+    use crate::operations::resume;
+    use crate::records::CheckpointExt;
 
     const MINIMAL_DOT: &str = r#"digraph Test {
         graph [goal="Build feature"]

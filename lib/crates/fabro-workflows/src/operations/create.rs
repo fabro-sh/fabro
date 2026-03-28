@@ -17,13 +17,6 @@ use super::source::{resolve_workflow, ResolveWorkflowInput, WorkflowInput};
 
 const RUN_CONFIG_FILE: &str = "workflow.toml";
 
-pub struct ValidateInput {
-    pub workflow: WorkflowInput,
-    pub settings: FabroSettings,
-    pub cwd: PathBuf,
-    pub custom_transforms: Vec<Box<dyn Transform>>,
-}
-
 #[derive(Clone, Debug)]
 pub struct CreateRunInput {
     pub workflow: WorkflowInput,
@@ -55,27 +48,6 @@ struct PersistCreateOptions {
     host_repo_path: Option<String>,
     goal_override: Option<String>,
     base_dir: Option<PathBuf>,
-}
-
-/// Parse, transform, and validate a DOT source string.
-///
-/// Returns `Validated` even when validation produced errors. Call
-/// `validated.raise_on_errors()` if the caller wants to fail fast.
-pub fn validate(input: ValidateInput) -> Result<Validated, FabroError> {
-    let resolved = resolve_workflow(ResolveWorkflowInput {
-        workflow: input.workflow,
-        settings: input.settings,
-        cwd: input.cwd,
-    })
-    .map_err(|err| FabroError::Parse(err.to_string()))?;
-
-    preprocess_and_validate(
-        &resolved.raw_source,
-        resolved.base_dir,
-        input.custom_transforms,
-        Some(&resolved.settings),
-        resolved.goal_override.as_deref(),
-    )
 }
 
 /// Resolve workflow inputs, normalize settings, and persist a run directory.
@@ -196,7 +168,7 @@ fn create_from_source(
     persist_validated(validated, options)
 }
 
-fn preprocess_and_validate(
+pub(super) fn preprocess_and_validate(
     dot_source: &str,
     base_dir: Option<PathBuf>,
     custom_transforms: Vec<Box<dyn Transform>>,
@@ -344,6 +316,7 @@ mod tests {
     use super::*;
     use fabro_graphviz::graph::AttrValue;
 
+    use crate::operations::{validate, ValidateInput};
     use crate::run_status::RunStatusRecordExt;
 
     fn validate_dot(dot_source: &str, settings: FabroSettings) -> Validated {
