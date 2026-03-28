@@ -27,8 +27,8 @@ pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
         .parse()
         .with_context(|| format!("invalid duration: {s}"))?;
     match unit {
-        "h" => Ok(chrono::Duration::hours(num as i64)),
-        "d" => Ok(chrono::Duration::days(num as i64)),
+        "h" => Ok(chrono::Duration::hours(i64::try_from(num).unwrap())),
+        "d" => Ok(chrono::Duration::days(i64::try_from(num).unwrap())),
         _ => bail!("invalid duration unit '{unit}' in '{s}' (expected 'h' or 'd')"),
     }
 }

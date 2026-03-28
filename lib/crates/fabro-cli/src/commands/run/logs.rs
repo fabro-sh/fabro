@@ -128,10 +128,10 @@ fn try_parse_relative_duration(s: &str) -> Option<chrono::Duration> {
     let (num_str, unit) = s.split_at(s.len() - 1);
     let num: u64 = num_str.parse().ok()?;
     match unit {
-        "s" => Some(chrono::Duration::seconds(num as i64)),
-        "m" => Some(chrono::Duration::minutes(num as i64)),
-        "h" => Some(chrono::Duration::hours(num as i64)),
-        "d" => Some(chrono::Duration::days(num as i64)),
+        "s" => Some(chrono::Duration::seconds(i64::try_from(num).unwrap())),
+        "m" => Some(chrono::Duration::minutes(i64::try_from(num).unwrap())),
+        "h" => Some(chrono::Duration::hours(i64::try_from(num).unwrap())),
+        "d" => Some(chrono::Duration::days(i64::try_from(num).unwrap())),
         _ => None,
     }
 }

@@ -501,7 +501,7 @@ fn compute_queue_positions(runs: &HashMap<String, ManagedRun>) -> HashMap<String
     queued
         .into_iter()
         .enumerate()
-        .map(|(i, (id, _))| (id.clone(), (i + 1) as i64))
+        .map(|(i, (id, _))| (id.clone(), i64::try_from(i + 1).unwrap()))
         .collect()
 }
 

@@ -462,7 +462,7 @@ fn determine_exit_code(conclusion_path: &Path, status_record: Option<RunStatusRe
 
 #[allow(unsafe_code)]
 fn kill_engine(run_dir: &Path) {
-    if let Some(pid) = read_launcher_pid(run_dir).map(|pid| pid as i32) {
+    if let Some(pid) = read_launcher_pid(run_dir).map(|pid| i32::try_from(pid).unwrap()) {
         #[cfg(unix)]
         unsafe {
             libc::kill(pid, libc::SIGTERM);
@@ -475,7 +475,7 @@ fn kill_engine(run_dir: &Path) {
 fn process_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
-        unsafe { libc::kill(pid as i32, 0) == 0 }
+        unsafe { libc::kill(i32::try_from(pid).unwrap(), 0) == 0 }
     }
     #[cfg(not(unix))]
     {

@@ -488,7 +488,7 @@ async fn sigterm_then_kill(child: &mut Child) {
         // SAFETY: kill with a negative pid signals the entire process group.
         // The pid is valid because we just obtained it from child.id().
         unsafe {
-            libc::kill(-(pid as i32), libc::SIGTERM);
+            libc::kill(-i32::try_from(pid).unwrap(), libc::SIGTERM);
         }
         if time::timeout(std::time::Duration::from_secs(2), child.wait())
             .await

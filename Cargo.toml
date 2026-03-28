@@ -88,7 +88,6 @@ too_many_arguments = "allow"
 too_many_lines = "allow"
 used_underscore_binding = "allow"
 if_not_else = "allow"
-cast_possible_wrap = "allow"
 cast_precision_loss = "allow"
 doc_markdown = "allow"
 # Disallowed restriction lints
