@@ -51,21 +51,25 @@ impl<G: Graph + 'static> ExecutorBuilder<G> {
         }
     }
 
+    #[must_use]
     pub fn lifecycle(mut self, lifecycle: Box<dyn RunLifecycle<G>>) -> Self {
         self.lifecycle = Some(lifecycle);
         self
     }
 
+    #[must_use]
     pub fn cancel_token(mut self, token: Arc<AtomicBool>) -> Self {
         self.options.cancel_token = Some(token);
         self
     }
 
+    #[must_use]
     pub fn stall_token(mut self, token: CancellationToken) -> Self {
         self.options.stall_token = Some(token);
         self
     }
 
+    #[must_use]
     pub fn max_node_visits(mut self, limit: usize) -> Self {
         self.options.max_node_visits = Some(limit);
         self

@@ -28,7 +28,7 @@ pub(crate) fn run(args: &ForkArgs, styles: &Styles) -> Result<()> {
         .transpose()?;
     let new_run_id = fork(
         &store,
-        ForkRunInput {
+        &ForkRunInput {
             source_run_id: run_id.clone(),
             target,
             push: !args.no_push,

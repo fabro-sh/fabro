@@ -28,7 +28,7 @@ pub(crate) fn run(args: &RewindArgs, styles: &Styles) -> Result<()> {
 
     rewind(
         &store,
-        RewindInput {
+        &RewindInput {
             run_id: run_id.clone(),
             target,
             push: !args.no_push,

@@ -22,11 +22,6 @@ pub(super) fn df_command(args: &DfArgs) -> Result<()> {
 }
 
 fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Path) -> Result<()> {
-    let runs = scan_runs(runs_base)?;
-    let mut active_count = 0u64;
-    let mut total_run_size = 0u64;
-    let mut reclaimable_run_size = 0u64;
-
     struct RunSizeInfo {
         run_id: String,
         workflow_name: String,
@@ -34,6 +29,11 @@ fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Path) -
         start_time_dt: Option<DateTime<Utc>>,
         size: u64,
     }
+
+    let runs = scan_runs(runs_base)?;
+    let mut active_count = 0u64;
+    let mut total_run_size = 0u64;
+    let mut reclaimable_run_size = 0u64;
 
     let mut run_details = Vec::new();
     for run in &runs {
@@ -96,7 +96,11 @@ fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Path) -
     }
 
     let run_reclaim_pct = if total_run_size > 0 {
-        (reclaimable_run_size as f64 / total_run_size as f64 * 100.0) as u64
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        // f64-to-integer: percentage is 0-100
+        {
+            (reclaimable_run_size as f64 / total_run_size as f64 * 100.0) as u64
+        }
     } else {
         0
     };

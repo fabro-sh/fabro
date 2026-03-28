@@ -85,12 +85,12 @@ pub async fn execute(init: Initialized) -> Executed {
 
     let settings_arc = Arc::new(run_options.clone());
     let lifecycle = WorkflowLifecycle::new(
-        Arc::clone(&emitter),
+        &emitter,
         hook_runner.clone(),
-        Arc::clone(&sandbox),
+        &sandbox,
         graph_arc,
-        run_options.run_dir.clone(),
-        settings_arc,
+        &run_options.run_dir,
+        &settings_arc,
         checkpoint.is_some(),
     );
 
@@ -204,7 +204,7 @@ pub async fn execute(init: Initialized) -> Executed {
 
     let graph_max = graph.max_node_visits();
     let max_node_visits = if graph_max > 0 {
-        Some(graph_max as usize)
+        Some(usize::try_from(graph_max).unwrap())
     } else if run_options.dry_run_enabled() {
         Some(10)
     } else {
@@ -228,12 +228,15 @@ pub async fn execute(init: Initialized) -> Executed {
                                 return;
                             }
                             let last = emitter.last_event_at();
-                            let now = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis() as i64;
+                            let now = i64::try_from(
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis(),
+                            )
+                            .unwrap();
                             let idle_ms = now.saturating_sub(last);
-                            if idle_ms >= stall_timeout.as_millis() as i64 {
+                            if idle_ms >= i64::try_from(stall_timeout.as_millis()).unwrap() {
                                 token_clone.cancel();
                                 return;
                             }

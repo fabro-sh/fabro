@@ -70,9 +70,9 @@ impl McpClient {
                     let mut header_map = HeaderMap::new();
                     for (key, value) in headers {
                         let name = HeaderName::from_bytes(key.as_bytes())
-                            .map_err(|e| anyhow!("invalid header name '{}': {}", key, e))?;
+                            .map_err(|e| anyhow!("invalid header name '{key}': {e}"))?;
                         let val = HeaderValue::from_str(value)
-                            .map_err(|e| anyhow!("invalid header value for '{}': {}", key, e))?;
+                            .map_err(|e| anyhow!("invalid header value for '{key}': {e}"))?;
                         header_map.insert(name, val);
                     }
                     builder = builder.default_headers(header_map);
@@ -207,8 +207,7 @@ impl McpClient {
             serde_json::Value::Null => None,
             other => {
                 return Err(anyhow!(
-                    "MCP tool arguments must be a JSON object, got {}",
-                    other
+                    "MCP tool arguments must be a JSON object, got {other}"
                 ));
             }
         };

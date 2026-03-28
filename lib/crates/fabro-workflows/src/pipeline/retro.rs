@@ -84,7 +84,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
         Err(anyhow::anyhow!("No LLM client available"))
     };
 
-    let duration_ms = retro_start.elapsed().as_millis() as u64;
+    let duration_ms = u64::try_from(retro_start.elapsed().as_millis()).unwrap();
     if let Some(ref emitter) = options.emitter {
         match &narrative_result {
             Ok(_) => emitter.emit(&WorkflowRunEvent::RetroCompleted { duration_ms }),

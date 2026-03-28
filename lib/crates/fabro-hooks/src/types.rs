@@ -103,8 +103,8 @@ impl HookDecision {
         match (&self, &other) {
             (Self::Block { .. }, _) => self,
             (_, Self::Block { .. }) => other,
-            (Self::Skip { .. }, _) | (Self::Override { .. }, _) => self,
-            (_, Self::Skip { .. }) | (_, Self::Override { .. }) => other,
+            (Self::Skip { .. } | Self::Override { .. }, _) => self,
+            (_, Self::Skip { .. } | Self::Override { .. }) => other,
             _ => Self::Proceed,
         }
     }

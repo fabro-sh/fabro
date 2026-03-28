@@ -24,6 +24,14 @@ async fn list_from(
     args: PrListArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {
+    struct PrRow {
+        run_id: String,
+        number: u64,
+        state: String,
+        title: String,
+        url: String,
+    }
+
     let creds = github_app.context(
         "GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id",
     )?;
@@ -43,14 +51,6 @@ async fn list_from(
     if entries.is_empty() {
         println!("No pull requests found.");
         return Ok(());
-    }
-
-    struct PrRow {
-        run_id: String,
-        number: u64,
-        state: String,
-        title: String,
-        url: String,
     }
 
     let futures: Vec<_> = entries

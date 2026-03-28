@@ -69,7 +69,7 @@ pub(crate) fn format_duration_short(d: Duration) -> String {
     if secs >= 60 {
         format!("{}m{:02}s", secs / 60, secs % 60)
     } else if d.as_millis() >= 1000 {
-        format!("{}s", secs)
+        format!("{secs}s")
     } else {
         format!("{}ms", d.as_millis())
     }
@@ -83,7 +83,9 @@ fn terminal_hyperlink(url: &str, text: &str) -> String {
 /// Format a number as an integer if whole, one decimal otherwise.
 fn format_number(n: f64) -> String {
     if (n - n.round()).abs() < f64::EPSILON {
-        format!("{}", n as i64)
+        #[allow(clippy::cast_possible_truncation)] // f64-to-integer: intentional rounding
+        let i = n as i64;
+        format!("{i}")
     } else {
         format!("{n:.1}")
     }
@@ -718,7 +720,7 @@ impl ProgressUI {
                 }
             }
             "SetupStarted" => {
-                let count = u64_field("command_count") as usize;
+                let count = usize::try_from(u64_field("command_count")).unwrap();
                 self.on_setup_started(count);
             }
             "SetupCompleted" => {
@@ -972,7 +974,7 @@ impl ProgressUI {
             }
             "DevcontainerLifecycleStarted" => {
                 let phase = str_field("phase").unwrap_or("?");
-                let command_count = u64_field("command_count") as usize;
+                let command_count = usize::try_from(u64_field("command_count")).unwrap();
                 self.devcontainer_command_count = command_count;
                 match &self.renderer {
                     ProgressRenderer::Tty(tty) => {
@@ -1478,6 +1480,8 @@ impl ProgressUI {
                 ..
             } if self.verbose => {
                 let yellow = Style::new().yellow();
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                // f64-to-integer: delay is non-negative and fits in u64
                 let delay_ms = (*delay_secs * 1000.0) as u64;
                 let dur = format_duration_ms(delay_ms);
                 self.insert_info_line_for_stage(

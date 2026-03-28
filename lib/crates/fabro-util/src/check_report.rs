@@ -66,10 +66,11 @@ impl CheckReport {
         footer: Option<&str>,
         max_width: Option<u16>,
     ) -> String {
-        let mut out = String::new();
-        let width = max_width.unwrap_or(80) as usize;
         // "      • " is 8 chars of prefix before detail text
         const DETAIL_PREFIX_LEN: usize = 8;
+
+        let mut out = String::new();
+        let width = max_width.unwrap_or(80) as usize;
 
         let show_section_headers = self.sections.len() > 1;
 

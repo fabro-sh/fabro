@@ -12,6 +12,7 @@ use fabro_config::server::TlsSettings;
 use crate::jwt_auth::PeerCertificates;
 
 /// How client certificates should be verified.
+#[derive(Clone, Copy)]
 pub enum ClientAuth {
     /// No client certificates requested (TLS encryption only).
     None,

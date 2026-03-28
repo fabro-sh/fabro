@@ -127,7 +127,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
             .as_ref()
             .map(|w| w.auth.allowed_usernames.clone())
             .unwrap_or_default();
-        let auth_mode = resolve_auth_mode(&api, allowed_usernames);
+        let auth_mode = resolve_auth_mode(&api, &allowed_usernames);
         let client_auth = api.tls.as_ref().map(|_| client_auth_from_mode(&auth_mode));
         let max_concurrent_runs = args
             .max_concurrent_runs

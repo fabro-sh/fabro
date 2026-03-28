@@ -6,12 +6,12 @@ use fabro_mcp::connection_manager::{McpConnectionManager, call_result_to_string}
 use crate::tool_registry::RegisteredTool;
 
 /// Create `RegisteredTool` instances for every tool exposed by connected MCP servers.
-pub fn make_mcp_tools(manager: Arc<McpConnectionManager>) -> Vec<RegisteredTool> {
+pub fn make_mcp_tools(manager: &Arc<McpConnectionManager>) -> Vec<RegisteredTool> {
     manager
         .all_tools()
         .iter()
         .map(|(qualified_name, info)| {
-            let mgr = Arc::clone(&manager);
+            let mgr = Arc::clone(manager);
             let name = qualified_name.clone();
             let tool_timeout = std::time::Duration::from_secs(120);
 
@@ -67,7 +67,7 @@ mod tests {
         let mut mgr = McpConnectionManager::new();
         mgr.start_servers(&[config]).await;
 
-        let tools = make_mcp_tools(Arc::new(mgr));
+        let tools = make_mcp_tools(&Arc::new(mgr));
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].definition.name, "mcp__test_echo__echo");
         assert_eq!(tools[0].definition.description, "Echo back the message");
@@ -79,7 +79,7 @@ mod tests {
         let mut mgr = McpConnectionManager::new();
         mgr.start_servers(&[config]).await;
 
-        let tools = make_mcp_tools(Arc::new(mgr));
+        let tools = make_mcp_tools(&Arc::new(mgr));
         let tool = &tools[0];
 
         use crate::sandbox::Sandbox;

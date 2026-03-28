@@ -148,7 +148,7 @@ fn persist_terminal_engine_failure(run_dir: &Path, error: &FabroError, duration:
         run_dir,
         final_status,
         failure_reason,
-        duration.as_millis() as u64,
+        u64::try_from(duration.as_millis()).unwrap(),
         None,
     );
     persist_terminal_outcome(run_dir, &conclusion, run_status, status_reason);
@@ -472,7 +472,7 @@ impl RunSession {
         let executed = pipeline::execute(initialized).await;
         let failed = !matches!(
             executed.outcome.as_ref().map(|outcome| &outcome.status),
-            Ok(StageStatus::Success) | Ok(StageStatus::PartialSuccess)
+            Ok(StageStatus::Success | StageStatus::PartialSuccess)
         );
 
         let retro_opts = RetroOptions {

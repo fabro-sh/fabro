@@ -114,7 +114,7 @@ pub trait Handler: Send + Sync {
 }
 
 /// Extract a human-readable message from a panic payload.
-pub(crate) fn format_panic_message(payload: Box<dyn Any + Send>) -> String {
+pub(crate) fn format_panic_message(payload: &Box<dyn Any + Send>) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
         format!("handler panicked: {s}")
     } else if let Some(s) = payload.downcast_ref::<String>() {

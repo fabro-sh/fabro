@@ -545,7 +545,7 @@ impl DevcontainerResolver {
         ports
             .iter()
             .filter_map(|p| match p {
-                serde_json::Value::Number(n) => n.as_u64().map(|n| n as u16),
+                serde_json::Value::Number(n) => n.as_u64().map(|n| u16::try_from(n).unwrap()),
                 serde_json::Value::String(s) => {
                     let s = s.split('/').next().unwrap_or(s); // strip protocol
                     if let Some((_host, container)) = s.split_once(':') {

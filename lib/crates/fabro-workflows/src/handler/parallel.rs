@@ -128,6 +128,15 @@ impl Handler for ParallelHandler {
         run_dir: &Path,
         services: &EngineServices,
     ) -> Result<Outcome, FabroError> {
+        // Build per-branch sandboxes (sequentially for git setup)
+        struct BranchSetup {
+            target_id: String,
+            branch_index: usize,
+            branch_context: Context,
+            sandbox: Arc<dyn Sandbox>,
+            worktree_path: Option<PathBuf>,
+        }
+
         let parallel_start = Instant::now();
         let branches = graph.outgoing_edges(&node.id);
         if branches.is_empty() {
@@ -187,15 +196,6 @@ impl Handler for ParallelHandler {
         } else {
             None
         };
-
-        // Build per-branch sandboxes (sequentially for git setup)
-        struct BranchSetup {
-            target_id: String,
-            branch_index: usize,
-            branch_context: Context,
-            sandbox: Arc<dyn Sandbox>,
-            worktree_path: Option<PathBuf>,
-        }
 
         let mut branch_setups: Vec<BranchSetup> = Vec::new();
         for (branch_index, edge) in branches.iter().enumerate() {

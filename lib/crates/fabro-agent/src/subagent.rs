@@ -346,7 +346,7 @@ pub fn make_spawn_agent_tool(
                 let max_turns = args
                     .get("max_turns")
                     .and_then(serde_json::Value::as_u64)
-                    .map(|v| v as usize);
+                    .map(|v| usize::try_from(v).unwrap());
 
                 // Note: working_dir and model require session factory changes to wire through
                 let mut session = session_factory();

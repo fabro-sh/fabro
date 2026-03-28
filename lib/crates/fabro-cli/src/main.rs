@@ -35,7 +35,7 @@ async fn main() {
     let raw_args: Vec<String> = std::env::args().collect();
 
     let (command_name, result) = main_inner().await;
-    let duration_ms = start.elapsed().as_millis() as u64;
+    let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap();
 
     let is_error = result.is_err();
     let command = sanitize::sanitize_command(&raw_args, &command_name);

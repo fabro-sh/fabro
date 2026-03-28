@@ -24,6 +24,7 @@ pub trait OutcomeExt: Sized {
     fn fail_classify(reason: impl Into<String>) -> Self;
     fn retry_classify(reason: impl Into<String>) -> Self;
     fn simulated(node_id: &str) -> Self;
+    #[must_use]
     fn with_signature(self, sig: Option<impl Into<String>>) -> Self;
     fn failure_reason(&self) -> Option<&str>;
     fn failure_category(&self) -> Option<FailureCategory>;

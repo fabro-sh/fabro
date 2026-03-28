@@ -440,6 +440,7 @@ fn build_compact_preamble(
 // Summary preamble
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Copy)]
 enum SummaryDetail {
     Low,
     Medium,

@@ -13,7 +13,8 @@ use tokio::fs;
 use super::{EngineServices, Handler};
 
 fn timeout_ms(node: &Node) -> Option<u64> {
-    node.timeout().map(|d| d.as_millis() as u64)
+    node.timeout()
+        .map(|d| u64::try_from(d.as_millis()).unwrap())
 }
 
 /// Shell-escape a string using `shlex::try_quote` (POSIX-safe).
@@ -107,7 +108,9 @@ impl Handler for CommandHandler {
             script.to_string()
         };
 
-        let timeout_ms = node.timeout().map_or(600_000, |d| d.as_millis() as u64);
+        let timeout_ms = node
+            .timeout()
+            .map_or(600_000, |d| u64::try_from(d.as_millis()).unwrap());
         let env_vars = if services.env.is_empty() {
             None
         } else {
