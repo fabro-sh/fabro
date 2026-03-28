@@ -7,7 +7,7 @@ description = "Sandbox trait and implementations for Fabro agent execution envir
 
 [features]
 default = ["local"]
-local = ["dep:glob", "dep:libc"]
+local = []
 docker = ["dep:bollard", "dep:tar", "dep:futures"]
 ssh = ["dep:openssh", "dep:fabro-github", "dep:fabro-config"]
 exe = ["ssh", "fabro-config/exedev", "fabro-types/exedev"]
@@ -33,7 +33,7 @@ base64.workspace = true
 shlex = "1"
 
 # local
-glob = { version = "0.3", optional = true }
+glob = { version = "0.3" }
 
 # docker
 bollard = { workspace = true, optional = true }
@@ -56,7 +56,7 @@ daytona-api-client = { workspace = true, optional = true }
 git2 = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
-libc = { version = "0.2", optional = true }
+libc = { version = "0.2" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }

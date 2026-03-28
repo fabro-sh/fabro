@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use fabro_types::settings::WorktreeMode;
+
+#[cfg(any(feature = "docker", feature = "daytona", feature = "exe"))]
+use anyhow::anyhow;
 
 use crate::sandbox_record::SandboxRecord;
 use crate::{Sandbox, SandboxEventCallback};
