@@ -11,6 +11,7 @@ use fabro_config::FabroSettings;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_hooks::HookConfig;
 use fabro_interview::AutoApproveInterviewer;
+use fabro_sandbox::SandboxSpec;
 
 use super::*;
 use crate::context::{self, Context};
@@ -20,7 +21,7 @@ use crate::handler::start::StartHandler;
 use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline::initialize;
-use crate::pipeline::types::{InitOptions, LlmSpec, Persisted, SandboxEnvSpec, SandboxSpec};
+use crate::pipeline::types::{InitOptions, LlmSpec, Persisted, SandboxEnvSpec};
 use crate::records::{Checkpoint, CheckpointExt, RunRecord, StartRecordExt};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::test_support::run_graph;

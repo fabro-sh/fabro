@@ -17,7 +17,13 @@ pub enum SandboxProvider {
     Ssh,
 }
 
-impl SandboxProvider {}
+impl SandboxProvider {
+    /// True only for Local. Used by dry-run to force local execution.
+    /// NOT the same as "runs on the host" (Docker is host-adjacent but not dry-run compatible).
+    pub fn is_local(&self) -> bool {
+        matches!(self, Self::Local)
+    }
+}
 
 impl fmt::Display for SandboxProvider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

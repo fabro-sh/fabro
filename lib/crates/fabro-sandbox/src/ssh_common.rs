@@ -1,5 +1,6 @@
 //! Shared types and utilities for SSH-based sandbox implementations (exe, ssh).
 
+use std::path::Path;
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -39,6 +40,19 @@ pub struct GitCloneParams {
     pub url: String,
     /// Branch to clone. If None, uses the remote's default.
     pub branch: Option<String>,
+}
+
+#[cfg(feature = "daytona")]
+pub fn detect_clone_params(cwd: &Path) -> Option<GitCloneParams> {
+    let (detected_url, branch) = match crate::daytona::detect_repo_info(cwd) {
+        Ok(info) => info,
+        Err(err) => {
+            tracing::warn!("No git repo detected for sandbox clone: {err}");
+            return None;
+        }
+    };
+    let url = fabro_github::ssh_url_to_https(&detected_url);
+    Some(GitCloneParams { url, branch })
 }
 
 /// Wrap a shell command in base64 encoding to avoid escaping issues.

@@ -40,12 +40,11 @@ use crate::sessions as sessions_mod;
 use crate::sessions::{SessionStore, new_session_store};
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_retro::RetroExt;
+use fabro_sandbox::SandboxSpec;
 use fabro_workflows::context::Context;
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
 use fabro_workflows::operations::{self, CreateRunInput, WorkflowInput};
-use fabro_workflows::pipeline::{
-    self, InitOptions, LlmSpec, Persisted, SandboxEnvSpec, SandboxSpec,
-};
+use fabro_workflows::pipeline::{self, InitOptions, LlmSpec, Persisted, SandboxEnvSpec};
 use fabro_workflows::records::{Checkpoint, CheckpointExt};
 use fabro_workflows::run_options::LifecycleOptions;
 use fabro_workflows::run_options::RunOptions;

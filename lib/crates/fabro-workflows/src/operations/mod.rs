@@ -8,8 +8,9 @@ mod start;
 mod test_support;
 mod validate;
 
-pub use crate::pipeline::{DevcontainerSpec, LlmSpec, SandboxEnvSpec, SandboxSpec};
+pub use crate::pipeline::{DevcontainerSpec, LlmSpec, SandboxEnvSpec};
 pub use create::{CreateRunInput, CreatedRun, create};
+pub use fabro_sandbox::SandboxSpec;
 pub use fork::{ForkRunInput, fork};
 pub use resume::resume;
 pub use rewind::{

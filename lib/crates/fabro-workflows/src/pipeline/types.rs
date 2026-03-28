@@ -10,11 +10,7 @@ use fabro_interview::Interviewer;
 use fabro_llm::Provider;
 use fabro_mcp::config::McpServerConfig;
 use fabro_model::FallbackTarget;
-use fabro_sandbox::daytona::DaytonaConfig;
-use fabro_sandbox::docker::DockerSandboxConfig;
-#[cfg(feature = "exedev")]
-use fabro_sandbox::exe::{ExeConfig, GitCloneParams as ExeGitCloneParams};
-use fabro_sandbox::ssh::{GitCloneParams as SshGitCloneParams, SshConfig};
+use fabro_sandbox::SandboxSpec;
 use fabro_validate::Diagnostic;
 
 use crate::context::Context;
@@ -200,36 +196,6 @@ impl Persisted {
     pub fn load(run_dir: &Path) -> Result<Self, FabroError> {
         super::persist::load(run_dir)
     }
-}
-
-/// Options for the INITIALIZE phase.
-pub enum SandboxSpec {
-    Local {
-        working_directory: PathBuf,
-    },
-    Docker {
-        config: DockerSandboxConfig,
-    },
-    Daytona {
-        config: DaytonaConfig,
-        github_app: Option<fabro_github::GitHubAppCredentials>,
-        run_id: Option<String>,
-        clone_branch: Option<String>,
-    },
-    #[cfg(feature = "exedev")]
-    Exe {
-        config: ExeConfig,
-        clone_params: Option<ExeGitCloneParams>,
-        run_id: Option<String>,
-        github_app: Option<fabro_github::GitHubAppCredentials>,
-        mgmt_destination: String,
-    },
-    Ssh {
-        config: SshConfig,
-        clone_params: Option<SshGitCloneParams>,
-        run_id: Option<String>,
-        github_app: Option<fabro_github::GitHubAppCredentials>,
-    },
 }
 
 #[derive(Clone)]

@@ -722,6 +722,10 @@ impl Sandbox for ExeSandbox {
         self.ssh_command().map(Some)
     }
 
+    fn data_host(&self) -> Option<&str> {
+        self.data_host.get().map(String::as_str)
+    }
+
     fn origin_url(&self) -> Option<&str> {
         self.origin_url.get().map(String::as_str)
     }

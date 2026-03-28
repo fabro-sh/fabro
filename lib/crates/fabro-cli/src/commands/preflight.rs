@@ -2,7 +2,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::bail;
-use fabro_agent::{DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox};
 use fabro_config::cli::load_cli_config;
 use fabro_config::project::{
     ResolveSettingsInput, resolve_settings, resolve_workflow_path, resolve_working_directory,
@@ -11,9 +10,11 @@ use fabro_config::{FabroConfig, FabroSettings};
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_llm::client::Client as LlmClient;
 use fabro_model::{Catalog, Provider};
-use fabro_sandbox::SandboxProvider;
-use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, detect_repo_info};
-use fabro_sandbox::ssh::{GitCloneParams as SshGitCloneParams, SshConfig, SshSandbox};
+use fabro_sandbox::daytona::{DaytonaConfig, detect_repo_info};
+use fabro_sandbox::ssh::SshConfig;
+use fabro_sandbox::{
+    DockerSandboxConfig, Sandbox, SandboxProvider, SandboxSpec, detect_clone_params,
+};
 use fabro_util::terminal::Styles;
 use fabro_workflows::git::{GitSyncStatus, sync_status};
 use fabro_workflows::operations::{ValidateInput, WorkflowInput, validate};
@@ -150,35 +151,10 @@ fn resolve_exe_config(settings: &FabroSettings) -> Option<fabro_sandbox::exe::Ex
         .and_then(|sandbox| sandbox.exe.clone())
 }
 
-#[cfg(feature = "exedev")]
-fn resolve_exe_clone_params(cwd: &Path) -> Option<fabro_sandbox::exe::GitCloneParams> {
-    let (detected_url, branch) = match detect_repo_info(cwd) {
-        Ok(info) => info,
-        Err(err) => {
-            tracing::warn!("No git repo detected for exe.dev clone: {err}");
-            return None;
-        }
-    };
-    let url = fabro_github::ssh_url_to_https(&detected_url);
-    Some(fabro_sandbox::exe::GitCloneParams { url, branch })
-}
-
 fn resolve_ssh_config(settings: &FabroSettings) -> Option<SshConfig> {
     settings
         .sandbox_settings()
         .and_then(|sandbox| sandbox.ssh.clone())
-}
-
-fn resolve_ssh_clone_params(cwd: &Path) -> Option<SshGitCloneParams> {
-    let (detected_url, branch) = match detect_repo_info(cwd) {
-        Ok(info) => info,
-        Err(err) => {
-            tracing::warn!("No git repo detected for SSH clone: {err}");
-            return None;
-        }
-    };
-    let url = fabro_github::ssh_url_to_https(&detected_url);
-    Some(SshGitCloneParams { url, branch })
 }
 
 async fn mint_github_token(
@@ -279,53 +255,55 @@ async fn run_preflight(
     let ssh_config = resolve_ssh_config(settings);
 
     let sandbox_result: Result<Arc<dyn Sandbox>, String> = match sandbox_provider {
-        SandboxProvider::Docker => {
-            let config = DockerSandboxConfig {
+        SandboxProvider::Local => SandboxSpec::Local {
+            working_directory: working_directory.to_path_buf(),
+        }
+        .build(None)
+        .await
+        .map_err(|e| e.to_string()),
+        SandboxProvider::Docker => SandboxSpec::Docker {
+            config: DockerSandboxConfig {
                 host_working_directory: working_directory.to_string_lossy().to_string(),
                 ..DockerSandboxConfig::default()
-            };
-            DockerSandbox::new(config)
-                .map(|env| Arc::new(env) as Arc<dyn Sandbox>)
-                .map_err(|e| format!("Docker sandbox creation failed: {e}"))
+            },
         }
-        SandboxProvider::Daytona => {
-            let config = daytona_config.unwrap_or_default();
-            match DaytonaSandbox::new(config, github_app.clone(), None, None).await {
-                Ok(env) => Ok(Arc::new(env) as Arc<dyn Sandbox>),
-                Err(e) => Err(format!("Daytona sandbox creation failed: {e}")),
-            }
+        .build(None)
+        .await
+        .map_err(|e| e.to_string()),
+        SandboxProvider::Daytona => SandboxSpec::Daytona {
+            config: daytona_config.unwrap_or_default(),
+            github_app: github_app.clone(),
+            run_id: None,
+            clone_branch: None,
         }
+        .build(None)
+        .await
+        .map_err(|e| format!("Daytona sandbox creation failed: {e}")),
         #[cfg(feature = "exedev")]
-        SandboxProvider::Exe => {
-            match fabro_sandbox::exe::OpensshRunner::connect_raw("exe.dev").await {
-                Ok(mgmt_ssh) => {
-                    let config = exe_config.unwrap_or_default();
-                    let clone_params = resolve_exe_clone_params(working_directory);
-                    let env = fabro_sandbox::exe::ExeSandbox::new(
-                        Box::new(mgmt_ssh),
-                        config,
-                        clone_params,
-                        None,
-                        None,
-                    );
-                    Ok(Arc::new(env) as Arc<dyn Sandbox>)
-                }
-                Err(e) => Err(format!("exe.dev SSH connection failed: {e}")),
-            }
+        SandboxProvider::Exe => SandboxSpec::Exe {
+            config: exe_config.unwrap_or_default(),
+            clone_params: detect_clone_params(working_directory),
+            run_id: None,
+            github_app: None,
+            mgmt_destination: "exe.dev".to_string(),
         }
+        .build(None)
+        .await
+        .map_err(|e| format!("exe sandbox creation failed: {e}")),
         #[cfg(not(feature = "exedev"))]
         SandboxProvider::Exe => Err("exe sandbox requires the exedev feature".to_string()),
         SandboxProvider::Ssh => match ssh_config {
-            Some(config) => {
-                let clone_params = resolve_ssh_clone_params(working_directory);
-                let env = SshSandbox::new(config, clone_params, None, None);
-                Ok(Arc::new(env) as Arc<dyn Sandbox>)
+            Some(config) => SandboxSpec::Ssh {
+                config,
+                clone_params: detect_clone_params(working_directory),
+                run_id: None,
+                github_app: None,
             }
+            .build(None)
+            .await
+            .map_err(|e| e.to_string()),
             None => Err("SSH sandbox requires [sandbox.ssh] config".to_string()),
         },
-        SandboxProvider::Local => {
-            Ok(Arc::new(LocalSandbox::new(working_directory.to_path_buf())) as Arc<dyn Sandbox>)
-        }
     };
 
     let sandbox_ok = match sandbox_result {

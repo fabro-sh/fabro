@@ -25,6 +25,6 @@ pub use transform::transform;
 pub use types::{
     Concluded, DevcontainerSpec, Executed, FinalizeOptions, Finalized, InitOptions, Initialized,
     LlmSpec, Parsed, Persisted, PullRequestOptions, RetroOptions, Retroed, SandboxEnvSpec,
-    SandboxSpec, TransformOptions, Transformed, Validated,
+    TransformOptions, Transformed, Validated,
 };
 pub use validate::validate;

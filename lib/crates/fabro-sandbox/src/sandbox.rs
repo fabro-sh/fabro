@@ -136,6 +136,10 @@ macro_rules! delegate_sandbox {
                 self.$field.host_git_dir()
             }
 
+            fn data_host(&self) -> Option<&str> {
+                self.$field.data_host()
+            }
+
             fn parallel_worktree_path(
                 &self,
                 run_dir: &std::path::Path,
@@ -454,6 +458,12 @@ pub trait Sandbox: Send + Sync {
     /// The host-accessible path to this sandbox's git worktree, if applicable.
     /// When `Some`, the engine runs git operations (add, commit) from the host.
     fn host_git_dir(&self) -> Option<&str> {
+        None
+    }
+
+    /// The remote host for reconnection (e.g. SSH destination, exe.dev data plane).
+    /// Default is None; Exe and Ssh override.
+    fn data_host(&self) -> Option<&str> {
         None
     }
 

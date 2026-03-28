@@ -4,11 +4,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use fabro_agent::Sandbox;
-use fabro_config::sandbox::WorktreeMode;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_llm::client::Client;
 use fabro_sandbox::{
-    DockerSandbox, LocalSandbox, ReadBeforeWriteSandbox, SandboxRecord, SandboxRecordExt,
+    ReadBeforeWriteSandbox, SandboxEventCallback, SandboxRecordExt, WorkdirStrategy,
     WorktreeConfig, WorktreeSandbox,
 };
 use shlex::try_quote;
@@ -19,28 +18,13 @@ use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::git::{self, GitSyncStatus, MetadataStore};
 use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use crate::handler::{HandlerRegistry, default_registry};
-use crate::run_options::{GitCheckpointOptions, RunOptions};
-use fabro_sandbox::daytona::DaytonaSandbox;
-use fabro_sandbox::docker::DockerSandboxConfig;
-use fabro_sandbox::ssh::SshSandbox;
+use crate::run_options::GitCheckpointOptions;
 use tokio::process::Command as TokioCommand;
 use tokio::runtime::Handle;
 use tokio::task::spawn_blocking;
 use tokio::time::timeout as tokio_timeout;
 
-use super::types::{InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec, SandboxSpec};
-
-struct SandboxBuildResult {
-    sandbox: Arc<dyn Sandbox>,
-    worktree_created: bool,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum WorkdirStrategy {
-    LocalDirectory,
-    LocalWorktree,
-    Cloud,
-}
+use super::types::{InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec};
 
 struct WorktreePlan {
     branch_name: String,
@@ -73,64 +57,6 @@ fn emit_run_notice(
     });
 }
 
-fn sandbox_provider_name(spec: &SandboxSpec) -> &'static str {
-    match spec {
-        SandboxSpec::Local { .. } => "local",
-        SandboxSpec::Docker { .. } => "docker",
-        SandboxSpec::Daytona { .. } => "daytona",
-        #[cfg(feature = "exedev")]
-        SandboxSpec::Exe { .. } => "exe",
-        SandboxSpec::Ssh { .. } => "ssh",
-    }
-}
-
-fn host_repo_path_for_planning(run_options: &RunOptions, spec: &SandboxSpec) -> Option<PathBuf> {
-    run_options.host_repo_path.clone().or_else(|| match spec {
-        SandboxSpec::Local { working_directory } => Some(working_directory.clone()),
-        SandboxSpec::Docker { config } => Some(PathBuf::from(&config.host_working_directory)),
-        _ => None,
-    })
-}
-
-fn resolve_workdir_strategy(
-    spec: &SandboxSpec,
-    worktree_mode: WorktreeMode,
-    git_status: GitSyncStatus,
-    checkpoint_present: bool,
-) -> WorkdirStrategy {
-    if checkpoint_present {
-        return match spec {
-            SandboxSpec::Local { .. } | SandboxSpec::Docker { .. } => {
-                WorkdirStrategy::LocalDirectory
-            }
-            _ => WorkdirStrategy::Cloud,
-        };
-    }
-
-    match spec {
-        SandboxSpec::Local { .. } => match worktree_mode {
-            WorktreeMode::Always => WorkdirStrategy::LocalWorktree,
-            WorktreeMode::Clean => {
-                if git_status.is_clean() {
-                    WorkdirStrategy::LocalWorktree
-                } else {
-                    WorkdirStrategy::LocalDirectory
-                }
-            }
-            WorktreeMode::Dirty => {
-                if git_status.is_clean() {
-                    WorkdirStrategy::LocalDirectory
-                } else {
-                    WorkdirStrategy::LocalWorktree
-                }
-            }
-            WorktreeMode::Never => WorkdirStrategy::LocalDirectory,
-        },
-        SandboxSpec::Docker { .. } => WorkdirStrategy::LocalDirectory,
-        _ => WorkdirStrategy::Cloud,
-    }
-}
-
 async fn resolve_worktree_plan(
     options: &mut InitOptions,
 ) -> Result<Option<WorktreePlan>, FabroError> {
@@ -139,16 +65,19 @@ async fn resolve_worktree_plan(
         return Ok(None);
     };
 
-    let host_repo_path = host_repo_path_for_planning(&options.run_options, &options.sandbox);
+    let host_repo_path = options
+        .run_options
+        .host_repo_path
+        .clone()
+        .or_else(|| options.sandbox.host_repo_path());
     let git_status = host_repo_path
         .as_ref()
         .map_or(GitSyncStatus::Dirty, |path| {
             git::sync_status(path, "origin", options.run_options.base_branch.as_deref())
         });
-    let strategy = resolve_workdir_strategy(
-        &options.sandbox,
+    let strategy = options.sandbox.workdir_strategy(
         worktree_mode,
-        git_status,
+        git_status.is_clean(),
         options.checkpoint.is_some(),
     );
 
@@ -254,154 +183,6 @@ async fn resolve_worktree_plan(
             Ok(None)
         }
     }
-}
-
-fn local_sandbox_with_callback(
-    working_directory: PathBuf,
-    emitter: Arc<EventEmitter>,
-) -> Arc<dyn Sandbox> {
-    let mut sandbox = LocalSandbox::new(working_directory);
-    sandbox.set_event_callback(Arc::new(move |event| {
-        emitter.emit(&WorkflowRunEvent::Sandbox { event });
-    }));
-    Arc::new(sandbox)
-}
-
-async fn build_sandbox(
-    spec: &SandboxSpec,
-    worktree_plan: Option<&WorktreePlan>,
-    emitter: Arc<EventEmitter>,
-) -> Result<SandboxBuildResult, FabroError> {
-    let mut worktree_created = false;
-    let sandbox: Arc<dyn Sandbox> = match spec {
-        SandboxSpec::Local { working_directory } => {
-            if let Some(plan) = worktree_plan {
-                let inner =
-                    local_sandbox_with_callback(working_directory.clone(), Arc::clone(&emitter));
-                let mut worktree = WorktreeSandbox::new(
-                    inner,
-                    WorktreeConfig {
-                        branch_name: plan.branch_name.clone(),
-                        base_sha: plan.base_sha.clone(),
-                        worktree_path: plan.worktree_path.to_string_lossy().into_owned(),
-                        skip_branch_creation: false,
-                    },
-                );
-                worktree.set_event_callback(Arc::clone(&emitter).worktree_callback());
-                match worktree.initialize().await {
-                    Ok(()) => {
-                        worktree_created = true;
-                        Arc::new(ReadBeforeWriteSandbox::new(Arc::new(worktree)))
-                    }
-                    Err(e) => {
-                        emit_run_notice(
-                            &emitter,
-                            RunNoticeLevel::Warn,
-                            "worktree_setup_failed",
-                            format!("Git worktree setup failed ({e}), running without worktree."),
-                        );
-                        Arc::new(ReadBeforeWriteSandbox::new(local_sandbox_with_callback(
-                            working_directory.clone(),
-                            Arc::clone(&emitter),
-                        )))
-                    }
-                }
-            } else {
-                Arc::new(ReadBeforeWriteSandbox::new(local_sandbox_with_callback(
-                    working_directory.clone(),
-                    Arc::clone(&emitter),
-                )))
-            }
-        }
-        SandboxSpec::Docker { config } => {
-            let mut sandbox = DockerSandbox::new(DockerSandboxConfig {
-                image: config.image.clone(),
-                host_working_directory: config.host_working_directory.clone(),
-                container_mount_point: config.container_mount_point.clone(),
-                network_mode: config.network_mode.clone(),
-                extra_mounts: config.extra_mounts.clone(),
-                memory_limit: config.memory_limit,
-                cpu_quota: config.cpu_quota,
-                auto_pull: config.auto_pull,
-                env_vars: config.env_vars.clone(),
-            })
-            .map_err(|e| FabroError::engine(format!("Failed to create Docker sandbox: {e}")))?;
-            let emitter_cb = Arc::clone(&emitter);
-            sandbox.set_event_callback(Arc::new(move |event| {
-                emitter_cb.emit(&WorkflowRunEvent::Sandbox { event });
-            }));
-            Arc::new(ReadBeforeWriteSandbox::new(Arc::new(sandbox)))
-        }
-        SandboxSpec::Daytona {
-            config,
-            github_app,
-            run_id,
-            clone_branch,
-        } => {
-            let mut sandbox = DaytonaSandbox::new(
-                config.clone(),
-                github_app.clone(),
-                run_id.clone(),
-                clone_branch.clone(),
-            )
-            .await
-            .map_err(FabroError::engine)?;
-            let emitter_cb = Arc::clone(&emitter);
-            sandbox.set_event_callback(Arc::new(move |event| {
-                emitter_cb.emit(&WorkflowRunEvent::Sandbox { event });
-            }));
-            Arc::new(ReadBeforeWriteSandbox::new(Arc::new(sandbox)))
-        }
-        #[cfg(feature = "exedev")]
-        SandboxSpec::Exe {
-            config,
-            clone_params,
-            run_id,
-            github_app,
-            mgmt_destination,
-        } => {
-            let mgmt_ssh = fabro_sandbox::exe::OpensshRunner::connect_raw(mgmt_destination)
-                .await
-                .map_err(|e| {
-                    FabroError::engine(format!("Failed to connect to {mgmt_destination}: {e}"))
-                })?;
-            let mut sandbox = fabro_sandbox::exe::ExeSandbox::new(
-                Box::new(mgmt_ssh),
-                config.clone(),
-                clone_params.clone(),
-                run_id.clone(),
-                github_app.clone(),
-            );
-            let emitter_cb = Arc::clone(&emitter);
-            sandbox.set_event_callback(Arc::new(move |event| {
-                emitter_cb.emit(&WorkflowRunEvent::Sandbox { event });
-            }));
-            Arc::new(ReadBeforeWriteSandbox::new(Arc::new(sandbox)))
-        }
-        SandboxSpec::Ssh {
-            config,
-            clone_params,
-            run_id,
-            github_app,
-        } => {
-            let mut sandbox = SshSandbox::new(
-                config.clone(),
-                clone_params.clone(),
-                run_id.clone(),
-                github_app.clone(),
-            );
-            let emitter_cb = Arc::clone(&emitter);
-            sandbox.set_event_callback(Arc::new(move |event| {
-                emitter_cb.emit(&WorkflowRunEvent::Sandbox { event });
-            }));
-            Arc::new(ReadBeforeWriteSandbox::new(Arc::new(sandbox)))
-        }
-    };
-
-    Ok(SandboxBuildResult {
-        sandbox,
-        worktree_created,
-    })
 }
 
 async fn mint_github_token(
@@ -531,12 +312,9 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), FabroErro
             workspace_folder: config.workspace_folder.clone(),
         });
 
-    if let SandboxSpec::Daytona {
-        config: daytona, ..
-    } = &mut options.sandbox
-    {
-        daytona.snapshot = Some(devcontainer_to_snapshot_config(&config));
-    }
+    options
+        .sandbox
+        .apply_devcontainer_snapshot(devcontainer_to_snapshot_config(&config));
 
     let timeout = std::time::Duration::from_millis(300_000);
     for command in &config.initialize_commands {
@@ -602,48 +380,6 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), FabroErro
 
     Ok(())
 }
-
-fn write_sandbox_record(
-    run_dir: &Path,
-    spec: &SandboxSpec,
-    sandbox: &Arc<dyn Sandbox>,
-) -> Result<(), anyhow::Error> {
-    let working_directory = sandbox.working_directory().to_string();
-    let identifier = {
-        let info = sandbox.sandbox_info();
-        if info.is_empty() { None } else { Some(info) }
-    };
-
-    let record = match spec {
-        SandboxSpec::Docker { config } => SandboxRecord {
-            provider: sandbox_provider_name(spec).to_string(),
-            working_directory: working_directory.clone(),
-            identifier,
-            host_working_directory: Some(config.host_working_directory.clone()),
-            container_mount_point: Some(working_directory),
-            data_host: None,
-        },
-        SandboxSpec::Ssh { config, .. } => SandboxRecord {
-            provider: sandbox_provider_name(spec).to_string(),
-            working_directory,
-            identifier,
-            host_working_directory: None,
-            container_mount_point: None,
-            data_host: Some(config.destination.clone()),
-        },
-        _ => SandboxRecord {
-            provider: sandbox_provider_name(spec).to_string(),
-            working_directory,
-            identifier,
-            host_working_directory: None,
-            container_mount_point: None,
-            data_host: None,
-        },
-    };
-
-    record.save(&run_dir.join("sandbox.json"))
-}
-
 /// INITIALIZE phase: prepare the sandbox, env, and handlers for execution.
 pub async fn initialize(
     persisted: Persisted,
@@ -670,17 +406,62 @@ pub async fn initialize(
         });
     }
 
-    let sandbox_result = build_sandbox(
-        &options.sandbox,
-        worktree_plan.as_ref(),
-        Arc::clone(&options.emitter),
-    )
-    .await?;
-    if worktree_plan.is_some() && !sandbox_result.worktree_created {
+    let sandbox_event_callback: SandboxEventCallback = {
+        let emitter = Arc::clone(&options.emitter);
+        Arc::new(move |event| {
+            emitter.emit(&WorkflowRunEvent::Sandbox { event });
+        })
+    };
+    let mut worktree_created = false;
+    let sandbox: Arc<dyn Sandbox> = if let Some(plan) = worktree_plan.as_ref() {
+        let inner = options
+            .sandbox
+            .build(Some(Arc::clone(&sandbox_event_callback)))
+            .await
+            .map_err(|e| FabroError::engine(e.to_string()))?;
+        let mut worktree = WorktreeSandbox::new(
+            inner,
+            WorktreeConfig {
+                branch_name: plan.branch_name.clone(),
+                base_sha: plan.base_sha.clone(),
+                worktree_path: plan.worktree_path.to_string_lossy().into_owned(),
+                skip_branch_creation: false,
+            },
+        );
+        worktree.set_event_callback(Arc::clone(&options.emitter).worktree_callback());
+        match worktree.initialize().await {
+            Ok(()) => {
+                worktree_created = true;
+                Arc::new(ReadBeforeWriteSandbox::new(Arc::new(worktree)))
+            }
+            Err(e) => {
+                emit_run_notice(
+                    &options.emitter,
+                    RunNoticeLevel::Warn,
+                    "worktree_setup_failed",
+                    format!("Git worktree setup failed ({e}), running without worktree."),
+                );
+                Arc::new(ReadBeforeWriteSandbox::new(
+                    options
+                        .sandbox
+                        .build(Some(Arc::clone(&sandbox_event_callback)))
+                        .await
+                        .map_err(|e| FabroError::engine(e.to_string()))?,
+                ))
+            }
+        }
+    } else {
+        Arc::new(ReadBeforeWriteSandbox::new(
+            options
+                .sandbox
+                .build(Some(Arc::clone(&sandbox_event_callback)))
+                .await
+                .map_err(|e| FabroError::engine(e.to_string()))?,
+        ))
+    };
+    if worktree_plan.is_some() && !worktree_created {
         options.run_options.git = None;
     }
-
-    let sandbox = sandbox_result.sandbox;
     let cleanup_guard = scopeguard::guard(Arc::clone(&sandbox), |sandbox| {
         if let Ok(handle) = Handle::try_current() {
             handle.spawn(async move {
@@ -714,7 +495,11 @@ pub async fn initialize(
     options.emitter.emit(&WorkflowRunEvent::SandboxInitialized {
         working_directory: sandbox.working_directory().to_string(),
     });
-    if let Err(e) = write_sandbox_record(&run_dir, &options.sandbox, &sandbox) {
+    if let Err(e) = options
+        .sandbox
+        .to_sandbox_record(&*sandbox)
+        .save(&run_dir.join("sandbox.json"))
+    {
         tracing::warn!(error = %e, "Failed to save sandbox record");
     }
 
@@ -868,6 +653,7 @@ mod tests {
     use fabro_config::FabroSettings;
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_interview::AutoApproveInterviewer;
+    use fabro_sandbox::SandboxSpec;
 
     use super::*;
     use crate::pipeline::types::InitOptions;

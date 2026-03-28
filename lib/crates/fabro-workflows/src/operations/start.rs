@@ -10,7 +10,7 @@ use fabro_config::sandbox::WorktreeMode;
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
-use fabro_sandbox::SandboxProvider;
+use fabro_sandbox::{SandboxProvider, SandboxSpec, detect_clone_params};
 use serde::Serialize;
 
 use crate::context::Context;
@@ -23,8 +23,8 @@ use crate::handler::HandlerRegistry;
 use crate::outcome::{Outcome, StageStatus};
 use crate::pipeline::{
     self, DevcontainerSpec, FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted,
-    PullRequestOptions, RetroOptions, SandboxEnvSpec, SandboxSpec, build_conclusion,
-    classify_engine_result, persist_terminal_outcome,
+    PullRequestOptions, RetroOptions, SandboxEnvSpec, build_conclusion, classify_engine_result,
+    persist_terminal_outcome,
 };
 use crate::records::{Checkpoint, Conclusion, ConclusionExt, RunRecord, RunRecordExt};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
@@ -33,7 +33,7 @@ use fabro_config::run::PullRequestSettings;
 use fabro_retro::retro::Retro;
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::daytona::detect_repo_info;
-use fabro_sandbox::ssh::{GitCloneParams as SshGitCloneParams, SshConfig};
+use fabro_sandbox::ssh::SshConfig;
 use tokio::runtime::Handle;
 
 struct RunSession {
@@ -174,12 +174,11 @@ impl RunSession {
             .unwrap_or((None, None));
 
         let sandbox_provider = resolve_sandbox_provider(&settings)?;
-        let sandbox_provider =
-            if settings.dry_run_enabled() && !matches!(sandbox_provider, SandboxProvider::Local) {
-                SandboxProvider::Local
-            } else {
-                sandbox_provider
-            };
+        let sandbox_provider = if settings.dry_run_enabled() && !sandbox_provider.is_local() {
+            SandboxProvider::Local
+        } else {
+            sandbox_provider
+        };
         let model = settings
             .llm
             .as_ref()
@@ -225,7 +224,7 @@ impl RunSession {
             #[cfg(feature = "exedev")]
             SandboxProvider::Exe => SandboxSpec::Exe {
                 config: resolve_exe_config(&settings).unwrap_or_default(),
-                clone_params: resolve_exe_clone_params(&working_directory),
+                clone_params: detect_clone_params(&working_directory),
                 run_id: Some(record.run_id.clone()),
                 github_app: services.github_app.clone(),
                 mgmt_destination: "exe.dev".to_string(),
@@ -242,7 +241,7 @@ impl RunSession {
                         "--sandbox ssh requires [sandbox.ssh] config".to_string(),
                     )
                 })?,
-                clone_params: resolve_ssh_clone_params(&working_directory),
+                clone_params: detect_clone_params(&working_directory),
                 run_id: Some(record.run_id.clone()),
                 github_app: services.github_app.clone(),
             },
@@ -346,35 +345,10 @@ fn resolve_exe_config(settings: &FabroSettings) -> Option<fabro_sandbox::exe::Ex
         .and_then(|sandbox| sandbox.exe.clone())
 }
 
-#[cfg(feature = "exedev")]
-fn resolve_exe_clone_params(cwd: &Path) -> Option<fabro_sandbox::exe::GitCloneParams> {
-    let (detected_url, branch) = match fabro_sandbox::daytona::detect_repo_info(cwd) {
-        Ok(info) => info,
-        Err(err) => {
-            tracing::warn!("No git repo detected for exe.dev clone: {err}");
-            return None;
-        }
-    };
-    let url = fabro_github::ssh_url_to_https(&detected_url);
-    Some(fabro_sandbox::exe::GitCloneParams { url, branch })
-}
-
 fn resolve_ssh_config(settings: &FabroSettings) -> Option<SshConfig> {
     settings
         .sandbox_settings()
         .and_then(|sandbox| sandbox.ssh.clone())
-}
-
-fn resolve_ssh_clone_params(cwd: &Path) -> Option<SshGitCloneParams> {
-    let (detected_url, branch) = match detect_repo_info(cwd) {
-        Ok(info) => info,
-        Err(err) => {
-            tracing::warn!("No git repo detected for SSH clone: {err}");
-            return None;
-        }
-    };
-    let url = fabro_github::ssh_url_to_https(&detected_url);
-    Some(SshGitCloneParams { url, branch })
 }
 
 fn resolve_fallback_chain(

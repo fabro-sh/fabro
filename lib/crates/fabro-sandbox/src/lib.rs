@@ -1,4 +1,5 @@
 pub mod sandbox;
+pub mod sandbox_spec;
 
 pub mod read_guard;
 
@@ -38,6 +39,7 @@ pub use sandbox::{
     DirEntry, ExecResult, GitRunInfo, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
     format_lines_numbered, git_push_via_exec, setup_git_via_exec, shell_quote,
 };
+pub use sandbox_spec::{SandboxSpec, WorkdirStrategy};
 
 pub use read_guard::ReadBeforeWriteSandbox;
 
@@ -52,3 +54,6 @@ pub use local::LocalSandbox;
 pub use docker::{DockerSandbox, DockerSandboxConfig};
 
 pub use sandbox_record::{SandboxRecord, SandboxRecordExt};
+
+#[cfg(all(feature = "ssh", feature = "daytona"))]
+pub use ssh_common::detect_clone_params;

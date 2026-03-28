@@ -593,6 +593,10 @@ impl Sandbox for SshSandbox {
         Ok(Some(self.ssh_command()))
     }
 
+    fn data_host(&self) -> Option<&str> {
+        Some(&self.config.destination)
+    }
+
     fn origin_url(&self) -> Option<&str> {
         self.origin_url.get().map(String::as_str)
     }
