@@ -6,7 +6,7 @@ use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Password};
 use fabro_config::dotenv::{merge_env, write_env_file as write_env};
 use fabro_llm::client::Client as LlmClient;
-use fabro_llm::generate::{generate, GenerateParams};
+use fabro_llm::generate::{GenerateParams, generate};
 use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 use tokio::task::spawn_blocking;

@@ -2,8 +2,8 @@ use crate::profiles::EnvContext;
 use crate::sandbox::Sandbox;
 use crate::skills::Skill;
 use crate::subagent::{
-    make_close_agent_tool, make_send_input_tool, make_spawn_agent_tool, make_wait_tool,
-    SessionFactory, SubAgentManager,
+    SessionFactory, SubAgentManager, make_close_agent_tool, make_send_input_tool,
+    make_spawn_agent_tool, make_wait_tool,
 };
 use crate::tool_registry::ToolRegistry;
 use fabro_llm::types::ToolDefinition;

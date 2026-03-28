@@ -91,7 +91,7 @@ pub fn parse_github_owner_repo(url: &str) -> Result<(String, String), String> {
 ///
 /// The JWT is valid for 10 minutes with a 60-second clock skew allowance.
 pub fn sign_app_jwt(app_id: &str, private_key_pem: &str) -> Result<String, String> {
-    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
     use serde::Serialize;
 
     #[derive(Serialize)]
@@ -556,12 +556,12 @@ pub async fn get_authenticated_app(
         401 => {
             return Err("GitHub App authentication failed. \
                  Check that app_id and GITHUB_APP_PRIVATE_KEY are correct."
-                .to_string())
+                .to_string());
         }
         status => {
             return Err(format!(
                 "Unexpected status {status} fetching GitHub App info"
-            ))
+            ));
         }
     }
 
@@ -670,13 +670,13 @@ pub async fn get_pull_request(
         404 => {
             return Err(format!(
                 "Pull request #{number} not found in {owner}/{repo}"
-            ))
+            ));
         }
         401 | 403 => {
             return Err(format!(
                 "Authentication failed fetching pull request ({})",
                 resp.status()
-            ))
+            ));
         }
         status => {
             let body = resp.text().await.unwrap_or_default();

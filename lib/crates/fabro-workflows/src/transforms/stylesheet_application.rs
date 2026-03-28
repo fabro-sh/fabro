@@ -1,7 +1,7 @@
 use fabro_graphviz::graph::Graph;
 
-use super::stylesheet::{apply_stylesheet, parse_stylesheet};
 use super::Transform;
+use super::stylesheet::{apply_stylesheet, parse_stylesheet};
 
 /// Applies the `model_stylesheet` graph attribute to resolve LLM properties for each node.
 pub struct StylesheetApplicationTransform;

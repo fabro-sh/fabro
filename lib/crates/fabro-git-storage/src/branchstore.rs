@@ -1,8 +1,8 @@
 use git2::{Oid, Signature};
 use tracing::{debug, warn};
 
-use crate::gitobj::{FileMode, Store, TreeEntries};
 use crate::Result;
+use crate::gitobj::{FileMode, Store, TreeEntries};
 
 /// Metadata about a commit, returned by `log`.
 #[derive(Debug)]

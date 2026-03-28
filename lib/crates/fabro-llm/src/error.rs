@@ -291,7 +291,7 @@ pub fn error_from_status_code(
             return SdkError::RequestTimeout {
                 message: detail.message,
                 source: None,
-            }
+            };
         }
         413 => ProviderErrorKind::ContextLength,
         429 => ProviderErrorKind::RateLimit,
@@ -349,7 +349,7 @@ pub fn error_from_grpc_status(
             return SdkError::RequestTimeout {
                 message: detail.message,
                 source: None,
-            }
+            };
         }
         _ => ProviderErrorKind::Server,
     };
@@ -899,102 +899,132 @@ mod tests {
     fn failover_eligible_transient_provider_errors() {
         let detail = || Box::new(ProviderErrorDetail::new("error", "openai"));
 
-        assert!(SdkError::Provider {
-            kind: ProviderErrorKind::RateLimit,
-            detail: detail(),
-        }
-        .failover_eligible());
+        assert!(
+            SdkError::Provider {
+                kind: ProviderErrorKind::RateLimit,
+                detail: detail(),
+            }
+            .failover_eligible()
+        );
 
-        assert!(SdkError::Provider {
-            kind: ProviderErrorKind::Server,
-            detail: detail(),
-        }
-        .failover_eligible());
+        assert!(
+            SdkError::Provider {
+                kind: ProviderErrorKind::Server,
+                detail: detail(),
+            }
+            .failover_eligible()
+        );
 
-        assert!(SdkError::Provider {
-            kind: ProviderErrorKind::QuotaExceeded,
-            detail: detail(),
-        }
-        .failover_eligible());
+        assert!(
+            SdkError::Provider {
+                kind: ProviderErrorKind::QuotaExceeded,
+                detail: detail(),
+            }
+            .failover_eligible()
+        );
     }
 
     #[test]
     fn failover_eligible_transient_non_provider_errors() {
-        assert!(SdkError::RequestTimeout {
-            message: "timed out".into(),
-            source: None,
-        }
-        .failover_eligible());
+        assert!(
+            SdkError::RequestTimeout {
+                message: "timed out".into(),
+                source: None,
+            }
+            .failover_eligible()
+        );
 
-        assert!(SdkError::Network {
-            message: "refused".into(),
-            source: None,
-        }
-        .failover_eligible());
+        assert!(
+            SdkError::Network {
+                message: "refused".into(),
+                source: None,
+            }
+            .failover_eligible()
+        );
 
-        assert!(SdkError::Stream {
-            message: "broken".into(),
-            source: None,
-        }
-        .failover_eligible());
+        assert!(
+            SdkError::Stream {
+                message: "broken".into(),
+                source: None,
+            }
+            .failover_eligible()
+        );
     }
 
     #[test]
     fn failover_not_eligible_deterministic_errors() {
         let detail = || Box::new(ProviderErrorDetail::new("error", "openai"));
 
-        assert!(!SdkError::Provider {
-            kind: ProviderErrorKind::Authentication,
-            detail: detail(),
-        }
-        .failover_eligible());
+        assert!(
+            !SdkError::Provider {
+                kind: ProviderErrorKind::Authentication,
+                detail: detail(),
+            }
+            .failover_eligible()
+        );
 
-        assert!(!SdkError::Provider {
-            kind: ProviderErrorKind::InvalidRequest,
-            detail: detail(),
-        }
-        .failover_eligible());
+        assert!(
+            !SdkError::Provider {
+                kind: ProviderErrorKind::InvalidRequest,
+                detail: detail(),
+            }
+            .failover_eligible()
+        );
 
-        assert!(!SdkError::Provider {
-            kind: ProviderErrorKind::ContextLength,
-            detail: detail(),
-        }
-        .failover_eligible());
+        assert!(
+            !SdkError::Provider {
+                kind: ProviderErrorKind::ContextLength,
+                detail: detail(),
+            }
+            .failover_eligible()
+        );
 
-        assert!(!SdkError::Provider {
-            kind: ProviderErrorKind::ContentFilter,
-            detail: detail(),
-        }
-        .failover_eligible());
+        assert!(
+            !SdkError::Provider {
+                kind: ProviderErrorKind::ContentFilter,
+                detail: detail(),
+            }
+            .failover_eligible()
+        );
     }
 
     #[test]
     fn failover_not_eligible_non_provider_errors() {
-        assert!(!SdkError::Configuration {
-            message: "bad".into(),
-            source: None,
-        }
-        .failover_eligible());
+        assert!(
+            !SdkError::Configuration {
+                message: "bad".into(),
+                source: None,
+            }
+            .failover_eligible()
+        );
 
-        assert!(!SdkError::Abort {
-            message: "cancelled".into()
-        }
-        .failover_eligible());
+        assert!(
+            !SdkError::Abort {
+                message: "cancelled".into()
+            }
+            .failover_eligible()
+        );
 
-        assert!(!SdkError::InvalidToolCall {
-            message: "bad".into()
-        }
-        .failover_eligible());
+        assert!(
+            !SdkError::InvalidToolCall {
+                message: "bad".into()
+            }
+            .failover_eligible()
+        );
 
-        assert!(!SdkError::NoObjectGenerated {
-            message: "none".into()
-        }
-        .failover_eligible());
+        assert!(
+            !SdkError::NoObjectGenerated {
+                message: "none".into()
+            }
+            .failover_eligible()
+        );
 
-        assert!(!SdkError::UnsupportedToolChoice {
-            message: "nope".into()
-        }
-        .failover_eligible());
+        assert!(
+            !SdkError::UnsupportedToolChoice {
+                message: "nope".into()
+            }
+            .failover_eligible()
+        );
     }
 
     #[test]

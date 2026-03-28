@@ -4,9 +4,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 
 use fabro_agent::{
-    subagent::{SessionFactory, SubAgentManager},
     AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session,
     SessionConfig, Turn,
+    subagent::{SessionFactory, SubAgentManager},
 };
 use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request, Usage};
@@ -21,8 +21,8 @@ use crate::context::keys::Fidelity;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
 use crate::event::{EventEmitter, WorkflowRunEvent};
-use crate::outcome::compute_stage_cost;
 use crate::outcome::StageUsage;
+use crate::outcome::compute_stage_cost;
 use fabro_graphviz::graph::Node;
 
 fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
@@ -578,7 +578,7 @@ impl CodergenBackend for AgentApiBackend {
                         }
                         Err(fabro_agent::AgentError::Llm(err)) => return Err(FabroError::Llm(err)),
                         Err(fabro_agent::AgentError::Aborted(_)) => {
-                            return Err(FabroError::Cancelled)
+                            return Err(FabroError::Cancelled);
                         }
                         Err(other) => {
                             return Err(FabroError::handler(format!(
@@ -588,11 +588,7 @@ impl CodergenBackend for AgentApiBackend {
                     }
                 }
 
-                if succeeded {
-                    Ok(())
-                } else {
-                    Err(last_err)
-                }
+                if succeeded { Ok(()) } else { Err(last_err) }
             }
             Err(fabro_agent::AgentError::Llm(sdk_err)) => Err(FabroError::Llm(sdk_err)),
             Err(fabro_agent::AgentError::Aborted(_)) => Err(FabroError::Cancelled),

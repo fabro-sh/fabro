@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::args::{ConfigCommand, ConfigNamespace, ConfigShowArgs};
 use fabro_config::cli::load_cli_config;
-use fabro_config::project::{discover_project_config, resolve_settings, ResolveSettingsInput};
+use fabro_config::project::{ResolveSettingsInput, discover_project_config, resolve_settings};
 use fabro_config::{FabroConfig, FabroSettings};
 
 pub fn dispatch(ns: ConfigNamespace) -> anyhow::Result<()> {

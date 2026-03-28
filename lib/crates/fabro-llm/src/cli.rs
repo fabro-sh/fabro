@@ -4,11 +4,11 @@ use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use cli_table::format::{Border, Justify, Separator};
-use cli_table::{print_stdout, Cell, CellStruct, Color, Style, Table};
-use futures::{stream, StreamExt};
+use cli_table::{Cell, CellStruct, Color, Style, Table, print_stdout};
+use futures::{StreamExt, stream};
 use serde::Deserialize;
 use tokio::task;
 use tokio::time;
@@ -118,11 +118,7 @@ fn format_speed(tps: Option<f64>) -> String {
 }
 
 fn color_if(use_color: bool, color: Color) -> Option<Color> {
-    if use_color {
-        Some(color)
-    } else {
-        None
-    }
+    if use_color { Some(color) } else { None }
 }
 
 fn model_row(model: &Model, use_color: bool) -> Vec<CellStruct> {

@@ -5,18 +5,18 @@ use anyhow::bail;
 use fabro_agent::{DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox};
 use fabro_config::cli::load_cli_config;
 use fabro_config::project::{
-    resolve_settings, resolve_workflow_path, resolve_working_directory, ResolveSettingsInput,
+    ResolveSettingsInput, resolve_settings, resolve_workflow_path, resolve_working_directory,
 };
 use fabro_config::{FabroConfig, FabroSettings};
-use fabro_graphviz::graph::{is_llm_handler_type, Graph};
+use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_llm::client::Client as LlmClient;
 use fabro_model::{Catalog, Provider};
-use fabro_sandbox::daytona::{detect_repo_info, DaytonaConfig, DaytonaSandbox};
-use fabro_sandbox::ssh::{GitCloneParams as SshGitCloneParams, SshConfig, SshSandbox};
 use fabro_sandbox::SandboxProvider;
+use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, detect_repo_info};
+use fabro_sandbox::ssh::{GitCloneParams as SshGitCloneParams, SshConfig, SshSandbox};
 use fabro_util::terminal::Styles;
-use fabro_workflows::git::{sync_status, GitSyncStatus};
-use fabro_workflows::operations::{validate, ValidateInput, WorkflowInput};
+use fabro_workflows::git::{GitSyncStatus, sync_status};
+use fabro_workflows::operations::{ValidateInput, WorkflowInput, validate};
 
 use crate::args::PreflightArgs;
 use crate::shared::github::build_github_app_credentials;

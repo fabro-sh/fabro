@@ -1,7 +1,7 @@
 // Re-export all sandbox types from fabro-sandbox.
 pub use fabro_sandbox::{
-    format_lines_numbered, shell_quote, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
-    SandboxEventCallback, WorktreeConfig, WorktreeEvent, WorktreeEventCallback, WorktreeSandbox,
+    DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback, WorktreeConfig,
+    WorktreeEvent, WorktreeEventCallback, WorktreeSandbox, format_lines_numbered, shell_quote,
 };
 
 // Re-export the delegate_sandbox! macro at crate root so existing

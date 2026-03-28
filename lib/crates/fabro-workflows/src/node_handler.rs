@@ -14,7 +14,7 @@ use crate::context::Context;
 
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::handler::{dispatch_handler, format_panic_message, EngineServices};
+use crate::handler::{EngineServices, dispatch_handler, format_panic_message};
 use crate::outcome::{Outcome, StageStatus};
 use crate::retry::build_retry_policy;
 use crate::run_dir;
@@ -143,8 +143,8 @@ mod tests {
     use fabro_core::lifecycle::NoopLifecycle;
     use fabro_core::outcome::StageStatus;
     use fabro_core::state::RunState;
-    use fabro_graphviz::graph::types::{Edge, Graph, Node};
     use fabro_graphviz::graph::AttrValue;
+    use fabro_graphviz::graph::types::{Edge, Graph, Node};
 
     use super::*;
     use crate::graph::WorkflowGraph;

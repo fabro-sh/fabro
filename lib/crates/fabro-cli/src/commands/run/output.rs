@@ -6,7 +6,7 @@ use fabro_store::RuntimeState;
 use fabro_util::terminal::Styles;
 use fabro_util::text::strip_goal_decoration;
 use fabro_workflows::asset_snapshot::collect_asset_paths;
-use fabro_workflows::outcome::{format_cost, StageStatus};
+use fabro_workflows::outcome::{StageStatus, format_cost};
 use fabro_workflows::pipeline::{Persisted, Validated};
 use fabro_workflows::pull_request::PullRequestRecord;
 use fabro_workflows::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt};

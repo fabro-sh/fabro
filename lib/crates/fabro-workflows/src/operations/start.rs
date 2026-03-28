@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use fabro_config::sandbox::WorktreeMode;
 use fabro_config::FabroSettings;
+use fabro_config::sandbox::WorktreeMode;
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
@@ -16,23 +16,23 @@ use serde::Serialize;
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{
-    append_progress_event, EventEmitter, ProgressLogger, RunNoticeLevel, WorkflowRunEvent,
+    EventEmitter, ProgressLogger, RunNoticeLevel, WorkflowRunEvent, append_progress_event,
 };
 use crate::git::GitAuthor;
 use crate::handler::HandlerRegistry;
 use crate::outcome::{Outcome, StageStatus};
 use crate::pipeline::{
-    self, build_conclusion, classify_engine_result, persist_terminal_outcome, DevcontainerSpec,
-    FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted, PullRequestOptions, RetroOptions,
-    SandboxEnvSpec, SandboxSpec,
+    self, DevcontainerSpec, FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted,
+    PullRequestOptions, RetroOptions, SandboxEnvSpec, SandboxSpec, build_conclusion,
+    classify_engine_result, persist_terminal_outcome,
 };
 use crate::records::{Checkpoint, Conclusion, ConclusionExt, RunRecord, RunRecordExt};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{self, RunStatus, RunStatusRecordExt, StatusReason};
 use fabro_config::run::PullRequestSettings;
 use fabro_retro::retro::Retro;
-use fabro_sandbox::daytona::detect_repo_info;
 use fabro_sandbox::daytona::DaytonaConfig;
+use fabro_sandbox::daytona::detect_repo_info;
 use fabro_sandbox::ssh::{GitCloneParams as SshGitCloneParams, SshConfig};
 use tokio::runtime::Handle;
 
@@ -711,9 +711,9 @@ mod tests {
     use super::*;
     use crate::context::Context;
     use crate::event::EventEmitter;
+    use crate::handler::HandlerRegistry;
     use crate::handler::exit::ExitHandler;
     use crate::handler::start::StartHandler;
-    use crate::handler::HandlerRegistry;
     use crate::operations::resume;
     use crate::records::CheckpointExt;
 

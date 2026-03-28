@@ -18,7 +18,7 @@ use crate::error::FabroError;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::git::{self, GitSyncStatus, MetadataStore};
 use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
-use crate::handler::{default_registry, HandlerRegistry};
+use crate::handler::{HandlerRegistry, default_registry};
 use crate::run_options::{GitCheckpointOptions, RunOptions};
 use fabro_sandbox::daytona::DaytonaSandbox;
 use fabro_sandbox::docker::DockerSandboxConfig;
@@ -542,11 +542,12 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), FabroErro
         let shell_commands = match command {
             fabro_devcontainer::Command::Shell(shell) => vec![shell.clone()],
             fabro_devcontainer::Command::Args(args) => {
-                vec![args
-                    .iter()
-                    .map(|arg| try_quote(arg).unwrap_or_else(|_| arg.into()).to_string())
-                    .collect::<Vec<_>>()
-                    .join(" ")]
+                vec![
+                    args.iter()
+                        .map(|arg| try_quote(arg).unwrap_or_else(|_| arg.into()).to_string())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                ]
             }
             fabro_devcontainer::Command::Parallel(commands) => commands.values().cloned().collect(),
         };
@@ -606,11 +607,7 @@ fn write_sandbox_record(
     let working_directory = sandbox.working_directory().to_string();
     let identifier = {
         let info = sandbox.sandbox_info();
-        if info.is_empty() {
-            None
-        } else {
-            Some(info)
-        }
+        if info.is_empty() { None } else { Some(info) }
     };
 
     let record = match spec {

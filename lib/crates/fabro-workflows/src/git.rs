@@ -7,7 +7,7 @@ use git2::{Repository, Signature};
 
 use crate::error::{FabroError, Result};
 use crate::records::{Checkpoint, RunRecord, StartRecord};
-use tokio::task::{spawn_blocking, JoinError};
+use tokio::task::{JoinError, spawn_blocking};
 use tokio::time::timeout;
 
 /// Branch prefix for workflow run branches (e.g. `fabro/run/{run_id}`).

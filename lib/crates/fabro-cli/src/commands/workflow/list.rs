@@ -1,9 +1,9 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use fabro_util::terminal::Styles;
 
 use fabro_config::project::{
-    discover_project_config, list_workflows_detailed, resolve_fabro_root, WorkflowInfo,
-    WorkflowSource,
+    WorkflowInfo, WorkflowSource, discover_project_config, list_workflows_detailed,
+    resolve_fabro_root,
 };
 
 use crate::args::WorkflowListArgs;

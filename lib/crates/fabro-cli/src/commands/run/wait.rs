@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 use fabro_workflows::records::{Conclusion, ConclusionExt};

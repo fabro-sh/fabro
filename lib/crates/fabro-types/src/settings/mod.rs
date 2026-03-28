@@ -16,8 +16,8 @@ pub use cli::{
 };
 pub use hook::{HookConfig, HookDefinition, HookEvent, HookType, TlsMode};
 pub use mcp::{
-    default_startup_timeout_secs, default_tool_timeout_secs, McpServerConfig, McpServerEntry,
-    McpTransport,
+    McpServerConfig, McpServerEntry, McpTransport, default_startup_timeout_secs,
+    default_tool_timeout_secs,
 };
 pub use project::ProjectFabroSettings;
 pub use run::{

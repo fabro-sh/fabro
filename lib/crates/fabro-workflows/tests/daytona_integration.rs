@@ -11,8 +11,8 @@ use fabro_agent::Sandbox;
 use fabro_config::FabroSettings;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_llm::provider::Provider;
-use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 use fabro_sandbox::SandboxRecordExt;
+use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 use fabro_store::RuntimeState;
 use fabro_workflows::artifact::sync_artifacts_to_env;
 use fabro_workflows::context::Context;
@@ -1737,8 +1737,8 @@ async fn daytona_toolbox_idle_diagnostic() {
 #[tokio::test]
 #[ignore]
 async fn daytona_cp_upload_download_round_trip() {
-    use fabro_sandbox::reconnect::reconnect;
     use fabro_sandbox::SandboxRecord;
+    use fabro_sandbox::reconnect::reconnect;
 
     // 1. Create and initialize a real Daytona sandbox
     let env = create_env().await;

@@ -13,7 +13,7 @@ use fabro_graphviz::graph::{Graph, Node};
 use tokio::fs;
 
 use super::agent::{
-    expand_variables, extract_status_fields, truncate, CodergenBackend, CodergenResult,
+    CodergenBackend, CodergenResult, expand_variables, extract_status_fields, truncate,
 };
 use super::{EngineServices, Handler};
 
@@ -188,9 +188,11 @@ mod tests {
                 .get(crate::context::keys::LAST_STAGE),
             Some(&serde_json::json!("classify"))
         );
-        assert!(outcome
-            .context_updates
-            .contains_key(crate::context::keys::LAST_RESPONSE));
+        assert!(
+            outcome
+                .context_updates
+                .contains_key(crate::context::keys::LAST_RESPONSE)
+        );
         assert_eq!(
             outcome
                 .context_updates

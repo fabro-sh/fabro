@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 /// Return the path to `~/.fabro/.env`.
 pub fn env_file_path() -> Result<PathBuf> {

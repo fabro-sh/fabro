@@ -301,9 +301,10 @@ mod tests {
         }"#;
         let meta: FeatureMetadata = serde_json::from_str(json).unwrap();
         assert_eq!(meta.depends_on.len(), 2);
-        assert!(meta
-            .depends_on
-            .contains_key("ghcr.io/devcontainers/features/common-utils:1"));
+        assert!(
+            meta.depends_on
+                .contains_key("ghcr.io/devcontainers/features/common-utils:1")
+        );
         assert_eq!(
             meta.depends_on.get("ghcr.io/devcontainers/features/node:1"),
             Some(&serde_json::json!({"version": "20"}))

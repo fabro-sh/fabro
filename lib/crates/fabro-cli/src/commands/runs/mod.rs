@@ -19,11 +19,7 @@ pub async fn dispatch(cmd: RunsCommands) -> Result<()> {
 }
 
 pub(super) fn short_run_id(id: &str) -> &str {
-    if id.len() > 12 {
-        &id[..12]
-    } else {
-        id
-    }
+    if id.len() > 12 { &id[..12] } else { id }
 }
 
 #[cfg(test)]

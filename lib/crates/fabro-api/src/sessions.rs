@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use fabro_llm::generate::{stream as llm_stream, GenerateParams};
+use fabro_llm::generate::{GenerateParams, stream as llm_stream};
 use fabro_llm::types::{Message as LlmMessage, StreamEvent};
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;

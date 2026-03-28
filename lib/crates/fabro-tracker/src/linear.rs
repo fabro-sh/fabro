@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::{execute_graphql_request, BlockerRef, Issue, Tracker};
+use crate::{BlockerRef, Issue, Tracker, execute_graphql_request};
 
 pub const LINEAR_API_ENDPOINT: &str = "https://api.linear.app/graphql";
 

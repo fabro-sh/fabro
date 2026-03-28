@@ -2,18 +2,18 @@ use crate::client::Client;
 use crate::error::SdkError;
 use crate::provider::StreamEventStream;
 use crate::retry::retry;
-use crate::tools::{execute_all_tools_with_repair, RepairToolCallFn, Tool};
+use crate::tools::{RepairToolCallFn, Tool, execute_all_tools_with_repair};
 use crate::types::{
     FinishReason, GenerateResult, Message, ObjectStreamEvent, ReasoningEffort, Request, Response,
     ResponseFormat, ResponseFormatType, RetryPolicy, StepResult, StreamEvent, TimeoutConfig,
     ToolCall, ToolChoice, ToolDefinition, Usage,
 };
 use fabro_util::backoff::BackoffPolicy;
-use futures::{future, stream, Stream, StreamExt};
+use futures::{Stream, StreamExt, future, stream};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tokio::sync::{mpsc, OnceCell};
+use tokio::sync::{OnceCell, mpsc};
 use tokio::time;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
@@ -1111,8 +1111,8 @@ mod tests {
     use crate::client::Client;
     use crate::provider::ProviderAdapter;
     use crate::types::{ContentPart, Role};
-    use futures::stream;
     use futures::StreamExt;
+    use futures::stream;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU32, Ordering};
 

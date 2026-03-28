@@ -18,7 +18,7 @@ use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{
-    stage_usage_to_llm, FailureCategory, FailureDetail, Outcome, StageStatus, StageUsage,
+    FailureCategory, FailureDetail, Outcome, StageStatus, StageUsage, stage_usage_to_llm,
 };
 use fabro_graphviz::graph::types::Node as GvNode;
 
@@ -295,11 +295,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 .values()
                 .filter_map(|o| o.usage.as_ref()?.cost)
                 .sum();
-            if sum > 0.0 {
-                Some(sum)
-            } else {
-                None
-            }
+            if sum > 0.0 { Some(sum) } else { None }
         };
         let run_usage = state
             .node_outcomes

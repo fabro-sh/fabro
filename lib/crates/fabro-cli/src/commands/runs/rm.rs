@@ -1,13 +1,13 @@
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use fabro_config::FabroSettingsExt;
 use fabro_sandbox::SandboxRecordExt;
 use tracing::warn;
 
 use fabro_sandbox::reconnect::reconnect as reconnect_sandbox;
 use fabro_workflows::run_lookup::{resolve_run, runs_base};
-use fabro_workflows::run_status::{write_run_status, RunStatus};
+use fabro_workflows::run_status::{RunStatus, write_run_status};
 
 use crate::args::RunsRemoveArgs;
 use crate::cli_config::load_cli_settings;

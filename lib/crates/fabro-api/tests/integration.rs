@@ -11,7 +11,7 @@ mod mtls_e2e {
     use fabro_api::jwt_auth::{AuthMode, AuthStrategy};
     use fabro_api::server::{build_router, create_app_state};
     use fabro_api::server_config::TlsSettings;
-    use fabro_api::tls::{build_rustls_config, ClientAuth};
+    use fabro_api::tls::{ClientAuth, build_rustls_config};
     use fabro_workflows::pipeline::LlmSpec;
     use tokio::net::TcpListener;
 
@@ -429,11 +429,11 @@ mod server_lifecycle {
     use axum::http::{Request, StatusCode};
     use fabro_api::server::{build_router, create_app_state_with_registry_factory};
     use fabro_interview::Interviewer;
+    use fabro_workflows::handler::HandlerRegistry;
     use fabro_workflows::handler::agent::AgentHandler;
     use fabro_workflows::handler::exit::ExitHandler;
     use fabro_workflows::handler::human::HumanHandler;
     use fabro_workflows::handler::start::StartHandler;
-    use fabro_workflows::handler::HandlerRegistry;
     use fabro_workflows::pipeline::LlmSpec;
     use tower::ServiceExt;
 

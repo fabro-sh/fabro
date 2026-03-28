@@ -7,7 +7,7 @@ use crate::outcome::StageStatus;
 use crate::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt};
 use crate::run_status::{self, RunStatus, RunStatusRecordExt};
 
-use super::start::{execute_persisted_run, StartServices, Started};
+use super::start::{StartServices, Started, execute_persisted_run};
 
 /// Resume a workflow run from its checkpoint. Errors if no checkpoint is found.
 pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, FabroError> {

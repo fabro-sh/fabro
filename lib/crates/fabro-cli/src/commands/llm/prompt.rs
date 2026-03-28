@@ -1,8 +1,8 @@
 use anyhow::Result;
 use fabro_config::FabroSettings;
-use fabro_llm::cli::{run_prompt, PromptArgs};
+use fabro_llm::cli::{PromptArgs, run_prompt};
 #[cfg(feature = "server")]
-use fabro_llm::cli::{run_prompt_via_server, ServerConnection};
+use fabro_llm::cli::{ServerConnection, run_prompt_via_server};
 
 use crate::args::GlobalArgs;
 

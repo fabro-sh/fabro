@@ -11,8 +11,8 @@ use fabro_core::state::RunState;
 
 use crate::artifact::ArtifactStore;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
-use crate::git::scan_node_files;
 use crate::git::MetadataStore;
+use crate::git::scan_node_files;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageStatus, StageUsage};

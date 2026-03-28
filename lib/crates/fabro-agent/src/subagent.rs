@@ -520,10 +520,12 @@ mod tests {
         let session = make_session(vec![text_response("Hello")]).await;
         let result = manager.spawn(session, "Do something".into(), 2);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Maximum subagent depth"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Maximum subagent depth")
+        );
     }
 
     #[tokio::test]
@@ -674,9 +676,11 @@ mod tests {
         manager.close(&agent_id).unwrap();
 
         let captured = events.lock().unwrap();
-        assert!(captured
-            .iter()
-            .any(|e| matches!(e, AgentEvent::SubAgentClosed { depth: 2, .. })));
+        assert!(
+            captured
+                .iter()
+                .any(|e| matches!(e, AgentEvent::SubAgentClosed { depth: 2, .. }))
+        );
     }
 
     #[tokio::test]

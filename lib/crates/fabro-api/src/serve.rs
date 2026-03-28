@@ -15,9 +15,9 @@ use clap::Args;
 use fabro_config::FabroSettings;
 
 use crate::github_webhooks::WebhookManager;
-use crate::jwt_auth::{decode_pem_env, resolve_auth_mode, AuthMode, AuthStrategy};
+use crate::jwt_auth::{AuthMode, AuthStrategy, decode_pem_env, resolve_auth_mode};
 use crate::server::{build_router, create_app_state_with_options, spawn_scheduler};
-use crate::tls::{build_rustls_config, serve_tls, ClientAuth};
+use crate::tls::{ClientAuth, build_rustls_config, serve_tls};
 use fabro_llm::client::Client as LlmClient;
 use fabro_sandbox::SandboxProvider;
 use fabro_workflows::pipeline::LlmSpec;
@@ -197,7 +197,9 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
                     }
                 }
                 _ => {
-                    warn!("Webhook config present but GITHUB_APP_WEBHOOK_SECRET or GITHUB_APP_PRIVATE_KEY not set; skipping webhook listener");
+                    warn!(
+                        "Webhook config present but GITHUB_APP_WEBHOOK_SECRET or GITHUB_APP_PRIVATE_KEY not set; skipping webhook listener"
+                    );
                     None
                 }
             }

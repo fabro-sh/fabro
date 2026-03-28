@@ -11,12 +11,12 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use fabro_config::sandbox::SandboxSettings;
 use fabro_llm::client::Client as LlmClient;
-use fabro_llm::generate::{generate, generate_object, GenerateParams};
+use fabro_llm::generate::{GenerateParams, generate, generate_object};
 use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest,
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
 };
-use fabro_retro::retro::{derive_retro, extract_stage_durations, Retro};
+use fabro_retro::retro::{Retro, derive_retro, extract_stage_durations};
 use fabro_util::redact::redact_jsonl_line;
 use fabro_workflows::error::FabroError;
 use fabro_workflows::git::GitAuthor;
@@ -27,9 +27,9 @@ use tokio::sync::oneshot;
 use tokio::sync::{Notify, OnceCell};
 use tokio::task::spawn_blocking;
 use tokio::time::{sleep, timeout};
-use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
-use tower::{service_fn, ServiceExt};
+use tokio_stream::wrappers::BroadcastStream;
+use tower::{ServiceExt, service_fn};
 
 use tracing::{error, info};
 
@@ -37,7 +37,7 @@ use crate::demo;
 use crate::error::ApiError;
 use crate::jwt_auth::{AuthMode, AuthenticatedService, AuthenticatedUser};
 use crate::sessions as sessions_mod;
-use crate::sessions::{new_session_store, SessionStore};
+use crate::sessions::{SessionStore, new_session_store};
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_retro::RetroExt;
 use fabro_workflows::context::Context;
@@ -918,7 +918,7 @@ async fn get_questions(
                         StatusCode::OK,
                         Json(ListResponse::new(Vec::<ApiQuestion>::new())),
                     )
-                        .into_response()
+                        .into_response();
                 }
             };
             let pending = interviewer.pending_questions();
@@ -1027,7 +1027,7 @@ async fn get_events(
             Some(managed_run) => match &managed_run.event_tx {
                 Some(tx) => tx.subscribe(),
                 None => {
-                    return ApiError::new(StatusCode::GONE, "Event stream closed.").into_response()
+                    return ApiError::new(StatusCode::GONE, "Event stream closed.").into_response();
                 }
             },
             None => return ApiError::not_found("Run not found.").into_response(),
@@ -1410,7 +1410,7 @@ async fn create_completion(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to create LLM client: {e}"),
             )
-            .into_response()
+            .into_response();
         }
     };
 
@@ -1420,7 +1420,7 @@ async fn create_completion(
             Ok(s) => s,
             Err(e) => {
                 return ApiError::new(StatusCode::BAD_GATEWAY, format!("LLM error: {e}"))
-                    .into_response()
+                    .into_response();
             }
         };
 
@@ -1540,7 +1540,7 @@ async fn get_retro(
 
 /// Render DOT source to a styled SVG via `render_dot` on a blocking thread.
 pub(crate) async fn render_dot_svg(dot_source: &str) -> Response {
-    use fabro_graphviz::render::{render_dot, GraphFormat};
+    use fabro_graphviz::render::{GraphFormat, render_dot};
 
     let source = dot_source.to_owned();
     match spawn_blocking(move || render_dot(&source, GraphFormat::Svg)).await {

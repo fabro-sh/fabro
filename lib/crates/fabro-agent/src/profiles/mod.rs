@@ -7,7 +7,7 @@ pub use gemini::GeminiProfile;
 pub use openai::OpenAiProfile;
 
 use crate::sandbox::Sandbox;
-use crate::skills::{format_skills_prompt_section, Skill};
+use crate::skills::{Skill, format_skills_prompt_section};
 use crate::tool_registry::ToolRegistry;
 use fabro_model::Provider;
 

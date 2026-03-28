@@ -65,8 +65,8 @@ mod tests {
     use super::*;
     use crate::types::RetryPolicy;
     use fabro_util::backoff::BackoffPolicy;
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     fn fast_backoff() -> BackoffPolicy {
         BackoffPolicy {

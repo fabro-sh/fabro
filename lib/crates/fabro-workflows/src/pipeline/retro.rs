@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use fabro_agent::SessionEvent;
-use fabro_retro::retro::{derive_retro, extract_stage_durations, Retro};
-use fabro_retro::retro_agent::{dry_run_narrative, run_retro_agent};
 use fabro_retro::RetroExt;
+use fabro_retro::retro::{Retro, derive_retro, extract_stage_durations};
+use fabro_retro::retro_agent::{dry_run_narrative, run_retro_agent};
 
 use crate::event::WorkflowRunEvent;
 use crate::records::{Checkpoint, CheckpointExt};
@@ -285,11 +285,13 @@ mod tests {
 
         assert!(retro.is_some());
         let seen = seen.lock().unwrap();
-        assert!(seen
-            .iter()
-            .any(|event| matches!(event, WorkflowRunEvent::RetroStarted)));
-        assert!(seen
-            .iter()
-            .any(|event| matches!(event, WorkflowRunEvent::RetroCompleted { .. })));
+        assert!(
+            seen.iter()
+                .any(|event| matches!(event, WorkflowRunEvent::RetroStarted))
+        );
+        assert!(
+            seen.iter()
+                .any(|event| matches!(event, WorkflowRunEvent::RetroCompleted { .. }))
+        );
     }
 }

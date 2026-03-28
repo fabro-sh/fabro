@@ -1,6 +1,6 @@
 use assert_cmd::Command;
-use fabro_config::mcp::McpTransport;
 use fabro_config::FabroSettings;
+use fabro_config::mcp::McpTransport;
 use fabro_store::RuntimeState;
 use predicates::prelude::*;
 
@@ -1450,9 +1450,11 @@ fn attach_supports_legacy_root_interview_paths() {
 
     assert!(run_dir.join("interview_request.json").exists());
     assert!(run_dir.join("interview_response.json").exists());
-    assert!(!RuntimeState::new(&run_dir)
-        .interview_response_path()
-        .exists());
+    assert!(
+        !RuntimeState::new(&run_dir)
+            .interview_response_path()
+            .exists()
+    );
 }
 
 // Bug 4: attach should respect the verbose flag from run.json.
@@ -1594,14 +1596,16 @@ fn config_show_workflow_name_applies_run_overlay_and_deep_merges() {
         .find(|hook| hook.name.as_deref() == Some("shared"))
         .expect("shared hook");
     assert_eq!(shared_hook.command.as_deref(), Some("echo run"));
-    assert!(cfg
-        .hooks
-        .iter()
-        .any(|hook| hook.name.as_deref() == Some("project")));
-    assert!(cfg
-        .hooks
-        .iter()
-        .any(|hook| hook.name.as_deref() == Some("run-only")));
+    assert!(
+        cfg.hooks
+            .iter()
+            .any(|hook| hook.name.as_deref() == Some("project"))
+    );
+    assert!(
+        cfg.hooks
+            .iter()
+            .any(|hook| hook.name.as_deref() == Some("run-only"))
+    );
 
     match &cfg.mcp_servers["shared"].transport {
         McpTransport::Stdio { command, .. } => assert_eq!(command, &vec!["echo", "run"]),

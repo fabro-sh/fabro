@@ -7,8 +7,8 @@ use std::time::Instant;
 use crate::shell_quote;
 use crate::ssh_common;
 use crate::{
-    format_lines_numbered, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
-    SandboxEventCallback,
+    DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
+    format_lines_numbered,
 };
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;

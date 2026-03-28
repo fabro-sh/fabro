@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 #[allow(unused_imports)]
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 #[cfg(feature = "daytona")]
 use crate::daytona::DaytonaSandbox;

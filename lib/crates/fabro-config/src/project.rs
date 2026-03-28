@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
+use crate::FabroSettings;
 use crate::config::FabroConfig;
 use crate::run;
-use crate::FabroSettings;
 pub use fabro_types::settings::project::ProjectFabroSettings;
 
 const CONFIG_FILENAME: &str = "fabro.toml";

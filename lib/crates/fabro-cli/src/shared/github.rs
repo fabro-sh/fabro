@@ -1,5 +1,5 @@
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_github::GitHubAppCredentials;
 
 pub(crate) fn build_github_app_credentials(app_id: Option<&str>) -> Option<GitHubAppCredentials> {

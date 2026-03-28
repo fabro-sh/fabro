@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use tokio::task::spawn_blocking;
 
 use crate::cli_config::load_cli_settings;

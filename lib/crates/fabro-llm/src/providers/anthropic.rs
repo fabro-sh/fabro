@@ -1,8 +1,8 @@
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use futures::stream;
 
-use crate::error::{error_from_status_code, SdkError};
-use crate::provider::{validate_tool_choice, ProviderAdapter, StreamEventStream};
+use crate::error::{SdkError, error_from_status_code};
+use crate::provider::{ProviderAdapter, StreamEventStream, validate_tool_choice};
 use crate::providers::common::{
     self as common, extract_system_prompt, parse_error_body, parse_rate_limit_headers,
     parse_retry_after, send_and_read_response,

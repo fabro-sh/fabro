@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -11,7 +11,7 @@ use crate::condition::evaluate_condition;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
-use crate::operations::{validate, ValidateInput, WorkflowInput};
+use crate::operations::{ValidateInput, WorkflowInput, validate};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline;
 use crate::pipeline::types::Initialized;
@@ -147,7 +147,7 @@ impl Handler for SubWorkflowHandler {
             Err(e) => {
                 return Ok(Outcome::fail_classify(format!(
                     "Failed to parse child pipeline: {e}"
-                )))
+                )));
             }
         };
 
@@ -293,9 +293,9 @@ impl Handler for SubWorkflowHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::handler::HandlerRegistry;
     use crate::handler::exit::ExitHandler;
     use crate::handler::start::StartHandler;
-    use crate::handler::HandlerRegistry;
     use fabro_graphviz::graph::AttrValue;
 
     fn make_services() -> EngineServices {
@@ -335,11 +335,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
-        assert!(outcome
-            .notes
-            .as_deref()
-            .unwrap()
-            .contains("Child completed"));
+        assert!(
+            outcome
+                .notes
+                .as_deref()
+                .unwrap()
+                .contains("Child completed")
+        );
         assert!(
             dir.path().join("nodes/manager_1/child").exists(),
             "child logs should default to first-visit directory naming"
@@ -366,10 +368,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);
-        assert!(outcome
-            .failure_reason()
-            .unwrap()
-            .contains("No child workflow source"));
+        assert!(
+            outcome
+                .failure_reason()
+                .unwrap()
+                .contains("No child workflow source")
+        );
     }
 
     #[tokio::test]
@@ -396,10 +400,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);
-        assert!(outcome
-            .failure_reason()
-            .unwrap()
-            .contains("Failed to parse child pipeline"));
+        assert!(
+            outcome
+                .failure_reason()
+                .unwrap()
+                .contains("Failed to parse child pipeline")
+        );
     }
 
     #[tokio::test]
@@ -621,11 +627,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
-        assert!(outcome
-            .notes
-            .as_deref()
-            .unwrap()
-            .contains("Stop condition satisfied"));
+        assert!(
+            outcome
+                .notes
+                .as_deref()
+                .unwrap()
+                .contains("Stop condition satisfied")
+        );
     }
 
     #[test]
@@ -784,14 +792,18 @@ mod tests {
         // Engine-internal keys do NOT propagate
         assert!(!outcome.context_updates.contains_key("internal.run_id"));
         assert!(!outcome.context_updates.contains_key("graph.goal"));
-        assert!(!outcome
-            .context_updates
-            .keys()
-            .any(|k| k.starts_with("thread.")));
-        assert!(!outcome
-            .context_updates
-            .keys()
-            .any(|k| k.starts_with("current")));
+        assert!(
+            !outcome
+                .context_updates
+                .keys()
+                .any(|k| k.starts_with("thread."))
+        );
+        assert!(
+            !outcome
+                .context_updates
+                .keys()
+                .any(|k| k.starts_with("current"))
+        );
     }
 
     #[tokio::test]

@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
-use fabro_config::run::PullRequestSettings;
 use fabro_config::FabroSettings;
+use fabro_config::run::PullRequestSettings;
 
 use crate::git::GitAuthor;
 

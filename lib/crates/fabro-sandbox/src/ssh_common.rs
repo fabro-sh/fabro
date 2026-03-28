@@ -3,11 +3,11 @@
 use std::time::Instant;
 
 use async_trait::async_trait;
-use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use tokio::sync::OnceCell;
 
-use crate::{shell_quote, SandboxEvent};
+use crate::{SandboxEvent, shell_quote};
 
 /// Output from an SSH command execution.
 pub struct SshOutput {

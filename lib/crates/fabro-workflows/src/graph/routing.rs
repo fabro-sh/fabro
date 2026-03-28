@@ -192,11 +192,7 @@ fn weighted_random<'a>(edges: &[&'a GvEdge]) -> Option<&'a GvEdge> {
         .iter()
         .map(|e| {
             let w = e.weight();
-            if w <= 0 {
-                1.0
-            } else {
-                w as f64
-            }
+            if w <= 0 { 1.0 } else { w as f64 }
         })
         .collect();
     let total: f64 = weights.iter().sum();

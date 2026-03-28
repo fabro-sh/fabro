@@ -3,12 +3,12 @@ use std::path::Path;
 use anyhow::Result;
 use chrono::Utc;
 use cli_table::format::{Border, Separator};
-use cli_table::{print_stdout, Cell, CellStruct, Color, Style, Table};
+use cli_table::{Cell, CellStruct, Color, Style, Table, print_stdout};
 use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 
 use fabro_util::text::strip_goal_decoration;
-use fabro_workflows::run_lookup::{filter_runs, runs_base, scan_runs, StatusFilter};
+use fabro_workflows::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs};
 use fabro_workflows::run_status::RunStatus;
 
 use crate::args::RunsListArgs;

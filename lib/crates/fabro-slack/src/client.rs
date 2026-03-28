@@ -1,5 +1,5 @@
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::debug;
 
 const SLACK_API_BASE: &str = "https://slack.com/api";

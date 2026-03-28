@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
 use crate::args::RunArgs;
-use fabro_config::project::{resolve_settings, ResolveSettingsInput};
+use fabro_config::project::{ResolveSettingsInput, resolve_settings};
 use fabro_config::{FabroConfig, FabroSettings};
 use fabro_util::terminal::Styles;
 use fabro_workflows::error::FabroError;
-use fabro_workflows::operations::{create, CreateRunInput, WorkflowInput};
+use fabro_workflows::operations::{CreateRunInput, WorkflowInput, create};
 
 use super::output::{print_diagnostics_from_error, print_workflow_report_from_persisted};
 

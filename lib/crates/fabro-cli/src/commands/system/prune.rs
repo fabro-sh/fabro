@@ -1,11 +1,11 @@
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use fabro_config::FabroSettingsExt;
 use tracing::{debug, info};
 
-use fabro_workflows::run_lookup::{filter_runs, runs_base, scan_runs, StatusFilter};
+use fabro_workflows::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs};
 
 use crate::args::RunsPruneArgs;
 use crate::cli_config::load_cli_settings;

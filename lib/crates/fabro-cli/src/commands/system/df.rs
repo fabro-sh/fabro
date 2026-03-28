@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use cli_table::format::{Border, Justify, Separator};
-use cli_table::{print_stdout, Cell, CellStruct, Style, Table};
+use cli_table::{Cell, CellStruct, Style, Table, print_stdout};
 use fabro_config::FabroSettingsExt;
 
 use fabro_workflows::run_lookup::{logs_base, runs_base, scan_runs};
@@ -199,11 +199,7 @@ fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Path) -
 }
 
 fn short_run_id(id: &str) -> &str {
-    if id.len() > 12 {
-        &id[..12]
-    } else {
-        id
-    }
+    if id.len() > 12 { &id[..12] } else { id }
 }
 
 fn truncate_str(s: &str, max_len: usize) -> String {

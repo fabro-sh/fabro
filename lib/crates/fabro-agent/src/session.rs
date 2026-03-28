@@ -11,7 +11,7 @@ use crate::memory::discover_memory;
 use crate::profiles::EnvContext;
 use crate::sandbox::Sandbox;
 use crate::skills::{
-    default_skill_dirs, discover_skills, expand_skill, make_use_skill_tool, ExpandedInput, Skill,
+    ExpandedInput, Skill, default_skill_dirs, discover_skills, expand_skill, make_use_skill_tool,
 };
 use crate::subagent::{SubAgentEventCallback, SubAgentManager};
 use crate::tool_execution::execute_tool_calls;
@@ -30,7 +30,7 @@ use futures::StreamExt;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
-use tokio::sync::{broadcast, Mutex as AsyncMutex};
+use tokio::sync::{Mutex as AsyncMutex, broadcast};
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -264,7 +264,9 @@ impl Session {
         info!(pid, port, "MCP server process launched in sandbox");
 
         // Wait for the server to start listening on the port
-        let poll_cmd = format!("for i in $(seq 1 30); do ss -tln | grep -q ':{port} ' && echo ready && exit 0; sleep 1; done; echo timeout");
+        let poll_cmd = format!(
+            "for i in $(seq 1 30); do ss -tln | grep -q ':{port} ' && echo ready && exit 0; sleep 1; done; echo timeout"
+        );
         let poll_result = sandbox
             .exec_command(&poll_cmd, 60_000, None, None, None)
             .await
@@ -781,7 +783,7 @@ impl Session {
                     return Err(self.emit_llm_error(SdkError::Stream {
                         message: "Stream ended without a Finish event (after retries)".into(),
                         source: None,
-                    }))
+                    }));
                 }
             };
 
@@ -983,8 +985,8 @@ mod tests {
     use fabro_llm::error::{ProviderErrorDetail, ProviderErrorKind};
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
     use fabro_llm::types::{Request, Response, Role, StreamEvent, ToolDefinition};
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Clone)]
     enum ScriptedStreamCall {
@@ -1244,18 +1246,26 @@ mod tests {
             events.push(event);
         }
 
-        assert!(events
-            .iter()
-            .any(|e| matches!(e.event, AgentEvent::SessionStarted)));
-        assert!(events
-            .iter()
-            .any(|e| matches!(e.event, AgentEvent::UserInput { .. })));
-        assert!(events
-            .iter()
-            .any(|e| matches!(e.event, AgentEvent::AssistantMessage { .. })));
-        assert!(events
-            .iter()
-            .any(|e| matches!(e.event, AgentEvent::SessionEnded)));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e.event, AgentEvent::SessionStarted))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e.event, AgentEvent::UserInput { .. }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e.event, AgentEvent::AssistantMessage { .. }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e.event, AgentEvent::SessionEnded))
+        );
     }
 
     #[tokio::test]

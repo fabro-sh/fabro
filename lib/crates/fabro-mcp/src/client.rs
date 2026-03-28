@@ -2,13 +2,13 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use rmcp::model::{CallToolRequestParams, CallToolResult};
-use rmcp::service::{serve_client, RoleClient, RunningService};
+use rmcp::service::{RoleClient, RunningService, serve_client};
+use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::child_process::TokioChildProcess;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
-use rmcp::transport::StreamableHttpClientTransport;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time;

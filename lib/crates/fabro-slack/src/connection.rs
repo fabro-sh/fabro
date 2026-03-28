@@ -6,8 +6,8 @@ use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
-use crate::client::{parse_wss_url, SlackApiError, SlackClient};
-use crate::dispatch::{dispatch, DispatchAction};
+use crate::client::{SlackApiError, SlackClient, parse_wss_url};
+use crate::dispatch::{DispatchAction, dispatch};
 use crate::socket::{SocketAck, SocketEnvelope};
 use crate::threads::ThreadRegistry;
 

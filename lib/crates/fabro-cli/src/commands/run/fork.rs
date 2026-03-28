@@ -3,7 +3,7 @@ use anyhow::Result;
 use fabro_git_storage::gitobj::Store;
 use fabro_util::terminal::Styles;
 use fabro_workflows::operations::{
-    build_timeline, find_run_id_by_prefix, fork, ForkRunInput, RewindTarget,
+    ForkRunInput, RewindTarget, build_timeline, find_run_id_by_prefix, fork,
 };
 use git2::Repository;
 

@@ -13,9 +13,9 @@ pub mod stylesheet;
 mod stylesheet_application;
 pub mod variable_expansion;
 
-pub use file_inlining::{resolve_file_ref, FileInliningTransform};
+pub use file_inlining::{FileInliningTransform, resolve_file_ref};
 pub use graph_merge::GraphMergeTransform;
 pub use model_resolution::ModelResolutionTransform;
 pub use preamble::PreambleTransform;
 pub use stylesheet_application::StylesheetApplicationTransform;
-pub use variable_expansion::{expand_vars, VariableExpansionTransform};
+pub use variable_expansion::{VariableExpansionTransform, expand_vars};

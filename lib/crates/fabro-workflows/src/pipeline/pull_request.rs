@@ -4,14 +4,14 @@ use fabro_config::run::MergeStrategy;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
-use fabro_github::{self as github_app, ssh_url_to_https, GitHubAppCredentials};
+use fabro_github::{self as github_app, GitHubAppCredentials, ssh_url_to_https};
 use fabro_graphviz::parser;
-use fabro_llm::generate::{generate, GenerateParams};
+use fabro_llm::generate::{GenerateParams, generate};
 use fabro_retro::RetroExt;
 use fabro_util::text::strip_goal_decoration;
 
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
-use crate::outcome::{format_cost as outcome_format_cost, StageStatus};
+use crate::outcome::{StageStatus, format_cost as outcome_format_cost};
 use crate::records::{Conclusion, ConclusionExt, RunRecord, RunRecordExt};
 use fabro_retro::retro::Retro;
 use tokio::fs::read_to_string;
@@ -361,7 +361,9 @@ pub async fn build_pr_body(
         } else {
             plan.as_str()
         };
-        format!("Goal: {goal}\n\nPlan:\n```\n{truncated_plan}\n```\n\nDiff:\n```\n{truncated_diff}\n```")
+        format!(
+            "Goal: {goal}\n\nPlan:\n```\n{truncated_plan}\n```\n\nDiff:\n```\n{truncated_diff}\n```"
+        )
     } else {
         format!("Goal: {goal}\n\nDiff:\n```\n{truncated_diff}\n```")
     };

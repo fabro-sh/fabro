@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use cli_table::Color;
 use fabro_util::terminal::Styles;
 use fabro_validate::{Diagnostic, Severity};
@@ -70,11 +70,7 @@ pub fn tilde_path(path: &Path) -> String {
 }
 
 pub fn color_if(use_color: bool, color: Color) -> Option<Color> {
-    if use_color {
-        Some(color)
-    } else {
-        None
-    }
+    if use_color { Some(color) } else { None }
 }
 
 pub fn split_run_path(s: &str) -> Option<(&str, &str)> {

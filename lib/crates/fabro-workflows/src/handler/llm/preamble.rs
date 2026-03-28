@@ -5,7 +5,7 @@ use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::outcome::Outcome;
 use crate::outcome::OutcomeExt;
-use fabro_graphviz::graph::{is_llm_handler_type, Graph, Node};
+use fabro_graphviz::graph::{Graph, Node, is_llm_handler_type};
 
 const COMPACT_OUTPUT_MAX_LINES: usize = 25;
 const SUMMARY_HIGH_OUTPUT_MAX_LINES: usize = 50;

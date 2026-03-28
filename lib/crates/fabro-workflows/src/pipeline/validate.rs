@@ -67,9 +67,11 @@ mod tests {
         let (graph, source, diagnostics) = validated.into_parts();
         assert_eq!(graph.name, "Test");
         assert_eq!(source, dot);
-        assert!(diagnostics
-            .iter()
-            .all(|d| d.severity != fabro_validate::Severity::Error));
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| d.severity != fabro_validate::Severity::Error)
+        );
     }
 
     #[test]

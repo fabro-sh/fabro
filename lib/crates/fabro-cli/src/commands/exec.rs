@@ -1,7 +1,7 @@
 use anyhow::Result;
 #[cfg(feature = "server")]
 use fabro_agent::cli::run_with_args_and_client;
-use fabro_agent::cli::{run_with_args, AgentArgs};
+use fabro_agent::cli::{AgentArgs, run_with_args};
 use fabro_config::mcp::McpServerEntry;
 use fabro_mcp::config::McpServerConfig;
 

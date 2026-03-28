@@ -3,8 +3,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fabro_agent::sandbox::ExecResult;
 use fabro_agent::Sandbox;
+use fabro_agent::sandbox::ExecResult;
 use fabro_model::Provider;
 use tokio::fs;
 use tokio::time::sleep;
@@ -13,8 +13,8 @@ use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{EventEmitter, WorkflowRunEvent};
-use crate::outcome::compute_stage_cost;
 use crate::outcome::StageUsage;
+use crate::outcome::compute_stage_cost;
 use fabro_graphviz::graph::Node;
 
 /// Maps a provider to its corresponding CLI tool metadata.
@@ -201,7 +201,9 @@ pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &s
         Provider::Gemini => format!("cat {prompt_file} | gemini -o json --yolo{model_flag}"),
         // --dangerously-skip-permissions: bypass all permission checks (required for non-interactive use).
         // CLAUDECODE= unset to allow running inside a Claude Code session.
-        Provider::Anthropic => format!("cat {prompt_file} | CLAUDECODE= claude -p --verbose --output-format stream-json --dangerously-skip-permissions{model_flag}"),
+        Provider::Anthropic => format!(
+            "cat {prompt_file} | CLAUDECODE= claude -p --verbose --output-format stream-json --dangerously-skip-permissions{model_flag}"
+        ),
     }
 }
 
@@ -1005,10 +1007,12 @@ mod tests {
 
         let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("install exited with code"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("install exited with code")
+        );
     }
 
     // -- Cycle 1: cli_command_for_provider --

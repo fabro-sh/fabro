@@ -7,7 +7,7 @@ use crate::pipeline::Validated;
 use crate::transforms::Transform;
 
 use super::create::preprocess_and_validate;
-use super::source::{resolve_workflow, ResolveWorkflowInput, WorkflowInput};
+use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
 
 pub struct ValidateInput {
     pub workflow: WorkflowInput,

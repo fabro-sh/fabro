@@ -257,8 +257,10 @@ mod tests {
 
     #[test]
     fn every_provider_has_at_least_one_env_var() {
-        assert!(Provider::ALL
-            .iter()
-            .all(|p| !p.api_key_env_vars().is_empty()));
+        assert!(
+            Provider::ALL
+                .iter()
+                .all(|p| !p.api_key_env_vars().is_empty())
+        );
     }
 }

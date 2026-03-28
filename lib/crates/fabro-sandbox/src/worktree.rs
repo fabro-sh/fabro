@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-use crate::{shell_quote, DirEntry, ExecResult, GrepOptions, Sandbox};
+use crate::{DirEntry, ExecResult, GrepOptions, Sandbox, shell_quote};
 
 /// Git command prefix that disables background maintenance.
 const GIT: &str = "git -c maintenance.auto=0 -c gc.auto=0";

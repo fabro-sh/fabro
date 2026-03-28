@@ -1,4 +1,4 @@
-use crate::error::{error_from_status_code, SdkError};
+use crate::error::{SdkError, error_from_status_code};
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::providers::common::LineReader;
 use crate::types::{FinishReason, Message, Request, Response, StreamEvent, Usage};

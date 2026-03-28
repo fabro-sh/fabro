@@ -1,6 +1,6 @@
 use anyhow::Result;
-use fabro_config::cli::load_cli_config;
 use fabro_config::FabroSettingsExt;
+use fabro_config::cli::load_cli_config;
 use fabro_util::terminal::Styles;
 use fabro_workflows::run_lookup::{resolve_run, runs_base};
 

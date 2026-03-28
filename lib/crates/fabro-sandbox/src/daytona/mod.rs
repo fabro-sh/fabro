@@ -5,8 +5,8 @@ use std::time::Instant;
 use crate::sandbox::resolve_path;
 use crate::shell_quote;
 use crate::{
-    format_lines_numbered, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
-    SandboxEventCallback,
+    DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
+    format_lines_numbered,
 };
 use async_trait::async_trait;
 use daytona_sdk::api_types::SignedPortPreviewUrl;
@@ -1132,8 +1132,8 @@ impl Sandbox for DaytonaSandbox {
 /// Uses base64 encoding (matching the TypeScript/Python/Ruby Daytona SDKs)
 /// to avoid shell escaping issues with quotes and special characters.
 fn wrap_bash_command(command: &str) -> String {
-    use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
     let encoded = STANDARD.encode(command);
     format!("sh -c \"echo '{encoded}' | base64 -d | sh\"")
 }

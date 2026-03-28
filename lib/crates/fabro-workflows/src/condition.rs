@@ -4,8 +4,8 @@
 /// `parse_condition` and provides runtime evaluation against `Outcome`/`Context`.
 use fabro_graphviz::condition::{Clause, ConditionExpr, Op};
 
-use crate::context::keys;
 use crate::context::Context;
+use crate::context::keys;
 use crate::outcome::Outcome;
 
 // ---------------------------------------------------------------------------

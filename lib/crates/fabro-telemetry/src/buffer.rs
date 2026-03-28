@@ -63,7 +63,7 @@ mod tests {
     use super::*;
     use crate::event::User;
     use serde_json::json;
-    use std::sync::{mpsc, Arc, Mutex};
+    use std::sync::{Arc, Mutex, mpsc};
 
     fn make_track(event: &str) -> Track {
         Track {

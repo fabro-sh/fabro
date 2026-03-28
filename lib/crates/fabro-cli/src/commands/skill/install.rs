@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use tracing::{debug, info};
 
 use crate::args::{SkillDir, SkillInstallArgs, SkillScope};

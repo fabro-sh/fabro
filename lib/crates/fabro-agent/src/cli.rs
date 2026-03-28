@@ -3,9 +3,9 @@ use crate::error::AbortReason;
 use crate::tools::WebFetchSummarizer;
 use crate::truncation;
 use crate::{
-    subagent::{SessionFactory, SubAgentManager},
     AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile,
     Sandbox, Session, SessionConfig, Turn,
+    subagent::{SessionFactory, SubAgentManager},
 };
 use clap::{Args, Parser};
 use fabro_llm::client::Client;

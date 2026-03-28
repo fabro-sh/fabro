@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use rustls::server::WebPkiClientVerifier;
 use rustls::ServerConfig;
+use rustls::server::WebPkiClientVerifier;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::net::TcpListener;
 use tracing::error;

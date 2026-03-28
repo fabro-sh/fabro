@@ -1,11 +1,11 @@
 use anyhow::Context;
 use anyhow::Result;
 use cli_table::format::{Border, Separator};
-use cli_table::{print_stderr, Cell, CellStruct, Color, Style, Table};
+use cli_table::{Cell, CellStruct, Color, Style, Table, print_stderr};
 use fabro_git_storage::gitobj::Store;
 use fabro_util::terminal::Styles;
 use fabro_workflows::operations::{
-    build_timeline, find_run_id_by_prefix, rewind, RewindInput, RewindTarget, RunTimeline,
+    RewindInput, RewindTarget, RunTimeline, build_timeline, find_run_id_by_prefix, rewind,
 };
 use git2::Repository;
 

@@ -266,7 +266,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
-    use crate::test_fixtures::{linear_graph, TestGraph, TestNode};
+    use crate::test_fixtures::{TestGraph, TestNode, linear_graph};
 
     /// A lifecycle that records which callbacks were called.
     struct RecordingLifecycle {

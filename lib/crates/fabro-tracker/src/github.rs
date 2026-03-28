@@ -2,10 +2,10 @@ use async_trait::async_trait;
 use tokio::sync::OnceCell;
 
 use fabro_github::{
-    create_installation_access_token_for_projects, sign_app_jwt, GitHubAppCredentials,
+    GitHubAppCredentials, create_installation_access_token_for_projects, sign_app_jwt,
 };
 
-use crate::{execute_graphql_request, Issue, Tracker};
+use crate::{Issue, Tracker, execute_graphql_request};
 
 /// Execute a GitHub GraphQL request and return the response JSON.
 async fn execute_github_graphql(

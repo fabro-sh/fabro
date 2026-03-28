@@ -7,7 +7,7 @@ mod shared;
 mod sleep_inhibitor;
 
 use anyhow::Result;
-use args::{Commands, GlobalArgs, RunCommands, LONG_VERSION};
+use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands};
 use clap::Parser;
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
 use fabro_util::terminal::Styles;

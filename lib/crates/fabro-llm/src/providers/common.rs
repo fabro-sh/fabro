@@ -1,6 +1,6 @@
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
 
-use crate::error::{error_from_status_code, SdkError};
+use crate::error::{SdkError, error_from_status_code};
 use crate::types::{Message, RateLimitInfo, Role};
 use reqwest::header::HeaderMap;
 use tokio::time;

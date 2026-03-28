@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use crate::error::FabroError;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
-use crate::git::{scan_node_files, MetadataStore};
+use crate::git::{MetadataStore, scan_node_files};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt, StageSummary};
 use crate::run_options::RunOptions;
-use crate::run_status::{write_run_status, RunStatus, StatusReason};
+use crate::run_status::{RunStatus, StatusReason, write_run_status};
 use crate::sandbox_git::git_push_host;
 use fabro_hooks::{HookContext, HookEvent, HookRunner};
 use fabro_retro::retro::extract_stage_durations;

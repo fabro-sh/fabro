@@ -15,7 +15,7 @@ use crate::hook_context::set_hook_node;
 use crate::millis_u64;
 use crate::outcome::{FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus};
 use crate::run_dir::{node_dir, visit_from_context};
-use crate::sandbox_git::{git_checkpoint, git_merge_ff_only, git_remove_worktree, GIT_REMOTE};
+use crate::sandbox_git::{GIT_REMOTE, git_checkpoint, git_merge_ff_only, git_remove_worktree};
 use fabro_graphviz::graph::{AttrValue, Graph, Node};
 use fabro_hooks::{HookContext, HookEvent};
 use tokio::fs;

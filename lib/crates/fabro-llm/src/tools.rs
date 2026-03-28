@@ -409,11 +409,13 @@ mod tests {
         let results = execute_all_tools_with_repair(&tool_refs, &calls, &[], None, None).await;
         assert_eq!(results.len(), 1);
         assert!(results[0].is_error);
-        assert!(results[0]
-            .content
-            .as_str()
-            .unwrap()
-            .contains("validation failed"));
+        assert!(
+            results[0]
+                .content
+                .as_str()
+                .unwrap()
+                .contains("validation failed")
+        );
     }
 
     #[tokio::test]
@@ -460,11 +462,13 @@ mod tests {
             execute_all_tools_with_repair(&tool_refs, &calls, &[], None, Some(&repair)).await;
         assert_eq!(results.len(), 1);
         assert!(results[0].is_error);
-        assert!(results[0]
-            .content
-            .as_str()
-            .unwrap()
-            .contains("repair failed"));
+        assert!(
+            results[0]
+                .content
+                .as_str()
+                .unwrap()
+                .contains("repair failed")
+        );
     }
 
     // --- args_type_name ---

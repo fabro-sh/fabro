@@ -1244,7 +1244,7 @@ mod tests {
 
     #[tokio::test]
     async fn web_fetch_prompt_with_summarizer_returns_llm_answer() {
-        use crate::test_support::{make_client, text_response, MockLlmProvider};
+        use crate::test_support::{MockLlmProvider, make_client, text_response};
 
         let provider = Arc::new(MockLlmProvider::new(vec![text_response(
             "Rust is a systems programming language focused on safety and performance.",
@@ -1321,7 +1321,7 @@ mod tests {
 
     #[tokio::test]
     async fn web_fetch_summarizer_routes_to_specified_provider() {
-        use crate::test_support::{text_response, MockErrorProvider, MockLlmProvider};
+        use crate::test_support::{MockErrorProvider, MockLlmProvider, text_response};
         use fabro_llm::error::{ProviderErrorDetail, ProviderErrorKind, SdkError};
 
         // "other_provider" is the default — it rejects all requests.

@@ -179,9 +179,11 @@ mod tests {
         }"#;
         let graph = parse(input).unwrap();
         assert!(graph.nodes["plan"].classes.contains(&"loop-a".to_string()));
-        assert!(graph.nodes["implement"]
-            .classes
-            .contains(&"loop-a".to_string()));
+        assert!(
+            graph.nodes["implement"]
+                .classes
+                .contains(&"loop-a".to_string())
+        );
     }
 
     #[test]

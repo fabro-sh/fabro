@@ -12,11 +12,11 @@ use crate::pipeline::types::PersistOptions;
 use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunRecord;
 use crate::run_lookup::default_runs_base;
-use crate::run_status::{write_run_status, RunStatus};
-use crate::transforms::{expand_vars, Transform};
+use crate::run_status::{RunStatus, write_run_status};
+use crate::transforms::{Transform, expand_vars};
 use fabro_sandbox::daytona::detect_repo_info;
 
-use super::source::{resolve_workflow, ResolveWorkflowInput, WorkflowInput};
+use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
 
 const RUN_CONFIG_FILE: &str = "workflow.toml";
 
@@ -320,7 +320,7 @@ mod tests {
     use super::*;
     use fabro_graphviz::graph::AttrValue;
 
-    use crate::operations::{validate, ValidateInput};
+    use crate::operations::{ValidateInput, validate};
     use crate::run_status::RunStatusRecordExt;
 
     fn validate_dot(dot_source: &str, settings: FabroSettings) -> Validated {
@@ -593,12 +593,14 @@ mod tests {
             created.persisted.run_record().settings.goal.as_deref(),
             Some("override goal")
         );
-        assert!(created
-            .persisted
-            .run_record()
-            .settings
-            .pull_request
-            .is_none());
+        assert!(
+            created
+                .persisted
+                .run_record()
+                .settings
+                .pull_request
+                .is_none()
+        );
         assert_eq!(
             created.persisted.run_record().workflow_slug.as_deref(),
             Some("slug")

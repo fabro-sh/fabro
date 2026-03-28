@@ -1,4 +1,4 @@
-use fabro_openai_oauth::{extract_account_id, run_browser_flow, DEFAULT_CLIENT_ID, DEFAULT_ISSUER};
+use fabro_openai_oauth::{DEFAULT_CLIENT_ID, DEFAULT_ISSUER, extract_account_id, run_browser_flow};
 
 #[tokio::main]
 async fn main() {

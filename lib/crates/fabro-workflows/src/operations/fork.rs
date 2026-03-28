@@ -3,11 +3,11 @@ use fabro_git_storage::branchstore::BranchStore;
 use fabro_git_storage::gitobj::Store;
 use git2::{Oid, Signature};
 
-use crate::git::{push_run_branches, MetadataStore, RUN_BRANCH_PREFIX};
+use crate::git::{MetadataStore, RUN_BRANCH_PREFIX, push_run_branches};
 use crate::records::RunRecord;
 use crate::records::StartRecord;
 
-use super::rewind::{build_timeline, RewindTarget, TimelineEntry};
+use super::rewind::{RewindTarget, TimelineEntry, build_timeline};
 
 #[derive(Debug, Clone)]
 pub struct ForkRunInput {

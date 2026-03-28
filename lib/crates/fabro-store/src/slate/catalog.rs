@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
-use object_store::path::Path;
 use object_store::ObjectStore;
+use object_store::path::Path;
 
 use crate::{CatalogRecord, ListRunsQuery, Result};
 

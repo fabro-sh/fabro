@@ -7,10 +7,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
-use object_store::path::Path;
 use object_store::ObjectStore;
-use slatedb::config::DbReaderOptions;
+use object_store::path::Path;
 use slatedb::DbReader;
+use slatedb::config::DbReaderOptions;
 use tokio::sync::Mutex;
 
 use crate::keys;
@@ -544,11 +544,13 @@ mod tests {
             .unwrap();
 
         assert!(store.open_run("run-1").await.unwrap().is_some());
-        assert!(store
-            .list_runs(&ListRunsQuery::default())
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            store
+                .list_runs(&ListRunsQuery::default())
+                .await
+                .unwrap()
+                .is_empty()
+        );
 
         store.repair_catalog().await.unwrap();
         let listed = store.list_runs(&ListRunsQuery::default()).await.unwrap();
@@ -624,11 +626,13 @@ mod tests {
             .unwrap();
 
         assert!(store.open_run("run-1").await.unwrap().is_none());
-        assert!(store
-            .list_runs(&ListRunsQuery::default())
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            store
+                .list_runs(&ListRunsQuery::default())
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]

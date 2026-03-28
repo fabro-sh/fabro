@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use fabro_config::run::LlmConfig;
-use fabro_config::{sandbox as sandbox_config, FabroConfig};
+use fabro_config::{FabroConfig, sandbox as sandbox_config};
 use fabro_sandbox::SandboxProvider;
 
 use crate::args::{PreflightArgs, RunArgs};

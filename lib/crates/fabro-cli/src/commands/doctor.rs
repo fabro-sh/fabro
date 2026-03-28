@@ -4,8 +4,8 @@ use std::process::Command;
 #[cfg(feature = "server")]
 use std::sync::LazyLock;
 
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 #[cfg(feature = "server")]
 use fabro_config::server::{ApiAuthStrategy, AuthProvider};
 use fabro_llm::client::Client as LlmClient;
@@ -1177,11 +1177,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
         report.render(&styles, verbose, None, Some(term_width))
     );
 
-    if report.has_errors() {
-        1
-    } else {
-        0
-    }
+    if report.has_errors() { 1 } else { 0 }
 }
 
 // ---------------------------------------------------------------------------
@@ -1246,10 +1242,12 @@ mod tests {
         let live = vec![(Provider::Anthropic, Ok(()))];
         let result = check_llm_providers(&statuses, Some(&live));
         assert_eq!(result.status, CheckStatus::Pass);
-        assert!(result
-            .details
-            .iter()
-            .any(|d| d.text.contains("connectivity: OK")));
+        assert!(
+            result
+                .details
+                .iter()
+                .any(|d| d.text.contains("connectivity: OK"))
+        );
     }
 
     #[test]
@@ -1466,10 +1464,12 @@ mod tests {
             };
             let result = check_api(&status, None);
             assert!(result.details.iter().any(|d| d.text.contains("jwt")));
-            assert!(result
-                .details
-                .iter()
-                .any(|d| d.text.contains("https://api.example.com")));
+            assert!(
+                result
+                    .details
+                    .iter()
+                    .any(|d| d.text.contains("https://api.example.com"))
+            );
         }
 
         #[test]
@@ -1481,10 +1481,12 @@ mod tests {
             let live = Ok(());
             let result = check_api(&status, Some(&live));
             assert_eq!(result.status, CheckStatus::Pass);
-            assert!(result
-                .details
-                .iter()
-                .any(|d| d.text.contains("Connectivity: OK")));
+            assert!(
+                result
+                    .details
+                    .iter()
+                    .any(|d| d.text.contains("Connectivity: OK"))
+            );
         }
 
         #[test]
@@ -1496,10 +1498,12 @@ mod tests {
             let live = Err("connection refused".to_string());
             let result = check_api(&status, Some(&live));
             assert_eq!(result.status, CheckStatus::Warning);
-            assert!(result
-                .details
-                .iter()
-                .any(|d| d.text.contains("connection refused")));
+            assert!(
+                result
+                    .details
+                    .iter()
+                    .any(|d| d.text.contains("connection refused"))
+            );
         }
 
         // -- check_web --
@@ -1525,14 +1529,18 @@ mod tests {
             };
             let result = check_web(&status, None);
             assert!(result.details.iter().any(|d| d.text.contains("github")));
-            assert!(result
-                .details
-                .iter()
-                .any(|d| d.text.contains("https://arc.example.com")));
-            assert!(result
-                .details
-                .iter()
-                .any(|d| d.text.contains("Allowed usernames: 3")));
+            assert!(
+                result
+                    .details
+                    .iter()
+                    .any(|d| d.text.contains("https://arc.example.com"))
+            );
+            assert!(
+                result
+                    .details
+                    .iter()
+                    .any(|d| d.text.contains("Allowed usernames: 3"))
+            );
         }
 
         #[test]
@@ -1545,10 +1553,12 @@ mod tests {
             let live = Ok(());
             let result = check_web(&status, Some(&live));
             assert_eq!(result.status, CheckStatus::Pass);
-            assert!(result
-                .details
-                .iter()
-                .any(|d| d.text.contains("Connectivity: OK")));
+            assert!(
+                result
+                    .details
+                    .iter()
+                    .any(|d| d.text.contains("Connectivity: OK"))
+            );
         }
 
         #[test]
@@ -1561,10 +1571,12 @@ mod tests {
             let live = Err("connection refused".to_string());
             let result = check_web(&status, Some(&live));
             assert_eq!(result.status, CheckStatus::Warning);
-            assert!(result
-                .details
-                .iter()
-                .any(|d| d.text.contains("connection refused")));
+            assert!(
+                result
+                    .details
+                    .iter()
+                    .any(|d| d.text.contains("connection refused"))
+            );
         }
     } // mod server_tests (check_github_app, check_api, check_web)
 
@@ -1893,20 +1905,24 @@ mod tests {
         fn crypto_jwt_configured_but_key_missing() {
             let result = check_crypto(&crypto_input(vec![ApiAuthStrategy::Jwt]));
             assert_eq!(result.status, CheckStatus::Error);
-            assert!(result
-                .details
-                .iter()
-                .any(|d| d.text.contains("FABRO_JWT_PUBLIC_KEY not set")));
+            assert!(
+                result
+                    .details
+                    .iter()
+                    .any(|d| d.text.contains("FABRO_JWT_PUBLIC_KEY not set"))
+            );
         }
 
         #[test]
         fn crypto_mtls_configured_but_tls_not_set() {
             let result = check_crypto(&crypto_input(vec![ApiAuthStrategy::Mtls]));
             assert_eq!(result.status, CheckStatus::Error);
-            assert!(result
-                .details
-                .iter()
-                .any(|d| d.text.contains("[api.tls] not set")));
+            assert!(
+                result
+                    .details
+                    .iter()
+                    .any(|d| d.text.contains("[api.tls] not set"))
+            );
         }
 
         #[test]
@@ -1917,10 +1933,12 @@ mod tests {
             };
             let result = check_crypto(&input);
             assert_eq!(result.status, CheckStatus::Error);
-            assert!(result
-                .details
-                .iter()
-                .any(|d| d.text.contains("Permission denied")));
+            assert!(
+                result
+                    .details
+                    .iter()
+                    .any(|d| d.text.contains("Permission denied"))
+            );
         }
 
         #[test]
@@ -1933,10 +1951,12 @@ mod tests {
             };
             let result = check_crypto(&input);
             assert_eq!(result.status, CheckStatus::Error);
-            assert!(result
-                .details
-                .iter()
-                .any(|d| d.text.contains("JWT public key: invalid")));
+            assert!(
+                result
+                    .details
+                    .iter()
+                    .any(|d| d.text.contains("JWT public key: invalid"))
+            );
         }
 
         #[test]
@@ -1949,10 +1969,12 @@ mod tests {
             };
             let result = check_crypto(&input);
             assert_eq!(result.status, CheckStatus::Error);
-            assert!(result
-                .details
-                .iter()
-                .any(|d| d.text.contains("JWT private key: invalid")));
+            assert!(
+                result
+                    .details
+                    .iter()
+                    .any(|d| d.text.contains("JWT private key: invalid"))
+            );
         }
 
         #[test]
@@ -1968,10 +1990,12 @@ mod tests {
             };
             let result = check_crypto(&input);
             assert_eq!(result.status, CheckStatus::Pass);
-            assert!(result
-                .details
-                .iter()
-                .any(|d| d.text.contains("JWT public key: valid")));
+            assert!(
+                result
+                    .details
+                    .iter()
+                    .any(|d| d.text.contains("JWT public key: valid"))
+            );
         }
 
         #[test]

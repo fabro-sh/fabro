@@ -1,7 +1,7 @@
 use fabro_interview::Answer;
 
 use crate::interaction;
-use crate::socket::{classify_envelope, SocketEnvelope, SocketEventKind};
+use crate::socket::{SocketEnvelope, SocketEventKind, classify_envelope};
 use crate::threads::{self, ThreadRegistry};
 
 #[derive(Debug)]

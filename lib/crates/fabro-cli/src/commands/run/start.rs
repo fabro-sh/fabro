@@ -1,13 +1,13 @@
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::Utc;
 use fabro_config::FabroSettingsExt;
 use fabro_workflows::records::{RunRecord, RunRecordExt};
 
 use super::launcher::{
-    launcher_log_path, launcher_record_path, remove_launcher_record, write_launcher_record,
-    LauncherRecord,
+    LauncherRecord, launcher_log_path, launcher_record_path, remove_launcher_record,
+    write_launcher_record,
 };
 
 /// Spawn a detached engine process for the given run directory.

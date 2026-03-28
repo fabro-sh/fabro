@@ -242,9 +242,11 @@ async fn remote_env_excluded_from_dockerfile() {
         .unwrap();
 
     // containerEnv IS in the Dockerfile
-    assert!(config
-        .dockerfile
-        .contains("ENV DEBIAN_FRONTEND=noninteractive"));
+    assert!(
+        config
+            .dockerfile
+            .contains("ENV DEBIAN_FRONTEND=noninteractive")
+    );
 
     // remoteEnv is NOT in the Dockerfile
     assert!(!config.dockerfile.contains("EDITOR=code"));
@@ -340,9 +342,11 @@ async fn local_feature_refs_resolved() {
         .unwrap();
 
     // Base image preserved
-    assert!(config
-        .dockerfile
-        .contains("FROM mcr.microsoft.com/devcontainers/base:ubuntu"));
+    assert!(
+        config
+            .dockerfile
+            .contains("FROM mcr.microsoft.com/devcontainers/base:ubuntu")
+    );
 
     // Feature install.sh snippets are in the Dockerfile
     assert!(config.dockerfile.contains("node-feature"));
@@ -381,9 +385,11 @@ async fn feature_container_env_merged() {
 
     // Feature containerEnv values baked into Dockerfile
     assert!(config.dockerfile.contains("ENV NODE_INSTALLED=true"));
-    assert!(config
-        .dockerfile
-        .contains("ENV NODE_PATH=/usr/local/lib/node_modules"));
+    assert!(
+        config
+            .dockerfile
+            .contains("ENV NODE_PATH=/usr/local/lib/node_modules")
+    );
     assert!(config.dockerfile.contains("ENV PYTHON_INSTALLED=true"));
     assert!(config.dockerfile.contains("ENV BASE_UTILS_INSTALLED=true"));
 

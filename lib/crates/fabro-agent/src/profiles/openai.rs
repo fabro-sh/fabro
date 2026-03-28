@@ -1,11 +1,11 @@
 use crate::agent_profile::AgentProfile;
 use crate::config::SessionConfig;
-use crate::profiles::assemble_system_prompt;
 use crate::profiles::BaseProfile;
+use crate::profiles::assemble_system_prompt;
 use crate::sandbox::Sandbox;
 use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
-use crate::tools::{register_core_tools, WebFetchSummarizer};
+use crate::tools::{WebFetchSummarizer, register_core_tools};
 use crate::v4a_patch::make_apply_patch_tool;
 use fabro_model::Provider;
 

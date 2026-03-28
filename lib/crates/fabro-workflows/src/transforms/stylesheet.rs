@@ -1,5 +1,5 @@
 use fabro_graphviz::graph::{AttrValue, Graph};
-pub use fabro_graphviz::stylesheet::{parse_stylesheet, Rule, Selector, Stylesheet};
+pub use fabro_graphviz::stylesheet::{Rule, Selector, Stylesheet, parse_stylesheet};
 
 /// Recognized stylesheet properties.
 const STYLESHEET_PROPERTIES: &[&str] =

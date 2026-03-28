@@ -1,7 +1,7 @@
 use anyhow::Result;
 #[cfg(feature = "server")]
 use fabro_llm::cli::ServerConnection;
-use fabro_llm::cli::{run_models, ModelsCommand};
+use fabro_llm::cli::{ModelsCommand, run_models};
 
 use crate::args::GlobalArgs;
 #[cfg(feature = "server")]

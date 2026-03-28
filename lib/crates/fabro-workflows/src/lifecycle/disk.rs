@@ -17,7 +17,7 @@ use crate::outcome::StageUsage;
 use crate::records::{Checkpoint, CheckpointExt};
 use crate::run_dir::{write_node_status, write_start_record};
 use crate::run_options::RunOptions;
-use crate::run_status::{write_run_status, RunStatus};
+use crate::run_status::{RunStatus, write_run_status};
 use fabro_graphviz::graph::types::Graph as GvGraph;
 
 type WfRunState = RunState<Option<StageUsage>>;

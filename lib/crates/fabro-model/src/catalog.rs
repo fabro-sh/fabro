@@ -261,9 +261,11 @@ mod tests {
     #[test]
     fn builtin_closest_no_match() {
         let haiku = Catalog::builtin().get("claude-haiku-4-5").unwrap();
-        assert!(Catalog::builtin()
-            .closest(Provider::OpenAi, haiku)
-            .is_none());
+        assert!(
+            Catalog::builtin()
+                .closest(Provider::OpenAi, haiku)
+                .is_none()
+        );
     }
 
     #[test]

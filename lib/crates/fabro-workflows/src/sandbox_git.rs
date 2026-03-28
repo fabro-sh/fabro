@@ -4,7 +4,7 @@ use fabro_agent::Sandbox;
 use fabro_git_storage::trailerlink::{self, Trailer};
 
 use crate::asset_snapshot;
-use crate::git::{blocking_push_with_timeout, push_ref, GitAuthor};
+use crate::git::{GitAuthor, blocking_push_with_timeout, push_ref};
 use fabro_sandbox::daytona::detect_repo_info;
 
 /// Captured git state for a workflow run, shared with handlers.

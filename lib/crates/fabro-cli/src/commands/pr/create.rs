@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use fabro_config::FabroSettingsExt;
 use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;

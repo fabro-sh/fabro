@@ -100,8 +100,8 @@ crate::delegate_sandbox! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::MockSandbox;
     use crate::GrepOptions;
+    use crate::test_support::MockSandbox;
     use std::collections::HashMap;
 
     fn mock_with_files(files: HashMap<String, String>) -> MockSandbox {

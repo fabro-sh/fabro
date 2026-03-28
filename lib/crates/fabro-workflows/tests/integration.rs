@@ -12,7 +12,7 @@ use fabro_interview::{
 };
 use fabro_llm::provider::Provider;
 use fabro_store::RuntimeState;
-use fabro_validate::{validate, validate_or_raise, Severity};
+use fabro_validate::{Severity, validate, validate_or_raise};
 use fabro_workflows::context::Context;
 use fabro_workflows::error::{FabroError, FailureSignatureExt};
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
@@ -22,8 +22,8 @@ use fabro_workflows::handler::conditional::ConditionalHandler;
 use fabro_workflows::handler::default_registry;
 use fabro_workflows::handler::exit::ExitHandler;
 use fabro_workflows::handler::human::HumanHandler;
-use fabro_workflows::handler::llm::cli::{parse_cli_response, AgentCliBackend, BackendRouter};
 use fabro_workflows::handler::llm::AgentApiBackend;
+use fabro_workflows::handler::llm::cli::{AgentCliBackend, BackendRouter, parse_cli_response};
 use fabro_workflows::handler::manager_loop::SubWorkflowHandler;
 use fabro_workflows::handler::start::StartHandler;
 use fabro_workflows::handler::wait::WaitHandler;
@@ -32,7 +32,7 @@ use fabro_workflows::outcome::{Outcome, OutcomeExt, StageStatus};
 use fabro_workflows::records::{Checkpoint, CheckpointExt};
 use fabro_workflows::run_options::{GitCheckpointOptions, RunOptions};
 use fabro_workflows::stylesheet::{apply_stylesheet, parse_stylesheet};
-use fabro_workflows::test_support::{run_graph_with_hooks, WorkflowRunner};
+use fabro_workflows::test_support::{WorkflowRunner, run_graph_with_hooks};
 use fabro_workflows::transform::{
     StylesheetApplicationTransform, Transform, VariableExpansionTransform,
 };
@@ -220,9 +220,11 @@ async fn end_to_end_linear_pipeline() {
 
     let checkpoint = Checkpoint::load(&checkpoint_path).expect("checkpoint should load");
     assert!(checkpoint.completed_nodes.contains(&"start".to_string()));
-    assert!(checkpoint
-        .completed_nodes
-        .contains(&"codergen_step".to_string()));
+    assert!(
+        checkpoint
+            .completed_nodes
+            .contains(&"codergen_step".to_string())
+    );
 
     // Codergen handler writes prompt.md, response.md, status.json
     let stage_dir = dir.path().join("nodes").join("codergen_step");
@@ -2012,27 +2014,41 @@ async fn event_streaming_lifecycle() {
     engine.run(&graph, &run_options).await.expect("run");
 
     let collected = events.lock().unwrap();
-    assert!(collected
-        .iter()
-        .any(|e| matches!(e, WorkflowRunEvent::WorkflowRunStarted { .. })));
-    assert!(collected
-        .iter()
-        .any(|e| matches!(e, WorkflowRunEvent::StageStarted { name, .. } if name == "start")));
-    assert!(collected
-        .iter()
-        .any(|e| matches!(e, WorkflowRunEvent::StageCompleted { name, .. } if name == "start")));
-    assert!(collected
-        .iter()
-        .any(|e| matches!(e, WorkflowRunEvent::StageStarted { name, .. } if name == "task")));
-    assert!(collected
-        .iter()
-        .any(|e| matches!(e, WorkflowRunEvent::StageCompleted { name, .. } if name == "task")));
-    assert!(collected
-        .iter()
-        .any(|e| matches!(e, WorkflowRunEvent::CheckpointCompleted { .. })));
-    assert!(collected
-        .iter()
-        .any(|e| matches!(e, WorkflowRunEvent::WorkflowRunCompleted { .. })));
+    assert!(
+        collected
+            .iter()
+            .any(|e| matches!(e, WorkflowRunEvent::WorkflowRunStarted { .. }))
+    );
+    assert!(
+        collected
+            .iter()
+            .any(|e| matches!(e, WorkflowRunEvent::StageStarted { name, .. } if name == "start"))
+    );
+    assert!(
+        collected
+            .iter()
+            .any(|e| matches!(e, WorkflowRunEvent::StageCompleted { name, .. } if name == "start"))
+    );
+    assert!(
+        collected
+            .iter()
+            .any(|e| matches!(e, WorkflowRunEvent::StageStarted { name, .. } if name == "task"))
+    );
+    assert!(
+        collected
+            .iter()
+            .any(|e| matches!(e, WorkflowRunEvent::StageCompleted { name, .. } if name == "task"))
+    );
+    assert!(
+        collected
+            .iter()
+            .any(|e| matches!(e, WorkflowRunEvent::CheckpointCompleted { .. }))
+    );
+    assert!(
+        collected
+            .iter()
+            .any(|e| matches!(e, WorkflowRunEvent::WorkflowRunCompleted { .. }))
+    );
     // WorkflowRunStarted first, WorkflowRunCompleted last
     assert!(matches!(
         collected.first().unwrap(),
@@ -2150,10 +2166,12 @@ async fn tool_handler_e2e() {
         .context_values
         .get("command.output")
         .expect("command.output should exist");
-    assert!(command_output
-        .as_str()
-        .unwrap()
-        .contains("hello-from-script"));
+    assert!(
+        command_output
+            .as_str()
+            .unwrap()
+            .contains("hello-from-script")
+    );
 }
 
 #[tokio::test]
@@ -2510,12 +2528,16 @@ async fn scenario_ship_a_feature() {
     assert!(cp.completed_nodes.contains(&"review".to_string()));
 
     let collected = events.lock().unwrap();
-    assert!(collected
-        .iter()
-        .any(|e| matches!(e, WorkflowRunEvent::WorkflowRunStarted { .. })));
-    assert!(collected
-        .iter()
-        .any(|e| matches!(e, WorkflowRunEvent::WorkflowRunCompleted { .. })));
+    assert!(
+        collected
+            .iter()
+            .any(|e| matches!(e, WorkflowRunEvent::WorkflowRunStarted { .. }))
+    );
+    assert!(
+        collected
+            .iter()
+            .any(|e| matches!(e, WorkflowRunEvent::WorkflowRunCompleted { .. }))
+    );
 }
 
 #[tokio::test]
@@ -2968,11 +2990,13 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     let manager_outcome = cp.node_outcomes.get("manager").expect("manager outcome");
     assert_eq!(manager_outcome.status, StageStatus::Success);
-    assert!(manager_outcome
-        .notes
-        .as_deref()
-        .unwrap()
-        .contains("Stop condition satisfied"));
+    assert!(
+        manager_outcome
+            .notes
+            .as_deref()
+            .unwrap()
+            .contains("Stop condition satisfied")
+    );
     // Overall pipeline succeeds because manager succeeded
     assert_eq!(outcome.status, StageStatus::Success);
 }
@@ -3045,10 +3069,12 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     let manager_outcome = cp.node_outcomes.get("manager").expect("manager outcome");
     assert_eq!(manager_outcome.status, StageStatus::Fail);
-    assert!(manager_outcome
-        .failure_reason()
-        .unwrap()
-        .contains("Max cycles"));
+    assert!(
+        manager_outcome
+            .failure_reason()
+            .unwrap()
+            .contains("Max cycles")
+    );
     // Pipeline reached exit with goal gates satisfied — per spec, SUCCESS.
     assert_eq!(outcome.status, StageStatus::Success);
 }
@@ -3554,27 +3580,33 @@ async fn integration_smoke_plan_implement_review_done() {
     assert!(cp.completed_nodes.contains(&"review".to_string()));
 
     // Verify prompt.md and response.md exist
-    assert!(dir
-        .path()
-        .join("nodes")
-        .join("plan")
-        .join("prompt.md")
-        .exists());
-    assert!(dir
-        .path()
-        .join("nodes")
-        .join("plan")
-        .join("response.md")
-        .exists());
+    assert!(
+        dir.path()
+            .join("nodes")
+            .join("plan")
+            .join("prompt.md")
+            .exists()
+    );
+    assert!(
+        dir.path()
+            .join("nodes")
+            .join("plan")
+            .join("response.md")
+            .exists()
+    );
 
     // Verify events
     let collected = events.lock().unwrap();
-    assert!(collected
-        .iter()
-        .any(|e| matches!(e, WorkflowRunEvent::WorkflowRunStarted { .. })));
-    assert!(collected
-        .iter()
-        .any(|e| matches!(e, WorkflowRunEvent::WorkflowRunCompleted { .. })));
+    assert!(
+        collected
+            .iter()
+            .any(|e| matches!(e, WorkflowRunEvent::WorkflowRunStarted { .. }))
+    );
+    assert!(
+        collected
+            .iter()
+            .any(|e| matches!(e, WorkflowRunEvent::WorkflowRunCompleted { .. }))
+    );
 }
 
 // ===========================================================================
@@ -5969,10 +6001,10 @@ mod real_llm {
     use fabro_graphviz::graph::{AttrValue, Edge, Graph};
     use fabro_interview::AutoApproveInterviewer;
     use fabro_workflows::event::EventEmitter;
+    use fabro_workflows::handler::HandlerRegistry;
     use fabro_workflows::handler::exit::ExitHandler;
     use fabro_workflows::handler::human::HumanHandler;
     use fabro_workflows::handler::start::StartHandler;
-    use fabro_workflows::handler::HandlerRegistry;
     use fabro_workflows::outcome::StageStatus;
     use fabro_workflows::records::{Checkpoint, CheckpointExt};
     use fabro_workflows::run_options::RunOptions;
@@ -7080,9 +7112,11 @@ fn subgraph_class_derived_from_label() {
 
     // Nodes inside subgraph receive derived class "loop-a"
     assert!(graph.nodes["plan"].classes.contains(&"loop-a".to_string()));
-    assert!(graph.nodes["implement"]
-        .classes
-        .contains(&"loop-a".to_string()));
+    assert!(
+        graph.nodes["implement"]
+            .classes
+            .contains(&"loop-a".to_string())
+    );
 
     // Nodes outside subgraph do not get the class
     assert!(!graph.nodes["start"].classes.contains(&"loop-a".to_string()));
@@ -7103,9 +7137,11 @@ fn subgraph_class_derivation_strips_special_chars() {
     let graph = parse(input).expect("parsing should succeed");
     // "Code Review!!!" -> lowercase "code review!!!" -> spaces to hyphens "code-review!!!"
     // -> strip non-alphanumeric except hyphens -> "code-review"
-    assert!(graph.nodes["reviewer"]
-        .classes
-        .contains(&"code-review".to_string()));
+    assert!(
+        graph.nodes["reviewer"]
+            .classes
+            .contains(&"code-review".to_string())
+    );
 }
 
 #[test]
@@ -8074,10 +8110,12 @@ async fn hook_json_block_with_reason() {
 
     let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("forbidden by policy"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("forbidden by policy")
+    );
 }
 
 // --- Sandbox field tests ---
@@ -9791,10 +9829,12 @@ async fn cli_backend_run_writes_provider_used_json() {
     assert_eq!(provider_json["mode"], "cli");
     assert_eq!(provider_json["provider"], "anthropic");
     assert_eq!(provider_json["model"], "claude-opus-4-6");
-    assert!(provider_json["command"]
-        .as_str()
-        .unwrap()
-        .contains("claude"));
+    assert!(
+        provider_json["command"]
+            .as_str()
+            .unwrap()
+            .contains("claude")
+    );
 }
 
 // -- BackendRouter e2e: delegates to correct backend --

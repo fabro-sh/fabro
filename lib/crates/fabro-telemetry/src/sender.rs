@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use uuid::Uuid;
 
 use crate::event::Track;

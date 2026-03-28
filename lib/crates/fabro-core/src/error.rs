@@ -43,7 +43,9 @@ pub enum CoreError {
     Cancelled,
     #[error("blocked: {message}")]
     Blocked { message: String },
-    #[error("node \"{node_id}\" visited {visits} times ({limit_source} limit {limit}); run is stuck in a cycle")]
+    #[error(
+        "node \"{node_id}\" visited {visits} times ({limit_source} limit {limit}); run is stuck in a cycle"
+    )]
     VisitLimitExceeded {
         node_id: String,
         visits: usize,
@@ -177,10 +179,12 @@ mod tests {
         assert!(!CoreError::NodeNotFound { id: "x".into() }.is_retryable());
         assert!(!CoreError::Cancelled.is_retryable());
         assert!(!CoreError::NoStartNode.is_retryable());
-        assert!(!CoreError::Blocked {
-            message: "no".into()
-        }
-        .is_retryable());
+        assert!(
+            !CoreError::Blocked {
+                message: "no".into()
+            }
+            .is_retryable()
+        );
         assert!(!CoreError::Other("err".into()).is_retryable());
     }
 }

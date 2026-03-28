@@ -1,3 +1,4 @@
+use nom::IResult;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::{char, multispace0};
@@ -5,7 +6,6 @@ use nom::combinator::opt;
 use nom::error::{Error, ParseError};
 use nom::multi::{many0, separated_list0};
 use nom::sequence::{delimited, preceded, tuple};
-use nom::IResult;
 
 use crate::parser::ast::{
     AstValue, AttrBlock, DotGraph, EdgeStmt, NodeStmt, Statement, SubgraphStmt,

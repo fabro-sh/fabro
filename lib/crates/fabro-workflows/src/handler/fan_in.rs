@@ -4,8 +4,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 
-use crate::context::keys;
 use crate::context::Context;
+use crate::context::keys;
 use crate::error::FabroError;
 use crate::event::EventEmitter;
 use crate::outcome::{Outcome, OutcomeExt};
@@ -521,10 +521,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);
-        assert!(outcome
-            .failure_reason()
-            .unwrap()
-            .contains("all candidates failed"));
+        assert!(
+            outcome
+                .failure_reason()
+                .unwrap()
+                .contains("all candidates failed")
+        );
     }
 
     #[tokio::test]

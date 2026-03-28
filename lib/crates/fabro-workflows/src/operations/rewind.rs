@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use fabro_git_storage::branchstore::{BranchStore, CommitInfo};
 use fabro_git_storage::gitobj::Store;
 use git2::{Oid, Repository, Signature};
 
-use crate::git::{push_run_branches, MetadataStore, RUN_BRANCH_PREFIX};
+use crate::git::{MetadataStore, RUN_BRANCH_PREFIX, push_run_branches};
 use crate::records::{Checkpoint, RunRecord};
 use fabro_graphviz::graph::Graph;
 use fabro_graphviz::parser;

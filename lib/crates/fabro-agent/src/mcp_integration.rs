@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use fabro_llm::types::ToolDefinition;
-use fabro_mcp::connection_manager::{call_result_to_string, McpConnectionManager};
+use fabro_mcp::connection_manager::{McpConnectionManager, call_result_to_string};
 
 use crate::tool_registry::RegisteredTool;
 

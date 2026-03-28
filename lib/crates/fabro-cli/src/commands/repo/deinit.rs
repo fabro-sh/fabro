@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 pub fn run_deinit() -> Result<()> {
     let repo_root = super::init::git_repo_root()?;

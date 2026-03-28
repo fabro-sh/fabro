@@ -2,8 +2,8 @@ use std::path::Path;
 
 use async_trait::async_trait;
 
-use crate::context::keys;
 use crate::context::Context;
+use crate::context::keys;
 use crate::error::FabroError;
 use crate::outcome::{Outcome, OutcomeExt};
 use crate::run_dir::{node_dir, visit_from_context};
@@ -547,10 +547,12 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
         let command_output = outcome.context_updates.get(keys::COMMAND_OUTPUT).unwrap();
-        assert!(command_output
-            .as_str()
-            .unwrap()
-            .contains("hello from python"));
+        assert!(
+            command_output
+                .as_str()
+                .unwrap()
+                .contains("hello from python")
+        );
     }
 
     #[tokio::test]
@@ -597,10 +599,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);
-        assert!(outcome
-            .failure_reason()
-            .unwrap()
-            .contains("Invalid language"));
+        assert!(
+            outcome
+                .failure_reason()
+                .unwrap()
+                .contains("Invalid language")
+        );
     }
 
     #[tokio::test]

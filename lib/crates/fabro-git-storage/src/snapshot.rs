@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use git2::{Oid, Signature};
 use tracing::{debug, warn};
 
-use crate::gitobj::{FileMode, Store, TreeEntries};
 use crate::Result;
+use crate::gitobj::{FileMode, Store, TreeEntries};
 
 /// Options for writing a snapshot.
 pub struct WriteOptions<'a> {
@@ -388,10 +388,11 @@ mod tests {
                 .unwrap(),
             b"new content"
         );
-        assert!(snap
-            .read_file(result.commit_oid, "to_delete.txt")
-            .unwrap()
-            .is_none());
+        assert!(
+            snap.read_file(result.commit_oid, "to_delete.txt")
+                .unwrap()
+                .is_none()
+        );
     }
 
     // -- write embeds in-memory metadata --

@@ -1,5 +1,5 @@
 use fabro_interview::{Question, QuestionType};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn text_block(text: &str) -> Value {
     json!({
@@ -105,10 +105,12 @@ mod tests {
 
         let section = &blocks_json[0];
         assert_eq!(section["type"], "section");
-        assert!(section["text"]["text"]
-            .as_str()
-            .unwrap()
-            .contains("Approve this PR?"));
+        assert!(
+            section["text"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Approve this PR?")
+        );
 
         let actions = &blocks_json[1];
         assert_eq!(actions["type"], "actions");
@@ -237,9 +239,11 @@ mod tests {
         let submit_elements = submit_block["elements"].as_array().unwrap();
         assert_eq!(submit_elements[0]["type"], "button");
         assert_eq!(submit_elements[0]["text"]["text"], "Submit");
-        assert!(submit_elements[0]["action_id"]
-            .as_str()
-            .unwrap()
-            .contains("q-5"));
+        assert!(
+            submit_elements[0]["action_id"]
+                .as_str()
+                .unwrap()
+                .contains("q-5")
+        );
     }
 }

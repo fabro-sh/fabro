@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use fabro_config::{project as project_config, FabroSettings};
+use fabro_config::{FabroSettings, project as project_config};
 use fabro_util::path::expand_tilde;
 
 #[derive(Clone, Debug)]

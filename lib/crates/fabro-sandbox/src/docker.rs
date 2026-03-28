@@ -1,8 +1,9 @@
 use crate::{
-    format_lines_numbered, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
-    SandboxEventCallback,
+    DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
+    format_lines_numbered,
 };
 use async_trait::async_trait;
+use bollard::Docker;
 use bollard::container::LogOutput;
 use bollard::container::{
     Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
@@ -11,7 +12,6 @@ use bollard::container::{
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
 use bollard::models::HostConfig;
-use bollard::Docker;
 use futures::StreamExt;
 use std::collections::HashMap;
 use std::time::Instant;

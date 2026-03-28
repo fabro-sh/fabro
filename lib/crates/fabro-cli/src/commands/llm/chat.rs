@@ -1,8 +1,8 @@
 use anyhow::Result;
 use fabro_config::FabroSettings;
-use fabro_llm::cli::{run_chat, ChatArgs};
+use fabro_llm::cli::{ChatArgs, run_chat};
 #[cfg(feature = "server")]
-use fabro_llm::cli::{run_chat_via_server, ServerConnection};
+use fabro_llm::cli::{ServerConnection, run_chat_via_server};
 
 use crate::args::GlobalArgs;
 

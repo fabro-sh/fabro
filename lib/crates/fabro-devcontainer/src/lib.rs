@@ -83,7 +83,9 @@ pub enum DevcontainerError {
     #[error("variable substitution error: {0}")]
     Variable(String),
 
-    #[error("base Dockerfile contains COPY or ADD instructions that reference build context files, which is not supported by Daytona snapshots: {0}")]
+    #[error(
+        "base Dockerfile contains COPY or ADD instructions that reference build context files, which is not supported by Daytona snapshots: {0}"
+    )]
     UnsupportedCopyAdd(String),
 }
 

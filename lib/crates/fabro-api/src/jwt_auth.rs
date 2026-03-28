@@ -277,7 +277,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
             AuthMode::Disabled => {
                 return Ok(AuthenticatedUser {
                     login: "demo".to_string(),
-                })
+                });
             }
             AuthMode::Strategies(strategies) => strategies,
         };
@@ -320,11 +320,11 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::Router;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use axum::response::IntoResponse;
     use axum::routing::get;
-    use axum::Router;
     use tower::ServiceExt;
 
     async fn protected_handler(_auth: AuthenticatedService) -> impl IntoResponse {

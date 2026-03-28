@@ -3,8 +3,8 @@ pub use fabro_config::cli::*;
 
 use std::path::Path;
 
-use fabro_config::cli::load_cli_config;
 use fabro_config::FabroSettings;
+use fabro_config::cli::load_cli_config;
 
 #[cfg(feature = "server")]
 use tracing::debug;

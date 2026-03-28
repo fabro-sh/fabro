@@ -5,8 +5,8 @@ use tokio::fs;
 use tokio::process::Command;
 use tracing::info;
 
-use crate::types::{FeatureMetadata, LifecycleCommand};
 use crate::DevcontainerError;
+use crate::types::{FeatureMetadata, LifecycleCommand};
 
 /// A resolved feature layer ready to be inserted into a Dockerfile.
 #[derive(Debug, Clone)]
@@ -1123,9 +1123,11 @@ mod tests {
         let resolved = resolve_features(&features, tmp.path(), None).await.unwrap();
         assert_eq!(resolved.layers.len(), 1);
         assert_eq!(resolved.layers[0].dir_name, "node");
-        assert!(resolved.layers[0]
-            .dockerfile_snippet
-            .contains("export VERSION=\"20\""));
+        assert!(
+            resolved.layers[0]
+                .dockerfile_snippet
+                .contains("export VERSION=\"20\"")
+        );
     }
 
     #[test]

@@ -9,13 +9,13 @@ mod test_support;
 mod validate;
 
 pub use crate::pipeline::{DevcontainerSpec, LlmSpec, SandboxEnvSpec, SandboxSpec};
-pub use create::{create, CreateRunInput, CreatedRun};
-pub use fork::{fork, ForkRunInput};
+pub use create::{CreateRunInput, CreatedRun, create};
+pub use fork::{ForkRunInput, fork};
 pub use resume::resume;
 pub use rewind::{
-    build_timeline, find_run_id_by_prefix, rewind, RewindInput, RewindTarget, RunTimeline,
-    TimelineEntry,
+    RewindInput, RewindTarget, RunTimeline, TimelineEntry, build_timeline, find_run_id_by_prefix,
+    rewind,
 };
 pub use source::WorkflowInput;
-pub use start::{start, StartServices, Started};
-pub use validate::{validate, ValidateInput};
+pub use start::{StartServices, Started, start};
+pub use validate::{ValidateInput, validate};

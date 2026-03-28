@@ -5,10 +5,10 @@ use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use async_trait::async_trait;
-use fabro_agent::tool_registry::ToolContext;
 use fabro_agent::Sandbox;
+use fabro_agent::tool_registry::ToolContext;
 use fabro_llm::client::Client as LlmClient;
-use fabro_llm::generate::{generate_object, GenerateParams};
+use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_llm::types::{Message, Request, ToolResult};
 use fabro_util::env::{Env, SystemEnv};
 use tokio::process::Command as TokioCommand;

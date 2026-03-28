@@ -100,7 +100,9 @@ pub async fn execute(init: Initialized) -> Executed {
             cp.restart_failure_signatures.clone(),
         );
         if cp.context_values.get(context::keys::INTERNAL_FIDELITY)
-            == Some(&serde_json::json!(context::keys::Fidelity::Full.to_string()))
+            == Some(&serde_json::json!(
+                context::keys::Fidelity::Full.to_string()
+            ))
         {
             lifecycle.set_degrade_fidelity_on_resume(true);
         }

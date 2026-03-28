@@ -6,7 +6,7 @@ use fabro_interview::FileInterviewer;
 use fabro_store::RuntimeState;
 use fabro_workflows::event::EventEmitter;
 use fabro_workflows::git::GitAuthor;
-use fabro_workflows::operations::{resume as resume_run, start as start_run, StartServices};
+use fabro_workflows::operations::{StartServices, resume as resume_run, start as start_run};
 
 use crate::cli_config;
 use crate::shared;

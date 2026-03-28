@@ -1,6 +1,6 @@
-use crate::sandbox::{format_lines_numbered, Sandbox};
+use crate::sandbox::{Sandbox, format_lines_numbered};
 use crate::tool_registry::RegisteredTool;
-use crate::truncation::{truncate_output, TruncationMode};
+use crate::truncation::{TruncationMode, truncate_output};
 use fabro_llm::types::ToolDefinition;
 use std::sync::Arc;
 
@@ -1310,10 +1310,11 @@ EOF";
         assert!(result.contains("Moved file"));
 
         // Old path gone
-        assert!(env
-            .read_file("src/models/user.py", None, None)
-            .await
-            .is_err());
+        assert!(
+            env.read_file("src/models/user.py", None, None)
+                .await
+                .is_err()
+        );
 
         // New path has updated content
         let content = env
@@ -1405,7 +1406,7 @@ def gamma():
         use crate::config::SessionConfig;
         use crate::session::Session;
         use crate::test_support::{
-            make_client, text_response, tool_call_response, MockLlmProvider, TestProfile,
+            MockLlmProvider, TestProfile, make_client, text_response, tool_call_response,
         };
         use crate::tool_registry::ToolRegistry;
 

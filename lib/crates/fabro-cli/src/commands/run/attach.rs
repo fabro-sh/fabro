@@ -1,11 +1,11 @@
 use std::io::{BufRead, BufReader, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use fabro_interview::{AnswerValue, ConsoleInterviewer};
 use fabro_store::RuntimeState;
@@ -490,7 +490,7 @@ mod tests {
     use fabro_util::terminal::Styles;
     use fabro_workflows::outcome::StageStatus;
     use fabro_workflows::records::Conclusion;
-    use fabro_workflows::run_status::{write_run_status, StatusReason};
+    use fabro_workflows::run_status::{StatusReason, write_run_status};
 
     fn no_color_styles() -> &'static Styles {
         Box::leak(Box::new(Styles::new(false)))

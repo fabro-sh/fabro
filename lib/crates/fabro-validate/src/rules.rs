@@ -2,8 +2,8 @@ use std::collections::{HashSet, VecDeque};
 use std::str::FromStr;
 
 use fabro_graphviz::condition::parse_condition;
-use fabro_graphviz::graph::{is_llm_handler_type, AttrValue, Graph};
-use fabro_graphviz::stylesheet::{parse_stylesheet, Selector};
+use fabro_graphviz::graph::{AttrValue, Graph, is_llm_handler_type};
+use fabro_graphviz::stylesheet::{Selector, parse_stylesheet};
 
 use crate::{Diagnostic, LintRule, Severity};
 

@@ -23,7 +23,7 @@ pub fn spawn_detached(args: &[&str], env: &[(&str, &str)]) {
 
 #[cfg(unix)]
 fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)]) {
-    use fork::{fork, setsid, Fork};
+    use fork::{Fork, fork, setsid};
 
     // Flush stdout/stderr before forking so the child process doesn't inherit
     // buffered data that would be flushed again on child exit, causing
