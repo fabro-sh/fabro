@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use fabro_store::RuntimeState;
 use fabro_util::terminal::Styles;
 use fabro_workflows::outcome::{format_cost, StageStatus};
 use fabro_workflows::pipeline::{Persisted, Validated};
@@ -199,7 +200,8 @@ pub(crate) fn print_final_output(run_dir: &Path, styles: &Styles) {
 }
 
 pub(crate) fn print_assets(run_dir: &Path, styles: &Styles) {
-    let paths = fabro_workflows::asset_snapshot::collect_asset_paths(run_dir);
+    let runtime_state = RuntimeState::new(run_dir);
+    let paths = fabro_workflows::asset_snapshot::collect_asset_paths(&runtime_state.assets_dir());
     if paths.is_empty() {
         return;
     }

@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use fabro_store::RuntimeState;
+
 use crate::error::FabroError;
 use crate::outcome::StageStatus;
 use crate::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt};
@@ -38,6 +40,15 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
 }
 
 fn cleanup_resume_artifacts(run_dir: &Path) {
+    let runtime_state = RuntimeState::new(run_dir);
+    for path in [
+        runtime_state.interview_request_path(),
+        runtime_state.interview_response_path(),
+        runtime_state.interview_claim_path(),
+    ] {
+        let _ = std::fs::remove_file(path);
+    }
+
     for name in [
         "conclusion.json",
         "pull_request.json",

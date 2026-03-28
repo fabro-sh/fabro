@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use fabro_config::FabroSettingsExt;
+use fabro_store::RuntimeState;
 
 use crate::args::AssetCpArgs;
 use crate::shared::split_run_path;
@@ -11,7 +12,9 @@ pub fn cp_command(args: &AssetCpArgs) -> Result<()> {
     let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
     let (run_id, asset_path) = parse_source(&args.source);
     let run = fabro_workflows::run_lookup::resolve_run(&base, run_id)?;
-    let entries = fabro_workflows::assets::scan_assets(&run.path, args.node.as_deref())?;
+    let runtime_state = RuntimeState::new(&run.path);
+    let entries =
+        fabro_workflows::assets::scan_assets(&runtime_state.assets_dir(), args.node.as_deref())?;
 
     if entries.is_empty() {
         bail!("No assets found for this run");

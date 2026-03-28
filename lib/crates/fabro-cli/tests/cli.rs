@@ -1,6 +1,7 @@
 use assert_cmd::Command;
 use fabro_config::mcp::McpTransport;
 use fabro_config::FabroSettings;
+use fabro_store::RuntimeState;
 use predicates::prelude::*;
 
 #[allow(deprecated)]
@@ -1303,8 +1304,10 @@ fn bug3_attach_leaves_interview_request_until_engine_consumes_response() {
         "stage": "gate",
         "metadata": {}
     });
+    let runtime_state = RuntimeState::new(&run_dir);
+    std::fs::create_dir_all(runtime_state.runtime_dir()).unwrap();
     std::fs::write(
-        run_dir.join("interview_request.json"),
+        runtime_state.interview_request_path(),
         serde_json::to_string(&question).unwrap(),
     )
     .unwrap();
@@ -1324,14 +1327,14 @@ fn bug3_attach_leaves_interview_request_until_engine_consumes_response() {
     // The attach loop should leave the request durable until the engine consumes
     // the response, so a crashed attach can be retried safely.
     assert!(
-        run_dir.join("interview_request.json").exists(),
+        runtime_state.interview_request_path().exists(),
         "bug3: interview_request.json should stay present until the engine consumes the answer"
     );
     assert!(
-        run_dir.join("interview_response.json").exists(),
+        runtime_state.interview_response_path().exists(),
         "bug3: attach should write interview_response.json after handling the prompt"
     );
-    let response = std::fs::read_to_string(run_dir.join("interview_response.json")).unwrap();
+    let response = std::fs::read_to_string(runtime_state.interview_response_path()).unwrap();
     assert!(response.contains("\"value\": \"Yes\""));
 }
 
@@ -1364,8 +1367,10 @@ fn attach_closed_stdin_keeps_interview_pending() {
         "stage": "gate",
         "metadata": {}
     });
+    let runtime_state = RuntimeState::new(&run_dir);
+    std::fs::create_dir_all(runtime_state.runtime_dir()).unwrap();
     std::fs::write(
-        run_dir.join("interview_request.json"),
+        runtime_state.interview_request_path(),
         serde_json::to_string(&question).unwrap(),
     )
     .unwrap();
@@ -1386,17 +1391,68 @@ fn attach_closed_stdin_keeps_interview_pending() {
         "attach should explain that the run is still waiting for a human answer.\nstderr: {stderr}"
     );
     assert!(
-        run_dir.join("interview_request.json").exists(),
+        runtime_state.interview_request_path().exists(),
         "attach with closed stdin must leave the request pending"
     );
     assert!(
-        !run_dir.join("interview_response.json").exists(),
+        !runtime_state.interview_response_path().exists(),
         "attach with closed stdin must not fabricate a response"
     );
     assert!(
-        !run_dir.join("interview_request.claim").exists(),
+        !runtime_state.interview_claim_path().exists(),
         "attach with closed stdin must release the claim so a later attach can answer"
     );
+}
+
+#[test]
+fn attach_supports_legacy_root_interview_paths() {
+    let home = tempfile::tempdir().unwrap();
+
+    let run_dir = setup_run_dir(
+        home.path(),
+        "attach-legacy-interview-paths",
+        serde_json::json!({}),
+        &[
+            r#"{"ts":"2026-01-01T00:00:01Z","run_id":"attach-legacy-interview-paths","event":"StageStarted","node_id":"gate","name":"Gate","index":0,"attempt":1,"max_attempts":1}"#,
+        ],
+    );
+
+    std::fs::write(
+        run_dir.join("status.json"),
+        serde_json::json!({"status": "running", "updated_at": "2026-01-01T00:00:00Z"}).to_string(),
+    )
+    .unwrap();
+
+    let question = serde_json::json!({
+        "text": "Approve?",
+        "question_type": "YesNo",
+        "options": [],
+        "allow_freeform": false,
+        "default": {"value": "Yes", "selected_option": null, "text": null},
+        "timeout_seconds": 1.0,
+        "stage": "gate",
+        "metadata": {}
+    });
+    std::fs::write(
+        run_dir.join("interview_request.json"),
+        serde_json::to_string(&question).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(run_dir.join("run.pid"), "99999999").unwrap();
+
+    let _ = arc()
+        .env("HOME", home.path())
+        .env("NO_COLOR", "1")
+        .args(["attach", "attach-legacy-interview-paths"])
+        .write_stdin("y\n")
+        .timeout(std::time::Duration::from_secs(5))
+        .output();
+
+    assert!(run_dir.join("interview_request.json").exists());
+    assert!(run_dir.join("interview_response.json").exists());
+    assert!(!RuntimeState::new(&run_dir)
+        .interview_response_path()
+        .exists());
 }
 
 // Bug 4: attach should respect the verbose flag from run.json.

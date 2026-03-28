@@ -13,6 +13,7 @@ use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_llm::provider::Provider;
 use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 use fabro_sandbox::SandboxRecordExt;
+use fabro_store::RuntimeState;
 use fabro_workflows::artifact::sync_artifacts_to_env;
 use fabro_workflows::context::Context;
 use fabro_workflows::error::FabroError;
@@ -1307,12 +1308,7 @@ async fn daytona_asset_collection() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let assets_dir = dir
-        .path()
-        .join("artifacts")
-        .join("assets")
-        .join("create_assets")
-        .join("retry_1");
+    let assets_dir = RuntimeState::new(dir.path()).asset_stage_dir("create_assets", 1);
 
     let report_path = assets_dir.join("test-results/report.xml");
     assert!(
