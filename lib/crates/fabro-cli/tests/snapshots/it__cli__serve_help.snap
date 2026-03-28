@@ -1,5 +1,5 @@
 ---
-source: lib/crates/fabro-cli/tests/cli.rs
+source: lib/crates/fabro-cli/tests/it/cli.rs
 assertion_line: 349
 expression: stdout
 ---
