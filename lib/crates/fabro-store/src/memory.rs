@@ -1049,4 +1049,24 @@ mod tests {
         store.delete_run("run-1").await.unwrap();
         assert!(store.open_run("run-1").await.unwrap().is_none());
     }
+
+    #[tokio::test]
+    async fn create_run_allows_retry_and_rejects_conflict() {
+        let store = InMemoryStore::default();
+        let ts = dt("2026-03-27T12:00:00Z");
+
+        // First create succeeds.
+        store.create_run("run-1", ts).await.unwrap();
+
+        // Retry with exact same created_at succeeds (idempotent).
+        store.create_run("run-1", ts).await.unwrap();
+
+        // Different created_at for the same run_id is rejected.
+        let different_ts = dt("2026-03-27T12:00:01Z");
+        match store.create_run("run-1", different_ts).await {
+            Err(StoreError::RunAlreadyExists(_)) => {} // expected
+            Err(other) => panic!("expected RunAlreadyExists, got: {other:?}"),
+            Ok(_) => panic!("expected RunAlreadyExists, but create_run succeeded"),
+        }
+    }
 }
