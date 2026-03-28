@@ -61,7 +61,7 @@ pub(crate) struct WorkflowLifecycle {
     disk: DiskLifecycle,
     git: GitLifecycle,
     artifact: ArtifactLifecycle,
-    on_node: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    on_node: crate::OnNodeCallback,
     /// Set in on_edge_selected when loop_restart approved; read+cleared by EventLifecycle::on_run_start
     restarted_from: Arc<Mutex<Option<(String, String)>>>,
     /// Shared git checkpoint result (written by git, read by event)
@@ -85,7 +85,7 @@ impl WorkflowLifecycle {
         run_dir: &PathBuf,
         run_options: &Arc<RunOptions>,
         is_resume: bool,
-        on_node: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+        on_node: crate::OnNodeCallback,
     ) -> Self {
         let runtime_state = RuntimeState::new(run_dir);
         let restarted_from: Arc<Mutex<Option<(String, String)>>> = Arc::new(Mutex::new(None));

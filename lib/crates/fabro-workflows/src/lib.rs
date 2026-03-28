@@ -1,5 +1,10 @@
+use std::sync::Arc;
+
 use fabro_retro::retro::CompletedStage;
 use serde::de::DeserializeOwned;
+
+/// Callback invoked when a workflow node starts executing.
+pub type OnNodeCallback = Option<Arc<dyn Fn(&str) + Send + Sync>>;
 
 /// Convert a Duration's milliseconds to u64, saturating on overflow.
 pub(crate) fn millis_u64(d: std::time::Duration) -> u64 {
