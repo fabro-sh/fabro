@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use fabro_interview::FileInterviewer;
+use fabro_store::RuntimeState;
 use fabro_workflows::event::EventEmitter;
 
 use crate::cli_config;
@@ -19,11 +20,16 @@ pub async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bool) -> 
     let _launcher_guard = scopeguard::guard(launcher_path.clone(), |path| {
         super::launcher::remove_launcher_record(&path);
     });
+    let runtime_state = RuntimeState::new(&run_dir);
 
     let services = fabro_workflows::operations::StartServices {
         cancel_token: None,
         emitter: Arc::new(EventEmitter::new()),
-        interviewer: Arc::new(FileInterviewer::new(run_dir.clone())),
+        interviewer: Arc::new(FileInterviewer::new(
+            runtime_state.interview_request_path(),
+            runtime_state.interview_response_path(),
+            runtime_state.interview_claim_path(),
+        )),
         git_author,
         github_app,
         registry_override: None,

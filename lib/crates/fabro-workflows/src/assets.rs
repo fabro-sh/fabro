@@ -19,10 +19,9 @@ fn serialize_path<S: serde::Serializer>(path: &Path, serializer: S) -> Result<S:
     serializer.serialize_str(&path.display().to_string())
 }
 
-/// Walk `{run_dir}/artifacts/assets/*/retry_*/manifest.json`, stat each file, and return entries.
-pub fn scan_assets(run_dir: &Path, node_filter: Option<&str>) -> Result<Vec<AssetEntry>> {
-    let assets_dir = run_dir.join("artifacts/assets");
-    let nodes = match std::fs::read_dir(&assets_dir) {
+/// Walk `{assets_dir}/*/retry_*/manifest.json`, stat each file, and return entries.
+pub fn scan_assets(assets_dir: &Path, node_filter: Option<&str>) -> Result<Vec<AssetEntry>> {
+    let nodes = match std::fs::read_dir(assets_dir) {
         Ok(read_dir) => read_dir,
         Err(_) => return Ok(Vec::new()),
     };

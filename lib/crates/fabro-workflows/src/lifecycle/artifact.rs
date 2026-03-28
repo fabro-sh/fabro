@@ -23,9 +23,9 @@ type WfNodeDecision = NodeDecision<Option<StageUsage>>;
 pub struct ArtifactLifecycle {
     pub sandbox: Arc<dyn fabro_sandbox::Sandbox>,
     pub artifact_store: Arc<Mutex<ArtifactStore>>,
-    pub artifact_base_dir: Option<PathBuf>,
+    pub artifact_values_dir: Option<PathBuf>,
     pub emitter: Arc<EventEmitter>,
-    pub run_dir: PathBuf,
+    pub assets_dir: PathBuf,
     pub asset_globs: Vec<String>,
     /// Per-attempt state: epoch seconds when the attempt started.
     attempt_start_epoch: Mutex<Option<f64>>,
@@ -36,17 +36,17 @@ impl ArtifactLifecycle {
     pub fn new(
         sandbox: Arc<dyn fabro_sandbox::Sandbox>,
         artifact_store: Arc<Mutex<ArtifactStore>>,
-        artifact_base_dir: Option<PathBuf>,
+        artifact_values_dir: Option<PathBuf>,
         emitter: Arc<EventEmitter>,
-        run_dir: PathBuf,
+        assets_dir: PathBuf,
         asset_globs: Vec<String>,
     ) -> Self {
         Self {
             sandbox,
             artifact_store,
-            artifact_base_dir,
+            artifact_values_dir,
             emitter,
-            run_dir,
+            assets_dir,
             asset_globs,
             attempt_start_epoch: Mutex::new(None),
         }
@@ -62,7 +62,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
     ) -> fabro_core::error::Result<()> {
         // Swap in a fresh artifact store on restart (don't call clear() — preserves files on disk)
         let mut store = self.artifact_store.lock().unwrap();
-        *store = ArtifactStore::new(self.artifact_base_dir.clone());
+        *store = ArtifactStore::new(self.artifact_values_dir.clone());
         *self.attempt_start_epoch.lock().unwrap() = None;
         Ok(())
     }
@@ -98,9 +98,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
             format!("{node_id}-visit_{visit}")
         };
         let stage_dir = self
-            .run_dir
-            .join("artifacts")
-            .join("assets")
+            .assets_dir
             .join(node_slug)
             .join(format!("retry_{}", ctx.attempt));
         let _ = std::fs::create_dir_all(&stage_dir);

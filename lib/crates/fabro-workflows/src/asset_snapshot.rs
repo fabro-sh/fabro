@@ -317,12 +317,11 @@ pub async fn collect_assets(
     Ok(summary)
 }
 
-/// Collect all asset paths from manifest files under `{run_dir}/artifacts/assets/*/retry_*/manifest.json`.
+/// Collect all asset paths from manifest files under `{assets_dir}/*/retry_*/manifest.json`.
 ///
 /// Returns the full on-disk paths to the downloaded asset files.
-pub fn collect_asset_paths(run_dir: &Path) -> Vec<String> {
-    let assets_dir = run_dir.join("artifacts/assets");
-    let Ok(nodes) = std::fs::read_dir(&assets_dir) else {
+pub fn collect_asset_paths(assets_dir: &Path) -> Vec<String> {
+    let Ok(nodes) = std::fs::read_dir(assets_dir) else {
         return Vec::new();
     };
 
@@ -700,9 +699,10 @@ mod tests {
     fn collect_asset_paths_from_manifests() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
+        let assets_dir = base.join("cache/artifacts/assets");
 
         // Create two node directories with manifests
-        let node_a = base.join("artifacts/assets/node_a/retry_1");
+        let node_a = assets_dir.join("node_a/retry_1");
         std::fs::create_dir_all(&node_a).unwrap();
         std::fs::write(
             node_a.join("manifest.json"),
@@ -720,7 +720,7 @@ mod tests {
         )
         .unwrap();
 
-        let node_b = base.join("artifacts/assets/node_b/retry_1");
+        let node_b = assets_dir.join("node_b/retry_1");
         std::fs::create_dir_all(&node_b).unwrap();
         std::fs::write(
             node_b.join("manifest.json"),
@@ -735,24 +735,24 @@ mod tests {
         )
         .unwrap();
 
-        let paths = collect_asset_paths(base);
+        let paths = collect_asset_paths(&assets_dir);
         assert_eq!(paths.len(), 3);
         let base_str = base.to_string_lossy();
         assert!(paths.contains(&format!(
-            "{base_str}/artifacts/assets/node_a/retry_1/test-results/report.xml"
+            "{base_str}/cache/artifacts/assets/node_a/retry_1/test-results/report.xml"
         )));
         assert!(paths.contains(&format!(
-            "{base_str}/artifacts/assets/node_a/retry_1/test-results/screenshot.png"
+            "{base_str}/cache/artifacts/assets/node_a/retry_1/test-results/screenshot.png"
         )));
         assert!(paths.contains(&format!(
-            "{base_str}/artifacts/assets/node_b/retry_1/coverage/lcov.info"
+            "{base_str}/cache/artifacts/assets/node_b/retry_1/coverage/lcov.info"
         )));
     }
 
     #[test]
     fn collect_asset_paths_empty_when_no_assets() {
         let tmp = tempfile::tempdir().unwrap();
-        let paths = collect_asset_paths(tmp.path());
+        let paths = collect_asset_paths(&tmp.path().join("cache/artifacts/assets"));
         assert!(paths.is_empty());
     }
 

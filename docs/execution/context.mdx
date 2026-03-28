@@ -199,7 +199,7 @@ Internal keys (prefixed with `internal.`, `current`, `graph.`, `thread.`, `respo
 When a stage produces a large output (over 100KB of serialized JSON), Fabro automatically offloads it to the **artifact store** on disk rather than keeping it in the in-memory context. The context value is replaced with a `file://` pointer:
 
 ```
-response.plan → file:///tmp/logs/artifacts/values/response.plan.json
+ response.plan → file:///tmp/logs/cache/artifacts/values/response.plan.json
 ```
 
 The preamble renderer resolves these pointers and displays a reference to the file path. For remote sandboxes (Docker, Daytona), Fabro syncs artifact files to the sandbox at `{working_directory}/.fabro/artifacts/` so agents can read them.

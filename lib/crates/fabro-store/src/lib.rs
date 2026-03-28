@@ -8,11 +8,13 @@ use futures::Stream;
 mod error;
 mod keys;
 mod memory;
+mod runtime;
 mod slate;
 mod types;
 
 pub use error::{Result, StoreError};
 pub use memory::InMemoryStore;
+pub use runtime::RuntimeState;
 pub use slate::SlateStore;
 pub use types::{
     CatalogRecord, EventEnvelope, EventPayload, NodeSnapshot, NodeVisitRef, RunSnapshot, RunSummary,

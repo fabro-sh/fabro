@@ -10,35 +10,47 @@ const REATTACH_WINDOW: Duration = Duration::from_millis(300);
 #[cfg(not(test))]
 const REATTACH_WINDOW: Duration = Duration::from_secs(30);
 
+#[cfg(test)]
+use std::path::Path;
+
 /// An interviewer that communicates via JSON files in the run directory.
 ///
 /// The engine process writes `interview_request.json` and polls for
 /// `interview_response.json`. The attach process watches for the request
 /// file, prompts the user, and writes the response file.
 pub struct FileInterviewer {
-    run_dir: PathBuf,
+    request_path: PathBuf,
+    response_path: PathBuf,
+    claim_path: PathBuf,
 }
 
 impl FileInterviewer {
-    pub fn new(run_dir: PathBuf) -> Self {
-        Self { run_dir }
+    pub fn new(request_path: PathBuf, response_path: PathBuf, claim_path: PathBuf) -> Self {
+        Self {
+            request_path,
+            response_path,
+            claim_path,
+        }
     }
 
     fn request_path(&self) -> PathBuf {
-        self.run_dir.join("interview_request.json")
+        self.request_path.clone()
     }
 
     fn response_path(&self) -> PathBuf {
-        self.run_dir.join("interview_response.json")
+        self.response_path.clone()
     }
 
     fn claim_path(&self) -> PathBuf {
-        self.run_dir.join("interview_request.claim")
+        self.claim_path.clone()
     }
 
     async fn write_request_atomically(&self, question: &Question) -> std::io::Result<()> {
         let json = serde_json::to_string_pretty(question).expect("Question serialization failed");
         let request_path = self.request_path();
+        if let Some(parent) = request_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
         let temp_path = request_path.with_extension("json.tmp");
         tokio::fs::write(&temp_path, json).await?;
         tokio::fs::rename(temp_path, request_path).await
@@ -133,11 +145,24 @@ mod tests {
     use super::*;
     use crate::{AnswerValue, QuestionType};
 
+    fn interviewer_paths(run_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
+        (
+            run_dir.join("interview_request.json"),
+            run_dir.join("interview_response.json"),
+            run_dir.join("interview_request.claim"),
+        )
+    }
+
     #[tokio::test]
     async fn write_request_poll_response() {
         let dir = tempfile::tempdir().unwrap();
         let run_dir = dir.path().to_path_buf();
-        let interviewer = FileInterviewer::new(run_dir.clone());
+        let (request_path, response_path, claim_path) = interviewer_paths(&run_dir);
+        let interviewer = FileInterviewer::new(
+            request_path.clone(),
+            response_path.clone(),
+            claim_path.clone(),
+        );
 
         let question = Question::new("approve?", QuestionType::YesNo);
 
@@ -145,7 +170,6 @@ mod tests {
         let ask_handle = tokio::spawn(async move { interviewer.ask(question).await });
 
         // Wait for the request file to appear
-        let request_path = run_dir.join("interview_request.json");
         for _ in 0..50 {
             if request_path.exists() {
                 break;
@@ -162,7 +186,6 @@ mod tests {
         // Write a response
         let answer = Answer::yes();
         let response_json = serde_json::to_string_pretty(&answer).unwrap();
-        let response_path = run_dir.join("interview_response.json");
         tokio::fs::write(&response_path, response_json)
             .await
             .unwrap();
@@ -174,13 +197,14 @@ mod tests {
         // Both files should be cleaned up
         assert!(!request_path.exists());
         assert!(!response_path.exists());
-        assert!(!run_dir.join("interview_request.claim").exists());
+        assert!(!claim_path.exists());
     }
 
     #[tokio::test]
     async fn timeout_returns_default() {
         let dir = tempfile::tempdir().unwrap();
-        let interviewer = FileInterviewer::new(dir.path().to_path_buf());
+        let (request_path, response_path, claim_path) = interviewer_paths(dir.path());
+        let interviewer = FileInterviewer::new(request_path, response_path, claim_path);
 
         let mut question = Question::new("approve?", QuestionType::YesNo);
         question.timeout_seconds = Some(0.1);
@@ -194,14 +218,15 @@ mod tests {
     async fn claim_released_without_response_returns_timeout() {
         let dir = tempfile::tempdir().unwrap();
         let run_dir = dir.path().to_path_buf();
-        let interviewer = FileInterviewer::new(run_dir.clone());
+        let (request_path, response_path, claim_path) = interviewer_paths(&run_dir);
+        let interviewer =
+            FileInterviewer::new(request_path.clone(), response_path, claim_path.clone());
 
         let question = Question::new("approve?", QuestionType::YesNo);
 
         let ask_handle = tokio::spawn(async move { interviewer.ask(question).await });
 
         // Wait for request file to appear
-        let request_path = run_dir.join("interview_request.json");
         for _ in 0..50 {
             if request_path.exists() {
                 break;
@@ -211,7 +236,6 @@ mod tests {
         assert!(request_path.exists());
 
         // Simulate attacher creating claim file
-        let claim_path = run_dir.join("interview_request.claim");
         std::fs::write(&claim_path, "12345\n").unwrap();
 
         // Let the poll loop see the claim
@@ -238,7 +262,9 @@ mod tests {
     async fn claim_released_without_response_returns_default() {
         let dir = tempfile::tempdir().unwrap();
         let run_dir = dir.path().to_path_buf();
-        let interviewer = FileInterviewer::new(run_dir.clone());
+        let (request_path, response_path, claim_path) = interviewer_paths(&run_dir);
+        let interviewer =
+            FileInterviewer::new(request_path.clone(), response_path, claim_path.clone());
 
         let mut question = Question::new("approve?", QuestionType::YesNo);
         question.default = Some(Answer::no());
@@ -246,7 +272,6 @@ mod tests {
         let ask_handle = tokio::spawn(async move { interviewer.ask(question).await });
 
         // Wait for request file
-        let request_path = run_dir.join("interview_request.json");
         for _ in 0..50 {
             if request_path.exists() {
                 break;
@@ -256,7 +281,6 @@ mod tests {
         assert!(request_path.exists());
 
         // Simulate attacher creating then deleting claim
-        let claim_path = run_dir.join("interview_request.claim");
         std::fs::write(&claim_path, "12345\n").unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
         std::fs::remove_file(&claim_path).unwrap();
@@ -273,15 +297,18 @@ mod tests {
     async fn claim_released_then_new_attacher_answers() {
         let dir = tempfile::tempdir().unwrap();
         let run_dir = dir.path().to_path_buf();
-        let interviewer = FileInterviewer::new(run_dir.clone());
+        let (request_path, response_path, claim_path) = interviewer_paths(&run_dir);
+        let interviewer = FileInterviewer::new(
+            request_path.clone(),
+            response_path.clone(),
+            claim_path.clone(),
+        );
 
         let question = Question::new("approve?", QuestionType::YesNo);
 
-        let run_dir2 = run_dir.clone();
         let ask_handle = tokio::spawn(async move { interviewer.ask(question).await });
 
         // Wait for request file
-        let request_path = run_dir.join("interview_request.json");
         for _ in 0..50 {
             if request_path.exists() {
                 break;
@@ -291,7 +318,6 @@ mod tests {
         assert!(request_path.exists());
 
         // First attacher creates then releases claim
-        let claim_path = run_dir.join("interview_request.claim");
         std::fs::write(&claim_path, "12345\n").unwrap();
         tokio::time::sleep(Duration::from_millis(150)).await;
         std::fs::remove_file(&claim_path).unwrap();
@@ -302,7 +328,7 @@ mod tests {
 
         let answer = Answer::yes();
         let response_json = serde_json::to_string_pretty(&answer).unwrap();
-        tokio::fs::write(run_dir2.join("interview_response.json"), response_json)
+        tokio::fs::write(response_path, response_json)
             .await
             .unwrap();
 
@@ -317,7 +343,8 @@ mod tests {
     #[tokio::test]
     async fn timeout_without_default_returns_timeout() {
         let dir = tempfile::tempdir().unwrap();
-        let interviewer = FileInterviewer::new(dir.path().to_path_buf());
+        let (request_path, response_path, claim_path) = interviewer_paths(dir.path());
+        let interviewer = FileInterviewer::new(request_path, response_path, claim_path);
 
         let mut question = Question::new("approve?", QuestionType::YesNo);
         question.timeout_seconds = Some(0.1);

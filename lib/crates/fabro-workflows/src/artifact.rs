@@ -32,28 +32,28 @@ enum StoredData {
 
 /// Named, typed storage for large stage outputs.
 pub struct ArtifactStore {
-    base_dir: Option<PathBuf>,
+    values_dir: Option<PathBuf>,
     artifacts: RwLock<HashMap<String, (ArtifactInfo, StoredData)>>,
 }
 
 impl std::fmt::Debug for ArtifactStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ArtifactStore")
-            .field("base_dir", &self.base_dir)
+            .field("values_dir", &self.values_dir)
             .finish_non_exhaustive()
     }
 }
 
 impl ArtifactStore {
     #[must_use]
-    pub fn new(base_dir: Option<PathBuf>) -> Self {
+    pub fn new(values_dir: Option<PathBuf>) -> Self {
         Self {
-            base_dir,
+            values_dir,
             artifacts: RwLock::new(HashMap::new()),
         }
     }
 
-    /// Store an artifact. Large artifacts with a configured `base_dir` are written to disk.
+    /// Store an artifact. Large artifacts with a configured `values_dir` are written to disk.
     ///
     /// # Errors
     ///
@@ -74,13 +74,12 @@ impl ArtifactStore {
             .map_err(|e| FabroError::engine(format!("artifact serialize failed: {e}")))?;
         let size_bytes = serialized.len();
 
-        let is_file_backed = size_bytes > FILE_BACKING_THRESHOLD && self.base_dir.is_some();
+        let is_file_backed = size_bytes > FILE_BACKING_THRESHOLD && self.values_dir.is_some();
 
         let (stored, file_path) = if is_file_backed {
-            let base = self.base_dir.as_ref().expect("base_dir checked above");
-            let artifacts_dir = base.join("artifacts").join("values");
-            std::fs::create_dir_all(&artifacts_dir)?;
-            let path = artifacts_dir.join(format!("{id}.json"));
+            let values_dir = self.values_dir.as_ref().expect("values_dir checked above");
+            std::fs::create_dir_all(values_dir)?;
+            let path = values_dir.join(format!("{id}.json"));
             std::fs::write(&path, &serialized)?;
             (StoredData::FileBacked(path.clone()), Some(path))
         } else {
@@ -175,13 +174,11 @@ impl ArtifactStore {
         }
     }
 
-    /// Returns the absolute path to the artifacts directory under this store's base_dir.
-    /// Returns `None` if no `base_dir` is configured.
+    /// Returns the configured values directory.
+    /// Returns `None` if no file-backed storage is configured.
     #[must_use]
-    pub fn artifacts_dir(&self) -> Option<PathBuf> {
-        self.base_dir
-            .as_ref()
-            .map(|b| b.join("artifacts").join("values"))
+    pub fn values_dir(&self) -> Option<PathBuf> {
+        self.values_dir.clone()
     }
 
     /// Remove all artifacts. Also deletes file-backed data from disk.
@@ -247,7 +244,8 @@ pub fn is_artifact_pointer(value: &Value) -> bool {
 
 /// Resolve an artifact pointer to the base name displayed in preamble rendering.
 ///
-/// Given `"file:///tmp/logs/artifacts/response.plan.json"`, returns `"See: /tmp/logs/artifacts/response.plan.json"`.
+/// Given `"file:///tmp/logs/cache/artifacts/values/response.plan.json"`, returns
+/// `"See: /tmp/logs/cache/artifacts/values/response.plan.json"`.
 #[must_use]
 pub fn format_artifact_reference(path: &str) -> String {
     format!("See: {path}")
@@ -377,10 +375,7 @@ mod tests {
         let info = store.store("big", "large artifact", data.clone()).unwrap();
         assert!(info.is_file_backed);
         assert!(info.size_bytes > FILE_BACKING_THRESHOLD);
-        assert_eq!(
-            info.file_path,
-            Some(dir.path().join("artifacts").join("values").join("big.json"))
-        );
+        assert_eq!(info.file_path, Some(dir.path().join("big.json")));
 
         let retrieved = store.retrieve("big").unwrap();
         assert_eq!(retrieved, data);
@@ -395,7 +390,7 @@ mod tests {
         let data = serde_json::json!(large_string);
         store.store("big", "large", data).unwrap();
 
-        let file_path = dir.path().join("artifacts").join("values").join("big.json");
+        let file_path = dir.path().join("big.json");
         assert!(file_path.exists());
 
         store.remove("big");
@@ -403,7 +398,7 @@ mod tests {
     }
 
     #[test]
-    fn small_artifact_stays_in_memory_even_with_base_dir() {
+    fn small_artifact_stays_in_memory_even_with_values_dir() {
         let dir = tempfile::tempdir().unwrap();
         let store = ArtifactStore::new(Some(dir.path().to_path_buf()));
 
@@ -438,12 +433,7 @@ mod tests {
         let path = artifact_path(pointer).expect("should be an artifact pointer");
         assert_eq!(
             path,
-            dir.path()
-                .join("artifacts")
-                .join("values")
-                .join("response.plan.json")
-                .to_str()
-                .unwrap()
+            dir.path().join("response.plan.json").to_str().unwrap()
         );
 
         // The artifact store should contain the original value
@@ -451,12 +441,7 @@ mod tests {
         assert_eq!(retrieved, serde_json::json!(large_string));
 
         // File should exist on disk
-        assert!(dir
-            .path()
-            .join("artifacts")
-            .join("values")
-            .join("response.plan.json")
-            .exists());
+        assert!(dir.path().join("response.plan.json").exists());
     }
 
     #[test]
@@ -476,11 +461,19 @@ mod tests {
 
     #[test]
     fn artifact_path_extracts_path_from_pointer() {
-        let value = serde_json::json!("file:///tmp/logs/artifacts/response.plan.json");
+        let value = serde_json::json!("file:///tmp/logs/cache/artifacts/values/response.plan.json");
         assert_eq!(
             artifact_path(&value),
-            Some("/tmp/logs/artifacts/response.plan.json")
+            Some("/tmp/logs/cache/artifacts/values/response.plan.json")
         );
+    }
+
+    #[test]
+    fn values_dir_returns_configured_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ArtifactStore::new(Some(dir.path().to_path_buf()));
+
+        assert_eq!(store.values_dir(), Some(dir.path().to_path_buf()));
     }
 
     #[test]

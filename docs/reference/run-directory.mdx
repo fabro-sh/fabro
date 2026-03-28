@@ -69,7 +69,12 @@ Manager nodes that run sub-workflows write a nested `child/` directory containin
 
 **`worktree/`** — When running in git checkpoint mode, Fabro creates a Git worktree here as the working directory for agents and commands.
 
-**`assets/`** — Test artifacts collected from the execution environment (Playwright reports, JUnit XML, Cypress screenshots/videos). Located at `worktree/assets/` for local runs or within node directories for remote sandbox runs.
+**`runtime/`** — Local-only runtime files, including interview IPC files used by detached runs and `fabro attach`.
+
+**`cache/`** — Local filesystem cache for file-backed artifacts and captured test assets:
+
+- `cache/artifacts/values/` — large context values offloaded from checkpoints
+- `cache/artifacts/assets/` — captured test artifacts organized by node and retry
 
 ## Browsing runs
 
@@ -98,6 +103,21 @@ fabro ps --filter workflow=my-workflow
 │   ├── final.patch
 │   ├── retro.json
 │   ├── cli.log
+│   ├── runtime/
+│   │   ├── interview_request.json
+│   │   ├── interview_response.json
+│   │   └── interview_request.claim
+│   ├── cache/
+│   │   └── artifacts/
+│   │       ├── values/
+│   │       │   ├── response.plan.json
+│   │       │   └── command.output.json
+│   │       └── assets/
+│   │           └── test/
+│   │               └── retry_1/
+│   │                   ├── test-results/
+│   │                   │   └── screenshot.png
+│   │                   └── manifest.json
 │   ├── nodes/
 │   │   ├── plan/
 │   │   │   ├── prompt.md
@@ -126,7 +146,5 @@ fabro ps --filter workflow=my-workflow
 │   │           ├── start.json
 │   │           ├── checkpoint.json
 │   │           └── nodes/
-│   ├── worktree/                     # Git worktree (git checkpoint mode)
-│   │   └── assets/                   # Test artifacts
-│   └── assets/                       # Or here for remote sandboxes
+│   └── worktree/                     # Git worktree (git checkpoint mode)
 ```

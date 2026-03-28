@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use assert_cmd::Command;
+use fabro_store::RuntimeState;
 use predicates;
 use serde_json::Value;
 
@@ -782,7 +783,7 @@ fn local_run_lifecycle() {
     );
 
     // 6. Seed a synthetic asset so asset list/cp have something to work with.
-    let asset_dir = run_dir.join("artifacts/assets/step1/retry_0");
+    let asset_dir = RuntimeState::new(&run_dir).asset_stage_dir("step1", 0);
     std::fs::create_dir_all(&asset_dir).unwrap();
     std::fs::write(asset_dir.join("output.txt"), "asset-content-42").unwrap();
     std::fs::write(

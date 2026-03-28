@@ -11,6 +11,7 @@ use fabro_interview::{
     QueueInterviewer, RecordingInterviewer,
 };
 use fabro_llm::provider::Provider;
+use fabro_store::RuntimeState;
 use fabro_validate::{validate, validate_or_raise, Severity};
 use fabro_workflows::context::Context;
 use fabro_workflows::error::{FabroError, FailureSignatureExt};
@@ -8729,11 +8730,7 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
     );
 
     // The artifact file should exist on disk
-    let artifact_file = dir
-        .path()
-        .join("artifacts")
-        .join("values")
-        .join("response.big_output.json");
+    let artifact_file = RuntimeState::new(dir.path()).artifact_value_path("response.big_output");
     assert!(
         artifact_file.exists(),
         "artifact file should exist at {artifact_file:?}"
@@ -12840,12 +12837,7 @@ async fn asset_collection_local_sandbox_success() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Check that asset files were collected into the stage directory
-    let assets_dir = run_dir
-        .path()
-        .join("artifacts")
-        .join("assets")
-        .join("create_assets")
-        .join("retry_1");
+    let assets_dir = RuntimeState::new(run_dir.path()).asset_stage_dir("create_assets", 1);
 
     let report_path = assets_dir.join("test-results/report.xml");
     assert!(
@@ -12955,12 +12947,7 @@ async fn asset_collection_local_sandbox_on_failure() {
     // Assets should still be collected regardless of intermediate node failures.
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let assets_dir = run_dir
-        .path()
-        .join("artifacts")
-        .join("assets")
-        .join("create_assets")
-        .join("retry_1");
+    let assets_dir = RuntimeState::new(run_dir.path()).asset_stage_dir("create_assets", 1);
 
     let report_path = assets_dir.join("test-results/report.xml");
     assert!(
@@ -13050,12 +13037,7 @@ async fn asset_collection_docker_sandbox() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let assets_dir = run_dir
-        .path()
-        .join("artifacts")
-        .join("assets")
-        .join("create_assets")
-        .join("retry_1");
+    let assets_dir = RuntimeState::new(run_dir.path()).asset_stage_dir("create_assets", 1);
 
     let report_path = assets_dir.join("test-results/report.xml");
     assert!(

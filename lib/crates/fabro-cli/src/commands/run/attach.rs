@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Result};
 
 use fabro_interview::{AnswerValue, ConsoleInterviewer};
+use fabro_store::RuntimeState;
 use fabro_util::terminal::Styles;
 use fabro_workflows::records::{ConclusionExt, RunRecordExt};
 use fabro_workflows::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
@@ -33,8 +34,9 @@ pub async fn attach_run(
     let progress_path = run_dir.join("progress.jsonl");
     let conclusion_path = run_dir.join("conclusion.json");
     let status_path = run_dir.join("status.json");
-    let interview_request_path = run_dir.join("interview_request.json");
-    let interview_response_path = run_dir.join("interview_response.json");
+    let runtime_state = RuntimeState::new(run_dir);
+    let runtime_interview_paths = InterviewPaths::from_runtime_state(&runtime_state);
+    let legacy_interview_paths = InterviewPaths::from_base_dir(run_dir);
 
     let mut engine_guard = engine_child.map(EngineChildGuard::new);
 
@@ -163,32 +165,41 @@ pub async fn attach_run(
         }
 
         // Check for interview request
-        if interview_request_path.exists() && !interview_response_path.exists() {
-            if let Some(_claim_guard) = InterviewClaimGuard::acquire(run_dir) {
-                if let Ok(request_data) = std::fs::read_to_string(&interview_request_path) {
-                    if let Ok(question) =
-                        serde_json::from_str::<fabro_interview::Question>(&request_data)
+        if let Some(interview_paths) =
+            active_interview_paths(&runtime_interview_paths, &legacy_interview_paths)
+        {
+            if !interview_paths.response_path.exists() {
+                if let Some(_claim_guard) = InterviewClaimGuard::acquire(&interview_paths.base_dir)
+                {
+                    if let Ok(request_data) = std::fs::read_to_string(&interview_paths.request_path)
                     {
-                        // Hide progress bars during interview
-                        progress_ui.hide_bars();
+                        if let Ok(question) =
+                            serde_json::from_str::<fabro_interview::Question>(&request_data)
+                        {
+                            // Hide progress bars during interview
+                            progress_ui.hide_bars();
 
-                        // Prompt user via ConsoleInterviewer
-                        let interviewer = ConsoleInterviewer::new(styles);
-                        let answer =
-                            fabro_interview::Interviewer::ask(&interviewer, question).await;
+                            // Prompt user via ConsoleInterviewer
+                            let interviewer = ConsoleInterviewer::new(styles);
+                            let answer =
+                                fabro_interview::Interviewer::ask(&interviewer, question).await;
 
-                        // Show progress bars again before any return path.
-                        progress_ui.show_bars();
+                            // Show progress bars again before any return path.
+                            progress_ui.show_bars();
 
-                        if answer_requires_reattach(&answer) {
-                            if let Some(guard) = engine_guard.as_mut() {
-                                guard.defuse();
+                            if answer_requires_reattach(&answer) {
+                                if let Some(guard) = engine_guard.as_mut() {
+                                    guard.defuse();
+                                }
+                                eprintln!("{INTERVIEW_UNANSWERED_MESSAGE}");
+                                return Ok(ExitCode::from(1));
                             }
-                            eprintln!("{INTERVIEW_UNANSWERED_MESSAGE}");
-                            return Ok(ExitCode::from(1));
-                        }
 
-                        write_interview_response_atomically(&interview_response_path, &answer)?;
+                            write_interview_response_atomically(
+                                &interview_paths.response_path,
+                                &answer,
+                            )?;
+                        }
                     }
                 }
             }
@@ -287,8 +298,47 @@ fn progress_file_is_empty(path: &Path) -> bool {
         .unwrap_or(true)
 }
 
-fn interview_claim_path(run_dir: &Path) -> std::path::PathBuf {
-    run_dir.join("interview_request.claim")
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InterviewPaths {
+    base_dir: PathBuf,
+    request_path: PathBuf,
+    response_path: PathBuf,
+}
+
+impl InterviewPaths {
+    fn from_base_dir(base_dir: &Path) -> Self {
+        let base_dir = base_dir.to_path_buf();
+        Self {
+            request_path: base_dir.join("interview_request.json"),
+            response_path: base_dir.join("interview_response.json"),
+            base_dir,
+        }
+    }
+
+    fn from_runtime_state(runtime_state: &RuntimeState) -> Self {
+        Self {
+            base_dir: runtime_state.runtime_dir(),
+            request_path: runtime_state.interview_request_path(),
+            response_path: runtime_state.interview_response_path(),
+        }
+    }
+}
+
+fn active_interview_paths(
+    runtime_paths: &InterviewPaths,
+    legacy_paths: &InterviewPaths,
+) -> Option<InterviewPaths> {
+    if runtime_paths.request_path.exists() {
+        Some(runtime_paths.clone())
+    } else if legacy_paths.request_path.exists() {
+        Some(legacy_paths.clone())
+    } else {
+        None
+    }
+}
+
+fn interview_claim_path(base_dir: &Path) -> PathBuf {
+    base_dir.join("interview_request.claim")
 }
 
 struct InterviewClaimGuard {
@@ -296,10 +346,10 @@ struct InterviewClaimGuard {
 }
 
 impl InterviewClaimGuard {
-    fn acquire(run_dir: &Path) -> Option<Self> {
-        if try_claim_interview_request(run_dir) {
+    fn acquire(base_dir: &Path) -> Option<Self> {
+        if try_claim_interview_request(base_dir) {
             Some(Self {
-                claim_path: interview_claim_path(run_dir),
+                claim_path: interview_claim_path(base_dir),
             })
         } else {
             None
@@ -340,8 +390,12 @@ impl Drop for EngineChildGuard {
     }
 }
 
-fn try_claim_interview_request(run_dir: &Path) -> bool {
-    let claim_path = interview_claim_path(run_dir);
+fn try_claim_interview_request(base_dir: &Path) -> bool {
+    if std::fs::create_dir_all(base_dir).is_err() {
+        return false;
+    }
+
+    let claim_path = interview_claim_path(base_dir);
     if let Ok(existing) = std::fs::read_to_string(&claim_path) {
         if let Ok(pid) = existing.trim().parse::<u32>() {
             if process_alive(pid) {
@@ -373,6 +427,9 @@ fn write_interview_response_atomically(
     answer: &fabro_interview::Answer,
 ) -> Result<()> {
     let response_json = serde_json::to_string_pretty(answer)?;
+    if let Some(parent) = response_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let temp_path = response_path.with_extension("json.tmp");
     std::fs::write(&temp_path, response_json)?;
     std::fs::rename(temp_path, response_path)?;
@@ -520,6 +577,38 @@ mod tests {
         }
 
         assert!(!interview_claim_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn active_interview_paths_prefers_runtime_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime_state = RuntimeState::new(dir.path());
+        let runtime_paths = InterviewPaths::from_runtime_state(&runtime_state);
+        let legacy_paths = InterviewPaths::from_base_dir(dir.path());
+
+        std::fs::create_dir_all(runtime_state.runtime_dir()).unwrap();
+        std::fs::write(&runtime_paths.request_path, "{}").unwrap();
+        std::fs::write(&legacy_paths.request_path, "{}").unwrap();
+
+        assert_eq!(
+            active_interview_paths(&runtime_paths, &legacy_paths),
+            Some(runtime_paths)
+        );
+    }
+
+    #[test]
+    fn active_interview_paths_falls_back_to_legacy_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime_state = RuntimeState::new(dir.path());
+        let runtime_paths = InterviewPaths::from_runtime_state(&runtime_state);
+        let legacy_paths = InterviewPaths::from_base_dir(dir.path());
+
+        std::fs::write(&legacy_paths.request_path, "{}").unwrap();
+
+        assert_eq!(
+            active_interview_paths(&runtime_paths, &legacy_paths),
+            Some(legacy_paths)
+        );
     }
 
     #[test]

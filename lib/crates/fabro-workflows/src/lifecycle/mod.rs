@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use async_trait::async_trait;
+use fabro_store::RuntimeState;
 
 use fabro_core::error::Result as CoreResult;
 use fabro_core::graph::NodeSpec;
@@ -83,12 +84,15 @@ impl WorkflowLifecycle {
         run_options: Arc<RunOptions>,
         is_resume: bool,
     ) -> Self {
+        let runtime_state = RuntimeState::new(&run_dir);
         let restarted_from: Arc<Mutex<Option<(String, String)>>> = Arc::new(Mutex::new(None));
         let loop_restart_signature_limit = graph.loop_restart_signature_limit();
         let checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>> =
             Arc::new(Mutex::new(None));
         let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let artifact_store = Arc::new(Mutex::new(ArtifactStore::new(Some(run_dir.clone()))));
+        let artifact_store = Arc::new(Mutex::new(ArtifactStore::new(Some(
+            runtime_state.artifact_values_dir(),
+        ))));
 
         let circuit_breaker = Arc::new(CircuitBreakerLifecycle::new(loop_restart_signature_limit));
 
@@ -157,9 +161,9 @@ impl WorkflowLifecycle {
         let artifact = ArtifactLifecycle::new(
             Arc::clone(&sandbox),
             Arc::clone(&artifact_store),
-            Some(run_dir.clone()),
+            Some(runtime_state.artifact_values_dir()),
             Arc::clone(&emitter),
-            run_dir,
+            runtime_state.assets_dir(),
             run_options.asset_globs().to_vec(),
         );
 

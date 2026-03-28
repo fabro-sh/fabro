@@ -34,6 +34,7 @@ fabro-validate = { path = "../fabro-validate" }
 fabro-workflows = { path = "../fabro-workflows" }
 fabro-api = { path = "../fabro-api", optional = true }
 fabro-telemetry = { path = "../fabro-telemetry" }
+fabro-store = { path = "../fabro-store" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 clap.workspace = true
