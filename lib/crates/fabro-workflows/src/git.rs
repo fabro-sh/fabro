@@ -202,6 +202,32 @@ pub fn push_branch(repo: &Path, remote: &str, branch: &str) -> Result<()> {
     run_git_push(git_cmd(repo).args(["push", remote, branch]))
 }
 
+/// Push run and metadata branches to origin if a remote tracking branch exists.
+///
+/// Callers supply pre-built refspecs so they control force-push (`+` prefix).
+pub fn push_run_branches(
+    store: &Store,
+    probe_branch: &str,
+    run_refspec: Option<&str>,
+    meta_refspec: &str,
+    label: &str,
+) -> anyhow::Result<()> {
+    let repo_path = store.repo_dir();
+    let remote_ref = format!("refs/remotes/origin/{probe_branch}");
+    if store.repo().find_reference(&remote_ref).is_err() {
+        return Ok(());
+    }
+    eprintln!("Pushing {label} branches to origin...");
+    if let Some(refspec) = run_refspec {
+        push_branch(repo_path, "origin", refspec)
+            .map_err(|e| anyhow::anyhow!("failed to push run branch: {e}"))?;
+    }
+    push_branch(repo_path, "origin", meta_refspec)
+        .map_err(|e| anyhow::anyhow!("failed to push metadata branch: {e}"))?;
+    eprintln!("Remote refs updated.");
+    Ok(())
+}
+
 /// Error from [`blocking_push_with_timeout`].
 pub enum BlockingPushError {
     /// The git push itself failed.

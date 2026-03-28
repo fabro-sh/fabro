@@ -134,29 +134,16 @@ fn fork_from_entry(
         .map_err(|e| anyhow::anyhow!("failed to write metadata entries: {e}"))?;
 
     if push {
-        let repo_path = store
-            .repo()
-            .workdir()
-            .or_else(|| store.repo().path().parent())
-            .unwrap_or(store.repo().path());
-
         let source_run_branch = format!("{}{source_run_id}", crate::git::RUN_BRANCH_PREFIX);
-        let remote_ref = format!("refs/remotes/origin/{source_run_branch}");
-        let has_remote_tracking = store.repo().find_reference(&remote_ref).is_ok();
-
-        if has_remote_tracking {
-            eprintln!("Pushing new branches to origin...");
-
-            let run_refspec = format!("refs/heads/{new_run_branch}:refs/heads/{new_run_branch}");
-            crate::git::push_branch(repo_path, "origin", &run_refspec)
-                .map_err(|e| anyhow::anyhow!("failed to push run branch: {e}"))?;
-
-            let meta_refspec = format!("refs/heads/{new_meta_branch}:refs/heads/{new_meta_branch}");
-            crate::git::push_branch(repo_path, "origin", &meta_refspec)
-                .map_err(|e| anyhow::anyhow!("failed to push metadata branch: {e}"))?;
-
-            eprintln!("Remote refs updated.");
-        }
+        let run_refspec = format!("refs/heads/{new_run_branch}:refs/heads/{new_run_branch}");
+        let meta_refspec = format!("refs/heads/{new_meta_branch}:refs/heads/{new_meta_branch}");
+        crate::git::push_run_branches(
+            store,
+            &source_run_branch,
+            Some(&run_refspec),
+            &meta_refspec,
+            "new",
+        )?;
     }
 
     Ok(new_run_id)

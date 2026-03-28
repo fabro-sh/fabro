@@ -280,30 +280,18 @@ fn rewind_to_entry(store: &Store, run_id: &str, entry: &TimelineEntry, push: boo
     }
 
     if push {
-        let repo_path = store
-            .repo()
-            .workdir()
-            .or_else(|| store.repo().path().parent())
-            .unwrap_or(store.repo().path());
-
-        let remote_ref = format!("refs/remotes/origin/{run_branch}");
-        let has_remote_tracking = store.repo().find_reference(&remote_ref).is_ok();
-
-        if has_remote_tracking {
-            eprintln!("Force-pushing rewound branches to origin...");
-
-            if entry.run_commit_sha.is_some() {
-                let refspec = format!("+refs/heads/{run_branch}:refs/heads/{run_branch}");
-                crate::git::push_branch(repo_path, "origin", &refspec)
-                    .map_err(|e| anyhow::anyhow!("failed to push run branch: {e}"))?;
-            }
-
-            let meta_refspec = format!("+refs/heads/{meta_branch}:refs/heads/{meta_branch}");
-            crate::git::push_branch(repo_path, "origin", &meta_refspec)
-                .map_err(|e| anyhow::anyhow!("failed to push metadata branch: {e}"))?;
-
-            eprintln!("Remote refs updated.");
-        }
+        let run_refspec = entry
+            .run_commit_sha
+            .as_ref()
+            .map(|_| format!("+refs/heads/{run_branch}:refs/heads/{run_branch}"));
+        let meta_refspec = format!("+refs/heads/{meta_branch}:refs/heads/{meta_branch}");
+        crate::git::push_run_branches(
+            store,
+            &run_branch,
+            run_refspec.as_deref(),
+            &meta_refspec,
+            "rewound",
+        )?;
     }
 
     Ok(())

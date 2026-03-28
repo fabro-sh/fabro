@@ -106,6 +106,13 @@ impl Store {
         &self.repo
     }
 
+    pub fn repo_dir(&self) -> &Path {
+        self.repo
+            .workdir()
+            .or_else(|| self.repo.path().parent())
+            .unwrap_or(self.repo.path())
+    }
+
     /// Store bytes as a git blob.
     pub fn write_blob(&self, content: &[u8]) -> Result<Oid> {
         Ok(self.repo.blob(content)?)
