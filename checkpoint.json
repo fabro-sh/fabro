@@ -1,0 +1,51 @@
+{
+  "timestamp": "2026-03-28T21:16:47.949909Z",
+  "current_node": "run_tests",
+  "completed_nodes": [
+    "start",
+    "run_tests"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "response.run_tests": "[Simulated] Response for stage: run_tests",
+    "failure_signature": "",
+    "internal.retry_count.run_tests": 0,
+    "internal.fidelity": "compact",
+    "internal.work_dir": "/Users/bhelmkamp/.fabro/runs/20260328-dry-run-01KMV4WZJZTHJET58CRNHQ29MS/worktree",
+    "internal.thread_id": "start",
+    "outcome": "success",
+    "current.preamble": "Goal: Run tests and report results\n",
+    "internal.retry_count.start": 0,
+    "last_response": "[Simulated] Response for stage: run_tests",
+    "internal.node_visit_count": 1,
+    "thread.start.current_node": "run_tests",
+    "last_stage": "run_tests",
+    "failure_class": "",
+    "graph.goal": "Run tests and report results",
+    "internal.run_id": "01KMV4WZJZTHJET58CRNHQ29MS",
+    "graph.rankdir": "LR",
+    "current_node": "run_tests"
+  },
+  "node_outcomes": {
+    "start": {
+      "status": "success",
+      "notes": "[Simulated] start",
+      "usage": null
+    },
+    "run_tests": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "run_tests",
+        "last_response": "[Simulated] Response for stage: run_tests",
+        "response.run_tests": "[Simulated] Response for stage: run_tests"
+      },
+      "notes": "[Simulated] run_tests",
+      "usage": null
+    }
+  },
+  "next_node_id": "report",
+  "node_visits": {
+    "run_tests": 1,
+    "start": 1
+  }
+}
