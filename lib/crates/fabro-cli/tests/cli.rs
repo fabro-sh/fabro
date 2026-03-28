@@ -1271,8 +1271,8 @@ digraph Test {
     );
 }
 
-// Bug 3: attach loop must delete interview_request.json after handling it
-// to prevent re-prompting the user on the next poll iteration.
+// Bug 3: attach loop must leave interview_request.json in place until the
+// engine consumes interview_response.json, so reattach remains safe.
 #[test]
 fn bug3_attach_leaves_interview_request_until_engine_consumes_response() {
     let home = tempfile::tempdir().unwrap();
