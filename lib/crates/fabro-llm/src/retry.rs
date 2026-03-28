@@ -2,6 +2,7 @@ use crate::error::SdkError;
 use crate::types::RetryPolicy;
 use std::future::Future;
 use std::time::Duration;
+use tokio::time;
 use tracing::warn;
 
 /// Retry a fallible async operation according to the given policy (Section 6.6).
@@ -51,7 +52,7 @@ where
                     on_retry(&err, attempt, delay);
                 }
 
-                tokio::time::sleep(delay).await;
+                time::sleep(delay).await;
 
                 attempt += 1;
             }

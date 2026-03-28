@@ -3,7 +3,9 @@
 use std::time::Instant;
 
 use async_trait::async_trait;
+use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use tokio::sync::OnceCell;
 
 use crate::{shell_quote, SandboxEvent};
 
@@ -41,7 +43,7 @@ pub struct GitCloneParams {
 
 /// Wrap a shell command in base64 encoding to avoid escaping issues.
 pub(crate) fn wrap_bash_command(command: &str) -> String {
-    let encoded = base64::engine::general_purpose::STANDARD.encode(command);
+    let encoded = STANDARD.encode(command);
     format!("echo '{encoded}' | base64 -d | sh")
 }
 
@@ -68,7 +70,7 @@ pub(crate) async fn clone_repo(
     working_dir: &str,
     params: &GitCloneParams,
     github_app: Option<&fabro_github::GitHubAppCredentials>,
-    origin_url: &tokio::sync::OnceCell<String>,
+    origin_url: &OnceCell<String>,
     emit: &(dyn Fn(SandboxEvent) + Send + Sync),
 ) -> Result<(), String> {
     emit(SandboxEvent::GitCloneStarted {

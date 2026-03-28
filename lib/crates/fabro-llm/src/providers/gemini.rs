@@ -5,14 +5,17 @@ use crate::error::{
     error_from_grpc_status, error_from_status_code, ProviderErrorDetail, ProviderErrorKind,
     SdkError,
 };
-use crate::provider::{ProviderAdapter, StreamEventStream};
+use crate::provider::{validate_tool_choice, ProviderAdapter, StreamEventStream};
 use crate::providers::common::{
-    extract_system_prompt, parse_error_body, parse_rate_limit_headers, parse_retry_after,
+    self as common, extract_system_prompt, parse_error_body, parse_rate_limit_headers,
+    parse_retry_after,
 };
 use crate::types::{
-    ContentPart, FinishReason, Message, Request, Response, ResponseFormat, ResponseFormatType,
-    Role, StreamEvent, ThinkingData, ToolCall, ToolChoice, ToolDefinition, Usage,
+    AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response,
+    ResponseFormat, ResponseFormatType, Role, StreamEvent, ThinkingData, ToolCall, ToolChoice,
+    ToolDefinition, Usage,
 };
+use reqwest::header::HeaderMap;
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -43,7 +46,7 @@ impl Adapter {
     }
 
     #[must_use]
-    pub fn with_timeout(self, timeout: crate::types::AdapterTimeout) -> Self {
+    pub fn with_timeout(self, timeout: AdapterTimeout) -> Self {
         Self {
             http: self.http.with_timeout(timeout),
         }
@@ -251,8 +254,8 @@ fn translate_messages(messages: &[&Message]) -> Vec<Content> {
                             })
                         },
                         |url| {
-                            if crate::providers::common::is_file_path(url) {
-                                match crate::providers::common::load_file_as_base64(url) {
+                            if common::is_file_path(url) {
+                                match common::load_file_as_base64(url) {
                                     Ok((b64, mime)) => Some(serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})),
                                     Err(_) => None,
                                 }
@@ -273,8 +276,8 @@ fn translate_messages(messages: &[&Message]) -> Vec<Content> {
                             })
                         },
                         |url| {
-                            if crate::providers::common::is_file_path(url) {
-                                match crate::providers::common::load_file_as_base64(url) {
+                            if common::is_file_path(url) {
+                                match common::load_file_as_base64(url) {
                                     Ok((b64, mime)) => Some(serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})),
                                     Err(_) => None,
                                 }
@@ -295,8 +298,8 @@ fn translate_messages(messages: &[&Message]) -> Vec<Content> {
                             })
                         },
                         |url| {
-                            if crate::providers::common::is_file_path(url) {
-                                match crate::providers::common::load_file_as_base64(url) {
+                            if common::is_file_path(url) {
+                                match common::load_file_as_base64(url) {
                                     Ok((b64, mime)) => Some(serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})),
                                     Err(_) => None,
                                 }
@@ -505,7 +508,7 @@ fn parse_usage(metadata: Option<&UsageMetadata>) -> Usage {
 /// Like `send_and_read_response` but uses gRPC status code mapping when available.
 async fn send_gemini_response(
     request: reqwest::RequestBuilder,
-) -> Result<(String, reqwest::header::HeaderMap), SdkError> {
+) -> Result<(String, HeaderMap), SdkError> {
     let http_resp = request.send().await.map_err(|e| {
         if e.is_timeout() {
             SdkError::request_timeout(format!("gemini: {e}"), e)
@@ -589,7 +592,7 @@ async fn send_streaming_request(
 fn process_sse_stream(
     http_resp: reqwest::Response,
     model: String,
-    rate_limit: Option<crate::types::RateLimitInfo>,
+    rate_limit: Option<RateLimitInfo>,
     stream_read_timeout: Option<std::time::Duration>,
 ) -> StreamEventStream {
     Box::pin(stream::unfold(
@@ -698,14 +701,14 @@ struct SseStreamState {
     /// Whether we have emitted the `Finish` event.
     finished: bool,
     /// Rate limit info parsed from HTTP response headers.
-    rate_limit: Option<crate::types::RateLimitInfo>,
+    rate_limit: Option<RateLimitInfo>,
 }
 
 impl SseStreamState {
     fn new(
         http_resp: reqwest::Response,
         model: String,
-        rate_limit: Option<crate::types::RateLimitInfo>,
+        rate_limit: Option<RateLimitInfo>,
         stream_read_timeout: Option<std::time::Duration>,
     ) -> Self {
         Self {
@@ -884,7 +887,7 @@ impl ProviderAdapter for Adapter {
 
     async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
         if let Some(tc) = &request.tool_choice {
-            crate::provider::validate_tool_choice(self, tc)?;
+            validate_tool_choice(self, tc)?;
         }
         let api_body = build_api_request(request);
 
@@ -950,7 +953,7 @@ impl ProviderAdapter for Adapter {
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
         if let Some(tc) = &request.tool_choice {
-            crate::provider::validate_tool_choice(self, tc)?;
+            validate_tool_choice(self, tc)?;
         }
         let api_body = build_api_request(request);
 

@@ -6,6 +6,8 @@ use crate::types::{AgentEvent, Turn};
 use fabro_llm::types::ToolDefinition;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
+use tokio::sync::Mutex as AsyncMutex;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 pub type SessionFactory = Arc<dyn Fn() -> Session + Send + Sync>;
@@ -26,7 +28,7 @@ pub enum SubAgentStatus {
 }
 
 pub struct SubAgent {
-    task: Option<tokio::task::JoinHandle<Result<SubAgentResult, AgentError>>>,
+    task: Option<JoinHandle<Result<SubAgentResult, AgentError>>>,
     followup_queue: Arc<Mutex<VecDeque<String>>>,
     cancel_token: CancellationToken,
     depth: usize,
@@ -303,7 +305,7 @@ impl SubAgentManager {
 }
 
 pub fn make_spawn_agent_tool(
-    manager: Arc<tokio::sync::Mutex<SubAgentManager>>,
+    manager: Arc<AsyncMutex<SubAgentManager>>,
     session_factory: SessionFactory,
     current_depth: usize,
 ) -> RegisteredTool {
@@ -358,7 +360,7 @@ pub fn make_spawn_agent_tool(
     }
 }
 
-pub fn make_send_input_tool(manager: Arc<tokio::sync::Mutex<SubAgentManager>>) -> RegisteredTool {
+pub fn make_send_input_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name: "send_input".into(),
@@ -393,7 +395,7 @@ pub fn make_send_input_tool(manager: Arc<tokio::sync::Mutex<SubAgentManager>>) -
     }
 }
 
-pub fn make_wait_tool(manager: Arc<tokio::sync::Mutex<SubAgentManager>>) -> RegisteredTool {
+pub fn make_wait_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name: "wait".into(),
@@ -425,7 +427,7 @@ pub fn make_wait_tool(manager: Arc<tokio::sync::Mutex<SubAgentManager>>) -> Regi
     }
 }
 
-pub fn make_close_agent_tool(manager: Arc<tokio::sync::Mutex<SubAgentManager>>) -> RegisteredTool {
+pub fn make_close_agent_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
             name: "close_agent".into(),

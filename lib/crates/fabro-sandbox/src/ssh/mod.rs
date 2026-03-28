@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
+use crate::sandbox::resolve_path;
 use crate::shell_quote;
 use crate::ssh_common;
 use crate::{
@@ -11,6 +12,8 @@ use crate::{
     SandboxEventCallback,
 };
 use async_trait::async_trait;
+use tokio::fs;
+use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
 pub use crate::ssh_common::{GitCloneParams, SshOutput, SshRunner};
@@ -25,14 +28,14 @@ const PROVIDER: &str = "ssh";
 /// Unlike ExeSandbox, there is no VM lifecycle management -- the host
 /// must already be running and accessible via SSH.
 pub struct SshSandbox {
-    ssh: tokio::sync::OnceCell<Box<dyn SshRunner>>,
+    ssh: OnceCell<Box<dyn SshRunner>>,
     config: SshConfig,
     clone_params: Option<GitCloneParams>,
     run_id: Option<String>,
     github_app: Option<fabro_github::GitHubAppCredentials>,
-    rg_available: tokio::sync::OnceCell<bool>,
+    rg_available: OnceCell<bool>,
     event_callback: Option<SandboxEventCallback>,
-    origin_url: tokio::sync::OnceCell<String>,
+    origin_url: OnceCell<String>,
 }
 
 impl SshSandbox {
@@ -44,21 +47,21 @@ impl SshSandbox {
         github_app: Option<fabro_github::GitHubAppCredentials>,
     ) -> Self {
         Self {
-            ssh: tokio::sync::OnceCell::new(),
+            ssh: OnceCell::new(),
             config,
             clone_params,
             run_id,
             github_app,
-            rg_available: tokio::sync::OnceCell::const_new(),
+            rg_available: OnceCell::const_new(),
             event_callback: None,
-            origin_url: tokio::sync::OnceCell::new(),
+            origin_url: OnceCell::new(),
         }
     }
 
     /// Create an `SshSandbox` from a pre-connected SSH runner.
     /// Used for reconnection (e.g. `fabro cp`) when the host is already known.
     pub fn from_existing(ssh: Box<dyn SshRunner>, config: SshConfig) -> Self {
-        let ssh_cell = tokio::sync::OnceCell::new();
+        let ssh_cell = OnceCell::new();
         let _ = ssh_cell.set(ssh);
         Self {
             ssh: ssh_cell,
@@ -66,9 +69,9 @@ impl SshSandbox {
             clone_params: None,
             run_id: None,
             github_app: None,
-            rg_available: tokio::sync::OnceCell::const_new(),
+            rg_available: OnceCell::const_new(),
             event_callback: None,
-            origin_url: tokio::sync::OnceCell::new(),
+            origin_url: OnceCell::new(),
         }
     }
 
@@ -111,7 +114,7 @@ impl SshSandbox {
     }
 
     fn resolve_path(&self, path: &str) -> String {
-        crate::sandbox::resolve_path(path, &self.config.working_directory)
+        resolve_path(path, &self.config.working_directory)
     }
 }
 
@@ -484,11 +487,11 @@ impl Sandbox for SshSandbox {
         let bytes = ssh.download_file(&resolved).await?;
 
         if let Some(parent) = local_path.parent() {
-            tokio::fs::create_dir_all(parent)
+            fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
         }
-        tokio::fs::write(local_path, &bytes)
+        fs::write(local_path, &bytes)
             .await
             .map_err(|e| format!("Failed to write {}: {e}", local_path.display()))?;
 
@@ -503,7 +506,7 @@ impl Sandbox for SshSandbox {
         let ssh = self.ssh()?;
         let resolved = self.resolve_path(remote_path);
 
-        let bytes = tokio::fs::read(local_path)
+        let bytes = fs::read(local_path)
             .await
             .map_err(|e| format!("Failed to read {}: {e}", local_path.display()))?;
 

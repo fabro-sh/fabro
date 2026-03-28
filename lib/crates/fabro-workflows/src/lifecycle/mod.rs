@@ -26,12 +26,13 @@ use fabro_core::state::RunState;
 
 use crate::artifact::ArtifactStore;
 use crate::context;
-use crate::error::FailureSignatureExt;
+use crate::error::{FailureSignature, FailureSignatureExt};
 use crate::event::EventEmitter;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageUsage};
 use crate::run_options::RunOptions;
+use fabro_graphviz::graph::types::Graph as GvGraph;
 use fabro_hooks::HookRunner;
 use fabro_sandbox::Sandbox;
 
@@ -68,7 +69,7 @@ pub struct WorkflowLifecycle {
     /// Gates context seeding on initial resume.
     is_initial_resume: AtomicBool,
     // Config needed for context seeding
-    graph: Arc<fabro_graphviz::graph::types::Graph>,
+    graph: Arc<GvGraph>,
     run_id: String,
     working_directory: Option<String>,
 }
@@ -79,7 +80,7 @@ impl WorkflowLifecycle {
         emitter: Arc<EventEmitter>,
         hook_runner: Option<Arc<HookRunner>>,
         sandbox: Arc<dyn Sandbox>,
-        graph: Arc<fabro_graphviz::graph::types::Graph>,
+        graph: Arc<GvGraph>,
         run_dir: PathBuf,
         run_options: Arc<RunOptions>,
         is_resume: bool,
@@ -188,8 +189,8 @@ impl WorkflowLifecycle {
     /// Restore circuit breaker state from a checkpoint (for resume).
     pub fn restore_circuit_breaker(
         &self,
-        loop_sigs: HashMap<crate::error::FailureSignature, usize>,
-        restart_sigs: HashMap<crate::error::FailureSignature, usize>,
+        loop_sigs: HashMap<FailureSignature, usize>,
+        restart_sigs: HashMap<FailureSignature, usize>,
     ) {
         self.circuit_breaker.restore(loop_sigs, restart_sigs);
     }
@@ -320,7 +321,7 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
                     .failure
                     .as_ref()
                     .and_then(|f| f.signature.as_deref());
-                crate::error::FailureSignature::new(
+                FailureSignature::new(
                     node.id(),
                     category,
                     signature_hint,

@@ -9,8 +9,13 @@ use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
 use crate::event::EventEmitter;
-use crate::outcome::{Outcome, OutcomeExt, StageUsage};
+use crate::outcome::{
+    FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus, StageUsage,
+};
+use crate::run_dir::{node_dir, visit_from_context};
+use crate::vars::expand_vars;
 use fabro_graphviz::graph::{Graph, Node};
+use tokio::fs;
 
 use super::{EngineServices, Handler};
 
@@ -75,7 +80,7 @@ impl AgentHandler {
 /// `$gaol` at runtime.
 pub(crate) fn expand_variables(text: &str, graph: &Graph) -> Result<String, FabroError> {
     let vars = HashMap::from([("goal".to_string(), graph.goal().to_string())]);
-    crate::vars::expand_vars(text, &vars).map_err(|e| FabroError::Validation(e.to_string()))
+    expand_vars(text, &vars).map_err(|e| FabroError::Validation(e.to_string()))
 }
 
 /// Status fields that indicate a JSON object contains routing directives.
@@ -164,14 +169,12 @@ pub(crate) fn extract_status_fields(text: &str, outcome: &mut Outcome) -> bool {
     }
 
     if let Some(status_str) = obj.get("outcome").and_then(|v| v.as_str()) {
-        if let Ok(status) = status_str.parse::<crate::outcome::StageStatus>() {
+        if let Ok(status) = status_str.parse::<StageStatus>() {
             outcome.status = status;
-            if outcome.status == crate::outcome::StageStatus::Fail {
+            if outcome.status == StageStatus::Fail {
                 if let Some(reason) = obj.get("failure_reason").and_then(|v| v.as_str()) {
-                    outcome.failure = Some(crate::outcome::FailureDetail::new(
-                        reason,
-                        crate::outcome::FailureCategory::Deterministic,
-                    ));
+                    outcome.failure =
+                        Some(FailureDetail::new(reason, FailureCategory::Deterministic));
                 }
             }
         }
@@ -249,10 +252,10 @@ impl Handler for AgentHandler {
         };
 
         // 2. Write prompt to logs
-        let visit = crate::run_dir::visit_from_context(context);
-        let stage_dir = crate::run_dir::node_dir(run_dir, &node.id, visit);
-        tokio::fs::create_dir_all(&stage_dir).await?;
-        tokio::fs::write(stage_dir.join("prompt.md"), &prompt).await?;
+        let visit = visit_from_context(context);
+        let stage_dir = node_dir(run_dir, &node.id, visit);
+        fs::create_dir_all(&stage_dir).await?;
+        fs::write(stage_dir.join("prompt.md"), &prompt).await?;
 
         // 3. Call LLM backend (agent loop)
         let thread_id = context.thread_id();
@@ -285,7 +288,7 @@ impl Handler for AgentHandler {
                     Ok(CodergenResult::Full(outcome)) => {
                         let status_json = serde_json::to_string_pretty(&outcome)
                             .unwrap_or_else(|_| "{}".to_string());
-                        tokio::fs::write(stage_dir.join("status.json"), &status_json).await?;
+                        fs::write(stage_dir.join("status.json"), &status_json).await?;
                         return Ok(outcome);
                     }
                     Ok(CodergenResult::Text {
@@ -311,7 +314,7 @@ impl Handler for AgentHandler {
             };
 
         // 4. Write response to logs
-        tokio::fs::write(stage_dir.join("response.md"), &response_text).await?;
+        fs::write(stage_dir.join("response.md"), &response_text).await?;
 
         // 7. Build and write status
         let mut outcome = Outcome::success();
@@ -364,7 +367,7 @@ impl Handler for AgentHandler {
 
         let status_json =
             serde_json::to_string_pretty(&outcome).unwrap_or_else(|_| "{}".to_string());
-        tokio::fs::write(stage_dir.join("status.json"), &status_json).await?;
+        fs::write(stage_dir.join("status.json"), &status_json).await?;
 
         Ok(outcome)
     }

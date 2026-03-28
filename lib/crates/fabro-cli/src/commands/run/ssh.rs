@@ -1,15 +1,18 @@
 use anyhow::{bail, Context, Result};
 use fabro_config::FabroSettingsExt;
+use fabro_sandbox::daytona::DaytonaSandbox;
 use fabro_sandbox::SandboxRecordExt;
+use fabro_workflows::run_lookup::{resolve_run, runs_base};
 use tracing::info;
 
 use crate::args::SshArgs;
+use crate::cli_config::load_cli_settings;
 use crate::shared::validate_daytona_provider;
 
 pub async fn run(args: SshArgs) -> Result<()> {
-    let cli_config = crate::cli_config::load_cli_settings(None)?;
-    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
-    let run_dir = fabro_workflows::run_lookup::resolve_run(&base, &args.run)?.path;
+    let cli_config = load_cli_settings(None)?;
+    let base = runs_base(&cli_config.storage_dir());
+    let run_dir = resolve_run(&base, &args.run)?.path;
     let sandbox_json = run_dir.join("sandbox.json");
     let record = fabro_sandbox::SandboxRecord::load(&sandbox_json).context(
         "Failed to load sandbox.json — was this run started with a recent version of arc?",
@@ -24,7 +27,7 @@ pub async fn run(args: SshArgs) -> Result<()> {
 
     info!(run_id = %args.run, ttl_minutes = args.ttl, "Creating SSH access");
 
-    let daytona = fabro_sandbox::daytona::DaytonaSandbox::reconnect(name)
+    let daytona = DaytonaSandbox::reconnect(name)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 

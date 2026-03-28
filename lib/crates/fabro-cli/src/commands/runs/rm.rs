@@ -5,13 +5,18 @@ use fabro_config::FabroSettingsExt;
 use fabro_sandbox::SandboxRecordExt;
 use tracing::warn;
 
+use fabro_sandbox::reconnect::reconnect as reconnect_sandbox;
+use fabro_workflows::run_lookup::{resolve_run, runs_base};
+use fabro_workflows::run_status::{write_run_status, RunStatus};
+
 use crate::args::RunsRemoveArgs;
+use crate::cli_config::load_cli_settings;
 
 use super::short_run_id;
 
 pub async fn remove_command(args: &RunsRemoveArgs) -> Result<()> {
-    let cli_config = crate::cli_config::load_cli_settings(None)?;
-    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
+    let cli_config = load_cli_settings(None)?;
+    let base = runs_base(&cli_config.storage_dir());
     remove_from(args, &base).await
 }
 
@@ -19,7 +24,7 @@ async fn remove_from(args: &RunsRemoveArgs, base: &Path) -> Result<()> {
     let mut had_errors = false;
 
     for identifier in &args.runs {
-        let run = match fabro_workflows::run_lookup::resolve_run(base, identifier) {
+        let run = match resolve_run(base, identifier) {
             Ok(run) => run,
             Err(err) => {
                 eprintln!("error: {identifier}: {err}");
@@ -38,16 +43,12 @@ async fn remove_from(args: &RunsRemoveArgs, base: &Path) -> Result<()> {
             continue;
         }
 
-        fabro_workflows::run_status::write_run_status(
-            &run.path,
-            fabro_workflows::run_status::RunStatus::Removing,
-            None,
-        );
+        write_run_status(&run.path, RunStatus::Removing, None);
 
         let sandbox_path = run.path.join("sandbox.json");
         if let Ok(record) = fabro_sandbox::SandboxRecord::load(&sandbox_path) {
             if record.provider != "local" {
-                match fabro_sandbox::reconnect::reconnect(&record).await {
+                match reconnect_sandbox(&record).await {
                     Ok(sandbox) => {
                         if let Err(err) = sandbox.cleanup().await {
                             warn!(run_id = %run.run_id, error = %err, "sandbox cleanup failed");

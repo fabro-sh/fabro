@@ -3,17 +3,21 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use fabro_config::FabroSettingsExt;
+use fabro_sandbox::reconnect::reconnect;
 use fabro_sandbox::SandboxRecordExt;
-use fabro_workflows::records::StartRecordExt;
+use fabro_workflows::records::{StartRecord, StartRecordExt};
+use fabro_workflows::run_lookup::{resolve_run, runs_base};
+use fabro_workflows::sandbox_git::GIT_REMOTE;
 use tracing::{debug, info};
 
 use crate::args::DiffArgs;
+use crate::cli_config::load_cli_settings;
 
 pub async fn run(args: DiffArgs) -> Result<()> {
     info!(run_id = %args.run, "Showing diff");
-    let cli_config = crate::cli_config::load_cli_settings(None)?;
-    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
-    let run_dir = fabro_workflows::run_lookup::resolve_run(&base, &args.run)?.path;
+    let cli_config = load_cli_settings(None)?;
+    let base = runs_base(&cli_config.storage_dir());
+    let run_dir = resolve_run(&base, &args.run)?.path;
 
     let patch = resolve_diff(&run_dir, &args).await?;
 
@@ -38,8 +42,7 @@ async fn resolve_diff(run_dir: &Path, args: &DiffArgs) -> Result<String> {
         });
     }
 
-    let start = fabro_workflows::records::StartRecord::load(run_dir)
-        .context("Failed to load start.json")?;
+    let start = StartRecord::load(run_dir).context("Failed to load start.json")?;
 
     let base_sha = start
         .base_sha
@@ -66,7 +69,7 @@ async fn resolve_diff(run_dir: &Path, args: &DiffArgs) -> Result<String> {
     )?;
 
     info!(provider = %record.provider, "Reconnecting to sandbox for live diff");
-    let sandbox = fabro_sandbox::reconnect::reconnect(&record).await?;
+    let sandbox = reconnect(&record).await?;
 
     let cmd = build_live_diff_cmd(base_sha, args.stat, args.shortstat);
     debug!(cmd, "Running git diff in sandbox");
@@ -98,8 +101,7 @@ fn build_live_diff_cmd(base_sha: &str, stat: bool, shortstat: bool) -> String {
     );
     format!(
         "{} add -N . && {} diff{flags} {quoted_sha}",
-        fabro_workflows::sandbox_git::GIT_REMOTE,
-        fabro_workflows::sandbox_git::GIT_REMOTE
+        GIT_REMOTE, GIT_REMOTE
     )
 }
 

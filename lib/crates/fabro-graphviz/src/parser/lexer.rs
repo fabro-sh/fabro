@@ -56,8 +56,9 @@ pub mod combinators {
     use nom::bytes::complete::{tag, take_while, take_while1};
     use nom::character::complete::{char, multispace0};
     use nom::combinator::{map, opt, recognize};
+    use nom::error::{Error, ErrorKind};
     use nom::sequence::{delimited, pair, preceded};
-    use nom::IResult;
+    use nom::{Err, IResult};
 
     use crate::parser::ast::AstValue;
 
@@ -85,7 +86,7 @@ pub mod combinators {
         let mut result = first.to_string();
         let mut remaining = rest;
         let mut found_dot = false;
-        while let Ok((r, _)) = char::<&str, nom::error::Error<&str>>('.')(remaining) {
+        while let Ok((r, _)) = char::<&str, Error<&str>>('.')(remaining) {
             if let Ok((r2, segment)) = identifier(r) {
                 result.push('.');
                 result.push_str(segment);
@@ -98,10 +99,7 @@ pub mod combinators {
         if found_dot {
             Ok((remaining, result))
         } else {
-            Err(nom::Err::Error(nom::error::Error::new(
-                input,
-                nom::error::ErrorKind::Tag,
-            )))
+            Err(Err::Error(Error::new(input, ErrorKind::Tag)))
         }
     }
 
@@ -148,10 +146,7 @@ pub mod combinators {
                             consumed += c.len_utf8();
                         }
                         None => {
-                            return Err(nom::Err::Error(nom::error::Error::new(
-                                input,
-                                nom::error::ErrorKind::Char,
-                            )));
+                            return Err(Err::Error(Error::new(input, ErrorKind::Char)));
                         }
                     }
                 }
@@ -160,10 +155,7 @@ pub mod combinators {
                     consumed += c.len_utf8();
                 }
                 None => {
-                    return Err(nom::Err::Error(nom::error::Error::new(
-                        input,
-                        nom::error::ErrorKind::Char,
-                    )));
+                    return Err(Err::Error(Error::new(input, ErrorKind::Char)));
                 }
             }
         }
@@ -175,10 +167,7 @@ pub mod combinators {
         match word {
             "true" => Ok((rest, true)),
             "false" => Ok((rest, false)),
-            _ => Err(nom::Err::Error(nom::error::Error::new(
-                input,
-                nom::error::ErrorKind::Tag,
-            ))),
+            _ => Err(Err::Error(Error::new(input, ErrorKind::Tag))),
         }
     }
 
@@ -188,9 +177,9 @@ pub mod combinators {
             pair(opt(char('-')), take_while(|c: char| c.is_ascii_digit())),
             pair(char('.'), take_while1(|c: char| c.is_ascii_digit())),
         ))(input)?;
-        let val: f64 = raw.parse().map_err(|_| {
-            nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Float))
-        })?;
+        let val: f64 = raw
+            .parse()
+            .map_err(|_| Err::Error(Error::new(input, ErrorKind::Float)))?;
         Ok((rest, val))
     }
 
@@ -201,14 +190,11 @@ pub mod combinators {
             take_while1(|c: char| c.is_ascii_digit()),
         ))(input)?;
         if rest.starts_with('.') {
-            return Err(nom::Err::Error(nom::error::Error::new(
-                input,
-                nom::error::ErrorKind::Digit,
-            )));
+            return Err(Err::Error(Error::new(input, ErrorKind::Digit)));
         }
-        let val: i64 = raw.parse().map_err(|_| {
-            nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
-        })?;
+        let val: i64 = raw
+            .parse()
+            .map_err(|_| Err::Error(Error::new(input, ErrorKind::Digit)))?;
         Ok((rest, val))
     }
 
@@ -224,10 +210,7 @@ pub mod combinators {
             .next()
             .is_some_and(|c| c.is_ascii_alphanumeric())
         {
-            return Err(nom::Err::Error(nom::error::Error::new(
-                input,
-                nom::error::ErrorKind::Tag,
-            )));
+            return Err(Err::Error(Error::new(input, ErrorKind::Tag)));
         }
         Ok((rest, AstValue::Str(format!("{num}{unit}"))))
     }
@@ -243,10 +226,7 @@ pub mod combinators {
             take_while(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.'),
         ))(input)?;
         if !raw.contains('-') && !raw.contains('.') {
-            return Err(nom::Err::Error(nom::error::Error::new(
-                input,
-                nom::error::ErrorKind::Verify,
-            )));
+            return Err(Err::Error(Error::new(input, ErrorKind::Verify)));
         }
         Ok((rest, raw.to_string()))
     }

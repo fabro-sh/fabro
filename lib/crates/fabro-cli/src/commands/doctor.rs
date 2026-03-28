@@ -4,17 +4,24 @@ use std::process::Command;
 #[cfg(feature = "server")]
 use std::sync::LazyLock;
 
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine as _;
 #[cfg(feature = "server")]
 use fabro_config::server::{ApiAuthStrategy, AuthProvider};
+use fabro_llm::client::Client as LlmClient;
+use fabro_llm::types::{Message, Request};
 use fabro_model::{Catalog, Provider};
 pub use fabro_util::check_report::{
     CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus,
 };
 use fabro_util::terminal::Styles;
+use futures::future::join_all;
 #[cfg(feature = "server")]
 use regex::Regex;
 #[cfg(feature = "server")]
 use semver::Version;
+
+use crate::cli_config::load_cli_settings;
 
 // ---------------------------------------------------------------------------
 // System dependency types and parsers (server mode only)
@@ -863,12 +870,12 @@ pub(crate) fn probe_model(provider: Provider) -> String {
 }
 
 async fn probe_llm_provider(
-    client: &fabro_llm::client::Client,
+    client: &LlmClient,
     provider: Provider,
 ) -> (Provider, Result<(), String>) {
-    let request = fabro_llm::types::Request {
+    let request = Request {
         model: probe_model(provider),
-        messages: vec![fabro_llm::types::Message::user("hi")],
+        messages: vec![Message::user("hi")],
         provider: Some(provider.as_str().to_string()),
         tools: None,
         tool_choice: None,
@@ -928,7 +935,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
     spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
     // Gather state
-    let cli_config = crate::cli_config::load_cli_settings(None).unwrap_or_default();
+    let cli_config = load_cli_settings(None).unwrap_or_default();
 
     let config_path = dirs::home_dir().map(|h| h.join(".fabro").join("cli.toml"));
     let config_exists = config_path.as_ref().is_some_and(|p| p.exists());
@@ -980,7 +987,8 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
             let pem = if raw.starts_with("-----") {
                 Ok(raw.clone())
             } else {
-                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw)
+                BASE64_STANDARD
+                    .decode(raw)
                     .map_err(|e| format!("base64 decode failed: {e}"))
                     .and_then(|bytes| {
                         String::from_utf8(bytes)
@@ -1058,7 +1066,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
         let http = reqwest::Client::new();
 
         // Build LLM client — may fail if no keys are set
-        let llm_client = fabro_llm::client::Client::from_env().await.ok();
+        let llm_client = LlmClient::from_env().await.ok();
 
         let configured_providers: Vec<Provider> = llm_statuses
             .iter()
@@ -1072,7 +1080,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
                     .iter()
                     .map(|p| probe_llm_provider(client, *p))
                     .collect();
-                Some(futures::future::join_all(futures).await)
+                Some(join_all(futures).await)
             } else {
                 None
             }

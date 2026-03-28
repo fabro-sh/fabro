@@ -2,6 +2,7 @@ use crate::error::{error_from_status_code, SdkError};
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::providers::common::LineReader;
 use crate::types::{FinishReason, Message, Request, Response, StreamEvent, Usage};
+use futures::stream;
 use tracing::{debug, error};
 
 /// Provider adapter that routes LLM requests through an fabro server's
@@ -161,35 +162,34 @@ impl ProviderAdapter for Adapter {
         let body = build_body(request, true)?;
         let http_resp = send_request(&self.client, &url, &body, &self.provider_name).await?;
 
-        let stream =
-            futures::stream::unfold(LineReader::new(http_resp, None), |mut reader| async move {
-                loop {
-                    match reader.read_next_chunk("\n\n").await {
-                        Ok(Some(block)) => {
-                            if let Some((event_type, data)) = parse_sse_block(&block) {
-                                if event_type == "stream_event" {
-                                    match serde_json::from_str::<StreamEvent>(&data) {
-                                        Ok(event) => return Some((Ok(event), reader)),
-                                        Err(e) => {
-                                            return Some((
-                                                Err(SdkError::stream_error(
-                                                    format!("failed to parse stream event: {e}"),
-                                                    e,
-                                                )),
-                                                reader,
-                                            ));
-                                        }
+        let stream = stream::unfold(LineReader::new(http_resp, None), |mut reader| async move {
+            loop {
+                match reader.read_next_chunk("\n\n").await {
+                    Ok(Some(block)) => {
+                        if let Some((event_type, data)) = parse_sse_block(&block) {
+                            if event_type == "stream_event" {
+                                match serde_json::from_str::<StreamEvent>(&data) {
+                                    Ok(event) => return Some((Ok(event), reader)),
+                                    Err(e) => {
+                                        return Some((
+                                            Err(SdkError::stream_error(
+                                                format!("failed to parse stream event: {e}"),
+                                                e,
+                                            )),
+                                            reader,
+                                        ));
                                     }
                                 }
-                                // Skip non-stream_event SSE events
                             }
-                            // Empty or unparsable block — keep reading.
+                            // Skip non-stream_event SSE events
                         }
-                        Ok(None) => return None,
-                        Err(e) => return Some((Err(e), reader)),
+                        // Empty or unparsable block — keep reading.
                     }
+                    Ok(None) => return None,
+                    Err(e) => return Some((Err(e), reader)),
                 }
-            });
+            }
+        });
 
         Ok(Box::pin(stream))
     }

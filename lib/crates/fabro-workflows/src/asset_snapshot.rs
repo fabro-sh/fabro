@@ -1,6 +1,7 @@
 use fabro_agent::Sandbox;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use tokio::fs;
 use tracing::{debug, warn};
 
 /// A file discovered by the find command.
@@ -308,9 +309,9 @@ pub async fn collect_assets(
         if let Ok(json) = serde_json::to_string_pretty(&summary) {
             let manifest_path = stage_dir.join("manifest.json");
             if let Some(parent) = manifest_path.parent() {
-                let _ = tokio::fs::create_dir_all(parent).await;
+                let _ = fs::create_dir_all(parent).await;
             }
-            let _ = tokio::fs::write(&manifest_path, json).await;
+            let _ = fs::write(&manifest_path, json).await;
         }
     }
 

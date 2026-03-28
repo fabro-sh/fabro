@@ -8,8 +8,10 @@ use anyhow::{bail, Context, Result};
 use clap::{Args, Subcommand};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{print_stdout, Cell, CellStruct, Color, Style, Table};
-use futures::StreamExt;
+use futures::{stream, StreamExt};
 use serde::Deserialize;
+use tokio::task;
+use tokio::time;
 
 use fabro_util::terminal::Styles;
 
@@ -17,7 +19,7 @@ use fabro_model::{Catalog, Model, Provider};
 
 use crate::generate::{self, GenerateParams};
 use crate::tools::Tool;
-use crate::types::{ContentPart, Message};
+use crate::types::{ContentPart, GenerateResult, Message, ReasoningEffort, StreamEvent, Usage};
 
 pub struct ServerConnection {
     pub client: reqwest::Client,
@@ -161,7 +163,7 @@ fn models_title() -> Vec<CellStruct> {
     ]
 }
 
-fn print_models_table(models: &[crate::types::Model], s: &Styles) {
+fn print_models_table(models: &[Model], s: &Styles) {
     let use_color = s.use_color;
     let rows: Vec<Vec<CellStruct>> = models.iter().map(|m| model_row(m, use_color)).collect();
     let table = rows
@@ -251,7 +253,7 @@ fn apply_options(
     Ok(params)
 }
 
-fn print_usage(usage: &crate::types::Usage) {
+fn print_usage(usage: &Usage) {
     eprintln!(
         "Tokens: {} input, {} output, {} total",
         usage.input_tokens, usage.output_tokens, usage.total_tokens
@@ -278,7 +280,7 @@ pub async fn run_chat(args: ChatArgs) -> Result<()> {
 
     loop {
         let line = if is_tty {
-            let result = tokio::task::spawn_blocking(|| {
+            let result = task::spawn_blocking(|| {
                 dialoguer::Input::<String>::with_theme(&ColorfulTheme::default())
                     .with_prompt(">")
                     .interact_on(&Term::stderr())
@@ -318,7 +320,7 @@ pub async fn run_chat(args: ChatArgs) -> Result<()> {
         let mut stream_result = generate::stream(params).await?;
         let mut full_text = String::new();
         while let Some(event) = stream_result.next().await {
-            if let crate::types::StreamEvent::TextDelta { delta, .. } = event? {
+            if let StreamEvent::TextDelta { delta, .. } = event? {
                 print!("{delta}");
                 full_text.push_str(&delta);
             }
@@ -380,7 +382,7 @@ pub async fn run_prompt(args: PromptArgs) -> Result<()> {
         (false, None) => {
             let mut stream_result = generate::stream(params).await?;
             while let Some(event) = stream_result.next().await {
-                if let crate::types::StreamEvent::TextDelta { delta, .. } = event? {
+                if let StreamEvent::TextDelta { delta, .. } = event? {
                     print!("{delta}");
                 }
             }
@@ -480,22 +482,22 @@ pub async fn run_prompt_via_server(args: PromptArgs, server: &ServerConnection) 
         }
 
         let show_usage = args.usage;
-        let mut output_usage: Option<crate::types::Usage> = None;
+        let mut output_usage: Option<Usage> = None;
 
         parse_sse_frames(response, |event_type, data| {
             if event_type == "stream_event" {
-                if let Ok(event) = serde_json::from_str::<crate::types::StreamEvent>(data) {
+                if let Ok(event) = serde_json::from_str::<StreamEvent>(data) {
                     match event {
-                        crate::types::StreamEvent::TextDelta { delta, .. } => {
+                        StreamEvent::TextDelta { delta, .. } => {
                             print!("{delta}");
                             let _ = io::stdout().flush();
                         }
-                        crate::types::StreamEvent::Finish { usage, .. } => {
+                        StreamEvent::Finish { usage, .. } => {
                             if show_usage {
                                 output_usage = Some(usage);
                             }
                         }
-                        crate::types::StreamEvent::Error { error, .. } => {
+                        StreamEvent::Error { error, .. } => {
                             bail!("Server error: {error}");
                         }
                         _ => {}
@@ -646,7 +648,7 @@ pub async fn run_chat_via_server(args: ChatArgs, server: &ServerConnection) -> R
 
     loop {
         let line = if is_tty {
-            let result = tokio::task::spawn_blocking(|| {
+            let result = task::spawn_blocking(|| {
                 dialoguer::Input::<String>::with_theme(&ColorfulTheme::default())
                     .with_prompt(">")
                     .interact_on(&Term::stderr())
@@ -869,16 +871,13 @@ fn build_deep_test_params(info: &Model) -> Option<GenerateParams> {
         .max_tokens(1024);
 
     if info.features.reasoning {
-        params = params.reasoning_effort(crate::types::ReasoningEffort::High);
+        params = params.reasoning_effort(ReasoningEffort::High);
     }
 
     Some(params)
 }
 
-fn validate_deep_result(
-    result: &crate::types::GenerateResult,
-    info: &Model,
-) -> (cli_table::Color, String) {
+fn validate_deep_result(result: &GenerateResult, info: &Model) -> (cli_table::Color, String) {
     // Check tool use: need at least 2 steps (tool call + follow-up)
     if result.steps.len() < 2 {
         return (
@@ -1048,7 +1047,7 @@ async fn test_one_model(info: &Model, deep: bool) -> (Color, String) {
             None => (Color::Yellow, "deep: skipped (no tool support)".to_string()),
             Some(params) => {
                 let result =
-                    tokio::time::timeout(Duration::from_secs(90), generate::generate(params)).await;
+                    time::timeout(Duration::from_secs(90), generate::generate(params)).await;
                 match result {
                     Ok(Ok(ref gen_result)) => validate_deep_result(gen_result, info),
                     Ok(Err(e)) => (Color::Red, format!("deep: error: {e}")),
@@ -1062,8 +1061,7 @@ async fn test_one_model(info: &Model, deep: bool) -> (Color, String) {
             .prompt("Say OK")
             .max_tokens(16);
 
-        let result =
-            tokio::time::timeout(Duration::from_secs(30), generate::generate(params)).await;
+        let result = time::timeout(Duration::from_secs(30), generate::generate(params)).await;
         match result {
             Ok(Ok(_)) => (Color::Green, "ok".to_string()),
             Ok(Err(e)) => (Color::Red, format!("error: {e}")),
@@ -1109,7 +1107,7 @@ async fn test_models(
     indexed.shuffle(&mut rand::thread_rng());
 
     // Run tests concurrently, 6 at a time
-    let results: Vec<(usize, Color, String)> = futures::stream::iter(indexed)
+    let results: Vec<(usize, Color, String)> = stream::iter(indexed)
         .map(|(idx, info)| {
             let pb = pb.clone();
             async move {

@@ -4,14 +4,17 @@ use anyhow::{Context, Result};
 use fabro_config::FabroSettingsExt;
 use tracing::info;
 
+use fabro_workflows::run_lookup::runs_base;
+
 use crate::args::PrMergeArgs;
+use crate::cli_config::load_cli_settings;
 
 pub async fn merge_command(
     args: PrMergeArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {
-    let cli_config = crate::cli_config::load_cli_settings(None)?;
-    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
+    let cli_config = load_cli_settings(None)?;
+    let base = runs_base(&cli_config.storage_dir());
     merge_from(&base, args, github_app).await
 }
 

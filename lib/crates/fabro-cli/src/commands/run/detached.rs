@@ -5,6 +5,8 @@ use anyhow::Result;
 use fabro_interview::FileInterviewer;
 use fabro_store::RuntimeState;
 use fabro_workflows::event::EventEmitter;
+use fabro_workflows::git::GitAuthor;
+use fabro_workflows::operations::{resume as resume_run, start as start_run, StartServices};
 
 use crate::cli_config;
 use crate::shared;
@@ -12,7 +14,7 @@ use crate::shared;
 pub async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bool) -> Result<()> {
     let cli_config = cli_config::load_cli_settings(None)?;
     let github_app = shared::github::build_github_app_credentials(cli_config.app_id());
-    let git_author = fabro_workflows::git::GitAuthor::from_options(
+    let git_author = GitAuthor::from_options(
         cli_config.git_author().and_then(|a| a.name.clone()),
         cli_config.git_author().and_then(|a| a.email.clone()),
     );
@@ -22,7 +24,7 @@ pub async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bool) -> 
     });
     let runtime_state = RuntimeState::new(&run_dir);
 
-    let services = fabro_workflows::operations::StartServices {
+    let services = StartServices {
         cancel_token: None,
         emitter: Arc::new(EventEmitter::new()),
         interviewer: Arc::new(FileInterviewer::new(
@@ -36,9 +38,9 @@ pub async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bool) -> 
     };
 
     if resume {
-        let _ = fabro_workflows::operations::resume(&run_dir, services).await?;
+        let _ = resume_run(&run_dir, services).await?;
     } else {
-        let _ = fabro_workflows::operations::start(&run_dir, services).await?;
+        let _ = start_run(&run_dir, services).await?;
     }
 
     Ok(())

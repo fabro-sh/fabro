@@ -67,6 +67,7 @@ object_store = "0.12.5"
 
 [workspace.lints.clippy]
 wildcard_imports = "warn"
+absolute_paths = "warn"
 
 [profile.release]
 lto = "thin"

@@ -15,16 +15,26 @@ use serde::Serialize;
 
 use crate::context::Context;
 use crate::error::FabroError;
-use crate::event::{EventEmitter, ProgressLogger, RunNoticeLevel, WorkflowRunEvent};
+use crate::event::{
+    append_progress_event, EventEmitter, ProgressLogger, RunNoticeLevel, WorkflowRunEvent,
+};
+use crate::git::GitAuthor;
+use crate::handler::HandlerRegistry;
 use crate::outcome::{Outcome, StageStatus};
 use crate::pipeline::{
     self, build_conclusion, classify_engine_result, persist_terminal_outcome, DevcontainerSpec,
     FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted, PullRequestOptions, RetroOptions,
     SandboxEnvSpec, SandboxSpec,
 };
-use crate::records::{Checkpoint, Conclusion, ConclusionExt, RunRecordExt};
+use crate::records::{Checkpoint, Conclusion, ConclusionExt, RunRecord, RunRecordExt};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{self, RunStatus, RunStatusRecordExt, StatusReason};
+use fabro_config::run::PullRequestSettings;
+use fabro_retro::retro::Retro;
+use fabro_sandbox::daytona::detect_repo_info;
+use fabro_sandbox::daytona::DaytonaConfig;
+use fabro_sandbox::ssh::{GitCloneParams as SshGitCloneParams, SshConfig};
+use tokio::runtime::Handle;
 
 struct RunSession {
     cancel_token: Option<Arc<AtomicBool>>,
@@ -37,14 +47,14 @@ struct RunSession {
     sandbox_env: SandboxEnvSpec,
     devcontainer: Option<DevcontainerSpec>,
     seed_context: Option<Context>,
-    git_author: crate::git::GitAuthor,
+    git_author: GitAuthor,
     git: Option<GitCheckpointOptions>,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     worktree_mode: Option<WorktreeMode>,
-    registry_override: Option<Arc<crate::handler::HandlerRegistry>>,
+    registry_override: Option<Arc<HandlerRegistry>>,
     retro_enabled: bool,
     preserve_sandbox: bool,
-    pr_config: Option<fabro_config::run::PullRequestSettings>,
+    pr_config: Option<PullRequestSettings>,
     pr_github_app: Option<fabro_github::GitHubAppCredentials>,
     pr_origin_url: Option<String>,
     pr_model: String,
@@ -54,14 +64,14 @@ pub struct StartServices {
     pub cancel_token: Option<Arc<AtomicBool>>,
     pub emitter: Arc<EventEmitter>,
     pub interviewer: Arc<dyn Interviewer>,
-    pub git_author: crate::git::GitAuthor,
+    pub git_author: GitAuthor,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
-    pub registry_override: Option<Arc<crate::handler::HandlerRegistry>>,
+    pub registry_override: Option<Arc<HandlerRegistry>>,
 }
 
 pub struct Started {
     pub finalized: Finalized,
-    pub retro: Option<fabro_retro::retro::Retro>,
+    pub retro: Option<Retro>,
     pub retro_duration: Duration,
 }
 
@@ -159,10 +169,9 @@ impl RunSession {
                 .map_err(|err| FabroError::Precondition(err.to_string()))?;
         }
 
-        let (origin_url, detected_base_branch) =
-            fabro_sandbox::daytona::detect_repo_info(&working_directory)
-                .map(|(url, branch)| (Some(url), branch))
-                .unwrap_or((None, None));
+        let (origin_url, detected_base_branch) = detect_repo_info(&working_directory)
+            .map(|(url, branch)| (Some(url), branch))
+            .unwrap_or((None, None));
 
         let sandbox_provider = resolve_sandbox_provider(&settings)?;
         let sandbox_provider =
@@ -324,9 +333,7 @@ fn resolve_worktree_mode(settings: &FabroSettings) -> sandbox_config::WorktreeMo
         .unwrap_or_default()
 }
 
-fn resolve_daytona_config(
-    settings: &FabroSettings,
-) -> Option<fabro_sandbox::daytona::DaytonaConfig> {
+fn resolve_daytona_config(settings: &FabroSettings) -> Option<DaytonaConfig> {
     settings
         .sandbox_settings()
         .and_then(|sandbox| sandbox.daytona.clone())
@@ -352,14 +359,14 @@ fn resolve_exe_clone_params(cwd: &Path) -> Option<fabro_sandbox::exe::GitClonePa
     Some(fabro_sandbox::exe::GitCloneParams { url, branch })
 }
 
-fn resolve_ssh_config(settings: &FabroSettings) -> Option<fabro_sandbox::ssh::SshConfig> {
+fn resolve_ssh_config(settings: &FabroSettings) -> Option<SshConfig> {
     settings
         .sandbox_settings()
         .and_then(|sandbox| sandbox.ssh.clone())
 }
 
-fn resolve_ssh_clone_params(cwd: &Path) -> Option<fabro_sandbox::ssh::GitCloneParams> {
-    let (detected_url, branch) = match fabro_sandbox::daytona::detect_repo_info(cwd) {
+fn resolve_ssh_clone_params(cwd: &Path) -> Option<SshGitCloneParams> {
+    let (detected_url, branch) = match detect_repo_info(cwd) {
         Ok(info) => info,
         Err(err) => {
             tracing::warn!("No git repo detected for SSH clone: {err}");
@@ -367,7 +374,7 @@ fn resolve_ssh_clone_params(cwd: &Path) -> Option<fabro_sandbox::ssh::GitClonePa
         }
     };
     let url = fabro_github::ssh_url_to_https(&detected_url);
-    Some(fabro_sandbox::ssh::GitCloneParams { url, branch })
+    Some(SshGitCloneParams { url, branch })
 }
 
 fn resolve_fallback_chain(
@@ -455,7 +462,7 @@ impl RunSession {
             if preserve_sandbox {
                 return;
             }
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            if let Ok(handle) = Handle::try_current() {
                 handle.spawn(async move {
                     let _ = sandbox_for_cleanup.cleanup().await;
                 });
@@ -591,7 +598,7 @@ impl Drop for DetachedRunCompletionGuard {
             );
         }
         if let Some(run_id) = load_run_id(&self.run_dir) {
-            let _ = crate::event::append_progress_event(
+            let _ = append_progress_event(
                 &self.run_dir,
                 &run_id,
                 &WorkflowRunEvent::RunNotice {
@@ -605,7 +612,7 @@ impl Drop for DetachedRunCompletionGuard {
 }
 
 fn load_run_id(run_dir: &Path) -> Option<String> {
-    crate::records::RunRecord::load(run_dir)
+    RunRecord::load(run_dir)
         .ok()
         .map(|record| record.run_id)
         .filter(|run_id| !run_id.trim().is_empty())
@@ -649,7 +656,7 @@ fn persist_detached_failure(
     run_status::write_run_status(run_dir, RunStatus::Failed, Some(reason));
 
     if let Some(run_id) = load_run_id(run_dir) {
-        crate::event::append_progress_event(
+        append_progress_event(
             run_dir,
             &run_id,
             &WorkflowRunEvent::RunNotice {

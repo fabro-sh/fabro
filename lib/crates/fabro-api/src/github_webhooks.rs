@@ -6,6 +6,8 @@ use axum::Router;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use tokio::net::TcpListener;
+use tokio::process::Command;
+use tokio::sync::oneshot;
 use tracing::{debug, error, info, warn};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -108,7 +110,7 @@ fn parse_event_metadata(body: &[u8]) -> (String, String) {
 /// A running webhook listener that can be shut down.
 pub struct WebhookListener {
     port: u16,
-    shutdown_tx: tokio::sync::oneshot::Sender<()>,
+    shutdown_tx: oneshot::Sender<()>,
 }
 
 impl WebhookListener {
@@ -132,7 +134,7 @@ pub async fn spawn_webhook_listener(secret: Vec<u8>) -> anyhow::Result<WebhookLi
         .route("/webhooks/github", post(webhook_handler))
         .with_state(state);
 
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
     tokio::spawn(async move {
         axum::serve(listener, router)
@@ -198,7 +200,7 @@ impl WebhookManager {
 }
 
 async fn enable_tailscale_funnel(port: u16) -> anyhow::Result<String> {
-    let output = tokio::process::Command::new("tailscale")
+    let output = Command::new("tailscale")
         .args(["funnel", &port.to_string()])
         .output()
         .await?;
@@ -209,7 +211,7 @@ async fn enable_tailscale_funnel(port: u16) -> anyhow::Result<String> {
     }
 
     // Get the funnel URL from `tailscale funnel status`
-    let status_output = tokio::process::Command::new("tailscale")
+    let status_output = Command::new("tailscale")
         .args(["funnel", "status"])
         .output()
         .await?;
@@ -233,7 +235,7 @@ async fn enable_tailscale_funnel(port: u16) -> anyhow::Result<String> {
 }
 
 async fn disable_tailscale_funnel(port: u16) {
-    match tokio::process::Command::new("tailscale")
+    match Command::new("tailscale")
         .args(["funnel", "off", &port.to_string()])
         .output()
         .await

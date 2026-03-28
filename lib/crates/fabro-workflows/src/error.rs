@@ -1,3 +1,4 @@
+use fabro_graphviz::error::GraphvizError;
 use fabro_llm::error::{ProviderErrorKind, SdkError};
 use fabro_validate::Diagnostic;
 use serde::{Deserialize, Serialize};
@@ -5,6 +6,8 @@ use thiserror::Error;
 
 pub use fabro_types::failure_signature::FailureSignature;
 pub use fabro_types::outcome::FailureCategory;
+
+use crate::outcome::{FailureDetail, Outcome, StageStatus};
 
 /// Classify an `SdkError` into a `FailureCategory` based on its structure.
 #[must_use]
@@ -299,16 +302,16 @@ impl FabroError {
     }
 
     /// Build a fail `Outcome` with structured `FailureDetail`.
-    pub fn to_fail_outcome(&self) -> crate::outcome::Outcome {
-        let failure = crate::outcome::FailureDetail {
+    pub fn to_fail_outcome(&self) -> Outcome {
+        let failure = FailureDetail {
             message: self.to_string(),
             category: self.failure_category(),
             signature: self.failure_signature_hint(),
         };
-        crate::outcome::Outcome {
-            status: crate::outcome::StageStatus::Fail,
+        Outcome {
+            status: StageStatus::Fail,
             failure: Some(failure),
-            ..crate::outcome::Outcome::success()
+            ..Outcome::success()
         }
     }
 }
@@ -325,11 +328,11 @@ impl From<SdkError> for FabroError {
     }
 }
 
-impl From<fabro_graphviz::error::GraphvizError> for FabroError {
-    fn from(e: fabro_graphviz::error::GraphvizError) -> Self {
+impl From<GraphvizError> for FabroError {
+    fn from(e: GraphvizError) -> Self {
         match e {
-            fabro_graphviz::error::GraphvizError::Parse(msg) => Self::Parse(msg),
-            fabro_graphviz::error::GraphvizError::Stylesheet(msg) => Self::Stylesheet(msg),
+            GraphvizError::Parse(msg) => Self::Parse(msg),
+            GraphvizError::Stylesheet(msg) => Self::Stylesheet(msg),
         }
     }
 }

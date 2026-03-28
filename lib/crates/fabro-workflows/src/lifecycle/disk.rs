@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use fabro_core::error::Result as CoreResult;
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::RunLifecycle;
 use fabro_core::outcome::NodeResult;
@@ -16,6 +17,8 @@ use crate::outcome::StageUsage;
 use crate::records::{Checkpoint, CheckpointExt};
 use crate::run_dir::{write_node_status, write_start_record};
 use crate::run_options::RunOptions;
+use crate::run_status::{write_run_status, RunStatus};
+use fabro_graphviz::graph::types::Graph as GvGraph;
 
 type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
@@ -24,7 +27,7 @@ type WfNodeResult = NodeResult<Option<StageUsage>>;
 pub struct DiskLifecycle {
     pub run_dir: PathBuf,
     pub run_id: String,
-    pub graph: Arc<fabro_graphviz::graph::types::Graph>,
+    pub graph: Arc<GvGraph>,
     pub run_options: Arc<RunOptions>,
     pub emitter: Arc<EventEmitter>,
     pub circuit_breaker: Arc<CircuitBreakerLifecycle>,
@@ -33,19 +36,11 @@ pub struct DiskLifecycle {
 
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
-    async fn on_run_start(
-        &self,
-        _graph: &WorkflowGraph,
-        _state: &WfRunState,
-    ) -> fabro_core::error::Result<()> {
+    async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
         // Write start.json
         write_start_record(&self.run_dir, &self.run_options);
         // Write run status as Running
-        crate::run_status::write_run_status(
-            &self.run_dir,
-            crate::run_status::RunStatus::Running,
-            None,
-        );
+        write_run_status(&self.run_dir, RunStatus::Running, None);
         Ok(())
     }
 
@@ -54,7 +49,7 @@ impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
         node: &WorkflowNode,
         result: &mut WfNodeResult,
         state: &WfRunState,
-    ) -> fabro_core::error::Result<()> {
+    ) -> CoreResult<()> {
         let gv = node.inner();
         let visit = state.node_visits.get(gv.id.as_str()).copied().unwrap_or(1);
         write_node_status(&self.run_dir, &gv.id, visit, &result.outcome);
@@ -67,7 +62,7 @@ impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
         result: &WfNodeResult,
         next_node_id: Option<&str>,
         state: &WfRunState,
-    ) -> fabro_core::error::Result<()> {
+    ) -> CoreResult<()> {
         if !self.checkpoint_enabled {
             return Ok(());
         }

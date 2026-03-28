@@ -1,3 +1,6 @@
+use fabro_retro::retro::CompletedStage;
+use serde::de::DeserializeOwned;
+
 /// Convert a Duration's milliseconds to u64, saturating on overflow.
 pub(crate) fn millis_u64(d: std::time::Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
@@ -16,7 +19,7 @@ pub(crate) fn save_json<T: serde::Serialize>(
 }
 
 /// Load a value from a JSON file.
-pub(crate) fn load_json<T: serde::de::DeserializeOwned>(
+pub(crate) fn load_json<T: DeserializeOwned>(
     path: &std::path::Path,
     label: &str,
 ) -> error::Result<T> {
@@ -27,10 +30,7 @@ pub(crate) fn load_json<T: serde::de::DeserializeOwned>(
 
 /// Build `Vec<CompletedStage>` from a `Checkpoint`, mapping workflow-engine
 /// types into the flat struct expected by `fabro_retro::retro::derive_retro`.
-pub fn build_completed_stages(
-    cp: &records::Checkpoint,
-    run_failed: bool,
-) -> Vec<fabro_retro::retro::CompletedStage> {
+pub fn build_completed_stages(cp: &records::Checkpoint, run_failed: bool) -> Vec<CompletedStage> {
     use outcome::{OutcomeExt, StageStatus};
 
     let mut stages = Vec::new();
@@ -53,7 +53,7 @@ pub fn build_completed_stages(
             any_stage_failed = true;
         }
 
-        stages.push(fabro_retro::retro::CompletedStage {
+        stages.push(CompletedStage {
             node_id: node_id.clone(),
             status,
             succeeded,
@@ -71,7 +71,7 @@ pub fn build_completed_stages(
         if let Some(last) = stages.last_mut() {
             last.failed = true;
         } else {
-            stages.push(fabro_retro::retro::CompletedStage {
+            stages.push(CompletedStage {
                 node_id: "unknown".to_string(),
                 status: "fail".to_string(),
                 succeeded: false,

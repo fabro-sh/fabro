@@ -1,10 +1,11 @@
 use crate::config::{SessionConfig, ToolHookCallback, ToolHookDecision};
 use crate::event::EventEmitter;
 use crate::sandbox::Sandbox;
-use crate::tool_registry::ToolRegistry;
+use crate::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
 use crate::truncation::truncate_tool_output;
 use crate::types::AgentEvent;
-use fabro_llm::types::ToolResult;
+use fabro_llm::types::{ToolCall, ToolResult};
+use futures::future;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -13,7 +14,7 @@ use tracing::debug;
 /// Execute tool calls, choosing parallel or sequential based on `parallel` flag.
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_tool_calls(
-    tool_calls: &[fabro_llm::types::ToolCall],
+    tool_calls: &[ToolCall],
     parallel: bool,
     registry: &ToolRegistry,
     env: Arc<dyn Sandbox>,
@@ -55,7 +56,7 @@ pub async fn execute_tool_calls(
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_tool_calls_sequential(
-    tool_calls: &[fabro_llm::types::ToolCall],
+    tool_calls: &[ToolCall],
     registry: &ToolRegistry,
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
@@ -91,7 +92,7 @@ async fn execute_tool_calls_sequential(
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_tool_calls_parallel(
-    tool_calls: &[fabro_llm::types::ToolCall],
+    tool_calls: &[ToolCall],
     registry: &ToolRegistry,
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
@@ -132,13 +133,13 @@ async fn execute_tool_calls_parallel(
         })
         .collect();
 
-    futures::future::join_all(futures).await
+    future::join_all(futures).await
 }
 
 /// Execute a single tool call with event emission and output truncation.
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_and_emit_one_tool(
-    tc: &fabro_llm::types::ToolCall,
+    tc: &ToolCall,
     registry: &ToolRegistry,
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
@@ -165,8 +166,8 @@ pub async fn execute_and_emit_one_tool(
 /// Execute a single tool call with event emission, using a pre-looked-up tool reference.
 #[allow(clippy::too_many_arguments)]
 async fn execute_and_emit_one_tool_with_lookup(
-    tc: &fabro_llm::types::ToolCall,
-    registered_tool: Option<&crate::tool_registry::RegisteredTool>,
+    tc: &ToolCall,
+    registered_tool: Option<&RegisteredTool>,
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: CancellationToken,
@@ -262,8 +263,8 @@ async fn execute_and_emit_one_tool_with_lookup(
 
 /// Execute a single tool call: argument validation and execution.
 async fn execute_one_tool(
-    tc: &fabro_llm::types::ToolCall,
-    registered_tool: Option<&crate::tool_registry::RegisteredTool>,
+    tc: &ToolCall,
+    registered_tool: Option<&RegisteredTool>,
     env: Arc<dyn Sandbox>,
     cancel_token: CancellationToken,
     tool_env: Option<&HashMap<String, String>>,
@@ -276,7 +277,7 @@ async fn execute_one_tool(
                 return ToolResult::error(&tc.id, validation_error);
             }
 
-            let ctx = crate::tool_registry::ToolContext {
+            let ctx = ToolContext {
                 env,
                 cancel: cancel_token,
                 tool_env: tool_env.cloned(),

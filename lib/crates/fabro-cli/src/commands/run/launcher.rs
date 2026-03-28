@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use fabro_config::FabroSettingsExt;
-use fabro_workflows::records::RunRecordExt;
+use fabro_workflows::records::{RunRecord, RunRecordExt};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,7 +46,7 @@ pub(crate) fn remove_launcher_record(path: &Path) {
 }
 
 pub(crate) fn active_launcher_record_for_run(run_dir: &Path) -> Option<LauncherRecord> {
-    let run_record = fabro_workflows::records::RunRecord::load(run_dir).ok()?;
+    let run_record = RunRecord::load(run_dir).ok()?;
     let path = launcher_record_path(&run_record.settings.storage_dir(), &run_record.run_id);
     let launcher = read_launcher_record(&path)?;
     if launcher_record_is_running(&launcher) {

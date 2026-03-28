@@ -2,8 +2,10 @@ use anyhow::bail;
 use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 use fabro_workflows::records::{RunRecord, RunRecordExt};
+use fabro_workflows::run_lookup::{find_run_by_prefix, runs_base};
 
 use crate::args::ResumeArgs;
+use crate::cli_config::load_cli_settings;
 
 /// Resume an interrupted workflow run.
 ///
@@ -11,9 +13,9 @@ use crate::args::ResumeArgs;
 /// artifacts from the previous execution, then spawns an engine subprocess
 /// (identical to `fabro run`'s create→start→attach flow).
 pub async fn resume_command(args: ResumeArgs, styles: &'static Styles) -> anyhow::Result<()> {
-    let cli_config = crate::cli_config::load_cli_settings(None)?;
-    let base = fabro_workflows::run_lookup::runs_base(&cli_config.storage_dir());
-    let run_dir = fabro_workflows::run_lookup::find_run_by_prefix(&base, &args.run)?;
+    let cli_config = load_cli_settings(None)?;
+    let base = runs_base(&cli_config.storage_dir());
+    let run_dir = find_run_by_prefix(&base, &args.run)?;
 
     // find_run_by_prefix can match orphan directories (no run.json).
     if !run_dir.join("run.json").exists() {

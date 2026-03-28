@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use fabro_config::FabroSettingsExt;
-use fabro_workflows::records::RunRecordExt;
+use fabro_workflows::records::{RunRecord, RunRecordExt};
 
 use super::launcher::{
     launcher_log_path, launcher_record_path, remove_launcher_record, write_launcher_record,
@@ -15,7 +15,7 @@ use super::launcher::{
 /// The engine process reads `run.json` from the run directory and executes the
 /// workflow. Returns the child process handle (use `.id()` for the PID).
 pub fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Child> {
-    let record = fabro_workflows::records::RunRecord::load(run_dir)
+    let record = RunRecord::load(run_dir)
         .map_err(|e| anyhow!("Cannot start run: failed to load run.json: {e}"))?;
 
     let storage_dir = record.settings.storage_dir();

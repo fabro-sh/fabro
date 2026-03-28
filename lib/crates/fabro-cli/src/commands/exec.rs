@@ -1,9 +1,14 @@
 use anyhow::Result;
+#[cfg(feature = "server")]
+use fabro_agent::cli::run_with_args_and_client;
+use fabro_agent::cli::{run_with_args, AgentArgs};
+use fabro_config::mcp::McpServerEntry;
+use fabro_mcp::config::McpServerConfig;
 
 use crate::args::GlobalArgs;
 use crate::cli_config;
 
-pub async fn execute(mut args: fabro_agent::cli::AgentArgs, globals: &GlobalArgs) -> Result<()> {
+pub async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_config = cli_config::load_cli_settings(None)?;
     #[cfg(feature = "sleep_inhibitor")]
     let _sleep_guard = crate::sleep_inhibitor::guard(cli_config.prevent_idle_sleep_enabled());
@@ -20,10 +25,10 @@ pub async fn execute(mut args: fabro_agent::cli::AgentArgs, globals: &GlobalArgs
         globals.server_url.as_deref(),
         &cli_config,
     );
-    let mcp_servers: Vec<fabro_mcp::config::McpServerConfig> = cli_config
+    let mcp_servers: Vec<McpServerConfig> = cli_config
         .mcp_servers
         .into_iter()
-        .map(|(name, entry): (String, fabro_config::mcp::McpServerEntry)| entry.into_config(name))
+        .map(|(name, entry): (String, McpServerEntry)| entry.into_config(name))
         .collect();
     #[cfg(feature = "server")]
     {
@@ -46,11 +51,11 @@ pub async fn execute(mut args: fabro_agent::cli::AgentArgs, globals: &GlobalArgs
                     .register_provider(adapter)
                     .await
                     .map_err(|e| anyhow::anyhow!("Failed to register fabro server adapter: {e}"))?;
-                fabro_agent::cli::run_with_args_and_client(args, Some(client), mcp_servers).await?
+                run_with_args_and_client(args, Some(client), mcp_servers).await?
             }
             cli_config::ExecutionMode::Standalone => {
                 tracing::info!(mode = "standalone", "Agent session starting");
-                fabro_agent::cli::run_with_args(args, mcp_servers).await?
+                run_with_args(args, mcp_servers).await?
             }
         }
     }
@@ -58,7 +63,7 @@ pub async fn execute(mut args: fabro_agent::cli::AgentArgs, globals: &GlobalArgs
     {
         let _ = globals;
         tracing::info!(mode = "standalone", "Agent session starting");
-        fabro_agent::cli::run_with_args(args, mcp_servers).await?
+        run_with_args(args, mcp_servers).await?
     }
 
     Ok(())

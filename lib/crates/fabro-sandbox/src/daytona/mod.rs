@@ -2,14 +2,20 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
+use crate::sandbox::resolve_path;
 use crate::shell_quote;
 use crate::{
     format_lines_numbered, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
     SandboxEventCallback,
 };
 use async_trait::async_trait;
+use daytona_sdk::api_types::SignedPortPreviewUrl;
 use fabro_github::GitHubAppCredentials;
 use rand::Rng;
+use tokio::fs;
+use tokio::sync::OnceCell;
+use tokio::time;
+use tokio_util::sync::CancellationToken;
 
 const WORKING_DIRECTORY: &str = "/home/daytona/workspace";
 const DEFAULT_SNAPSHOT: &str = "daytona-medium";
@@ -24,11 +30,11 @@ pub struct DaytonaSandbox {
     config: DaytonaConfig,
     client: daytona_sdk::Client,
     github_app: Option<GitHubAppCredentials>,
-    sandbox: tokio::sync::OnceCell<daytona_sdk::Sandbox>,
-    rg_available: tokio::sync::OnceCell<bool>,
+    sandbox: OnceCell<daytona_sdk::Sandbox>,
+    rg_available: OnceCell<bool>,
     event_callback: Option<SandboxEventCallback>,
     /// HTTPS origin URL stored after clone so we can refresh push credentials later.
-    origin_url: tokio::sync::OnceCell<String>,
+    origin_url: OnceCell<String>,
     run_id: Option<String>,
     /// Explicit branch to clone. When set, overrides the branch detected by
     /// `detect_repo_info` — avoids cloning a local-only worktree branch
@@ -51,10 +57,10 @@ impl DaytonaSandbox {
             config,
             client,
             github_app,
-            sandbox: tokio::sync::OnceCell::new(),
-            rg_available: tokio::sync::OnceCell::const_new(),
+            sandbox: OnceCell::new(),
+            rg_available: OnceCell::const_new(),
             event_callback: None,
-            origin_url: tokio::sync::OnceCell::new(),
+            origin_url: OnceCell::new(),
             run_id,
             clone_branch,
         })
@@ -72,16 +78,16 @@ impl DaytonaSandbox {
             .get(sandbox_name)
             .await
             .map_err(|e| format!("Failed to reconnect to Daytona sandbox '{sandbox_name}': {e}"))?;
-        let sandbox_cell = tokio::sync::OnceCell::new();
+        let sandbox_cell = OnceCell::new();
         let _ = sandbox_cell.set(sdk_sandbox);
         Ok(Self {
             config: DaytonaConfig::default(),
             client,
             github_app: None,
             sandbox: sandbox_cell,
-            rg_available: tokio::sync::OnceCell::const_new(),
+            rg_available: OnceCell::const_new(),
             event_callback: None,
-            origin_url: tokio::sync::OnceCell::new(),
+            origin_url: OnceCell::new(),
             run_id: None,
             clone_branch: None,
         })
@@ -126,7 +132,7 @@ impl DaytonaSandbox {
         &self,
         port: u16,
         expires_in_seconds: Option<i32>,
-    ) -> Result<daytona_sdk::api_types::SignedPortPreviewUrl, String> {
+    ) -> Result<SignedPortPreviewUrl, String> {
         let sandbox = self.sandbox()?;
         sandbox
             .get_signed_preview_url(port as i32, expires_in_seconds)
@@ -142,7 +148,7 @@ impl DaytonaSandbox {
     }
 
     fn resolve_path(&self, path: &str) -> String {
-        crate::sandbox::resolve_path(path, WORKING_DIRECTORY)
+        resolve_path(path, WORKING_DIRECTORY)
     }
 
     /// Get the sandbox, returning an error if not yet initialized.
@@ -257,7 +263,7 @@ impl DaytonaSandbox {
         let deadline = Instant::now() + std::time::Duration::from_secs(600);
 
         while Instant::now() < deadline {
-            tokio::time::sleep(delay).await;
+            time::sleep(delay).await;
             let dto = self
                 .client
                 .snapshot
@@ -332,11 +338,11 @@ impl Sandbox for DaytonaSandbox {
             .map_err(|e| format!("Failed to download file {resolved}: {e}"))?;
 
         if let Some(parent) = local_path.parent() {
-            tokio::fs::create_dir_all(parent)
+            fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
         }
-        tokio::fs::write(local_path, &bytes)
+        fs::write(local_path, &bytes)
             .await
             .map_err(|e| format!("Failed to write {}: {e}", local_path.display()))?;
 
@@ -363,7 +369,7 @@ impl Sandbox for DaytonaSandbox {
             }
         }
 
-        let bytes = tokio::fs::read(local_path)
+        let bytes = fs::read(local_path)
             .await
             .map_err(|e| format!("Failed to read {}: {e}", local_path.display()))?;
 
@@ -914,7 +920,7 @@ impl Sandbox for DaytonaSandbox {
         timeout_ms: u64,
         working_dir: Option<&str>,
         env_vars: Option<&HashMap<String, String>>,
-        cancel_token: Option<tokio_util::sync::CancellationToken>,
+        cancel_token: Option<CancellationToken>,
     ) -> Result<ExecResult, String> {
         tracing::info!(command, timeout_ms, "exec_command: entered");
 
@@ -976,7 +982,7 @@ impl Sandbox for DaytonaSandbox {
                 );
                 res.map_err(|e| format!("Failed to execute command: {e}"))?
             }
-            () = tokio::time::sleep(timeout_duration) => {
+            () = time::sleep(timeout_duration) => {
                 tracing::info!(
                     elapsed_ms = start.elapsed().as_millis() as u64,
                     timeout_ms,
@@ -1126,8 +1132,9 @@ impl Sandbox for DaytonaSandbox {
 /// Uses base64 encoding (matching the TypeScript/Python/Ruby Daytona SDKs)
 /// to avoid shell escaping issues with quotes and special characters.
 fn wrap_bash_command(command: &str) -> String {
+    use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(command);
+    let encoded = STANDARD.encode(command);
     format!("sh -c \"echo '{encoded}' | base64 -d | sh\"")
 }
 

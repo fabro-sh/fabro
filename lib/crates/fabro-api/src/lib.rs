@@ -1,4 +1,4 @@
-#[allow(clippy::wildcard_imports)]
+#[allow(clippy::wildcard_imports, clippy::absolute_paths)]
 mod demo;
 pub mod error;
 pub mod github_webhooks;

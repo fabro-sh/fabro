@@ -1,16 +1,26 @@
-use crate::config::ToolApprovalFn;
+use crate::config::{ToolApprovalAdapter, ToolApprovalFn, ToolHookCallback};
+use crate::error::AbortReason;
+use crate::tools::WebFetchSummarizer;
+use crate::truncation;
 use crate::{
     subagent::{SessionFactory, SubAgentManager},
     AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile,
-    Session, SessionConfig, Turn,
+    Sandbox, Session, SessionConfig, Turn,
 };
 use clap::{Args, Parser};
 use fabro_llm::client::Client;
+use fabro_llm::error::SdkError;
+use fabro_llm::middleware::{Middleware, NextFn, NextStreamFn};
+use fabro_llm::provider::StreamEventStream;
+use fabro_llm::types::{Request, Response};
+use fabro_mcp::config::McpServerConfig;
 use fabro_model::{Catalog, ModelRef, Provider};
 use fabro_util::terminal::Styles;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use tokio::signal;
+use tokio::sync::Mutex as AsyncMutex;
 
 /// Public arguments for the agent command, usable from an external CLI.
 #[derive(Args)]
@@ -173,12 +183,9 @@ fn summarizer_model_id(provider: Provider) -> ModelRef {
     }
 }
 
-fn build_summarizer(
-    provider: Provider,
-    llm_client: Option<Client>,
-) -> Option<crate::tools::WebFetchSummarizer> {
+fn build_summarizer(provider: Provider, llm_client: Option<Client>) -> Option<WebFetchSummarizer> {
     let client = llm_client?;
-    Some(crate::tools::WebFetchSummarizer {
+    Some(WebFetchSummarizer {
         client,
         model_id: summarizer_model_id(provider),
     })
@@ -218,7 +225,7 @@ fn format_tool_args(args: &serde_json::Value, cwd: &str) -> String {
             serde_json::Value::String(s) => {
                 let s = s.strip_prefix(&cwd_prefix).unwrap_or(s);
                 let display = if s.len() > 80 {
-                    format!("{}...", &s[..crate::truncation::floor_char_boundary(s, 77)])
+                    format!("{}...", &s[..truncation::floor_char_boundary(s, 77)])
                 } else {
                     s.to_string()
                 };
@@ -273,12 +280,8 @@ struct DebugMiddleware {
 }
 
 #[async_trait::async_trait]
-impl fabro_llm::middleware::Middleware for DebugMiddleware {
-    async fn handle_complete(
-        &self,
-        request: fabro_llm::types::Request,
-        next: fabro_llm::middleware::NextFn,
-    ) -> Result<fabro_llm::types::Response, fabro_llm::error::SdkError> {
+impl Middleware for DebugMiddleware {
+    async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, SdkError> {
         let s = self.styles;
         eprintln!(
             "{}",
@@ -306,9 +309,9 @@ impl fabro_llm::middleware::Middleware for DebugMiddleware {
 
     async fn handle_stream(
         &self,
-        request: fabro_llm::types::Request,
-        next: fabro_llm::middleware::NextStreamFn,
-    ) -> Result<fabro_llm::provider::StreamEventStream, fabro_llm::error::SdkError> {
+        request: Request,
+        next: NextStreamFn,
+    ) -> Result<StreamEventStream, SdkError> {
         next(request).await
     }
 }
@@ -319,12 +322,8 @@ struct VerboseMiddleware {
 }
 
 #[async_trait::async_trait]
-impl fabro_llm::middleware::Middleware for VerboseMiddleware {
-    async fn handle_complete(
-        &self,
-        request: fabro_llm::types::Request,
-        next: fabro_llm::middleware::NextFn,
-    ) -> Result<fabro_llm::types::Response, fabro_llm::error::SdkError> {
+impl Middleware for VerboseMiddleware {
+    async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, SdkError> {
         let s = self.styles;
         eprintln!(
             "{}\n{}",
@@ -344,16 +343,16 @@ impl fabro_llm::middleware::Middleware for VerboseMiddleware {
 
     async fn handle_stream(
         &self,
-        request: fabro_llm::types::Request,
-        next: fabro_llm::middleware::NextStreamFn,
-    ) -> Result<fabro_llm::provider::StreamEventStream, fabro_llm::error::SdkError> {
+        request: Request,
+        next: NextStreamFn,
+    ) -> Result<StreamEventStream, SdkError> {
         next(request).await
     }
 }
 
 pub async fn run_with_args(
     args: AgentArgs,
-    mcp_servers: Vec<fabro_mcp::config::McpServerConfig>,
+    mcp_servers: Vec<McpServerConfig>,
 ) -> anyhow::Result<()> {
     run_with_args_and_client(args, None, mcp_servers).await
 }
@@ -361,7 +360,7 @@ pub async fn run_with_args(
 pub async fn run_with_args_and_client(
     args: AgentArgs,
     llm_client: Option<Client>,
-    mcp_servers: Vec<fabro_mcp::config::McpServerConfig>,
+    mcp_servers: Vec<McpServerConfig>,
 ) -> anyhow::Result<()> {
     // Resolve color support once, leak to get 'static lifetime for use across threads
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
@@ -407,7 +406,7 @@ pub async fn run_with_args_and_client(
     // Build sandbox
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let cwd_str = cwd.to_string_lossy().to_string();
-    let env: Arc<dyn crate::Sandbox> = Arc::new(crate::ReadBeforeWriteSandbox::new(Arc::new(
+    let env: Arc<dyn Sandbox> = Arc::new(crate::ReadBeforeWriteSandbox::new(Arc::new(
         LocalSandbox::new(cwd),
     )));
 
@@ -415,8 +414,7 @@ pub async fn run_with_args_and_client(
     let permissions = args.permissions.unwrap_or(PermissionLevel::ReadWrite);
     let is_interactive = std::io::stdin().is_terminal() && !args.auto_approve;
     let tool_approval = build_tool_approval(permissions, is_interactive, styles);
-    let tool_hooks: Arc<dyn crate::config::ToolHookCallback> =
-        Arc::new(crate::config::ToolApprovalAdapter(tool_approval));
+    let tool_hooks: Arc<dyn ToolHookCallback> = Arc::new(ToolApprovalAdapter(tool_approval));
 
     let config = SessionConfig {
         tool_hooks: Some(tool_hooks.clone()),
@@ -426,7 +424,7 @@ pub async fn run_with_args_and_client(
     };
 
     // Register subagent tools
-    let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(
+    let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(
         config.max_subagent_depth,
     )));
     let manager_for_callback = manager.clone();
@@ -490,11 +488,11 @@ pub async fn run_with_args_and_client(
     let cancel_token = session.cancel_token();
     let abort_reason = session.abort_reason_handle();
     tokio::spawn(async move {
-        tokio::signal::ctrl_c().await.ok();
+        signal::ctrl_c().await.ok();
         {
             let mut guard = abort_reason.lock().unwrap_or_else(|e| e.into_inner());
             if guard.is_none() {
-                *guard = Some(crate::error::AbortReason::Cancelled);
+                *guard = Some(AbortReason::Cancelled);
             }
         }
         cancel_token.cancel();
@@ -562,7 +560,7 @@ pub async fn run_with_args_and_client(
                             ..
                         } => {
                             let task_preview = if task.len() > 60 {
-                                &task[..crate::truncation::floor_char_boundary(task, 60)]
+                                &task[..truncation::floor_char_boundary(task, 60)]
                             } else {
                                 task
                             };
@@ -773,7 +771,7 @@ mod tests {
     #[test]
     fn build_profile_can_register_subagent_tools() {
         let mut profile = build_profile(Provider::Anthropic, "model", None);
-        let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(1)));
+        let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(1)));
         let factory: SessionFactory = Arc::new(|| {
             panic!("factory should not be called in this test");
         });

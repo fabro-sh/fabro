@@ -1,9 +1,12 @@
+use crate::error::AgentError;
+use fabro_llm::error::SdkError;
 use fabro_llm::types::{ContentPart, ThinkingData, ToolCall, ToolResult, Usage};
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 
 mod system_time_iso8601 {
-    use chrono::{DateTime, Utc};
+    use chrono::{DateTime, SecondsFormat, Utc};
+    use serde::de::Error as DeError;
     use serde::{self, Deserialize, Deserializer, Serializer};
     use std::time::SystemTime;
 
@@ -12,7 +15,7 @@ mod system_time_iso8601 {
         S: Serializer,
     {
         let dt: DateTime<Utc> = (*time).into();
-        serializer.serialize_str(&dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+        serializer.serialize_str(&dt.to_rfc3339_opts(SecondsFormat::Millis, true))
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
@@ -20,7 +23,7 @@ mod system_time_iso8601 {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        let dt = DateTime::parse_from_rfc3339(&s).map_err(serde::de::Error::custom)?;
+        let dt = DateTime::parse_from_rfc3339(&s).map_err(DeError::custom)?;
         Ok(dt.with_timezone(&Utc).into())
     }
 }
@@ -128,7 +131,7 @@ pub enum AgentEvent {
         is_error: bool,
     },
     Error {
-        error: crate::error::AgentError,
+        error: AgentError,
     },
     Warning {
         kind: String,
@@ -160,7 +163,7 @@ pub enum AgentEvent {
         model: String,
         attempt: usize,
         delay_secs: f64,
-        error: fabro_llm::error::SdkError,
+        error: SdkError,
     },
     SubAgentSpawned {
         agent_id: String,
@@ -176,7 +179,7 @@ pub enum AgentEvent {
     SubAgentFailed {
         agent_id: String,
         depth: usize,
-        error: crate::error::AgentError,
+        error: AgentError,
     },
     SubAgentClosed {
         agent_id: String,
@@ -481,7 +484,7 @@ mod tests {
         let event = AgentEvent::SubAgentFailed {
             agent_id: "sa-1".into(),
             depth: 0,
-            error: crate::error::AgentError::ToolExecution("timeout".into()),
+            error: AgentError::ToolExecution("timeout".into()),
         };
         assert!(matches!(event, AgentEvent::SubAgentFailed { depth: 0, .. }));
     }
@@ -527,7 +530,7 @@ mod tests {
             AgentEvent::SubAgentFailed {
                 agent_id: "sa-1".into(),
                 depth: 0,
-                error: crate::error::AgentError::ToolExecution("oops".into()),
+                error: AgentError::ToolExecution("oops".into()),
             },
             AgentEvent::SubAgentClosed {
                 agent_id: "sa-1".into(),
@@ -669,7 +672,7 @@ mod tests {
     #[test]
     fn error_event_serde_roundtrip_with_agent_error() {
         let event = AgentEvent::Error {
-            error: crate::error::AgentError::Llm(fabro_llm::error::SdkError::Network {
+            error: AgentError::Llm(fabro_llm::error::SdkError::Network {
                 message: "refused".into(),
                 source: None,
             }),
@@ -720,7 +723,7 @@ mod tests {
         let event = AgentEvent::SubAgentFailed {
             agent_id: "sa-1".into(),
             depth: 0,
-            error: crate::error::AgentError::ToolExecution("cmd failed".into()),
+            error: AgentError::ToolExecution("cmd failed".into()),
         };
         let json = serde_json::to_string(&event).unwrap();
         let deserialized: AgentEvent = serde_json::from_str(&json).unwrap();
@@ -735,7 +738,7 @@ mod tests {
     #[test]
     fn error_event_preserves_error_type_through_json() {
         let event = AgentEvent::Error {
-            error: crate::error::AgentError::ToolExecution("cmd failed".into()),
+            error: AgentError::ToolExecution("cmd failed".into()),
         };
         let json = serde_json::to_string(&event).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();

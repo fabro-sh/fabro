@@ -3,11 +3,14 @@ use std::sync::Arc;
 
 use crate::error::FabroError;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
+use crate::git::{scan_node_files, MetadataStore};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
-use crate::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt};
+use crate::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt, StageSummary};
 use crate::run_options::RunOptions;
-use crate::run_status::{RunStatus, StatusReason};
+use crate::run_status::{write_run_status, RunStatus, StatusReason};
+use crate::sandbox_git::git_push_host;
 use fabro_hooks::{HookContext, HookEvent, HookRunner};
+use fabro_retro::retro::extract_stage_durations;
 
 use super::types::{Concluded, FinalizeOptions, Retroed};
 
@@ -67,7 +70,7 @@ pub fn build_conclusion(
     final_git_commit_sha: Option<String>,
 ) -> Conclusion {
     let checkpoint = Checkpoint::load(&run_dir.join("checkpoint.json")).ok();
-    let stage_durations = fabro_retro::retro::extract_stage_durations(run_dir);
+    let stage_durations = extract_stage_durations(run_dir);
 
     let mut total_input_tokens: i64 = 0;
     let mut total_output_tokens: i64 = 0;
@@ -105,7 +108,7 @@ pub fn build_conclusion(
                 total_reasoning_tokens += usage.reasoning_tokens.unwrap_or(0);
             }
 
-            stages.push(crate::records::StageSummary {
+            stages.push(StageSummary {
                 stage_id: node_id.clone(),
                 stage_label: node_id.clone(),
                 duration_ms: stage_durations.get(node_id).copied().unwrap_or(0),
@@ -143,7 +146,7 @@ pub fn persist_terminal_outcome(
     status_reason: Option<StatusReason>,
 ) {
     let _ = conclusion.save(&run_dir.join("conclusion.json"));
-    crate::run_status::write_run_status(run_dir, run_status, status_reason);
+    write_run_status(run_dir, run_status, status_reason);
 }
 
 /// Write a finalize commit to the shadow branch with retro.json and final node files.
@@ -161,8 +164,8 @@ pub async fn write_finalize_commit(run_options: &RunOptions, run_dir: &Path) {
         return;
     };
 
-    let store = crate::git::MetadataStore::new(repo_path, &run_options.git_author);
-    let mut entries = crate::git::scan_node_files(run_dir);
+    let store = MetadataStore::new(repo_path, &run_options.git_author);
+    let mut entries = scan_node_files(run_dir);
     if let Ok(retro_bytes) = std::fs::read(run_dir.join("retro.json")) {
         entries.push(("retro.json".to_string(), retro_bytes));
     }
@@ -176,7 +179,7 @@ pub async fn write_finalize_commit(run_options: &RunOptions, run_dir: &Path) {
     }
 
     let refspec = format!("refs/heads/{meta_branch}");
-    crate::sandbox_git::git_push_host(
+    git_push_host(
         repo_path,
         &refspec,
         &run_options.github_app,

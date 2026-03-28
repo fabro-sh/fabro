@@ -3,21 +3,41 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{self as axum_extract, Path, Query, State};
 use axum::http::StatusCode;
-use axum::response::sse::{Event, Sse};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use fabro_config::sandbox::SandboxSettings;
+use fabro_llm::client::Client as LlmClient;
+use fabro_llm::generate::{generate, generate_object, GenerateParams};
+use fabro_llm::types::{
+    ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest,
+    Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
+};
+use fabro_retro::retro::{derive_retro, extract_stage_durations, Retro};
+use fabro_util::redact::redact_jsonl_line;
+use fabro_workflows::error::FabroError;
+use fabro_workflows::git::GitAuthor;
+use fabro_workflows::handler::HandlerRegistry;
+use futures_util::stream;
 use tokio::sync::broadcast;
+use tokio::sync::oneshot;
+use tokio::sync::{Notify, OnceCell};
+use tokio::task::spawn_blocking;
+use tokio::time::{sleep, timeout};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
-use tower::ServiceExt;
+use tower::{service_fn, ServiceExt};
 
 use tracing::{error, info};
 
+use crate::demo;
 use crate::error::ApiError;
 use crate::jwt_auth::{AuthMode, AuthenticatedService, AuthenticatedUser};
+use crate::sessions as sessions_mod;
+use crate::sessions::{new_session_store, SessionStore};
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_retro::RetroExt;
 use fabro_workflows::context::Context;
@@ -75,7 +95,7 @@ struct ManagedRun {
     event_tx: Option<broadcast::Sender<WorkflowRunEvent>>,
     context: Option<Context>,
     checkpoint: Option<Checkpoint>,
-    cancel_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    cancel_tx: Option<oneshot::Sender<()>>,
     cancel_token: Option<Arc<AtomicBool>>,
     run_dir: Option<std::path::PathBuf>,
 }
@@ -98,8 +118,7 @@ struct AggregateUsageTotals {
 }
 
 type LlmSpecFactory = dyn Fn() -> LlmSpec + Send + Sync;
-type RegistryFactoryOverride =
-    dyn Fn(Arc<dyn Interviewer>) -> fabro_workflows::handler::HandlerRegistry + Send + Sync;
+type RegistryFactoryOverride = dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync;
 
 /// Shared application state for the server.
 pub struct AppState {
@@ -110,11 +129,11 @@ pub struct AppState {
     pub dry_run: bool,
     pub db: sqlx::SqlitePool,
     max_concurrent_runs: usize,
-    scheduler_notify: tokio::sync::Notify,
+    scheduler_notify: Notify,
     pub hooks: Vec<fabro_hooks::HookDefinition>,
-    git_author: fabro_workflows::git::GitAuthor,
-    pub sessions: crate::sessions::SessionStore,
-    llm_client: tokio::sync::OnceCell<fabro_llm::client::Client>,
+    git_author: GitAuthor,
+    pub sessions: SessionStore,
+    llm_client: OnceCell<LlmClient>,
 }
 
 /// Build the axum Router with all run endpoints.
@@ -140,7 +159,7 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
         .layer(axum::Extension(auth_mode))
         .with_state(state);
 
-    let dispatch = tower::service_fn(move |req: axum::extract::Request| {
+    let dispatch = service_fn(move |req: axum_extract::Request| {
         let demo = demo_router.clone();
         let real = real_router.clone();
         async move {
@@ -157,99 +176,78 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
 
 fn demo_routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route(
-            "/runs",
-            get(crate::demo::list_runs).post(crate::demo::start_run_stub),
-        )
-        .route("/runs/{id}", get(crate::demo::get_run_status))
-        .route("/runs/{id}/questions", get(crate::demo::get_questions_stub))
-        .route(
-            "/runs/{id}/questions/{qid}/answer",
-            post(crate::demo::answer_stub),
-        )
-        .route("/runs/{id}/events", get(crate::demo::run_events_stub))
-        .route("/runs/{id}/checkpoint", get(crate::demo::checkpoint_stub))
-        .route("/runs/{id}/context", get(crate::demo::context_stub))
-        .route("/runs/{id}/cancel", post(crate::demo::cancel_stub))
-        .route("/runs/{id}/pause", post(crate::demo::pause_stub))
-        .route("/runs/{id}/unpause", post(crate::demo::unpause_stub))
-        .route("/runs/{id}/graph", get(crate::demo::get_run_graph))
-        .route("/runs/{id}/retro", get(crate::demo::get_run_retro))
-        .route("/runs/{id}/stages", get(crate::demo::get_run_stages))
+        .route("/runs", get(demo::list_runs).post(demo::start_run_stub))
+        .route("/runs/{id}", get(demo::get_run_status))
+        .route("/runs/{id}/questions", get(demo::get_questions_stub))
+        .route("/runs/{id}/questions/{qid}/answer", post(demo::answer_stub))
+        .route("/runs/{id}/events", get(demo::run_events_stub))
+        .route("/runs/{id}/checkpoint", get(demo::checkpoint_stub))
+        .route("/runs/{id}/context", get(demo::context_stub))
+        .route("/runs/{id}/cancel", post(demo::cancel_stub))
+        .route("/runs/{id}/pause", post(demo::pause_stub))
+        .route("/runs/{id}/unpause", post(demo::unpause_stub))
+        .route("/runs/{id}/graph", get(demo::get_run_graph))
+        .route("/runs/{id}/retro", get(demo::get_run_retro))
+        .route("/runs/{id}/stages", get(demo::get_run_stages))
         .route(
             "/runs/{id}/stages/{stageId}/turns",
-            get(crate::demo::get_stage_turns),
+            get(demo::get_stage_turns),
         )
-        .route("/runs/{id}/files", get(crate::demo::get_run_files))
-        .route("/runs/{id}/usage", get(crate::demo::get_run_usage))
-        .route(
-            "/runs/{id}/verification",
-            get(crate::demo::get_run_verification),
-        )
-        .route("/runs/{id}/settings", get(crate::demo::get_run_settings))
-        .route("/runs/{id}/steer", post(crate::demo::steer_run_stub))
-        .route(
-            "/runs/{id}/preview",
-            post(crate::demo::generate_preview_url_stub),
-        )
-        .route("/workflows", get(crate::demo::list_workflows))
-        .route("/workflows/{name}", get(crate::demo::get_workflow))
-        .route(
-            "/workflows/{name}/runs",
-            get(crate::demo::list_workflow_runs),
-        )
+        .route("/runs/{id}/files", get(demo::get_run_files))
+        .route("/runs/{id}/usage", get(demo::get_run_usage))
+        .route("/runs/{id}/verification", get(demo::get_run_verification))
+        .route("/runs/{id}/settings", get(demo::get_run_settings))
+        .route("/runs/{id}/steer", post(demo::steer_run_stub))
+        .route("/runs/{id}/preview", post(demo::generate_preview_url_stub))
+        .route("/workflows", get(demo::list_workflows))
+        .route("/workflows/{name}", get(demo::get_workflow))
+        .route("/workflows/{name}/runs", get(demo::list_workflow_runs))
         .route(
             "/verification/criteria",
-            get(crate::demo::list_verification_criteria),
+            get(demo::list_verification_criteria),
         )
         .route(
             "/verification/criteria/{id}",
-            get(crate::demo::get_verification_criterion),
+            get(demo::get_verification_criterion),
         )
         .route(
             "/verification/controls",
-            get(crate::demo::list_verification_controls),
+            get(demo::list_verification_controls),
         )
         .route(
             "/verification/controls/{id}",
-            get(crate::demo::get_verification_control),
+            get(demo::get_verification_control),
         )
         .route(
             "/verification/signoffs",
-            get(crate::demo::list_signoffs).post(crate::demo::create_signoff_stub),
+            get(demo::list_signoffs).post(demo::create_signoff_stub),
         )
-        .route("/verification/signoffs/{id}", get(crate::demo::get_signoff))
-        .route("/retros", get(crate::demo::list_retros))
+        .route("/verification/signoffs/{id}", get(demo::get_signoff))
+        .route("/retros", get(demo::list_retros))
         .route(
             "/sessions",
-            get(crate::demo::list_sessions).post(crate::demo::create_session_stub),
+            get(demo::list_sessions).post(demo::create_session_stub),
         )
-        .route("/sessions/{id}", get(crate::demo::get_session))
-        .route(
-            "/sessions/{id}/messages",
-            post(crate::demo::send_message_stub),
-        )
-        .route(
-            "/sessions/{id}/events",
-            get(crate::demo::session_events_stub),
-        )
+        .route("/sessions/{id}", get(demo::get_session))
+        .route("/sessions/{id}/messages", post(demo::send_message_stub))
+        .route("/sessions/{id}/events", get(demo::session_events_stub))
         .route(
             "/insights/queries",
-            get(crate::demo::list_saved_queries).post(crate::demo::save_query_stub),
+            get(demo::list_saved_queries).post(demo::save_query_stub),
         )
         .route(
             "/insights/queries/{id}",
-            get(crate::demo::get_saved_query)
-                .put(crate::demo::update_query_stub)
-                .delete(crate::demo::delete_query_stub),
+            get(demo::get_saved_query)
+                .put(demo::update_query_stub)
+                .delete(demo::delete_query_stub),
         )
-        .route("/insights/execute", post(crate::demo::execute_query_stub))
-        .route("/insights/history", get(crate::demo::list_query_history))
-        .route("/models", get(crate::demo::list_models))
+        .route("/insights/execute", post(demo::execute_query_stub))
+        .route("/insights/history", get(demo::list_query_history))
+        .route("/models", get(demo::list_models))
         .route("/models/{id}/test", post(test_model))
         .route("/completions", post(create_completion))
-        .route("/settings", get(crate::demo::get_server_settings))
-        .route("/usage", get(crate::demo::get_aggregate_usage))
+        .route("/settings", get(demo::get_server_settings))
+        .route("/usage", get(demo::get_aggregate_usage))
 }
 
 fn real_routes() -> Router<Arc<AppState>> {
@@ -289,16 +287,13 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/retros", get(not_implemented))
         .route(
             "/sessions",
-            get(crate::sessions::list_sessions).post(crate::sessions::create_session),
+            get(sessions_mod::list_sessions).post(sessions_mod::create_session),
         )
-        .route("/sessions/{id}", get(crate::sessions::retrieve_session))
-        .route(
-            "/sessions/{id}/messages",
-            post(crate::sessions::send_message),
-        )
+        .route("/sessions/{id}", get(sessions_mod::retrieve_session))
+        .route("/sessions/{id}/messages", post(sessions_mod::send_message))
         .route(
             "/sessions/{id}/events",
-            get(crate::sessions::stream_session_events),
+            get(sessions_mod::stream_session_events),
         )
         .route(
             "/insights/queries",
@@ -312,7 +307,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         )
         .route("/insights/execute", post(not_implemented))
         .route("/insights/history", get(not_implemented))
-        .route("/models", get(crate::demo::list_models))
+        .route("/models", get(demo::list_models))
         .route("/models/{id}/test", post(test_model))
         .route("/completions", post(create_completion))
         .route("/settings", get(not_implemented))
@@ -393,7 +388,7 @@ pub fn create_app_state(
         llm_spec_factory,
         false,
         5,
-        fabro_workflows::git::GitAuthor::default(),
+        GitAuthor::default(),
         Vec::new(),
     )
 }
@@ -402,10 +397,7 @@ pub fn create_app_state(
 pub fn create_app_state_with_registry_factory(
     db: sqlx::SqlitePool,
     llm_spec_factory: impl Fn() -> LlmSpec + Send + Sync + 'static,
-    registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> fabro_workflows::handler::HandlerRegistry
-        + Send
-        + Sync
-        + 'static,
+    registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
     build_app_state(
         db,
@@ -413,7 +405,7 @@ pub fn create_app_state_with_registry_factory(
         Some(Box::new(registry_factory_override)),
         false,
         5,
-        fabro_workflows::git::GitAuthor::default(),
+        GitAuthor::default(),
         Vec::new(),
     )
 }
@@ -424,7 +416,7 @@ pub fn create_app_state_with_options(
     llm_spec_factory: impl Fn() -> LlmSpec + Send + Sync + 'static,
     dry_run: bool,
     max_concurrent_runs: usize,
-    git_author: fabro_workflows::git::GitAuthor,
+    git_author: GitAuthor,
     hooks: Vec<fabro_hooks::HookDefinition>,
 ) -> Arc<AppState> {
     build_app_state(
@@ -444,7 +436,7 @@ fn build_app_state(
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
     dry_run: bool,
     max_concurrent_runs: usize,
-    git_author: fabro_workflows::git::GitAuthor,
+    git_author: GitAuthor,
     hooks: Vec<fabro_hooks::HookDefinition>,
 ) -> Arc<AppState> {
     Arc::new(AppState {
@@ -455,11 +447,11 @@ fn build_app_state(
         dry_run,
         db,
         max_concurrent_runs,
-        scheduler_notify: tokio::sync::Notify::new(),
+        scheduler_notify: Notify::new(),
         hooks,
         git_author,
-        sessions: crate::sessions::new_session_store(),
-        llm_client: tokio::sync::OnceCell::new(),
+        sessions: new_session_store(),
+        llm_client: OnceCell::new(),
     })
 }
 
@@ -524,7 +516,7 @@ async fn start_run(
     let settings = fabro_config::FabroSettings {
         dry_run: Some(state.dry_run),
         hooks: state.hooks.clone(),
-        sandbox: Some(fabro_config::sandbox::SandboxSettings {
+        sandbox: Some(SandboxSettings {
             provider: Some("local".to_string()),
             ..Default::default()
         }),
@@ -544,7 +536,7 @@ async fn start_run(
         base_branch: None,
     }) {
         Ok(created) => created,
-        Err(ref err @ fabro_workflows::error::FabroError::ValidationFailed { ref diagnostics }) => {
+        Err(ref err @ FabroError::ValidationFailed { ref diagnostics }) => {
             let message = if diagnostics.is_empty() {
                 err.to_string()
             } else {
@@ -556,7 +548,7 @@ async fn start_run(
             };
             return ApiError::bad_request(message).into_response();
         }
-        Err(err @ fabro_workflows::error::FabroError::Parse(_)) => {
+        Err(err @ FabroError::Parse(_)) => {
             return ApiError::bad_request(err.to_string()).into_response();
         }
         Err(err) => {
@@ -619,7 +611,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
             None => return,
         };
 
-        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
         let cancel_token = Arc::new(AtomicBool::new(false));
         let (event_tx, _) = broadcast::channel(256);
 
@@ -751,7 +743,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
                 },
             )
             .await?;
-            Ok::<_, fabro_workflows::error::FabroError>(pipeline::execute(initialized).await)
+            Ok::<_, FabroError>(pipeline::execute(initialized).await)
         }
     };
 
@@ -778,8 +770,8 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
     if let Some(ref cp) = checkpoint {
         let failed = result.is_err();
         let completed_stages = fabro_workflows::build_completed_stages(cp, failed);
-        let stage_durations = fabro_retro::retro::extract_stage_durations(&run_options.run_dir);
-        let retro = fabro_retro::retro::derive_retro(
+        let stage_durations = extract_stage_durations(&run_options.run_dir);
+        let retro = derive_retro(
             &run_id,
             "workflow",
             "",
@@ -817,7 +809,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
                 info!(run_id = %run_id, "Run completed");
                 managed_run.status = RunStatus::Completed;
             }
-            Err(fabro_workflows::error::FabroError::Cancelled) => {
+            Err(FabroError::Cancelled) => {
                 info!(run_id = %run_id, "Run cancelled");
                 managed_run.status = RunStatus::Cancelled;
             }
@@ -844,7 +836,7 @@ pub fn spawn_scheduler(state: Arc<AppState>) {
         loop {
             tokio::select! {
                 _ = state.scheduler_notify.notified() => {},
-                _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {},
+                _ = sleep(std::time::Duration::from_secs(1)) => {},
             }
             // Promote as many queued runs as capacity allows
             loop {
@@ -1045,7 +1037,7 @@ async fn get_events(
     let stream = BroadcastStream::new(rx).filter_map(|result| match result {
         Ok(event) => {
             let data = serde_json::to_string(&event).unwrap_or_default();
-            let data = fabro_util::redact::redact_jsonl_line(&data);
+            let data = redact_jsonl_line(&data);
             Some(Ok::<Event, std::convert::Infallible>(
                 Event::default().data(data),
             ))
@@ -1196,16 +1188,12 @@ async fn test_model(
         .into_response();
     }
 
-    let params = fabro_llm::generate::GenerateParams::new(&info.id)
+    let params = GenerateParams::new(&info.id)
         .provider(info.provider.as_str())
         .prompt("Say OK")
         .max_tokens(16);
 
-    let result = tokio::time::timeout(
-        Duration::from_secs(30),
-        fabro_llm::generate::generate(params),
-    )
-    .await;
+    let result = timeout(Duration::from_secs(30), generate(params)).await;
 
     match result {
         Ok(Ok(_)) => Json(serde_json::json!({
@@ -1228,26 +1216,26 @@ async fn test_model(
     }
 }
 
-fn finish_reason_to_api_stop_reason(reason: &fabro_llm::types::FinishReason) -> String {
+fn finish_reason_to_api_stop_reason(reason: &FinishReason) -> String {
     match reason {
-        fabro_llm::types::FinishReason::Stop => "end_turn".to_string(),
-        fabro_llm::types::FinishReason::Length => "max_tokens".to_string(),
-        fabro_llm::types::FinishReason::ToolCalls => "tool_calls".to_string(),
-        fabro_llm::types::FinishReason::ContentFilter => "content_filter".to_string(),
-        fabro_llm::types::FinishReason::Error => "error".to_string(),
-        fabro_llm::types::FinishReason::Other(s) => s.clone(),
+        FinishReason::Stop => "end_turn".to_string(),
+        FinishReason::Length => "max_tokens".to_string(),
+        FinishReason::ToolCalls => "tool_calls".to_string(),
+        FinishReason::ContentFilter => "content_filter".to_string(),
+        FinishReason::Error => "error".to_string(),
+        FinishReason::Other(s) => s.clone(),
     }
 }
 
-fn convert_api_message(msg: &fabro_api_types::CompletionMessage) -> fabro_llm::types::Message {
+fn convert_api_message(msg: &fabro_api_types::CompletionMessage) -> LlmMessage {
     let role = match msg.role {
-        fabro_api_types::CompletionMessageRole::System => fabro_llm::types::Role::System,
-        fabro_api_types::CompletionMessageRole::User => fabro_llm::types::Role::User,
-        fabro_api_types::CompletionMessageRole::Assistant => fabro_llm::types::Role::Assistant,
-        fabro_api_types::CompletionMessageRole::Tool => fabro_llm::types::Role::Tool,
-        fabro_api_types::CompletionMessageRole::Developer => fabro_llm::types::Role::Developer,
+        fabro_api_types::CompletionMessageRole::System => Role::System,
+        fabro_api_types::CompletionMessageRole::User => Role::User,
+        fabro_api_types::CompletionMessageRole::Assistant => Role::Assistant,
+        fabro_api_types::CompletionMessageRole::Tool => Role::Tool,
+        fabro_api_types::CompletionMessageRole::Developer => Role::Developer,
     };
-    let content: Vec<fabro_llm::types::ContentPart> = msg
+    let content: Vec<ContentPart> = msg
         .content
         .iter()
         .filter_map(|part| {
@@ -1255,7 +1243,7 @@ fn convert_api_message(msg: &fabro_api_types::CompletionMessage) -> fabro_llm::t
             serde_json::from_value(json).ok()
         })
         .collect();
-    fabro_llm::types::Message {
+    LlmMessage {
         role,
         content,
         name: msg.name.clone(),
@@ -1263,13 +1251,13 @@ fn convert_api_message(msg: &fabro_api_types::CompletionMessage) -> fabro_llm::t
     }
 }
 
-fn convert_llm_message(msg: &fabro_llm::types::Message) -> fabro_api_types::CompletionMessage {
+fn convert_llm_message(msg: &LlmMessage) -> fabro_api_types::CompletionMessage {
     let role = match msg.role {
-        fabro_llm::types::Role::System => fabro_api_types::CompletionMessageRole::System,
-        fabro_llm::types::Role::User => fabro_api_types::CompletionMessageRole::User,
-        fabro_llm::types::Role::Assistant => fabro_api_types::CompletionMessageRole::Assistant,
-        fabro_llm::types::Role::Tool => fabro_api_types::CompletionMessageRole::Tool,
-        fabro_llm::types::Role::Developer => fabro_api_types::CompletionMessageRole::Developer,
+        Role::System => fabro_api_types::CompletionMessageRole::System,
+        Role::User => fabro_api_types::CompletionMessageRole::User,
+        Role::Assistant => fabro_api_types::CompletionMessageRole::Assistant,
+        Role::Tool => fabro_api_types::CompletionMessageRole::Tool,
+        Role::Developer => fabro_api_types::CompletionMessageRole::Developer,
     };
     let content: Vec<fabro_api_types::CompletionContentPart> = msg
         .content
@@ -1310,22 +1298,22 @@ async fn create_completion(
     info!(model = %model_id, provider = ?provider_name, "Completion request received");
 
     // Build messages list
-    let mut messages: Vec<fabro_llm::types::Message> = Vec::new();
+    let mut messages: Vec<LlmMessage> = Vec::new();
     if let Some(system) = req.system {
-        messages.push(fabro_llm::types::Message::system(system));
+        messages.push(LlmMessage::system(system));
     }
     for msg in &req.messages {
         messages.push(convert_api_message(msg));
     }
 
     // Convert tools
-    let tools: Option<Vec<fabro_llm::types::ToolDefinition>> = if req.tools.is_empty() {
+    let tools: Option<Vec<ToolDefinition>> = if req.tools.is_empty() {
         None
     } else {
         Some(
             req.tools
                 .into_iter()
-                .map(|t| fabro_llm::types::ToolDefinition {
+                .map(|t| ToolDefinition {
                     name: t.name,
                     description: t.description,
                     parameters: t.parameters,
@@ -1335,20 +1323,17 @@ async fn create_completion(
     };
 
     // Convert tool_choice
-    let tool_choice: Option<fabro_llm::types::ToolChoice> =
-        req.tool_choice.map(|tc| match tc.mode {
-            fabro_api_types::CompletionToolChoiceMode::Auto => fabro_llm::types::ToolChoice::Auto,
-            fabro_api_types::CompletionToolChoiceMode::None => fabro_llm::types::ToolChoice::None,
-            fabro_api_types::CompletionToolChoiceMode::Required => {
-                fabro_llm::types::ToolChoice::Required
-            }
-            fabro_api_types::CompletionToolChoiceMode::Named => {
-                fabro_llm::types::ToolChoice::named(tc.tool_name.unwrap_or_default())
-            }
-        });
+    let tool_choice: Option<ToolChoice> = req.tool_choice.map(|tc| match tc.mode {
+        fabro_api_types::CompletionToolChoiceMode::Auto => ToolChoice::Auto,
+        fabro_api_types::CompletionToolChoiceMode::None => ToolChoice::None,
+        fabro_api_types::CompletionToolChoiceMode::Required => ToolChoice::Required,
+        fabro_api_types::CompletionToolChoiceMode::Named => {
+            ToolChoice::named(tc.tool_name.unwrap_or_default())
+        }
+    });
 
     // Build the LLM request
-    let request = fabro_llm::types::Request {
+    let request = LlmRequest {
         model: model_id.clone(),
         messages,
         provider: provider_name,
@@ -1376,23 +1361,23 @@ async fn create_completion(
     if state.dry_run {
         let msg_id = ulid::Ulid::new().to_string();
         if use_stream {
-            let finish_event = fabro_llm::types::StreamEvent::finish(
-                fabro_llm::types::FinishReason::Stop,
-                fabro_llm::types::Usage::default(),
-                fabro_llm::types::Response {
+            let finish_event = StreamEvent::finish(
+                FinishReason::Stop,
+                Usage::default(),
+                LlmResponse {
                     id: msg_id.clone(),
                     model: model_id.clone(),
                     provider: String::new(),
-                    message: fabro_llm::types::Message::assistant(""),
-                    finish_reason: fabro_llm::types::FinishReason::Stop,
-                    usage: fabro_llm::types::Usage::default(),
+                    message: LlmMessage::assistant(""),
+                    finish_reason: FinishReason::Stop,
+                    usage: Usage::default(),
                     raw: None,
                     warnings: vec![],
                     rate_limit: None,
                 },
             );
             let json = serde_json::to_string(&finish_event).unwrap_or_default();
-            let sse_stream = futures_util::stream::iter(vec![Ok::<_, std::convert::Infallible>(
+            let sse_stream = stream::iter(vec![Ok::<_, std::convert::Infallible>(
                 Event::default().event("stream_event").data(json),
             )]);
             return Sse::new(sse_stream).into_response();
@@ -1418,11 +1403,7 @@ async fn create_completion(
     }
 
     // Get or create LLM client (cached in AppState)
-    let client = match state
-        .llm_client
-        .get_or_try_init(fabro_llm::client::Client::from_env)
-        .await
-    {
+    let client = match state.llm_client.get_or_try_init(LlmClient::from_env).await {
         Ok(c) => c,
         Err(e) => {
             return ApiError::new(
@@ -1469,13 +1450,11 @@ async fn create_completion(
 
         Sse::new(sse_stream)
             .keep_alive(
-                axum::response::sse::KeepAlive::new()
-                    .interval(Duration::from_secs(15))
-                    .event(
-                        Event::default()
-                            .event("ping")
-                            .data(serde_json::json!({"type": "ping"}).to_string()),
-                    ),
+                KeepAlive::new().interval(Duration::from_secs(15)).event(
+                    Event::default()
+                        .event("ping")
+                        .data(serde_json::json!({"type": "ping"}).to_string()),
+                ),
             )
             .into_response()
     } else {
@@ -1484,7 +1463,7 @@ async fn create_completion(
 
         if let Some(schema) = req.schema {
             // Structured output uses generate_object for JSON parsing logic
-            let mut params = fabro_llm::generate::GenerateParams::new(&request.model)
+            let mut params = GenerateParams::new(&request.model)
                 .messages(request.messages)
                 .client(std::sync::Arc::new(client.clone()));
             if let Some(ref p) = request.provider {
@@ -1499,7 +1478,7 @@ async fn create_completion(
             if let Some(top_p) = request.top_p {
                 params = params.top_p(top_p);
             }
-            match fabro_llm::generate::generate_object(params, schema).await {
+            match generate_object(params, schema).await {
                 Ok(result) => Json(fabro_api_types::CompletionResponse {
                     id: msg_id,
                     model: model_id,
@@ -1553,7 +1532,7 @@ async fn get_retro(
         return (StatusCode::OK, Json(serde_json::json!(null))).into_response();
     };
 
-    match fabro_retro::retro::Retro::load(&run_dir) {
+    match Retro::load(&run_dir) {
         Ok(retro) => (StatusCode::OK, Json(retro)).into_response(),
         Err(_) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
     }
@@ -1564,7 +1543,7 @@ pub(crate) async fn render_dot_svg(dot_source: &str) -> Response {
     use fabro_graphviz::render::{render_dot, GraphFormat};
 
     let source = dot_source.to_owned();
-    match tokio::task::spawn_blocking(move || render_dot(&source, GraphFormat::Svg)).await {
+    match spawn_blocking(move || render_dot(&source, GraphFormat::Svg)).await {
         Ok(Ok(bytes)) => {
             (StatusCode::OK, [("content-type", "image/svg+xml")], bytes).into_response()
         }
@@ -1675,7 +1654,7 @@ mod tests {
             test_llm_spec,
             true,
             5,
-            fabro_workflows::git::GitAuthor::default(),
+            GitAuthor::default(),
             Vec::new(),
         );
         let app = build_router(state, AuthMode::Disabled);
@@ -1702,7 +1681,7 @@ mod tests {
             test_llm_spec,
             true,
             5,
-            fabro_workflows::git::GitAuthor::default(),
+            GitAuthor::default(),
             Vec::new(),
         );
         let app = build_router(state, AuthMode::Disabled);
@@ -2393,7 +2372,7 @@ mod tests {
             test_llm_spec,
             false,
             1,
-            fabro_workflows::git::GitAuthor::default(),
+            GitAuthor::default(),
             Vec::new(),
         );
         let app = test_app_with_scheduler(state);
@@ -2481,7 +2460,7 @@ mod tests {
             test_llm_spec,
             true,
             5,
-            fabro_workflows::git::GitAuthor::default(),
+            GitAuthor::default(),
             Vec::new(),
         );
         let app = build_router(state, AuthMode::Disabled);
@@ -2518,7 +2497,7 @@ mod tests {
             test_llm_spec,
             true,
             5,
-            fabro_workflows::git::GitAuthor::default(),
+            GitAuthor::default(),
             Vec::new(),
         );
         let app = build_router(state, AuthMode::Disabled);

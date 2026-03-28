@@ -1,9 +1,16 @@
 use std::path::Path;
 
 use anyhow::Result;
+use dialoguer::console::Term;
+use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Password};
+use fabro_config::dotenv::{merge_env, write_env_file as write_env};
+use fabro_llm::client::Client as LlmClient;
+use fabro_llm::generate::{generate, GenerateParams};
 use fabro_model::Provider;
 use fabro_util::terminal::Styles;
+use tokio::task::spawn_blocking;
+use tokio::time::timeout;
 
 use crate::commands::doctor;
 
@@ -111,20 +118,16 @@ pub(crate) async fn run_openai_oauth_or_api_key(s: &Styles) -> Result<Vec<(Strin
 // ---------------------------------------------------------------------------
 
 pub(crate) fn prompt_confirm(prompt: &str, default: bool) -> Result<bool> {
-    Ok(
-        Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            .with_prompt(prompt)
-            .default(default)
-            .interact_on(&dialoguer::console::Term::stderr())?,
-    )
+    Ok(Confirm::with_theme(&ColorfulTheme::default())
+        .with_prompt(prompt)
+        .default(default)
+        .interact_on(&Term::stderr())?)
 }
 
 pub(crate) fn prompt_password(prompt: &str) -> Result<String> {
-    Ok(
-        Password::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            .with_prompt(prompt)
-            .interact_on(&dialoguer::console::Term::stderr())?,
-    )
+    Ok(Password::with_theme(&ColorfulTheme::default())
+        .with_prompt(prompt)
+        .interact_on(&Term::stderr())?)
 }
 
 // ---------------------------------------------------------------------------
@@ -142,8 +145,8 @@ pub(crate) fn write_env_file(
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
-    let merged = fabro_config::dotenv::merge_env(&existing, &refs);
-    fabro_config::dotenv::write_env_file(&env_path, &merged)?;
+    let merged = merge_env(&existing, &refs);
+    write_env(&env_path, &merged)?;
     eprintln!(
         "  {}",
         s.dim.apply_to(format!("Wrote {}", env_path.display()))
@@ -160,24 +163,19 @@ pub(crate) async fn validate_api_key(provider: Provider, api_key: &str) -> Resul
     let env_var = provider.api_key_env_vars()[0];
     std::env::set_var(env_var, api_key);
 
-    let client = fabro_llm::client::Client::from_env()
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = LlmClient::from_env().await.map_err(|e| e.to_string())?;
 
-    let params = fabro_llm::generate::GenerateParams::new(doctor::probe_model(provider))
+    let params = GenerateParams::new(doctor::probe_model(provider))
         .provider(provider.as_str())
         .prompt("Say OK")
         .max_tokens(16)
         .client(std::sync::Arc::new(client));
 
-    tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        fabro_llm::generate::generate(params),
-    )
-    .await
-    .map_err(|_| "timeout (30s)".to_string())?
-    .map(|_| ())
-    .map_err(|e| e.to_string())
+    timeout(std::time::Duration::from_secs(30), generate(params))
+        .await
+        .map_err(|_| "timeout (30s)".to_string())?
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 pub(crate) async fn prompt_and_validate_key(
@@ -193,7 +191,7 @@ pub(crate) async fn prompt_and_validate_key(
 
     loop {
         let prompt = env_var.to_string();
-        let key: String = tokio::task::spawn_blocking(move || prompt_password(&prompt)).await??;
+        let key: String = spawn_blocking(move || prompt_password(&prompt)).await??;
 
         eprintln!("  {}", s.dim.apply_to("Validating API key..."));
         match validate_api_key(provider, &key).await {
@@ -203,10 +201,9 @@ pub(crate) async fn prompt_and_validate_key(
             }
             Err(e) => {
                 eprintln!("  [error] API key validation failed: {e}");
-                let retry = tokio::task::spawn_blocking(|| {
-                    prompt_confirm("Try again with a different key?", true)
-                })
-                .await??;
+                let retry =
+                    spawn_blocking(|| prompt_confirm("Try again with a different key?", true))
+                        .await??;
                 if !retry {
                     return Ok((env_var.to_string(), key));
                 }

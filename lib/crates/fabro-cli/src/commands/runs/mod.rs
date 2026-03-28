@@ -1,4 +1,5 @@
 use anyhow::Result;
+use fabro_util::terminal::Styles;
 
 use crate::args::RunsCommands;
 
@@ -9,7 +10,7 @@ pub(crate) mod rm;
 pub async fn dispatch(cmd: RunsCommands) -> Result<()> {
     match cmd {
         RunsCommands::Ps(args) => {
-            let styles = fabro_util::terminal::Styles::detect_stdout();
+            let styles = Styles::detect_stdout();
             list::list_command(&args, &styles)
         }
         RunsCommands::Rm(args) => rm::remove_command(&args).await,

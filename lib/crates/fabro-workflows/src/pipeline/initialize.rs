@@ -13,12 +13,20 @@ use fabro_sandbox::{
 };
 use shlex::try_quote;
 
+use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontainer_lifecycle};
 use crate::error::FabroError;
-use crate::event::{RunNoticeLevel, WorkflowRunEvent};
-use crate::git::{self, GitSyncStatus};
-use crate::handler::default_registry;
+use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
+use crate::git::{self, GitSyncStatus, MetadataStore};
 use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
-use crate::run_options::GitCheckpointOptions;
+use crate::handler::{default_registry, HandlerRegistry};
+use crate::run_options::{GitCheckpointOptions, RunOptions};
+use fabro_sandbox::daytona::DaytonaSandbox;
+use fabro_sandbox::docker::DockerSandboxConfig;
+use fabro_sandbox::ssh::SshSandbox;
+use tokio::process::Command as TokioCommand;
+use tokio::runtime::Handle;
+use tokio::task::spawn_blocking;
+use tokio::time::timeout as tokio_timeout;
 
 use super::types::{InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec, SandboxSpec};
 
@@ -53,7 +61,7 @@ async fn run_hooks(
 }
 
 fn emit_run_notice(
-    emitter: &crate::event::EventEmitter,
+    emitter: &EventEmitter,
     level: RunNoticeLevel,
     code: impl Into<String>,
     message: impl Into<String>,
@@ -76,10 +84,7 @@ fn sandbox_provider_name(spec: &SandboxSpec) -> &'static str {
     }
 }
 
-fn host_repo_path_for_planning(
-    run_options: &crate::run_options::RunOptions,
-    spec: &SandboxSpec,
-) -> Option<PathBuf> {
+fn host_repo_path_for_planning(run_options: &RunOptions, spec: &SandboxSpec) -> Option<PathBuf> {
     run_options.host_repo_path.clone().or_else(|| match spec {
         SandboxSpec::Local { working_directory } => Some(working_directory.clone()),
         SandboxSpec::Docker { config } => Some(PathBuf::from(&config.host_working_directory)),
@@ -178,11 +183,9 @@ async fn resolve_worktree_plan(
                 GitSyncStatus::Dirty => {
                     let repo_path = repo_path.clone();
                     let branch = branch.clone();
-                    tokio::task::spawn_blocking(move || {
-                        git::branch_needs_push(&repo_path, "origin", &branch)
-                    })
-                    .await
-                    .unwrap_or(true)
+                    spawn_blocking(move || git::branch_needs_push(&repo_path, "origin", &branch))
+                        .await
+                        .unwrap_or(true)
                 }
             };
 
@@ -254,7 +257,7 @@ async fn resolve_worktree_plan(
 
 fn local_sandbox_with_callback(
     working_directory: PathBuf,
-    emitter: Arc<crate::event::EventEmitter>,
+    emitter: Arc<EventEmitter>,
 ) -> Arc<dyn Sandbox> {
     let mut sandbox = LocalSandbox::new(working_directory);
     sandbox.set_event_callback(Arc::new(move |event| {
@@ -266,7 +269,7 @@ fn local_sandbox_with_callback(
 async fn build_sandbox(
     spec: &SandboxSpec,
     worktree_plan: Option<&WorktreePlan>,
-    emitter: Arc<crate::event::EventEmitter>,
+    emitter: Arc<EventEmitter>,
 ) -> Result<SandboxBuildResult, FabroError> {
     let mut worktree_created = false;
     let sandbox: Arc<dyn Sandbox> = match spec {
@@ -310,7 +313,7 @@ async fn build_sandbox(
             }
         }
         SandboxSpec::Docker { config } => {
-            let mut sandbox = DockerSandbox::new(fabro_sandbox::docker::DockerSandboxConfig {
+            let mut sandbox = DockerSandbox::new(DockerSandboxConfig {
                 image: config.image.clone(),
                 host_working_directory: config.host_working_directory.clone(),
                 container_mount_point: config.container_mount_point.clone(),
@@ -334,7 +337,7 @@ async fn build_sandbox(
             run_id,
             clone_branch,
         } => {
-            let mut sandbox = fabro_sandbox::daytona::DaytonaSandbox::new(
+            let mut sandbox = DaytonaSandbox::new(
                 config.clone(),
                 github_app.clone(),
                 run_id.clone(),
@@ -380,7 +383,7 @@ async fn build_sandbox(
             run_id,
             github_app,
         } => {
-            let mut sandbox = fabro_sandbox::ssh::SshSandbox::new(
+            let mut sandbox = SshSandbox::new(
                 config.clone(),
                 clone_params.clone(),
                 run_id.clone(),
@@ -428,7 +431,7 @@ async fn mint_github_token(
 async fn build_sandbox_env(
     spec: &SandboxEnvSpec,
     github_app: Option<&fabro_github::GitHubAppCredentials>,
-    emitter: &crate::event::EventEmitter,
+    emitter: &EventEmitter,
 ) -> Result<HashMap<String, String>, FabroError> {
     let mut env = spec.devcontainer_env.clone();
     env.extend(spec.toml_env.clone());
@@ -458,8 +461,8 @@ async fn build_registry(
     spec: &LlmSpec,
     interviewer: Arc<dyn fabro_interview::Interviewer>,
     sandbox_env: &HashMap<String, String>,
-    emitter: &crate::event::EventEmitter,
-) -> Result<(Arc<crate::handler::HandlerRegistry>, Option<Client>, bool), FabroError> {
+    emitter: &EventEmitter,
+) -> Result<(Arc<HandlerRegistry>, Option<Client>, bool), FabroError> {
     let build_dry_run = || Arc::new(default_registry(Arc::clone(&interviewer), || None));
 
     if spec.dry_run {
@@ -531,9 +534,7 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), FabroErro
         config: daytona, ..
     } = &mut options.sandbox
     {
-        daytona.snapshot = Some(crate::devcontainer_bridge::devcontainer_to_snapshot_config(
-            &config,
-        ));
+        daytona.snapshot = Some(devcontainer_to_snapshot_config(&config));
     }
 
     let timeout = std::time::Duration::from_millis(300_000);
@@ -551,9 +552,9 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), FabroErro
         };
 
         for shell_command in shell_commands {
-            let output = tokio::time::timeout(
+            let output = tokio_timeout(
                 timeout,
-                tokio::process::Command::new("sh")
+                TokioCommand::new("sh")
                     .arg("-c")
                     .arg(&shell_command)
                     .current_dir(&devcontainer.resolve_dir)
@@ -664,7 +665,7 @@ pub async fn initialize(
         options.run_options.git = Some(GitCheckpointOptions {
             base_sha: Some(plan.base_sha.clone()),
             run_branch: Some(plan.branch_name.clone()),
-            meta_branch: Some(crate::git::MetadataStore::branch_name(&options.run_id)),
+            meta_branch: Some(MetadataStore::branch_name(&options.run_id)),
         });
     }
 
@@ -680,7 +681,7 @@ pub async fn initialize(
 
     let sandbox = sandbox_result.sandbox;
     let cleanup_guard = scopeguard::guard(Arc::clone(&sandbox), |sandbox| {
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        if let Ok(handle) = Handle::try_current() {
             handle.spawn(async move {
                 let _ = sandbox.cleanup().await;
             });
@@ -759,9 +760,7 @@ pub async fn initialize(
                 options.run_options.git = Some(GitCheckpointOptions {
                     base_sha,
                     run_branch: Some(info.run_branch.clone()),
-                    meta_branch: Some(crate::git::MetadataStore::branch_name(
-                        &options.run_options.run_id,
-                    )),
+                    meta_branch: Some(MetadataStore::branch_name(&options.run_options.run_id)),
                 });
                 if options.run_options.base_branch.is_none() {
                     options.run_options.base_branch = info.base_branch;
@@ -828,7 +827,7 @@ pub async fn initialize(
     }
 
     for (phase, commands) in &options.lifecycle.devcontainer_phases {
-        crate::devcontainer_bridge::run_devcontainer_lifecycle(
+        run_devcontainer_lifecycle(
             sandbox.as_ref(),
             &options.emitter,
             phase,

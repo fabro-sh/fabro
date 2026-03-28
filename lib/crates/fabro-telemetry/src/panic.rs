@@ -1,7 +1,9 @@
 use std::panic::PanicHookInfo;
 use std::path::Path;
 
-use sentry::protocol::{Event, Exception, Mechanism};
+use crate::spawn::spawn_fabro_subcommand;
+use sentry::integrations::backtrace;
+use sentry::protocol::{Context, Event, Exception, Mechanism, OsContext, Values};
 
 use crate::TelemetryLevel;
 
@@ -24,7 +26,7 @@ pub fn build_event(message: &str) -> Event<'static> {
     let mut event = Event::new();
     event.level = sentry::Level::Fatal;
 
-    let stacktrace = sentry::integrations::backtrace::current_stacktrace();
+    let stacktrace = backtrace::current_stacktrace();
 
     let exception = Exception {
         ty: "panic".into(),
@@ -38,14 +40,14 @@ pub fn build_event(message: &str) -> Event<'static> {
         ..Default::default()
     };
 
-    event.exception = sentry::protocol::Values {
+    event.exception = Values {
         values: vec![exception],
     };
 
     // Add OS context.
     event.contexts.insert(
         "os".to_string(),
-        sentry::protocol::Context::Os(Box::new(sentry::protocol::OsContext {
+        Context::Os(Box::new(OsContext {
             name: Some(std::env::consts::OS.to_string()),
             ..Default::default()
         })),
@@ -102,7 +104,7 @@ fn spawn_panic_sender(event: Event<'static>) {
     };
 
     let filename = format!("fabro-panic-{}.json", event.event_id);
-    crate::spawn::spawn_fabro_subcommand("__send_panic", &filename, &json);
+    spawn_fabro_subcommand("__send_panic", &filename, &json);
 }
 
 /// Send a serialized Sentry panic event. Called by the `__send_panic` subcommand.

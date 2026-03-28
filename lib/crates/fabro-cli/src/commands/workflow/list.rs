@@ -1,6 +1,11 @@
 use anyhow::{bail, Result};
 use fabro_util::terminal::Styles;
 
+use fabro_config::project::{
+    discover_project_config, list_workflows_detailed, resolve_fabro_root, WorkflowInfo,
+    WorkflowSource,
+};
+
 use crate::args::WorkflowListArgs;
 use crate::shared::relative_path;
 
@@ -10,7 +15,7 @@ pub fn list_command(_args: &WorkflowListArgs) -> Result<()> {
     let styles = Styles::detect_stderr();
     let cwd = std::env::current_dir()?;
 
-    let (config_path, config) = match fabro_config::project::discover_project_config(&cwd)? {
+    let (config_path, config) = match discover_project_config(&cwd)? {
         Some(found) => found,
         None => bail!(
             "No fabro.toml found in {cwd} or any parent directory",
@@ -18,22 +23,19 @@ pub fn list_command(_args: &WorkflowListArgs) -> Result<()> {
         ),
     };
 
-    let fabro_root = fabro_config::project::resolve_fabro_root(&config_path, &config);
+    let fabro_root = resolve_fabro_root(&config_path, &config);
     let project_wf_dir = fabro_root.join("workflows");
     let user_wf_dir = dirs::home_dir().map(|h| h.join(".fabro").join("workflows"));
 
-    let workflows = fabro_config::project::list_workflows_detailed(
-        Some(&project_wf_dir),
-        user_wf_dir.as_deref(),
-    );
+    let workflows = list_workflows_detailed(Some(&project_wf_dir), user_wf_dir.as_deref());
 
     let project: Vec<_> = workflows
         .iter()
-        .filter(|w| w.source == fabro_config::project::WorkflowSource::Project)
+        .filter(|w| w.source == WorkflowSource::Project)
         .collect();
     let user: Vec<_> = workflows
         .iter()
-        .filter(|w| w.source == fabro_config::project::WorkflowSource::User)
+        .filter(|w| w.source == WorkflowSource::User)
         .collect();
 
     let name_width = workflows.iter().map(|w| w.name.len()).max().unwrap_or(0);
@@ -65,7 +67,7 @@ pub fn list_command(_args: &WorkflowListArgs) -> Result<()> {
 fn print_section(
     title: &str,
     path: &str,
-    workflows: &[&fabro_config::project::WorkflowInfo],
+    workflows: &[&WorkflowInfo],
     name_width: usize,
     styles: &Styles,
 ) {

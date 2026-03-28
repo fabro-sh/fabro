@@ -15,8 +15,10 @@ use crate::operations::{validate, ValidateInput, WorkflowInput};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline;
 use crate::pipeline::types::Initialized;
+use crate::run_dir::visit_from_context;
 use crate::run_options::RunOptions;
-use fabro_graphviz::graph::{Graph, Node};
+use fabro_graphviz::graph::{AttrValue, Graph, Node};
+use tokio::time::{sleep, timeout};
 
 use super::{EngineServices, Handler};
 
@@ -116,7 +118,7 @@ impl Handler for SubWorkflowHandler {
         let poll_interval = node
             .attrs
             .get("manager.poll_interval")
-            .and_then(fabro_graphviz::graph::AttrValue::as_duration)
+            .and_then(AttrValue::as_duration)
             .unwrap_or_else(|| {
                 let raw = node
                     .attrs
@@ -129,7 +131,7 @@ impl Handler for SubWorkflowHandler {
         let max_cycles = node
             .attrs
             .get("manager.max_cycles")
-            .and_then(fabro_graphviz::graph::AttrValue::as_i64)
+            .and_then(AttrValue::as_i64)
             .unwrap_or(1000);
         let max_cycles = u64::try_from(max_cycles).unwrap_or(1000).max(1);
 
@@ -150,7 +152,7 @@ impl Handler for SubWorkflowHandler {
         };
 
         // Build child RunOptions
-        let visit = crate::run_dir::visit_from_context(context) as u64;
+        let visit = visit_from_context(context) as u64;
         let child_logs = run_dir.join(format!("nodes/{}_{visit}/child", node.id));
         let _ = std::fs::create_dir_all(&child_logs);
 
@@ -255,14 +257,14 @@ impl Handler for SubWorkflowHandler {
 
                     return Ok(outcome);
                 }
-                _ = tokio::time::sleep(poll_interval) => {
+                _ = sleep(poll_interval) => {
                     // Check stop condition
                     if !stop_condition.is_empty() {
                         let dummy_outcome = Outcome::success();
                         if evaluate_condition(stop_condition, &dummy_outcome, context) {
                             child_cancel.store(true, Ordering::Relaxed);
                             // Give child a moment to wind down
-                            let _ = tokio::time::timeout(
+                            let _ = timeout(
                                 Duration::from_millis(100),
                                 &mut child_handle,
                             ).await;
@@ -279,7 +281,7 @@ impl Handler for SubWorkflowHandler {
 
         // Max cycles exceeded — cancel child
         child_cancel.store(true, Ordering::Relaxed);
-        let _ = tokio::time::timeout(Duration::from_millis(100), &mut child_handle).await;
+        let _ = timeout(Duration::from_millis(100), &mut child_handle).await;
 
         Ok(Outcome::fail_classify(format!(
             "Max cycles ({max_cycles}) exceeded for manager loop node: {}",

@@ -3,39 +3,47 @@ use std::sync::Arc;
 
 use anyhow::bail;
 use fabro_agent::{DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox};
-use fabro_config::project::ResolveSettingsInput;
+use fabro_config::cli::load_cli_config;
+use fabro_config::project::{
+    resolve_settings, resolve_workflow_path, resolve_working_directory, ResolveSettingsInput,
+};
 use fabro_config::{FabroConfig, FabroSettings};
+use fabro_graphviz::graph::{is_llm_handler_type, Graph};
+use fabro_llm::client::Client as LlmClient;
 use fabro_model::{Catalog, Provider};
+use fabro_sandbox::daytona::{detect_repo_info, DaytonaConfig, DaytonaSandbox};
+use fabro_sandbox::ssh::{GitCloneParams as SshGitCloneParams, SshConfig, SshSandbox};
 use fabro_sandbox::SandboxProvider;
 use fabro_util::terminal::Styles;
-use fabro_workflows::git::GitSyncStatus;
+use fabro_workflows::git::{sync_status, GitSyncStatus};
+use fabro_workflows::operations::{validate, ValidateInput, WorkflowInput};
 
 use crate::args::PreflightArgs;
+use crate::shared::github::build_github_app_credentials;
 
 pub async fn execute(mut args: PreflightArgs) -> anyhow::Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let cli_defaults = fabro_config::cli::load_cli_config(None)?;
+    let cli_defaults = load_cli_config(None)?;
     let cli_config: FabroSettings = cli_defaults.clone().try_into()?;
     args.verbose = args.verbose || cli_config.verbose_enabled();
 
-    let github_app = crate::shared::github::build_github_app_credentials(cli_config.app_id());
+    let github_app = build_github_app_credentials(cli_config.app_id());
     let cli_args_config = FabroConfig::try_from(&args)?;
     let cwd = std::env::current_dir()?;
-    let settings = fabro_config::project::resolve_settings(ResolveSettingsInput {
+    let settings = resolve_settings(ResolveSettingsInput {
         workflow_path: args.workflow.clone(),
         cwd: cwd.clone(),
         defaults: cli_defaults,
         overrides: cli_args_config,
         apply_project_config: true,
     })?;
-    let resolution = fabro_config::project::resolve_workflow_path(&args.workflow, &cwd)?;
-    let working_directory = fabro_config::project::resolve_working_directory(&settings, &cwd);
+    let resolution = resolve_workflow_path(&args.workflow, &cwd)?;
+    let working_directory = resolve_working_directory(&settings, &cwd);
 
-    let (origin_url, detected_base_branch) =
-        fabro_sandbox::daytona::detect_repo_info(&working_directory)
-            .map(|(url, branch)| (Some(url), branch))
-            .unwrap_or((None, None));
-    let git_status = fabro_workflows::git::sync_status(
+    let (origin_url, detected_base_branch) = detect_repo_info(&working_directory)
+        .map(|(url, branch)| (Some(url), branch))
+        .unwrap_or((None, None));
+    let git_status = sync_status(
         &working_directory,
         "origin",
         detected_base_branch.as_deref(),
@@ -43,13 +51,12 @@ pub async fn execute(mut args: PreflightArgs) -> anyhow::Result<()> {
 
     let sandbox_provider = resolve_sandbox_provider(args.sandbox.map(Into::into), &settings)?;
 
-    let validated =
-        fabro_workflows::operations::validate(fabro_workflows::operations::ValidateInput {
-            workflow: fabro_workflows::operations::WorkflowInput::Path(args.workflow.clone()),
-            settings: settings.clone(),
-            cwd,
-            custom_transforms: Vec::new(),
-        })?;
+    let validated = validate(ValidateInput {
+        workflow: WorkflowInput::Path(args.workflow.clone()),
+        settings: settings.clone(),
+        cwd,
+        custom_transforms: Vec::new(),
+    })?;
     super::run::output::print_workflow_report(&validated, Some(&resolution.dot_path), styles);
     if validated.has_errors() {
         bail!("Validation failed");
@@ -74,7 +81,7 @@ fn resolve_model_provider(
     cli_model: Option<&str>,
     cli_provider: Option<&str>,
     settings: &FabroSettings,
-    graph: &fabro_graphviz::graph::Graph,
+    graph: &Graph,
 ) -> (String, Option<String>) {
     let configured_model = settings.llm.as_ref().and_then(|llm| llm.model.as_deref());
     let configured_provider = settings
@@ -128,9 +135,7 @@ fn resolve_sandbox_provider(
         .unwrap_or_default())
 }
 
-fn resolve_daytona_config(
-    settings: &FabroSettings,
-) -> Option<fabro_sandbox::daytona::DaytonaConfig> {
+fn resolve_daytona_config(settings: &FabroSettings) -> Option<DaytonaConfig> {
     settings
         .sandbox_settings()
         .and_then(|sandbox| sandbox.daytona.clone())
@@ -145,7 +150,7 @@ fn resolve_exe_config(settings: &FabroSettings) -> Option<fabro_sandbox::exe::Ex
 
 #[cfg(feature = "exedev")]
 fn resolve_exe_clone_params(cwd: &Path) -> Option<fabro_sandbox::exe::GitCloneParams> {
-    let (detected_url, branch) = match fabro_sandbox::daytona::detect_repo_info(cwd) {
+    let (detected_url, branch) = match detect_repo_info(cwd) {
         Ok(info) => info,
         Err(err) => {
             tracing::warn!("No git repo detected for exe.dev clone: {err}");
@@ -156,14 +161,14 @@ fn resolve_exe_clone_params(cwd: &Path) -> Option<fabro_sandbox::exe::GitClonePa
     Some(fabro_sandbox::exe::GitCloneParams { url, branch })
 }
 
-fn resolve_ssh_config(settings: &FabroSettings) -> Option<fabro_sandbox::ssh::SshConfig> {
+fn resolve_ssh_config(settings: &FabroSettings) -> Option<SshConfig> {
     settings
         .sandbox_settings()
         .and_then(|sandbox| sandbox.ssh.clone())
 }
 
-fn resolve_ssh_clone_params(cwd: &Path) -> Option<fabro_sandbox::ssh::GitCloneParams> {
-    let (detected_url, branch) = match fabro_sandbox::daytona::detect_repo_info(cwd) {
+fn resolve_ssh_clone_params(cwd: &Path) -> Option<SshGitCloneParams> {
+    let (detected_url, branch) = match detect_repo_info(cwd) {
         Ok(info) => info,
         Err(err) => {
             tracing::warn!("No git repo detected for SSH clone: {err}");
@@ -171,7 +176,7 @@ fn resolve_ssh_clone_params(cwd: &Path) -> Option<fabro_sandbox::ssh::GitClonePa
         }
     };
     let url = fabro_github::ssh_url_to_https(&detected_url);
-    Some(fabro_sandbox::ssh::GitCloneParams { url, branch })
+    Some(SshGitCloneParams { url, branch })
 }
 
 async fn mint_github_token(
@@ -201,7 +206,7 @@ async fn mint_github_token(
 
 #[allow(clippy::too_many_arguments)]
 async fn run_preflight(
-    graph: &fabro_graphviz::graph::Graph,
+    graph: &Graph,
     settings: &FabroSettings,
     cli_model: Option<&str>,
     cli_provider: Option<&str>,
@@ -281,14 +286,7 @@ async fn run_preflight(
         }
         SandboxProvider::Daytona => {
             let config = daytona_config.unwrap_or_default();
-            match fabro_sandbox::daytona::DaytonaSandbox::new(
-                config,
-                github_app.clone(),
-                None,
-                None,
-            )
-            .await
-            {
+            match DaytonaSandbox::new(config, github_app.clone(), None, None).await {
                 Ok(env) => Ok(Arc::new(env) as Arc<dyn Sandbox>),
                 Err(e) => Err(format!("Daytona sandbox creation failed: {e}")),
             }
@@ -316,7 +314,7 @@ async fn run_preflight(
         SandboxProvider::Ssh => match ssh_config {
             Some(config) => {
                 let clone_params = resolve_ssh_clone_params(working_directory);
-                let env = fabro_sandbox::ssh::SshSandbox::new(config, clone_params, None, None);
+                let env = SshSandbox::new(config, clone_params, None, None);
                 Ok(Arc::new(env) as Arc<dyn Sandbox>)
             }
             None => Err("SSH sandbox requires [sandbox.ssh] config".to_string()),
@@ -367,14 +365,14 @@ async fn run_preflight(
     }
 
     let default_provider = provider.as_deref().unwrap_or("anthropic");
-    let llm_ok = match fabro_llm::client::Client::from_env().await {
+    let llm_ok = match LlmClient::from_env().await {
         Ok(c) => {
             let configured: Vec<String> =
                 c.provider_names().iter().map(|s| s.to_string()).collect();
 
             let mut model_providers = std::collections::BTreeSet::new();
             for node in graph.nodes.values() {
-                if !fabro_graphviz::graph::is_llm_handler_type(node.handler_type()) {
+                if !is_llm_handler_type(node.handler_type()) {
                     continue;
                 }
                 let node_model = node.model().unwrap_or(&model);

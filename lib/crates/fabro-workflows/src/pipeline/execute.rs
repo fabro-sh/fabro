@@ -2,21 +2,25 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use fabro_core::executor::ExecutorBuilder;
+use fabro_core::handler::NodeHandler;
 use fabro_core::state::RunState;
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 use crate::context::{self, Context};
 use crate::error::FabroError;
+use crate::event::WorkflowRunEvent;
 use crate::graph::WorkflowGraph;
 use crate::handler::EngineServices;
 use crate::lifecycle::WorkflowLifecycle;
 use crate::node_handler::WorkflowNodeHandler;
 use crate::outcome::{Outcome, StageStatus};
+use crate::records::Checkpoint;
 use crate::sandbox_git::GitState;
 
 use super::types::{Executed, Initialized};
 
-fn seed_context_from_checkpoint(checkpoint: Option<&crate::records::Checkpoint>) -> Context {
+fn seed_context_from_checkpoint(checkpoint: Option<&Checkpoint>) -> Context {
     let context = Context::new();
     if let Some(cp) = checkpoint {
         for (k, v) in &cp.context_values {
@@ -217,7 +221,7 @@ pub async fn execute(init: Initialized) -> Executed {
             tokio::spawn(async move {
                 loop {
                     tokio::select! {
-                        _ = tokio::time::sleep(stall_timeout) => {
+                        _ = sleep(stall_timeout) => {
                             if shutdown_clone.is_cancelled() {
                                 return;
                             }
@@ -243,9 +247,8 @@ pub async fn execute(init: Initialized) -> Executed {
             None
         };
 
-    let mut builder =
-        ExecutorBuilder::new(handler as Arc<dyn fabro_core::handler::NodeHandler<WorkflowGraph>>)
-            .lifecycle(Box::new(lifecycle));
+    let mut builder = ExecutorBuilder::new(handler as Arc<dyn NodeHandler<WorkflowGraph>>)
+        .lifecycle(Box::new(lifecycle));
 
     if let Some(ref cancel) = run_options.cancel_token {
         builder = builder.cancel_token(cancel.clone());
@@ -279,7 +282,7 @@ pub async fn execute(init: Initialized) -> Executed {
         Err(fabro_core::CoreError::StallTimeout { node_id }) => {
             let stall_timeout = graph.stall_timeout().unwrap_or_default();
             let idle_secs = stall_timeout.as_secs();
-            emitter.emit(&crate::event::WorkflowRunEvent::StallWatchdogTimeout {
+            emitter.emit(&WorkflowRunEvent::StallWatchdogTimeout {
                 node: node_id.clone(),
                 idle_seconds: idle_secs,
             });

@@ -1,3 +1,5 @@
+use fabro_graphviz::parser;
+
 use super::types::Parsed;
 use crate::error::FabroError;
 
@@ -7,7 +9,7 @@ use crate::error::FabroError;
 ///
 /// Returns `FabroError::Parse` if the DOT source is invalid.
 pub fn parse(dot_source: &str) -> Result<Parsed, FabroError> {
-    let graph = fabro_graphviz::parser::parse(dot_source)?;
+    let graph = parser::parse(dot_source)?;
     Ok(Parsed {
         graph,
         source: dot_source.to_string(),

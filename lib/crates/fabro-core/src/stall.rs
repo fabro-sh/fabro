@@ -3,6 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::Notify;
+use tokio::task::JoinHandle;
+use tokio::time::sleep;
 
 /// Trait for receiving stall timeout notifications.
 pub trait ActivityMonitor: Send + Sync {
@@ -25,7 +27,7 @@ pub struct StallWatchdog {
 pub struct StallGuard {
     activity: Arc<Notify>,
     shutdown: Arc<AtomicBool>,
-    handle: Option<tokio::task::JoinHandle<()>>,
+    handle: Option<JoinHandle<()>>,
 }
 
 impl StallWatchdog {
@@ -55,7 +57,7 @@ impl StallWatchdog {
         let handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = tokio::time::sleep(timeout) => {
+                    _ = sleep(timeout) => {
                         if shutdown.load(Ordering::Relaxed) {
                             return;
                         }

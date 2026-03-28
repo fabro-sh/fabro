@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
-use fabro_core::error::CoreError;
+use fabro_core::error::{CoreError, Result as CoreResult};
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::RunLifecycle;
 use fabro_core::outcome::NodeResult;
@@ -11,10 +11,12 @@ use fabro_core::state::RunState;
 
 use crate::artifact::ArtifactStore;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
+use crate::git::scan_node_files;
+use crate::git::MetadataStore;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageStatus, StageUsage};
-use crate::records::CheckpointExt;
+use crate::records::{Checkpoint, CheckpointExt};
 use crate::run_dir::node_dir;
 use crate::run_options::RunOptions;
 use crate::sandbox_git::{git_checkpoint, git_diff, git_push_host};
@@ -45,11 +47,7 @@ pub struct GitLifecycle {
 
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for GitLifecycle {
-    async fn on_run_start(
-        &self,
-        _graph: &WorkflowGraph,
-        _state: &WfRunState,
-    ) -> fabro_core::error::Result<()> {
+    async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
         // Reset last_git_sha (diff base parity)
         *self.last_git_sha.lock().unwrap() = None;
         *self.checkpoint_git_result.lock().unwrap() = None;
@@ -62,7 +60,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 .and_then(|g| g.meta_branch.as_ref()),
             self.run_options.host_repo_path.as_ref(),
         ) {
-            let store = crate::git::MetadataStore::new(repo_path, &self.run_options.git_author);
+            let store = MetadataStore::new(repo_path, &self.run_options.git_author);
             let run_json = std::fs::read(self.run_dir.join("run.json")).ok();
             let start_json = std::fs::read(self.run_dir.join("start.json")).ok();
             let sandbox_json = std::fs::read(self.run_dir.join("sandbox.json")).ok();
@@ -94,7 +92,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         result: &WfNodeResult,
         _next_node_id: Option<&str>,
         state: &WfRunState,
-    ) -> fabro_core::error::Result<()> {
+    ) -> CoreResult<()> {
         let node_id = node.id();
 
         // Skip git checkpoint for the start node (always empty) or if git disabled
@@ -111,7 +109,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 .and_then(|g| g.meta_branch.as_ref()),
             self.run_options.host_repo_path.as_ref(),
         ) {
-            let store = crate::git::MetadataStore::new(repo_path, &self.run_options.git_author);
+            let store = MetadataStore::new(repo_path, &self.run_options.git_author);
             // Build checkpoint JSON for shadow branch
             let checkpoint_path = self.run_dir.join("checkpoint.json");
             std::fs::read(&checkpoint_path).ok().and_then(|cp_json| {
@@ -127,7 +125,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                         })
                     })
                     .collect();
-                extra_entries.extend(crate::git::scan_node_files(&self.run_dir));
+                extra_entries.extend(scan_node_files(&self.run_dir));
                 let extra_refs: Vec<(&str, &[u8])> = extra_entries
                     .iter()
                     .map(|(k, v)| (k.as_str(), v.as_slice()))
@@ -173,7 +171,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
 
                 // Re-save checkpoint.json with SHA
                 let checkpoint_path = self.run_dir.join("checkpoint.json");
-                if let Ok(mut cp) = crate::records::Checkpoint::load(&checkpoint_path) {
+                if let Ok(mut cp) = Checkpoint::load(&checkpoint_path) {
                     cp.git_commit_sha = Some(sha.clone());
                     if let Err(e) = cp.save(&checkpoint_path) {
                         self.emitter.emit(&WorkflowRunEvent::RunNotice {

@@ -4,6 +4,8 @@ use fabro_agent::Sandbox;
 use fabro_git_storage::trailerlink::{self, Trailer};
 
 use crate::asset_snapshot;
+use crate::git::{blocking_push_with_timeout, push_ref, GitAuthor};
+use fabro_sandbox::daytona::detect_repo_info;
 
 /// Captured git state for a workflow run, shared with handlers.
 #[derive(Debug, Clone)]
@@ -13,7 +15,7 @@ pub struct GitState {
     pub run_branch: Option<String>,
     pub meta_branch: Option<String>,
     pub checkpoint_exclude_globs: Vec<String>,
-    pub git_author: crate::git::GitAuthor,
+    pub git_author: GitAuthor,
 }
 
 pub const GIT_REMOTE: &str = "git -c maintenance.auto=0 -c gc.auto=0";
@@ -36,7 +38,7 @@ pub async fn git_checkpoint(
     completed_count: usize,
     shadow_sha: Option<String>,
     exclude_globs: &[String],
-    author: &crate::git::GitAuthor,
+    author: &GitAuthor,
 ) -> std::result::Result<String, String> {
     let mut all_excludes: Vec<String> = asset_snapshot::EXCLUDE_DIRS
         .iter()
@@ -133,7 +135,7 @@ pub async fn git_push_host(
     github_app: &Option<fabro_github::GitHubAppCredentials>,
     label: &str,
 ) -> bool {
-    let (origin_url, _) = match fabro_sandbox::daytona::detect_repo_info(repo_path) {
+    let (origin_url, _) = match detect_repo_info(repo_path) {
         Ok(info) => info,
         Err(e) => {
             tracing::warn!(error = %e, label, "Cannot detect origin for push");
@@ -158,10 +160,8 @@ pub async fn git_push_host(
 
     let rp = repo_path.to_path_buf();
     let refspec_owned = refspec.to_string();
-    let result = crate::git::blocking_push_with_timeout(60, move || {
-        crate::git::push_ref(&rp, &push_url, &refspec_owned)
-    })
-    .await;
+    let result =
+        blocking_push_with_timeout(60, move || push_ref(&rp, &push_url, &refspec_owned)).await;
     match result {
         Ok(()) => {
             tracing::info!(label, "Pushed to origin");

@@ -1,6 +1,6 @@
 use crate::config::SessionConfig;
 use crate::sandbox::GrepOptions;
-use crate::tool_registry::RegisteredTool;
+use crate::tool_registry::{RegisteredTool, ToolRegistry};
 use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request, ToolDefinition};
 use fabro_model::ModelRef;
@@ -47,7 +47,7 @@ fn html_to_markdown(text: &str) -> String {
 /// `SessionConfig` (e.g. with a longer `default_command_timeout_ms`) for providers
 /// that need non-default shell behavior.
 pub fn register_core_tools(
-    registry: &mut crate::tool_registry::ToolRegistry,
+    registry: &mut ToolRegistry,
     config: &SessionConfig,
     summarizer: Option<WebFetchSummarizer>,
 ) {

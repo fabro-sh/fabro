@@ -5,16 +5,13 @@ use fabro_types::NodeStatusRecord;
 
 use crate::context::Context;
 use crate::outcome::{Outcome, OutcomeExt};
-use crate::records::StartRecordExt;
+use crate::records::{StartRecord, StartRecordExt};
 use crate::run_options::RunOptions;
 
 /// Write start.json at the start of a workflow run. Returns the StartRecord.
-pub(crate) fn write_start_record(
-    run_dir: &Path,
-    settings: &RunOptions,
-) -> crate::records::StartRecord {
+pub(crate) fn write_start_record(run_dir: &Path, settings: &RunOptions) -> StartRecord {
     let git_state = settings.git.as_ref();
-    let record = crate::records::StartRecord {
+    let record = StartRecord {
         run_id: settings.run_id.clone(),
         start_time: Utc::now(),
         run_branch: git_state.and_then(|g| g.run_branch.clone()),

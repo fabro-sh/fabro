@@ -5,8 +5,15 @@ use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use async_trait::async_trait;
-
+use fabro_agent::tool_registry::ToolContext;
 use fabro_agent::Sandbox;
+use fabro_llm::client::Client as LlmClient;
+use fabro_llm::generate::{generate_object, GenerateParams};
+use fabro_llm::types::{Message, Request, ToolResult};
+use fabro_util::env::{Env, SystemEnv};
+use tokio::process::Command as TokioCommand;
+use tokio::time::timeout as tokio_timeout;
+use tokio_util::sync::CancellationToken;
 
 use crate::config::{HookDefinition, HookType, TlsMode};
 use crate::types::{HookContext, HookDecision, HookResult, PromptHookResponse};
@@ -40,11 +47,7 @@ pub trait HookExecutor: Send + Sync {
 /// Interpolate `$VAR` and `${VAR}` references in `value` using environment
 /// variables, but only when the variable name appears in `allowed_vars`.
 /// Unlisted or missing vars are replaced with the empty string.
-pub fn interpolate_env_vars(
-    value: &str,
-    allowed_vars: &[String],
-    env: &dyn fabro_util::env::Env,
-) -> String {
+pub fn interpolate_env_vars(value: &str, allowed_vars: &[String], env: &dyn Env) -> String {
     let mut result = String::with_capacity(value.len());
     let mut chars = value.chars().peekable();
 
@@ -149,7 +152,7 @@ impl HookExecutorImpl {
                 },
             }
         } else {
-            let mut cmd = tokio::process::Command::new("sh");
+            let mut cmd = TokioCommand::new("sh");
             cmd.arg("-c").arg(command);
             if let Some(wd) = work_dir {
                 cmd.current_dir(wd);
@@ -238,7 +241,7 @@ impl HookExecutorImpl {
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = HookDecision>,
     {
-        match tokio::time::timeout(timeout, f()).await {
+        match tokio_timeout(timeout, f()).await {
             Ok(decision) => decision,
             Err(_) => {
                 tracing::warn!("{hook_kind} hook timed out, proceeding");
@@ -258,12 +261,12 @@ impl HookExecutorImpl {
         let user_msg = Self::build_hook_user_message(prompt, context);
 
         Self::execute_llm_with_timeout(timeout, "prompt", || async move {
-            let params = fabro_llm::generate::GenerateParams::new(&resolved_model)
+            let params = GenerateParams::new(&resolved_model)
                 .system(HOOK_EVALUATOR_SYSTEM_PROMPT)
                 .prompt(user_msg)
                 .max_tokens(1024);
 
-            match fabro_llm::generate::generate_object(params, HOOK_RESPONSE_SCHEMA.clone()).await {
+            match generate_object(params, HOOK_RESPONSE_SCHEMA.clone()).await {
                 Ok(result) => match result.output {
                     Some(obj) => match serde_json::from_value::<PromptHookResponse>(obj) {
                         Ok(resp) if resp.ok => HookDecision::Proceed,
@@ -306,7 +309,7 @@ impl HookExecutorImpl {
         let user_msg = Self::build_hook_user_message(prompt, context);
 
         Self::execute_llm_with_timeout(timeout, "agent", || async move {
-            let client = match fabro_llm::client::Client::from_env().await {
+            let client = match LlmClient::from_env().await {
                 Ok(c) => c,
                 Err(e) => {
                     tracing::warn!(error = %e, "agent hook client creation failed, proceeding");
@@ -320,15 +323,15 @@ impl HookExecutorImpl {
             let tool_defs = registry.definitions();
 
             let mut messages = vec![
-                fabro_llm::types::Message::system(HOOK_EVALUATOR_SYSTEM_PROMPT),
-                fabro_llm::types::Message::user(user_msg),
+                Message::system(HOOK_EVALUATOR_SYSTEM_PROMPT),
+                Message::user(user_msg),
             ];
 
             let rounds = max_tool_rounds.unwrap_or(50);
-            let cancel = tokio_util::sync::CancellationToken::new();
+            let cancel = CancellationToken::new();
 
             for _ in 0..rounds {
-                let request = fabro_llm::types::Request {
+                let request = Request {
                     model: resolved_model.clone(),
                     messages: messages.clone(),
                     provider: None,
@@ -362,25 +365,23 @@ impl HookExecutorImpl {
 
                 for tc in &tool_calls {
                     let tool = registry.get(&tc.name).cloned();
-                    let ctx = fabro_agent::tool_registry::ToolContext {
+                    let ctx = ToolContext {
                         env: sandbox.clone(),
                         cancel: cancel.child_token(),
                         tool_env: None,
                     };
                     let result = match tool {
                         Some(t) => match (t.executor)(tc.arguments.clone(), ctx).await {
-                            Ok(output) => fabro_llm::types::ToolResult::success(
-                                tc.id.clone(),
-                                serde_json::json!(output),
-                            ),
-                            Err(err) => fabro_llm::types::ToolResult::error(tc.id.clone(), err),
+                            Ok(output) => {
+                                ToolResult::success(tc.id.clone(), serde_json::json!(output))
+                            }
+                            Err(err) => ToolResult::error(tc.id.clone(), err),
                         },
-                        None => fabro_llm::types::ToolResult::error(
-                            tc.id.clone(),
-                            format!("Unknown tool: {}", tc.name),
-                        ),
+                        None => {
+                            ToolResult::error(tc.id.clone(), format!("Unknown tool: {}", tc.name))
+                        }
                     };
-                    messages.push(fabro_llm::types::Message::tool_result(
+                    messages.push(Message::tool_result(
                         result.tool_call_id,
                         result.content,
                         result.is_error,
@@ -414,7 +415,7 @@ impl HookExecutorImpl {
         tls: &TlsMode,
         context: &HookContext,
         timeout: std::time::Duration,
-        env: &dyn fabro_util::env::Env,
+        env: &dyn Env,
     ) -> HookDecision {
         // Enforce URL scheme based on TLS mode
         match tls {
@@ -551,7 +552,7 @@ impl HookExecutor for HookExecutorImpl {
                     tls,
                     context,
                     definition.timeout(),
-                    &fabro_util::env::SystemEnv,
+                    &SystemEnv,
                 )
                 .await
             }

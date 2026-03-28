@@ -1,7 +1,14 @@
+use axum::extract::Query;
+use axum::http::StatusCode;
+use axum::response::Html;
+use axum::routing::get;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use tokio::net::TcpListener;
+use tokio::sync::oneshot;
+use tokio::time;
 
 pub const DEFAULT_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 pub const DEFAULT_ISSUER: &str = "https://auth.openai.com";
@@ -336,7 +343,7 @@ pub async fn poll_device_flow(
             if error == "authorization_pending" {
                 tracing::debug!(attempt, "Device flow authorization pending");
                 if device.interval > 0 {
-                    tokio::time::sleep(std::time::Duration::from_secs(device.interval)).await;
+                    time::sleep(std::time::Duration::from_secs(device.interval)).await;
                 }
                 continue;
             }
@@ -366,8 +373,8 @@ struct CallbackParams {
 pub async fn start_callback_server(
     port: u16,
     expected_state: String,
-) -> Result<(u16, tokio::sync::oneshot::Receiver<Result<String, String>>), String> {
-    let listener = tokio::net::TcpListener::bind(format!("localhost:{port}"))
+) -> Result<(u16, oneshot::Receiver<Result<String, String>>), String> {
+    let listener = TcpListener::bind(format!("localhost:{port}"))
         .await
         .map_err(|e| format!("Failed to bind callback server: {e}"))?;
     let actual_port = listener
@@ -375,8 +382,8 @@ pub async fn start_callback_server(
         .map_err(|e| format!("Failed to get local address: {e}"))?
         .port();
 
-    let (code_tx, code_rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let (code_tx, code_rx) = oneshot::channel::<Result<String, String>>();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
     let code_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(code_tx)));
     let shutdown_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(shutdown_tx)));
@@ -384,12 +391,12 @@ pub async fn start_callback_server(
 
     let app = axum::Router::new().route(
         "/auth/callback",
-        axum::routing::get(
-            move |axum::extract::Query(params): axum::extract::Query<CallbackParams>| async move {
+        get(
+            move |Query(params): Query<CallbackParams>| async move {
                 if params.state != *expected_state {
                     return (
-                        axum::http::StatusCode::BAD_REQUEST,
-                        axum::response::Html("State mismatch".to_string()),
+                        StatusCode::BAD_REQUEST,
+                        Html("State mismatch".to_string()),
                     );
                 }
 
@@ -404,8 +411,8 @@ pub async fn start_callback_server(
                         let _ = tx.send(());
                     }
                     return (
-                        axum::http::StatusCode::BAD_REQUEST,
-                        axum::response::Html(format!(
+                        StatusCode::BAD_REQUEST,
+                        Html(format!(
                             r#"<!DOCTYPE html>
 <html>
 <head>
@@ -441,8 +448,8 @@ pub async fn start_callback_server(
                             let _ = tx.send(());
                         }
                         return (
-                            axum::http::StatusCode::BAD_REQUEST,
-                            axum::response::Html("No authorization code received".to_string()),
+                            StatusCode::BAD_REQUEST,
+                            Html("No authorization code received".to_string()),
                         );
                     }
                 };
@@ -454,8 +461,8 @@ pub async fn start_callback_server(
                     let _ = tx.send(());
                 }
                 (
-                    axum::http::StatusCode::OK,
-                    axum::response::Html(
+                    StatusCode::OK,
+                    Html(
                         r#"<!DOCTYPE html>
 <html>
 <head>

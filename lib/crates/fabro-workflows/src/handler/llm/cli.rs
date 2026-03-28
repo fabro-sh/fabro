@@ -6,6 +6,8 @@ use async_trait::async_trait;
 use fabro_agent::sandbox::ExecResult;
 use fabro_agent::Sandbox;
 use fabro_model::Provider;
+use tokio::fs;
+use tokio::time::sleep;
 
 use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::Context;
@@ -492,7 +494,7 @@ impl CodergenBackend for AgentCliBackend {
 
         let command = cli_command_for_provider(provider, model, &prompt_path);
 
-        let _ = tokio::fs::create_dir_all(stage_dir).await;
+        let _ = fs::create_dir_all(stage_dir).await;
         let provider_used = serde_json::json!({
             "mode": "cli",
             "provider": provider.as_str(),
@@ -500,7 +502,7 @@ impl CodergenBackend for AgentCliBackend {
             "command": &command,
         });
         if let Ok(json) = serde_json::to_string_pretty(&provider_used) {
-            let _ = tokio::fs::write(stage_dir.join("provider_used.json"), json).await;
+            let _ = fs::write(stage_dir.join("provider_used.json"), json).await;
         }
 
         // Forward provider API key and custom env vars so the CLI tool can authenticate.
@@ -587,7 +589,7 @@ impl CodergenBackend for AgentCliBackend {
             format!("[ -f {exit_code_path} ] && cat {exit_code_path} || echo running");
         let poll_interval = self.poll_interval;
         let exit_code: i32 = loop {
-            tokio::time::sleep(poll_interval).await;
+            sleep(poll_interval).await;
             emitter.touch(); // keep the stall watchdog alive while polling
             let poll_result = sandbox
                 .exec_command(&poll_command, 30_000, None, None, None)
@@ -605,7 +607,7 @@ impl CodergenBackend for AgentCliBackend {
                     .await
                 {
                     if !r.stdout.is_empty() {
-                        let _ = tokio::fs::write(stage_dir.join(local), &r.stdout).await;
+                        let _ = fs::write(stage_dir.join(local), &r.stdout).await;
                     }
                 }
             }
@@ -645,12 +647,12 @@ impl CodergenBackend for AgentCliBackend {
             "stderr_len": result.stderr.len(),
             "duration_ms": result.duration_ms,
         })) {
-            let _ = tokio::fs::write(stage_dir.join("cli_result_meta.json"), json).await;
+            let _ = fs::write(stage_dir.join("cli_result_meta.json"), json).await;
         }
 
         if result.exit_code != 0 {
-            let _ = tokio::fs::write(stage_dir.join("cli_stdout.log"), &result.stdout).await;
-            let _ = tokio::fs::write(stage_dir.join("cli_stderr.log"), &result.stderr).await;
+            let _ = fs::write(stage_dir.join("cli_stdout.log"), &result.stdout).await;
+            let _ = fs::write(stage_dir.join("cli_stderr.log"), &result.stderr).await;
 
             let tail = |s: &str, n: usize| -> String {
                 s.chars()

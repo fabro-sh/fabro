@@ -1,6 +1,10 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
+use tokio::task::spawn_blocking;
+
+use crate::cli_config::load_cli_settings;
+use crate::shared::github::build_github_app_credentials;
 
 pub(super) fn git_repo_root() -> Result<PathBuf> {
     let output = std::process::Command::new("git")
@@ -150,7 +154,7 @@ async fn check_github_app_installation() {
     };
 
     // Load CLI config to get app_id and slug
-    let cli_config = match crate::cli_config::load_cli_settings(None) {
+    let cli_config = match load_cli_settings(None) {
         Ok(c) => c,
         Err(_) => return,
     };
@@ -172,7 +176,7 @@ async fn check_github_app_installation() {
     let slug = cli_config.slug().map(String::from);
 
     // Build GitHub App credentials
-    let creds = match crate::shared::github::build_github_app_credentials(Some(&app_id)) {
+    let creds = match build_github_app_credentials(Some(&app_id)) {
         Some(c) => c,
         None => {
             eprintln!(
@@ -264,7 +268,7 @@ async fn check_github_app_installation() {
             // Only prompt if stdin is a terminal
             if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
                 eprintln!("  Press Enter to continue after installing...");
-                let _ = tokio::task::spawn_blocking(|| {
+                let _ = spawn_blocking(|| {
                     let mut buf = String::new();
                     let _ = std::io::stdin().read_line(&mut buf);
                 })

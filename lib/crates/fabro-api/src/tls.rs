@@ -65,6 +65,8 @@ pub async fn serve_tls(
     tls_acceptor: tokio_rustls::TlsAcceptor,
     router: axum::Router,
 ) -> anyhow::Result<()> {
+    use hyper::body::Incoming;
+    use hyper::service::service_fn;
     use hyper_util::rt::{TokioExecutor, TokioIo};
     use hyper_util::server::conn::auto::Builder;
     use tower_service::Service;
@@ -94,13 +96,11 @@ pub async fn serve_tls(
 
             let io = TokioIo::new(tls_stream);
 
-            let service = hyper::service::service_fn(
-                move |mut req: hyper::Request<hyper::body::Incoming>| {
-                    req.extensions_mut().insert(peer_certs.clone());
-                    let mut router = router.clone();
-                    async move { router.call(req).await }
-                },
-            );
+            let service = service_fn(move |mut req: hyper::Request<Incoming>| {
+                req.extensions_mut().insert(peer_certs.clone());
+                let mut router = router.clone();
+                async move { router.call(req).await }
+            });
 
             if let Err(e) = builder.serve_connection(io, service).await {
                 error!(%remote_addr, "connection error: {e}");

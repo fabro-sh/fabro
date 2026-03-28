@@ -1,13 +1,14 @@
-use futures::StreamExt;
+use futures::{stream, StreamExt};
 
 use crate::error::{error_from_status_code, ProviderErrorDetail, ProviderErrorKind, SdkError};
-use crate::provider::{ProviderAdapter, StreamEventStream};
+use crate::provider::{validate_tool_choice, ProviderAdapter, StreamEventStream};
 use crate::providers::common::{
     parse_error_body, parse_rate_limit_headers, parse_retry_after, send_and_read_response,
 };
 use crate::types::{
-    ContentPart, FinishReason, Message, Request, Response, ResponseFormat, ResponseFormatType,
-    Role, StreamEvent, ThinkingData, ToolCall, ToolChoice, ToolDefinition, Usage,
+    AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response,
+    ResponseFormat, ResponseFormatType, Role, StreamEvent, ThinkingData, ToolCall, ToolChoice,
+    ToolDefinition, Usage,
 };
 
 /// `OpenAI`-compatible Chat Completions adapter (Section 7.10).
@@ -46,7 +47,7 @@ impl Adapter {
     }
 
     #[must_use]
-    pub fn with_timeout(self, timeout: crate::types::AdapterTimeout) -> Self {
+    pub fn with_timeout(self, timeout: AdapterTimeout) -> Self {
         Self {
             http: self.http.with_timeout(timeout),
             ..self
@@ -451,7 +452,7 @@ impl ProviderAdapter for Adapter {
 
     async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
         if let Some(tc) = &request.tool_choice {
-            crate::provider::validate_tool_choice(self, tc)?;
+            validate_tool_choice(self, tc)?;
         }
         let api_body = build_api_request(request, None, &self.provider_name);
         let url = format!("{}/chat/completions", self.http.base_url);
@@ -530,7 +531,7 @@ impl ProviderAdapter for Adapter {
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
         if let Some(tc) = &request.tool_choice {
-            crate::provider::validate_tool_choice(self, tc)?;
+            validate_tool_choice(self, tc)?;
         }
         let api_body = build_api_request(request, Some(true), &self.provider_name);
         let url = format!("{}/chat/completions", self.http.base_url);
@@ -565,7 +566,7 @@ impl ProviderAdapter for Adapter {
         let rate_limit = parse_rate_limit_headers(http_resp.headers());
         let stream_read_timeout = self.http.stream_read_timeout;
 
-        let stream = futures::stream::unfold(
+        let stream = stream::unfold(
             StreamState::new(
                 http_resp,
                 provider_name,
@@ -629,7 +630,7 @@ impl ProviderAdapter for Adapter {
         );
 
         // Flatten batched events into individual stream events.
-        let flat_stream = futures::stream::unfold(
+        let flat_stream = stream::unfold(
             FlattenState {
                 inner: Box::pin(stream),
                 pending: Vec::new(),
@@ -680,7 +681,7 @@ struct StreamState {
     done: bool,
     /// True after `finish_events()` has been called (guards against duplicates).
     finished: bool,
-    rate_limit: Option<crate::types::RateLimitInfo>,
+    rate_limit: Option<RateLimitInfo>,
 }
 
 impl StreamState {
@@ -688,7 +689,7 @@ impl StreamState {
         response: reqwest::Response,
         provider_name: String,
         model: String,
-        rate_limit: Option<crate::types::RateLimitInfo>,
+        rate_limit: Option<RateLimitInfo>,
         stream_read_timeout: Option<std::time::Duration>,
     ) -> Self {
         Self {

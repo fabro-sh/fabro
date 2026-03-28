@@ -10,11 +10,15 @@ use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
+use crate::git::sanitize_ref_component;
 use crate::hook_context::set_hook_node;
 use crate::millis_u64;
-use crate::outcome::{Outcome, OutcomeExt, StageStatus};
-use fabro_graphviz::graph::{Graph, Node};
+use crate::outcome::{FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus};
+use crate::run_dir::{node_dir, visit_from_context};
+use crate::sandbox_git::{git_checkpoint, git_merge_ff_only, git_remove_worktree, GIT_REMOTE};
+use fabro_graphviz::graph::{AttrValue, Graph, Node};
 use fabro_hooks::{HookContext, HookEvent};
+use tokio::fs;
 
 use super::{EngineServices, Handler};
 
@@ -153,7 +157,7 @@ impl Handler for ParallelHandler {
         let max_parallel = node
             .attrs
             .get("max_parallel")
-            .and_then(fabro_graphviz::graph::AttrValue::as_i64)
+            .and_then(AttrValue::as_i64)
             .unwrap_or(4);
         let max_parallel = usize::try_from(max_parallel).unwrap_or(4).max(1);
 
@@ -162,7 +166,7 @@ impl Handler for ParallelHandler {
 
         // --- Git isolation: checkpoint "parallel base" before fan-out ---
         let base_sha: Option<String> = if let Some(ref gs) = git_state {
-            let result = crate::sandbox_git::git_checkpoint(
+            let result = git_checkpoint(
                 &*services.sandbox,
                 &gs.run_id,
                 &node.id,
@@ -205,13 +209,13 @@ impl Handler for ParallelHandler {
                 (&git_state, &base_sha)
             {
                 let branch_key = &target_id;
-                let visit = crate::run_dir::visit_from_context(&branch_context);
+                let visit = visit_from_context(&branch_context);
                 let branch_name = format!(
                     "fabro/run/parallel/{}/{}/pass{}/{}",
                     gs.run_id,
-                    crate::git::sanitize_ref_component(&node.id),
+                    sanitize_ref_component(&node.id),
                     visit,
-                    crate::git::sanitize_ref_component(branch_key),
+                    sanitize_ref_component(branch_key),
                 );
 
                 // Compute worktree path (each sandbox type knows its own path scheme)
@@ -327,7 +331,7 @@ impl Handler for ParallelHandler {
                     let nid = &setup.target_id;
                     let status_str = outcome.status.to_string();
                     // Use exec_command to commit and capture HEAD in the branch worktree
-                    let git_r = crate::sandbox_git::GIT_REMOTE;
+                    let git_r = GIT_REMOTE;
                     let add_cmd = format!("{git_r} add -A");
                     let add_result = setup
                         .sandbox
@@ -414,7 +418,7 @@ impl Handler for ParallelHandler {
             for result in &results {
                 if let Some(ref wt_path) = result.worktree_path {
                     let wt_str = wt_path.to_string_lossy().into_owned();
-                    crate::sandbox_git::git_remove_worktree(&*services.sandbox, &wt_str).await;
+                    git_remove_worktree(&*services.sandbox, &wt_str).await;
                     services
                         .emitter
                         .emit(&WorkflowRunEvent::GitWorktreeRemove { path: wt_str });
@@ -431,7 +435,7 @@ impl Handler for ParallelHandler {
             successful.sort_by(|a, b| a.id.cmp(&b.id));
             if let Some(winner) = successful.first() {
                 let sha = winner.head_sha.as_ref().unwrap();
-                crate::sandbox_git::git_merge_ff_only(&*services.sandbox, sha).await;
+                git_merge_ff_only(&*services.sandbox, sha).await;
             }
         }
 
@@ -463,11 +467,11 @@ impl Handler for ParallelHandler {
         context.set(keys::PARALLEL_RESULTS, serde_json::json!(results_json));
         context.set(keys::PARALLEL_BRANCH_COUNT, serde_json::json!(total));
 
-        let visit = crate::run_dir::visit_from_context(context);
-        let node_dir = crate::run_dir::node_dir(run_dir, &node.id, visit);
-        let _ = tokio::fs::create_dir_all(&node_dir).await;
+        let visit = visit_from_context(context);
+        let node_dir = node_dir(run_dir, &node.id, visit);
+        let _ = fs::create_dir_all(&node_dir).await;
         if let Ok(json) = serde_json::to_string_pretty(&results_json) {
-            let _ = tokio::fs::write(node_dir.join("parallel_results.json"), json).await;
+            let _ = fs::write(node_dir.join("parallel_results.json"), json).await;
         }
 
         services.emitter.emit(&WorkflowRunEvent::ParallelCompleted {
@@ -514,9 +518,9 @@ impl Handler for ParallelHandler {
                 "Parallel node dispatched {total} branches ({success_count} succeeded, {fail_count} failed)"
             )),
             failure: if is_fail {
-                Some(crate::outcome::FailureDetail::new(
+                Some(FailureDetail::new(
                     format!("Join policy not satisfied: {success_count}/{total} succeeded"),
-                    crate::outcome::FailureCategory::Deterministic,
+                    FailureCategory::Deterministic,
                 ))
             } else {
                 None

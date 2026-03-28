@@ -2,8 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
+use fabro_core::error::Result as CoreResult;
 use fabro_core::graph::NodeSpec;
-use fabro_core::lifecycle::{EdgeContext, NodeDecision, RunLifecycle};
+use fabro_core::lifecycle::{EdgeContext, EdgeDecision, NodeDecision, RunLifecycle};
 use fabro_core::state::RunState;
 use fabro_graphviz::graph::types::{Edge as GvEdge, Graph as GvGraph, Node as GvNode};
 
@@ -47,11 +48,7 @@ impl FidelityLifecycle {
 
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
-    async fn on_run_start(
-        &self,
-        _graph: &WorkflowGraph,
-        _state: &WfRunState,
-    ) -> fabro_core::error::Result<()> {
+    async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
         // Clear incoming edge data (restart target must not inherit pre-restart edge)
         *self.incoming_edge_data.lock().unwrap() = None;
         Ok(())
@@ -61,7 +58,7 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
         &self,
         node: &WorkflowNode,
         state: &WfRunState,
-    ) -> fabro_core::error::Result<WfNodeDecision> {
+    ) -> CoreResult<WfNodeDecision> {
         let incoming = self.incoming_edge_data.lock().unwrap().take();
         let gv_node = node.inner();
 
@@ -142,7 +139,7 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
         &self,
         ctx: &EdgeContext<'_, WorkflowGraph>,
         _state: &WfRunState,
-    ) -> fabro_core::error::Result<fabro_core::lifecycle::EdgeDecision> {
+    ) -> CoreResult<EdgeDecision> {
         // Capture fidelity/thread from edge for next node
         if let Some(ref edge) = ctx.edge {
             let gv_edge = edge.inner();
@@ -151,7 +148,7 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
             };
             *self.incoming_edge_data.lock().unwrap() = Some(edge_data);
         }
-        Ok(fabro_core::lifecycle::EdgeDecision::Continue)
+        Ok(EdgeDecision::Continue)
     }
 }
 

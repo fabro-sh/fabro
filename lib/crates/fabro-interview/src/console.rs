@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use fabro_util::terminal::Styles;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{self, AsyncBufReadExt, BufReader};
+use tokio::task;
 
 use crate::{Answer, AnswerValue, Interviewer, Question, QuestionOption, QuestionType};
 
@@ -55,7 +56,7 @@ fn find_matching_option(response: &str, options: &[QuestionOption]) -> Option<An
 async fn read_line(prompt: &str) -> PromptRead {
     // Print the prompt to stderr so it doesn't interfere with piped stdout
     eprint!("{prompt}");
-    let stdin = tokio::io::stdin();
+    let stdin = io::stdin();
     let mut reader = BufReader::new(stdin);
     let mut line = String::new();
     match reader.read_line(&mut line).await {
@@ -219,7 +220,7 @@ impl Interviewer for ConsoleInterviewer {
                 eprint!("{rendered}");
             }
             let q = question;
-            return tokio::task::spawn_blocking(move || match q.question_type {
+            return task::spawn_blocking(move || match q.question_type {
                 QuestionType::MultipleChoice => ask_select_interactive(&q),
                 QuestionType::MultiSelect => ask_multi_select_interactive(&q),
                 QuestionType::YesNo | QuestionType::Confirmation => ask_confirm_interactive(&q),

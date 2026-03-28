@@ -14,10 +14,12 @@ use crate::context::Context;
 
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::handler::{format_panic_message, EngineServices};
+use crate::handler::{dispatch_handler, format_panic_message, EngineServices};
 use crate::outcome::{Outcome, StageStatus};
 use crate::retry::build_retry_policy;
 use crate::run_dir;
+use fabro_graphviz::graph::types::Graph as GvGraph;
+use tokio::time::timeout;
 
 /// Production node handler that bridges fabro-core's NodeHandler to the
 /// existing fabro-workflows Handler trait via EngineServices.
@@ -27,7 +29,7 @@ use crate::run_dir;
 pub struct WorkflowNodeHandler {
     pub services: Arc<EngineServices>,
     pub run_dir: PathBuf,
-    pub graph: Arc<fabro_graphviz::graph::types::Graph>,
+    pub graph: Arc<GvGraph>,
 }
 
 #[async_trait]
@@ -50,7 +52,7 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
 
         // Wrap with panic catch + timeout
         let run_dir = self.run_dir.clone();
-        let future = crate::handler::dispatch_handler(
+        let future = dispatch_handler(
             handler,
             gv_node,
             &wf_context,
@@ -61,7 +63,7 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
         let panic_safe = AssertUnwindSafe(future).catch_unwind();
 
         let timed_result = if let Some(duration) = node_timeout {
-            match tokio::time::timeout(duration, panic_safe).await {
+            match timeout(duration, panic_safe).await {
                 Ok(inner) => inner,
                 Err(_elapsed) => {
                     return Err(CoreError::handler(HandlerErrorDetail {

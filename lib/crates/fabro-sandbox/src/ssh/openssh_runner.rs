@@ -1,5 +1,7 @@
 use async_trait::async_trait;
+use base64::engine::general_purpose::STANDARD;
 use openssh::{KnownHosts, SessionBuilder};
+use tokio::time;
 
 use super::{SshOutput, SshRunner};
 use crate::shell_quote;
@@ -52,7 +54,7 @@ impl SshRunner for OpensshRunner {
         let mut child = self.session.shell(command);
         let fut = child.output();
 
-        match tokio::time::timeout(timeout, fut).await {
+        match time::timeout(timeout, fut).await {
             Ok(Ok(output)) => {
                 let exit_code = output.status.code().unwrap_or(-1);
                 Ok(SshOutput {
@@ -68,7 +70,7 @@ impl SshRunner for OpensshRunner {
 
     async fn upload_file(&self, path: &str, content: &[u8]) -> Result<(), String> {
         use base64::Engine;
-        let encoded = base64::engine::general_purpose::STANDARD.encode(content);
+        let encoded = STANDARD.encode(content);
         let cmd = format!("echo '{}' | base64 -d > {}", encoded, shell_quote(path),);
         let output = self
             .session

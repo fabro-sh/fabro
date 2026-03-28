@@ -1,5 +1,6 @@
 use std::{env, fs, path::Path};
 
+use schemars::schema::Schema;
 use typify::{TypeSpace, TypeSpaceSettings};
 
 fn main() {
@@ -23,10 +24,10 @@ fn main() {
         .as_object()
         .expect("no components/schemas in spec");
 
-    let named_schemas: Vec<(String, schemars::schema::Schema)> = schemas
+    let named_schemas: Vec<(String, Schema)> = schemas
         .iter()
         .map(|(name, value)| {
-            let schema: schemars::schema::Schema = serde_json::from_value(value.clone())
+            let schema: Schema = serde_json::from_value(value.clone())
                 .unwrap_or_else(|e| panic!("failed to parse schema {name}: {e}"));
             (name.clone(), schema)
         })

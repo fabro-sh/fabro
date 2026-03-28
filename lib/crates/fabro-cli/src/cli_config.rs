@@ -3,13 +3,14 @@ pub use fabro_config::cli::*;
 
 use std::path::Path;
 
+use fabro_config::cli::load_cli_config;
 use fabro_config::FabroSettings;
 
 #[cfg(feature = "server")]
 use tracing::debug;
 
 pub fn load_cli_settings(path: Option<&Path>) -> anyhow::Result<FabroSettings> {
-    fabro_config::cli::load_cli_config(path)?.try_into()
+    load_cli_config(path)?.try_into()
 }
 
 #[cfg(feature = "server")]

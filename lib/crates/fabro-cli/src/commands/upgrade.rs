@@ -7,6 +7,9 @@ use semver::Version;
 use sha2::{Digest, Sha256};
 use tracing::debug;
 
+use tokio::process::Command as TokioCommand;
+use tokio::task::JoinHandle;
+
 use crate::args::UpgradeArgs;
 
 // ── Download backend abstraction ───────────────────────────────────────────
@@ -29,7 +32,7 @@ impl Backend {
     async fn fetch_latest_release_tag(&self) -> Result<String> {
         match self {
             Backend::Gh => {
-                let output = tokio::process::Command::new("gh")
+                let output = TokioCommand::new("gh")
                     .args([
                         "release",
                         "view",
@@ -75,7 +78,7 @@ impl Backend {
         let dest = dest_dir.join(asset);
         match self {
             Backend::Gh => {
-                let status = tokio::process::Command::new("gh")
+                let status = TokioCommand::new("gh")
                     .args([
                         "release",
                         "download",
@@ -117,10 +120,7 @@ impl Backend {
 
 async fn select_backend() -> Backend {
     // Check if gh is available
-    let gh_version = tokio::process::Command::new("gh")
-        .arg("--version")
-        .output()
-        .await;
+    let gh_version = TokioCommand::new("gh").arg("--version").output().await;
     let Ok(output) = gh_version else {
         debug!("gh CLI not found, using HTTP backend");
         return Backend::Http(http_client().expect("failed to build HTTP client"));
@@ -131,7 +131,7 @@ async fn select_backend() -> Backend {
     }
 
     // Check if gh is authenticated
-    let auth_status = tokio::process::Command::new("gh")
+    let auth_status = TokioCommand::new("gh")
         .args(["auth", "status"])
         .output()
         .await;
@@ -349,7 +349,7 @@ pub async fn run_upgrade(args: UpgradeArgs) -> Result<()> {
 pub fn spawn_upgrade_check(
     no_upgrade_check: bool,
     upgrade_check_enabled: bool,
-) -> Option<tokio::task::JoinHandle<()>> {
+) -> Option<JoinHandle<()>> {
     if no_upgrade_check || !upgrade_check_enabled {
         return None;
     }

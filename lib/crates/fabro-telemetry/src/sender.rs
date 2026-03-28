@@ -5,6 +5,8 @@ use base64::Engine;
 use uuid::Uuid;
 
 use crate::event::Track;
+use crate::spawn::spawn_fabro_subcommand;
+use reqwest::blocking::Client as BlockingClient;
 
 const SEGMENT_BASE_URL: &str = match option_env!("SEGMENT_BASE_URL") {
     Some(url) => url,
@@ -42,7 +44,7 @@ fn spawn_sender(tracks: &[Track]) {
 
     let jsonl = lines.join("\n");
     let filename = format!("fabro-events-{}.jsonl", Uuid::new_v4());
-    crate::spawn::spawn_fabro_subcommand("__send_analytics", &filename, jsonl.as_bytes());
+    spawn_fabro_subcommand("__send_analytics", &filename, jsonl.as_bytes());
 }
 
 /// Parse JSONL content into a Segment batch payload.
@@ -99,7 +101,7 @@ pub fn upload_blocking(tracks: &[Track]) -> anyhow::Result<()> {
 
     let auth = STANDARD.encode(format!("{write_key}:"));
 
-    let resp = reqwest::blocking::Client::new()
+    let resp = BlockingClient::new()
         .post(format!("{SEGMENT_BASE_URL}/v1/batch"))
         .header("Authorization", format!("Basic {auth}"))
         .json(&payload)

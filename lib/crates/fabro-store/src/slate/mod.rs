@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use object_store::path::Path;
 use object_store::ObjectStore;
+use slatedb::config::DbReaderOptions;
 use slatedb::DbReader;
 use tokio::sync::Mutex;
 
@@ -53,7 +54,7 @@ impl SlateStore {
             db_prefix.to_string(),
             self.object_store.clone(),
             None,
-            slatedb::config::DbReaderOptions::default(),
+            DbReaderOptions::default(),
         )
         .await?)
     }

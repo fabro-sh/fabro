@@ -1,6 +1,7 @@
 use rmcp::model::{
-    CancelledNotificationParam, LoggingLevel, LoggingMessageNotificationParam,
-    ProgressNotificationParam, ResourceUpdatedNotificationParam,
+    CancelledNotificationParam, ClientCapabilities, ClientInfo, Implementation, LoggingLevel,
+    LoggingMessageNotificationParam, ProgressNotificationParam, ProtocolVersion,
+    ResourceUpdatedNotificationParam,
 };
 use rmcp::service::NotificationContext;
 use rmcp::{ClientHandler, RoleClient};
@@ -11,11 +12,11 @@ use tracing::{debug, error, info, warn};
 pub(crate) struct LoggingClientHandler;
 
 impl ClientHandler for LoggingClientHandler {
-    fn get_info(&self) -> rmcp::model::ClientInfo {
-        rmcp::model::ClientInfo {
-            protocol_version: rmcp::model::ProtocolVersion::V_2025_03_26,
-            capabilities: rmcp::model::ClientCapabilities::default(),
-            client_info: rmcp::model::Implementation {
+    fn get_info(&self) -> ClientInfo {
+        ClientInfo {
+            protocol_version: ProtocolVersion::V_2025_03_26,
+            capabilities: ClientCapabilities::default(),
+            client_info: Implementation {
                 name: "fabro-mcp".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
                 title: None,

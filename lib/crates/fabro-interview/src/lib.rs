@@ -11,6 +11,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use tokio::time;
 
 /// The type of question being asked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -174,7 +175,7 @@ pub async fn ask_with_timeout(interviewer: &dyn Interviewer, question: Question)
 
     if let Some(secs) = timeout_secs {
         let duration = std::time::Duration::from_secs_f64(secs);
-        match tokio::time::timeout(duration, interviewer.ask(question)).await {
+        match time::timeout(duration, interviewer.ask(question)).await {
             Ok(answer) => answer,
             Err(_elapsed) => default_answer.unwrap_or_else(Answer::timeout),
         }

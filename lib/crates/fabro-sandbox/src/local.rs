@@ -5,8 +5,10 @@ use crate::{
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+use tokio::fs;
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
+use tokio::process::{Child, Command};
+use tokio::time;
 use tokio_util::sync::CancellationToken;
 
 pub struct LocalSandbox {
@@ -80,7 +82,7 @@ impl Sandbox for LocalSandbox {
         limit: Option<usize>,
     ) -> Result<String, String> {
         let full_path = self.resolve_path(path);
-        let content = tokio::fs::read_to_string(&full_path)
+        let content = fs::read_to_string(&full_path)
             .await
             .map_err(|e| format!("Failed to read {}: {e}", full_path.display()))?;
 
@@ -90,18 +92,18 @@ impl Sandbox for LocalSandbox {
     async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
         let full_path = self.resolve_path(path);
         if let Some(parent) = full_path.parent() {
-            tokio::fs::create_dir_all(parent)
+            fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
         }
-        tokio::fs::write(&full_path, content)
+        fs::write(&full_path, content)
             .await
             .map_err(|e| format!("Failed to write {}: {e}", full_path.display()))
     }
 
     async fn delete_file(&self, path: &str) -> Result<(), String> {
         let full_path = self.resolve_path(path);
-        tokio::fs::remove_file(&full_path)
+        fs::remove_file(&full_path)
             .await
             .map_err(|e| format!("Failed to delete {}: {e}", full_path.display()))
     }
@@ -237,7 +239,7 @@ impl Sandbox for LocalSandbox {
                 let status = status_result.map_err(|e| format!("Failed to wait for process: {e}"))?;
                 (false, status.code().unwrap_or(-1))
             }
-            () = tokio::time::sleep(timeout_duration) => {
+            () = time::sleep(timeout_duration) => {
                 sigterm_then_kill(&mut child).await;
                 (true, -1)
             }
@@ -366,11 +368,11 @@ impl Sandbox for LocalSandbox {
     ) -> Result<(), String> {
         let full_path = self.resolve_path(remote_path);
         if let Some(parent) = local_path.parent() {
-            tokio::fs::create_dir_all(parent)
+            fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
         }
-        tokio::fs::copy(&full_path, local_path).await.map_err(|e| {
+        fs::copy(&full_path, local_path).await.map_err(|e| {
             format!(
                 "Failed to copy {} to {}: {e}",
                 full_path.display(),
@@ -387,11 +389,11 @@ impl Sandbox for LocalSandbox {
     ) -> Result<(), String> {
         let full_path = self.resolve_path(remote_path);
         if let Some(parent) = full_path.parent() {
-            tokio::fs::create_dir_all(parent)
+            fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
         }
-        tokio::fs::copy(local_path, &full_path).await.map_err(|e| {
+        fs::copy(local_path, &full_path).await.map_err(|e| {
             format!(
                 "Failed to copy {} to {}: {e}",
                 local_path.display(),
@@ -406,7 +408,7 @@ impl Sandbox for LocalSandbox {
             provider: "local".into(),
         });
         let start = Instant::now();
-        let result = tokio::fs::create_dir_all(&self.working_directory)
+        let result = fs::create_dir_all(&self.working_directory)
             .await
             .map_err(|e| format!("Failed to create working directory: {e}"));
         let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -477,13 +479,13 @@ impl Sandbox for LocalSandbox {
 }
 
 /// Send SIGTERM to the process group, wait 2s for graceful shutdown, then SIGKILL.
-async fn sigterm_then_kill(child: &mut tokio::process::Child) {
+async fn sigterm_then_kill(child: &mut Child) {
     #[cfg(unix)]
     if let Some(pid) = child.id() {
         unsafe {
             libc::kill(-(pid as i32), libc::SIGTERM);
         }
-        if tokio::time::timeout(std::time::Duration::from_secs(2), child.wait())
+        if time::timeout(std::time::Duration::from_secs(2), child.wait())
             .await
             .is_err()
         {

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::error::FabroError;
-use crate::records::RunRecordExt;
+use crate::records::{RunRecord, RunRecordExt};
 
 use super::types::{PersistOptions, Persisted, Validated};
 
@@ -35,7 +35,7 @@ pub fn persist(validated: Validated, mut options: PersistOptions) -> Result<Pers
 /// `run.json` is authoritative for graph + config; `workflow.fabro` provides the
 /// original DOT source string when present.
 pub(crate) fn load(run_dir: &Path) -> Result<Persisted, FabroError> {
-    let run_record = crate::records::RunRecord::load(run_dir)?;
+    let run_record = RunRecord::load(run_dir)?;
     let graph = run_record.graph.clone();
     let source = match std::fs::read_to_string(run_dir.join(GRAPH_FILE_NAME)) {
         Ok(source) => source,
