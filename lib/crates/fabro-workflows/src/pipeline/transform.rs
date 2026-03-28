@@ -1,6 +1,6 @@
 use crate::transforms::{
-    FileInliningTransform, ModelResolutionTransform, StylesheetApplicationTransform, Transform,
-    VariableExpansionTransform,
+    FileInliningTransform, ImportTransform, ModelResolutionTransform,
+    StylesheetApplicationTransform, Transform, VariableExpansionTransform,
 };
 
 use super::types::{Parsed, TransformOptions, Transformed};
@@ -13,15 +13,19 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Transformed {
     let Parsed { mut graph, source } = parsed;
 
     // Built-in transforms (PreambleTransform moved to engine execution time)
+    if let Some(ref dir) = options.base_dir {
+        let fallback = dirs::home_dir().map(|home| home.join(".fabro"));
+        ImportTransform::new(dir.clone(), fallback).apply(&mut graph);
+    }
+
+    if let Some(ref dir) = options.base_dir {
+        let fallback = dirs::home_dir().map(|home| home.join(".fabro"));
+        FileInliningTransform::new(dir.clone(), fallback).apply(&mut graph);
+    }
+
     VariableExpansionTransform.apply(&mut graph);
     StylesheetApplicationTransform.apply(&mut graph);
     ModelResolutionTransform.apply(&mut graph);
-
-    // File inlining when base_dir is provided
-    if let Some(ref dir) = options.base_dir {
-        let fallback = dirs::home_dir().map(|h| h.join(".fabro"));
-        FileInliningTransform::new(dir.clone(), fallback).apply(&mut graph);
-    }
 
     // Custom transforms
     for t in &options.custom_transforms {
@@ -33,9 +37,18 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Transformed {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
     use crate::pipeline::parse::parse;
     use fabro_graphviz::graph::AttrValue;
+
+    fn write_file(path: &Path, contents: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, contents).unwrap();
+    }
 
     #[test]
     fn transform_applies_variable_expansion() {
@@ -81,6 +94,81 @@ mod tests {
         );
         assert_eq!(
             transformed.graph.nodes["work"].attrs.get("model"),
+            Some(&AttrValue::String("claude-sonnet-4-6".into()))
+        );
+    }
+
+    #[test]
+    fn transform_inlines_files_before_variable_expansion() {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(&dir.path().join("goal.md"), "Expand $goal");
+
+        let parsed = parse(
+            r#"digraph Test {
+                graph [goal="Ship it"]
+                start [shape=Mdiamond]
+                work [prompt="@goal.md"]
+                exit [shape=Msquare]
+                start -> work -> exit
+            }"#,
+        )
+        .unwrap();
+        let transformed = transform(
+            parsed,
+            &TransformOptions {
+                base_dir: Some(dir.path().to_path_buf()),
+                custom_transforms: vec![],
+            },
+        );
+
+        assert_eq!(
+            transformed.graph.nodes["work"]
+                .attrs
+                .get("prompt")
+                .and_then(AttrValue::as_str),
+            Some("Expand Ship it")
+        );
+    }
+
+    #[test]
+    fn transform_imports_before_variable_expansion_and_stylesheet() {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(&dir.path().join("prompts/lint.md"), "Run checks for $goal");
+        write_file(
+            &dir.path().join("validate.fabro"),
+            r#"digraph validate {
+                start [shape=Mdiamond]
+                lint [prompt="@prompts/lint.md"]
+                exit [shape=Msquare]
+                start -> lint -> exit
+            }"#,
+        );
+
+        let parsed = parse(
+            r#"digraph Test {
+                graph [goal="Launch", model_stylesheet=".validate { model: sonnet; }"]
+                start [shape=Mdiamond]
+                validate [import="./validate.fabro"]
+                exit [shape=Msquare]
+                start -> validate -> exit
+            }"#,
+        )
+        .unwrap();
+        let transformed = transform(
+            parsed,
+            &TransformOptions {
+                base_dir: Some(dir.path().to_path_buf()),
+                custom_transforms: vec![],
+            },
+        );
+
+        let lint = &transformed.graph.nodes["validate.lint"];
+        assert_eq!(
+            lint.attrs.get("prompt").and_then(AttrValue::as_str),
+            Some("Run checks for Launch")
+        );
+        assert_eq!(
+            lint.attrs.get("model"),
             Some(&AttrValue::String("claude-sonnet-4-6".into()))
         );
     }
