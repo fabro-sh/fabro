@@ -13,7 +13,7 @@ use tracing::{debug, info};
 use crate::args::DiffArgs;
 use crate::cli_config::load_cli_settings;
 
-pub async fn run(args: DiffArgs) -> Result<()> {
+pub(crate) async fn run(args: DiffArgs) -> Result<()> {
     info!(run_id = %args.run, "Showing diff");
     let cli_config = load_cli_settings(None)?;
     let base = runs_base(&cli_config.storage_dir());

@@ -13,10 +13,10 @@ use crate::outcome::{Outcome, StageUsage};
 // ---- WorkflowNode ----
 
 #[derive(Debug, Clone)]
-pub struct WorkflowNode(pub Arc<GvNode>);
+pub(crate) struct WorkflowNode(pub Arc<GvNode>);
 
 impl WorkflowNode {
-    pub fn inner(&self) -> &GvNode {
+    pub(crate) fn inner(&self) -> &GvNode {
         &self.0
     }
 }
@@ -38,10 +38,10 @@ impl NodeSpec for WorkflowNode {
 // ---- WorkflowEdge ----
 
 #[derive(Debug, Clone)]
-pub struct WorkflowEdge(pub Arc<GvEdge>);
+pub(crate) struct WorkflowEdge(pub Arc<GvEdge>);
 
 impl WorkflowEdge {
-    pub fn inner(&self) -> &GvEdge {
+    pub(crate) fn inner(&self) -> &GvEdge {
         &self.0
     }
 }
@@ -63,10 +63,10 @@ impl EdgeSpec for WorkflowEdge {
 // ---- WorkflowGraph ----
 
 #[derive(Debug, Clone)]
-pub struct WorkflowGraph(pub Arc<GvGraph>);
+pub(crate) struct WorkflowGraph(pub Arc<GvGraph>);
 
 impl WorkflowGraph {
-    pub fn inner(&self) -> &GvGraph {
+    pub(crate) fn inner(&self) -> &GvGraph {
         &self.0
     }
 }

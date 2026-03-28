@@ -10,7 +10,7 @@ static SECRET_PATTERN: LazyLock<Regex> =
 const ENTROPY_THRESHOLD: f64 = 4.5;
 
 /// Compute Shannon entropy (bits per byte) of a string.
-pub fn shannon_entropy(s: &str) -> f64 {
+pub(super) fn shannon_entropy(s: &str) -> f64 {
     if s.is_empty() {
         return 0.0;
     }
@@ -22,7 +22,7 @@ pub fn shannon_entropy(s: &str) -> f64 {
     let mut entropy = 0.0;
     for &count in &freq {
         if count > 0 {
-            let p = count as f64 / len;
+            let p = f64::from(count) / len;
             entropy -= p * p.log2();
         }
     }
@@ -34,7 +34,7 @@ pub fn shannon_entropy(s: &str) -> f64 {
 /// Returns regions where tokens match `[A-Za-z0-9+_=-]{10,}` and have
 /// Shannon entropy above the threshold (4.5 bits). Protects against
 /// consuming characters from JSON escape sequences.
-pub fn find_entropy_regions(s: &str) -> Vec<Region> {
+pub(super) fn find_entropy_regions(s: &str) -> Vec<Region> {
     let mut regions = Vec::new();
     for m in SECRET_PATTERN.find_iter(s) {
         let mut start = m.start();

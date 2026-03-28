@@ -13,7 +13,7 @@ use crate::args::DfArgs;
 use crate::cli_config::load_cli_settings;
 use crate::shared::format_size;
 
-pub fn df_command(args: &DfArgs) -> Result<()> {
+pub(super) fn df_command(args: &DfArgs) -> Result<()> {
     let cli_config = load_cli_settings(None)?;
     let data_dir = cli_config.storage_dir();
     let runs_base_dir = runs_base(&data_dir);
@@ -81,7 +81,12 @@ fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Path) -
                 continue;
             }
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.ends_with(".db") || name.ends_with(".db-wal") || name.ends_with(".db-shm") {
+            if std::path::Path::new(&name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("db"))
+                || name.ends_with(".db-wal")
+                || name.ends_with(".db-shm")
+            {
                 if let Ok(meta) = path.metadata() {
                     db_count += 1;
                     total_db_size += meta.len();
@@ -214,9 +219,9 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 fn dir_size(path: &Path) -> u64 {
     walkdir::WalkDir::new(path)
         .into_iter()
-        .filter_map(|entry| entry.ok())
+        .filter_map(std::result::Result::ok)
         .filter_map(|entry| entry.metadata().ok())
-        .filter(|metadata| metadata.is_file())
+        .filter(std::fs::Metadata::is_file)
         .map(|metadata| metadata.len())
         .sum()
 }

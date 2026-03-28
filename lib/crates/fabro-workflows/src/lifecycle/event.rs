@@ -34,7 +34,7 @@ fn node_script(node: &GvNode) -> Option<String> {
 }
 
 /// Sub-lifecycle responsible for emitting workflow run events.
-pub struct EventLifecycle {
+pub(crate) struct EventLifecycle {
     pub emitter: Arc<EventEmitter>,
     pub graph_name: String,
     pub run_id: String,

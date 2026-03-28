@@ -22,6 +22,7 @@ pub fn spawn_detached(args: &[&str], env: &[(&str, &str)]) {
 }
 
 #[cfg(unix)]
+#[allow(clippy::exit)]
 fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)]) {
     use fork::{Fork, fork, setsid};
 
@@ -98,10 +99,10 @@ fn spawn_detached_windows(args: &[&str], env: &[(&str, &str)]) {
 /// This is the shared pattern used by both analytics and panic senders.
 /// No-ops silently if the exe path can't be resolved or the temp file can't be written.
 pub fn spawn_fabro_subcommand(subcommand: &str, filename: &str, json: &[u8]) {
-    let tmp_dir = match dirs::home_dir() {
-        Some(h) => h.join(".fabro").join("tmp"),
-        None => return,
+    let Some(home) = dirs::home_dir() else {
+        return;
     };
+    let tmp_dir = home.join(".fabro").join("tmp");
     if std::fs::create_dir_all(&tmp_dir).is_err() {
         return;
     }
@@ -110,17 +111,16 @@ pub fn spawn_fabro_subcommand(subcommand: &str, filename: &str, json: &[u8]) {
         return;
     }
 
-    let path_str = match path.to_str() {
-        Some(s) => s.to_string(),
-        None => return,
+    let Some(path_str) = path.to_str() else {
+        return;
     };
+    let path_str = path_str.to_string();
 
-    let exe = match std::env::current_exe()
+    let Some(exe) = std::env::current_exe()
         .ok()
-        .and_then(|p| p.to_str().map(|s| s.to_string()))
-    {
-        Some(e) => e,
-        None => return,
+        .and_then(|p| p.to_str().map(std::string::ToString::to_string))
+    else {
+        return;
     };
 
     spawn_detached(

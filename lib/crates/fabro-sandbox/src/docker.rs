@@ -444,16 +444,15 @@ impl Sandbox for DockerSandbox {
         });
         let start = Instant::now();
 
-        let container_id = match self.container_id.get() {
-            Some(id) => id.clone(),
-            None => {
-                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-                self.emit(SandboxEvent::CleanupCompleted {
-                    provider: "docker".into(),
-                    duration_ms,
-                });
-                return Ok(());
-            }
+        let container_id = if let Some(id) = self.container_id.get() {
+            id.clone()
+        } else {
+            let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+            self.emit(SandboxEvent::CleanupCompleted {
+                provider: "docker".into(),
+                duration_ms,
+            });
+            return Ok(());
         };
 
         // Stop with 5-second grace period; ignore "not running" errors

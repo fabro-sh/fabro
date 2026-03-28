@@ -9,7 +9,7 @@ use fabro_workflows::operations::{ValidateInput, WorkflowInput, validate};
 use crate::args::ValidateArgs;
 use crate::shared::{print_diagnostics, relative_path};
 
-pub fn run(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<()> {
+pub(crate) fn run(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
     let cli_defaults = load_cli_config(None)?;
     let settings = resolve_settings(ResolveSettingsInput {

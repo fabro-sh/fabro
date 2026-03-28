@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 /// A git commit message trailer (key-value pair).
 pub struct Trailer<'a> {
     pub key: &'a str,
@@ -51,7 +53,7 @@ pub fn format_message(subject: &str, body: &str, trailers: &[Trailer<'_>]) -> St
     if !trailers.is_empty() {
         msg.push_str("\n\n");
         for trailer in trailers {
-            msg.push_str(&format!("{}: {}\n", trailer.key, trailer.value));
+            let _ = writeln!(msg, "{}: {}", trailer.key, trailer.value);
         }
     }
 

@@ -11,7 +11,7 @@ use fabro_config::server::{ApiAuthStrategy, AuthProvider};
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::types::{Message, Request};
 use fabro_model::{Catalog, Provider};
-pub use fabro_util::check_report::{
+pub(crate) use fabro_util::check_report::{
     CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus,
 };
 use fabro_util::terminal::Styles;
@@ -194,7 +194,7 @@ fn apply_live_result(
     }
 }
 
-pub fn check_config(path: Option<PathBuf>) -> CheckResult {
+pub(crate) fn check_config(path: Option<PathBuf>) -> CheckResult {
     match path {
         Some(p) => CheckResult {
             name: "Configuration".to_string(),
@@ -215,7 +215,7 @@ pub fn check_config(path: Option<PathBuf>) -> CheckResult {
     }
 }
 
-pub fn check_llm_providers(
+pub(crate) fn check_llm_providers(
     statuses: &[(Provider, bool)],
     live_results: Option<&[(Provider, Result<(), String>)]>,
 ) -> CheckResult {
@@ -252,7 +252,10 @@ pub fn check_llm_providers(
             remediation: Some("Set at least one provider API key".to_string()),
         }
     } else if !failed_providers.is_empty() {
-        let names: Vec<_> = failed_providers.iter().map(|p| p.to_string()).collect();
+        let names: Vec<_> = failed_providers
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         CheckResult {
             name: "LLM providers".to_string(),
             status: CheckStatus::Warning,
@@ -271,7 +274,7 @@ pub fn check_llm_providers(
     }
 }
 
-pub fn check_brave_search(
+pub(crate) fn check_brave_search(
     api_key_set: bool,
     live_result: Option<&Result<(), String>>,
 ) -> CheckResult {
@@ -317,12 +320,12 @@ pub fn check_brave_search(
     }
 }
 
-pub struct SandboxStatus {
+pub(crate) struct SandboxStatus {
     pub daytona_configured: bool,
     pub daytona_probe: Option<Result<(), String>>,
 }
 
-pub fn check_sandbox(status: &SandboxStatus) -> CheckResult {
+pub(crate) fn check_sandbox(status: &SandboxStatus) -> CheckResult {
     let mut details = Vec::new();
 
     match &status.daytona_probe {
@@ -378,7 +381,7 @@ pub fn check_sandbox(status: &SandboxStatus) -> CheckResult {
     }
 }
 
-pub struct GithubAppStatus {
+pub(crate) struct GithubAppStatus {
     pub app_id: Option<String>,
     pub slug: Option<String>,
     pub private_key_set: bool,
@@ -416,7 +419,7 @@ impl GithubAppStatus {
     }
 }
 
-pub fn check_github_app(status: &GithubAppStatus) -> CheckResult {
+pub(crate) fn check_github_app(status: &GithubAppStatus) -> CheckResult {
     let mut details: Vec<CheckDetail> = Vec::new();
 
     match (&status.app_id, &status.slug) {
@@ -922,7 +925,7 @@ async fn probe_url(http: &reqwest::Client, url: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
+pub(crate) async fn run_doctor(verbose: bool, live: bool) -> i32 {
     let styles = Styles::detect_stdout();
 
     let spinner = indicatif::ProgressBar::new_spinner();
@@ -999,7 +1002,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
                 Ok(pem) => Some(
                     fabro_github::sign_app_jwt(app_id, &pem)
                         .map(|_| ())
-                        .map_err(|e| e.to_string()),
+                        .map_err(|e| e.clone()),
                 ),
                 Err(e) => Some(Err(e)),
             }
@@ -1177,7 +1180,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
         report.render(&styles, verbose, None, Some(term_width))
     );
 
-    if report.has_errors() { 1 } else { 0 }
+    i32::from(report.has_errors())
 }
 
 // ---------------------------------------------------------------------------

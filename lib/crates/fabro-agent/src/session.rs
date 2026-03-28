@@ -113,12 +113,11 @@ impl Session {
         .await;
 
         // Discover skills
-        let skill_dirs = match &self.config.skill_dirs {
-            Some(dirs) => dirs.clone(),
-            None => {
-                let home = dirs::home_dir().map(|p| p.to_string_lossy().to_string());
-                default_skill_dirs(home.as_deref(), self.config.git_root.as_deref())
-            }
+        let skill_dirs = if let Some(dirs) = &self.config.skill_dirs {
+            dirs.clone()
+        } else {
+            let home = dirs::home_dir().map(|p| p.to_string_lossy().to_string());
+            default_skill_dirs(home.as_deref(), self.config.git_root.as_deref())
         };
         self.skills = discover_skills(self.sandbox.as_ref(), &skill_dirs).await;
         debug!(skill_count = self.skills.len(), "Skills discovered");
@@ -291,15 +290,14 @@ impl Session {
         }
 
         // Get the preview URL for the port, or fall back to localhost for local sandboxes
-        match sandbox.get_preview_url(port).await? {
-            Some(url_and_headers) => Ok(url_and_headers),
-            None => {
-                info!(port, "No preview URL available, using localhost");
-                Ok((
-                    format!("http://localhost:{port}"),
-                    std::collections::HashMap::new(),
-                ))
-            }
+        if let Some(url_and_headers) = sandbox.get_preview_url(port).await? {
+            Ok(url_and_headers)
+        } else {
+            info!(port, "No preview URL available, using localhost");
+            Ok((
+                format!("http://localhost:{port}"),
+                std::collections::HashMap::new(),
+            ))
         }
     }
 
@@ -389,7 +387,10 @@ impl Session {
     }
 
     fn set_abort_reason(&self, reason: AbortReason) {
-        let mut guard = self.abort_reason.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self
+            .abort_reason
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if guard.is_none() {
             *guard = Some(reason);
         }
@@ -399,7 +400,7 @@ impl Session {
         let reason = self
             .abort_reason
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
             .unwrap_or(AbortReason::Cancelled);
         AgentError::Aborted(reason)
@@ -544,7 +545,9 @@ impl Session {
             tokio::spawn(async move {
                 time::sleep(duration).await;
                 {
-                    let mut guard = reason_handle.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut guard = reason_handle
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     if guard.is_none() {
                         *guard = Some(AbortReason::WallClockTimeout);
                     }
@@ -777,14 +780,11 @@ impl Session {
                 }
             }
 
-            let response = match response {
-                Some(response) => response,
-                None => {
-                    return Err(self.emit_llm_error(SdkError::Stream {
-                        message: "Stream ended without a Finish event (after retries)".into(),
-                        source: None,
-                    }));
-                }
+            let Some(response) = response else {
+                return Err(self.emit_llm_error(SdkError::Stream {
+                    message: "Stream ended without a Finish event (after retries)".into(),
+                    source: None,
+                }));
             };
 
             // Record assistant turn

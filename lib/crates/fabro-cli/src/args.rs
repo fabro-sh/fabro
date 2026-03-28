@@ -501,7 +501,7 @@ pub(crate) struct WaitArgs {
 }
 
 #[derive(Args)]
-pub(crate) struct WorkflowListArgs {}
+pub(crate) struct WorkflowListArgs;
 
 #[derive(Args)]
 pub(crate) struct WorkflowCreateArgs {

@@ -57,7 +57,7 @@ impl StallWatchdog {
         let handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = sleep(timeout) => {
+                    () = sleep(timeout) => {
                         if shutdown.load(Ordering::Relaxed) {
                             return;
                         }
@@ -69,12 +69,11 @@ impl StallWatchdog {
                         cancel_token.store(true, Ordering::Relaxed);
                         return;
                     }
-                    _ = activity.notified() => {
+                    () = activity.notified() => {
                         if shutdown.load(Ordering::Relaxed) {
                             return;
                         }
                         // Activity reported, restart the timer
-                        continue;
                     }
                 }
             }

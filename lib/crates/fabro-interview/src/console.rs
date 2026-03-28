@@ -53,6 +53,7 @@ fn find_matching_option(response: &str, options: &[QuestionOption]) -> Option<An
     None
 }
 
+#[allow(clippy::print_stderr)]
 async fn read_line(prompt: &str) -> PromptRead {
     // Print the prompt to stderr so it doesn't interfere with piped stdout
     eprint!("{prompt}");
@@ -211,6 +212,7 @@ fn ask_freeform_interactive(question: &Question) -> Answer {
 
 #[async_trait]
 impl Interviewer for ConsoleInterviewer {
+    #[allow(clippy::print_stderr)]
     async fn ask(&self, question: Question) -> Answer {
         // If stdin is a TTY, use dialoguer for interactive arrow-key navigation.
         // Otherwise, fall back to the line-based reader for piped input.
@@ -258,6 +260,7 @@ impl Interviewer for ConsoleInterviewer {
         }
     }
 
+    #[allow(clippy::print_stderr)]
     async fn inform(&self, message: &str, stage: &str) {
         let s = self.styles;
         eprintln!("{} {message}", s.dim.apply_to(format!("[{stage}]")));

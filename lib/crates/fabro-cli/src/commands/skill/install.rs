@@ -21,7 +21,7 @@ const SKILL_FILES: &[(&str, &str)] = &[
 ];
 
 /// Install all skill files under `base_dir/fabro-create-workflow/`.
-pub fn install_skill_to(base_dir: &Path) -> Result<()> {
+pub(crate) fn install_skill_to(base_dir: &Path) -> Result<()> {
     let skill_dir = base_dir.join("fabro-create-workflow");
 
     for (rel_path, content) in SKILL_FILES {
@@ -37,7 +37,7 @@ pub fn install_skill_to(base_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn run_skill_install(args: &SkillInstallArgs) -> Result<()> {
+pub(super) fn run_skill_install(args: &SkillInstallArgs) -> Result<()> {
     let base_dir = resolve_base_dir(&args.scope, &args.dir)?;
     let skill_dir = base_dir.join("fabro-create-workflow");
 

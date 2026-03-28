@@ -11,7 +11,7 @@ use crate::args::RunsPruneArgs;
 use crate::cli_config::load_cli_settings;
 use crate::shared::format_size;
 
-pub fn prune_command(args: &RunsPruneArgs) -> Result<()> {
+pub(super) fn prune_command(args: &RunsPruneArgs) -> Result<()> {
     let cli_config = load_cli_settings(None)?;
     let base = runs_base(&cli_config.storage_dir());
     prune_from(args, &base)
@@ -111,9 +111,9 @@ fn parse_label_filters(label_args: &[String]) -> Vec<(String, String)> {
 fn dir_size(path: &Path) -> u64 {
     walkdir::WalkDir::new(path)
         .into_iter()
-        .filter_map(|entry| entry.ok())
+        .filter_map(std::result::Result::ok)
         .filter_map(|entry| entry.metadata().ok())
-        .filter(|metadata| metadata.is_file())
+        .filter(std::fs::Metadata::is_file)
         .map(|metadata| metadata.len())
         .sum()
 }

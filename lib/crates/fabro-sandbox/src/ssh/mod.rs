@@ -1,6 +1,7 @@
 mod openssh_runner;
 
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::path::Path;
 use std::time::Instant;
 
@@ -90,7 +91,7 @@ impl SshSandbox {
     fn ssh(&self) -> Result<&dyn SshRunner, String> {
         self.ssh
             .get()
-            .map(|b| b.as_ref())
+            .map(std::convert::AsRef::as_ref)
             .ok_or_else(|| "SSH sandbox not initialized -- call initialize() first".to_string())
     }
 
@@ -211,11 +212,7 @@ impl Sandbox for SshSandbox {
 
         if let Some(vars) = env_vars {
             for (key, value) in vars {
-                script.push_str(&format!(
-                    "export {}={}\n",
-                    shell_quote(key),
-                    shell_quote(value)
-                ));
+                let _ = writeln!(script, "export {}={}", shell_quote(key), shell_quote(value));
             }
         }
 
@@ -223,7 +220,7 @@ impl Sandbox for SshSandbox {
             Some(dir) => self.resolve_path(dir),
             None => self.config.working_directory.clone(),
         };
-        script.push_str(&format!("cd {} && {command}", shell_quote(&dir)));
+        let _ = write!(script, "cd {} && {command}", shell_quote(&dir));
 
         let full_cmd = ssh_common::wrap_bash_command(&script);
 
@@ -403,16 +400,17 @@ impl Sandbox for SshSandbox {
                 cmd.push_str(" -i");
             }
             if let Some(ref glob_filter) = options.glob_filter {
-                cmd.push_str(&format!(" --glob {}", shell_quote(glob_filter)));
+                let _ = write!(cmd, " --glob {}", shell_quote(glob_filter));
             }
             if let Some(max) = options.max_results {
-                cmd.push_str(&format!(" --max-count {max}"));
+                let _ = write!(cmd, " --max-count {max}");
             }
-            cmd.push_str(&format!(
+            let _ = write!(
+                cmd,
                 " -- {} {}",
                 shell_quote(pattern),
                 shell_quote(&resolved)
-            ));
+            );
             cmd
         } else {
             let mut cmd = "grep -rn".to_string();
@@ -420,16 +418,17 @@ impl Sandbox for SshSandbox {
                 cmd.push_str(" -i");
             }
             if let Some(ref glob_filter) = options.glob_filter {
-                cmd.push_str(&format!(" --include {}", shell_quote(glob_filter)));
+                let _ = write!(cmd, " --include {}", shell_quote(glob_filter));
             }
             if let Some(max) = options.max_results {
-                cmd.push_str(&format!(" -m {max}"));
+                let _ = write!(cmd, " -m {max}");
             }
-            cmd.push_str(&format!(
+            let _ = write!(
+                cmd,
                 " -- {} {}",
                 shell_quote(pattern),
                 shell_quote(&resolved)
-            ));
+            );
             cmd
         };
 
@@ -521,7 +520,7 @@ impl Sandbox for SshSandbox {
         &self.config.working_directory
     }
 
-    fn platform(&self) -> &str {
+    fn platform(&self) -> &'static str {
         "linux"
     }
 
@@ -537,13 +536,11 @@ impl Sandbox for SshSandbox {
     }
 
     async fn refresh_push_credentials(&self) -> Result<(), String> {
-        let origin_url = match self.origin_url() {
-            Some(url) => url,
-            None => return Ok(()),
+        let Some(origin_url) = self.origin_url() else {
+            return Ok(());
         };
-        let creds = match &self.github_app {
-            Some(c) => c,
-            None => return Ok(()),
+        let Some(creds) = &self.github_app else {
+            return Ok(());
         };
 
         let auth_url = fabro_github::resolve_authenticated_url(creds, origin_url)

@@ -20,6 +20,7 @@ use std::path::Path;
 /// The engine process writes `interview_request.json` and polls for
 /// `interview_response.json`. The attach process watches for the request
 /// file, prompts the user, and writes the response file.
+#[allow(clippy::struct_field_names)]
 pub struct FileInterviewer {
     request_path: PathBuf,
     response_path: PathBuf,
@@ -125,12 +126,11 @@ impl Interviewer for FileInterviewer {
 
         if let Some(secs) = timeout_secs {
             let duration = std::time::Duration::from_secs_f64(secs);
-            match time::timeout(duration, poll).await {
-                Ok(answer) => answer,
-                Err(_) => {
-                    self.cleanup_ipc_files().await;
-                    default_answer.unwrap_or_else(Answer::timeout)
-                }
+            if let Ok(answer) = time::timeout(duration, poll).await {
+                answer
+            } else {
+                self.cleanup_ipc_files().await;
+                default_answer.unwrap_or_else(Answer::timeout)
             }
         } else {
             poll.await

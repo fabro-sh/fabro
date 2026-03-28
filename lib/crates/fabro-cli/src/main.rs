@@ -1,3 +1,5 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::exit)]
+
 mod args;
 mod cli_config;
 mod commands;
@@ -220,7 +222,7 @@ async fn main_inner() -> (String, Result<()>) {
                 result?;
             }
             Commands::SendPanic { path } => {
-                let result = tel_panic::capture(&path).await;
+                let result = tel_panic::capture(&path);
                 let _ = std::fs::remove_file(&path);
                 result?;
             }

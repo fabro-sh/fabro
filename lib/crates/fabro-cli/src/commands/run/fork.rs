@@ -9,7 +9,7 @@ use git2::Repository;
 
 use crate::args::ForkArgs;
 
-pub fn run(args: &ForkArgs, styles: &Styles) -> Result<()> {
+pub(crate) fn run(args: &ForkArgs, styles: &Styles) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
     let run_id = find_run_id_by_prefix(&repo, &args.run_id)?;
     let store = Store::new(repo);

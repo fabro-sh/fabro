@@ -141,9 +141,8 @@ impl<'a> SnapshotStore<'a> {
 
     /// Tip commit of a snapshot branch. `None` if branch doesn't exist.
     pub fn latest(&self, branch: &str) -> Result<Option<SnapshotInfo>> {
-        let commit_oid = match self.objects.resolve_ref(branch)? {
-            Some(oid) => oid,
-            None => return Ok(None),
+        let Some(commit_oid) = self.objects.resolve_ref(branch)? else {
+            return Ok(None);
         };
         let commit = self.objects.repo().find_commit(commit_oid)?;
         let tree_oid = commit.tree_id();
@@ -173,9 +172,8 @@ impl<'a> SnapshotStore<'a> {
 
     /// Walk commits on a snapshot branch, newest first.
     pub fn list_commits(&self, branch: &str, limit: usize) -> Result<Vec<SnapshotInfo>> {
-        let commit_oid = match self.objects.resolve_ref(branch)? {
-            Some(oid) => oid,
-            None => return Ok(vec![]),
+        let Some(commit_oid) = self.objects.resolve_ref(branch)? else {
+            return Ok(vec![]);
         };
         let mut revwalk = self.objects.repo().revwalk()?;
         revwalk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)?;
@@ -245,7 +243,7 @@ impl<'a> SnapshotStore<'a> {
         let walker = walkdir::WalkDir::new(&disk_dir.disk_path)
             .follow_links(false)
             .into_iter()
-            .filter_map(|e| e.ok());
+            .filter_map(std::result::Result::ok);
 
         for entry in walker {
             // Skip symlinks

@@ -102,6 +102,7 @@ impl std::fmt::Debug for SessionConfig {
             .field("max_command_timeout_ms", &self.max_command_timeout_ms)
             .field("max_tokens", &self.max_tokens)
             .field("reasoning_effort", &self.reasoning_effort)
+            .field("speed", &self.speed)
             .field("tool_output_limits", &self.tool_output_limits)
             .field("tool_line_limits", &self.tool_line_limits)
             .field("enable_loop_detection", &self.enable_loop_detection)

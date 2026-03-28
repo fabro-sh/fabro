@@ -225,22 +225,17 @@ pub async fn discover_skills(env: &dyn Sandbox, dirs: &[String]) -> Vec<Skill> {
         std::collections::HashMap::new();
 
     for dir in dirs {
-        let paths = match env.glob("*/SKILL.md", Some(dir)).await {
-            Ok(paths) => paths,
-            Err(_) => continue,
+        let Ok(paths) = env.glob("*/SKILL.md", Some(dir)).await else {
+            continue;
         };
 
         for path in paths {
-            let content = match env.read_file(&path, None, None).await {
-                Ok(c) => c,
-                Err(_) => continue,
+            let Ok(content) = env.read_file(&path, None, None).await else {
+                continue;
             };
 
-            match parse_skill(&content) {
-                Ok(skill) => {
-                    skills_by_name.insert(skill.name.clone(), skill);
-                }
-                Err(_) => continue,
+            if let Ok(skill) = parse_skill(&content) {
+                skills_by_name.insert(skill.name.clone(), skill);
             }
         }
     }

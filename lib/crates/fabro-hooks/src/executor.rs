@@ -219,8 +219,8 @@ impl HookExecutorImpl {
     }
 
     /// Resolve a model alias (e.g. "haiku") to a concrete model ID.
-    fn resolve_model(model: &Option<String>) -> String {
-        let model_id = model.as_deref().unwrap_or("haiku");
+    fn resolve_model(model: Option<&String>) -> String {
+        let model_id = model.map(String::as_str).unwrap_or("haiku");
         let model_info = fabro_model::Catalog::builtin().get(model_id);
         model_info.map_or(model_id, |m| m.id.as_str()).to_string()
     }
@@ -241,19 +241,18 @@ impl HookExecutorImpl {
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = HookDecision>,
     {
-        match tokio_timeout(timeout, f()).await {
-            Ok(decision) => decision,
-            Err(_) => {
-                tracing::warn!("{hook_kind} hook timed out, proceeding");
-                HookDecision::Proceed
-            }
+        if let Ok(decision) = tokio_timeout(timeout, f()).await {
+            decision
+        } else {
+            tracing::warn!("{hook_kind} hook timed out, proceeding");
+            HookDecision::Proceed
         }
     }
 
     /// Execute a prompt hook: single-turn LLM call returning ok/block.
     async fn execute_prompt(
         prompt: &str,
-        model: &Option<String>,
+        model: Option<&String>,
         context: &HookContext,
         timeout: std::time::Duration,
     ) -> HookDecision {
@@ -267,21 +266,18 @@ impl HookExecutorImpl {
                 .max_tokens(1024);
 
             match generate_object(params, HOOK_RESPONSE_SCHEMA.clone()).await {
-                Ok(result) => match result.output {
-                    Some(obj) => match serde_json::from_value::<PromptHookResponse>(obj) {
-                        Ok(resp) if resp.ok => HookDecision::Proceed,
-                        Ok(resp) => HookDecision::Block {
-                            reason: resp.reason,
-                        },
-                        Err(e) => {
-                            tracing::warn!(error = %e, "prompt hook response deserialize failed, proceeding");
-                            HookDecision::Proceed
-                        }
+                Ok(result) => if let Some(obj) = result.output { match serde_json::from_value::<PromptHookResponse>(obj) {
+                    Ok(resp) if resp.ok => HookDecision::Proceed,
+                    Ok(resp) => HookDecision::Block {
+                        reason: resp.reason,
                     },
-                    None => {
-                        tracing::warn!("prompt hook returned no structured output, proceeding");
+                    Err(e) => {
+                        tracing::warn!(error = %e, "prompt hook response deserialize failed, proceeding");
                         HookDecision::Proceed
                     }
+                } } else {
+                    tracing::warn!("prompt hook returned no structured output, proceeding");
+                    HookDecision::Proceed
                 },
                 Err(e) => {
                     tracing::warn!(error = %e, "prompt hook LLM call failed, proceeding");
@@ -299,7 +295,7 @@ impl HookExecutorImpl {
     /// a normal agent session.
     async fn execute_agent(
         prompt: &str,
-        model: &Option<String>,
+        model: Option<&String>,
         max_tool_rounds: Option<u32>,
         context: &HookContext,
         sandbox: Arc<dyn Sandbox>,
@@ -396,7 +392,7 @@ impl HookExecutorImpl {
     }
 
     /// Build a reqwest client for the given TLS mode.
-    fn build_http_client(tls: &TlsMode) -> reqwest::Client {
+    fn build_http_client(tls: TlsMode) -> reqwest::Client {
         let accept_invalid = matches!(tls, TlsMode::NoVerify | TlsMode::Off);
         reqwest::Client::builder()
             .danger_accept_invalid_certs(accept_invalid)
@@ -410,7 +406,7 @@ impl HookExecutorImpl {
     async fn execute_http(
         client: &reqwest::Client,
         url: &str,
-        headers: &Option<HashMap<String, String>>,
+        headers: Option<&HashMap<String, String>>,
         allowed_env_vars: &[String],
         tls: &TlsMode,
         context: &HookContext,
@@ -489,13 +485,13 @@ struct HttpClientCache {
 impl HttpClientCache {
     fn new() -> Self {
         Self {
-            verify: HookExecutorImpl::build_http_client(&TlsMode::Verify),
-            no_verify: HookExecutorImpl::build_http_client(&TlsMode::NoVerify),
-            off: HookExecutorImpl::build_http_client(&TlsMode::Off),
+            verify: HookExecutorImpl::build_http_client(TlsMode::Verify),
+            no_verify: HookExecutorImpl::build_http_client(TlsMode::NoVerify),
+            off: HookExecutorImpl::build_http_client(TlsMode::Off),
         }
     }
 
-    fn get(&self, tls: &TlsMode) -> &reqwest::Client {
+    fn get(&self, tls: TlsMode) -> &reqwest::Client {
         match tls {
             TlsMode::Verify => &self.verify,
             TlsMode::NoVerify => &self.no_verify,
@@ -545,9 +541,9 @@ impl HookExecutor for HookExecutorImpl {
             ) => {
                 let clients = HTTP_CLIENTS.get_or_init(HttpClientCache::new);
                 Self::execute_http(
-                    clients.get(tls),
+                    clients.get(*tls),
                     url,
-                    headers,
+                    headers.as_ref(),
                     allowed_env_vars,
                     tls,
                     context,
@@ -565,7 +561,7 @@ impl HookExecutor for HookExecutorImpl {
                     ref prompt,
                     ref model,
                 }),
-            ) => Self::execute_prompt(prompt, model, context, definition.timeout()).await,
+            ) => Self::execute_prompt(prompt, model.as_ref(), context, definition.timeout()).await,
             Some(
                 Cow::Borrowed(HookType::Agent {
                     ref prompt,
@@ -580,7 +576,7 @@ impl HookExecutor for HookExecutorImpl {
             ) => {
                 Self::execute_agent(
                     prompt,
-                    model,
+                    model.as_ref(),
                     *max_tool_rounds,
                     context,
                     sandbox,
@@ -619,7 +615,7 @@ mod tests {
     }
 
     fn test_http_client() -> reqwest::Client {
-        HookExecutorImpl::build_http_client(&TlsMode::Off)
+        HookExecutorImpl::build_http_client(TlsMode::Off)
     }
 
     fn make_definition(command: &str) -> HookDefinition {
@@ -925,7 +921,7 @@ mod tests {
         let decision = HookExecutorImpl::execute_http(
             &client,
             &format!("{}/hook", server.url()),
-            &None,
+            None,
             &[],
             &TlsMode::Off,
             &make_context(),
@@ -957,7 +953,7 @@ mod tests {
         let decision = HookExecutorImpl::execute_http(
             &client,
             &format!("{}/hook", server.url()),
-            &None,
+            None,
             &[],
             &TlsMode::Off,
             &make_context(),
@@ -984,7 +980,7 @@ mod tests {
         let decision = HookExecutorImpl::execute_http(
             &client,
             &format!("{}/hook", server.url()),
-            &None,
+            None,
             &[],
             &TlsMode::Off,
             &make_context(),
@@ -1003,7 +999,7 @@ mod tests {
         let decision = HookExecutorImpl::execute_http(
             &client,
             "http://127.0.0.1:1",
-            &None,
+            None,
             &[],
             &TlsMode::Off,
             &make_context(),
@@ -1037,7 +1033,7 @@ mod tests {
         let decision = HookExecutorImpl::execute_http(
             &client,
             &format!("{}/hook", server.url()),
-            &Some(headers),
+            Some(&headers),
             &["FABRO_TEST_TOKEN".to_string()],
             &TlsMode::Off,
             &make_context(),
@@ -1058,7 +1054,7 @@ mod tests {
         let decision = HookExecutorImpl::execute_http(
             &client,
             "http://example.com/hook",
-            &None,
+            None,
             &[],
             &TlsMode::Verify,
             &make_context(),
@@ -1076,7 +1072,7 @@ mod tests {
         let decision = HookExecutorImpl::execute_http(
             &client,
             "http://example.com/hook",
-            &None,
+            None,
             &[],
             &TlsMode::NoVerify,
             &make_context(),
@@ -1102,7 +1098,7 @@ mod tests {
         let decision = HookExecutorImpl::execute_http(
             &client,
             &format!("{}/hook", server.url()),
-            &None,
+            None,
             &[],
             &TlsMode::Off,
             &make_context(),

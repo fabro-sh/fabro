@@ -107,7 +107,7 @@ pub enum LifecycleCommand {
 /// Metadata from a devcontainer-feature.json file.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FeatureMetadata {
+pub(crate) struct FeatureMetadata {
     pub id: Option<String>,
     pub name: Option<String>,
     pub version: Option<String>,
@@ -135,7 +135,7 @@ pub struct FeatureMetadata {
 
 /// A single option for a devcontainer feature.
 #[derive(Debug, Clone, Deserialize)]
-pub struct FeatureOption {
+pub(crate) struct FeatureOption {
     #[serde(rename = "type")]
     pub option_type: Option<String>,
     pub default: Option<serde_json::Value>,

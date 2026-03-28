@@ -10,7 +10,7 @@ use tracing::info;
 use crate::args::PrListArgs;
 use crate::cli_config::load_cli_settings;
 
-pub async fn list_command(
+pub(super) async fn list_command(
     args: PrListArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {

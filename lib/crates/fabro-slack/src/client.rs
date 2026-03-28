@@ -114,7 +114,7 @@ pub fn parse_wss_url(response: &Value) -> Result<String, SlackApiError> {
     check_ok(response)?;
     response["url"]
         .as_str()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .ok_or_else(|| SlackApiError::Api("missing url in response".to_string()))
 }
 

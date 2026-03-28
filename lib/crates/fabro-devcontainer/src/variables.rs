@@ -1,7 +1,7 @@
 use fabro_util::env::Env;
 
 /// Context for variable substitution.
-pub struct VariableContext<'a> {
+pub(crate) struct VariableContext<'a> {
     pub local_workspace_folder: String,
     pub local_workspace_folder_basename: String,
     pub container_workspace_folder: String,
@@ -9,7 +9,7 @@ pub struct VariableContext<'a> {
 }
 
 /// Replace devcontainer variables in a string value.
-pub fn substitute(input: &str, ctx: &VariableContext) -> String {
+pub(crate) fn substitute(input: &str, ctx: &VariableContext) -> String {
     let mut result = String::with_capacity(input.len());
     let mut rest = input;
 
@@ -24,7 +24,7 @@ pub fn substitute(input: &str, ctx: &VariableContext) -> String {
                 Some(val) => result.push_str(&val),
                 None => {
                     // Unknown variable — leave as-is
-                    result.push_str(&rest[start..start + 2 + close + 1]);
+                    result.push_str(&rest[start..=(start + 2 + close)]);
                 }
             }
             rest = &after_open[close + 1..];

@@ -25,7 +25,7 @@ struct IncomingEdgeData {
 }
 
 /// Sub-lifecycle responsible for fidelity/thread resolution and context key setup.
-pub struct FidelityLifecycle {
+pub(crate) struct FidelityLifecycle {
     pub graph: Arc<GvGraph>,
     incoming_edge_data: Mutex<Option<IncomingEdgeData>>,
     /// True on the first node after checkpoint resume when prior fidelity was Full.
@@ -33,7 +33,7 @@ pub struct FidelityLifecycle {
 }
 
 impl FidelityLifecycle {
-    pub fn new(graph: Arc<GvGraph>) -> Self {
+    pub(crate) fn new(graph: Arc<GvGraph>) -> Self {
         Self {
             graph,
             incoming_edge_data: Mutex::new(None),
@@ -41,7 +41,7 @@ impl FidelityLifecycle {
         }
     }
 
-    pub fn set_degrade_fidelity_on_resume(&self, flag: bool) {
+    pub(crate) fn set_degrade_fidelity_on_resume(&self, flag: bool) {
         *self.degrade_fidelity_on_resume.lock().unwrap() = flag;
     }
 }

@@ -6,7 +6,7 @@ use fabro_graphviz::parser::parse_ast;
 use crate::args::ParseArgs;
 use crate::shared::read_workflow_file;
 
-pub fn run(args: &ParseArgs) -> anyhow::Result<()> {
+pub(crate) fn run(args: &ParseArgs) -> anyhow::Result<()> {
     let stdout = std::io::stdout();
     run_to(args, stdout.lock())
 }

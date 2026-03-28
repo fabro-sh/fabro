@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::response::Html;
@@ -54,7 +56,7 @@ fn percent_encode_param(s: &str) -> String {
                 out.push(b as char);
             }
             _ => {
-                out.push_str(&format!("%{b:02X}"));
+                let _ = write!(out, "%{b:02X}");
             }
         }
     }
@@ -438,20 +440,17 @@ pub async fn start_callback_server(
                     );
                 }
 
-                let code = match params.code {
-                    Some(c) => c,
-                    None => {
-                        if let Some(tx) = code_tx.lock().unwrap().take() {
-                            let _ = tx.send(Err("No authorization code received".to_string()));
-                        }
-                        if let Some(tx) = shutdown_tx.lock().unwrap().take() {
-                            let _ = tx.send(());
-                        }
-                        return (
-                            StatusCode::BAD_REQUEST,
-                            Html("No authorization code received".to_string()),
-                        );
+                let Some(code) = params.code else {
+                    if let Some(tx) = code_tx.lock().unwrap().take() {
+                        let _ = tx.send(Err("No authorization code received".to_string()));
                     }
+                    if let Some(tx) = shutdown_tx.lock().unwrap().take() {
+                        let _ = tx.send(());
+                    }
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Html("No authorization code received".to_string()),
+                    );
                 };
 
                 if let Some(tx) = code_tx.lock().unwrap().take() {

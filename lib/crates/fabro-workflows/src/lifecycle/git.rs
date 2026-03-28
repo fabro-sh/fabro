@@ -26,13 +26,13 @@ type WfNodeResult = NodeResult<Option<StageUsage>>;
 
 /// Result of a git checkpoint operation, shared with EventLifecycle.
 #[derive(Debug, Clone)]
-pub struct GitCheckpointResult {
+pub(crate) struct GitCheckpointResult {
     pub commit_sha: Option<String>,
     pub push_results: Vec<(String, bool)>,
 }
 
 /// Sub-lifecycle responsible for git operations (checkpoint commits, pushes, diffs).
-pub struct GitLifecycle {
+pub(crate) struct GitLifecycle {
     pub sandbox: Arc<dyn fabro_sandbox::Sandbox>,
     pub artifact_store: Arc<Mutex<ArtifactStore>>,
     pub emitter: Arc<EventEmitter>,

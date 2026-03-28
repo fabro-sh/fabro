@@ -31,7 +31,7 @@ fn http_client() -> Result<reqwest::Client> {
 impl Backend {
     async fn fetch_latest_release_tag(&self) -> Result<String> {
         match self {
-            Backend::Gh => {
+            Self::Gh => {
                 let output = TokioCommand::new("gh")
                     .args([
                         "release",
@@ -52,7 +52,7 @@ impl Backend {
                 }
                 Ok(String::from_utf8(output.stdout)?.trim().to_string())
             }
-            Backend::Http(client) => {
+            Self::Http(client) => {
                 let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
                 let resp = client
                     .get(&url)
@@ -77,7 +77,7 @@ impl Backend {
     async fn download_release(&self, tag: &str, asset: &str, dest_dir: &Path) -> Result<PathBuf> {
         let dest = dest_dir.join(asset);
         match self {
-            Backend::Gh => {
+            Self::Gh => {
                 let status = TokioCommand::new("gh")
                     .args([
                         "release",
@@ -98,7 +98,7 @@ impl Backend {
                     bail!("gh release download failed with exit code {status}");
                 }
             }
-            Backend::Http(client) => {
+            Self::Http(client) => {
                 let url =
                     format!("https://github.com/{GITHUB_REPO}/releases/download/{tag}/{asset}");
                 let resp = client
@@ -223,7 +223,7 @@ impl UpgradeCheckState {
 
 // ── Main upgrade command ───────────────────────────────────────────────────
 
-pub async fn run_upgrade(args: UpgradeArgs) -> Result<()> {
+pub(crate) async fn run_upgrade(args: UpgradeArgs) -> Result<()> {
     let backend = select_backend().await;
 
     let current =
@@ -346,7 +346,7 @@ pub async fn run_upgrade(args: UpgradeArgs) -> Result<()> {
 /// Spawn a background task that checks for a newer version and prints a notice
 /// to stderr after the main command completes. Returns a handle that should be
 /// awaited at the end of `main_inner`.
-pub fn spawn_upgrade_check(
+pub(crate) fn spawn_upgrade_check(
     no_upgrade_check: bool,
     upgrade_check_enabled: bool,
 ) -> Option<JoinHandle<()>> {

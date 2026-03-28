@@ -12,7 +12,7 @@ use crate::args::WaitArgs;
 use crate::cli_config::load_cli_settings;
 use crate::shared::format_duration_ms;
 
-pub fn run(args: WaitArgs, styles: &Styles) -> Result<()> {
+pub(crate) fn run(args: WaitArgs, styles: &Styles) -> Result<()> {
     let cli_config = load_cli_settings(None)?;
     let base = runs_base(&cli_config.storage_dir());
     let run_info = resolve_run(&base, &args.run)?;

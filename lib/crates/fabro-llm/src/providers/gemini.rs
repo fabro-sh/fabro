@@ -134,6 +134,7 @@ struct CandidateContent {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_field_names)]
 struct UsageMetadata {
     prompt_token_count: Option<i64>,
     candidates_token_count: Option<i64>,
@@ -881,7 +882,7 @@ impl SseStreamState {
 
 #[async_trait::async_trait]
 impl ProviderAdapter for Adapter {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "gemini"
     }
 

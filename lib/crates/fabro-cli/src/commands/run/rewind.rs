@@ -12,7 +12,7 @@ use git2::Repository;
 use crate::args::RewindArgs;
 use crate::shared::color_if;
 
-pub fn run(args: &RewindArgs, styles: &Styles) -> Result<()> {
+pub(crate) fn run(args: &RewindArgs, styles: &Styles) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
     let run_id = find_run_id_by_prefix(&repo, &args.run_id)?;
     let store = Store::new(repo);

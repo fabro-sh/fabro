@@ -373,7 +373,7 @@ fn apply_hunks(content: &str, hunks: &[Hunk]) -> Result<String, String> {
         }
 
         // Calculate total lines consumed from original
-        let explicit_context_count = if has_explicit_context { 1 } else { 0 };
+        let explicit_context_count = usize::from(has_explicit_context);
         let total_original_lines = explicit_context_count
             + hunk
                 .changes

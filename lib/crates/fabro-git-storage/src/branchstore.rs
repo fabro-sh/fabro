@@ -115,9 +115,8 @@ impl<'a> BranchStore<'a> {
 
     /// Read a single file from the latest tree. Returns `None` if branch or path doesn't exist.
     pub fn read_entry(&self, path: &str) -> Result<Option<Vec<u8>>> {
-        let commit_oid = match self.objects.resolve_ref(&self.branch)? {
-            Some(oid) => oid,
-            None => return Ok(None),
+        let Some(commit_oid) = self.objects.resolve_ref(&self.branch)? else {
+            return Ok(None);
         };
         let commit = self.objects.repo().find_commit(commit_oid)?;
         let tree = commit.tree()?;
@@ -134,9 +133,8 @@ impl<'a> BranchStore<'a> {
 
     /// Read multiple paths. Missing paths are omitted from the result.
     pub fn read_entries<'b>(&self, paths: &[&'b str]) -> Result<Vec<(&'b str, Vec<u8>)>> {
-        let commit_oid = match self.objects.resolve_ref(&self.branch)? {
-            Some(oid) => oid,
-            None => return Ok(vec![]),
+        let Some(commit_oid) = self.objects.resolve_ref(&self.branch)? else {
+            return Ok(vec![]);
         };
         let commit = self.objects.repo().find_commit(commit_oid)?;
         let tree = commit.tree()?;
@@ -157,9 +155,8 @@ impl<'a> BranchStore<'a> {
 
     /// List all paths under a prefix in the latest tree.
     pub fn list_entries(&self, prefix: &str) -> Result<Vec<String>> {
-        let commit_oid = match self.objects.resolve_ref(&self.branch)? {
-            Some(oid) => oid,
-            None => return Ok(vec![]),
+        let Some(commit_oid) = self.objects.resolve_ref(&self.branch)? else {
+            return Ok(vec![]);
         };
         let commit = self.objects.repo().find_commit(commit_oid)?;
         let tree_oid = commit.tree_id();
@@ -184,9 +181,8 @@ impl<'a> BranchStore<'a> {
 
     /// Walk commits on the branch, newest first.
     pub fn log(&self, limit: usize) -> Result<Vec<CommitInfo>> {
-        let commit_oid = match self.objects.resolve_ref(&self.branch)? {
-            Some(oid) => oid,
-            None => return Ok(vec![]),
+        let Some(commit_oid) = self.objects.resolve_ref(&self.branch)? else {
+            return Ok(vec![]);
         };
         let mut revwalk = self.objects.repo().revwalk()?;
         revwalk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)?;

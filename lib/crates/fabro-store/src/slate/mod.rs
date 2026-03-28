@@ -28,7 +28,7 @@ impl std::fmt::Debug for SlateStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SlateStore")
             .field("base_prefix", &self.base_prefix)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -68,12 +68,11 @@ impl SlateStore {
     async fn get_active_run(&self, run_id: &str) -> Option<SlateRunStore> {
         let mut active_runs = self.active_runs.lock().await;
         let weak = active_runs.get(run_id).cloned()?;
-        match weak.upgrade() {
-            Some(inner) => Some(SlateRunStore::from_inner(inner)),
-            None => {
-                active_runs.remove(run_id);
-                None
-            }
+        if let Some(inner) = weak.upgrade() {
+            Some(SlateRunStore::from_inner(inner))
+        } else {
+            active_runs.remove(run_id);
+            None
         }
     }
 

@@ -15,7 +15,7 @@ use tracing::info;
 use crate::args::PrCreateArgs;
 use crate::cli_config::load_cli_settings;
 
-pub async fn create_command(
+pub(super) async fn create_command(
     args: PrCreateArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {

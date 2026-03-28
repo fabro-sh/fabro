@@ -159,6 +159,7 @@ fn models_title() -> Vec<CellStruct> {
     ]
 }
 
+#[allow(clippy::print_stdout)]
 fn print_models_table(models: &[Model], s: &Styles) {
     let use_color = s.use_color;
     let rows: Vec<Vec<CellStruct>> = models.iter().map(|m| model_row(m, use_color)).collect();
@@ -249,6 +250,7 @@ fn apply_options(
     Ok(params)
 }
 
+#[allow(clippy::print_stderr)]
 fn print_usage(usage: &Usage) {
     eprintln!(
         "Tokens: {} input, {} output, {} total",
@@ -267,6 +269,7 @@ pub struct ChatArgs {
     pub system: Option<String>,
 }
 
+#[allow(clippy::print_stdout, clippy::print_stderr)]
 pub async fn run_chat(args: ChatArgs) -> Result<()> {
     let (model_id, provider) = resolve_model(args.model);
     eprintln!("Using model: {model_id}");
@@ -329,6 +332,7 @@ pub async fn run_chat(args: ChatArgs) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::print_stdout, clippy::print_stderr)]
 pub async fn run_prompt(args: PromptArgs) -> Result<()> {
     let stdin_prompt = read_stdin_prompt();
     let prompt_text = resolve_prompt(args.prompt, stdin_prompt)?;
@@ -394,6 +398,7 @@ pub async fn run_prompt(args: PromptArgs) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::print_stdout, clippy::print_stderr)]
 pub async fn run_prompt_via_server(args: PromptArgs, server: &ServerConnection) -> Result<()> {
     let stdin_prompt = read_stdin_prompt();
     let prompt_text = resolve_prompt(args.prompt, stdin_prompt)?;
@@ -558,6 +563,7 @@ pub async fn run_prompt_via_server(args: PromptArgs, server: &ServerConnection) 
 }
 
 /// Extract and print text from a CompletionMessage JSON value.
+#[allow(clippy::print_stdout)]
 fn print_message_text(message: &serde_json::Value) {
     if let Some(content) = message["content"].as_array() {
         for part in content {
@@ -607,6 +613,7 @@ async fn parse_sse_frames(
 }
 
 /// Stream session SSE events, printing text deltas to stdout in real-time.
+#[allow(clippy::print_stdout)]
 async fn stream_session_text(response: reqwest::Response) -> Result<()> {
     parse_sse_frames(response, |event_type, data| {
         match event_type {
@@ -638,6 +645,7 @@ async fn stream_session_text(response: reqwest::Response) -> Result<()> {
     .await
 }
 
+#[allow(clippy::print_stderr)]
 pub async fn run_chat_via_server(args: ChatArgs, server: &ServerConnection) -> Result<()> {
     let is_tty = io::stdin().is_terminal();
     let mut session_id: Option<String> = None;
@@ -848,8 +856,14 @@ fn build_deep_test_params(info: &Model) -> Option<GenerateParams> {
             "required": ["a", "b"]
         }),
         |args, _ctx| async move {
-            let a = args.get("a").and_then(|v| v.as_i64()).unwrap_or(0);
-            let b = args.get("b").and_then(|v| v.as_i64()).unwrap_or(0);
+            let a = args
+                .get("a")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
+            let b = args
+                .get("b")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
             Ok(serde_json::json!(a + b))
         },
     );
@@ -909,6 +923,7 @@ fn validate_deep_result(result: &GenerateResult, info: &Model) -> (cli_table::Co
     (Color::Green, "deep: ok".to_string())
 }
 
+#[allow(clippy::print_stdout, clippy::print_stderr)]
 async fn test_models_via_server(
     server: &ServerConnection,
     provider: Option<&str>,
@@ -996,14 +1011,11 @@ pub async fn run_models(
 
     match command {
         ModelsCommand::List { provider, query } => {
-            let mut models = match &server {
-                Some(s) => {
-                    fetch_models_from_server(&s.client, &s.base_url, provider.as_deref()).await?
-                }
-                None => {
-                    let p = provider.as_deref().and_then(|s| s.parse::<Provider>().ok());
-                    Catalog::builtin().list(p).into_iter().cloned().collect()
-                }
+            let mut models = if let Some(s) = &server {
+                fetch_models_from_server(&s.client, &s.base_url, provider.as_deref()).await?
+            } else {
+                let p = provider.as_deref().and_then(|s| s.parse::<Provider>().ok());
+                Catalog::builtin().list(p).into_iter().cloned().collect()
             };
 
             if let Some(q) = &query {
@@ -1066,6 +1078,7 @@ async fn test_one_model(info: &Model, deep: bool) -> (Color, String) {
     }
 }
 
+#[allow(clippy::print_stdout)]
 async fn test_models(
     provider: Option<&str>,
     model: Option<&str>,

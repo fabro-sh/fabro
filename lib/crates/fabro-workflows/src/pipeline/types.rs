@@ -108,7 +108,7 @@ impl Validated {
 }
 
 /// Options for the PERSIST phase.
-pub struct PersistOptions {
+pub(crate) struct PersistOptions {
     pub run_dir: PathBuf,
     pub run_record: RunRecord,
 }

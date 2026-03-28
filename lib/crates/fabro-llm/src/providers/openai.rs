@@ -935,7 +935,7 @@ fn handle_response_completed(
 
 #[async_trait::async_trait]
 impl ProviderAdapter for Adapter {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "openai"
     }
 

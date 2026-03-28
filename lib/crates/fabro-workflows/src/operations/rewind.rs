@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::str::FromStr;
 
 use anyhow::{Context, Result, bail};
@@ -166,14 +167,12 @@ fn backfill_run_shas(store: &Store, run_id: &str, timeline: &mut [TimelineEntry]
     }
 
     let run_branch = format!("{}{run_id}", RUN_BRANCH_PREFIX);
-    let sig = match Signature::now("Fabro", "noreply@fabro.sh") {
-        Ok(s) => s,
-        Err(_) => return,
+    let Ok(sig) = Signature::now("Fabro", "noreply@fabro.sh") else {
+        return;
     };
     let bs = BranchStore::new(store, &run_branch, &sig);
-    let run_commits = match bs.log(10_000) {
-        Ok(c) => c,
-        Err(_) => return,
+    let Ok(run_commits) = bs.log(10_000) else {
+        return;
     };
 
     let prefix = format!("fabro({run_id}): ");
@@ -248,6 +247,7 @@ pub fn rewind(store: &Store, input: RewindInput) -> Result<()> {
     rewind_to_entry(store, &input.run_id, entry, input.push)
 }
 
+#[allow(clippy::print_stderr)]
 fn rewind_to_entry(store: &Store, run_id: &str, entry: &TimelineEntry, push: bool) -> Result<()> {
     let meta_branch = MetadataStore::branch_name(run_id);
     store
@@ -304,9 +304,8 @@ pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<String> 
     let mut matches = Vec::new();
 
     for reference in refs.flatten() {
-        let name = match reference.name() {
-            Some(n) => n,
-            None => continue,
+        let Some(name) = reference.name() else {
+            continue;
         };
         if let Some(run_id) = name.strip_prefix(pattern) {
             if run_id == prefix {
@@ -324,7 +323,7 @@ pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<String> 
         _ => {
             let mut msg = format!("ambiguous run ID prefix '{prefix}', matches:\n");
             for m in &matches {
-                msg.push_str(&format!("  {m}\n"));
+                let _ = writeln!(msg, "  {m}");
             }
             bail!("{msg}")
         }
@@ -333,9 +332,8 @@ pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<String> 
 
 fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String> {
     let branch = MetadataStore::branch_name(run_id);
-    let sig = match Signature::now("Fabro", "noreply@fabro.sh") {
-        Ok(s) => s,
-        Err(_) => return HashMap::new(),
+    let Ok(sig) = Signature::now("Fabro", "noreply@fabro.sh") else {
+        return HashMap::new();
     };
     let bs = BranchStore::new(store, &branch, &sig);
 
@@ -353,9 +351,8 @@ fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String> {
         },
     };
     let dot_source = String::from_utf8_lossy(&graph_bytes);
-    let graph = match parser::parse(&dot_source) {
-        Ok(g) => g,
-        Err(_) => return HashMap::new(),
+    let Ok(graph) = parser::parse(&dot_source) else {
+        return HashMap::new();
     };
     detect_parallel_interior(&graph)
 }

@@ -1,121 +1,121 @@
 use crate::NodeVisitRef;
 
-pub const INIT_KEY: &str = "_init.json";
-pub const RUN_KEY: &str = "run.json";
-pub const START_KEY: &str = "start.json";
-pub const STATUS_KEY: &str = "status.json";
-pub const CHECKPOINT_KEY: &str = "checkpoint.json";
-pub const CONCLUSION_KEY: &str = "conclusion.json";
-pub const RETRO_KEY: &str = "retro.json";
-pub const GRAPH_KEY: &str = "graph.fabro";
-pub const SANDBOX_KEY: &str = "sandbox.json";
-pub const RETRO_PROMPT_KEY: &str = "retro/prompt.md";
-pub const RETRO_RESPONSE_KEY: &str = "retro/response.md";
-pub const EVENTS_PREFIX: &str = "events/";
-pub const CHECKPOINTS_PREFIX: &str = "checkpoints/";
-pub const ARTIFACT_VALUES_PREFIX: &str = "artifacts/values/";
-pub const ARTIFACT_NODES_PREFIX: &str = "artifacts/nodes/";
+pub(crate) const INIT_KEY: &str = "_init.json";
+pub(crate) const RUN_KEY: &str = "run.json";
+pub(crate) const START_KEY: &str = "start.json";
+pub(crate) const STATUS_KEY: &str = "status.json";
+pub(crate) const CHECKPOINT_KEY: &str = "checkpoint.json";
+pub(crate) const CONCLUSION_KEY: &str = "conclusion.json";
+pub(crate) const RETRO_KEY: &str = "retro.json";
+pub(crate) const GRAPH_KEY: &str = "graph.fabro";
+pub(crate) const SANDBOX_KEY: &str = "sandbox.json";
+pub(crate) const RETRO_PROMPT_KEY: &str = "retro/prompt.md";
+pub(crate) const RETRO_RESPONSE_KEY: &str = "retro/response.md";
+pub(crate) const EVENTS_PREFIX: &str = "events/";
+pub(crate) const CHECKPOINTS_PREFIX: &str = "checkpoints/";
+pub(crate) const ARTIFACT_VALUES_PREFIX: &str = "artifacts/values/";
+pub(crate) const ARTIFACT_NODES_PREFIX: &str = "artifacts/nodes/";
 
-pub fn init() -> &'static str {
+pub(crate) fn init() -> &'static str {
     INIT_KEY
 }
 
-pub fn run() -> &'static str {
+pub(crate) fn run() -> &'static str {
     RUN_KEY
 }
 
-pub fn start() -> &'static str {
+pub(crate) fn start() -> &'static str {
     START_KEY
 }
 
-pub fn status() -> &'static str {
+pub(crate) fn status() -> &'static str {
     STATUS_KEY
 }
 
-pub fn checkpoint() -> &'static str {
+pub(crate) fn checkpoint() -> &'static str {
     CHECKPOINT_KEY
 }
 
-pub fn conclusion() -> &'static str {
+pub(crate) fn conclusion() -> &'static str {
     CONCLUSION_KEY
 }
 
-pub fn retro() -> &'static str {
+pub(crate) fn retro() -> &'static str {
     RETRO_KEY
 }
 
-pub fn graph() -> &'static str {
+pub(crate) fn graph() -> &'static str {
     GRAPH_KEY
 }
 
-pub fn sandbox() -> &'static str {
+pub(crate) fn sandbox() -> &'static str {
     SANDBOX_KEY
 }
 
-pub fn node_visit_prefix(node: &NodeVisitRef<'_>) -> String {
+pub(crate) fn node_visit_prefix(node: &NodeVisitRef<'_>) -> String {
     format!("nodes/{}/visit-{}", node.node_id, node.visit)
 }
 
-pub fn node_prompt(node: &NodeVisitRef<'_>) -> String {
+pub(crate) fn node_prompt(node: &NodeVisitRef<'_>) -> String {
     format!("{}/prompt.md", node_visit_prefix(node))
 }
 
-pub fn node_response(node: &NodeVisitRef<'_>) -> String {
+pub(crate) fn node_response(node: &NodeVisitRef<'_>) -> String {
     format!("{}/response.md", node_visit_prefix(node))
 }
 
-pub fn node_status(node: &NodeVisitRef<'_>) -> String {
+pub(crate) fn node_status(node: &NodeVisitRef<'_>) -> String {
     format!("{}/status.json", node_visit_prefix(node))
 }
 
-pub fn node_stdout(node: &NodeVisitRef<'_>) -> String {
+pub(crate) fn node_stdout(node: &NodeVisitRef<'_>) -> String {
     format!("{}/stdout.log", node_visit_prefix(node))
 }
 
-pub fn node_stderr(node: &NodeVisitRef<'_>) -> String {
+pub(crate) fn node_stderr(node: &NodeVisitRef<'_>) -> String {
     format!("{}/stderr.log", node_visit_prefix(node))
 }
 
-pub fn retro_prompt() -> &'static str {
+pub(crate) fn retro_prompt() -> &'static str {
     RETRO_PROMPT_KEY
 }
 
-pub fn retro_response() -> &'static str {
+pub(crate) fn retro_response() -> &'static str {
     RETRO_RESPONSE_KEY
 }
 
-pub fn event_key(seq: u32, epoch_ms: i64) -> String {
+pub(crate) fn event_key(seq: u32, epoch_ms: i64) -> String {
     format!("{EVENTS_PREFIX}{seq:06}-{epoch_ms}.json")
 }
 
-pub fn checkpoint_history_key(seq: u32, epoch_ms: i64) -> String {
+pub(crate) fn checkpoint_history_key(seq: u32, epoch_ms: i64) -> String {
     format!("{CHECKPOINTS_PREFIX}{seq:04}-{epoch_ms}.json")
 }
 
-pub fn artifact_value(artifact_id: &str) -> String {
+pub(crate) fn artifact_value(artifact_id: &str) -> String {
     format!("{ARTIFACT_VALUES_PREFIX}{artifact_id}.json")
 }
 
-pub fn node_asset_prefix(node: &NodeVisitRef<'_>) -> String {
+pub(crate) fn node_asset_prefix(node: &NodeVisitRef<'_>) -> String {
     format!(
         "{ARTIFACT_NODES_PREFIX}{}/visit-{}",
         node.node_id, node.visit
     )
 }
 
-pub fn node_asset(node: &NodeVisitRef<'_>, filename: &str) -> String {
+pub(crate) fn node_asset(node: &NodeVisitRef<'_>, filename: &str) -> String {
     format!("{}/{filename}", node_asset_prefix(node))
 }
 
-pub fn parse_event_seq(key: &str) -> Option<u32> {
+pub(crate) fn parse_event_seq(key: &str) -> Option<u32> {
     parse_seq(key, EVENTS_PREFIX)
 }
 
-pub fn parse_checkpoint_seq(key: &str) -> Option<u32> {
+pub(crate) fn parse_checkpoint_seq(key: &str) -> Option<u32> {
     parse_seq(key, CHECKPOINTS_PREFIX)
 }
 
-pub fn parse_node_key(key: &str) -> Option<(String, u32, String)> {
+pub(crate) fn parse_node_key(key: &str) -> Option<(String, u32, String)> {
     parse_visit_scoped_key(key, "nodes/")
 }
 

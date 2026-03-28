@@ -108,7 +108,8 @@ impl InMemoryRunStore {
         self.data.lock().await.clone()
     }
 
-    async fn build_node_snapshot_from_data(
+    #[allow(clippy::unused_self)]
+    fn build_node_snapshot_from_data(
         &self,
         data: &BTreeMap<String, Vec<u8>>,
         node: &NodeVisitRef<'_>,
@@ -156,7 +157,7 @@ impl InMemoryRunStore {
         Ok(checkpoints)
     }
 
-    async fn build_snapshot_from_data(
+    fn build_snapshot_from_data(
         &self,
         data: &BTreeMap<String, Vec<u8>>,
     ) -> Result<Option<RunSnapshot>> {
@@ -177,7 +178,7 @@ impl InMemoryRunStore {
                 node_id: &node_id,
                 visit,
             };
-            nodes.push(self.build_node_snapshot_from_data(data, &node).await?);
+            nodes.push(self.build_node_snapshot_from_data(data, &node)?);
         }
 
         Ok(Some(RunSnapshot {
@@ -385,7 +386,7 @@ impl RunStore for Arc<InMemoryRunStore> {
 
     async fn get_node(&self, node: &NodeVisitRef<'_>) -> Result<NodeSnapshot> {
         let data = self.snapshot_data().await;
-        self.build_node_snapshot_from_data(&data, node).await
+        self.build_node_snapshot_from_data(&data, node)
     }
 
     async fn list_node_visits(&self, node_id: &str) -> Result<Vec<u32>> {
@@ -514,7 +515,7 @@ impl RunStore for Arc<InMemoryRunStore> {
 
     async fn get_snapshot(&self) -> Result<Option<RunSnapshot>> {
         let data = self.snapshot_data().await;
-        self.build_snapshot_from_data(&data).await
+        self.build_snapshot_from_data(&data)
     }
 }
 

@@ -153,6 +153,7 @@ struct ApiFunction {
 }
 
 #[derive(serde::Deserialize)]
+#[allow(clippy::struct_field_names)]
 struct ApiUsage {
     prompt_tokens: i64,
     completion_tokens: i64,
@@ -715,12 +716,11 @@ impl StreamState {
         if self.done {
             return Ok(None);
         }
-        match self.line_reader.read_next_chunk("\n").await? {
-            Some(line) => Ok(Some(line)),
-            None => {
-                self.done = true;
-                Ok(None)
-            }
+        if let Some(line) = self.line_reader.read_next_chunk("\n").await? {
+            Ok(Some(line))
+        } else {
+            self.done = true;
+            Ok(None)
         }
     }
 

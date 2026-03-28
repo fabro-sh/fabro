@@ -26,9 +26,9 @@ impl Serialize for DaytonaNetwork {
         S: serde::Serializer,
     {
         match self {
-            DaytonaNetwork::Block => serializer.serialize_str("block"),
-            DaytonaNetwork::AllowAll => serializer.serialize_str("allow_all"),
-            DaytonaNetwork::AllowList(cidrs) => {
+            Self::Block => serializer.serialize_str("block"),
+            Self::AllowAll => serializer.serialize_str("allow_all"),
+            Self::AllowList(cidrs) => {
                 use serde::ser::SerializeMap;
                 let mut map = serializer.serialize_map(Some(1))?;
                 map.serialize_entry("allow_list", cidrs)?;

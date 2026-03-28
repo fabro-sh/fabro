@@ -144,18 +144,17 @@ pub async fn git_push_host(
     };
 
     let https_url = fabro_github::ssh_url_to_https(&origin_url);
-    let push_url = match github_app {
-        Some(creds) => match fabro_github::resolve_authenticated_url(creds, &https_url).await {
+    let push_url = if let Some(creds) = github_app {
+        match fabro_github::resolve_authenticated_url(creds, &https_url).await {
             Ok(url) => url,
             Err(e) => {
                 tracing::warn!(error = %e, label, "Failed to get token for push");
                 return false;
             }
-        },
-        None => {
-            tracing::warn!(label, "No GitHub App credentials for push");
-            return false;
         }
+    } else {
+        tracing::warn!(label, "No GitHub App credentials for push");
+        return false;
     };
 
     let rp = repo_path.to_path_buf();
@@ -183,7 +182,7 @@ pub(crate) async fn git_diff(
     match sandbox.exec_command(&cmd, 30_000, None, None, None).await {
         Ok(r) if r.exit_code == 0 => Ok(r.stdout),
         Ok(r) => Err(format!("exit {}: {}", r.exit_code, r.stderr.trim())),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(e.clone()),
     }
 }
 

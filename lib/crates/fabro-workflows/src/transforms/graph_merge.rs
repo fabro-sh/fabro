@@ -23,8 +23,8 @@ impl Transform for GraphMergeTransform {
             for (id, node) in &secondary.nodes {
                 let prefixed_id = format!("{prefix}.{id}");
                 let mut merged_node = Node::new(&prefixed_id);
-                merged_node.attrs = node.attrs.clone();
-                merged_node.classes = node.classes.clone();
+                merged_node.attrs.clone_from(&node.attrs);
+                merged_node.classes.clone_from(&node.classes);
                 graph.nodes.insert(prefixed_id, merged_node);
             }
 
@@ -33,7 +33,7 @@ impl Transform for GraphMergeTransform {
                     format!("{prefix}.{}", edge.from),
                     format!("{prefix}.{}", edge.to),
                 );
-                merged_edge.attrs = edge.attrs.clone();
+                merged_edge.attrs.clone_from(&edge.attrs);
                 graph.edges.push(merged_edge);
             }
         }

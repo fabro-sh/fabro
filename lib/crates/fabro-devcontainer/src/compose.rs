@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 /// Extracted configuration from a Docker Compose service.
 #[derive(Debug, Clone, Default)]
-pub struct ComposeServiceConfig {
+pub(crate) struct ComposeServiceConfig {
     pub image: Option<String>,
     pub build: Option<ComposeBuild>,
     pub ports: Vec<u16>,
@@ -13,13 +13,13 @@ pub struct ComposeServiceConfig {
 
 /// Build configuration from a Docker Compose service.
 #[derive(Debug, Clone)]
-pub struct ComposeBuild {
+pub(crate) struct ComposeBuild {
     pub context: String,
     pub dockerfile: Option<String>,
 }
 
 /// Parse a Docker Compose file and extract config for the named service.
-pub fn parse_compose(
+pub(crate) fn parse_compose(
     compose_path: &Path,
     service_name: &str,
 ) -> Result<ComposeServiceConfig, String> {
@@ -155,7 +155,7 @@ fn parse_environment(service: &serde_yaml::Value) -> HashMap<String, String> {
 /// Parse multiple Docker Compose files and merge config for the named service.
 /// Later files override earlier files for image/build/user; ports accumulate (deduped);
 /// environment keys from later files override earlier ones.
-pub fn parse_compose_multi(
+pub(crate) fn parse_compose_multi(
     compose_paths: &[PathBuf],
     service_name: &str,
 ) -> Result<ComposeServiceConfig, String> {

@@ -1,11 +1,11 @@
-pub mod artifact;
-pub mod auto_status;
-pub mod circuit_breaker;
-pub mod disk;
-pub mod event;
-pub mod fidelity;
-pub mod git;
-pub mod hook;
+pub(crate) mod artifact;
+pub(crate) mod auto_status;
+pub(crate) mod circuit_breaker;
+pub(crate) mod disk;
+pub(crate) mod event;
+pub(crate) mod fidelity;
+pub(crate) mod git;
+pub(crate) mod hook;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -52,7 +52,7 @@ type WfNodeDecision = NodeDecision<Option<StageUsage>>;
 
 /// Orchestrates all sub-lifecycles with explicit per-callback ordering.
 /// Implements `RunLifecycle<WorkflowGraph>` by delegating to focused structs.
-pub struct WorkflowLifecycle {
+pub(crate) struct WorkflowLifecycle {
     event: EventLifecycle,
     hook: HookLifecycle,
     fidelity: FidelityLifecycle,
@@ -76,7 +76,7 @@ pub struct WorkflowLifecycle {
 
 impl WorkflowLifecycle {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         emitter: Arc<EventEmitter>,
         hook_runner: Option<Arc<HookRunner>>,
         sandbox: Arc<dyn Sandbox>,
@@ -187,7 +187,7 @@ impl WorkflowLifecycle {
     }
 
     /// Restore circuit breaker state from a checkpoint (for resume).
-    pub fn restore_circuit_breaker(
+    pub(crate) fn restore_circuit_breaker(
         &self,
         loop_sigs: HashMap<FailureSignature, usize>,
         restart_sigs: HashMap<FailureSignature, usize>,
@@ -196,7 +196,7 @@ impl WorkflowLifecycle {
     }
 
     /// Set the fidelity degradation flag for checkpoint resume.
-    pub fn set_degrade_fidelity_on_resume(&self, flag: bool) {
+    pub(crate) fn set_degrade_fidelity_on_resume(&self, flag: bool) {
         self.fidelity.set_degrade_fidelity_on_resume(flag);
     }
 }

@@ -202,7 +202,7 @@ impl<G: Graph + 'static> Executor<G> {
                 .await?;
 
             // Determine next step
-            let last_outcome = state.node_outcomes.get(node.id()).unwrap();
+            let last_outcome = &state.node_outcomes[node.id()];
             let next = self
                 .resolve_next_step(&node, last_outcome, &state, graph)
                 .await?;
@@ -369,40 +369,37 @@ impl<G: Graph + 'static> Executor<G> {
         }
 
         // Normal edge selection
-        match graph.select_edge(node, outcome, &state.context) {
-            Some(selection) => {
-                let target = selection.edge.target().to_string();
-                let is_restart = selection.edge.is_loop_restart();
+        if let Some(selection) = graph.select_edge(node, outcome, &state.context) {
+            let target = selection.edge.target().to_string();
+            let is_restart = selection.edge.is_loop_restart();
 
-                let ctx = EdgeContext {
-                    from: node.id(),
-                    to: &target,
-                    edge: Some(selection.edge.clone()),
-                    is_jump: false,
-                    outcome,
-                    reason: selection.reason,
-                };
-                match self.lifecycle.on_edge_selected(&ctx, state).await? {
-                    EdgeDecision::Continue => {
-                        if is_restart {
-                            Ok(NextStep::LoopRestart(target))
-                        } else {
-                            Ok(NextStep::Edge(target))
-                        }
-                    }
-                    EdgeDecision::Override(new_target) => Ok(NextStep::Edge(new_target)),
-                    EdgeDecision::Block(msg) => Err(CoreError::blocked(msg)),
-                }
-            }
-            None => {
-                // No edge found
-                if outcome.status == StageStatus::Fail {
-                    if let Some(retry_target) = graph.get_retry_target(node.id()) {
-                        return Ok(NextStep::Edge(retry_target));
+            let ctx = EdgeContext {
+                from: node.id(),
+                to: &target,
+                edge: Some(selection.edge.clone()),
+                is_jump: false,
+                outcome,
+                reason: selection.reason,
+            };
+            match self.lifecycle.on_edge_selected(&ctx, state).await? {
+                EdgeDecision::Continue => {
+                    if is_restart {
+                        Ok(NextStep::LoopRestart(target))
+                    } else {
+                        Ok(NextStep::Edge(target))
                     }
                 }
-                Ok(NextStep::End)
+                EdgeDecision::Override(new_target) => Ok(NextStep::Edge(new_target)),
+                EdgeDecision::Block(msg) => Err(CoreError::blocked(msg)),
             }
+        } else {
+            // No edge found
+            if outcome.status == StageStatus::Fail {
+                if let Some(retry_target) = graph.get_retry_target(node.id()) {
+                    return Ok(NextStep::Edge(retry_target));
+                }
+            }
+            Ok(NextStep::End)
         }
     }
 }

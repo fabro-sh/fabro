@@ -91,8 +91,11 @@ pub async fn serve_tls(
 
             // Extract peer certificates once per connection (not per request)
             let (_, server_conn) = tls_stream.get_ref();
-            let peer_certs =
-                PeerCertificates(server_conn.peer_certificates().map(|certs| certs.to_vec()));
+            let peer_certs = PeerCertificates(
+                server_conn
+                    .peer_certificates()
+                    .map(<[rustls_pki_types::CertificateDer<'_>]>::to_vec),
+            );
 
             let io = TokioIo::new(tls_stream);
 

@@ -22,7 +22,7 @@ type WfNodeResult = NodeResult<Option<StageUsage>>;
 type WfNodeDecision = NodeDecision<Option<StageUsage>>;
 
 /// Sub-lifecycle responsible for running workflow hooks.
-pub struct HookLifecycle {
+pub(crate) struct HookLifecycle {
     pub hook_runner: Option<Arc<HookRunner>>,
     pub sandbox: Arc<dyn Sandbox>,
     pub hook_work_dir: Option<PathBuf>,

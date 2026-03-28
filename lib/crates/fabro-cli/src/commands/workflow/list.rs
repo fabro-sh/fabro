@@ -11,16 +11,15 @@ use crate::shared::relative_path;
 
 const GOAL_MAX_LEN: usize = 60;
 
-pub fn list_command(_args: &WorkflowListArgs) -> Result<()> {
+pub(super) fn list_command(_args: &WorkflowListArgs) -> Result<()> {
     let styles = Styles::detect_stderr();
     let cwd = std::env::current_dir()?;
 
-    let (config_path, config) = match discover_project_config(&cwd)? {
-        Some(found) => found,
-        None => bail!(
+    let Some((config_path, config)) = discover_project_config(&cwd)? else {
+        bail!(
             "No fabro.toml found in {cwd} or any parent directory",
             cwd = cwd.display()
-        ),
+        );
     };
 
     let fabro_root = resolve_fabro_root(&config_path, &config);

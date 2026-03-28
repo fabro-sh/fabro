@@ -11,7 +11,7 @@ use tracing::{debug, info};
 use crate::args::LogsArgs;
 use crate::cli_config::load_cli_settings;
 
-pub fn run(args: LogsArgs, styles: &Styles) -> Result<()> {
+pub(crate) fn run(args: LogsArgs, styles: &Styles) -> Result<()> {
     let cli_config = load_cli_settings(None)?;
     let base = runs_base(&cli_config.storage_dir());
     let run = resolve_run(&base, &args.run)?;
@@ -102,7 +102,7 @@ fn extract_timestamp(line: &str) -> Option<DateTime<Utc>> {
     ts_str.parse::<DateTime<Utc>>().ok()
 }
 
-pub fn parse_since(s: &str) -> Result<DateTime<Utc>> {
+pub(crate) fn parse_since(s: &str) -> Result<DateTime<Utc>> {
     let s = s.trim();
     if s.is_empty() {
         bail!("empty --since value");
@@ -186,7 +186,7 @@ fn render_indented_markdown(styles: &Styles, text: &str, indent: &str) -> String
         .join("\n")
 }
 
-pub fn format_event_pretty(line: &str, styles: &Styles) -> Option<String> {
+pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String> {
     let envelope: serde_json::Value = serde_json::from_str(line).ok()?;
     let event = envelope.get("event")?.as_str()?;
     let ts = format_timestamp(envelope.get("ts")?.as_str()?);
@@ -234,7 +234,7 @@ pub fn format_event_pretty(line: &str, styles: &Styles) -> Option<String> {
             if let Some(usage) = envelope.get("usage") {
                 let total = usage
                     .get("total_tokens")
-                    .and_then(|value| value.as_i64())
+                    .and_then(serde_json::Value::as_i64)
                     .unwrap_or(0);
                 let pad = " ".repeat(ts.len() + 1);
                 if total > 0 {
@@ -246,10 +246,13 @@ pub fn format_event_pretty(line: &str, styles: &Styles) -> Option<String> {
                             .apply_to(format!("Tokens: {}", format_tokens(total as u64)))
                     ));
                 }
-                if let Some(cache_read) = usage.get("cache_read_tokens").and_then(|v| v.as_i64()) {
+                if let Some(cache_read) = usage
+                    .get("cache_read_tokens")
+                    .and_then(serde_json::Value::as_i64)
+                {
                     let cache_write = usage
                         .get("cache_write_tokens")
-                        .and_then(|v| v.as_i64())
+                        .and_then(serde_json::Value::as_i64)
                         .unwrap_or(0);
                     lines.push(format!(
                         "{}{}",
@@ -261,7 +264,10 @@ pub fn format_event_pretty(line: &str, styles: &Styles) -> Option<String> {
                         ))
                     ));
                 }
-                if let Some(reasoning) = usage.get("reasoning_tokens").and_then(|v| v.as_i64()) {
+                if let Some(reasoning) = usage
+                    .get("reasoning_tokens")
+                    .and_then(serde_json::Value::as_i64)
+                {
                     if reasoning > 0 {
                         lines.push(format!(
                             "{}{}",
@@ -321,14 +327,17 @@ pub fn format_event_pretty(line: &str, styles: &Styles) -> Option<String> {
             let label = str_field(&envelope, "node_label").unwrap_or("?");
             let duration = format_duration_ms(envelope.get("duration_ms"));
             let cost = format_cost(envelope.get("cost"));
-            let turns = envelope.get("turns").and_then(|v| v.as_u64()).unwrap_or(0);
+            let turns = envelope
+                .get("turns")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
             let tools = envelope
                 .get("tool_calls")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             let tokens = envelope
                 .get("total_tokens")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             let stats = format!("({turns} turns, {tools} tools, {})", format_tokens(tokens));
             Some(format!(
@@ -386,7 +395,7 @@ pub fn format_event_pretty(line: &str, styles: &Styles) -> Option<String> {
             let tool = str_field(&envelope, "tool_name").unwrap_or("?");
             let is_error = envelope
                 .get("is_error")
-                .and_then(|v| v.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
             let detail = tool_detail(&envelope);
             let display = match detail {
@@ -432,7 +441,7 @@ pub fn format_event_pretty(line: &str, styles: &Styles) -> Option<String> {
         "SetupCompleted" => {
             let count = envelope
                 .get("command_count")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             let duration = format_duration_ms(envelope.get("duration_ms"));
             Some(format!(
@@ -445,11 +454,11 @@ pub fn format_event_pretty(line: &str, styles: &Styles) -> Option<String> {
         "Agent.CompactionCompleted" => {
             let original = envelope
                 .get("original_turn_count")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             let preserved = envelope
                 .get("preserved_turn_count")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             Some(format!(
                 "{}   {}",
@@ -462,7 +471,7 @@ pub fn format_event_pretty(line: &str, styles: &Styles) -> Option<String> {
         "ParallelStarted" => {
             let count = envelope
                 .get("branch_count")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             Some(format!(
                 "{} {} Parallel  {} branches",
@@ -502,7 +511,7 @@ pub fn format_event_pretty(line: &str, styles: &Styles) -> Option<String> {
             let url = str_field(&envelope, "pr_url").unwrap_or("?");
             let draft = envelope
                 .get("draft")
-                .and_then(|v| v.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
             let label = if draft { "Draft PR:" } else { "PR:" };
             Some(format!(
@@ -584,7 +593,7 @@ fn format_timestamp(ts: &str) -> String {
 }
 
 fn format_duration_ms(value: Option<&serde_json::Value>) -> String {
-    let ms = value.and_then(|v| v.as_u64()).unwrap_or(0);
+    let ms = value.and_then(serde_json::Value::as_u64).unwrap_or(0);
     if ms < 1000 {
         format!("{ms}ms")
     } else {
@@ -599,7 +608,7 @@ fn format_duration_ms(value: Option<&serde_json::Value>) -> String {
 }
 
 fn format_cost(value: Option<&serde_json::Value>) -> String {
-    let cost = value.and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let cost = value.and_then(serde_json::Value::as_f64).unwrap_or(0.0);
     if cost > 0.0 {
         format!("${cost:.2}")
     } else {

@@ -29,7 +29,7 @@ pub struct Catalog {
 impl Catalog {
     /// Returns a reference to the global built-in catalog (loaded once from catalog.json).
     #[must_use]
-    pub fn builtin() -> &'static Catalog {
+    pub fn builtin() -> &'static Self {
         &GLOBAL_CATALOG
     }
 
@@ -134,14 +134,12 @@ impl Catalog {
         model: &str,
         fallbacks: &HashMap<String, Vec<String>>,
     ) -> Vec<FallbackTarget> {
-        let reference = match self.get(model) {
-            Some(info) => info,
-            None => return Vec::new(),
+        let Some(reference) = self.get(model) else {
+            return Vec::new();
         };
 
-        let fallback_providers = match fallbacks.get(primary.as_str()) {
-            Some(providers) => providers,
-            None => return Vec::new(),
+        let Some(fallback_providers) = fallbacks.get(primary.as_str()) else {
+            return Vec::new();
         };
 
         fallback_providers

@@ -92,7 +92,7 @@ pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, F
         }
     }
 
-    execute_persisted_run(run_dir, None, services).await
+    Box::pin(execute_persisted_run(run_dir, None, services)).await
 }
 
 pub(super) async fn execute_persisted_run(
@@ -100,7 +100,7 @@ pub(super) async fn execute_persisted_run(
     checkpoint: Option<Checkpoint>,
     services: StartServices,
 ) -> Result<Started, FabroError> {
-    let mut bootstrap_guard = DetachedRunBootstrapGuard::arm(run_dir)?;
+    let mut bootstrap_guard = DetachedRunBootstrapGuard::arm(run_dir);
 
     let persisted = match Persisted::load(run_dir) {
         Ok(persisted) => persisted,
@@ -125,7 +125,7 @@ pub(super) async fn execute_persisted_run(
     bootstrap_guard.defuse();
     let mut completion_guard = DetachedRunCompletionGuard::arm(run_dir);
     let run_start = Instant::now();
-    let started = session.run(persisted, checkpoint).await;
+    let started = Box::pin(session.run(persisted, checkpoint)).await;
 
     match started {
         Ok(started) => {
@@ -193,9 +193,9 @@ impl RunSession {
 
         let provider_enum: Provider = provider
             .as_deref()
-            .map(|value| value.parse::<Provider>())
+            .map(str::parse::<Provider>)
             .transpose()
-            .map_err(|err| FabroError::Precondition(err.to_string()))?
+            .map_err(|err| FabroError::Precondition(err.clone()))?
             .unwrap_or_else(Provider::default_from_env);
 
         let fallback_chain = resolve_fallback_chain(provider_enum, &model, &settings);
@@ -273,7 +273,7 @@ impl RunSession {
             services.interviewer
         };
 
-        Ok(RunSession {
+        Ok(Self {
             cancel_token: services.cancel_token,
             emitter: services.emitter,
             sandbox,
@@ -315,7 +315,7 @@ fn resolve_sandbox_provider(settings: &FabroSettings) -> Result<SandboxProvider,
     settings
         .sandbox_settings()
         .and_then(|sandbox| sandbox.provider.as_deref())
-        .map(|provider| provider.parse::<SandboxProvider>())
+        .map(str::parse::<SandboxProvider>)
         .transpose()
         .map_err(|err| FabroError::Precondition(format!("Invalid sandbox provider: {err}")))?
         .map_or_else(|| Ok(SandboxProvider::default()), Ok)
@@ -530,16 +530,16 @@ struct DetachedRunBootstrapGuard {
 }
 
 impl DetachedRunBootstrapGuard {
-    fn arm(run_dir: &Path) -> Result<Self, FabroError> {
+    fn arm(run_dir: &Path) -> Self {
         run_status::write_run_status(
             run_dir,
             RunStatus::Starting,
             Some(StatusReason::SandboxInitializing),
         );
-        Ok(Self {
+        Self {
             run_dir: run_dir.to_path_buf(),
             active: true,
-        })
+        }
     }
 
     fn defuse(&mut self) {

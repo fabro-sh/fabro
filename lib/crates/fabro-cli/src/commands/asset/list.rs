@@ -8,7 +8,7 @@ use crate::args::AssetListArgs;
 use crate::cli_config::load_cli_settings;
 use crate::shared::format_size;
 
-pub fn list_command(args: &AssetListArgs) -> Result<()> {
+pub(super) fn list_command(args: &AssetListArgs) -> Result<()> {
     let cli_config = load_cli_settings(None)?;
     let base = runs_base(&cli_config.storage_dir());
     let run = resolve_run(&base, &args.run_id)?;

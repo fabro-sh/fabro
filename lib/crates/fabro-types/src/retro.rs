@@ -16,11 +16,11 @@ pub enum SmoothnessRating {
 impl fmt::Display for SmoothnessRating {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            SmoothnessRating::Effortless => "effortless",
-            SmoothnessRating::Smooth => "smooth",
-            SmoothnessRating::Bumpy => "bumpy",
-            SmoothnessRating::Struggled => "struggled",
-            SmoothnessRating::Failed => "failed",
+            Self::Effortless => "effortless",
+            Self::Smooth => "smooth",
+            Self::Bumpy => "bumpy",
+            Self::Struggled => "struggled",
+            Self::Failed => "failed",
         };
         f.write_str(s)
     }

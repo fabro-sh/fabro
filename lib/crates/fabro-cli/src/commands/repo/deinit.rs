@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 
-pub fn run_deinit() -> Result<()> {
+pub(crate) fn run_deinit() -> Result<()> {
     let repo_root = super::init::git_repo_root()?;
 
     let fabro_toml = repo_root.join("fabro.toml");

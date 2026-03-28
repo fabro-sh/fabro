@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write;
 
 use crate::artifact::{artifact_path, format_artifact_reference};
 use crate::context::keys;
@@ -93,7 +94,7 @@ fn is_meta_handler(graph: &Graph, node_id: &str) -> bool {
 }
 
 fn is_blank_value(val: Option<&serde_json::Value>) -> bool {
-    val.and_then(|v| v.as_str()).is_some_and(|s| s.is_empty())
+    val.and_then(|v| v.as_str()).is_some_and(str::is_empty)
 }
 
 fn is_context_key_excluded(key: &str) -> bool {
@@ -519,10 +520,10 @@ fn build_summary_preamble(
                         let status = outcome.status.to_string();
                         let mut line = format!("- {node_id}: {status}");
                         if let Some(notes) = outcome.notes.as_deref() {
-                            line.push_str(&format!(" ({notes})"));
+                            let _ = write!(line, " ({notes})");
                         }
                         if let Some(reason) = outcome.failure_reason() {
-                            line.push_str(&format!(" [reason: {reason}]"));
+                            let _ = write!(line, " [reason: {reason}]");
                         }
                         parts.push(line);
 
@@ -566,10 +567,10 @@ fn build_summary_preamble(
                         let status = outcome.status.to_string();
                         let mut line = format!("- {node_id}: {status}");
                         if let Some(notes) = outcome.notes.as_deref() {
-                            line.push_str(&format!(" ({notes})"));
+                            let _ = write!(line, " ({notes})");
                         }
                         if let Some(reason) = outcome.failure_reason() {
-                            line.push_str(&format!(" [reason: {reason}]"));
+                            let _ = write!(line, " [reason: {reason}]");
                         }
                         parts.push(line);
 

@@ -1,5 +1,5 @@
 #[allow(unused_imports)]
-pub use fabro_config::cli::*;
+pub(crate) use fabro_config::cli::*;
 
 use std::path::Path;
 
@@ -9,7 +9,7 @@ use fabro_config::cli::load_cli_config;
 #[cfg(feature = "server")]
 use tracing::debug;
 
-pub fn load_cli_settings(path: Option<&Path>) -> anyhow::Result<FabroSettings> {
+pub(crate) fn load_cli_settings(path: Option<&Path>) -> anyhow::Result<FabroSettings> {
     load_cli_config(path)?.try_into()
 }
 

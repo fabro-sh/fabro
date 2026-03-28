@@ -14,7 +14,7 @@ use crate::cli_config::load_cli_settings;
 
 use super::short_run_id;
 
-pub async fn remove_command(args: &RunsRemoveArgs) -> Result<()> {
+pub(crate) async fn remove_command(args: &RunsRemoveArgs) -> Result<()> {
     let cli_config = load_cli_settings(None)?;
     let base = runs_base(&cli_config.storage_dir());
     remove_from(args, &base).await

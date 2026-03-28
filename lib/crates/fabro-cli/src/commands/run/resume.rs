@@ -12,7 +12,10 @@ use crate::cli_config::load_cli_settings;
 /// Looks up the run by ID prefix, validates a checkpoint exists, cleans stale
 /// artifacts from the previous execution, then spawns an engine subprocess
 /// (identical to `fabro run`'s create→start→attach flow).
-pub async fn resume_command(args: ResumeArgs, styles: &'static Styles) -> anyhow::Result<()> {
+pub(crate) async fn resume_command(
+    args: ResumeArgs,
+    styles: &'static Styles,
+) -> anyhow::Result<()> {
     let cli_config = load_cli_settings(None)?;
     let base = runs_base(&cli_config.storage_dir());
     let run_dir = find_run_by_prefix(&base, &args.run)?;
@@ -64,6 +67,7 @@ mod tests {
     }
 }
 
+#[allow(unsafe_code)]
 fn process_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {

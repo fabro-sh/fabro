@@ -814,7 +814,7 @@ impl LintRule for OrphanCustomOutcomeRule {
             // Check if there's at least one unconditional edge
             let has_unconditional = outgoing
                 .iter()
-                .any(|e| e.condition().is_none_or(|c| c.is_empty()));
+                .any(|e| e.condition().is_none_or(str::is_empty));
             if !has_unconditional {
                 diagnostics.push(Diagnostic {
                     rule: self.name().to_string(),
@@ -971,9 +971,8 @@ impl LintRule for StylesheetModelKnownRule {
         if stylesheet_str.is_empty() {
             return Vec::new();
         }
-        let stylesheet = match parse_stylesheet(stylesheet_str) {
-            Ok(ss) => ss,
-            Err(_) => return Vec::new(), // syntax errors caught by stylesheet_syntax rule
+        let Ok(stylesheet) = parse_stylesheet(stylesheet_str) else {
+            return Vec::new(); // syntax errors caught by stylesheet_syntax rule
         };
 
         let mut diagnostics = Vec::new();

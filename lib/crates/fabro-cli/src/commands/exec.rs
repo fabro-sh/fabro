@@ -8,7 +8,7 @@ use fabro_mcp::config::McpServerConfig;
 use crate::args::GlobalArgs;
 use crate::cli_config;
 
-pub async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_config = cli_config::load_cli_settings(None)?;
     #[cfg(feature = "sleep_inhibitor")]
     let _sleep_guard = crate::sleep_inhibitor::guard(cli_config.prevent_idle_sleep_enabled());
@@ -63,7 +63,7 @@ pub async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result<()> {
     {
         let _ = globals;
         tracing::info!(mode = "standalone", "Agent session starting");
-        run_with_args(args, mcp_servers).await?
+        run_with_args(args, mcp_servers).await?;
     }
 
     Ok(())

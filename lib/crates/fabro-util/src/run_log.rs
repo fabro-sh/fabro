@@ -53,8 +53,8 @@ pub enum RunLogGuard {
 impl Write for RunLogGuard {
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
         match self {
-            RunLogGuard::Inactive => Ok(data.len()),
-            RunLogGuard::Active { buf, .. } => buf.write(data),
+            Self::Inactive => Ok(data.len()),
+            Self::Active { buf, .. } => buf.write(data),
         }
     }
 
@@ -65,7 +65,7 @@ impl Write for RunLogGuard {
 
 impl Drop for RunLogGuard {
     fn drop(&mut self) {
-        if let RunLogGuard::Active { buf, file } = self {
+        if let Self::Active { buf, file } = self {
             if buf.is_empty() {
                 return;
             }

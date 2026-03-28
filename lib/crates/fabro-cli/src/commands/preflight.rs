@@ -21,7 +21,7 @@ use fabro_workflows::operations::{ValidateInput, WorkflowInput, validate};
 use crate::args::PreflightArgs;
 use crate::shared::github::build_github_app_credentials;
 
-pub async fn execute(mut args: PreflightArgs) -> anyhow::Result<()> {
+pub(crate) async fn execute(mut args: PreflightArgs) -> anyhow::Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
     let cli_defaults = load_cli_config(None)?;
     let cli_config: FabroSettings = cli_defaults.clone().try_into()?;
@@ -121,7 +121,7 @@ fn parse_sandbox_provider(settings: &FabroSettings) -> anyhow::Result<Option<San
     settings
         .sandbox_settings()
         .and_then(|s| s.provider.as_deref())
-        .map(|s| s.parse::<SandboxProvider>())
+        .map(str::parse::<SandboxProvider>)
         .transpose()
         .map_err(|e| anyhow::anyhow!("Invalid sandbox provider: {e}"))
 }
@@ -367,8 +367,11 @@ async fn run_preflight(
     let default_provider = provider.as_deref().unwrap_or("anthropic");
     let llm_ok = match LlmClient::from_env().await {
         Ok(c) => {
-            let configured: Vec<String> =
-                c.provider_names().iter().map(|s| s.to_string()).collect();
+            let configured: Vec<String> = c
+                .provider_names()
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect();
 
             let mut model_providers = std::collections::BTreeSet::new();
             for node in graph.nodes.values() {

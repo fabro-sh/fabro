@@ -14,7 +14,8 @@ use super::launcher::{
 ///
 /// The engine process reads `run.json` from the run directory and executes the
 /// workflow. Returns the child process handle (use `.id()` for the PID).
-pub fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Child> {
+#[allow(unsafe_code)]
+pub(crate) fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Child> {
     let record = RunRecord::load(run_dir)
         .map_err(|e| anyhow!("Cannot start run: failed to load run.json: {e}"))?;
 

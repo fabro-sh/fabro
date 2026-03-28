@@ -8,8 +8,9 @@ description = "Generated Rust types from the Fabro API OpenAPI spec"
 [lib]
 doctest = false
 
-[lints]
-workspace = true
+[lints.clippy]
+# Auto-generated crate; only enforce project-specific lints
+wildcard_imports = "warn"
 
 [dependencies]
 chrono = { workspace = true, features = ["serde"] }

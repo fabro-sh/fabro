@@ -24,7 +24,7 @@ type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
 
 /// Sub-lifecycle responsible for writing run state to disk (node status, checkpoints).
-pub struct DiskLifecycle {
+pub(crate) struct DiskLifecycle {
     pub run_dir: PathBuf,
     pub run_id: String,
     pub graph: Arc<GvGraph>,

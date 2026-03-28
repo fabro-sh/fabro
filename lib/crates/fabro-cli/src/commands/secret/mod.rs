@@ -7,7 +7,7 @@ use anyhow::Result;
 
 use crate::args::{SecretCommand, SecretNamespace};
 
-pub fn dispatch(ns: SecretNamespace) -> Result<()> {
+pub(crate) fn dispatch(ns: SecretNamespace) -> Result<()> {
     match ns.command {
         SecretCommand::Get(args) => get::get_command(&args),
         SecretCommand::List(args) => list::list_command(&args),

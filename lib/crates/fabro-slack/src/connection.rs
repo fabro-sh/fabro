@@ -33,12 +33,11 @@ pub fn process_message(
     text: &str,
     thread_registry: &ThreadRegistry,
 ) -> (Option<String>, ProcessOutcome, DispatchAction) {
-    let envelope: SocketEnvelope = match serde_json::from_str(text) {
-        Ok(e) => e,
-        Err(_) => {
-            warn!("Failed to parse WebSocket message as envelope");
-            return (None, ProcessOutcome::Continue, DispatchAction::Ignored);
-        }
+    let envelope: SocketEnvelope = if let Ok(e) = serde_json::from_str(text) {
+        e
+    } else {
+        warn!("Failed to parse WebSocket message as envelope");
+        return (None, ProcessOutcome::Continue, DispatchAction::Ignored);
     };
 
     let ack_json = envelope

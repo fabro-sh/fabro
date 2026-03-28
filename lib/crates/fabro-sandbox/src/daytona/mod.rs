@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::path::Path;
 use std::time::Instant;
 
@@ -135,7 +136,7 @@ impl DaytonaSandbox {
     ) -> Result<SignedPortPreviewUrl, String> {
         let sandbox = self.sandbox()?;
         sandbox
-            .get_signed_preview_url(port as i32, expires_in_seconds)
+            .get_signed_preview_url(i32::from(port), expires_in_seconds)
             .await
             .map_err(|e| format!("Failed to get signed preview URL for port {port}: {e}"))
     }
@@ -147,6 +148,7 @@ impl DaytonaSandbox {
         }
     }
 
+    #[allow(clippy::unused_self)]
     fn resolve_path(&self, path: &str) -> String {
         resolve_path(path, WORKING_DIRECTORY)
     }
@@ -684,7 +686,7 @@ impl Sandbox for DaytonaSandbox {
         WORKING_DIRECTORY
     }
 
-    fn platform(&self) -> &str {
+    fn platform(&self) -> &'static str {
         "linux"
     }
 
@@ -758,13 +760,11 @@ impl Sandbox for DaytonaSandbox {
     }
 
     async fn refresh_push_credentials(&self) -> Result<(), String> {
-        let origin_url = match self.origin_url.get() {
-            Some(url) => url,
-            None => return Ok(()), // no authenticated origin — nothing to refresh
+        let Some(origin_url) = self.origin_url.get() else {
+            return Ok(()); // no authenticated origin — nothing to refresh
         };
-        let creds = match &self.github_app {
-            Some(c) => c,
-            None => return Ok(()),
+        let Some(creds) = &self.github_app else {
+            return Ok(());
         };
 
         let auth_url = fabro_github::resolve_authenticated_url(creds, origin_url)
@@ -1049,16 +1049,17 @@ impl Sandbox for DaytonaSandbox {
                 cmd.push_str(" -i");
             }
             if let Some(ref glob_filter) = options.glob_filter {
-                cmd.push_str(&format!(" --glob {}", shell_quote(glob_filter)));
+                let _ = write!(cmd, " --glob {}", shell_quote(glob_filter));
             }
             if let Some(max) = options.max_results {
-                cmd.push_str(&format!(" --max-count {max}"));
+                let _ = write!(cmd, " --max-count {max}");
             }
-            cmd.push_str(&format!(
+            let _ = write!(
+                cmd,
                 " -- {} {}",
                 shell_quote(pattern),
                 shell_quote(&resolved)
-            ));
+            );
             cmd
         } else {
             let mut cmd = "grep -rn".to_string();
@@ -1066,16 +1067,17 @@ impl Sandbox for DaytonaSandbox {
                 cmd.push_str(" -i");
             }
             if let Some(ref glob_filter) = options.glob_filter {
-                cmd.push_str(&format!(" --include {}", shell_quote(glob_filter)));
+                let _ = write!(cmd, " --include {}", shell_quote(glob_filter));
             }
             if let Some(max) = options.max_results {
-                cmd.push_str(&format!(" -m {max}"));
+                let _ = write!(cmd, " -m {max}");
             }
-            cmd.push_str(&format!(
+            let _ = write!(
+                cmd,
                 " -- {} {}",
                 shell_quote(pattern),
                 shell_quote(&resolved)
-            ));
+            );
             cmd
         };
 

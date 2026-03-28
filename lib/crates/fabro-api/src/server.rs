@@ -606,9 +606,8 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
             Some(r) if r.status == RunStatus::Queued => r,
             _ => return,
         };
-        let run_dir = match managed_run.run_dir.clone() {
-            Some(path) => path,
-            None => return,
+        let Some(run_dir) = managed_run.run_dir.clone() else {
+            return;
         };
 
         let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
@@ -643,9 +642,8 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         let runs = state.runs.lock().expect("runs lock poisoned");
         runs.get(&run_id).and_then(|r| r.cancel_token.clone())
     };
-    let cancel_token = match cancel_token {
-        Some(ct) => ct,
-        None => return,
+    let Some(cancel_token) = cancel_token else {
+        return;
     };
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -835,8 +833,8 @@ pub fn spawn_scheduler(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
             tokio::select! {
-                _ = state.scheduler_notify.notified() => {},
-                _ = sleep(std::time::Duration::from_secs(1)) => {},
+                () = state.scheduler_notify.notified() => {},
+                () = sleep(std::time::Duration::from_secs(1)) => {},
             }
             // Promote as many queued runs as capacity allows
             loop {
@@ -862,7 +860,7 @@ pub fn spawn_scheduler(state: Arc<AppState>) {
                         tokio::spawn(execute_run(state_clone, id));
                     }
                     None => break,
-                };
+                }
             }
         }
     });
@@ -911,15 +909,12 @@ async fn get_questions(
     let runs = state.runs.lock().expect("runs lock poisoned");
     match runs.get(&id) {
         Some(managed_run) => {
-            let interviewer = match &managed_run.interviewer {
-                Some(i) => i,
-                None => {
-                    return (
-                        StatusCode::OK,
-                        Json(ListResponse::new(Vec::<ApiQuestion>::new())),
-                    )
-                        .into_response();
-                }
+            let Some(interviewer) = &managed_run.interviewer else {
+                return (
+                    StatusCode::OK,
+                    Json(ListResponse::new(Vec::<ApiQuestion>::new())),
+                )
+                    .into_response();
             };
             let pending = interviewer.pending_questions();
             let questions: Vec<ApiQuestion> = pending
@@ -961,12 +956,9 @@ async fn submit_answer(
     let runs = state.runs.lock().expect("runs lock poisoned");
     match runs.get(&id) {
         Some(managed_run) => {
-            let interviewer = match &managed_run.interviewer {
-                Some(i) => i,
-                None => {
-                    return ApiError::new(StatusCode::CONFLICT, "Run is not yet running.")
-                        .into_response();
-                }
+            let Some(interviewer) = &managed_run.interviewer else {
+                return ApiError::new(StatusCode::CONFLICT, "Run is not yet running.")
+                    .into_response();
             };
             let answer = if let Some(key) = &req.selected_option_key {
                 let option = interviewer

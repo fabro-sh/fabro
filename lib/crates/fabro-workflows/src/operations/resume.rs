@@ -36,7 +36,7 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
     cleanup_resume_artifacts(run_dir);
     run_status::write_run_status(run_dir, RunStatus::Submitted, None);
 
-    execute_persisted_run(run_dir, Some(checkpoint), services).await
+    Box::pin(execute_persisted_run(run_dir, Some(checkpoint), services)).await
 }
 
 fn cleanup_resume_artifacts(run_dir: &Path) {

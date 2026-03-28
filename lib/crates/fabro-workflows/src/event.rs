@@ -867,7 +867,7 @@ impl ProgressLogger {
                 ..
             } = event
             {
-                *run_id.lock().unwrap() = started_run_id.clone();
+                (*run_id.lock().unwrap()).clone_from(started_run_id);
             }
             let _ = append_progress_event(&run_dir, &run_id.lock().unwrap(), event);
         });

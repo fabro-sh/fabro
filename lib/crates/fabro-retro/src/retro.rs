@@ -56,7 +56,10 @@ pub fn extract_stage_durations(run_dir: &Path) -> HashMap<String, u64> {
         let Some(name) = envelope.get("node_id").and_then(|v| v.as_str()) else {
             continue;
         };
-        let Some(duration_ms) = envelope.get("duration_ms").and_then(|v| v.as_u64()) else {
+        let Some(duration_ms) = envelope
+            .get("duration_ms")
+            .and_then(serde_json::Value::as_u64)
+        else {
             continue;
         };
         durations.insert(name.to_string(), duration_ms);

@@ -22,7 +22,7 @@ type WfNodeResult = NodeResult<Option<StageUsage>>;
 type WfNodeDecision = NodeDecision<Option<StageUsage>>;
 
 /// Sub-lifecycle responsible for artifact collection, offloading, and syncing.
-pub struct ArtifactLifecycle {
+pub(crate) struct ArtifactLifecycle {
     pub sandbox: Arc<dyn fabro_sandbox::Sandbox>,
     pub artifact_store: Arc<Mutex<ArtifactStore>>,
     pub artifact_values_dir: Option<PathBuf>,
@@ -35,7 +35,7 @@ pub struct ArtifactLifecycle {
 
 impl ArtifactLifecycle {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         sandbox: Arc<dyn fabro_sandbox::Sandbox>,
         artifact_store: Arc<Mutex<ArtifactStore>>,
         artifact_values_dir: Option<PathBuf>,

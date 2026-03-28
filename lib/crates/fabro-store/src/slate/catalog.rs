@@ -68,7 +68,7 @@ pub(crate) async fn list_catalogs(
     Ok(records)
 }
 
-pub async fn repair_catalog(store: Arc<dyn ObjectStore>, base_prefix: &str) -> Result<()> {
+pub(super) async fn repair_catalog(store: Arc<dyn ObjectStore>, base_prefix: &str) -> Result<()> {
     let by_id_prefix = Path::from(format!("{base_prefix}by-id"));
     let by_start_prefix = Path::from(format!("{base_prefix}by-start"));
 

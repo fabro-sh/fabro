@@ -63,7 +63,7 @@ pub async fn discover_memory(
         }
     }
 
-    let total_bytes: usize = results.iter().map(|d| d.len()).sum();
+    let total_bytes: usize = results.iter().map(std::string::String::len).sum();
     info!(files = results.len(), total_bytes, "Project docs loaded");
 
     results
