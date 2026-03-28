@@ -7,7 +7,7 @@ use crate::git::MetadataStore;
 use crate::records::RunRecord;
 use crate::records::StartRecord;
 
-use super::rewind::{build_timeline, RewindTarget, RunTimeline, TimelineEntry};
+use super::rewind::{build_timeline, RewindTarget, TimelineEntry};
 
 #[derive(Debug, Clone)]
 pub struct ForkRunInput {
@@ -22,65 +22,12 @@ pub struct ForkRunInput {
 pub fn fork(store: &Store, input: ForkRunInput) -> Result<String> {
     let timeline = build_timeline(store, &input.source_run_id)?;
     let entry = match input.target.as_ref() {
-        Some(target) => resolve_timeline_entry(&timeline, target)?,
+        Some(target) => timeline.resolve(target)?,
         None => timeline.entries.last().ok_or_else(|| {
             anyhow::anyhow!("no checkpoints found for run {}", input.source_run_id)
         })?,
     };
     fork_from_entry(store, &input.source_run_id, entry, input.push)
-}
-
-fn resolve_timeline_entry<'a>(
-    timeline: &'a RunTimeline,
-    target: &RewindTarget,
-) -> Result<&'a TimelineEntry> {
-    match target {
-        RewindTarget::Ordinal(n) => timeline
-            .entries
-            .iter()
-            .find(|e| e.ordinal == *n)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "ordinal @{n} out of range (max @{})",
-                    timeline.entries.len()
-                )
-            }),
-        RewindTarget::LatestVisit(name) => {
-            let effective_name = timeline.parallel_map.get(name).unwrap_or(name);
-            timeline
-                .entries
-                .iter()
-                .rev()
-                .find(|e| e.node_name == *effective_name)
-                .ok_or_else(|| {
-                    if effective_name != name {
-                        anyhow::anyhow!(
-                            "node '{name}' is inside parallel '{effective_name}'; \
-                             no checkpoint found for '{effective_name}'"
-                        )
-                    } else {
-                        anyhow::anyhow!("no checkpoint found for node '{name}'")
-                    }
-                })
-        }
-        RewindTarget::SpecificVisit(name, visit) => {
-            let effective_name = timeline.parallel_map.get(name).unwrap_or(name);
-            timeline
-                .entries
-                .iter()
-                .find(|e| e.node_name == *effective_name && e.visit == *visit)
-                .ok_or_else(|| {
-                    if effective_name != name {
-                        anyhow::anyhow!(
-                            "node '{name}' is inside parallel '{effective_name}'; \
-                             no visit {visit} found for '{effective_name}'"
-                        )
-                    } else {
-                        anyhow::anyhow!("no visit {visit} found for node '{name}'")
-                    }
-                })
-        }
-    }
 }
 
 fn fork_from_entry(
@@ -217,39 +164,13 @@ fn fork_from_entry(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::str::FromStr;
 
+    use super::super::test_support::*;
     use super::*;
-    use git2::Repository;
+    use git2::Oid;
 
     use crate::operations::find_run_id_by_prefix;
-
-    fn temp_repo() -> (tempfile::TempDir, Store) {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo = Repository::init(dir.path()).unwrap();
-        (dir, Store::new(repo))
-    }
-
-    fn test_sig() -> Signature<'static> {
-        Signature::now("Test", "test@example.com").unwrap()
-    }
-
-    fn make_checkpoint_json(current_node: &str, visit: usize, git_sha: Option<&str>) -> Vec<u8> {
-        let mut node_visits = HashMap::new();
-        node_visits.insert(current_node.to_string(), visit);
-        let cp = serde_json::json!({
-            "timestamp": "2025-01-01T00:00:00Z",
-            "current_node": current_node,
-            "completed_nodes": [current_node],
-            "node_retries": {},
-            "context_values": {},
-            "logs": [],
-            "node_visits": node_visits,
-            "git_commit_sha": git_sha,
-        });
-        serde_json::to_vec(&cp).unwrap()
-    }
 
     fn make_run_record_json(run_id: &str) -> Vec<u8> {
         let record = serde_json::json!({

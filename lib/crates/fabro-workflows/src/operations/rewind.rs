@@ -61,6 +61,54 @@ pub struct RunTimeline {
     pub parallel_map: HashMap<String, String>,
 }
 
+impl RunTimeline {
+    pub fn resolve(&self, target: &RewindTarget) -> Result<&TimelineEntry> {
+        match target {
+            RewindTarget::Ordinal(n) => {
+                self.entries
+                    .iter()
+                    .find(|e| e.ordinal == *n)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("ordinal @{n} out of range (max @{})", self.entries.len())
+                    })
+            }
+            RewindTarget::LatestVisit(name) => {
+                let effective_name = self.parallel_map.get(name).unwrap_or(name);
+                self.entries
+                    .iter()
+                    .rev()
+                    .find(|e| e.node_name == *effective_name)
+                    .ok_or_else(|| {
+                        if effective_name != name {
+                            anyhow::anyhow!(
+                                "node '{name}' is inside parallel '{effective_name}'; \
+                                 no checkpoint found for '{effective_name}'"
+                            )
+                        } else {
+                            anyhow::anyhow!("no checkpoint found for node '{name}'")
+                        }
+                    })
+            }
+            RewindTarget::SpecificVisit(name, visit) => {
+                let effective_name = self.parallel_map.get(name).unwrap_or(name);
+                self.entries
+                    .iter()
+                    .find(|e| e.node_name == *effective_name && e.visit == *visit)
+                    .ok_or_else(|| {
+                        if effective_name != name {
+                            anyhow::anyhow!(
+                                "node '{name}' is inside parallel '{effective_name}'; \
+                                 no visit {visit} found for '{effective_name}'"
+                            )
+                        } else {
+                            anyhow::anyhow!("no visit {visit} found for node '{name}'")
+                        }
+                    })
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RewindInput {
     pub run_id: String,
@@ -193,55 +241,9 @@ fn detect_parallel_interior(graph: &Graph) -> HashMap<String, String> {
     interior_map
 }
 
-fn resolve_target<'a>(
-    timeline: &'a [TimelineEntry],
-    target: &RewindTarget,
-    parallel_map: &HashMap<String, String>,
-) -> Result<&'a TimelineEntry> {
-    match target {
-        RewindTarget::Ordinal(n) => timeline
-            .iter()
-            .find(|e| e.ordinal == *n)
-            .ok_or_else(|| anyhow::anyhow!("ordinal @{n} out of range (max @{})", timeline.len())),
-        RewindTarget::LatestVisit(name) => {
-            let effective_name = parallel_map.get(name).unwrap_or(name);
-            timeline
-                .iter()
-                .rev()
-                .find(|e| e.node_name == *effective_name)
-                .ok_or_else(|| {
-                    if effective_name != name {
-                        anyhow::anyhow!(
-                            "node '{name}' is inside parallel '{effective_name}'; \
-                             no checkpoint found for '{effective_name}'"
-                        )
-                    } else {
-                        anyhow::anyhow!("no checkpoint found for node '{name}'")
-                    }
-                })
-        }
-        RewindTarget::SpecificVisit(name, visit) => {
-            let effective_name = parallel_map.get(name).unwrap_or(name);
-            timeline
-                .iter()
-                .find(|e| e.node_name == *effective_name && e.visit == *visit)
-                .ok_or_else(|| {
-                    if effective_name != name {
-                        anyhow::anyhow!(
-                            "node '{name}' is inside parallel '{effective_name}'; \
-                             no visit {visit} found for '{effective_name}'"
-                        )
-                    } else {
-                        anyhow::anyhow!("no visit {visit} found for node '{name}'")
-                    }
-                })
-        }
-    }
-}
-
 pub fn rewind(store: &Store, input: RewindInput) -> Result<()> {
     let timeline = build_timeline(store, &input.run_id)?;
-    let entry = resolve_target(&timeline.entries, &input.target, &timeline.parallel_map)?;
+    let entry = timeline.resolve(&input.target)?;
     rewind_to_entry(store, &input.run_id, entry, input.push)
 }
 
@@ -371,33 +373,8 @@ fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::*;
     use super::*;
-
-    fn temp_repo() -> (tempfile::TempDir, Store) {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo = Repository::init(dir.path()).unwrap();
-        (dir, Store::new(repo))
-    }
-
-    fn test_sig() -> Signature<'static> {
-        Signature::now("Test", "test@example.com").unwrap()
-    }
-
-    fn make_checkpoint_json(current_node: &str, visit: usize, git_sha: Option<&str>) -> Vec<u8> {
-        let mut node_visits = HashMap::new();
-        node_visits.insert(current_node.to_string(), visit);
-        let cp = serde_json::json!({
-            "timestamp": "2025-01-01T00:00:00Z",
-            "current_node": current_node,
-            "completed_nodes": [current_node],
-            "node_retries": {},
-            "context_values": {},
-            "logs": [],
-            "node_visits": node_visits,
-            "git_commit_sha": git_sha,
-        });
-        serde_json::to_vec(&cp).unwrap()
-    }
 
     #[test]
     fn parse_target_ordinal() {
@@ -466,12 +443,9 @@ mod tests {
             parallel_map: HashMap::new(),
         };
 
-        let entry = resolve_target(
-            &timeline.entries,
-            &RewindTarget::LatestVisit("build".to_string()),
-            &timeline.parallel_map,
-        )
-        .unwrap();
+        let entry = timeline
+            .resolve(&RewindTarget::LatestVisit("build".to_string()))
+            .unwrap();
         assert_eq!(entry.ordinal, 3);
     }
 
