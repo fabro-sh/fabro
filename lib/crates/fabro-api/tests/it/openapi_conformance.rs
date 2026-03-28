@@ -1,5 +1,6 @@
 //! Conformance tests: spec ↔ router ↔ Rust struct consistency.
 
+use super::helpers::{test_db, test_llm_spec};
 use std::collections::BTreeSet;
 
 use axum::body::Body;
@@ -11,24 +12,7 @@ use fabro_config::run::*;
 use fabro_config::sandbox::SandboxSettings;
 use fabro_hooks::*;
 use fabro_sandbox::daytona::*;
-use fabro_workflows::pipeline::LlmSpec;
 use tower::ServiceExt;
-
-fn test_llm_spec() -> LlmSpec {
-    LlmSpec {
-        model: "test-model".to_string(),
-        provider: fabro_llm::Provider::Anthropic,
-        fallback_chain: Vec::new(),
-        mcp_servers: Vec::new(),
-        dry_run: true,
-    }
-}
-
-async fn test_db() -> sqlx::SqlitePool {
-    let pool = fabro_db::connect_memory().await.unwrap();
-    fabro_db::initialize_db(&pool).await.unwrap();
-    pool
-}
 
 fn load_spec() -> openapiv3::OpenAPI {
     let spec_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

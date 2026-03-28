@@ -422,6 +422,7 @@ mod mtls_e2e {
 // ===========================================================================
 
 mod server_lifecycle {
+    use super::super::helpers::{test_db, test_llm_spec};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -434,18 +435,7 @@ mod server_lifecycle {
     use fabro_workflows::handler::exit::ExitHandler;
     use fabro_workflows::handler::human::HumanHandler;
     use fabro_workflows::handler::start::StartHandler;
-    use fabro_workflows::pipeline::LlmSpec;
     use tower::ServiceExt;
-
-    fn test_llm_spec() -> LlmSpec {
-        LlmSpec {
-            model: "test-model".to_string(),
-            provider: fabro_llm::Provider::Anthropic,
-            fallback_chain: Vec::new(),
-            mcp_servers: Vec::new(),
-            dry_run: true,
-        }
-    }
 
     fn gate_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
         let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
@@ -476,12 +466,6 @@ mod server_lifecycle {
         done -> exit
         revise -> gate
     }"#;
-
-    async fn test_db() -> sqlx::SqlitePool {
-        let pool = fabro_db::connect_memory().await.unwrap();
-        fabro_db::initialize_db(&pool).await.unwrap();
-        pool
-    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn full_http_lifecycle_approve_and_complete() {
@@ -631,25 +615,15 @@ mod server_lifecycle {
 // ===========================================================================
 
 mod sse_events {
+    use super::super::helpers::{test_db, test_llm_spec};
     use std::sync::Arc;
     use std::time::Duration;
 
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use fabro_api::server::{build_router, create_app_state};
-    use fabro_workflows::pipeline::LlmSpec;
     use http_body_util::BodyExt;
     use tower::ServiceExt;
-
-    fn test_llm_spec() -> LlmSpec {
-        LlmSpec {
-            model: "test-model".to_string(),
-            provider: fabro_llm::Provider::Anthropic,
-            fallback_chain: Vec::new(),
-            mcp_servers: Vec::new(),
-            dry_run: true,
-        }
-    }
 
     const SIMPLE_DOT: &str = r#"digraph SSETest {
         graph [goal="Test SSE"]
@@ -658,12 +632,6 @@ mod sse_events {
         exit  [shape=Msquare]
         start -> work -> exit
     }"#;
-
-    async fn test_db() -> sqlx::SqlitePool {
-        let pool = fabro_db::connect_memory().await.unwrap();
-        fabro_db::initialize_db(&pool).await.unwrap();
-        pool
-    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sse_stream_contains_expected_event_types() {
@@ -791,13 +759,13 @@ mod sse_events {
 // ===========================================================================
 
 mod serve_dry_run {
+    use super::super::helpers::{test_db, test_llm_spec};
     use std::sync::Arc;
     use std::time::Duration;
 
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use fabro_api::server::{build_router, create_app_state};
-    use fabro_workflows::pipeline::LlmSpec;
     use tower::ServiceExt;
 
     const MINIMAL_DOT: &str = r#"digraph Test {
@@ -806,22 +774,6 @@ mod serve_dry_run {
         exit  [shape=Msquare]
         start -> exit
     }"#;
-
-    async fn test_db() -> sqlx::SqlitePool {
-        let pool = fabro_db::connect_memory().await.unwrap();
-        fabro_db::initialize_db(&pool).await.unwrap();
-        pool
-    }
-
-    fn test_llm_spec() -> LlmSpec {
-        LlmSpec {
-            model: "test-model".to_string(),
-            provider: fabro_llm::Provider::Anthropic,
-            fallback_chain: Vec::new(),
-            mcp_servers: Vec::new(),
-            dry_run: true,
-        }
-    }
 
     /// Build the router exactly as `serve_command` does in dry-run mode.
     async fn dry_run_app() -> axum::Router {

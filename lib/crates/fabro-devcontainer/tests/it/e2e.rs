@@ -5,14 +5,8 @@
 //!   3. containerEnv
 //!   4. dockerComposeFile array
 
+use super::helpers::fixture_path;
 use fabro_devcontainer::{Command, DevcontainerResolver};
-use std::path::PathBuf;
-
-fn fixture_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures")
-        .join(name)
-}
 
 /// Realistic Python project: Dockerfile + build.args + containerEnv + onCreateCommand + remoteEnv
 /// Verifies all 4 gaps work together in a single config.

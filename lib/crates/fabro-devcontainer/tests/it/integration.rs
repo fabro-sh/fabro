@@ -1,11 +1,5 @@
+use super::helpers::fixture_path;
 use fabro_devcontainer::{Command, DevcontainerResolver};
-use std::path::PathBuf;
-
-fn fixture_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures")
-        .join(name)
-}
 
 #[tokio::test]
 async fn resolve_image_only() {
