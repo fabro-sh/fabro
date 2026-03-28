@@ -12,6 +12,7 @@ use anyhow::Result;
 use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands};
 use clap::Parser;
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use rustls::crypto::ring::default_provider;
 use tracing::debug;
@@ -98,6 +99,7 @@ async fn main_inner() -> (String, Result<()>) {
     }
 
     let Cli { globals, command } = cli;
+    let _printer = Printer::from_flags(globals.quiet, globals.verbose);
     let command_name = command.name().to_string();
 
     let (config_log_level, upgrade_check_enabled) = {
@@ -197,10 +199,7 @@ async fn main_inner() -> (String, Result<()>) {
             }
             Commands::Repo(ns) => commands::repo::dispatch(ns).await?,
             Commands::Init => {
-                eprintln!(
-                    "{} `fabro init` is deprecated, use `fabro repo init` instead",
-                    console::Style::new().yellow().apply_to("warning:")
-                );
+                fabro_util::warn_user!("`fabro init` is deprecated, use `fabro repo init` instead");
                 commands::repo::init::run_init().await?;
             }
             Commands::Install { web_url } => {
@@ -420,5 +419,30 @@ mod tests {
             }
             _ => panic!("unexpected command variant"),
         }
+    }
+
+    #[test]
+    fn parse_quiet_flag() {
+        let cli =
+            Cli::try_parse_from(["fabro", "--quiet", "config", "show"]).expect("should parse");
+        assert!(cli.globals.quiet);
+        assert!(!cli.globals.verbose);
+    }
+
+    #[test]
+    fn parse_verbose_flag() {
+        let cli =
+            Cli::try_parse_from(["fabro", "--verbose", "config", "show"]).expect("should parse");
+        assert!(!cli.globals.quiet);
+        assert!(cli.globals.verbose);
+    }
+
+    #[test]
+    fn quiet_and_verbose_conflict() {
+        let result = Cli::try_parse_from(["fabro", "--quiet", "--verbose", "config", "show"]);
+        assert!(
+            result.is_err(),
+            "should fail when both --quiet and --verbose"
+        );
     }
 }

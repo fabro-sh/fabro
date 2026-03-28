@@ -28,6 +28,14 @@ pub(crate) struct GlobalArgs {
     #[arg(long, global = true)]
     pub no_upgrade_check: bool,
 
+    /// Suppress non-essential output
+    #[arg(long, global = true, conflicts_with = "verbose")]
+    pub quiet: bool,
+
+    /// Enable verbose output
+    #[arg(long, global = true, conflicts_with = "quiet")]
+    pub verbose: bool,
+
     /// Execution mode: standalone (in-process) or server (delegate to API)
     #[cfg(feature = "server")]
     #[arg(long, global = true, value_parser = parse_execution_mode)]
