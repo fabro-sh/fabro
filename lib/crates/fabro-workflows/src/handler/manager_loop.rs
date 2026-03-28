@@ -208,6 +208,7 @@ impl Handler for SubWorkflowHandler {
                 emitter,
                 sandbox,
                 registry,
+                on_node: None,
                 hook_runner,
                 env,
                 dry_run,

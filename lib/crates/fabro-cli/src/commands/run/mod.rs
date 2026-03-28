@@ -26,6 +26,10 @@ pub(crate) mod ssh;
 pub(crate) mod start;
 pub(crate) mod wait;
 
+pub(super) fn short_run_id(id: &str) -> &str {
+    if id.len() > 12 { &id[..12] } else { id }
+}
+
 pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
     match cmd {
         RunCommands::Run(args) => command::execute(args, globals).await,

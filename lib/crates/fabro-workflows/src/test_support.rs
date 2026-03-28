@@ -37,6 +37,7 @@ fn initialized(
         emitter,
         sandbox,
         registry: Arc::new(registry),
+        on_node: None,
         hook_runner: options.hook_runner,
         env: options.env,
         dry_run: run_options.dry_run_enabled(),

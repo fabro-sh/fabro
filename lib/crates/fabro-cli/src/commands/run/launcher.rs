@@ -86,8 +86,15 @@ fn launcher_process_matches(record: &LauncherRecord) -> bool {
     };
 
     let command = String::from_utf8_lossy(&output.stdout);
+    command_matches_launcher(record, &command)
+}
+
+#[cfg(unix)]
+fn command_matches_launcher(record: &LauncherRecord, command: &str) -> bool {
     let run_dir = record.run_dir.to_string_lossy();
-    command.contains("__detached") && command.contains(run_dir.as_ref())
+    let old_match = command.contains("__detached") && command.contains(run_dir.as_ref());
+    let new_match = command.contains(&format!("fabro: {}", super::short_run_id(&record.run_id)));
+    old_match || new_match
 }
 
 #[cfg(not(unix))]
@@ -143,5 +150,45 @@ mod tests {
 
         assert!(active_launcher_record_for_run(&run_dir).is_none());
         assert!(!launcher_path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_matches_launcher_accepts_old_detached_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = LauncherRecord {
+            run_id: "01JGABCDEF12ZYXW".to_string(),
+            run_dir: dir.path().join("run"),
+            pid: 42,
+            resume: false,
+            log_path: dir.path().join("launcher.log"),
+            started_at: Utc::now(),
+        };
+
+        let command = format!(
+            "/usr/local/bin/fabro __detached --run-dir {} --launcher-path /tmp/launcher.json",
+            record.run_dir.display()
+        );
+
+        assert!(command_matches_launcher(&record, &command));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_matches_launcher_accepts_new_title_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = LauncherRecord {
+            run_id: "01JGABCDEF12ZYXW".to_string(),
+            run_dir: dir.path().join("run"),
+            pid: 42,
+            resume: false,
+            log_path: dir.path().join("launcher.log"),
+            started_at: Utc::now(),
+        };
+
+        assert!(command_matches_launcher(
+            &record,
+            "fabro: 01JGABCDEF12 plan"
+        ));
     }
 }
