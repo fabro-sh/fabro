@@ -1,32 +1,46 @@
 {
-  "timestamp": "2026-03-28T21:10:30.222596Z",
-  "current_node": "run_tests",
+  "timestamp": "2026-03-28T21:10:30.439360Z",
+  "current_node": "report",
   "completed_nodes": [
     "start",
-    "run_tests"
+    "run_tests",
+    "report"
   ],
   "node_retries": {},
   "context_values": {
     "internal.retry_count.run_tests": 0,
     "failure_class": "",
     "response.run_tests": "[Simulated] Response for stage: run_tests",
-    "last_stage": "run_tests",
+    "thread.run_tests.current_node": "report",
+    "response.report": "[Simulated] Response for stage: report",
+    "last_stage": "report",
     "thread.start.current_node": "run_tests",
-    "current_node": "run_tests",
-    "current.preamble": "Goal: Run tests and report results\n",
+    "current_node": "report",
+    "current.preamble": "Goal: Run tests and report results\n\n## Completed stages\n- **run_tests**: success\n",
     "graph.goal": "Run tests and report results",
     "internal.run_id": "01KMV4HEM89BS7M3FYTE2P4J74",
+    "internal.retry_count.report": 0,
     "failure_signature": "",
     "internal.work_dir": "/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpExCkUb/fabro-data/runs/20260328-dry-run-01KMV4HEM89BS7M3FYTE2P4J74/worktree",
     "outcome": "success",
-    "internal.thread_id": "start",
+    "internal.thread_id": "run_tests",
     "internal.fidelity": "compact",
     "graph.rankdir": "LR",
     "internal.node_visit_count": 1,
     "internal.retry_count.start": 0,
-    "last_response": "[Simulated] Response for stage: run_tests"
+    "last_response": "[Simulated] Response for stage: report"
   },
   "node_outcomes": {
+    "report": {
+      "status": "success",
+      "context_updates": {
+        "last_stage": "report",
+        "last_response": "[Simulated] Response for stage: report",
+        "response.report": "[Simulated] Response for stage: report"
+      },
+      "notes": "[Simulated] report",
+      "usage": null
+    },
     "start": {
       "status": "success",
       "notes": "[Simulated] start",
@@ -43,9 +57,10 @@
       "usage": null
     }
   },
-  "next_node_id": "report",
+  "next_node_id": "exit",
   "node_visits": {
     "start": 1,
+    "report": 1,
     "run_tests": 1
   }
 }
