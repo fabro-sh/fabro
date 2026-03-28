@@ -3,6 +3,8 @@
 use std::time::Instant;
 
 #[cfg(feature = "daytona")]
+use crate::daytona;
+#[cfg(feature = "daytona")]
 use std::path::Path;
 
 use async_trait::async_trait;
@@ -46,7 +48,7 @@ pub struct GitCloneParams {
 
 #[cfg(feature = "daytona")]
 pub fn detect_clone_params(cwd: &Path) -> Option<GitCloneParams> {
-    let (detected_url, branch) = match crate::daytona::detect_repo_info(cwd) {
+    let (detected_url, branch) = match daytona::detect_repo_info(cwd) {
         Ok(info) => info,
         Err(err) => {
             tracing::warn!("No git repo detected for sandbox clone: {err}");
