@@ -8,6 +8,9 @@ description = "Graphviz DOT parser and typed graph data model"
 [lib]
 doctest = false
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 fabro-types = { path = "../fabro-types" }

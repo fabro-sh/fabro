@@ -8,6 +8,9 @@ description = "Tracker trait and types for issue tracking integrations"
 [lib]
 doctest = false
 
+[lints]
+workspace = true
+
 [dependencies]
 fabro-github = { path = "../fabro-github" }
 async-trait.workspace = true

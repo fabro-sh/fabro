@@ -8,6 +8,9 @@ description = "Retrospective analysis for Fabro workflow runs"
 [lib]
 doctest = false
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow = "1"
 chrono = { workspace = true, features = ["serde"] }

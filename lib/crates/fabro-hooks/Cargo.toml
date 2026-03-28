@@ -8,6 +8,9 @@ description = "User-defined lifecycle hooks for Fabro workflows"
 [lib]
 doctest = false
 
+[lints]
+workspace = true
+
 [dependencies]
 fabro-agent = { path = "../fabro-agent" }
 fabro-config = { path = "../fabro-config" }

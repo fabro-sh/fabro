@@ -13,6 +13,9 @@ default = []
 exedev = []
 clap = ["dep:clap"]
 
+[lints]
+workspace = true
+
 [dependencies]
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, optional = true }

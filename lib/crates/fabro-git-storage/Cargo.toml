@@ -9,6 +9,9 @@ repository = "https://github.com/brynary/arc"
 [lib]
 doctest = false
 
+[lints]
+workspace = true
+
 [dependencies]
 git2.workspace = true
 thiserror.workspace = true

@@ -8,6 +8,9 @@ description = "Shared utilities: secret redaction and terminal styling"
 [lib]
 doctest = false
 
+[lints]
+workspace = true
+
 [dependencies]
 console.workspace = true
 rand.workspace = true

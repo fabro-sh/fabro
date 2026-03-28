@@ -8,6 +8,9 @@ description = "Generic workflow execution engine"
 [lib]
 doctest = false
 
+[lints]
+workspace = true
+
 [dependencies]
 async-trait.workspace = true
 fabro-types = { path = "../fabro-types" }

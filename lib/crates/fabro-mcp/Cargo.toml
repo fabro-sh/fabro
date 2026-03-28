@@ -8,6 +8,9 @@ description = "MCP (Model Context Protocol) client for connecting to external to
 [lib]
 doctest = false
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 fabro-config = { path = "../fabro-config" }

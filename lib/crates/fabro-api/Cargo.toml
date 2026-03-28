@@ -8,6 +8,9 @@ description = "HTTP API server for Fabro pipelines"
 [lib]
 doctest = false
 
+[lints]
+workspace = true
+
 [dependencies]
 fabro-config = { path = "../fabro-config", features = ["exedev"] }
 fabro-graphviz = { path = "../fabro-graphviz" }

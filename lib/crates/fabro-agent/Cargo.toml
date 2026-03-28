@@ -17,6 +17,9 @@ quarantine = []
 [lib]
 doctest = false
 
+[lints]
+workspace = true
+
 [dependencies]
 clap.workspace = true
 anyhow.workspace = true
