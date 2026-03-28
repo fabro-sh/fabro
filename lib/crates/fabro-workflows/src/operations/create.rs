@@ -46,8 +46,6 @@ struct PersistCreateOptions {
     base_branch: Option<String>,
     working_directory: PathBuf,
     host_repo_path: Option<String>,
-    goal_override: Option<String>,
-    base_dir: Option<PathBuf>,
 }
 
 /// Resolve workflow inputs, normalize settings, and persist a run directory.
@@ -93,6 +91,9 @@ pub fn create(request: CreateRunInput) -> Result<CreatedRun, FabroError> {
             .and_then(|(_, branch)| branch)
     });
 
+    let goal_override = resolved.goal_override.clone();
+    let base_dir = resolved.base_dir.clone();
+
     let persisted = create_from_source(
         &resolved.raw_source,
         PersistCreateOptions {
@@ -104,9 +105,9 @@ pub fn create(request: CreateRunInput) -> Result<CreatedRun, FabroError> {
             base_branch,
             working_directory,
             host_repo_path,
-            goal_override: resolved.goal_override.clone(),
-            base_dir: resolved.base_dir.clone(),
         },
+        base_dir,
+        goal_override.as_deref(),
     )?;
 
     write_run_config_snapshot(&run_dir, resolved.workflow_toml_path.as_deref())?;
@@ -150,13 +151,15 @@ fn write_run_config_snapshot(
 fn create_from_source(
     dot_source: &str,
     options: PersistCreateOptions,
+    base_dir: Option<PathBuf>,
+    goal_override: Option<&str>,
 ) -> Result<Persisted, FabroError> {
     let validated = preprocess_and_validate(
         dot_source,
-        options.base_dir.clone(),
+        base_dir,
         Vec::new(),
         Some(&options.settings),
-        options.goal_override.as_deref(),
+        goal_override,
     )?;
 
     if validated.has_errors() {
@@ -220,8 +223,6 @@ fn persist_validated(
         base_branch,
         working_directory,
         host_repo_path,
-        goal_override: _,
-        base_dir: _,
     } = options;
 
     let settings = resolve_run_settings(settings, validated.graph());
