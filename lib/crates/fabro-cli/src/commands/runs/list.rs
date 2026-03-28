@@ -18,8 +18,8 @@ use crate::shared::{color_if, format_duration_ms, tilde_path};
 use super::short_run_id;
 
 pub(crate) fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
-    let cli_config = load_cli_settings(None)?;
-    let base = runs_base(&cli_config.storage_dir());
+    let cli_settings = load_cli_settings(None)?;
+    let base = runs_base(&cli_settings.storage_dir());
     let runs = scan_runs(&base)?;
     let label_filters = parse_label_filters(&args.filter.label);
     let filtered = filter_runs(

@@ -13,8 +13,8 @@ pub(super) async fn view_command(
     args: PrViewArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {
-    let cli_config = load_cli_settings(None)?;
-    let base = runs_base(&cli_config.storage_dir());
+    let cli_settings = load_cli_settings(None)?;
+    let base = runs_base(&cli_settings.storage_dir());
     view_from(&base, args, github_app).await
 }
 

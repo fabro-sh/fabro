@@ -23,9 +23,12 @@ pub enum ClientAuth {
 }
 
 /// Build a rustls `ServerConfig` from the `[api.tls]` configuration.
-pub fn build_rustls_config(tls_config: &TlsSettings, client_auth: ClientAuth) -> Arc<ServerConfig> {
-    let certs = load_certs(&tls_config.cert);
-    let key = load_private_key(&tls_config.key);
+pub fn build_rustls_config(
+    tls_settings: &TlsSettings,
+    client_auth: ClientAuth,
+) -> Arc<ServerConfig> {
+    let certs = load_certs(&tls_settings.cert);
+    let key = load_private_key(&tls_settings.key);
 
     let config = match client_auth {
         ClientAuth::None => ServerConfig::builder()
@@ -33,7 +36,7 @@ pub fn build_rustls_config(tls_config: &TlsSettings, client_auth: ClientAuth) ->
             .with_single_cert(certs, key)
             .expect("invalid server certificate or key"),
         ClientAuth::Required | ClientAuth::Optional => {
-            let ca_certs = load_certs(&tls_config.ca);
+            let ca_certs = load_certs(&tls_settings.ca);
             let mut root_store = rustls::RootCertStore::empty();
             for cert in ca_certs {
                 root_store

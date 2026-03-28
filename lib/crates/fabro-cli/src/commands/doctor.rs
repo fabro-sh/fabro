@@ -938,7 +938,7 @@ pub(crate) async fn run_doctor(verbose: bool, live: bool) -> i32 {
     spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
     // Gather state
-    let cli_config = load_cli_settings(None).unwrap_or_default();
+    let cli_settings = load_cli_settings(None).unwrap_or_default();
 
     let config_path = dirs::home_dir().map(|h| h.join(".fabro").join("cli.toml"));
     let config_exists = config_path.as_ref().is_some_and(|p| p.exists());
@@ -953,11 +953,11 @@ pub(crate) async fn run_doctor(verbose: bool, live: bool) -> i32 {
     let daytona_configured = std::env::var("DAYTONA_API_KEY").is_ok();
 
     #[cfg(feature = "server")]
-    let server_config = fabro_config::server::load_server_settings(None).unwrap_or_default();
+    let server_settings = fabro_config::server::load_server_settings(None).unwrap_or_default();
 
     #[cfg(feature = "server")]
     let api_status = {
-        let api = server_config.api.clone().unwrap_or_default();
+        let api = server_settings.api.clone().unwrap_or_default();
         ApiStatus {
             base_url: api.base_url.clone(),
             authentication_strategies: api.authentication_strategies.clone(),
@@ -966,7 +966,7 @@ pub(crate) async fn run_doctor(verbose: bool, live: bool) -> i32 {
 
     #[cfg(feature = "server")]
     let web_status = {
-        let web = server_config.web.clone().unwrap_or_default();
+        let web = server_settings.web.clone().unwrap_or_default();
         WebStatus {
             url: web.url.clone(),
             auth_provider: web.auth.provider.clone(),
@@ -975,15 +975,15 @@ pub(crate) async fn run_doctor(verbose: bool, live: bool) -> i32 {
     };
 
     #[cfg(feature = "server")]
-    let server_git = server_config.git.clone().unwrap_or_default();
+    let server_git = server_settings.git.clone().unwrap_or_default();
 
     #[cfg(feature = "server")]
-    let server_api = server_config.api.clone().unwrap_or_default();
+    let server_api = server_settings.api.clone().unwrap_or_default();
 
     #[cfg(feature = "server")]
-    let server_web = server_config.web.clone().unwrap_or_default();
+    let server_web = server_settings.web.clone().unwrap_or_default();
 
-    let git_app_id = cli_config.app_id().map(str::to_owned);
+    let git_app_id = cli_settings.app_id().map(str::to_owned);
     let private_key_raw = std::env::var("GITHUB_APP_PRIVATE_KEY").ok();
     let sign_result = match (&git_app_id, &private_key_raw) {
         (Some(app_id), Some(raw)) => {
@@ -1011,7 +1011,7 @@ pub(crate) async fn run_doctor(verbose: bool, live: bool) -> i32 {
     };
     let github_status = GithubAppStatus {
         app_id: git_app_id,
-        slug: cli_config.slug().map(str::to_owned),
+        slug: cli_settings.slug().map(str::to_owned),
         private_key_set: private_key_raw.is_some(),
         sign_result,
         #[cfg(feature = "server")]

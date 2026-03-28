@@ -16,8 +16,8 @@ use crate::cli_config::load_cli_settings;
 use crate::shared::github::build_github_app_credentials;
 
 pub(crate) async fn dispatch(ns: PrNamespace) -> Result<()> {
-    let cli_config = load_cli_settings(None)?;
-    let github_app = build_github_app_credentials(cli_config.app_id());
+    let cli_settings = load_cli_settings(None)?;
+    let github_app = build_github_app_credentials(cli_settings.app_id());
 
     match ns.command {
         PrCommand::Create(args) => create::create_command(args, github_app).await,

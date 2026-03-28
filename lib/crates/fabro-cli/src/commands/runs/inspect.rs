@@ -26,8 +26,8 @@ pub(crate) struct InspectOutput {
 }
 
 pub(crate) fn run(args: &InspectArgs) -> Result<()> {
-    let cli_config = load_cli_settings(None)?;
-    let base = runs_base(&cli_config.storage_dir());
+    let cli_settings = load_cli_settings(None)?;
+    let base = runs_base(&cli_settings.storage_dir());
     let run = resolve_run(&base, &args.run)?;
     let output = inspect_run_dir(&run.run_id, &run.path, run.status);
     let json = serde_json::to_string_pretty(&[output])?;

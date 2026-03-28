@@ -190,6 +190,6 @@ pub fn load_server_settings(path: Option<&Path>) -> anyhow::Result<FabroSettings
 }
 
 /// Resolve the storage directory: config value > default `~/.fabro`.
-pub fn resolve_storage_dir(config: &FabroSettings) -> PathBuf {
-    config.storage_dir()
+pub fn resolve_storage_dir(settings: &FabroSettings) -> PathBuf {
+    settings.storage_dir()
 }

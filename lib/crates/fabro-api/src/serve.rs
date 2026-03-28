@@ -93,17 +93,17 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     let data_dir = resolve_storage_dir(&server_settings);
 
     // Shared config for live reloading
-    let shared_config = Arc::new(RwLock::new(server_settings));
+    let shared_settings = Arc::new(RwLock::new(server_settings));
 
     // CLI overrides take precedence over config file values, even after reload
     let cli_model = args.model;
     let cli_provider = args.provider;
 
     // Build registry factory that reads live config
-    let config_for_factory = Arc::clone(&shared_config);
+    let settings_for_factory = Arc::clone(&shared_settings);
     let factory = move || {
         let (model, provider_enum) = resolve_model_provider(
-            &config_for_factory,
+            &settings_for_factory,
             cli_model.as_deref(),
             cli_provider.as_deref(),
         );
@@ -120,7 +120,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     fabro_db::initialize_db(&db).await?;
 
     let (auth_mode, client_auth, max_concurrent_runs) = {
-        let cfg = shared_config.read().expect("config lock poisoned");
+        let cfg = shared_settings.read().expect("config lock poisoned");
         let api = cfg.api.clone().unwrap_or_default();
         let allowed_usernames = cfg
             .web
@@ -137,7 +137,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     };
 
     let git_author = {
-        let cfg = shared_config.read().expect("config lock poisoned");
+        let cfg = shared_settings.read().expect("config lock poisoned");
         let author = cfg.git_author();
         GitAuthor::from_options(
             author.and_then(|a| a.name.clone()),
@@ -145,7 +145,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         )
     };
     let hooks = {
-        let cfg = shared_config.read().expect("config lock poisoned");
+        let cfg = shared_settings.read().expect("config lock poisoned");
         cfg.hooks.clone()
     };
     let state = create_app_state_with_options(
@@ -177,7 +177,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
 
     // Optionally start webhook listener
     let webhook_app_id = {
-        let cfg = shared_config.read().expect("config lock poisoned");
+        let cfg = shared_settings.read().expect("config lock poisoned");
         cfg.git
             .as_ref()
             .and_then(|g| g.webhooks.as_ref().and(g.app_id.as_ref()))
@@ -206,7 +206,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     };
 
     // Spawn config polling task
-    let config_for_poll = Arc::clone(&shared_config);
+    let settings_for_poll = Arc::clone(&shared_settings);
     let config_path_for_poll = config_path.clone();
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(5));
@@ -214,14 +214,14 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         loop {
             interval.tick().await;
             match load_server_settings(config_path_for_poll.as_deref()) {
-                Ok(new_config) => {
+                Ok(new_settings) => {
                     let changed = {
-                        let cfg = config_for_poll.read().expect("config lock poisoned");
-                        *cfg != new_config
+                        let cfg = settings_for_poll.read().expect("config lock poisoned");
+                        *cfg != new_settings
                     };
                     if changed {
-                        let mut cfg = config_for_poll.write().expect("config lock poisoned");
-                        *cfg = new_config;
+                        let mut cfg = settings_for_poll.write().expect("config lock poisoned");
+                        *cfg = new_settings;
                         info!("Server config reloaded");
                     }
                 }
@@ -233,16 +233,16 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     });
 
     // Branch: TLS or plain HTTP
-    let tls_config = shared_config
+    let tls_settings = shared_settings
         .read()
         .expect("config lock poisoned")
         .api
         .as_ref()
         .and_then(|a| a.tls.clone());
-    if let Some(ref tls_config) = tls_config {
+    if let Some(ref tls_settings) = tls_settings {
         let client_auth = client_auth.unwrap();
 
-        let rustls_config = build_rustls_config(tls_config, client_auth);
+        let rustls_config = build_rustls_config(tls_settings, client_auth);
         let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
 
         info!("TLS enabled");
@@ -262,11 +262,11 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
 
 /// Resolve model and provider from shared config, with CLI overrides taking precedence.
 fn resolve_model_provider(
-    shared_config: &RwLock<FabroSettings>,
+    shared_settings: &RwLock<FabroSettings>,
     cli_model: Option<&str>,
     cli_provider: Option<&str>,
 ) -> (String, Provider) {
-    let cfg = shared_config.read().expect("config lock poisoned");
+    let cfg = shared_settings.read().expect("config lock poisoned");
     let config_provider = cfg.llm.as_ref().and_then(|l| l.provider.as_deref());
     let config_model = cfg.llm.as_ref().and_then(|l| l.model.as_deref());
 

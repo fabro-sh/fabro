@@ -920,18 +920,21 @@ mod tests {
     #[cfg(feature = "server")]
     fn config_toml_roundtrips() {
         let toml_str = format_config_toml("brynary");
-        let config: fabro_config::FabroSettings =
+        let settings: fabro_config::FabroSettings =
             toml::from_str(&toml_str).expect("config should parse");
-        assert_eq!(config.web.unwrap().auth.allowed_usernames, vec!["brynary"]);
+        assert_eq!(
+            settings.web.unwrap().auth.allowed_usernames,
+            vec!["brynary"]
+        );
     }
 
     #[test]
     #[cfg(feature = "server")]
     fn config_toml_has_auth_strategies() {
         let toml_str = format_config_toml("alice");
-        let config: fabro_config::FabroSettings = toml::from_str(&toml_str).unwrap();
+        let settings: fabro_config::FabroSettings = toml::from_str(&toml_str).unwrap();
         assert_eq!(
-            config.api.unwrap().authentication_strategies,
+            settings.api.unwrap().authentication_strategies,
             vec![
                 fabro_config::server::ApiAuthStrategy::Jwt,
                 fabro_config::server::ApiAuthStrategy::Mtls,
@@ -944,8 +947,8 @@ mod tests {
     fn config_toml_has_tls_paths() {
         use std::path::PathBuf;
         let toml_str = format_config_toml("bob");
-        let config: fabro_config::FabroSettings = toml::from_str(&toml_str).unwrap();
-        let tls = config.api.unwrap().tls.expect("tls should be set");
+        let settings: fabro_config::FabroSettings = toml::from_str(&toml_str).unwrap();
+        let tls = settings.api.unwrap().tls.expect("tls should be set");
         assert_eq!(tls.cert, PathBuf::from("~/.fabro/certs/server.crt"));
         assert_eq!(tls.key, PathBuf::from("~/.fabro/certs/server.key"));
         assert_eq!(tls.ca, PathBuf::from("~/.fabro/certs/ca.crt"));

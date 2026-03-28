@@ -37,8 +37,8 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             Ok(())
         }
         RunCommands::Start { run } => {
-            let cli_config = load_cli_settings(None)?;
-            let base = runs_base(&cli_config.storage_dir());
+            let cli_settings = load_cli_settings(None)?;
+            let base = runs_base(&cli_settings.storage_dir());
             let run_info = resolve_run(&base, &run)?;
             let child = start::start_run(&run_info.path, false)?;
             eprintln!("Started engine process (PID {})", child.id());
@@ -46,8 +46,8 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         }
         RunCommands::Attach { run } => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            let cli_config = load_cli_settings(None)?;
-            let base = runs_base(&cli_config.storage_dir());
+            let cli_settings = load_cli_settings(None)?;
+            let base = runs_base(&cli_settings.storage_dir());
             let run_info = resolve_run(&base, &run)?;
             let exit_code = attach::attach_run(&run_info.path, false, styles, None).await?;
             if exit_code != std::process::ExitCode::SUCCESS {
@@ -72,8 +72,8 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             #[cfg(feature = "sleep_inhibitor")]
             let _sleep_guard = {
-                let cli_config = load_cli_settings(None)?;
-                crate::sleep_inhibitor::guard(cli_config.prevent_idle_sleep_enabled())
+                let cli_settings = load_cli_settings(None)?;
+                crate::sleep_inhibitor::guard(cli_settings.prevent_idle_sleep_enabled())
             };
             resume::resume_command(args, styles).await
         }

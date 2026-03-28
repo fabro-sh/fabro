@@ -69,14 +69,14 @@ pub fn decode_pem_env(name: &str, value: &str) -> String {
 ///
 /// Call this once at startup before serving requests. Panics if the
 /// configuration is invalid (JWT strategy but no public key, or mTLS without TLS config).
-pub fn resolve_auth_mode(api_config: &ApiSettings, allowed_usernames: &[String]) -> AuthMode {
+pub fn resolve_auth_mode(api_settings: &ApiSettings, allowed_usernames: &[String]) -> AuthMode {
     use fabro_config::server::ApiAuthStrategy;
 
-    if api_config.authentication_strategies.is_empty() {
+    if api_settings.authentication_strategies.is_empty() {
         warn!("No authentication strategies configured; all requests will be rejected");
     }
 
-    let strategies = api_config
+    let strategies = api_settings
         .authentication_strategies
         .iter()
         .map(|s| match s {
@@ -98,7 +98,7 @@ pub fn resolve_auth_mode(api_config: &ApiSettings, allowed_usernames: &[String])
             }
             ApiAuthStrategy::Mtls => {
                 assert!(
-                    api_config.tls.is_some(),
+                    api_settings.tls.is_some(),
                     "mTLS authentication strategy requires [api.tls] configuration with cert, key, and ca"
                 );
                 AuthStrategy::Mtls

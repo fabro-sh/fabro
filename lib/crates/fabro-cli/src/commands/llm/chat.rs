@@ -8,10 +8,10 @@ use crate::args::GlobalArgs;
 
 pub(super) async fn execute(
     mut args: ChatArgs,
-    cli_config: &FabroSettings,
+    cli_settings: &FabroSettings,
     globals: &GlobalArgs,
 ) -> Result<()> {
-    let llm_defaults = cli_config.llm.as_ref();
+    let llm_defaults = cli_settings.llm.as_ref();
     if args.model.is_none() {
         args.model = llm_defaults.and_then(|l| l.model.clone());
     }
@@ -21,7 +21,7 @@ pub(super) async fn execute(
         let resolved = crate::cli_config::resolve_mode(
             globals.mode.clone(),
             globals.server_url.as_deref(),
-            cli_config,
+            cli_settings,
         );
         match resolved.mode {
             crate::cli_config::ExecutionMode::Server => {

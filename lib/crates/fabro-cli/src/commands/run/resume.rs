@@ -16,8 +16,8 @@ pub(crate) async fn resume_command(
     args: ResumeArgs,
     styles: &'static Styles,
 ) -> anyhow::Result<()> {
-    let cli_config = load_cli_settings(None)?;
-    let base = runs_base(&cli_config.storage_dir());
+    let cli_settings = load_cli_settings(None)?;
+    let base = runs_base(&cli_settings.storage_dir());
     let run_dir = find_run_by_prefix(&base, &args.run)?;
 
     // find_run_by_prefix can match orphan directories (no run.json).

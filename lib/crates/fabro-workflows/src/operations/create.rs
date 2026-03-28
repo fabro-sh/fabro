@@ -255,9 +255,9 @@ fn persist_validated(
 }
 
 pub(crate) fn resolve_run_settings(mut settings: FabroSettings, graph: &Graph) -> FabroSettings {
-    let llm_config = settings.llm.as_ref();
-    let configured_model = llm_config.and_then(|l| l.model.as_deref());
-    let configured_provider = llm_config.and_then(|l| l.provider.as_deref());
+    let llm_settings = settings.llm.as_ref();
+    let configured_model = llm_settings.and_then(|l| l.model.as_deref());
+    let configured_provider = llm_settings.and_then(|l| l.provider.as_deref());
     let graph_provider = graph.attrs.get("default_provider").and_then(|v| v.as_str());
     let graph_model = graph.attrs.get("default_model").and_then(|v| v.as_str());
 

@@ -10,8 +10,8 @@ use crate::cli_config::load_cli_settings;
 use crate::shared::validate_daytona_provider;
 
 pub(crate) async fn run(args: PreviewArgs) -> Result<()> {
-    let cli_config = load_cli_settings(None)?;
-    let base = runs_base(&cli_config.storage_dir());
+    let cli_settings = load_cli_settings(None)?;
+    let base = runs_base(&cli_settings.storage_dir());
     let run_dir = resolve_run(&base, &args.run)?.path;
     let sandbox_json = run_dir.join("sandbox.json");
     let record = fabro_sandbox::SandboxRecord::load(&sandbox_json).context(

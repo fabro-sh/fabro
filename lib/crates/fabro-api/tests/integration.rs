@@ -181,14 +181,14 @@ mod mtls_e2e {
 
     /// Start a TLS server on a random port, returning the bound address.
     async fn start_tls_server(
-        tls_config: &TlsSettings,
+        tls_settings: &TlsSettings,
         client_auth: ClientAuth,
         auth_mode: AuthMode,
     ) -> std::net::SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let rustls_config = build_rustls_config(tls_config, client_auth);
+        let rustls_config = build_rustls_config(tls_settings, client_auth);
         let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
 
         let state = create_app_state(test_db().await, test_llm_spec);
@@ -236,14 +236,14 @@ mod mtls_e2e {
         let dir = tempfile::tempdir().unwrap();
         let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
 
-        let tls_config = TlsSettings {
+        let tls_settings = TlsSettings {
             cert: pki.server_cert.clone(),
             key: pki.server_key.clone(),
             ca: pki.ca_cert.clone(),
         };
 
         let auth_mode = AuthMode::Strategies(vec![AuthStrategy::Mtls]);
-        let addr = start_tls_server(&tls_config, ClientAuth::Required, auth_mode).await;
+        let addr = start_tls_server(&tls_settings, ClientAuth::Required, auth_mode).await;
 
         let client = build_client(&pki.ca_cert, Some(&pki.client_cert), Some(&pki.client_key));
 
@@ -262,14 +262,14 @@ mod mtls_e2e {
         let dir = tempfile::tempdir().unwrap();
         let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
 
-        let tls_config = TlsSettings {
+        let tls_settings = TlsSettings {
             cert: pki.server_cert.clone(),
             key: pki.server_key.clone(),
             ca: pki.ca_cert.clone(),
         };
 
         let auth_mode = AuthMode::Strategies(vec![AuthStrategy::Mtls]);
-        let addr = start_tls_server(&tls_config, ClientAuth::Required, auth_mode).await;
+        let addr = start_tls_server(&tls_settings, ClientAuth::Required, auth_mode).await;
 
         // Generate a DIFFERENT CA and client cert signed by it
         let wrong_dir = dir.path().join("wrong_ca");
@@ -303,7 +303,7 @@ mod mtls_e2e {
         let dir = tempfile::tempdir().unwrap();
         let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
 
-        let tls_config = TlsSettings {
+        let tls_settings = TlsSettings {
             cert: pki.server_cert.clone(),
             key: pki.server_key.clone(),
             ca: pki.ca_cert.clone(),
@@ -311,7 +311,7 @@ mod mtls_e2e {
 
         // mTLS is the ONLY strategy → client cert is required at TLS level
         let auth_mode = AuthMode::Strategies(vec![AuthStrategy::Mtls]);
-        let addr = start_tls_server(&tls_config, ClientAuth::Required, auth_mode).await;
+        let addr = start_tls_server(&tls_settings, ClientAuth::Required, auth_mode).await;
 
         // Client trusts the server CA but presents NO client cert
         let client = build_client(&pki.ca_cert, None, None);
@@ -378,7 +378,7 @@ mod mtls_e2e {
         let dir = tempfile::tempdir().unwrap();
         let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
 
-        let tls_config = TlsSettings {
+        let tls_settings = TlsSettings {
             cert: pki.server_cert.clone(),
             key: pki.server_key.clone(),
             ca: pki.ca_cert.clone(),
@@ -395,7 +395,7 @@ mod mtls_e2e {
                 allowed_usernames: vec!["brynary".to_string()],
             },
         ]);
-        let addr = start_tls_server(&tls_config, ClientAuth::Optional, auth_mode).await;
+        let addr = start_tls_server(&tls_settings, ClientAuth::Optional, auth_mode).await;
 
         // Client trusts the server CA but presents NO client cert
         let client = build_client(&pki.ca_cert, None, None);
