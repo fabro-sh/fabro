@@ -12,7 +12,7 @@ pub(super) async fn close_command(
     args: PrCloseArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {
-    let cli_settings = load_cli_settings(None)?;
+    let cli_settings = load_cli_settings()?;
     let base = runs_base(&cli_settings.storage_dir());
     close_from(&base, args, github_app).await
 }

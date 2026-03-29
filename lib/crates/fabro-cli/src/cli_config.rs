@@ -1,16 +1,14 @@
 #[allow(unused_imports)]
 pub(crate) use fabro_config::cli::*;
 
-use std::path::Path;
-
+use fabro_config::ConfigLayer;
 use fabro_config::FabroSettings;
-use fabro_config::cli::load_cli_config;
 
 #[cfg(feature = "server")]
 use tracing::debug;
 
-pub(crate) fn load_cli_settings(path: Option<&Path>) -> anyhow::Result<FabroSettings> {
-    load_cli_config(path)?.try_into()
+pub(crate) fn load_cli_settings() -> anyhow::Result<FabroSettings> {
+    ConfigLayer::cli()?.resolve()
 }
 
 #[cfg(feature = "server")]

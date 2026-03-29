@@ -115,7 +115,7 @@ async fn main_inner() -> (String, Result<()>) {
                     Err(err) => return (command_name, Err(err)),
                 }
             } else {
-                match cli_config::load_cli_settings(None) {
+                match cli_config::load_cli_settings() {
                     Ok(cli_settings) => (
                         cli_settings.log.as_ref().and_then(|l| l.level.clone()),
                         cli_settings.upgrade_check_enabled(),
@@ -126,7 +126,7 @@ async fn main_inner() -> (String, Result<()>) {
         }
         #[cfg(not(feature = "server"))]
         {
-            match cli_config::load_cli_settings(None) {
+            match cli_config::load_cli_settings() {
                 Ok(cli_settings) => (
                     cli_settings.log.as_ref().and_then(|l| l.level.clone()),
                     cli_settings.upgrade_check_enabled(),
@@ -188,7 +188,7 @@ async fn main_inner() -> (String, Result<()>) {
                 fabro_server::serve::serve_command(args, styles).await?;
             }
             Commands::Doctor { verbose, dry_run } => {
-                let cli_settings = cli_config::load_cli_settings(None)?;
+                let cli_settings = cli_config::load_cli_settings()?;
                 let verbose = verbose || cli_settings.verbose_enabled();
                 let exit_code = commands::doctor::run_doctor(verbose, !dry_run).await;
                 std::process::exit(exit_code);

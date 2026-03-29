@@ -1,18 +1,17 @@
 use anyhow::Result;
-use fabro_config::cli::load_cli_config;
+use fabro_config::ConfigLayer;
 use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, RunArgs};
 
 pub(crate) async fn execute(mut args: RunArgs, _globals: &GlobalArgs) -> Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let cli_defaults = load_cli_config(None)?;
-    let cli_settings: fabro_config::FabroSettings = cli_defaults.clone().try_into()?;
+    let cli_settings = ConfigLayer::cli()?.resolve()?;
     args.verbose = args.verbose || cli_settings.verbose_enabled();
 
     let quiet = args.detach;
     let prevent_idle_sleep = cli_settings.prevent_idle_sleep_enabled();
-    let (run_id, run_dir) = super::create::create_run(&args, cli_defaults, styles, quiet)?;
+    let (run_id, run_dir) = super::create::create_run(&args, styles, quiet)?;
 
     #[cfg(feature = "sleep_inhibitor")]
     let _sleep_guard = crate::sleep_inhibitor::guard(prevent_idle_sleep);

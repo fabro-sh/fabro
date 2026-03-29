@@ -14,7 +14,7 @@ use crate::store::{build_store, open_run_reader};
 
 pub(crate) async fn run(args: &ForkArgs, styles: &Styles) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let cli_settings = load_cli_settings(None)?;
+    let cli_settings = load_cli_settings()?;
     let durable_store = build_store(&cli_settings.storage_dir())?;
     let run_id =
         find_run_id_by_prefix_or_store(&repo, durable_store.as_ref(), &args.run_id).await?;

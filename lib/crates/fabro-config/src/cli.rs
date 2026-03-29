@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-use crate::config::FabroConfig;
+use crate::config::ConfigLayer;
 
 pub use fabro_types::settings::cli::{
     ClientTlsSettings, ExecSettings, ExecutionMode, OutputFormat, PermissionLevel, ServerSettings,
@@ -72,6 +72,6 @@ impl From<ExecConfig> for ExecSettings {
 
 /// Load CLI config from an explicit path or `~/.fabro/cli.toml`, returning defaults if the
 /// default file doesn't exist. An explicit path that doesn't exist is an error.
-pub fn load_cli_config(path: Option<&Path>) -> anyhow::Result<FabroConfig> {
+pub fn load_cli_config(path: Option<&Path>) -> anyhow::Result<ConfigLayer> {
     crate::load_config_file(path, "cli.toml")
 }

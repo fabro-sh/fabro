@@ -23,7 +23,7 @@ pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bo
     });
 
     let run_record = RunRecord::load(&run_dir)?;
-    let cli_settings = cli_config::load_cli_settings(None)?;
+    let cli_settings = cli_config::load_cli_settings()?;
     let on_node: fabro_workflows::OnNodeCallback = Some({
         let short_id = super::short_run_id(&run_record.run_id).to_string();
         fabro_proctitle::set(&format!("fabro: {short_id}"));

@@ -938,7 +938,7 @@ pub(crate) async fn run_doctor(verbose: bool, live: bool) -> i32 {
     spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
     // Gather state
-    let cli_settings = load_cli_settings(None).unwrap_or_default();
+    let cli_settings = load_cli_settings().unwrap_or_default();
 
     let config_path = dirs::home_dir().map(|h| h.join(".fabro").join("cli.toml"));
     let config_exists = config_path.as_ref().is_some_and(|p| p.exists());

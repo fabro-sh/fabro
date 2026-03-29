@@ -9,7 +9,7 @@ use crate::args::GlobalArgs;
 use crate::cli_config;
 
 pub(crate) async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = cli_config::load_cli_settings(None)?;
+    let cli_settings = cli_config::load_cli_settings()?;
     #[cfg(feature = "sleep_inhibitor")]
     let _sleep_guard = crate::sleep_inhibitor::guard(cli_settings.prevent_idle_sleep_enabled());
     let exec_defaults = cli_settings.exec.as_ref();

@@ -1,8 +1,7 @@
 use std::path::PathBuf;
 
 use crate::args::RunArgs;
-use fabro_config::project::{ResolveSettingsInput, resolve_settings};
-use fabro_config::{FabroConfig, FabroSettings};
+use fabro_config::{ConfigLayer, FabroSettings};
 use fabro_util::terminal::Styles;
 use fabro_workflows::error::FabroError;
 use fabro_workflows::operations::{CreateRunInput, WorkflowInput, create};
@@ -14,7 +13,6 @@ use super::output::{print_diagnostics_from_error, print_workflow_report_from_per
 /// This does NOT execute the workflow — it only prepares the run directory.
 pub(crate) fn create_run(
     args: &RunArgs,
-    cli_defaults: FabroConfig,
     styles: &Styles,
     quiet: bool,
 ) -> anyhow::Result<(String, PathBuf)> {
@@ -22,15 +20,12 @@ pub(crate) fn create_run(
         .workflow
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
-    let cli_args_config = FabroConfig::try_from(args)?;
+    let cli_args_config = ConfigLayer::try_from(args)?;
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let settings: FabroSettings = resolve_settings(ResolveSettingsInput {
-        workflow_path: workflow_path.clone(),
-        cwd: cwd.clone(),
-        defaults: cli_defaults,
-        overrides: cli_args_config,
-        apply_project_config: true,
-    })?;
+    let settings: FabroSettings = cli_args_config
+        .combine(ConfigLayer::for_workflow(workflow_path, &cwd)?)
+        .combine(ConfigLayer::cli()?)
+        .resolve()?;
 
     let created = match create(CreateRunInput {
         workflow: WorkflowInput::Path(workflow_path.clone()),

@@ -2,11 +2,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::bail;
-use fabro_config::cli::load_cli_config;
-use fabro_config::project::{
-    ResolveSettingsInput, resolve_settings, resolve_workflow_path, resolve_working_directory,
-};
-use fabro_config::{FabroConfig, FabroSettings};
+use fabro_config::project::{resolve_workflow_path, resolve_working_directory};
+use fabro_config::{ConfigLayer, FabroSettings};
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_llm::client::Client as LlmClient;
 use fabro_model::{Catalog, Provider};
@@ -24,20 +21,17 @@ use crate::shared::github::build_github_app_credentials;
 
 pub(crate) async fn execute(mut args: PreflightArgs) -> anyhow::Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let cli_defaults = load_cli_config(None)?;
-    let cli_settings: FabroSettings = cli_defaults.clone().try_into()?;
+    let cli = ConfigLayer::cli()?;
+    let cli_settings: FabroSettings = cli.clone().resolve()?;
     args.verbose = args.verbose || cli_settings.verbose_enabled();
 
     let github_app = build_github_app_credentials(cli_settings.app_id());
-    let cli_args_config = FabroConfig::try_from(&args)?;
+    let cli_args_config = ConfigLayer::try_from(&args)?;
     let cwd = std::env::current_dir()?;
-    let settings = resolve_settings(ResolveSettingsInput {
-        workflow_path: args.workflow.clone(),
-        cwd: cwd.clone(),
-        defaults: cli_defaults,
-        overrides: cli_args_config,
-        apply_project_config: true,
-    })?;
+    let settings = cli_args_config
+        .combine(ConfigLayer::for_workflow(&args.workflow, &cwd)?)
+        .combine(cli)
+        .resolve()?;
     let resolution = resolve_workflow_path(&args.workflow, &cwd)?;
     let working_directory = resolve_working_directory(&settings, &cwd);
 

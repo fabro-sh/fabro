@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 pub use fabro_types::settings::FabroSettings;
 
-use crate::config::FabroConfig;
+use crate::config::ConfigLayer;
 
 pub trait FabroSettingsExt {
     fn storage_dir(&self) -> PathBuf;
@@ -18,10 +18,10 @@ impl FabroSettingsExt for FabroSettings {
     }
 }
 
-impl TryFrom<FabroConfig> for FabroSettings {
+impl TryFrom<ConfigLayer> for FabroSettings {
     type Error = anyhow::Error;
 
-    fn try_from(value: FabroConfig) -> Result<Self, Self::Error> {
+    fn try_from(value: ConfigLayer) -> Result<Self, Self::Error> {
         Ok(Self {
             version: value.version,
             goal: value.goal,
@@ -60,10 +60,10 @@ impl TryFrom<FabroConfig> for FabroSettings {
     }
 }
 
-impl TryFrom<&FabroConfig> for FabroSettings {
+impl TryFrom<&ConfigLayer> for FabroSettings {
     type Error = anyhow::Error;
 
-    fn try_from(value: &FabroConfig) -> Result<Self, Self::Error> {
+    fn try_from(value: &ConfigLayer) -> Result<Self, Self::Error> {
         value.clone().try_into()
     }
 }

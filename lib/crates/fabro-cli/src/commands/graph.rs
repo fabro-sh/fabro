@@ -3,8 +3,8 @@ use std::io::Write;
 use std::sync::LazyLock;
 
 use anyhow::bail;
-use fabro_config::cli::load_cli_config;
-use fabro_config::project::{ResolveSettingsInput, resolve_settings, resolve_workflow_path};
+use fabro_config::ConfigLayer;
+use fabro_config::project::resolve_workflow_path;
 use fabro_graphviz::render::render_dot;
 use fabro_util::terminal::Styles;
 use fabro_validate::Severity;
@@ -19,14 +19,9 @@ static RANKDIR_RE: LazyLock<regex::Regex> =
 
 pub(crate) fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
-    let cli_defaults = load_cli_config(None)?;
-    let settings = resolve_settings(ResolveSettingsInput {
-        workflow_path: args.workflow.clone(),
-        cwd: cwd.clone(),
-        defaults: cli_defaults,
-        overrides: fabro_config::FabroConfig::default(),
-        apply_project_config: true,
-    })?;
+    let settings = ConfigLayer::for_workflow(&args.workflow, &cwd)?
+        .combine(ConfigLayer::cli()?)
+        .resolve()?;
     let resolution = resolve_workflow_path(&args.workflow, &cwd)?;
     let validated = validate(ValidateInput {
         workflow: WorkflowInput::Path(args.workflow.clone()),

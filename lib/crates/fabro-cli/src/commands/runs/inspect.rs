@@ -26,7 +26,7 @@ pub(crate) struct InspectOutput {
 }
 
 pub(crate) async fn run(args: &InspectArgs) -> Result<()> {
-    let cli_settings = load_cli_settings(None)?;
+    let cli_settings = load_cli_settings()?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = crate::store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;

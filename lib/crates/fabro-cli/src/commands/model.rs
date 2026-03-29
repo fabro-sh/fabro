@@ -11,7 +11,7 @@ pub(crate) async fn execute(command: Option<ModelsCommand>, globals: &GlobalArgs
     let server = {
         #[cfg(feature = "server")]
         {
-            let cli_settings = cli_config::load_cli_settings(None)?;
+            let cli_settings = cli_config::load_cli_settings()?;
             let resolved = cli_config::resolve_mode(
                 globals.mode.clone(),
                 globals.server_url.as_deref(),

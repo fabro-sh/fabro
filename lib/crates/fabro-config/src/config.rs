@@ -1,18 +1,18 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{ExecConfig, ExecutionMode, ServerConfig};
+use crate::cli::{self, ExecConfig, ExecutionMode, ServerConfig};
 use crate::combine::Combine;
 use crate::hook::{HookConfig, HookDefinition};
 use crate::mcp::McpServerEntry;
-use crate::project::ProjectFabroConfig;
+use crate::project::{self, ProjectFabroConfig};
 use crate::run::{
     AssetsConfig, CheckpointConfig, GitHubConfig, LlmConfig, PullRequestConfig, SetupConfig,
 };
 use crate::sandbox::SandboxConfig;
-use crate::server::{ApiConfig, Features, GitConfig, LogConfig, WebConfig};
+use crate::server::{self, ApiConfig, Features, GitConfig, LogConfig, WebConfig};
 use crate::settings::FabroSettings;
 
 fn is_default_checkpoint(c: &CheckpointConfig) -> bool {
@@ -25,7 +25,7 @@ fn is_default_checkpoint(c: &CheckpointConfig) -> bool {
 /// `parse_project_config`) all return this type. Fields irrelevant to a
 /// particular source are left unset (`None` / empty).
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct FabroConfig {
+pub struct ConfigLayer {
     // --- Workflow run config fields ---
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<u32>,
@@ -132,7 +132,7 @@ pub struct FabroConfig {
     pub fabro: Option<ProjectFabroConfig>,
 }
 
-impl Combine for FabroConfig {
+impl Combine for ConfigLayer {
     fn combine(self, other: Self) -> Self {
         let hooks = if self.hooks.is_empty() {
             other.hooks
@@ -182,13 +182,58 @@ impl Combine for FabroConfig {
     }
 }
 
-impl FabroConfig {
+impl ConfigLayer {
     #[must_use]
     pub fn combine(self, other: Self) -> Self {
         Combine::combine(self, other)
     }
 
-    pub fn try_into_settings(self) -> anyhow::Result<FabroSettings> {
+    /// Load workflow config + project config for a workflow path.
+    ///
+    /// Resolves the workflow path, loads its config, discovers project config
+    /// (`fabro.toml`) from the resolved workflow's parent directory, and combines
+    /// them (workflow takes precedence over project).
+    pub fn for_workflow(path: &Path, cwd: &Path) -> anyhow::Result<Self> {
+        let resolution = project::resolve_workflow_path(path, cwd)?;
+        if resolution.workflow_config.is_none() && !resolution.resolved_workflow_path.is_file() {
+            anyhow::bail!(
+                "Workflow not found: {}",
+                resolution.resolved_workflow_path.display()
+            );
+        }
+
+        let workflow_config = resolution.workflow_config.unwrap_or_default();
+        let project_config = project::discover_project_config(
+            resolution
+                .resolved_workflow_path
+                .parent()
+                .unwrap_or_else(|| Path::new(".")),
+        )?
+        .map(|(_, config)| config)
+        .unwrap_or_default();
+
+        Ok(workflow_config.combine(project_config))
+    }
+
+    /// Discover project config (`fabro.toml`) by walking ancestors from `start`.
+    pub fn project(start: &Path) -> anyhow::Result<Self> {
+        Ok(project::discover_project_config(start)?
+            .map(|(_, config)| config)
+            .unwrap_or_default())
+    }
+
+    /// Load CLI defaults from `~/.fabro/cli.toml`.
+    pub fn cli() -> anyhow::Result<Self> {
+        cli::load_cli_config(None)
+    }
+
+    /// Load server defaults from `~/.fabro/server.toml`.
+    pub fn server() -> anyhow::Result<Self> {
+        server::load_server_config(None)
+    }
+
+    /// Convert this combined config layer into final resolved settings.
+    pub fn resolve(self) -> anyhow::Result<FabroSettings> {
         self.try_into()
     }
 }
