@@ -420,6 +420,16 @@ pub(crate) struct InspectArgs {
 }
 
 #[derive(Args)]
+pub(crate) struct StoreDumpArgs {
+    /// Run ID prefix or workflow name
+    pub(crate) run: String,
+
+    /// Output directory (must not exist or be empty)
+    #[arg(long, short)]
+    pub(crate) output: PathBuf,
+}
+
+#[derive(Args)]
 pub(crate) struct SecretGetArgs {
     /// Name of the secret
     pub(crate) key: String,
@@ -751,6 +761,8 @@ pub(crate) enum Commands {
     Parse(ParseArgs),
     /// Inspect and copy run assets (screenshots, reports, traces)
     Asset(AssetNamespace),
+    /// Export store-backed run state for debugging
+    Store(StoreNamespace),
     #[command(flatten)]
     RunsCmd(RunsCommands),
     /// List and test LLM models
@@ -827,6 +839,9 @@ impl Commands {
             Self::Asset(ns) => match &ns.command {
                 AssetCommand::List(_) => "asset list",
                 AssetCommand::Cp(_) => "asset cp",
+            },
+            Self::Store(ns) => match &ns.command {
+                StoreCommand::Dump(_) => "store dump",
             },
             Self::Exec(_) => "exec",
             Self::RunCmd(cmd) => cmd.name(),
@@ -920,6 +935,18 @@ pub(crate) enum AssetCommand {
     List(AssetListArgs),
     /// Copy assets from a workflow run
     Cp(AssetCpArgs),
+}
+
+#[derive(Args)]
+pub(crate) struct StoreNamespace {
+    #[command(subcommand)]
+    pub(crate) command: StoreCommand,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum StoreCommand {
+    /// Export a run's durable state to a directory
+    Dump(StoreDumpArgs),
 }
 
 #[derive(Args)]
