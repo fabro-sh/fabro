@@ -31,7 +31,7 @@ Creates a new sub-agent session and starts it working on the given task.
 | `task` | string | yes | The task description for the sub-agent |
 | `working_dir` | string | no | Working directory for the sub-agent |
 | `model` | string | no | Model to use for the sub-agent |
-| `max_turns` | integer | no | Maximum number of turns (default: 50) |
+| `max_turns` | integer | no | Maximum number of turns (default: unlimited) |
 
 Returns the `agent_id` string used to reference this sub-agent in subsequent calls.
 
@@ -104,7 +104,7 @@ When a sub-agent fails, the error is captured and returned to the parent via the
 
 Specific failure modes:
 
-- **Sub-agent hits `max_turns`** — The sub-agent stops naturally and returns its last output as a successful result. The parent sees a normal completion with the final assistant message.
+- **Sub-agent hits `max_turns`** — The sub-agent stops naturally and returns its last output as a successful result. The parent sees a normal completion with the final assistant message. By default, there is no turn limit — sub-agents run until they complete their task or hit the context window.
 - **Sub-agent panics or errors** — The error is captured and returned through `wait` as a failure result. The parent can inspect the error and decide what to do.
 - **`spawn_agent` fails** (e.g. depth limit exceeded) — The error is returned immediately as a tool result. The parent can adjust its approach without waiting.
 
@@ -133,5 +133,7 @@ Sub-agents are most useful when:
 - **Context management** -- offload work to a sub-agent when the parent's context window is getting full
 
 <Note>
-Sub-agents have a default turn limit of 50. For larger tasks, pass a higher `max_turns` when spawning. The parent agent is blocked during a `wait` call, so spawn sub-agents before starting the wait to maximize concurrency.
+Sub-agents run with no turn limit by default — they continue until the task is complete or the context window is exhausted. Pass `max_turns` when spawning to cap execution for predictable cost control. The parent agent is blocked during a `wait` call, so spawn sub-agents before starting the wait to maximize concurrency.
 </Note>
+
+All active sub-agents are automatically cleaned up when the parent session closes — you don't need to explicitly `close_agent` on every sub-agent.

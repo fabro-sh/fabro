@@ -117,6 +117,57 @@ fabro resume <RUN_ID> --detach
 | `<RUN_ID>` | Run ID or unambiguous prefix |
 | `-d, --detach` | Run in the background and print the run ID |
 
+## `fabro wait`
+
+Block until a workflow run reaches a terminal state and exit with a code reflecting the outcome — analogous to `docker wait`. Exits 0 on success, 1 on failure or dead.
+
+```bash
+fabro wait <RUN>
+fabro wait abc123 --timeout 300
+fabro wait my-workflow --json
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<RUN>` | Run ID prefix or workflow name (most recent run) |
+| `--timeout <SECONDS>` | Maximum time to wait in seconds |
+| `--interval <MS>` | Poll interval in milliseconds (default: 1000) |
+| `--json` | Output the conclusion as JSON |
+
+## `fabro create`
+
+Allocate a run directory and persist a run spec without starting execution. Pair with `fabro start` and `fabro attach` for composable automation.
+
+```bash
+fabro create <WORKFLOW> --goal "Implement feature X"
+```
+
+Accepts the same arguments and flags as [`fabro run`](#fabro-run).
+
+## `fabro start`
+
+Start a previously created run by spawning the detached engine process.
+
+```bash
+fabro start <RUN>
+```
+
+| Argument | Description |
+|---|---|
+| `<RUN>` | Run ID prefix or workflow name |
+
+## `fabro attach`
+
+Attach to a running or finished workflow run. Tails progress with live rendering and handles human-in-the-loop interactions (interviews, steering).
+
+```bash
+fabro attach <RUN>
+```
+
+| Argument | Description |
+|---|---|
+| `<RUN>` | Run ID prefix or workflow name |
+
 ## `fabro ps`
 
 List workflow runs. By default, shows only active (running) runs — similar to `docker ps`. Use `-a` to include completed runs.
@@ -275,6 +326,7 @@ fabro model test -m claude-sonnet-4-5
 |---|---|
 | `-p, --provider <PROVIDER>` | Filter by provider |
 | `-m, --model <MODEL>` | Test a specific model |
+| `--deep` | Run a multi-turn tool-use test that validates the full agent loop (tool calls, reasoning round-trips) instead of a single-turn completion |
 
 ---
 
@@ -816,6 +868,22 @@ fabro secret rm ANTHROPIC_API_KEY
 | Argument | Description |
 |---|---|
 | `<KEY>` | Name of the secret to remove (required) |
+
+---
+
+## `fabro store dump`
+
+Export the contents of a run's store-backed state to a directory for debugging and inspection.
+
+```bash
+fabro store dump <RUN>
+fabro store dump abc123 -o ./debug-output
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<RUN>` | Run ID prefix or workflow name |
+| `-o, --output <DIR>` | Output directory (must not exist or be empty) |
 
 ---
 

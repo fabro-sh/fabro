@@ -67,6 +67,7 @@ Stylesheets support four properties:
 | `model` | Model ID or alias | `claude-sonnet-4-5`, `opus`, `gemini-pro` |
 | `provider` | Provider name (optional — auto-inferred from the model catalog when omitted) | `anthropic`, `openai`, `gemini` |
 | `reasoning_effort` | Reasoning effort level | `low`, `medium`, `high` |
+| `speed` | Output speed mode. `fast` enables Anthropic's fast mode for up to 2.5x faster output at higher cost. | `fast` |
 | `backend` | Agent execution backend — `api` (default) runs Fabro's own tool loop, `cli` delegates to an external CLI tool. See [Backends](/core-concepts/agents#backends). | `cli`, `api` |
 
 See [Models](/core-concepts/models) for the full list of model IDs and aliases.
