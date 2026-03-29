@@ -53,11 +53,11 @@ Key server config options:
 
 ### Event streaming
 
-The API streams run events via [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). Every significant action — stage starts, LLM calls, tool invocations, edge selections — is emitted as a structured JSON event. The web UI uses this endpoint for real-time run monitoring. Any HTTP client that supports SSE can subscribe. See the [run events endpoint](/api-reference/runs#get-events) in the API reference.
+The API streams run events via [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). Every significant action — stage starts, LLM calls, tool invocations, edge selections — is emitted as a structured JSON event. The web UI uses this endpoint for real-time run monitoring. Any HTTP client that supports SSE can subscribe. See the [run events endpoint](/api-reference/runs/stream-run-events) in the API reference.
 
 ### Human-in-the-loop
 
-In API mode, human-in-the-loop questions are served over HTTP instead of terminal prompts. The engine blocks the current stage until an answer is received, then continues execution. See the [Human-in-the-Loop API reference](/api-reference/human-in-the-loop) for the polling and answer submission endpoints.
+In API mode, human-in-the-loop questions are served over HTTP instead of terminal prompts. The engine blocks the current stage until an answer is received, then continues execution. See the [list questions](/api-reference/human-in-the-loop/list-run-questions) and [submit answer](/api-reference/human-in-the-loop/submit-run-answer) API reference pages.
 
 ### Authentication
 

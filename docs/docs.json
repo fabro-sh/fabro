@@ -217,7 +217,7 @@
                   "GET /runs/{id}/context",
                   "GET /runs/{id}/stages",
                   "GET /runs/{id}/stages/{stageId}/turns",
-                  "GET /runs/{id}/configuration"
+                  "GET /runs/{id}/settings"
                 ]
               }
             ]
