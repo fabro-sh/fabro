@@ -1,0 +1,24 @@
+---
+title: "File-based workflow imports"
+date: "2026-03-28"
+---
+
+## Workflow imports
+
+Workflows can now import subgraphs from other `.fabro` or `.dot` files, enabling reuse of common patterns across workflows. Imported graphs are merged into the parent workflow at parse time, with node name prefixing to avoid collisions. This replaces the previous `graph_merge` approach with a more flexible file-based import system.
+
+```dot
+graph {
+  graph [import="shared/review-loop.fabro"]
+}
+```
+
+## More
+
+<Accordion title="Improvements">
+- Detached engine processes now have descriptive OS-level process titles (visible in `ps` and activity monitors)
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed a panic when checking if a process is alive on systems where PID values exceed `i32::MAX`
+</Accordion>

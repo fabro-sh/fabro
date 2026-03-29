@@ -1,0 +1,23 @@
+---
+title: "Pull request pipeline stage and resume reliability"
+date: "2026-03-26"
+---
+
+## Pull request pipeline stage
+
+Workflows can now automatically create pull requests as part of the run pipeline. When a workflow finishes with code changes, the new `pull_request` pipeline stage creates a PR on the target repository with the run's diff, title, and description — no manual `gh pr create` step needed. This integrates with the existing GitHub App authentication and respects the workflow's git configuration.
+
+## More
+
+<Accordion title="Improvements">
+- `fabro resume` now rejects already-succeeded runs with a clear error instead of silently restarting them
+- Resume now validates the checkpoint file before cleaning up state, preventing partial cleanup on corrupt checkpoints
+- `fabro attach` now detects early init failures and rolls back partial worktree state automatically
+- Added restore operation that rebuilds runtime state from the checkpoint when resuming interrupted runs
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed resume creating unnecessary worktrees and failing to keep the sleep inhibitor alive
+- Fixed git checkpoint options not being threaded through to the resume path
+- Fixed verification regressions introduced by the runtime initialization refactor
+</Accordion>

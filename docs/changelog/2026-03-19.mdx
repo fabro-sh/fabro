@@ -1,5 +1,5 @@
 ---
-title: "Provider login and auto-detect default provider"
+title: "Provider login, auto-detect provider, and fabro wait"
 date: "2026-03-19"
 ---
 
@@ -17,12 +17,26 @@ For OpenAI, this launches the browser-based OAuth PKCE flow with an automatic fa
 
 The CLI now checks which providers have API keys configured and automatically selects the best available one, using precedence order Anthropic > OpenAI > Gemini. Previously, running commands without an explicit `--provider` flag always defaulted to Anthropic, which caused errors for users who only had OpenAI or Gemini keys configured.
 
+## `fabro wait`
+
+A new `fabro wait` subcommand blocks until a workflow run reaches a terminal state and exits with a code reflecting the outcome — analogous to `docker wait`. Accepts a run ID prefix or workflow name, with an optional `--timeout` flag and `--json` output mode for scripting.
+
+```bash
+fabro wait abc123 --timeout 300
+```
+
 ## More
 
 <Accordion title="CLI">
 - Default Anthropic model changed from `claude-opus-4-6` to `claude-sonnet-4-6`
-- Removed OpenSSL runtime dependency — the CLI binary no longer dynamically links against `libssl` or `libcrypto`, so it runs on machines without OpenSSL v3 installed
+- Removed OpenSSL runtime dependency — the CLI binary no longer dynamically links against `libssl` or `libcrypto`
 - Added `--web-url` flag to `fabro install` for specifying the web UI base URL for OAuth callbacks
+- `fabro ps` now strips markdown headings and "Plan:" prefix from the GOAL column for cleaner output
+</Accordion>
+
+<Accordion title="Workflows">
+- Node-level `model` attributes are now validated against the model catalog at parse time, with missing aliases surfaced as warnings
+- `reasoning_effort` is now mapped to Anthropic's `output_config.effort` parameter
 </Accordion>
 
 <Accordion title="Improvements">
@@ -32,6 +46,8 @@ The CLI now checks which providers have API keys configured and automatically se
 </Accordion>
 
 <Accordion title="Fixes">
-- Fixed OAuth callback URLs missing from CLI-generated GitHub App manifests, which caused OAuth login failures in the web UI
-- Fixed OpenAI multi-turn conversations failing because `store: false` was incorrectly set for all Responses API requests instead of only the Codex endpoint
+- Fixed agent sessions ignoring node-level `model` and `provider` attributes set in stylesheets
+- Fixed `fabro upgrade` failing with "No such file or directory"
+- Fixed OAuth callback URLs missing from CLI-generated GitHub App manifests
+- Fixed OpenAI multi-turn conversations failing because `store: false` was incorrectly set for all Responses API requests
 </Accordion>

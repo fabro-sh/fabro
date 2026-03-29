@@ -1,0 +1,33 @@
+---
+title: "Anthropic fast mode and deep model testing"
+date: "2026-03-21"
+---
+
+## Anthropic fast mode
+
+You can now enable Anthropic's fast mode for up to 2.5x faster output from Claude Opus 4.6 by setting `speed: fast` in your workflow stylesheet. This is useful for latency-sensitive stages where throughput matters more than cost.
+
+```dot
+graph {
+  graph [stylesheet="speed=fast"]
+}
+```
+
+## `fabro model test --deep`
+
+Model validation now supports a `--deep` flag that runs multi-turn tool-use conversations to verify that a provider handles the full agent loop correctly — not just single-turn completions. Tests run concurrently with a progress bar.
+
+```bash
+fabro model test --deep
+```
+
+## More
+
+<Accordion title="Fixes">
+- Fixed workflow TOML config being lost when running in detach mode
+- Fixed edge `thread_id` precedence to match documented fidelity behavior
+- Fixed Sonnet 4.5 `reasoning_effort` parameter error by converting to the thinking API format
+- Fixed OpenAI reasoning round-trip losing encrypted content by setting `store: false`
+- Fixed OpenAI provider incorrectly omitting `store: true` from requests
+- Suppressed stderr output noise in detach and create modes
+</Accordion>
