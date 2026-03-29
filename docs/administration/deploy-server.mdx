@@ -89,11 +89,11 @@ The web UI connects to the API server and provides:
 
 ## Event streaming
 
-The API streams run events via [Server-Sent Events (SSE)](/api-reference/runs#get-events). Every stage start, LLM call, tool invocation, and edge selection is emitted as a structured JSON event. Any HTTP client that supports SSE can subscribe — the web UI is just one consumer.
+The API streams run events via [Server-Sent Events (SSE)](/api-reference/runs/stream-run-events). Every stage start, LLM call, tool invocation, and edge selection is emitted as a structured JSON event. Any HTTP client that supports SSE can subscribe — the web UI is just one consumer.
 
 ## Human-in-the-loop
 
-In server mode, human-in-the-loop questions are served over HTTP instead of terminal prompts. The engine blocks the current stage until an answer is submitted, then continues execution. See the [Human-in-the-Loop API reference](/api-reference/human-in-the-loop) for the polling and answer endpoints.
+In server mode, human-in-the-loop questions are served over HTTP instead of terminal prompts. The engine blocks the current stage until an answer is submitted, then continues execution. See the [list questions](/api-reference/human-in-the-loop/list-run-questions) and [submit answer](/api-reference/human-in-the-loop/submit-run-answer) API reference pages.
 
 ## Authentication
 

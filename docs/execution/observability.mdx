@@ -163,7 +163,7 @@ FABRO_LOG=debug fabro run workflow.fabro
 
 ### API: Server-Sent Events
 
-When running workflows through the API server, subscribe to a live event stream via the [run events endpoint](/api-reference/runs#get-events). Each event is a JSON-serialized `WorkflowRunEvent`. The stream stays open until the run completes.
+When running workflows through the API server, subscribe to a live event stream via the [run events endpoint](/api-reference/runs/stream-run-events). Each event is a JSON-serialized `WorkflowRunEvent`. The stream stays open until the run completes.
 
 ### Web UI
 
@@ -209,13 +209,13 @@ Each run's directory contains a standard set of files:
 
 ### Inspecting stages and turns
 
-The API provides endpoints for drilling into individual stages and the agent turns within them. See the [stages](/api-reference/run-internals#get-stages) and [turns](/api-reference/run-internals#get-stage-turns) API reference for details.
+The API provides endpoints for drilling into individual stages and the agent turns within them. See the [stages](/api-reference/run-internals/list-run-stages) and [turns](/api-reference/run-internals/list-stage-turns) API reference pages.
 
 ## Insights (SQL analytics)
 
 The Insights feature lets you run SQL queries across your run data using DuckDB. This is useful for aggregate analysis — finding slow workflows, tracking failure rates, comparing model costs, and spotting trends.
 
-Insights is managed through the [Insights API endpoints](/api-reference/insights). You can save, update, and execute queries programmatically.
+Insights is managed through the [saved queries](/api-reference/insights/list-saved-queries) and [execute query](/api-reference/insights/execute-query) API reference pages. You can save, update, and execute queries programmatically.
 
 ### Example queries
 
@@ -253,7 +253,7 @@ ORDER BY runs DESC
 
 ## Aggregate usage
 
-The API server tracks aggregate usage counters across all runs — total run count, total runtime, and per-model breakdowns of token usage and cost. See the [usage endpoint](/api-reference/run-outputs#get-usage) in the API reference. Counters reset on server restart.
+The API server tracks aggregate usage counters across all runs — total run count, total runtime, and per-model breakdowns of token usage and cost. See the [usage endpoint](/api-reference/usage/aggregate-usage) in the API reference. Counters reset on server restart.
 
 <Frame caption="The Usage tab breaks down token counts and costs by stage and by model.">
   <img src="/images/web/run-usage.png" alt="Fabro web UI run usage showing per-stage and per-model token and cost breakdown" />
