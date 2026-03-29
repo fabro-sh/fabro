@@ -777,45 +777,36 @@ mod tests {
 
     #[tokio::test]
     async fn exchange_code_success() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
 
         let mock = server
-            .mock("POST", "/oauth/token")
-            .match_header("content-type", "application/x-www-form-urlencoded")
-            .match_body(mockito::Matcher::AllOf(vec![
-                mockito::Matcher::UrlEncoded(
-                    "grant_type".to_string(),
-                    "authorization_code".to_string(),
-                ),
-                mockito::Matcher::UrlEncoded("client_id".to_string(), "test-client".to_string()),
-                mockito::Matcher::UrlEncoded("code".to_string(), "test-code".to_string()),
-                mockito::Matcher::UrlEncoded(
-                    "redirect_uri".to_string(),
-                    "http://localhost/cb".to_string(),
-                ),
-                mockito::Matcher::UrlEncoded(
-                    "code_verifier".to_string(),
-                    "test-verifier".to_string(),
-                ),
-            ]))
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(
-                serde_json::json!({
-                    "id_token": "id-tok",
-                    "access_token": "access-tok",
-                    "refresh_token": "refresh-tok",
-                    "expires_in": 3600
-                })
-                .to_string(),
-            )
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/oauth/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .form_urlencoded_tuple("grant_type", "authorization_code")
+                    .form_urlencoded_tuple("client_id", "test-client")
+                    .form_urlencoded_tuple("code", "test-code")
+                    .form_urlencoded_tuple("redirect_uri", "http://localhost/cb")
+                    .form_urlencoded_tuple("code_verifier", "test-verifier");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "id_token": "id-tok",
+                            "access_token": "access-tok",
+                            "refresh_token": "refresh-tok",
+                            "expires_in": 3600
+                        })
+                        .to_string(),
+                    );
+            })
             .await;
 
         let client = reqwest::Client::new();
         let tokens = exchange_code_for_tokens(
             &client,
-            &server.url(),
+            &server.url(""),
             "test-client",
             "test-code",
             "http://localhost/cb",
@@ -834,19 +825,19 @@ mod tests {
 
     #[tokio::test]
     async fn exchange_code_error_response() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
 
         server
-            .mock("POST", "/oauth/token")
-            .with_status(400)
-            .with_body(r#"{"error": "invalid_grant"}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/oauth/token");
+                then.status(400).body(r#"{"error": "invalid_grant"}"#);
+            })
             .await;
 
         let client = reqwest::Client::new();
         let err = exchange_code_for_tokens(
             &client,
-            &server.url(),
+            &server.url(""),
             "test-client",
             "bad-code",
             "http://localhost/cb",
@@ -864,36 +855,34 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_token_success() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
 
         let mock = server
-            .mock("POST", "/oauth/token")
-            .match_body(mockito::Matcher::AllOf(vec![
-                mockito::Matcher::UrlEncoded("grant_type".to_string(), "refresh_token".to_string()),
-                mockito::Matcher::UrlEncoded("client_id".to_string(), "test-client".to_string()),
-                mockito::Matcher::UrlEncoded(
-                    "refresh_token".to_string(),
-                    "old-refresh-tok".to_string(),
-                ),
-            ]))
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(
-                serde_json::json!({
-                    "id_token": "new-id",
-                    "access_token": "new-access",
-                    "refresh_token": "new-refresh",
-                    "expires_in": 7200
-                })
-                .to_string(),
-            )
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/oauth/token")
+                    .form_urlencoded_tuple("grant_type", "refresh_token")
+                    .form_urlencoded_tuple("client_id", "test-client")
+                    .form_urlencoded_tuple("refresh_token", "old-refresh-tok");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "id_token": "new-id",
+                            "access_token": "new-access",
+                            "refresh_token": "new-refresh",
+                            "expires_in": 7200
+                        })
+                        .to_string(),
+                    );
+            })
             .await;
 
         let client = reqwest::Client::new();
-        let tokens = refresh_access_token(&client, &server.url(), "test-client", "old-refresh-tok")
-            .await
-            .unwrap();
+        let tokens =
+            refresh_access_token(&client, &server.url(""), "test-client", "old-refresh-tok")
+                .await
+                .unwrap();
 
         assert_eq!(tokens.access_token, "new-access");
         assert_eq!(tokens.refresh_token, "new-refresh");
@@ -904,17 +893,17 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_token_error() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
 
         server
-            .mock("POST", "/oauth/token")
-            .with_status(401)
-            .with_body(r#"{"error": "invalid_token"}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/oauth/token");
+                then.status(401).body(r#"{"error": "invalid_token"}"#);
+            })
             .await;
 
         let client = reqwest::Client::new();
-        let err = refresh_access_token(&client, &server.url(), "test-client", "expired-tok")
+        let err = refresh_access_token(&client, &server.url(""), "test-client", "expired-tok")
             .await
             .unwrap_err();
 
@@ -927,25 +916,27 @@ mod tests {
 
     #[tokio::test]
     async fn initiate_device_flow_success() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
 
         let mock = server
-            .mock("POST", "/api/accounts/deviceauth/usercode")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(
-                serde_json::json!({
-                    "device_auth_id": "dev-123",
-                    "user_code": "ABCD-1234",
-                    "interval": 5
-                })
-                .to_string(),
-            )
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/api/accounts/deviceauth/usercode");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "device_auth_id": "dev-123",
+                            "user_code": "ABCD-1234",
+                            "interval": 5
+                        })
+                        .to_string(),
+                    );
+            })
             .await;
 
         let client = reqwest::Client::new();
-        let device = initiate_device_flow(&client, &server.url(), "test-client")
+        let device = initiate_device_flow(&client, &server.url(""), "test-client")
             .await
             .unwrap();
 
@@ -958,17 +949,18 @@ mod tests {
 
     #[tokio::test]
     async fn initiate_device_flow_error() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
 
         server
-            .mock("POST", "/api/accounts/deviceauth/usercode")
-            .with_status(500)
-            .with_body("Internal Server Error")
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/api/accounts/deviceauth/usercode");
+                then.status(500).body("Internal Server Error");
+            })
             .await;
 
         let client = reqwest::Client::new();
-        let err = initiate_device_flow(&client, &server.url(), "test-client")
+        let err = initiate_device_flow(&client, &server.url(""), "test-client")
             .await
             .unwrap_err();
 
@@ -977,30 +969,32 @@ mod tests {
 
     #[tokio::test]
     async fn poll_device_flow_success() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
 
         server
-            .mock("POST", "/api/accounts/deviceauth/token")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::json!({"code": "auth-code-123"}).to_string())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/api/accounts/deviceauth/token");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(serde_json::json!({"code": "auth-code-123"}).to_string());
+            })
             .await;
 
         server
-            .mock("POST", "/oauth/token")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(
-                serde_json::json!({
-                    "id_token": "dev-id",
-                    "access_token": "dev-access",
-                    "refresh_token": "dev-refresh",
-                    "expires_in": 3600
-                })
-                .to_string(),
-            )
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/oauth/token");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "id_token": "dev-id",
+                            "access_token": "dev-access",
+                            "refresh_token": "dev-refresh",
+                            "expires_in": 3600
+                        })
+                        .to_string(),
+                    );
+            })
             .await;
 
         let device = DeviceAuthResponse {
@@ -1010,7 +1004,7 @@ mod tests {
         };
 
         let client = reqwest::Client::new();
-        let tokens = poll_device_flow(&client, &server.url(), "test-client", &device)
+        let tokens = poll_device_flow(&client, &server.url(""), "test-client", &device)
             .await
             .unwrap();
 
@@ -1019,14 +1013,15 @@ mod tests {
 
     #[tokio::test]
     async fn poll_device_flow_expired() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
 
         server
-            .mock("POST", "/api/accounts/deviceauth/token")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(serde_json::json!({"error": "expired_token"}).to_string())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/api/accounts/deviceauth/token");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(serde_json::json!({"error": "expired_token"}).to_string());
+            })
             .await;
 
         let device = DeviceAuthResponse {
@@ -1036,7 +1031,7 @@ mod tests {
         };
 
         let client = reqwest::Client::new();
-        let err = poll_device_flow(&client, &server.url(), "test-client", &device)
+        let err = poll_device_flow(&client, &server.url(""), "test-client", &device)
             .await
             .unwrap_err();
 

@@ -521,23 +521,25 @@ mod tests {
 
     #[tokio::test]
     async fn execute_github_graphql_success() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
 
         let mock = server
-            .mock("POST", "/graphql")
-            .match_header("Authorization", "Bearer test-token")
-            .match_header("Content-Type", "application/json")
-            .match_header("User-Agent", "fabro")
-            .with_status(200)
-            .with_body(r#"{"data": {"viewer": {"id": "U_abc"}}}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .header("Authorization", "Bearer test-token")
+                    .header("Content-Type", "application/json")
+                    .header("User-Agent", "fabro");
+                then.status(200)
+                    .body(r#"{"data": {"viewer": {"id": "U_abc"}}}"#);
+            })
             .await;
 
         let client = reqwest::Client::new();
         let result = execute_github_graphql(
             &client,
             "test-token",
-            &format!("{}/graphql", server.url()),
+            &server.url("/graphql"),
             "query { viewer { id } }",
             serde_json::json!({}),
         )
@@ -550,20 +552,20 @@ mod tests {
 
     #[tokio::test]
     async fn execute_github_graphql_http_error() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
 
         server
-            .mock("POST", "/graphql")
-            .with_status(401)
-            .with_body("Unauthorized")
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(401).body("Unauthorized");
+            })
             .await;
 
         let client = reqwest::Client::new();
         let err = execute_github_graphql(
             &client,
             "bad-token",
-            &format!("{}/graphql", server.url()),
+            &server.url("/graphql"),
             "query { viewer { id } }",
             serde_json::json!({}),
         )
@@ -575,20 +577,21 @@ mod tests {
 
     #[tokio::test]
     async fn execute_github_graphql_errors_array() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
 
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(r#"{"data": null, "errors": [{"message": "Not found"}]}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(200)
+                    .body(r#"{"data": null, "errors": [{"message": "Not found"}]}"#);
+            })
             .await;
 
         let client = reqwest::Client::new();
         let err = execute_github_graphql(
             &client,
             "token",
-            &format!("{}/graphql", server.url()),
+            &server.url("/graphql"),
             "query { bad }",
             serde_json::json!({}),
         )
@@ -600,23 +603,24 @@ mod tests {
 
     #[tokio::test]
     async fn execute_github_graphql_correct_headers() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
 
         let mock = server
-            .mock("POST", "/graphql")
-            .match_header("Authorization", "Bearer my-token")
-            .match_header("Content-Type", "application/json")
-            .match_header("User-Agent", "fabro")
-            .with_status(200)
-            .with_body(r#"{"data": {}}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .header("Authorization", "Bearer my-token")
+                    .header("Content-Type", "application/json")
+                    .header("User-Agent", "fabro");
+                then.status(200).body(r#"{"data": {}}"#);
+            })
             .await;
 
         let client = reqwest::Client::new();
         execute_github_graphql(
             &client,
             "my-token",
-            &format!("{}/graphql", server.url()),
+            &server.url("/graphql"),
             "query { viewer { id } }",
             serde_json::json!({}),
         )
@@ -707,33 +711,38 @@ mod tests {
 
     #[tokio::test]
     async fn project_node_id_resolved_via_org() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let pem = test_rsa_key();
-        let tracker = mock_github_tracker(&server.url(), pem);
+        let tracker = mock_github_tracker(&server.url(""), pem);
 
         server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("GET").path("/repos/owner/repo/installation");
+                then.status(200).body(r#"{"id": 1}"#);
+            })
             .await;
         server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/app/installations/1/access_tokens");
+                then.status(201).body(r#"{"token": "ghs_test"}"#);
+            })
             .await;
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(org_project_node_id_response())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("organization(login:");
+                then.status(200).body(org_project_node_id_response());
+            })
             .await;
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(empty_items_response())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("items(first:");
+                then.status(200).body(empty_items_response());
+            })
             .await;
 
         let issues = tracker.fetch_candidate_issues(&["Todo"]).await.unwrap();
@@ -742,42 +751,50 @@ mod tests {
 
     #[tokio::test]
     async fn project_node_id_falls_back_to_user() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let pem = test_rsa_key();
-        let tracker = mock_github_tracker(&server.url(), pem);
+        let tracker = mock_github_tracker(&server.url(""), pem);
 
         server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("GET").path("/repos/owner/repo/installation");
+                then.status(200).body(r#"{"id": 1}"#);
+            })
             .await;
         server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/app/installations/1/access_tokens");
+                then.status(201).body(r#"{"token": "ghs_test"}"#);
+            })
             .await;
         // Org query returns null → fall back to user
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(r#"{"data": {"organization": null}}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("organization(login:");
+                then.status(200).body(r#"{"data": {"organization": null}}"#);
+            })
             .await;
         // User query succeeds
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(r#"{"data": {"user": {"projectV2": {"id": "PVT_user1"}}}}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("user(login:");
+                then.status(200)
+                    .body(r#"{"data": {"user": {"projectV2": {"id": "PVT_user1"}}}}"#);
+            })
             .await;
         // Items page (empty)
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(empty_items_response())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("items(first:");
+                then.status(200).body(empty_items_response());
+            })
             .await;
 
         let issues = tracker.fetch_candidate_issues(&["Todo"]).await.unwrap();
@@ -790,27 +807,29 @@ mod tests {
 
     #[tokio::test]
     async fn github_tracker_fetch_viewer_id_success() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let pem = test_rsa_key();
-        let tracker = mock_github_tracker(&server.url(), pem);
+        let tracker = mock_github_tracker(&server.url(""), pem);
 
         server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("GET").path("/repos/owner/repo/installation");
+                then.status(200).body(r#"{"id": 1}"#);
+            })
             .await;
         server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/app/installations/1/access_tokens");
+                then.status(201).body(r#"{"token": "ghs_test"}"#);
+            })
             .await;
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(r#"{"data": {"viewer": {"id": "U_xyz"}}}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(200)
+                    .body(r#"{"data": {"viewer": {"id": "U_xyz"}}}"#);
+            })
             .await;
 
         let id = tracker.fetch_viewer_id().await.unwrap();
@@ -823,27 +842,29 @@ mod tests {
 
     #[tokio::test]
     async fn github_tracker_create_comment_success() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let pem = test_rsa_key();
-        let tracker = mock_github_tracker(&server.url(), pem);
+        let tracker = mock_github_tracker(&server.url(""), pem);
 
         server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("GET").path("/repos/owner/repo/installation");
+                then.status(200).body(r#"{"id": 1}"#);
+            })
             .await;
         server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/app/installations/1/access_tokens");
+                then.status(201).body(r#"{"token": "ghs_test"}"#);
+            })
             .await;
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(r#"{"data": {"addComment": {"clientMutationId": null}}}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(200)
+                    .body(r#"{"data": {"addComment": {"clientMutationId": null}}}"#);
+            })
             .await;
 
         let issue = make_test_issue("In Progress");
@@ -856,43 +877,42 @@ mod tests {
 
     #[tokio::test]
     async fn github_tracker_update_issue_state_success() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let pem = test_rsa_key();
-        let tracker = mock_github_tracker(&server.url(), pem);
+        let tracker = mock_github_tracker(&server.url(""), pem);
 
         server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("GET").path("/repos/owner/repo/installation");
+                then.status(200).body(r#"{"id": 1}"#);
+            })
             .await;
         server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/app/installations/1/access_tokens");
+                then.status(201).body(r#"{"token": "ghs_test"}"#);
+            })
             .await;
         // Resolve project node ID (org path)
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(org_project_node_id_response())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("organization(login:");
+                then.status(200).body(org_project_node_id_response());
+            })
             .await;
         // Field query
-        server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(r#"{"data": {"node": {"field": {"id": "FLD_1", "options": [{"id": "opt-done", "name": "Done"}, {"id": "opt-todo", "name": "Todo"}]}}}}"#)
-            .create_async()
-            .await;
+        server.mock_async(|when, then| {
+            when.method("POST").path("/graphql").body_includes("field(name:");
+            then.status(200).body(r#"{"data": {"node": {"field": {"id": "FLD_1", "options": [{"id": "opt-done", "name": "Done"}, {"id": "opt-todo", "name": "Todo"}]}}}}"#);
+        }).await;
         // Update mutation
-        server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(r#"{"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_item1"}}}}"#)
-            .create_async()
-            .await;
+        server.mock_async(|when, then| {
+            when.method("POST").path("/graphql").body_includes("updateProjectV2ItemFieldValue");
+            then.status(200).body(r#"{"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_item1"}}}}"#);
+        }).await;
 
         let issue = make_test_issue("In Progress");
         tracker.update_issue_state(&issue, "Done").await.unwrap();
@@ -900,36 +920,37 @@ mod tests {
 
     #[tokio::test]
     async fn github_tracker_update_issue_state_status_not_found() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let pem = test_rsa_key();
-        let tracker = mock_github_tracker(&server.url(), pem);
+        let tracker = mock_github_tracker(&server.url(""), pem);
 
         server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("GET").path("/repos/owner/repo/installation");
+                then.status(200).body(r#"{"id": 1}"#);
+            })
             .await;
         server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/app/installations/1/access_tokens");
+                then.status(201).body(r#"{"token": "ghs_test"}"#);
+            })
             .await;
         // Resolve project node ID
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(org_project_node_id_response())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("organization(login:");
+                then.status(200).body(org_project_node_id_response());
+            })
             .await;
         // Field query — options don't include "Nonexistent"
-        server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(r#"{"data": {"node": {"field": {"id": "FLD_1", "options": [{"id": "opt-done", "name": "Done"}]}}}}"#)
-            .create_async()
-            .await;
+        server.mock_async(|when, then| {
+            when.method("POST").path("/graphql").body_includes("field(name:");
+            then.status(200).body(r#"{"data": {"node": {"field": {"id": "FLD_1", "options": [{"id": "opt-done", "name": "Done"}]}}}}"#);
+        }).await;
 
         let issue = make_test_issue("Todo");
         let err = tracker
@@ -946,33 +967,38 @@ mod tests {
 
     #[tokio::test]
     async fn github_tracker_fetch_candidate_issues_single_page() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let pem = test_rsa_key();
-        let tracker = mock_github_tracker(&server.url(), pem);
+        let tracker = mock_github_tracker(&server.url(""), pem);
 
         server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("GET").path("/repos/owner/repo/installation");
+                then.status(200).body(r#"{"id": 1}"#);
+            })
             .await;
         server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/app/installations/1/access_tokens");
+                then.status(201).body(r#"{"token": "ghs_test"}"#);
+            })
             .await;
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(org_project_node_id_response())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("organization(login:");
+                then.status(200).body(org_project_node_id_response());
+            })
             .await;
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(single_item_response("In Progress"))
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("items(first:");
+                then.status(200).body(single_item_response("In Progress"));
+            })
             .await;
 
         let issues = tracker
@@ -992,33 +1018,38 @@ mod tests {
 
     #[tokio::test]
     async fn github_tracker_fetch_candidate_issues_empty() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let pem = test_rsa_key();
-        let tracker = mock_github_tracker(&server.url(), pem);
+        let tracker = mock_github_tracker(&server.url(""), pem);
 
         server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("GET").path("/repos/owner/repo/installation");
+                then.status(200).body(r#"{"id": 1}"#);
+            })
             .await;
         server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/app/installations/1/access_tokens");
+                then.status(201).body(r#"{"token": "ghs_test"}"#);
+            })
             .await;
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(org_project_node_id_response())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("organization(login:");
+                then.status(200).body(org_project_node_id_response());
+            })
             .await;
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(empty_items_response())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("items(first:");
+                then.status(200).body(empty_items_response());
+            })
             .await;
 
         let issues = tracker.fetch_candidate_issues(&["Todo"]).await.unwrap();
@@ -1027,9 +1058,9 @@ mod tests {
 
     #[tokio::test]
     async fn github_tracker_fetch_candidate_issues_status_filtering() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let pem = test_rsa_key();
-        let tracker = mock_github_tracker(&server.url(), pem);
+        let tracker = mock_github_tracker(&server.url(""), pem);
 
         let items_body = serde_json::json!({
             "data": {
@@ -1065,28 +1096,33 @@ mod tests {
         .to_string();
 
         server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("GET").path("/repos/owner/repo/installation");
+                then.status(200).body(r#"{"id": 1}"#);
+            })
             .await;
         server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/app/installations/1/access_tokens");
+                then.status(201).body(r#"{"token": "ghs_test"}"#);
+            })
             .await;
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(org_project_node_id_response())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("organization(login:");
+                then.status(200).body(org_project_node_id_response());
+            })
             .await;
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(items_body)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("items(first:");
+                then.status(200).body(items_body);
+            })
             .await;
 
         let issues = tracker
@@ -1104,9 +1140,9 @@ mod tests {
 
     #[tokio::test]
     async fn github_tracker_fetch_issues_by_ids_ordering() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let pem = test_rsa_key();
-        let tracker = mock_github_tracker(&server.url(), pem);
+        let tracker = mock_github_tracker(&server.url(""), pem);
 
         // Page returns issues in reverse order of what we request
         let items_body = serde_json::json!({
@@ -1143,28 +1179,33 @@ mod tests {
         .to_string();
 
         server
-            .mock("GET", "/repos/owner/repo/installation")
-            .with_status(200)
-            .with_body(r#"{"id": 1}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("GET").path("/repos/owner/repo/installation");
+                then.status(200).body(r#"{"id": 1}"#);
+            })
             .await;
         server
-            .mock("POST", "/app/installations/1/access_tokens")
-            .with_status(201)
-            .with_body(r#"{"token": "ghs_test"}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/app/installations/1/access_tokens");
+                then.status(201).body(r#"{"token": "ghs_test"}"#);
+            })
             .await;
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(org_project_node_id_response())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("organization(login:");
+                then.status(200).body(org_project_node_id_response());
+            })
             .await;
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(items_body)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("items(first:");
+                then.status(200).body(items_body);
+            })
             .await;
 
         // Request in A, B order — should get back in A, B order despite page returning B, A

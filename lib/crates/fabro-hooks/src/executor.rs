@@ -908,19 +908,21 @@ mod tests {
 
     #[tokio::test]
     async fn http_hook_posts_json_and_parses_decision() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let mock = server
-            .mock("POST", "/hook")
-            .match_header("content-type", "application/json")
-            .with_status(200)
-            .with_body(r#"{"decision": "skip", "reason": "not needed"}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/hook")
+                    .header("content-type", "application/json");
+                then.status(200)
+                    .body(r#"{"decision": "skip", "reason": "not needed"}"#);
+            })
             .await;
 
         let client = test_http_client();
         let decision = HookExecutorImpl::execute_http(
             &client,
-            &format!("{}/hook", server.url()),
+            &server.url("/hook"),
             None,
             &[],
             &TlsMode::Off,
@@ -941,18 +943,18 @@ mod tests {
 
     #[tokio::test]
     async fn http_hook_empty_2xx_returns_proceed() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let mock = server
-            .mock("POST", "/hook")
-            .with_status(200)
-            .with_body("")
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/hook");
+                then.status(200).body("");
+            })
             .await;
 
         let client = test_http_client();
         let decision = HookExecutorImpl::execute_http(
             &client,
-            &format!("{}/hook", server.url()),
+            &server.url("/hook"),
             None,
             &[],
             &TlsMode::Off,
@@ -968,18 +970,18 @@ mod tests {
 
     #[tokio::test]
     async fn http_hook_non_2xx_returns_proceed() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let mock = server
-            .mock("POST", "/hook")
-            .with_status(500)
-            .with_body("Internal Server Error")
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/hook");
+                then.status(500).body("Internal Server Error");
+            })
             .await;
 
         let client = test_http_client();
         let decision = HookExecutorImpl::execute_http(
             &client,
-            &format!("{}/hook", server.url()),
+            &server.url("/hook"),
             None,
             &[],
             &TlsMode::Off,
@@ -1015,13 +1017,14 @@ mod tests {
     async fn http_hook_sends_interpolated_headers() {
         let env = test_env(&[("FABRO_TEST_TOKEN", "my-secret")]);
 
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let mock = server
-            .mock("POST", "/hook")
-            .match_header("authorization", "Bearer my-secret")
-            .with_status(200)
-            .with_body("")
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/hook")
+                    .header("authorization", "Bearer my-secret");
+                then.status(200).body("");
+            })
             .await;
 
         let headers = HashMap::from([(
@@ -1032,7 +1035,7 @@ mod tests {
         let client = test_http_client();
         let decision = HookExecutorImpl::execute_http(
             &client,
-            &format!("{}/hook", server.url()),
+            &server.url("/hook"),
             Some(&headers),
             &["FABRO_TEST_TOKEN".to_string()],
             &TlsMode::Off,
@@ -1086,18 +1089,18 @@ mod tests {
 
     #[tokio::test]
     async fn http_hook_allows_http_url_when_tls_off() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let mock = server
-            .mock("POST", "/hook")
-            .with_status(200)
-            .with_body("")
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/hook");
+                then.status(200).body("");
+            })
             .await;
 
         let client = test_http_client();
         let decision = HookExecutorImpl::execute_http(
             &client,
-            &format!("{}/hook", server.url()),
+            &server.url("/hook"),
             None,
             &[],
             &TlsMode::Off,
@@ -1113,12 +1116,12 @@ mod tests {
 
     #[tokio::test]
     async fn executor_dispatches_http_hook() {
-        let mut server = mockito::Server::new_async().await;
+        let server = httpmock::MockServer::start_async().await;
         let mock = server
-            .mock("POST", "/hook")
-            .with_status(200)
-            .with_body(r#"{"decision": "proceed"}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/hook");
+                then.status(200).body(r#"{"decision": "proceed"}"#);
+            })
             .await;
 
         let executor = HookExecutorImpl;
@@ -1127,7 +1130,7 @@ mod tests {
             event: HookEvent::StageStart,
             command: None,
             hook_type: Some(HookType::Http {
-                url: format!("{}/hook", server.url()),
+                url: server.url("/hook"),
                 headers: None,
                 allowed_env_vars: vec![],
                 tls: TlsMode::Off,
