@@ -939,4 +939,58 @@ mod tests {
             vec!["src/lib.rs".to_string()]
         );
     }
+
+    #[tokio::test]
+    async fn slate_run_store_lists_artifact_values_and_asset_only_visits() {
+        let (_object_store, store) = make_store();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let run = store.create_run("run-1", created_at, None).await.unwrap();
+        run.put_run(&sample_run_record("run-1", created_at))
+            .await
+            .unwrap();
+
+        run.put_artifact_value("summary", &serde_json::json!({"done": true}))
+            .await
+            .unwrap();
+        run.put_artifact_value("plan", &serde_json::json!({"steps": 3}))
+            .await
+            .unwrap();
+
+        let snapshot_node = NodeVisitRef {
+            node_id: "code",
+            visit: 2,
+        };
+        run.put_node_prompt(&snapshot_node, "Plan").await.unwrap();
+        run.put_asset(&snapshot_node, "src/lib.rs", b"fn main() {}")
+            .await
+            .unwrap();
+
+        let asset_only_node = NodeVisitRef {
+            node_id: "artifact-only",
+            visit: 7,
+        };
+        run.put_asset(&asset_only_node, "logs/output.txt", b"hello")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            run.list_artifact_values().await.unwrap(),
+            vec!["plan".to_string(), "summary".to_string()]
+        );
+        assert_eq!(
+            run.list_all_assets().await.unwrap(),
+            vec![
+                (
+                    "artifact-only".to_string(),
+                    7,
+                    "logs/output.txt".to_string()
+                ),
+                ("code".to_string(), 2, "src/lib.rs".to_string())
+            ]
+        );
+
+        let snapshot = run.get_snapshot().await.unwrap().unwrap();
+        assert_eq!(snapshot.nodes.len(), 1);
+        assert_eq!(snapshot.nodes[0].node_id, "code");
+    }
 }

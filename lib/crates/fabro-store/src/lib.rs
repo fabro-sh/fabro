@@ -102,10 +102,12 @@ pub trait RunStore: Send + Sync {
 
     async fn put_artifact_value(&self, artifact_id: &str, value: &serde_json::Value) -> Result<()>;
     async fn get_artifact_value(&self, artifact_id: &str) -> Result<Option<serde_json::Value>>;
+    async fn list_artifact_values(&self) -> Result<Vec<String>>;
 
     async fn put_asset(&self, node: &NodeVisitRef<'_>, filename: &str, data: &[u8]) -> Result<()>;
     async fn get_asset(&self, node: &NodeVisitRef<'_>, filename: &str) -> Result<Option<Bytes>>;
     async fn list_assets(&self, node: &NodeVisitRef<'_>) -> Result<Vec<String>>;
+    async fn list_all_assets(&self) -> Result<Vec<(String, u32, String)>>;
 
     async fn get_snapshot(&self) -> Result<Option<RunSnapshot>>;
 }

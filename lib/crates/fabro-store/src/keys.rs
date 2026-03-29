@@ -115,11 +115,16 @@ pub(crate) fn parse_checkpoint_seq(key: &str) -> Option<u32> {
     parse_seq(key, CHECKPOINTS_PREFIX)
 }
 
+pub(crate) fn parse_artifact_value_id(key: &str) -> Option<String> {
+    key.strip_prefix(ARTIFACT_VALUES_PREFIX)
+        .and_then(|s| s.strip_suffix(".json"))
+        .map(ToString::to_string)
+}
+
 pub(crate) fn parse_node_key(key: &str) -> Option<(String, u32, String)> {
     parse_visit_scoped_key(key, "nodes/")
 }
 
-#[cfg(test)]
 pub(crate) fn parse_node_asset_key(key: &str) -> Option<(String, u32, String)> {
     parse_visit_scoped_key(key, ARTIFACT_NODES_PREFIX)
 }
@@ -186,6 +191,10 @@ mod tests {
         assert_eq!(parse_event_seq("events/000007-123.json"), Some(7));
         assert_eq!(parse_checkpoint_seq("checkpoints/0042-456.json"), Some(42));
         assert_eq!(
+            parse_artifact_value_id("artifacts/values/summary.json"),
+            Some("summary".to_string())
+        );
+        assert_eq!(
             parse_node_key("nodes/plan/visit-3/status.json"),
             Some(("plan".to_string(), 3, "status.json".to_string()))
         );
@@ -199,6 +208,10 @@ mod tests {
     fn parse_helpers_reject_invalid_keys() {
         assert_eq!(parse_event_seq("events/not-a-seq.json"), None);
         assert_eq!(parse_checkpoint_seq("checkpoints/oops.json"), None);
+        assert_eq!(
+            parse_artifact_value_id("artifacts/values/summary.txt"),
+            None
+        );
         assert_eq!(parse_node_key("nodes/plan/status.json"), None);
         assert_eq!(
             parse_node_asset_key("artifacts/nodes/code/status.json"),
