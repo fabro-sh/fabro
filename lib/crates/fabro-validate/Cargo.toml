@@ -2,6 +2,7 @@
 name = "fabro-validate"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "Validation and lint rules for Fabro workflow graphs"
 

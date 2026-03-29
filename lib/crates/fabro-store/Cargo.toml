@@ -2,6 +2,7 @@
 name = "fabro-store"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 
 [lib]

@@ -2,6 +2,7 @@
 name = "fabro-core"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "Generic workflow execution engine"
 

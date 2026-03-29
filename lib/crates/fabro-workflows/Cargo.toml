@@ -2,6 +2,7 @@
 name = "fabro-workflows"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "A DOT-based pipeline runner for multi-stage AI workflows"
 repository = "https://github.com/brynary/arc"

@@ -2,6 +2,7 @@
 name = "fabro-telemetry"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "Telemetry, analytics, and crash reporting"
 

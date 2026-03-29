@@ -2,6 +2,7 @@
 name = "fabro-macros"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "Procedural macros for fabro"
 

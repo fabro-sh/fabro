@@ -2,6 +2,7 @@
 name = "fabro-db"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "SQLite persistence layer for Fabro"
 

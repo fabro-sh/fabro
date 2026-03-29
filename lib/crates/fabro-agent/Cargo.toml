@@ -2,6 +2,7 @@
 name = "fabro-agent"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "A programmable agentic loop for coding agents"
 repository = "https://github.com/brynary/arc"
