@@ -6,22 +6,36 @@ use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Style, Table, print_stdout};
 use fabro_config::FabroSettingsExt;
 
-use fabro_workflows::run_lookup::{logs_base, runs_base, scan_runs};
+use fabro_workflows::run_lookup::{logs_base, runs_base, scan_runs_combined};
 use fabro_workflows::run_status::RunStatus;
 
 use crate::args::DfArgs;
 use crate::cli_config::load_cli_settings;
 use crate::shared::format_size;
 
-pub(super) fn df_command(args: &DfArgs) -> Result<()> {
+pub(super) async fn df_command(args: &DfArgs) -> Result<()> {
     let cli_settings = load_cli_settings(None)?;
     let data_dir = cli_settings.storage_dir();
     let runs_base_dir = runs_base(&data_dir);
     let logs_base_dir = logs_base(&data_dir);
-    df_from(args, &data_dir, &runs_base_dir, &logs_base_dir)
+    let store = crate::store::build_store(&data_dir)?;
+    df_from(
+        args,
+        store.as_ref(),
+        &data_dir,
+        &runs_base_dir,
+        &logs_base_dir,
+    )
+    .await
 }
 
-fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Path) -> Result<()> {
+async fn df_from(
+    args: &DfArgs,
+    store: &dyn fabro_store::Store,
+    data_dir: &Path,
+    runs_base: &Path,
+    logs_base: &Path,
+) -> Result<()> {
     struct RunSizeInfo {
         run_id: String,
         workflow_name: String,
@@ -30,7 +44,7 @@ fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Path) -
         size: u64,
     }
 
-    let runs = scan_runs(runs_base)?;
+    let runs = scan_runs_combined(store, runs_base).await?;
     let mut active_count = 0u64;
     let mut total_run_size = 0u64;
     let mut reclaimable_run_size = 0u64;

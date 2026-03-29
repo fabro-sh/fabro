@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use fabro_config::FabroSettingsExt;
 use fabro_workflows::pull_request::PullRequestRecord;
-use fabro_workflows::run_lookup::{runs_base, scan_runs};
+use fabro_workflows::run_lookup::{runs_base, scan_runs_combined};
 use futures::future::join_all;
 use tracing::info;
 
@@ -16,10 +16,12 @@ pub(super) async fn list_command(
 ) -> Result<()> {
     let cli_settings = load_cli_settings(None)?;
     let base = runs_base(&cli_settings.storage_dir());
-    list_from(&base, args, github_app).await
+    let store = crate::store::build_store(&cli_settings.storage_dir())?;
+    list_from(store.as_ref(), &base, args, github_app).await
 }
 
 async fn list_from(
+    store: &dyn fabro_store::Store,
     base: &Path,
     args: PrListArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
@@ -36,7 +38,9 @@ async fn list_from(
         "GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id",
     )?;
 
-    let runs = scan_runs(base).context("Failed to scan runs")?;
+    let runs = scan_runs_combined(store, base)
+        .await
+        .context("Failed to scan runs")?;
 
     let mut entries: Vec<(String, PullRequestRecord)> = Vec::new();
     for run in &runs {

@@ -215,7 +215,7 @@ async fn main_inner() -> (String, Result<()>) {
                 commands::upgrade::run_upgrade(args).await?;
             }
             Commands::Provider(ns) => commands::provider::dispatch(ns).await?,
-            Commands::System(ns) => commands::system::dispatch(ns)?,
+            Commands::System(ns) => commands::system::dispatch(ns).await?,
             Commands::SendAnalytics { path } => {
                 let result = sender::upload(&path).await;
                 let _ = std::fs::remove_file(&path);

@@ -2,7 +2,7 @@ use anyhow::Result;
 use fabro_config::FabroSettingsExt;
 use fabro_config::cli::load_cli_config;
 use fabro_util::terminal::Styles;
-use fabro_workflows::run_lookup::{resolve_run, runs_base};
+use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 
 use crate::args::{GlobalArgs, RunCommands};
 use crate::cli_config::load_cli_settings;
@@ -43,7 +43,8 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         RunCommands::Start { run } => {
             let cli_settings = load_cli_settings(None)?;
             let base = runs_base(&cli_settings.storage_dir());
-            let run_info = resolve_run(&base, &run)?;
+            let store = crate::store::build_store(&cli_settings.storage_dir())?;
+            let run_info = resolve_run_combined(store.as_ref(), &base, &run).await?;
             let child = start::start_run(&run_info.path, false)?;
             eprintln!("Started engine process (PID {})", child.id());
             Ok(())
@@ -52,8 +53,11 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             let cli_settings = load_cli_settings(None)?;
             let base = runs_base(&cli_settings.storage_dir());
-            let run_info = resolve_run(&base, &run)?;
-            let exit_code = attach::attach_run(&run_info.path, false, styles, None).await?;
+            let store = crate::store::build_store(&cli_settings.storage_dir())?;
+            let run_info = resolve_run_combined(store.as_ref(), &base, &run).await?;
+            let exit_code =
+                attach::attach_run(&run_info.path, Some(&run_info.run_id), false, styles, None)
+                    .await?;
             if exit_code != std::process::ExitCode::SUCCESS {
                 std::process::exit(1);
             }
