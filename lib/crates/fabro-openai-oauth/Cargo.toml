@@ -25,5 +25,5 @@ axum = "0.8"
 open = "5"
 
 [dev-dependencies]
-mockito = "1"
+httpmock = "0.8"
 tokio = { workspace = true, features = ["test-util", "macros"] }

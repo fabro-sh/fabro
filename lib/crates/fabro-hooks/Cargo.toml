@@ -28,6 +28,6 @@ tracing.workspace = true
 tokio-util.workspace = true
 
 [dev-dependencies]
-mockito = "1"
+httpmock = "0.8"
 tokio = { workspace = true, features = ["test-util", "macros"] }
 toml.workspace = true

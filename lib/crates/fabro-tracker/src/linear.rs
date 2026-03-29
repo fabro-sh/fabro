@@ -577,16 +577,18 @@ mod tests {
 
     #[tokio::test]
     async fn execute_graphql_success() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         let mock = server
-            .mock("POST", "/graphql")
-            .match_header("Authorization", "lin_api_test123")
-            .match_header("Content-Type", "application/json")
-            .with_status(200)
-            .with_body(r#"{"data": {"viewer": {"id": "user-1"}}}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .header("Authorization", "lin_api_test123")
+                    .header("Content-Type", "application/json");
+                then.status(200)
+                    .body(r#"{"data": {"viewer": {"id": "user-1"}}}"#);
+            })
             .await;
 
         let client = reqwest::Client::new();
@@ -605,14 +607,14 @@ mod tests {
 
     #[tokio::test]
     async fn execute_graphql_http_401() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         server
-            .mock("POST", "/graphql")
-            .with_status(401)
-            .with_body("Unauthorized")
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(401).body("Unauthorized");
+            })
             .await;
 
         let client = reqwest::Client::new();
@@ -630,14 +632,14 @@ mod tests {
 
     #[tokio::test]
     async fn execute_graphql_http_500() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         server
-            .mock("POST", "/graphql")
-            .with_status(500)
-            .with_body("Internal Server Error")
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(500).body("Internal Server Error");
+            })
             .await;
 
         let client = reqwest::Client::new();
@@ -655,14 +657,15 @@ mod tests {
 
     #[tokio::test]
     async fn execute_graphql_errors_array() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(r#"{"data": null, "errors": [{"message": "Variable not found"}]}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(200)
+                    .body(r#"{"data": null, "errors": [{"message": "Variable not found"}]}"#);
+            })
             .await;
 
         let client = reqwest::Client::new();
@@ -675,16 +678,17 @@ mod tests {
 
     #[tokio::test]
     async fn execute_graphql_correct_headers() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         let mock = server
-            .mock("POST", "/graphql")
-            .match_header("Authorization", "lin_api_test123")
-            .match_header("Content-Type", "application/json")
-            .with_status(200)
-            .with_body(r#"{"data": {}}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .header("Authorization", "lin_api_test123")
+                    .header("Content-Type", "application/json");
+                then.status(200).body(r#"{"data": {}}"#);
+            })
             .await;
 
         let client = reqwest::Client::new();
@@ -706,14 +710,15 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_viewer_id_success() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(r#"{"data": {"viewer": {"id": "user-abc"}}}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(200)
+                    .body(r#"{"data": {"viewer": {"id": "user-abc"}}}"#);
+            })
             .await;
 
         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
@@ -723,14 +728,14 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_viewer_id_error() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         server
-            .mock("POST", "/graphql")
-            .with_status(401)
-            .with_body("Unauthorized")
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(401).body("Unauthorized");
+            })
             .await;
 
         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
@@ -744,14 +749,15 @@ mod tests {
 
     #[tokio::test]
     async fn create_comment_success() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(r#"{"data": {"commentCreate": {"success": true}}}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(200)
+                    .body(r#"{"data": {"commentCreate": {"success": true}}}"#);
+            })
             .await;
 
         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
@@ -761,14 +767,15 @@ mod tests {
 
     #[tokio::test]
     async fn create_comment_returns_false() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(r#"{"data": {"commentCreate": {"success": false}}}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(200)
+                    .body(r#"{"data": {"commentCreate": {"success": false}}}"#);
+            })
             .await;
 
         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
@@ -783,25 +790,25 @@ mod tests {
 
     #[tokio::test]
     async fn update_issue_state_success() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         // First call: resolve state name to ID
-        let resolve_mock = server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(
-                r#"{"data": {"issue": {"team": {"states": {"nodes": [{"id": "state-done"}]}}}}}"#,
-            )
-            .create_async()
-            .await;
+        let resolve_mock = server.mock_async(|when, then| {
+            when.method("POST").path("/graphql").body_includes("team");
+            then.status(200)
+                .body(r#"{"data": {"issue": {"team": {"states": {"nodes": [{"id": "state-done"}]}}}}}"#);
+        }).await;
 
         // Second call: update issue
         let update_mock = server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(r#"{"data": {"issueUpdate": {"success": true}}}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes("issueUpdate");
+                then.status(200)
+                    .body(r#"{"data": {"issueUpdate": {"success": true}}}"#);
+            })
             .await;
 
         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
@@ -814,14 +821,15 @@ mod tests {
 
     #[tokio::test]
     async fn update_issue_state_not_found() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(r#"{"data": {"issue": {"team": {"states": {"nodes": []}}}}}"#)
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(200)
+                    .body(r#"{"data": {"issue": {"team": {"states": {"nodes": []}}}}}"#);
+            })
             .await;
 
         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
@@ -840,8 +848,8 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_candidate_issues_single_page() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         let issue = complete_issue_json();
         let body = serde_json::json!({
@@ -854,10 +862,10 @@ mod tests {
         });
 
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(body.to_string())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(200).body(body.to_string());
+            })
             .await;
 
         let tracker = LinearTracker::new(config, reqwest::Client::new(), "my-project".to_string());
@@ -873,8 +881,8 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_candidate_issues_two_pages() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         let issue1 = serde_json::json!({
             "id": "id-1", "identifier": "T-1", "title": "First",
@@ -905,22 +913,20 @@ mod tests {
         });
 
         server
-            .mock("POST", "/graphql")
-            .match_body(mockito::Matcher::PartialJsonString(
-                r#"{"variables":{"cursor":null}}"#.to_string(),
-            ))
-            .with_status(200)
-            .with_body(page1.to_string())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes(r#""cursor":null"#);
+                then.status(200).body(page1.to_string());
+            })
             .await;
         server
-            .mock("POST", "/graphql")
-            .match_body(mockito::Matcher::PartialJsonString(
-                r#"{"variables":{"cursor":"cursor-1"}}"#.to_string(),
-            ))
-            .with_status(200)
-            .with_body(page2.to_string())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/graphql")
+                    .body_includes(r#""cursor":"cursor-1""#);
+                then.status(200).body(page2.to_string());
+            })
             .await;
 
         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
@@ -933,8 +939,8 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_candidate_issues_empty() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         let body = serde_json::json!({
             "data": {
@@ -946,10 +952,10 @@ mod tests {
         });
 
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(body.to_string())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(200).body(body.to_string());
+            })
             .await;
 
         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
@@ -964,8 +970,8 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_issues_by_ids_ordering() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         // API returns in different order than requested
         let body = serde_json::json!({
@@ -988,10 +994,10 @@ mod tests {
         });
 
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(body.to_string())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql");
+                then.status(200).body(body.to_string());
+            })
             .await;
 
         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
@@ -1007,28 +1013,12 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_issues_by_ids_batching() {
-        let mut server = mockito::Server::new_async().await;
-        let config = mock_config(&server.url());
+        let server = httpmock::MockServer::start_async().await;
+        let config = mock_config(&server.url(""));
 
         // Create 51 IDs to trigger 2 batches
         let ids: Vec<String> = (0..51).map(|i| format!("id-{i}")).collect();
         let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
-
-        // Second batch (ids 50..51) — registered first for LIFO
-        let batch2_node = serde_json::json!({
-            "id": "id-50", "identifier": "T-50", "title": "T50",
-            "state": { "name": "Todo" }, "url": "https://linear.app/t/50",
-            "labels": { "nodes": [] }, "inverseRelations": { "nodes": [] }
-        });
-        let batch2 = serde_json::json!({
-            "data": { "issues": { "nodes": [batch2_node] } }
-        });
-        server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(batch2.to_string())
-            .create_async()
-            .await;
 
         // First batch (ids 0..50)
         let batch1_nodes: Vec<Value> = (0..50)
@@ -1048,10 +1038,26 @@ mod tests {
             "data": { "issues": { "nodes": batch1_nodes } }
         });
         server
-            .mock("POST", "/graphql")
-            .with_status(200)
-            .with_body(batch1.to_string())
-            .create_async()
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql").body_includes("id-49");
+                then.status(200).body(batch1.to_string());
+            })
+            .await;
+
+        // Second batch (id 50)
+        let batch2_node = serde_json::json!({
+            "id": "id-50", "identifier": "T-50", "title": "T50",
+            "state": { "name": "Todo" }, "url": "https://linear.app/t/50",
+            "labels": { "nodes": [] }, "inverseRelations": { "nodes": [] }
+        });
+        let batch2 = serde_json::json!({
+            "data": { "issues": { "nodes": [batch2_node] } }
+        });
+        server
+            .mock_async(|when, then| {
+                when.method("POST").path("/graphql").body_includes("id-50");
+                then.status(200).body(batch2.to_string());
+            })
             .await;
 
         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
