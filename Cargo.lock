@@ -1812,12 +1812,14 @@ dependencies = [
  "chrono",
  "fabro-agent",
  "fabro-llm",
+ "fabro-store",
  "fabro-types",
  "fabro-util",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

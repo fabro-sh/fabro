@@ -90,6 +90,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             });
         run_retro_agent(
             &options.sandbox,
+            Some(&*options.run_store),
             &options.run_dir,
             client,
             options.provider,

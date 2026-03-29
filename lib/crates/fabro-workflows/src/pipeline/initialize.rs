@@ -737,12 +737,13 @@ mod tests {
             persisted,
             InitOptions {
                 run_id: "run-test".to_string(),
-                run_store: crate::operations::open_or_hydrate_run(
-                    &InMemoryStore::default(),
-                    &run_dir,
-                )
-                .await
-                .unwrap(),
+                run_store: {
+                    let store: &dyn fabro_store::Store = &InMemoryStore::default();
+                    store
+                        .create_run("test-run", chrono::Utc::now(), None)
+                        .await
+                        .unwrap()
+                },
                 dry_run: false,
                 emitter,
                 sandbox: SandboxSpec::Local {
@@ -806,12 +807,13 @@ mod tests {
             persisted,
             InitOptions {
                 run_id: "run-test".to_string(),
-                run_store: crate::operations::open_or_hydrate_run(
-                    &InMemoryStore::default(),
-                    &run_dir,
-                )
-                .await
-                .unwrap(),
+                run_store: {
+                    let store: &dyn fabro_store::Store = &InMemoryStore::default();
+                    store
+                        .create_run("test-run", chrono::Utc::now(), None)
+                        .await
+                        .unwrap()
+                },
                 dry_run: false,
                 emitter,
                 sandbox: SandboxSpec::Local {

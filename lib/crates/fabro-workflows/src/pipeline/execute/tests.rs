@@ -140,8 +140,10 @@ fn test_lifecycle(setup_commands: Vec<String>) -> LifecycleOptions {
     }
 }
 
-async fn test_run_store(run_dir: &Path) -> Arc<dyn fabro_store::RunStore> {
-    crate::operations::open_or_hydrate_run(&InMemoryStore::default(), run_dir)
+async fn test_run_store(_run_dir: &Path) -> Arc<dyn fabro_store::RunStore> {
+    let store: &dyn fabro_store::Store = &InMemoryStore::default();
+    store
+        .create_run("test-run", chrono::Utc::now(), None)
         .await
         .unwrap()
 }

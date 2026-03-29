@@ -25,8 +25,8 @@ use crate::handler::HandlerRegistry;
 use crate::outcome::{Outcome, StageStatus};
 use crate::pipeline::{
     self, DevcontainerSpec, FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted,
-    PullRequestOptions, RetroOptions, SandboxEnvSpec, build_conclusion, classify_engine_result,
-    persist_terminal_outcome,
+    PullRequestOptions, RetroOptions, SandboxEnvSpec, build_conclusion_from_store,
+    classify_engine_result, persist_terminal_outcome,
 };
 use crate::records::{Checkpoint, Conclusion, ConclusionExt, RunRecord, RunRecordExt};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
@@ -199,13 +199,15 @@ async fn persist_terminal_engine_failure(
     let engine_result: Result<Outcome, FabroError> = Err(error.clone());
     let (final_status, failure_reason, run_status, status_reason) =
         classify_engine_result(&engine_result);
-    let conclusion = build_conclusion(
+    let conclusion = build_conclusion_from_store(
+        run_store,
         run_dir,
         final_status,
         failure_reason,
         u64::try_from(duration.as_millis()).unwrap(),
         None,
-    );
+    )
+    .await;
     persist_terminal_outcome(run_dir, &conclusion, run_status, status_reason);
     if let Err(err) = run_store.put_conclusion(&conclusion).await {
         tracing::warn!(error = %err, "Failed to save terminal engine failure conclusion to store");
@@ -812,7 +814,7 @@ fn write_failure_conclusion(
     _reason: Option<StatusReason>,
 ) -> Result<Conclusion, FabroError> {
     if run_dir.join("conclusion.json").exists() {
-        return Conclusion::load(&run_dir.join("conclusion.json")).map_err(Into::into);
+        return Conclusion::load(&run_dir.join("conclusion.json"));
     }
 
     let conclusion = build_failure_conclusion(message);
@@ -1015,13 +1017,27 @@ mod tests {
         let registry = Arc::new(test_registry());
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
-        std::fs::write(run_dir.join("checkpoint.json"), "{}").unwrap();
+        let services = test_start_services(&run_dir, emitter, registry).await;
 
-        let result = start(
-            &run_dir,
-            test_start_services(&run_dir, emitter, registry).await,
-        )
-        .await;
+        // Write a checkpoint to the store (not disk) so start() sees it
+        let checkpoint = Checkpoint::from_context(
+            &Context::new(),
+            "start",
+            vec!["start".to_string()],
+            HashMap::new(),
+            HashMap::new(),
+            Some("exit".to_string()),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        );
+        services
+            .run_store
+            .put_checkpoint(&checkpoint)
+            .await
+            .unwrap();
+
+        let result = start(&run_dir, services).await;
 
         assert!(
             matches!(&result, Err(crate::error::FabroError::Precondition(_))),

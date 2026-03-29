@@ -42,7 +42,7 @@ pub(crate) struct SlateRunStoreInner {
 
 enum SlateRunDb {
     Writer(slatedb::Db),
-    Reader(DbReader),
+    Reader(Box<DbReader>),
 }
 
 impl SlateRunStore {
@@ -74,7 +74,7 @@ impl SlateRunStore {
                 created_at: record.created_at,
                 db_prefix: record.db_prefix,
                 run_dir: record.run_dir,
-                db: SlateRunDb::Reader(db),
+                db: SlateRunDb::Reader(Box::new(db)),
                 event_seq: AtomicU32::new(event_seq),
                 checkpoint_seq: AtomicU32::new(checkpoint_seq),
                 close_lock: Mutex::new(()),
@@ -518,7 +518,7 @@ impl SlateRunDb {
     async fn get_json<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
         match self {
             Self::Writer(db) => get_json(db, key).await,
-            Self::Reader(db) => get_json(db, key).await,
+            Self::Reader(db) => get_json(db.as_ref(), key).await,
         }
     }
 
@@ -529,7 +529,7 @@ impl SlateRunDb {
     async fn get_text(&self, key: &str) -> Result<Option<String>> {
         match self {
             Self::Writer(db) => get_text(db, key).await,
-            Self::Reader(db) => get_text(db, key).await,
+            Self::Reader(db) => get_text(db.as_ref(), key).await,
         }
     }
 
@@ -564,14 +564,14 @@ impl SlateRunDb {
     async fn list_events_from(&self, start_seq: u32) -> Result<Vec<EventEnvelope>> {
         match self {
             Self::Writer(db) => list_events_from(db, start_seq).await,
-            Self::Reader(db) => list_events_from(db, start_seq).await,
+            Self::Reader(db) => list_events_from(db.as_ref(), start_seq).await,
         }
     }
 
     async fn list_checkpoints(&self) -> Result<Vec<(u32, Checkpoint)>> {
         match self {
             Self::Writer(db) => list_checkpoints(db).await,
-            Self::Reader(db) => list_checkpoints(db).await,
+            Self::Reader(db) => list_checkpoints(db.as_ref()).await,
         }
     }
 }

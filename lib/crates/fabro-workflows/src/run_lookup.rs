@@ -173,7 +173,7 @@ pub async fn scan_runs_combined(store: &dyn Store, base: &Path) -> Result<Vec<Ru
             };
             let start_time_dt = summary.created_at;
             let start_time = summary.start_time.unwrap_or(start_time_dt);
-            let end_time = if summary.status.is_some_and(|status| status.is_terminal()) {
+            let end_time = if summary.status.is_some_and(RunStatus::is_terminal) {
                 summary.duration_ms.and_then(|duration_ms| {
                     Some(
                         start_time_dt

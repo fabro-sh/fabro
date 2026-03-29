@@ -10,6 +10,7 @@ use fabro_agent::{
 use fabro_llm::client::Client;
 use fabro_llm::provider::Provider;
 use fabro_llm::types::ToolDefinition;
+use fabro_store::RunStore;
 use fabro_util::redact::redact_jsonl_line;
 use tokio::sync::broadcast::Receiver;
 use tokio::task::JoinHandle;
@@ -118,6 +119,7 @@ const SUBMIT_RETRO_SCHEMA: &str = r#"{
 /// files via tool access, then calls `submit_retro` with its analysis.
 pub async fn run_retro_agent(
     sandbox: &Arc<dyn Sandbox>,
+    run_store: Option<&dyn RunStore>,
     run_dir: &Path,
     llm_client: &Client,
     provider: Provider,
@@ -127,7 +129,7 @@ pub async fn run_retro_agent(
     // Upload data files into sandbox (needed for Daytona; no-op effect for local
     // since the agent can also read from the original paths via tools).
     let retro_data_dir = "/tmp/retro_data";
-    upload_data_files(sandbox, run_dir, retro_data_dir).await?;
+    upload_data_files(sandbox, run_store, run_dir, retro_data_dir).await?;
 
     // Build provider profile with the submit_retro tool
     let captured: Arc<Mutex<Option<RetroNarrative>>> = Arc::new(Mutex::new(None));
@@ -348,6 +350,7 @@ fn build_profile(provider: Provider, model: &str) -> Box<dyn AgentProfile> {
 
 async fn upload_data_files(
     sandbox: &Arc<dyn Sandbox>,
+    run_store: Option<&dyn RunStore>,
     run_dir: &Path,
     target_dir: &str,
 ) -> anyhow::Result<()> {
@@ -357,23 +360,125 @@ async fn upload_data_files(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create retro data dir: {e}"))?;
 
-    let files = [
-        "progress.jsonl",
-        "checkpoint.json",
-        "run.json",
-        "start.json",
-    ];
-    for filename in &files {
-        let source = run_dir.join(filename);
-        if source.exists() {
-            let content = std::fs::read_to_string(&source)?;
-            sandbox
-                .write_file(&format!("{target_dir}/{filename}"), &content)
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to upload {filename}: {e}"))?;
+    // progress.jsonl — try store first, fall back to filesystem
+    let progress_content = if let Some(store) = run_store {
+        match store.list_events().await {
+            Ok(envelopes) => {
+                let lines: Vec<String> = envelopes
+                    .into_iter()
+                    .filter_map(|env| serde_json::to_string(env.payload.as_value()).ok())
+                    .collect();
+                if lines.is_empty() {
+                    None
+                } else {
+                    Some(lines.join("\n") + "\n")
+                }
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "Could not read events from store, falling back to filesystem");
+                None
+            }
         }
+    } else {
+        None
+    };
+    let progress_content = if progress_content.is_some() {
+        progress_content
+    } else {
+        let source = run_dir.join("progress.jsonl");
+        if source.exists() {
+            Some(std::fs::read_to_string(&source)?)
+        } else {
+            None
+        }
+    };
+    if let Some(content) = progress_content {
+        sandbox
+            .write_file(&format!("{target_dir}/progress.jsonl"), &content)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to upload progress.jsonl: {e}"))?;
     }
 
+    // checkpoint.json — try store first, fall back to filesystem
+    let checkpoint_content = if let Some(store) = run_store {
+        match store.get_checkpoint().await {
+            Ok(Some(cp)) => serde_json::to_string_pretty(&cp).ok(),
+            Ok(None) => None,
+            Err(e) => {
+                tracing::debug!(error = %e, "Could not read checkpoint from store, falling back to filesystem");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    upload_file_with_fallback(
+        sandbox,
+        run_dir,
+        target_dir,
+        "checkpoint.json",
+        checkpoint_content,
+    )
+    .await?;
+
+    // run.json — try store first, fall back to filesystem
+    let run_content = if let Some(store) = run_store {
+        match store.get_run().await {
+            Ok(Some(run)) => serde_json::to_string_pretty(&run).ok(),
+            Ok(None) => None,
+            Err(e) => {
+                tracing::debug!(error = %e, "Could not read run from store, falling back to filesystem");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    upload_file_with_fallback(sandbox, run_dir, target_dir, "run.json", run_content).await?;
+
+    // start.json — try store first, fall back to filesystem
+    let start_content = if let Some(store) = run_store {
+        match store.get_start().await {
+            Ok(Some(start)) => serde_json::to_string_pretty(&start).ok(),
+            Ok(None) => None,
+            Err(e) => {
+                tracing::debug!(error = %e, "Could not read start from store, falling back to filesystem");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    upload_file_with_fallback(sandbox, run_dir, target_dir, "start.json", start_content).await?;
+
+    Ok(())
+}
+
+/// Upload a single file to the sandbox. If `store_content` is `Some`, use it directly;
+/// otherwise fall back to reading from `run_dir/filename` on the filesystem.
+async fn upload_file_with_fallback(
+    sandbox: &Arc<dyn Sandbox>,
+    run_dir: &Path,
+    target_dir: &str,
+    filename: &str,
+    store_content: Option<String>,
+) -> anyhow::Result<()> {
+    let content = if store_content.is_some() {
+        store_content
+    } else {
+        let source = run_dir.join(filename);
+        if source.exists() {
+            Some(std::fs::read_to_string(&source)?)
+        } else {
+            None
+        }
+    };
+    if let Some(content) = content {
+        sandbox
+            .write_file(&format!("{target_dir}/{filename}"), &content)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to upload {filename}: {e}"))?;
+    }
     Ok(())
 }
 

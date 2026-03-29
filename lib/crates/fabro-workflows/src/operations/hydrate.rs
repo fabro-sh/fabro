@@ -47,23 +47,45 @@ pub async fn open_or_hydrate_run(
     if let Some(start) = load_start_record(run_dir)? {
         run_store.put_start(&start).await.map_err(store_error)?;
     }
-    if let Some(checkpoint) = load_checkpoint(run_dir)? {
-        run_store
-            .put_checkpoint(&checkpoint)
-            .await
-            .map_err(store_error)?;
+    match load_checkpoint(run_dir) {
+        Ok(Some(checkpoint)) => {
+            run_store
+                .put_checkpoint(&checkpoint)
+                .await
+                .map_err(store_error)?;
+        }
+        Ok(None) => {}
+        Err(err) => {
+            tracing::warn!(error = %err, "Skipping malformed checkpoint.json during hydration")
+        }
     }
-    if let Some(conclusion) = load_conclusion(run_dir)? {
-        run_store
-            .put_conclusion(&conclusion)
-            .await
-            .map_err(store_error)?;
+    match load_conclusion(run_dir) {
+        Ok(Some(conclusion)) => {
+            run_store
+                .put_conclusion(&conclusion)
+                .await
+                .map_err(store_error)?;
+        }
+        Ok(None) => {}
+        Err(err) => {
+            tracing::warn!(error = %err, "Skipping malformed conclusion.json during hydration")
+        }
     }
-    if let Some(retro) = load_retro(run_dir)? {
-        run_store.put_retro(&retro).await.map_err(store_error)?;
+    match load_retro(run_dir) {
+        Ok(Some(retro)) => {
+            run_store.put_retro(&retro).await.map_err(store_error)?;
+        }
+        Ok(None) => {}
+        Err(err) => tracing::warn!(error = %err, "Skipping malformed retro.json during hydration"),
     }
-    if let Some(sandbox) = load_sandbox_record(run_dir)? {
-        run_store.put_sandbox(&sandbox).await.map_err(store_error)?;
+    match load_sandbox_record(run_dir) {
+        Ok(Some(sandbox)) => {
+            run_store.put_sandbox(&sandbox).await.map_err(store_error)?;
+        }
+        Ok(None) => {}
+        Err(err) => {
+            tracing::warn!(error = %err, "Skipping malformed sandbox.json during hydration")
+        }
     }
 
     hydrate_events(run_dir, &record.run_id, run_store.as_ref()).await?;
