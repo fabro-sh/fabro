@@ -23,7 +23,7 @@ async fn view_from(
     args: PrViewArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {
-    let (record, _run_dir) = super::load_pr_record(base, &args.run_id)?;
+    let (record, _run_dir) = super::load_pr_record(base, &args.run_id).await?;
 
     let creds = github_app.context(
         "GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id",

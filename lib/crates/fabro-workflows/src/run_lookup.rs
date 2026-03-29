@@ -162,6 +162,9 @@ pub async fn scan_runs_combined(store: &dyn Store, base: &Path) -> Result<Vec<Ru
                 continue;
             };
             let path = PathBuf::from(run_dir);
+            if !path.exists() {
+                continue;
+            }
             let Some(dir_name) = path
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())

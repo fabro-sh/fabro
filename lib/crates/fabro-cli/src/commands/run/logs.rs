@@ -9,7 +9,7 @@ use fabro_store::RunStore;
 use fabro_util::terminal::Styles;
 use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 use futures::StreamExt;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::args::LogsArgs;
 use crate::cli_config::load_cli_settings;
@@ -28,25 +28,34 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles) -> Result<()> {
     };
 
     let run_store = crate::store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
-    let (all_lines, last_seq) = match run_store.as_ref() {
-        Some(run_store) => {
-            let events = run_store
-                .list_events()
-                .await
-                .context("Failed to list store-backed run events")?;
-            let last_seq = events.last().map(|event| event.seq).unwrap_or(0);
-            let lines = events
-                .iter()
-                .map(event_payload_line)
-                .collect::<Result<Vec<_>>>()?;
-            (lines, last_seq)
-        }
+    let progress_path = run.path.join("progress.jsonl");
+    let (all_lines, last_seq, use_store_follow) = match run_store.as_ref() {
+        Some(run_store) => match run_store.list_events().await {
+            Ok(events) => {
+                let last_seq = events.last().map(|event| event.seq).unwrap_or(0);
+                let lines = events
+                    .iter()
+                    .map(event_payload_line)
+                    .collect::<Result<Vec<_>>>()?;
+                (lines, last_seq, true)
+            }
+            Err(err) => {
+                if !progress_path.exists() {
+                    return Err(err).context("Failed to list store-backed run events");
+                }
+                warn!(
+                    run_id = %run.run_id,
+                    error = %err,
+                    "Failed to read events from store; falling back to progress.jsonl"
+                );
+                (read_lines(&progress_path)?, 0, false)
+            }
+        },
         None => {
-            let progress_path = run.path.join("progress.jsonl");
             if !progress_path.exists() {
                 bail!("No progress.jsonl found for run '{}'", run.run_id);
             }
-            (read_lines(&progress_path)?, 0)
+            (read_lines(&progress_path)?, 0, false)
         }
     };
     let filtered = apply_filters(&all_lines, since_cutoff.as_ref(), args.tail);
@@ -66,18 +75,44 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles) -> Result<()> {
     }
 
     if args.follow {
-        if let Some(run_store) = run_store.as_ref() {
-            follow_store_logs(
-                run_store.as_ref(),
-                if last_seq == 0 { 1 } else { last_seq + 1 },
-                args.pretty,
-                styles,
-                is_tty,
-            )
-            .await?;
+        if use_store_follow {
+            if let Some(run_store) = run_store.as_ref() {
+                match follow_store_logs(
+                    run_store.as_ref(),
+                    if last_seq == 0 { 1 } else { last_seq + 1 },
+                    args.pretty,
+                    styles,
+                    is_tty,
+                )
+                .await
+                {
+                    Ok(()) => {}
+                    Err(err) => {
+                        if !progress_path.exists() {
+                            return Err(err);
+                        }
+                        warn!(
+                            run_id = %run.run_id,
+                            error = %err,
+                            "Failed to follow store events; falling back to progress.jsonl"
+                        );
+                        let lines_seen = read_lines(&progress_path)?.len();
+                        follow_logs(
+                            &progress_path,
+                            &run.path,
+                            lines_seen,
+                            args.pretty,
+                            styles,
+                            is_tty,
+                        )?;
+                    }
+                }
+            } else {
+                unreachable!("store follow requested without a run store");
+            }
         } else {
             follow_logs(
-                &run.path.join("progress.jsonl"),
+                &progress_path,
                 &run.path,
                 all_lines.len(),
                 args.pretty,

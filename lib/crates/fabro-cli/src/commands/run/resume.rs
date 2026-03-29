@@ -2,7 +2,7 @@ use anyhow::bail;
 use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 use fabro_workflows::records::{RunRecord, RunRecordExt};
-use fabro_workflows::run_lookup::{find_run_by_prefix, runs_base};
+use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 
 use crate::args::ResumeArgs;
 use crate::cli_config::load_cli_settings;
@@ -18,7 +18,9 @@ pub(crate) async fn resume_command(
 ) -> anyhow::Result<()> {
     let cli_settings = load_cli_settings(None)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let run_dir = find_run_by_prefix(&base, &args.run)?;
+    let store = crate::store::build_store(&cli_settings.storage_dir())?;
+    let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
+    let run_dir = run.path;
 
     // find_run_by_prefix can match orphan directories (no run.json).
     if !run_dir.join("run.json").exists() {
@@ -35,7 +37,8 @@ pub(crate) async fn resume_command(
     if args.detach {
         println!("{run_id}");
     } else {
-        let exit_code = super::attach::attach_run(&run_dir, true, styles, Some(child)).await?;
+        let exit_code =
+            super::attach::attach_run(&run_dir, Some(&run_id), true, styles, Some(child)).await?;
         super::output::print_run_summary(&run_dir, &run_id, styles);
         if exit_code != std::process::ExitCode::SUCCESS {
             std::process::exit(1);

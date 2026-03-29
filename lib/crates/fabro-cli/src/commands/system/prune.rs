@@ -3,18 +3,20 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use fabro_config::FabroSettingsExt;
+use fabro_store::Store;
 use tracing::{debug, info};
 
-use fabro_workflows::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs};
+use fabro_workflows::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_combined};
 
 use crate::args::RunsPruneArgs;
 use crate::cli_config::load_cli_settings;
 use crate::shared::format_size;
 
-pub(super) fn prune_command(args: &RunsPruneArgs) -> Result<()> {
+pub(super) async fn prune_command(args: &RunsPruneArgs) -> Result<()> {
     let cli_settings = load_cli_settings(None)?;
     let base = runs_base(&cli_settings.storage_dir());
-    prune_from(args, &base)
+    let store = crate::store::build_store(&cli_settings.storage_dir())?;
+    prune_from(args, store.as_ref(), &base).await
 }
 
 pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
@@ -33,8 +35,8 @@ pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
     }
 }
 
-fn prune_from(args: &RunsPruneArgs, base: &Path) -> Result<()> {
-    let runs = scan_runs(base)?;
+async fn prune_from(args: &RunsPruneArgs, store: &dyn Store, base: &Path) -> Result<()> {
+    let runs = scan_runs_combined(store, base).await?;
     let label_filters = parse_label_filters(&args.filter.label);
     let mut filtered = filter_runs(
         &runs,
@@ -79,6 +81,10 @@ fn prune_from(args: &RunsPruneArgs, base: &Path) -> Result<()> {
         for run in &filtered {
             info!(run_id = %run.run_id, path = %run.path.display(), "deleting run");
             std::fs::remove_dir_all(&run.path)?;
+            store
+                .delete_run(&run.run_id)
+                .await
+                .with_context(|| format!("failed to delete store state for {}", run.run_id))?;
         }
         eprintln!(
             "{} run(s) deleted ({} freed).",

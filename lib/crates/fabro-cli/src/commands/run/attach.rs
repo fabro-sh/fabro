@@ -6,9 +6,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
+use fabro_config::FabroSettingsExt;
+use futures::StreamExt;
 
 use fabro_interview::{AnswerValue, ConsoleInterviewer};
-use fabro_store::RuntimeState;
+use fabro_store::{EventEnvelope, RunStore, RuntimeState};
 use fabro_util::terminal::Styles;
 use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::records::{Conclusion, ConclusionExt, RunRecord, RunRecordExt};
@@ -30,13 +32,67 @@ const INTERVIEW_UNANSWERED_MESSAGE: &str =
 /// Returns exit code 0 for success/partial_success, 1 otherwise.
 pub(crate) async fn attach_run(
     run_dir: &Path,
+    run_id: Option<&str>,
     kill_on_detach: bool,
     styles: &'static Styles,
     engine_child: Option<std::process::Child>,
 ) -> Result<ExitCode> {
-    let progress_path = run_dir.join("progress.jsonl");
-    let conclusion_path = run_dir.join("conclusion.json");
-    let status_path = run_dir.join("status.json");
+    let run_record = RunRecord::load(run_dir).ok();
+    if let (Some(storage_dir), Some(run_id)) = (
+        run_record
+            .as_ref()
+            .map(|record| record.settings.storage_dir()),
+        run_id.or_else(|| run_record.as_ref().map(|record| record.run_id.as_str())),
+    ) {
+        match crate::store::open_run_reader(&storage_dir, run_id).await {
+            Ok(Some(run_store)) => match run_store.list_events().await {
+                Ok(events) => {
+                    let event_lines = events
+                        .iter()
+                        .map(event_payload_line)
+                        .collect::<Result<Vec<_>>>()?;
+                    return attach_run_store(
+                        run_dir,
+                        run_store.as_ref(),
+                        event_lines,
+                        events.last().map(|event| event.seq).unwrap_or(0),
+                        kill_on_detach,
+                        styles,
+                        engine_child,
+                    )
+                    .await;
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        run_id,
+                        error = %err,
+                        "Failed to list events from store; falling back to filesystem attach"
+                    );
+                }
+            },
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!(
+                    run_id,
+                    error = %err,
+                    "Failed to open store reader; falling back to filesystem attach"
+                );
+            }
+        }
+    }
+
+    attach_run_files(run_dir, kill_on_detach, styles, engine_child).await
+}
+
+async fn attach_run_store(
+    run_dir: &Path,
+    run_store: &dyn RunStore,
+    existing_events: Vec<String>,
+    last_seq: u32,
+    kill_on_detach: bool,
+    styles: &'static Styles,
+    engine_child: Option<std::process::Child>,
+) -> Result<ExitCode> {
     let runtime_state = RuntimeState::new(run_dir);
     let runtime_interview_paths = InterviewPaths::from_runtime_state(&runtime_state);
 
@@ -58,68 +114,13 @@ pub(crate) async fn attach_run(
         });
     }
 
-    // Wait for progress.jsonl to appear.
-    // If the engine dies during early init (before any event is emitted),
-    // progress.jsonl may never be created. Check for terminal status or
-    // engine death so we surface the real failure instead of timing out.
-    let mut wait_count = 0;
-    while !progress_path.exists() {
-        sleep(std::time::Duration::from_millis(100)).await;
-        wait_count += 1;
-
-        // Check if engine died before writing any progress
-        if let Some(record) = read_status_record(&status_path) {
-            if record.status.is_terminal() {
-                progress_ui.finish();
-                return Ok(determine_exit_code(&conclusion_path, Some(record)));
-            }
-        }
-
-        if let Some(guard) = engine_guard.as_mut() {
-            if let Some(child) = guard.inner() {
-                if matches!(child.try_wait(), Ok(Some(_))) {
-                    // Engine exited without writing progress.jsonl
-                    progress_ui.finish();
-                    return Ok(determine_exit_code(
-                        &conclusion_path,
-                        read_status_record(&status_path),
-                    ));
-                }
-            }
-        }
-
-        if let Some(pid) = read_launcher_pid(run_dir) {
-            if !process_alive(pid) && wait_count > 5 {
-                progress_ui.finish();
-                return Ok(determine_exit_code(
-                    &conclusion_path,
-                    read_status_record(&status_path),
-                ));
-            }
-        }
-
-        if wait_count > 100 {
-            // Guard's Drop kills+waits on the engine child
-            drop(engine_guard.take());
-            bail!(
-                "Timed out waiting for progress.jsonl to appear in {}",
-                run_dir.display()
-            );
-        }
-        if cancelled.load(Ordering::Relaxed) {
-            if !kill_on_detach {
-                if let Some(guard) = engine_guard.as_mut() {
-                    guard.defuse();
-                }
-            }
-            // Guard's Drop kills+waits when kill_on_detach is true
-            return Ok(ExitCode::from(1));
-        }
+    for line in &existing_events {
+        progress_ui.handle_json_line(line);
     }
 
-    let file = std::fs::File::open(&progress_path)?;
-    let mut reader = BufReader::new(file);
-    let mut line = String::new();
+    let mut stream = run_store
+        .watch_events_from(if last_seq == 0 { 1 } else { last_seq + 1 })
+        .await?;
     let mut cached_pid: Option<u32> = None;
     let attach_started = Instant::now();
 
@@ -135,8 +136,12 @@ pub(crate) async fn attach_run(
                 }
                 // Wait briefly for a terminal status or conclusion
                 for _ in 0..20 {
-                    if conclusion_path.exists()
-                        || read_status_record(&status_path)
+                    if run_store.get_conclusion().await.ok().flatten().is_some()
+                        || run_store
+                            .get_status()
+                            .await
+                            .ok()
+                            .flatten()
                             .is_some_and(|record| record.status.is_terminal())
                     {
                         break;
@@ -152,17 +157,15 @@ pub(crate) async fn attach_run(
             break;
         }
 
-        // Read new lines from progress.jsonl
-        loop {
-            line.clear();
-            let bytes_read = reader.read_line(&mut line)?;
-            if bytes_read == 0 {
-                break;
+        let mut saw_event = false;
+        match tokio::time::timeout(Duration::from_millis(100), stream.next()).await {
+            Ok(Some(Ok(event))) => {
+                let line = event_payload_line(&event)?;
+                progress_ui.handle_json_line(&line);
+                saw_event = true;
             }
-            let trimmed = line.trim();
-            if !trimmed.is_empty() {
-                progress_ui.handle_json_line(trimmed);
-            }
+            Ok(Some(Err(err))) => return Err(err.into()),
+            Ok(None) | Err(_) => {}
         }
 
         // Check for interview request
@@ -206,7 +209,11 @@ pub(crate) async fn attach_run(
             }
         }
 
-        let terminal_status = read_status_record(&status_path)
+        let terminal_status = run_store
+            .get_status()
+            .await
+            .ok()
+            .flatten()
             .map(|record| record.status)
             .filter(|status| status.is_terminal());
 
@@ -214,6 +221,211 @@ pub(crate) async fn attach_run(
             guard.inner().map(|child| match child.try_wait() {
                 Ok(None) => true,              // still running
                 Ok(Some(_)) | Err(_) => false, // exited or error
+            })
+        });
+
+        if let Some(child_alive) = child_alive_via_handle {
+            if !child_alive && !saw_event {
+                break;
+            }
+        } else {
+            if terminal_status.is_some() && !saw_event {
+                break;
+            }
+
+            let engine_alive = match cached_pid {
+                Some(pid) => process_alive(pid),
+                None => {
+                    if let Some(pid) = read_launcher_pid(run_dir) {
+                        cached_pid = Some(pid);
+                        process_alive(pid)
+                    } else {
+                        attach_started.elapsed() < ATTACH_STARTUP_GRACE || last_seq > 0
+                    }
+                }
+            };
+            if !engine_alive {
+                break;
+            }
+        }
+    }
+
+    progress_ui.finish();
+
+    Ok(determine_exit_code_with_store(run_store, run_dir).await)
+}
+
+async fn attach_run_files(
+    run_dir: &Path,
+    kill_on_detach: bool,
+    styles: &'static Styles,
+    engine_child: Option<std::process::Child>,
+) -> Result<ExitCode> {
+    let progress_path = run_dir.join("progress.jsonl");
+    let conclusion_path = run_dir.join("conclusion.json");
+    let status_path = run_dir.join("status.json");
+    let runtime_state = RuntimeState::new(run_dir);
+    let runtime_interview_paths = InterviewPaths::from_runtime_state(&runtime_state);
+
+    let mut engine_guard = engine_child.map(EngineChildGuard::new);
+
+    let is_tty = std::io::stderr().is_terminal();
+    let verbose = RunRecord::load(run_dir)
+        .map(|record| record.settings.verbose_enabled())
+        .unwrap_or(false);
+    let mut progress_ui = run_progress::ProgressUI::new(is_tty, verbose);
+
+    let cancelled = Arc::new(AtomicBool::new(false));
+    {
+        let cancelled = Arc::clone(&cancelled);
+        tokio::spawn(async move {
+            let _ = ctrl_c().await;
+            cancelled.store(true, Ordering::Relaxed);
+        });
+    }
+
+    let mut wait_count = 0;
+    while !progress_path.exists() {
+        sleep(std::time::Duration::from_millis(100)).await;
+        wait_count += 1;
+
+        if let Some(record) = read_status_record(&status_path) {
+            if record.status.is_terminal() {
+                progress_ui.finish();
+                return Ok(determine_exit_code(&conclusion_path, Some(record)));
+            }
+        }
+
+        if let Some(guard) = engine_guard.as_mut() {
+            if let Some(child) = guard.inner() {
+                if matches!(child.try_wait(), Ok(Some(_))) {
+                    progress_ui.finish();
+                    return Ok(determine_exit_code(
+                        &conclusion_path,
+                        read_status_record(&status_path),
+                    ));
+                }
+            }
+        }
+
+        if let Some(pid) = read_launcher_pid(run_dir) {
+            if !process_alive(pid) && wait_count > 5 {
+                progress_ui.finish();
+                return Ok(determine_exit_code(
+                    &conclusion_path,
+                    read_status_record(&status_path),
+                ));
+            }
+        }
+
+        if wait_count > 100 {
+            drop(engine_guard.take());
+            bail!(
+                "Timed out waiting for progress.jsonl to appear in {}",
+                run_dir.display()
+            );
+        }
+        if cancelled.load(Ordering::Relaxed) {
+            if !kill_on_detach {
+                if let Some(guard) = engine_guard.as_mut() {
+                    guard.defuse();
+                }
+            }
+            return Ok(ExitCode::from(1));
+        }
+    }
+
+    let file = std::fs::File::open(&progress_path)?;
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+    let mut cached_pid: Option<u32> = None;
+    let attach_started = Instant::now();
+
+    loop {
+        if cancelled.load(Ordering::Relaxed) {
+            if kill_on_detach {
+                if let Some(guard) = engine_guard.as_mut() {
+                    if let Some(child) = guard.inner() {
+                        let _ = child.kill();
+                    }
+                } else {
+                    kill_engine(run_dir);
+                }
+                for _ in 0..20 {
+                    if conclusion_path.exists()
+                        || read_status_record(&status_path)
+                            .is_some_and(|record| record.status.is_terminal())
+                    {
+                        break;
+                    }
+                    sleep(Duration::from_millis(100)).await;
+                }
+            } else {
+                if let Some(guard) = engine_guard.as_mut() {
+                    guard.defuse();
+                }
+                eprintln!("Detached from run (engine continues in background)");
+            }
+            break;
+        }
+
+        loop {
+            line.clear();
+            let bytes_read = reader.read_line(&mut line)?;
+            if bytes_read == 0 {
+                break;
+            }
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                progress_ui.handle_json_line(trimmed);
+            }
+        }
+
+        if runtime_interview_paths.request_path.exists() {
+            let interview_paths = &runtime_interview_paths;
+            if !interview_paths.response_path.exists() {
+                if let Some(_claim_guard) =
+                    InterviewClaimGuard::acquire(&interview_paths.claim_path)
+                {
+                    if let Ok(request_data) = std::fs::read_to_string(&interview_paths.request_path)
+                    {
+                        if let Ok(question) =
+                            serde_json::from_str::<fabro_interview::Question>(&request_data)
+                        {
+                            progress_ui.hide_bars();
+
+                            let interviewer = ConsoleInterviewer::new(styles);
+                            let answer =
+                                fabro_interview::Interviewer::ask(&interviewer, question).await;
+
+                            progress_ui.show_bars();
+
+                            if answer_requires_reattach(&answer) {
+                                if let Some(guard) = engine_guard.as_mut() {
+                                    guard.defuse();
+                                }
+                                eprintln!("{INTERVIEW_UNANSWERED_MESSAGE}");
+                                return Ok(ExitCode::from(1));
+                            }
+
+                            write_interview_response_atomically(
+                                &interview_paths.response_path,
+                                &answer,
+                            )?;
+                        }
+                    }
+                }
+            }
+        }
+
+        let terminal_status = read_status_record(&status_path)
+            .map(|record| record.status)
+            .filter(|status| status.is_terminal());
+
+        let child_alive_via_handle = engine_guard.as_mut().and_then(|guard| {
+            guard.inner().map(|child| match child.try_wait() {
+                Ok(None) => true,
+                Ok(Some(_)) | Err(_) => false,
             })
         });
 
@@ -249,7 +461,6 @@ pub(crate) async fn attach_run(
         sleep(Duration::from_millis(100)).await;
     }
 
-    // Finish progress bars
     progress_ui.finish();
 
     Ok(determine_exit_code(
@@ -275,6 +486,10 @@ fn drain_remaining(
             }
         }
     }
+}
+
+fn event_payload_line(event: &EventEnvelope) -> Result<String> {
+    serde_json::to_string(event.payload.as_value()).map_err(Into::into)
 }
 
 fn read_status_record(path: &Path) -> Option<RunStatusRecord> {
@@ -426,6 +641,31 @@ fn determine_exit_code(conclusion_path: &Path, status_record: Option<RunStatusRe
     }
 }
 
+async fn determine_exit_code_with_store(run_store: &dyn RunStore, run_dir: &Path) -> ExitCode {
+    match run_store.get_conclusion().await {
+        Ok(Some(conclusion)) => {
+            let success = matches!(
+                conclusion.status,
+                StageStatus::Success | StageStatus::PartialSuccess
+            );
+            if success {
+                ExitCode::from(0)
+            } else {
+                ExitCode::from(1)
+            }
+        }
+        Ok(None) | Err(_) => {
+            let status_path = run_dir.join("status.json");
+            let conclusion_path = run_dir.join("conclusion.json");
+            let status_record = match run_store.get_status().await {
+                Ok(record) => record.or_else(|| read_status_record(&status_path)),
+                Err(_) => read_status_record(&status_path),
+            };
+            determine_exit_code(&conclusion_path, status_record)
+        }
+    }
+}
+
 #[allow(unsafe_code)]
 fn kill_engine(run_dir: &Path) {
     if let Some(pid) = read_launcher_pid(run_dir).map(|pid| i32::try_from(pid).unwrap()) {
@@ -497,7 +737,7 @@ mod tests {
             .unwrap();
         let started = Instant::now();
 
-        let exit = attach_run(dir.path(), false, no_color_styles(), Some(child))
+        let exit = attach_run(dir.path(), None, false, no_color_styles(), Some(child))
             .await
             .unwrap();
 
@@ -518,7 +758,7 @@ mod tests {
             Some(StatusReason::LaunchFailed),
         );
 
-        let exit = attach_run(dir.path(), false, no_color_styles(), None)
+        let exit = attach_run(dir.path(), None, false, no_color_styles(), None)
             .await
             .unwrap();
 

@@ -25,7 +25,8 @@ pub(crate) async fn execute(mut args: RunArgs, _globals: &GlobalArgs) -> Result<
     if args.detach {
         println!("{run_id}");
     } else {
-        let exit_code = super::attach::attach_run(&run_dir, true, styles, Some(child)).await?;
+        let exit_code =
+            super::attach::attach_run(&run_dir, Some(&run_id), true, styles, Some(child)).await?;
         super::output::print_run_summary(&run_dir, &run_id, styles);
         if exit_code != std::process::ExitCode::SUCCESS {
             std::process::exit(1);
