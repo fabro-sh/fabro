@@ -276,10 +276,10 @@ async fn write_retro_prompt(
     prompt: &str,
 ) -> anyhow::Result<()> {
     if let Some(store) = run_store {
-        store
-            .put_retro_prompt(prompt)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to save retro prompt to store: {e}"))?;
+        if let Err(err) = store.put_retro_prompt(prompt).await {
+            tracing::warn!(error = %err, "Failed to save retro prompt to store");
+            std::fs::write(retro_dir.join("prompt.md"), prompt)?;
+        }
     } else {
         std::fs::write(retro_dir.join("prompt.md"), prompt)?;
     }
@@ -292,10 +292,10 @@ async fn write_retro_response(
     response: &str,
 ) -> anyhow::Result<()> {
     if let Some(store) = run_store {
-        store
-            .put_retro_response(response)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to save retro response to store: {e}"))?;
+        if let Err(err) = store.put_retro_response(response).await {
+            tracing::warn!(error = %err, "Failed to save retro response to store");
+            std::fs::write(retro_dir.join("response.md"), response)?;
+        }
     } else {
         std::fs::write(retro_dir.join("response.md"), response)?;
     }

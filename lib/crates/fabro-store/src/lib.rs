@@ -14,7 +14,7 @@ mod runtime;
 mod slate;
 mod types;
 
-pub use disk_projecting::DiskProjectingRunStore;
+pub use disk_projecting::{DiskProjectingRunStore, ProjectionError};
 pub use error::{Result, StoreError};
 pub use memory::InMemoryStore;
 pub use runtime::RuntimeState;

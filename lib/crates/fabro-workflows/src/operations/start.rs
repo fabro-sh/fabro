@@ -11,7 +11,7 @@ use fabro_config::{project as project_config, run as run_config, sandbox as sand
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec, detect_clone_params};
-use fabro_store::{DiskProjectingRunStore, RunStore};
+use fabro_store::{DiskProjectingRunStore, ProjectionError, RunStore};
 use serde::Serialize;
 
 use crate::context::Context;
@@ -118,10 +118,37 @@ pub(super) async fn execute_persisted_run(
     mut services: StartServices,
 ) -> Result<Started, FabroError> {
     let inner_store = Arc::clone(&services.run_store);
-    services.run_store = Arc::new(DiskProjectingRunStore::new(
-        inner_store,
-        run_dir.to_path_buf(),
-    ));
+    let projection_run_dir = run_dir.to_path_buf();
+    services.run_store = Arc::new(
+        DiskProjectingRunStore::new(inner_store, run_dir.to_path_buf()).on_projection_error(
+            Arc::new(move |projection_error: ProjectionError| {
+                let Some(run_id) = load_run_id(&projection_run_dir) else {
+                    return;
+                };
+
+                // Write directly to progress.jsonl/live.json so projection failures do not
+                // recurse back through the decorated store.append_event() path.
+                let _ = append_progress_event(
+                    &projection_run_dir,
+                    &run_id,
+                    &WorkflowRunEvent::RunNotice {
+                        level: RunNoticeLevel::Warn,
+                        code: "disk_projection_failed".to_string(),
+                        message: format!(
+                            "{}disk projection failed for {}: {}",
+                            if projection_error.critical {
+                                "critical "
+                            } else {
+                                ""
+                            },
+                            projection_error.path.display(),
+                            projection_error.error
+                        ),
+                    },
+                );
+            }),
+        ),
+    );
     let run_store = Arc::clone(&services.run_store);
     if let Err(err) = run_store
         .put_status(&run_status::RunStatusRecord::new(

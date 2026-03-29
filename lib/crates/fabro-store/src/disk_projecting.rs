@@ -17,18 +17,39 @@ use fabro_types::{
     StartRecord,
 };
 
+#[derive(Debug, Clone)]
+pub struct ProjectionError {
+    pub path: PathBuf,
+    pub critical: bool,
+    pub error: String,
+}
+
 pub struct DiskProjectingRunStore {
     inner: Arc<dyn RunStore>,
     run_dir: PathBuf,
+    on_projection_error: Option<Arc<dyn Fn(ProjectionError) + Send + Sync>>,
 }
 
 impl DiskProjectingRunStore {
     #[must_use]
     pub fn new(inner: Arc<dyn RunStore>, run_dir: PathBuf) -> Self {
-        Self { inner, run_dir }
+        Self {
+            inner,
+            run_dir,
+            on_projection_error: None,
+        }
     }
 
-    fn warn_projection(path: &Path, err: &std::io::Error, critical: bool) {
+    #[must_use]
+    pub fn on_projection_error(
+        mut self,
+        callback: Arc<dyn Fn(ProjectionError) + Send + Sync>,
+    ) -> Self {
+        self.on_projection_error = Some(callback);
+        self
+    }
+
+    fn report_projection_error(&self, path: &Path, err: &std::io::Error, critical: bool) {
         if critical {
             warn!(
                 path = %path.display(),
@@ -38,35 +59,43 @@ impl DiskProjectingRunStore {
         } else {
             warn!(path = %path.display(), error = %err, "Disk projection failed");
         }
-    }
 
-    fn write_json_critical<T: serde::Serialize>(path: &Path, value: &T) {
-        if let Err(err) = write_json(path, value) {
-            Self::warn_projection(path, &err, true);
+        if let Some(ref callback) = self.on_projection_error {
+            callback(ProjectionError {
+                path: path.to_path_buf(),
+                critical,
+                error: err.to_string(),
+            });
         }
     }
 
-    fn write_json_best_effort<T: serde::Serialize>(path: &Path, value: &T) {
+    fn write_json_critical<T: serde::Serialize>(&self, path: &Path, value: &T) {
         if let Err(err) = write_json(path, value) {
-            Self::warn_projection(path, &err, false);
+            self.report_projection_error(path, &err, true);
         }
     }
 
-    fn write_text_best_effort(path: &Path, value: &str) {
+    fn write_json_best_effort<T: serde::Serialize>(&self, path: &Path, value: &T) {
+        if let Err(err) = write_json(path, value) {
+            self.report_projection_error(path, &err, false);
+        }
+    }
+
+    fn write_text_best_effort(&self, path: &Path, value: &str) {
         if let Err(err) = write_text(path, value) {
-            Self::warn_projection(path, &err, false);
+            self.report_projection_error(path, &err, false);
         }
     }
 
     fn append_jsonl_critical(&self, payload: &EventPayload) {
         let progress_path = self.run_dir.join("progress.jsonl");
         if let Err(err) = append_jsonl(&progress_path, payload) {
-            Self::warn_projection(&progress_path, &err, true);
+            self.report_projection_error(&progress_path, &err, true);
         }
 
         let live_path = self.run_dir.join("live.json");
         if let Err(err) = write_live_json(&live_path, payload) {
-            Self::warn_projection(&live_path, &err, true);
+            self.report_projection_error(&live_path, &err, true);
         }
     }
 }
@@ -121,7 +150,7 @@ fn write_live_json(path: &Path, payload: &EventPayload) -> std::io::Result<()> {
 impl RunStore for DiskProjectingRunStore {
     async fn put_run(&self, record: &RunRecord) -> Result<()> {
         self.inner.put_run(record).await?;
-        Self::write_json_best_effort(&self.run_dir.join("run.json"), record);
+        self.write_json_best_effort(&self.run_dir.join("run.json"), record);
         Ok(())
     }
 
@@ -131,7 +160,7 @@ impl RunStore for DiskProjectingRunStore {
 
     async fn put_start(&self, record: &StartRecord) -> Result<()> {
         self.inner.put_start(record).await?;
-        Self::write_json_best_effort(&self.run_dir.join("start.json"), record);
+        self.write_json_best_effort(&self.run_dir.join("start.json"), record);
         Ok(())
     }
 
@@ -140,7 +169,7 @@ impl RunStore for DiskProjectingRunStore {
     }
 
     async fn put_status(&self, record: &RunStatusRecord) -> Result<()> {
-        Self::write_json_critical(&self.run_dir.join("status.json"), record);
+        self.write_json_critical(&self.run_dir.join("status.json"), record);
         self.inner.put_status(record).await
     }
 
@@ -150,7 +179,7 @@ impl RunStore for DiskProjectingRunStore {
 
     async fn put_checkpoint(&self, record: &Checkpoint) -> Result<()> {
         self.inner.put_checkpoint(record).await?;
-        Self::write_json_best_effort(&self.run_dir.join("checkpoint.json"), record);
+        self.write_json_best_effort(&self.run_dir.join("checkpoint.json"), record);
         Ok(())
     }
 
@@ -167,7 +196,7 @@ impl RunStore for DiskProjectingRunStore {
     }
 
     async fn put_conclusion(&self, record: &Conclusion) -> Result<()> {
-        Self::write_json_critical(&self.run_dir.join("conclusion.json"), record);
+        self.write_json_critical(&self.run_dir.join("conclusion.json"), record);
         self.inner.put_conclusion(record).await
     }
 
@@ -177,7 +206,7 @@ impl RunStore for DiskProjectingRunStore {
 
     async fn put_retro(&self, retro: &Retro) -> Result<()> {
         self.inner.put_retro(retro).await?;
-        Self::write_json_best_effort(&self.run_dir.join("retro.json"), retro);
+        self.write_json_best_effort(&self.run_dir.join("retro.json"), retro);
         Ok(())
     }
 
@@ -187,7 +216,7 @@ impl RunStore for DiskProjectingRunStore {
 
     async fn put_graph(&self, dot_source: &str) -> Result<()> {
         self.inner.put_graph(dot_source).await?;
-        Self::write_text_best_effort(&self.run_dir.join("workflow.fabro"), dot_source);
+        self.write_text_best_effort(&self.run_dir.join("workflow.fabro"), dot_source);
         Ok(())
     }
 
@@ -197,7 +226,7 @@ impl RunStore for DiskProjectingRunStore {
 
     async fn put_sandbox(&self, record: &SandboxRecord) -> Result<()> {
         self.inner.put_sandbox(record).await?;
-        Self::write_json_best_effort(&self.run_dir.join("sandbox.json"), record);
+        self.write_json_best_effort(&self.run_dir.join("sandbox.json"), record);
         Ok(())
     }
 
@@ -207,7 +236,7 @@ impl RunStore for DiskProjectingRunStore {
 
     async fn put_node_prompt(&self, node: &NodeVisitRef<'_>, prompt: &str) -> Result<()> {
         self.inner.put_node_prompt(node, prompt).await?;
-        Self::write_text_best_effort(
+        self.write_text_best_effort(
             &disk_node_dir(&self.run_dir, node.node_id, node.visit).join("prompt.md"),
             prompt,
         );
@@ -216,7 +245,7 @@ impl RunStore for DiskProjectingRunStore {
 
     async fn put_node_response(&self, node: &NodeVisitRef<'_>, response: &str) -> Result<()> {
         self.inner.put_node_response(node, response).await?;
-        Self::write_text_best_effort(
+        self.write_text_best_effort(
             &disk_node_dir(&self.run_dir, node.node_id, node.visit).join("response.md"),
             response,
         );
@@ -229,7 +258,7 @@ impl RunStore for DiskProjectingRunStore {
         status: &NodeStatusRecord,
     ) -> Result<()> {
         self.inner.put_node_status(node, status).await?;
-        Self::write_json_best_effort(
+        self.write_json_best_effort(
             &disk_node_dir(&self.run_dir, node.node_id, node.visit).join("status.json"),
             status,
         );
@@ -238,7 +267,7 @@ impl RunStore for DiskProjectingRunStore {
 
     async fn put_node_stdout(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
         self.inner.put_node_stdout(node, log).await?;
-        Self::write_text_best_effort(
+        self.write_text_best_effort(
             &disk_node_dir(&self.run_dir, node.node_id, node.visit).join("stdout.log"),
             log,
         );
@@ -247,7 +276,7 @@ impl RunStore for DiskProjectingRunStore {
 
     async fn put_node_stderr(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
         self.inner.put_node_stderr(node, log).await?;
-        Self::write_text_best_effort(
+        self.write_text_best_effort(
             &disk_node_dir(&self.run_dir, node.node_id, node.visit).join("stderr.log"),
             log,
         );
@@ -284,7 +313,7 @@ impl RunStore for DiskProjectingRunStore {
 
     async fn put_retro_prompt(&self, text: &str) -> Result<()> {
         self.inner.put_retro_prompt(text).await?;
-        Self::write_text_best_effort(&self.run_dir.join("retro").join("prompt.md"), text);
+        self.write_text_best_effort(&self.run_dir.join("retro").join("prompt.md"), text);
         Ok(())
     }
 
@@ -294,7 +323,7 @@ impl RunStore for DiskProjectingRunStore {
 
     async fn put_retro_response(&self, text: &str) -> Result<()> {
         self.inner.put_retro_response(text).await?;
-        Self::write_text_best_effort(&self.run_dir.join("retro").join("response.md"), text);
+        self.write_text_best_effort(&self.run_dir.join("retro").join("response.md"), text);
         Ok(())
     }
 
@@ -759,6 +788,44 @@ mod tests {
             serde_json::to_value(status).unwrap()
         );
         assert_eq!(stored_node.prompt.as_deref(), Some("Plan the fix"));
+    }
+
+    #[tokio::test]
+    async fn projection_error_callback_runs_on_disk_failure() {
+        let temp = TempDir::new().unwrap();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let inner = InMemoryStore::default()
+            .create_run(
+                "run-1",
+                created_at,
+                Some(temp.path().to_string_lossy().as_ref()),
+            )
+            .await
+            .unwrap();
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<ProjectionError>::new()));
+        let seen_clone = Arc::clone(&seen);
+        let store = DiskProjectingRunStore::new(inner, temp.path().to_path_buf())
+            .on_projection_error(Arc::new(move |error| {
+                seen_clone.lock().unwrap().push(error);
+            }));
+
+        let mut permissions = fs::metadata(temp.path()).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(temp.path(), permissions).unwrap();
+
+        store
+            .put_status(&sample_status(
+                RunStatus::Running,
+                Some(StatusReason::SandboxInitializing),
+            ))
+            .await
+            .unwrap();
+
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].critical);
+        assert_eq!(seen[0].path, temp.path().join("status.json"));
+        assert!(!seen[0].error.is_empty());
     }
 
     #[test]
