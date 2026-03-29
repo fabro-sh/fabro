@@ -5,13 +5,13 @@ use std::collections::BTreeSet;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use fabro_api::jwt_auth::AuthMode;
-use fabro_api::server::{build_router, create_app_state};
-use fabro_api::server_config::*;
 use fabro_config::run::*;
 use fabro_config::sandbox::SandboxSettings;
 use fabro_hooks::*;
 use fabro_sandbox::daytona::*;
+use fabro_server::jwt_auth::AuthMode;
+use fabro_server::server::{build_router, create_app_state};
+use fabro_server::server_config::*;
 use tower::ServiceExt;
 
 fn load_spec() -> openapiv3::OpenAPI {

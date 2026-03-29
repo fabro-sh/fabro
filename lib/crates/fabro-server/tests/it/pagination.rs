@@ -3,8 +3,8 @@
 use super::helpers::{test_db, test_llm_spec};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fabro_api::jwt_auth::AuthMode;
-use fabro_api::server::{build_router, create_app_state};
+use fabro_server::jwt_auth::AuthMode;
+use fabro_server::server::{build_router, create_app_state};
 use tower::ServiceExt;
 
 async fn get_json(app: axum::Router, uri: &str) -> serde_json::Value {

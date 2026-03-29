@@ -1,9 +1,9 @@
 [package]
-name = "fabro-api"
+name = "fabro-server"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
-description = "HTTP API server for Fabro pipelines"
+description = "HTTP server for Fabro pipelines"
 
 [lib]
 doctest = false

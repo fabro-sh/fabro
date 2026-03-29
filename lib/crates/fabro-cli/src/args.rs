@@ -772,7 +772,7 @@ pub(crate) enum Commands {
     },
     /// Start the HTTP API server
     #[cfg(feature = "server")]
-    Serve(fabro_api::serve::ServeArgs),
+    Serve(fabro_server::serve::ServeArgs),
     /// Check environment and integration health
     Doctor {
         /// Show detailed information for each check
