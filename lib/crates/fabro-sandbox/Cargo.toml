@@ -2,6 +2,7 @@
 name = "fabro-sandbox"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "Sandbox trait and implementations for Fabro agent execution environments"
 

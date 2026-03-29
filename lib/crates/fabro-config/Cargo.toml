@@ -2,6 +2,7 @@
 name = "fabro-config"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "Centralized configuration types for Fabro"
 

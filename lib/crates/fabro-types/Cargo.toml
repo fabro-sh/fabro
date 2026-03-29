@@ -2,6 +2,7 @@
 name = "fabro-types"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "Shared record structs and enums for Fabro"
 

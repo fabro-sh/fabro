@@ -2,6 +2,7 @@
 name = "fabro-git-storage"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "Store structured data in git without touching the working directory"
 repository = "https://github.com/brynary/arc"

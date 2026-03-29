@@ -2,6 +2,7 @@
 name = "fabro-github"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "GitHub App authentication and API helpers for Fabro"
 

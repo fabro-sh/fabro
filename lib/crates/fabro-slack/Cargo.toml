@@ -2,6 +2,7 @@
 name = "fabro-slack"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "Slack Socket Mode integration for Fabro interviewer"
 

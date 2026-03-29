@@ -2,6 +2,7 @@
 name = "fabro-tracker"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "Tracker trait and types for issue tracking integrations"
 

@@ -2,6 +2,7 @@
 name = "fabro-cli"
 edition.workspace = true
 version.workspace = true
+publish = false
 license.workspace = true
 description = "Unified CLI for the Fabro AI framework"
 
