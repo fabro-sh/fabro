@@ -152,7 +152,11 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     let store_path = data_dir.join("store");
     std::fs::create_dir_all(&store_path)?;
     let object_store = Arc::new(LocalFileSystem::new_with_prefix(&store_path)?);
-    let store = Arc::new(fabro_store::SlateStore::new(object_store, ""));
+    let store = Arc::new(fabro_store::SlateStore::new(
+        object_store,
+        "",
+        Duration::from_millis(5),
+    ));
     let state = create_app_state_with_store(
         db,
         factory,
