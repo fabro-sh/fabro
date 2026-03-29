@@ -13,6 +13,7 @@ use super::output::{print_diagnostics_from_error, print_workflow_report_from_per
 /// This does NOT execute the workflow — it only prepares the run directory.
 pub(crate) fn create_run(
     args: &RunArgs,
+    cli_defaults: ConfigLayer,
     styles: &Styles,
     quiet: bool,
 ) -> anyhow::Result<(String, PathBuf)> {
@@ -24,7 +25,7 @@ pub(crate) fn create_run(
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let settings: FabroSettings = cli_args_config
         .combine(ConfigLayer::for_workflow(workflow_path, &cwd)?)
-        .combine(ConfigLayer::cli()?)
+        .combine(cli_defaults)
         .resolve()?;
 
     let created = match create(CreateRunInput {

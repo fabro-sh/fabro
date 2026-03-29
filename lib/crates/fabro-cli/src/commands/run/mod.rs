@@ -1,4 +1,5 @@
 use anyhow::Result;
+use fabro_config::ConfigLayer;
 use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
@@ -34,7 +35,8 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         RunCommands::Run(args) => command::execute(args, globals).await,
         RunCommands::Create(args) => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            let (run_id, _run_dir) = create::create_run(&args, styles, true)?;
+            let cli = ConfigLayer::cli()?;
+            let (run_id, _run_dir) = create::create_run(&args, cli, styles, true)?;
             println!("{run_id}");
             Ok(())
         }

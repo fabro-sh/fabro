@@ -6,12 +6,13 @@ use crate::args::{GlobalArgs, RunArgs};
 
 pub(crate) async fn execute(mut args: RunArgs, _globals: &GlobalArgs) -> Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let cli_settings = ConfigLayer::cli()?.resolve()?;
+    let cli = ConfigLayer::cli()?;
+    let cli_settings = cli.clone().resolve()?;
     args.verbose = args.verbose || cli_settings.verbose_enabled();
 
     let quiet = args.detach;
     let prevent_idle_sleep = cli_settings.prevent_idle_sleep_enabled();
-    let (run_id, run_dir) = super::create::create_run(&args, styles, quiet)?;
+    let (run_id, run_dir) = super::create::create_run(&args, cli, styles, quiet)?;
 
     #[cfg(feature = "sleep_inhibitor")]
     let _sleep_guard = crate::sleep_inhibitor::guard(prevent_idle_sleep);
