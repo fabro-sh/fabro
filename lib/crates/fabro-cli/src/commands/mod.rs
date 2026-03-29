@@ -15,6 +15,7 @@ pub(crate) mod run;
 pub(crate) mod runs;
 pub(crate) mod secret;
 pub(crate) mod skill;
+pub(crate) mod store;
 pub(crate) mod system;
 pub(crate) mod upgrade;
 pub(crate) mod validate;

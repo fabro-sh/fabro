@@ -163,6 +163,32 @@ impl InMemoryRunStore {
         Ok(checkpoints)
     }
 
+    async fn list_artifact_values_inner(&self) -> Result<Vec<String>> {
+        let data = self.snapshot_data().await;
+        let mut artifact_ids = Vec::new();
+        for key in data.keys() {
+            let Some(artifact_id) = keys::parse_artifact_value_id(key) else {
+                continue;
+            };
+            artifact_ids.push(artifact_id);
+        }
+        artifact_ids.sort();
+        Ok(artifact_ids)
+    }
+
+    async fn list_all_assets_inner(&self) -> Result<Vec<(String, u32, String)>> {
+        let data = self.snapshot_data().await;
+        let mut assets = Vec::new();
+        for key in data.keys() {
+            let Some(asset) = keys::parse_node_asset_key(key) else {
+                continue;
+            };
+            assets.push(asset);
+        }
+        assets.sort();
+        Ok(assets)
+    }
+
     fn build_snapshot_from_data(
         &self,
         data: &BTreeMap<String, Vec<u8>>,
@@ -501,6 +527,10 @@ impl RunStore for InMemoryRunStore {
         self.get_json(&keys::artifact_value(artifact_id)).await
     }
 
+    async fn list_artifact_values(&self) -> Result<Vec<String>> {
+        self.list_artifact_values_inner().await
+    }
+
     async fn put_asset(&self, node: &NodeVisitRef<'_>, filename: &str, data: &[u8]) -> Result<()> {
         self.put_bytes(keys::node_asset(node, filename), data).await;
         Ok(())
@@ -524,6 +554,10 @@ impl RunStore for InMemoryRunStore {
         }
         assets.sort();
         Ok(assets)
+    }
+
+    async fn list_all_assets(&self) -> Result<Vec<(String, u32, String)>> {
+        self.list_all_assets_inner().await
     }
 
     async fn get_snapshot(&self) -> Result<Option<RunSnapshot>> {
@@ -859,6 +893,62 @@ mod tests {
         let snapshot_status = snapshot.nodes[0].status.as_ref().unwrap();
         assert_eq!(snapshot_status.status, node_status.status);
         assert_eq!(snapshot_status.failure_reason, node_status.failure_reason);
+    }
+
+    #[tokio::test]
+    async fn list_artifact_values_and_all_assets_include_asset_only_visits() {
+        let store = InMemoryStore::default();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let run = store.create_run("run-1", created_at, None).await.unwrap();
+        run.put_run(&sample_run_record("run-1", created_at))
+            .await
+            .unwrap();
+
+        run.put_artifact_value("summary", &serde_json::json!({"done": true}))
+            .await
+            .unwrap();
+        run.put_artifact_value("plan", &serde_json::json!({"steps": 3}))
+            .await
+            .unwrap();
+
+        let snapshot_node = NodeVisitRef {
+            node_id: "code",
+            visit: 2,
+        };
+        run.put_node_prompt(&snapshot_node, "Plan the fix")
+            .await
+            .unwrap();
+        run.put_asset(&snapshot_node, "src/lib.rs", b"fn main() {}")
+            .await
+            .unwrap();
+
+        let asset_only_node = NodeVisitRef {
+            node_id: "artifact-only",
+            visit: 7,
+        };
+        run.put_asset(&asset_only_node, "logs/output.txt", b"hello")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            run.list_artifact_values().await.unwrap(),
+            vec!["plan".to_string(), "summary".to_string()]
+        );
+        assert_eq!(
+            run.list_all_assets().await.unwrap(),
+            vec![
+                (
+                    "artifact-only".to_string(),
+                    7,
+                    "logs/output.txt".to_string()
+                ),
+                ("code".to_string(), 2, "src/lib.rs".to_string())
+            ]
+        );
+
+        let snapshot = run.get_snapshot().await.unwrap().unwrap();
+        assert_eq!(snapshot.nodes.len(), 1);
+        assert_eq!(snapshot.nodes[0].node_id, "code");
     }
 
     #[tokio::test]

@@ -179,6 +179,7 @@ async fn main_inner() -> (String, Result<()>) {
                 commands::parse::run(&args)?;
             }
             Commands::Asset(ns) => commands::asset::dispatch(ns)?,
+            Commands::Store(ns) => commands::store::dispatch(ns).await?,
             Commands::RunsCmd(cmd) => commands::runs::dispatch(cmd).await?,
             Commands::Model { command } => commands::model::execute(command, &globals).await?,
             #[cfg(feature = "server")]
@@ -243,7 +244,10 @@ async fn main_inner() -> (String, Result<()>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use args::{ConfigCommand, ConfigNamespace, ProviderCommand, ProviderNamespace};
+    use args::{
+        ConfigCommand, ConfigNamespace, ProviderCommand, ProviderNamespace, StoreCommand,
+        StoreNamespace,
+    };
     use clap::Parser;
 
     #[test]
@@ -297,6 +301,21 @@ mod tests {
                     Some(std::path::Path::new("my-workflow.toml"))
                 );
                 assert_eq!(args.goal.as_deref(), Some("test"));
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_store_dump_command() {
+        let cli = Cli::try_parse_from(["fabro", "store", "dump", "ABC123", "-o", "./out"])
+            .expect("should parse");
+        match *cli.command {
+            Commands::Store(StoreNamespace {
+                command: StoreCommand::Dump(args),
+            }) => {
+                assert_eq!(args.run, "ABC123");
+                assert_eq!(args.output, std::path::PathBuf::from("./out"));
             }
             _ => panic!("unexpected command variant"),
         }

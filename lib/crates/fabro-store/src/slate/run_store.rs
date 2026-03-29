@@ -435,6 +435,10 @@ impl RunStore for SlateRunStore {
             .await
     }
 
+    async fn list_artifact_values(&self) -> Result<Vec<String>> {
+        self.inner.db.list_artifact_values().await
+    }
+
     async fn put_asset(&self, node: &NodeVisitRef<'_>, filename: &str, data: &[u8]) -> Result<()> {
         self.inner
             .db
@@ -461,6 +465,10 @@ impl RunStore for SlateRunStore {
         }
         assets.sort();
         Ok(assets)
+    }
+
+    async fn list_all_assets(&self) -> Result<Vec<(String, u32, String)>> {
+        self.inner.db.list_all_assets().await
     }
 
     async fn get_snapshot(&self) -> Result<Option<RunSnapshot>> {
@@ -574,6 +582,20 @@ impl SlateRunDb {
             Self::Reader(db) => list_checkpoints(db.as_ref()).await,
         }
     }
+
+    async fn list_artifact_values(&self) -> Result<Vec<String>> {
+        match self {
+            Self::Writer(db) => list_artifact_values(db).await,
+            Self::Reader(db) => list_artifact_values(db.as_ref()).await,
+        }
+    }
+
+    async fn list_all_assets(&self) -> Result<Vec<(String, u32, String)>> {
+        match self {
+            Self::Writer(db) => list_all_assets(db).await,
+            Self::Reader(db) => list_all_assets(db.as_ref()).await,
+        }
+    }
 }
 
 async fn put_json<T: Serialize>(db: &slatedb::Db, key: &str, value: &T) -> Result<()> {
@@ -673,6 +695,44 @@ where
     }
     checkpoints.sort_by_key(|(seq, _)| *seq);
     Ok(checkpoints)
+}
+
+async fn list_artifact_values<R>(db: &R) -> Result<Vec<String>>
+where
+    R: DbRead + Sync,
+{
+    let mut iter = db
+        .scan_prefix(keys::ARTIFACT_VALUES_PREFIX.as_bytes())
+        .await?;
+    let mut artifact_ids = Vec::new();
+    while let Some(entry) = iter.next().await? {
+        let key = key_to_string(&entry.key)?;
+        let Some(artifact_id) = keys::parse_artifact_value_id(&key) else {
+            continue;
+        };
+        artifact_ids.push(artifact_id);
+    }
+    artifact_ids.sort();
+    Ok(artifact_ids)
+}
+
+async fn list_all_assets<R>(db: &R) -> Result<Vec<(String, u32, String)>>
+where
+    R: DbRead + Sync,
+{
+    let mut iter = db
+        .scan_prefix(keys::ARTIFACT_NODES_PREFIX.as_bytes())
+        .await?;
+    let mut assets = Vec::new();
+    while let Some(entry) = iter.next().await? {
+        let key = key_to_string(&entry.key)?;
+        let Some(asset) = keys::parse_node_asset_key(&key) else {
+            continue;
+        };
+        assets.push(asset);
+    }
+    assets.sort();
+    Ok(assets)
 }
 
 fn key_to_string(key: &Bytes) -> Result<String> {
