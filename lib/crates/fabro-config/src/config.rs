@@ -7,7 +7,7 @@ use crate::cli::{self, ExecConfig, ExecutionMode, ServerConfig};
 use crate::combine::Combine;
 use crate::hook::{HookConfig, HookDefinition};
 use crate::mcp::McpServerEntry;
-use crate::project::{self, ProjectFabroConfig};
+use crate::project::{self, ProjectConfig};
 use crate::run::{
     AssetsConfig, CheckpointConfig, GitHubConfig, LlmConfig, PullRequestConfig, SetupConfig,
 };
@@ -129,7 +129,7 @@ pub struct ConfigLayer {
 
     // --- Project config fields ---
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fabro: Option<ProjectFabroConfig>,
+    pub fabro: Option<ProjectConfig>,
 }
 
 impl Combine for ConfigLayer {

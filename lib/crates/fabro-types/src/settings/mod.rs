@@ -19,7 +19,7 @@ pub use mcp::{
     McpServerConfig, McpServerEntry, McpTransport, default_startup_timeout_secs,
     default_tool_timeout_secs,
 };
-pub use project::ProjectFabroSettings;
+pub use project::ProjectSettings;
 pub use run::{
     AssetsSettings, CheckpointSettings, GitHubSettings, LlmSettings, MergeStrategy,
     PullRequestSettings, SetupSettings,
@@ -107,7 +107,7 @@ pub struct FabroSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<GitSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fabro: Option<ProjectFabroSettings>,
+    pub fabro: Option<ProjectSettings>,
 }
 
 impl FabroSettings {

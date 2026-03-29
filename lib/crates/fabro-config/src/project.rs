@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::FabroSettings;
 use crate::config::ConfigLayer;
 use crate::run;
-pub use fabro_types::settings::project::ProjectFabroSettings;
+pub use fabro_types::settings::project::ProjectSettings;
 
 const CONFIG_FILENAME: &str = "fabro.toml";
 const SUPPORTED_VERSION: u32 = 1;
@@ -15,7 +15,7 @@ const RUN_GRAPH_FILE: &str = "workflow.fabro";
 const LEGACY_RUN_GRAPH_FILE: &str = "graph.fabro";
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct ProjectFabroConfig {
+pub struct ProjectConfig {
     pub root: Option<String>,
 }
 
@@ -32,8 +32,8 @@ fn default_root() -> String {
     ".".to_string()
 }
 
-impl From<ProjectFabroConfig> for ProjectFabroSettings {
-    fn from(value: ProjectFabroConfig) -> Self {
+impl From<ProjectConfig> for ProjectSettings {
+    fn from(value: ProjectConfig) -> Self {
         Self {
             root: value.root.unwrap_or_else(default_root),
         }
@@ -559,7 +559,7 @@ model = "claude-sonnet-4-6"
         let config_path = Path::new("/repo/fabro.toml");
         let config = ConfigLayer {
             version: Some(1),
-            fabro: Some(ProjectFabroConfig {
+            fabro: Some(ProjectConfig {
                 root: Some("fabro/".to_string()),
                 ..Default::default()
             }),
@@ -576,7 +576,7 @@ model = "claude-sonnet-4-6"
         let config_path = Path::new("/repo/fabro.toml");
         let config = ConfigLayer {
             version: Some(1),
-            fabro: Some(ProjectFabroConfig {
+            fabro: Some(ProjectConfig {
                 root: Some(".".to_string()),
                 ..Default::default()
             }),
