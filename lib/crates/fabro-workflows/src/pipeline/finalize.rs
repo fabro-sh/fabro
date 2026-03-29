@@ -262,7 +262,11 @@ pub fn persist_terminal_outcome(
 ///
 /// This captures the last diff.patch (written after the final checkpoint) and retro.json.
 /// Best-effort: errors are logged as warnings.
-pub async fn write_finalize_commit(run_options: &RunOptions, run_dir: &Path) {
+pub async fn write_finalize_commit(
+    run_options: &RunOptions,
+    run_dir: &Path,
+    run_store: &dyn RunStore,
+) {
     let (Some(meta_branch), Some(repo_path)) = (
         run_options
             .git
@@ -275,8 +279,12 @@ pub async fn write_finalize_commit(run_options: &RunOptions, run_dir: &Path) {
 
     let store = MetadataStore::new(repo_path, &run_options.git_author);
     let mut entries = scan_node_files(run_dir);
-    if let Ok(retro_bytes) = std::fs::read(run_dir.join("retro.json")) {
-        entries.push(("retro.json".to_string(), retro_bytes));
+    let retro_bytes = match run_store.get_retro().await {
+        Ok(Some(retro)) => serde_json::to_vec_pretty(&retro).ok(),
+        _ => std::fs::read(run_dir.join("retro.json")).ok(),
+    };
+    if let Some(bytes) = retro_bytes {
+        entries.push(("retro.json".to_string(), bytes));
     }
     let refs: Vec<(&str, &[u8])> = entries
         .iter()
@@ -360,7 +368,7 @@ pub async fn finalize(
     )
     .await;
 
-    write_finalize_commit(&run_options, &options.run_dir).await;
+    write_finalize_commit(&run_options, &options.run_dir, options.run_store.as_ref()).await;
 
     if options.preserve_sandbox {
         let info = sandbox.sandbox_info();

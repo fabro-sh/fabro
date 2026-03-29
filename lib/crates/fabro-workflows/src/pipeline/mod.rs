@@ -10,6 +10,7 @@ pub(crate) mod types;
 mod validate;
 
 pub use execute::execute;
+pub(crate) use finalize::build_conclusion_from_store;
 pub use finalize::{
     build_conclusion, classify_engine_result, finalize, persist_terminal_outcome,
     write_finalize_commit,

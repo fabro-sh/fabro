@@ -105,6 +105,7 @@ strip = true
 
 [profile.dev.package."*"]
 debug = false # Disable debug info for all dependencies
+opt-level = 1  # Shrinks monomorphized generics, reducing test binary size
 
 # regex is extremely slow in debug builds (~10s to compile gitleaks patterns)
 [profile.dev.package.regex]
