@@ -1,4 +1,9 @@
 [profile.default]
+# Cap parallelism: the workspace has ~33 test binaries (30-84 MB each).
+# At num-cpus concurrency the I/O from loading those binaries saturates
+# the system and pushes even trivial tests past the 4s kill timeout.
+# 12 threads keeps wall-clock time the same (~27s) with zero timeouts.
+test-threads = 12
 # Unit tests: flag SLOW after 2s, hard-kill after 4s
 slow-timeout = { period = "2s", terminate-after = 2 }
 
