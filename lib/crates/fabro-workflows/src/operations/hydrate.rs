@@ -56,7 +56,7 @@ pub async fn open_or_hydrate_run(
         }
         Ok(None) => {}
         Err(err) => {
-            tracing::warn!(error = %err, "Skipping malformed checkpoint.json during hydration")
+            tracing::warn!(error = %err, "Skipping malformed checkpoint.json during hydration");
         }
     }
     match load_conclusion(run_dir) {
@@ -68,7 +68,7 @@ pub async fn open_or_hydrate_run(
         }
         Ok(None) => {}
         Err(err) => {
-            tracing::warn!(error = %err, "Skipping malformed conclusion.json during hydration")
+            tracing::warn!(error = %err, "Skipping malformed conclusion.json during hydration");
         }
     }
     match load_retro(run_dir) {
@@ -84,7 +84,7 @@ pub async fn open_or_hydrate_run(
         }
         Ok(None) => {}
         Err(err) => {
-            tracing::warn!(error = %err, "Skipping malformed sandbox.json during hydration")
+            tracing::warn!(error = %err, "Skipping malformed sandbox.json during hydration");
         }
     }
 
