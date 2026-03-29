@@ -1,9 +1,9 @@
 [package]
-name = "fabro-types-derive"
+name = "fabro-macros"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
-description = "Derive macros for fabro-types"
+description = "Procedural macros for fabro"
 
 [lib]
 proc-macro = true

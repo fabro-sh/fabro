@@ -19,6 +19,6 @@ workspace = true
 [dependencies]
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, optional = true }
-fabro-types-derive = { path = "../fabro-types-derive" }
+fabro-macros = { path = "../fabro-macros" }
 serde.workspace = true
 serde_json.workspace = true

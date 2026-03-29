@@ -1754,6 +1754,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-macros"
+version = "0.176.2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "fabro-mcp"
 version = "0.176.2"
 dependencies = [
@@ -1936,18 +1945,9 @@ version = "0.176.2"
 dependencies = [
  "chrono",
  "clap",
- "fabro-types-derive",
+ "fabro-macros",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "fabro-types-derive"
-version = "0.176.2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]

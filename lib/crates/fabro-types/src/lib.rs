@@ -34,4 +34,4 @@ pub use status::{
 };
 pub use usage::StageUsage;
 
-pub use fabro_types_derive::Combine;
+pub use fabro_macros::Combine;
