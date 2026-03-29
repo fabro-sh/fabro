@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
+use fabro_store::{ListRunsQuery, Store};
 use serde::Serialize;
 
 use crate::records::{
@@ -149,6 +150,67 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
     Ok(runs)
 }
 
+pub async fn scan_runs_combined(store: &dyn Store, base: &Path) -> Result<Vec<RunInfo>> {
+    let mut runs_by_id: HashMap<String, RunInfo> = scan_runs(base)?
+        .into_iter()
+        .map(|run| (run.run_id.clone(), run))
+        .collect();
+
+    if let Ok(store_runs) = store.list_runs(&ListRunsQuery::default()).await {
+        for summary in store_runs {
+            let Some(run_dir) = summary.run_dir.as_deref() else {
+                continue;
+            };
+            let path = PathBuf::from(run_dir);
+            let Some(dir_name) = path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+            else {
+                continue;
+            };
+            let start_time_dt = summary.created_at;
+            let start_time = summary.start_time.unwrap_or(start_time_dt);
+            let end_time = if summary.status.is_some_and(|status| status.is_terminal()) {
+                summary.duration_ms.and_then(|duration_ms| {
+                    Some(
+                        start_time_dt
+                            + chrono::Duration::milliseconds(i64::try_from(duration_ms).ok()?),
+                    )
+                })
+            } else {
+                None
+            };
+            runs_by_id.insert(
+                summary.run_id.clone(),
+                RunInfo {
+                    run_id: summary.run_id,
+                    dir_name,
+                    workflow_name: summary
+                        .workflow_name
+                        .unwrap_or_else(|| "[starting]".to_string()),
+                    workflow_slug: summary.workflow_slug,
+                    status: summary.status.unwrap_or(RunStatus::Dead),
+                    status_reason: summary.status_reason,
+                    start_time: start_time.to_rfc3339(),
+                    labels: summary.labels,
+                    duration_ms: summary.duration_ms,
+                    total_cost: summary.total_cost,
+                    host_repo_path: summary.host_repo_path,
+                    goal: summary.goal.unwrap_or_default(),
+                    start_time_dt: Some(start_time_dt),
+                    end_time,
+                    path,
+                    is_orphan: false,
+                },
+            );
+        }
+    }
+
+    let mut runs: Vec<_> = runs_by_id.into_values().collect();
+    runs.sort_by(|a, b| b.start_time_dt.cmp(&a.start_time_dt));
+    Ok(runs)
+}
+
 struct StatusInfo {
     status: RunStatus,
     reason: Option<StatusReason>,
@@ -260,6 +322,52 @@ pub fn find_run_by_prefix(base: &Path, prefix: &str) -> Result<PathBuf> {
 
 pub fn resolve_run(base: &Path, identifier: &str) -> Result<RunInfo> {
     let runs = scan_runs(base).context("Failed to scan runs")?;
+
+    let id_matches: Vec<_> = runs
+        .iter()
+        .filter(|run| run.run_id.starts_with(identifier))
+        .collect();
+
+    match id_matches.len() {
+        1 => return Ok(id_matches[0].clone()),
+        count if count > 1 => {
+            let ids: Vec<&str> = id_matches.iter().map(|run| run.run_id.as_str()).collect();
+            bail!(
+                "Ambiguous prefix '{identifier}': {count} runs match: {}",
+                ids.join(", ")
+            )
+        }
+        _ => {}
+    }
+
+    let id_lower = identifier.to_lowercase();
+    let id_collapsed = collapse_separators(&id_lower);
+    let workflow_match = runs.iter().filter(|run| !run.is_orphan).find(|run| {
+        if let Some(slug) = &run.workflow_slug {
+            if slug.to_lowercase() == id_lower {
+                return true;
+            }
+        }
+        let name_lower = run.workflow_name.to_lowercase();
+        name_lower.contains(&id_lower) || collapse_separators(&name_lower).contains(&id_collapsed)
+    });
+
+    match workflow_match {
+        Some(run) => Ok(run.clone()),
+        None => {
+            bail!("No run found matching '{identifier}' (tried run ID prefix and workflow name)")
+        }
+    }
+}
+
+pub async fn resolve_run_combined(
+    store: &dyn Store,
+    base: &Path,
+    identifier: &str,
+) -> Result<RunInfo> {
+    let runs = scan_runs_combined(store, base)
+        .await
+        .context("Failed to scan runs")?;
 
     let id_matches: Vec<_> = runs
         .iter()

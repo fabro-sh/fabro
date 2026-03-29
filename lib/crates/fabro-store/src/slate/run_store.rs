@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use futures::Stream;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use slatedb::{CloseReason, DbRead, ErrorKind};
+use slatedb::{CloseReason, DbRead, DbReader, ErrorKind};
 use tokio::sync::{Mutex, mpsc};
 use tokio::time;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -33,14 +33,20 @@ pub(crate) struct SlateRunStoreInner {
     run_id: String,
     created_at: DateTime<Utc>,
     db_prefix: String,
-    db: slatedb::Db,
+    run_dir: Option<String>,
+    db: SlateRunDb,
     event_seq: AtomicU32,
     checkpoint_seq: AtomicU32,
     close_lock: Mutex<()>,
 }
 
+enum SlateRunDb {
+    Writer(slatedb::Db),
+    Reader(DbReader),
+}
+
 impl SlateRunStore {
-    pub(crate) async fn open(record: CatalogRecord, db: slatedb::Db) -> Result<Self> {
+    pub(crate) async fn open_writer(record: CatalogRecord, db: slatedb::Db) -> Result<Self> {
         let event_seq = recover_next_seq(&db, keys::EVENTS_PREFIX, keys::parse_event_seq).await?;
         let checkpoint_seq =
             recover_next_seq(&db, keys::CHECKPOINTS_PREFIX, keys::parse_checkpoint_seq).await?;
@@ -49,7 +55,26 @@ impl SlateRunStore {
                 run_id: record.run_id,
                 created_at: record.created_at,
                 db_prefix: record.db_prefix,
-                db,
+                run_dir: record.run_dir,
+                db: SlateRunDb::Writer(db),
+                event_seq: AtomicU32::new(event_seq),
+                checkpoint_seq: AtomicU32::new(checkpoint_seq),
+                close_lock: Mutex::new(()),
+            }),
+        })
+    }
+
+    pub(crate) async fn open_reader(record: CatalogRecord, db: DbReader) -> Result<Self> {
+        let event_seq = recover_next_seq(&db, keys::EVENTS_PREFIX, keys::parse_event_seq).await?;
+        let checkpoint_seq =
+            recover_next_seq(&db, keys::CHECKPOINTS_PREFIX, keys::parse_checkpoint_seq).await?;
+        Ok(Self {
+            inner: Arc::new(SlateRunStoreInner {
+                run_id: record.run_id,
+                created_at: record.created_at,
+                db_prefix: record.db_prefix,
+                run_dir: record.run_dir,
+                db: SlateRunDb::Reader(db),
                 event_seq: AtomicU32::new(event_seq),
                 checkpoint_seq: AtomicU32::new(checkpoint_seq),
                 close_lock: Mutex::new(()),
@@ -70,6 +95,7 @@ impl SlateRunStore {
             run_id: self.inner.run_id.clone(),
             created_at: self.inner.created_at,
             db_prefix: self.inner.db_prefix.clone(),
+            run_dir: self.inner.run_dir.clone(),
         }
     }
 
@@ -77,6 +103,7 @@ impl SlateRunStore {
         self.inner.run_id == record.run_id
             && self.inner.created_at == record.created_at
             && self.inner.db_prefix == record.db_prefix
+            && self.inner.run_dir == record.run_dir
     }
 
     pub(crate) fn created_at(&self) -> DateTime<Utc> {
@@ -93,7 +120,10 @@ impl SlateRunStore {
     }
 
     pub(crate) async fn snapshot(&self) -> Result<Arc<slatedb::DbSnapshot>> {
-        Ok(self.inner.db.snapshot().await?)
+        match &self.inner.db {
+            SlateRunDb::Writer(db) => Ok(db.snapshot().await?),
+            SlateRunDb::Reader(_) => Err(StoreError::ReadOnly),
+        }
     }
 
     pub(crate) async fn validate_init<R>(db: &R, expected: &CatalogRecord) -> Result<bool>
@@ -134,6 +164,7 @@ impl SlateRunStore {
             run_id: catalog.run_id.clone(),
             created_at: catalog.created_at,
             db_prefix: catalog.db_prefix.clone(),
+            run_dir: catalog.run_dir.clone(),
             workflow_name,
             workflow_slug: run.as_ref().and_then(|run| run.workflow_slug.clone()),
             goal,
@@ -170,11 +201,11 @@ impl SlateRunStore {
         Ok(NodeSnapshot {
             node_id: node.node_id.to_string(),
             visit: node.visit,
-            prompt: get_text(&self.inner.db, &keys::node_prompt(node)).await?,
-            response: get_text(&self.inner.db, &keys::node_response(node)).await?,
-            status: get_json(&self.inner.db, &keys::node_status(node)).await?,
-            stdout: get_text(&self.inner.db, &keys::node_stdout(node)).await?,
-            stderr: get_text(&self.inner.db, &keys::node_stderr(node)).await?,
+            prompt: self.inner.db.get_text(&keys::node_prompt(node)).await?,
+            response: self.inner.db.get_text(&keys::node_response(node)).await?,
+            status: self.inner.db.get_json(&keys::node_status(node)).await?,
+            stdout: self.inner.db.get_text(&keys::node_stdout(node)).await?,
+            stderr: self.inner.db.get_text(&keys::node_stderr(node)).await?,
         })
     }
 }
@@ -183,91 +214,98 @@ impl SlateRunStore {
 impl RunStore for SlateRunStore {
     async fn put_run(&self, record: &RunRecord) -> Result<()> {
         self.validate_run_record(record)?;
-        put_json(&self.inner.db, keys::run(), record).await
+        self.inner.db.put_json(keys::run(), record).await
     }
 
     async fn get_run(&self) -> Result<Option<RunRecord>> {
-        get_json(&self.inner.db, keys::run()).await
+        self.inner.db.get_json(keys::run()).await
     }
 
     async fn put_start(&self, record: &StartRecord) -> Result<()> {
-        put_json(&self.inner.db, keys::start(), record).await
+        self.inner.db.put_json(keys::start(), record).await
     }
 
     async fn get_start(&self) -> Result<Option<StartRecord>> {
-        get_json(&self.inner.db, keys::start()).await
+        self.inner.db.get_json(keys::start()).await
     }
 
     async fn put_status(&self, record: &RunStatusRecord) -> Result<()> {
-        put_json(&self.inner.db, keys::status(), record).await
+        self.inner.db.put_json(keys::status(), record).await
     }
 
     async fn get_status(&self) -> Result<Option<RunStatusRecord>> {
-        get_json(&self.inner.db, keys::status()).await
+        self.inner.db.get_json(keys::status()).await
     }
 
     async fn put_checkpoint(&self, record: &Checkpoint) -> Result<()> {
-        put_json(&self.inner.db, keys::checkpoint(), record).await
+        self.inner.db.put_json(keys::checkpoint(), record).await
     }
 
     async fn get_checkpoint(&self) -> Result<Option<Checkpoint>> {
-        get_json(&self.inner.db, keys::checkpoint()).await
+        self.inner.db.get_json(keys::checkpoint()).await
     }
 
     async fn append_checkpoint(&self, record: &Checkpoint) -> Result<u32> {
         let seq = self.inner.checkpoint_seq.fetch_add(1, Ordering::SeqCst);
         self.put_checkpoint(record).await?;
-        put_json(
-            &self.inner.db,
-            &keys::checkpoint_history_key(seq, Utc::now().timestamp_millis()),
-            record,
-        )
-        .await?;
+        self.inner
+            .db
+            .put_json(
+                &keys::checkpoint_history_key(seq, Utc::now().timestamp_millis()),
+                record,
+            )
+            .await?;
         Ok(seq)
     }
 
     async fn list_checkpoints(&self) -> Result<Vec<(u32, Checkpoint)>> {
-        list_checkpoints(&self.inner.db).await
+        self.inner.db.list_checkpoints().await
     }
 
     async fn put_conclusion(&self, record: &Conclusion) -> Result<()> {
-        put_json(&self.inner.db, keys::conclusion(), record).await
+        self.inner.db.put_json(keys::conclusion(), record).await
     }
 
     async fn get_conclusion(&self) -> Result<Option<Conclusion>> {
-        get_json(&self.inner.db, keys::conclusion()).await
+        self.inner.db.get_json(keys::conclusion()).await
     }
 
     async fn put_retro(&self, retro: &Retro) -> Result<()> {
-        put_json(&self.inner.db, keys::retro(), retro).await
+        self.inner.db.put_json(keys::retro(), retro).await
     }
 
     async fn get_retro(&self) -> Result<Option<Retro>> {
-        get_json(&self.inner.db, keys::retro()).await
+        self.inner.db.get_json(keys::retro()).await
     }
 
     async fn put_graph(&self, dot_source: &str) -> Result<()> {
-        put_text(&self.inner.db, keys::graph(), dot_source).await
+        self.inner.db.put_text(keys::graph(), dot_source).await
     }
 
     async fn get_graph(&self) -> Result<Option<String>> {
-        get_text(&self.inner.db, keys::graph()).await
+        self.inner.db.get_text(keys::graph()).await
     }
 
     async fn put_sandbox(&self, record: &SandboxRecord) -> Result<()> {
-        put_json(&self.inner.db, keys::sandbox(), record).await
+        self.inner.db.put_json(keys::sandbox(), record).await
     }
 
     async fn get_sandbox(&self) -> Result<Option<SandboxRecord>> {
-        get_json(&self.inner.db, keys::sandbox()).await
+        self.inner.db.get_json(keys::sandbox()).await
     }
 
     async fn put_node_prompt(&self, node: &NodeVisitRef<'_>, prompt: &str) -> Result<()> {
-        put_text(&self.inner.db, &keys::node_prompt(node), prompt).await
+        self.inner
+            .db
+            .put_text(&keys::node_prompt(node), prompt)
+            .await
     }
 
     async fn put_node_response(&self, node: &NodeVisitRef<'_>, response: &str) -> Result<()> {
-        put_text(&self.inner.db, &keys::node_response(node), response).await
+        self.inner
+            .db
+            .put_text(&keys::node_response(node), response)
+            .await
     }
 
     async fn put_node_status(
@@ -275,15 +313,18 @@ impl RunStore for SlateRunStore {
         node: &NodeVisitRef<'_>,
         status: &NodeStatusRecord,
     ) -> Result<()> {
-        put_json(&self.inner.db, &keys::node_status(node), status).await
+        self.inner
+            .db
+            .put_json(&keys::node_status(node), status)
+            .await
     }
 
     async fn put_node_stdout(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
-        put_text(&self.inner.db, &keys::node_stdout(node), log).await
+        self.inner.db.put_text(&keys::node_stdout(node), log).await
     }
 
     async fn put_node_stderr(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
-        put_text(&self.inner.db, &keys::node_stderr(node), log).await
+        self.inner.db.put_text(&keys::node_stderr(node), log).await
     }
 
     async fn get_node(&self, node: &NodeVisitRef<'_>) -> Result<NodeSnapshot> {
@@ -308,28 +349,29 @@ impl RunStore for SlateRunStore {
     async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
         payload.validate(&self.inner.run_id)?;
         let seq = self.inner.event_seq.fetch_add(1, Ordering::SeqCst);
-        put_json(
-            &self.inner.db,
-            &keys::event_key(seq, Utc::now().timestamp_millis()),
-            payload,
-        )
-        .await?;
+        self.inner
+            .db
+            .put_json(
+                &keys::event_key(seq, Utc::now().timestamp_millis()),
+                payload,
+            )
+            .await?;
         Ok(seq)
     }
 
     async fn list_events(&self) -> Result<Vec<EventEnvelope>> {
-        list_events_from(&self.inner.db, 1).await
+        self.inner.db.list_events_from(1).await
     }
 
     async fn list_events_from(&self, seq: u32) -> Result<Vec<EventEnvelope>> {
-        list_events_from(&self.inner.db, seq).await
+        self.inner.db.list_events_from(seq).await
     }
 
     async fn watch_events_from(
         &self,
         seq: u32,
     ) -> Result<std::pin::Pin<Box<dyn Stream<Item = Result<EventEnvelope>> + Send>>> {
-        let db = self.inner.db.clone();
+        let inner = Arc::clone(&self.inner);
         let (sender, receiver) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
@@ -339,7 +381,7 @@ impl RunStore for SlateRunStore {
                     return;
                 }
 
-                match list_events_from(&db, next_seq).await {
+                match inner.db.list_events_from(next_seq).await {
                     Ok(events) => {
                         if events.is_empty() {
                             time::sleep(Duration::from_millis(100)).await;
@@ -364,35 +406,47 @@ impl RunStore for SlateRunStore {
     }
 
     async fn put_retro_prompt(&self, text: &str) -> Result<()> {
-        put_text(&self.inner.db, keys::retro_prompt(), text).await
+        self.inner.db.put_text(keys::retro_prompt(), text).await
     }
 
     async fn get_retro_prompt(&self) -> Result<Option<String>> {
-        get_text(&self.inner.db, keys::retro_prompt()).await
+        self.inner.db.get_text(keys::retro_prompt()).await
     }
 
     async fn put_retro_response(&self, text: &str) -> Result<()> {
-        put_text(&self.inner.db, keys::retro_response(), text).await
+        self.inner.db.put_text(keys::retro_response(), text).await
     }
 
     async fn get_retro_response(&self) -> Result<Option<String>> {
-        get_text(&self.inner.db, keys::retro_response()).await
+        self.inner.db.get_text(keys::retro_response()).await
     }
 
     async fn put_artifact_value(&self, artifact_id: &str, value: &serde_json::Value) -> Result<()> {
-        put_json(&self.inner.db, &keys::artifact_value(artifact_id), value).await
+        self.inner
+            .db
+            .put_json(&keys::artifact_value(artifact_id), value)
+            .await
     }
 
     async fn get_artifact_value(&self, artifact_id: &str) -> Result<Option<serde_json::Value>> {
-        get_json(&self.inner.db, &keys::artifact_value(artifact_id)).await
+        self.inner
+            .db
+            .get_json(&keys::artifact_value(artifact_id))
+            .await
     }
 
     async fn put_asset(&self, node: &NodeVisitRef<'_>, filename: &str, data: &[u8]) -> Result<()> {
-        put_bytes(&self.inner.db, &keys::node_asset(node, filename), data).await
+        self.inner
+            .db
+            .put_bytes(&keys::node_asset(node, filename), data)
+            .await
     }
 
     async fn get_asset(&self, node: &NodeVisitRef<'_>, filename: &str) -> Result<Option<Bytes>> {
-        get_bytes(&self.inner.db, &keys::node_asset(node, filename)).await
+        self.inner
+            .db
+            .get_bytes(&keys::node_asset(node, filename))
+            .await
     }
 
     async fn list_assets(&self, node: &NodeVisitRef<'_>) -> Result<Vec<String>> {
@@ -443,6 +497,82 @@ impl RunStore for SlateRunStore {
             sandbox: self.get_sandbox().await?,
             nodes,
         }))
+    }
+}
+
+impl SlateRunDb {
+    fn writer(&self) -> Result<&slatedb::Db> {
+        match self {
+            Self::Writer(db) => Ok(db),
+            Self::Reader(_) => Err(StoreError::ReadOnly),
+        }
+    }
+
+    async fn close(&self) -> std::result::Result<(), slatedb::Error> {
+        match self {
+            Self::Writer(db) => db.close().await,
+            Self::Reader(db) => db.close().await,
+        }
+    }
+
+    async fn get_json<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
+        match self {
+            Self::Writer(db) => get_json(db, key).await,
+            Self::Reader(db) => get_json(db, key).await,
+        }
+    }
+
+    async fn put_json<T: Serialize>(&self, key: &str, value: &T) -> Result<()> {
+        put_json(self.writer()?, key, value).await
+    }
+
+    async fn get_text(&self, key: &str) -> Result<Option<String>> {
+        match self {
+            Self::Writer(db) => get_text(db, key).await,
+            Self::Reader(db) => get_text(db, key).await,
+        }
+    }
+
+    async fn put_text(&self, key: &str, value: &str) -> Result<()> {
+        put_text(self.writer()?, key, value).await
+    }
+
+    async fn get_bytes(&self, key: &str) -> Result<Option<Bytes>> {
+        match self {
+            Self::Writer(db) => get_bytes(db, key).await,
+            Self::Reader(db) => db.get(key).await.map_err(Into::into),
+        }
+    }
+
+    async fn put_bytes(&self, key: &str, value: &[u8]) -> Result<()> {
+        put_bytes(self.writer()?, key, value).await
+    }
+
+    async fn scan_prefix<P>(
+        &self,
+        prefix: P,
+    ) -> std::result::Result<slatedb::DbIterator, slatedb::Error>
+    where
+        P: AsRef<[u8]> + Send,
+    {
+        match self {
+            Self::Writer(db) => db.scan_prefix(prefix).await,
+            Self::Reader(db) => db.scan_prefix(prefix).await,
+        }
+    }
+
+    async fn list_events_from(&self, start_seq: u32) -> Result<Vec<EventEnvelope>> {
+        match self {
+            Self::Writer(db) => list_events_from(db, start_seq).await,
+            Self::Reader(db) => list_events_from(db, start_seq).await,
+        }
+    }
+
+    async fn list_checkpoints(&self) -> Result<Vec<(u32, Checkpoint)>> {
+        match self {
+            Self::Writer(db) => list_checkpoints(db).await,
+            Self::Reader(db) => list_checkpoints(db).await,
+        }
     }
 }
 

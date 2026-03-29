@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_retro::retro::CompletedStage;
+use fabro_store::EventEnvelope;
 use serde::de::DeserializeOwned;
 
 /// Callback invoked when a workflow node starts executing.
@@ -89,6 +91,24 @@ pub fn build_completed_stages(cp: &records::Checkpoint, run_failed: bool) -> Vec
     }
 
     stages
+}
+
+pub fn extract_stage_durations_from_events(events: &[EventEnvelope]) -> HashMap<String, u64> {
+    let mut durations = HashMap::new();
+    for envelope in events {
+        let value = envelope.payload.as_value();
+        if value.get("event").and_then(serde_json::Value::as_str) != Some("StageCompleted") {
+            continue;
+        }
+        let Some(node_id) = value.get("node_id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(duration_ms) = value.get("duration_ms").and_then(serde_json::Value::as_u64) else {
+            continue;
+        };
+        durations.insert(node_id.to_string(), duration_ms);
+    }
+    durations
 }
 
 #[doc(hidden)]

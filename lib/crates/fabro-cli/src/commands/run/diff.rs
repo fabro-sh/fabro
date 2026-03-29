@@ -6,7 +6,7 @@ use fabro_config::FabroSettingsExt;
 use fabro_sandbox::SandboxRecordExt;
 use fabro_sandbox::reconnect::reconnect;
 use fabro_workflows::records::{StartRecord, StartRecordExt};
-use fabro_workflows::run_lookup::{resolve_run, runs_base};
+use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflows::sandbox_git::GIT_REMOTE;
 use tracing::{debug, info};
 
@@ -17,9 +17,11 @@ pub(crate) async fn run(args: DiffArgs) -> Result<()> {
     info!(run_id = %args.run, "Showing diff");
     let cli_settings = load_cli_settings(None)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let run_dir = resolve_run(&base, &args.run)?.path;
+    let store = crate::store::build_store(&cli_settings.storage_dir())?;
+    let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
+    let run_store = crate::store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
 
-    let patch = resolve_diff(&run_dir, &args).await?;
+    let patch = resolve_diff(&run.path, run_store.as_deref(), &args).await?;
 
     let is_tty = io::stdout().is_terminal();
     let mut stdout = io::stdout().lock();
@@ -33,7 +35,11 @@ pub(crate) async fn run(args: DiffArgs) -> Result<()> {
     Ok(())
 }
 
-async fn resolve_diff(run_dir: &Path, args: &DiffArgs) -> Result<String> {
+async fn resolve_diff(
+    run_dir: &Path,
+    run_store: Option<&dyn fabro_store::RunStore>,
+    args: &DiffArgs,
+) -> Result<String> {
     if let Some(ref node_id) = args.node {
         debug!(node_id, "Reading per-node diff");
         let node_patch = run_dir.join("nodes").join(node_id).join("diff.patch");
@@ -42,7 +48,16 @@ async fn resolve_diff(run_dir: &Path, args: &DiffArgs) -> Result<String> {
         });
     }
 
-    let start = StartRecord::load(run_dir).context("Failed to load start.json")?;
+    let start = match run_store {
+        Some(run_store) => run_store
+            .get_start()
+            .await
+            .ok()
+            .flatten()
+            .or_else(|| StartRecord::load(run_dir).ok())
+            .context("Failed to load start.json")?,
+        None => StartRecord::load(run_dir).context("Failed to load start.json")?,
+    };
 
     let base_sha = start
         .base_sha
@@ -55,8 +70,14 @@ async fn resolve_diff(run_dir: &Path, args: &DiffArgs) -> Result<String> {
         return std::fs::read_to_string(&final_patch_path).context("Failed to read final.patch");
     }
 
-    let conclusion_path = run_dir.join("conclusion.json");
-    if conclusion_path.exists() {
+    let run_concluded = match run_store {
+        Some(run_store) => {
+            run_store.get_conclusion().await.ok().flatten().is_some()
+                || run_dir.join("conclusion.json").exists()
+        }
+        None => run_dir.join("conclusion.json").exists(),
+    };
+    if run_concluded {
         bail!(
             "Run completed but no final.patch exists — the run may not have produced any changes"
         );
@@ -64,9 +85,20 @@ async fn resolve_diff(run_dir: &Path, args: &DiffArgs) -> Result<String> {
 
     debug!("No final.patch found; attempting live diff from sandbox");
     let sandbox_json = run_dir.join("sandbox.json");
-    let record = fabro_sandbox::SandboxRecord::load(&sandbox_json).context(
-        "Failed to load sandbox.json — was this run started with a recent version of arc?",
-    )?;
+    let record = match run_store {
+        Some(run_store) => run_store
+            .get_sandbox()
+            .await
+            .ok()
+            .flatten()
+            .or_else(|| fabro_sandbox::SandboxRecord::load(&sandbox_json).ok())
+            .context(
+                "Failed to load sandbox.json — was this run started with a recent version of arc?",
+            )?,
+        None => fabro_sandbox::SandboxRecord::load(&sandbox_json).context(
+            "Failed to load sandbox.json — was this run started with a recent version of arc?",
+        )?,
+    };
 
     info!(provider = %record.provider, "Reconnecting to sandbox for live diff");
     let sandbox = reconnect(&record).await?;

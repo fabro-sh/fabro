@@ -14,11 +14,13 @@ pub(crate) async fn write_catalog(
     run_id: &str,
     created_at: DateTime<Utc>,
     db_prefix: &str,
+    run_dir: Option<&str>,
 ) -> Result<CatalogRecord> {
     let record = CatalogRecord {
         run_id: run_id.to_string(),
         created_at,
         db_prefix: db_prefix.to_string(),
+        run_dir: run_dir.map(ToOwned::to_owned),
     };
     let bytes = serde_json::to_vec(&record)?;
     store

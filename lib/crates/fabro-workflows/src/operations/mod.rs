@@ -1,5 +1,6 @@
 mod create;
 mod fork;
+mod hydrate;
 mod resume;
 mod rewind;
 mod source;
@@ -11,6 +12,7 @@ mod validate;
 pub use crate::pipeline::{DevcontainerSpec, LlmSpec, SandboxEnvSpec};
 pub use create::{CreateRunInput, CreatedRun, create};
 pub use fork::{ForkRunInput, fork};
+pub use hydrate::open_or_hydrate_run;
 pub use resume::resume;
 pub use rewind::{
     RewindInput, RewindTarget, RunTimeline, TimelineEntry, build_timeline, find_run_id_by_prefix,

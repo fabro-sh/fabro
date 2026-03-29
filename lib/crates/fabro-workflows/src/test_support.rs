@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use chrono::Utc;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::Graph as GvGraph;
+use fabro_store::{InMemoryStore, Store};
 
 use crate::error::Result;
 use crate::event::EventEmitter;
@@ -19,7 +21,7 @@ struct InitializedOptions {
     checkpoint: Option<Checkpoint>,
 }
 
-fn initialized(
+async fn initialized(
     registry: HandlerRegistry,
     emitter: Arc<EventEmitter>,
     sandbox: Arc<dyn Sandbox>,
@@ -28,10 +30,19 @@ fn initialized(
     options: InitializedOptions,
 ) -> Initialized {
     std::fs::create_dir_all(&run_options.run_dir).expect("failed to create run dir");
+    let run_store = InMemoryStore::default()
+        .create_run(
+            &run_options.run_id,
+            Utc::now(),
+            Some(run_options.run_dir.to_string_lossy().as_ref()),
+        )
+        .await
+        .expect("failed to create in-memory run store");
     Initialized {
         graph: graph.clone(),
         source: String::new(),
         run_options: run_options.clone(),
+        run_store,
         checkpoint: options.checkpoint,
         seed_context: None,
         emitter,
@@ -54,7 +65,7 @@ pub async fn run_graph(
     graph: &GvGraph,
     run_options: &RunOptions,
 ) -> Result<Outcome> {
-    let executed = pipeline::execute(initialized(
+    let initialized = initialized(
         registry,
         emitter,
         sandbox,
@@ -65,8 +76,9 @@ pub async fn run_graph(
             env: HashMap::new(),
             checkpoint: None,
         },
-    ))
+    )
     .await;
+    let executed = pipeline::execute(initialized).await;
     executed.outcome
 }
 
@@ -79,7 +91,7 @@ pub async fn run_graph_with_hooks(
     hook_runner: Arc<fabro_hooks::HookRunner>,
     env: Option<HashMap<String, String>>,
 ) -> Result<Outcome> {
-    let executed = pipeline::execute(initialized(
+    let initialized = initialized(
         registry,
         emitter,
         sandbox,
@@ -90,8 +102,9 @@ pub async fn run_graph_with_hooks(
             env: env.unwrap_or_default(),
             checkpoint: None,
         },
-    ))
+    )
     .await;
+    let executed = pipeline::execute(initialized).await;
     executed.outcome
 }
 
@@ -103,7 +116,7 @@ pub async fn run_graph_from_checkpoint(
     run_options: &RunOptions,
     checkpoint: &Checkpoint,
 ) -> Result<Outcome> {
-    let executed = pipeline::execute(initialized(
+    let initialized = initialized(
         registry,
         emitter,
         sandbox,
@@ -114,8 +127,9 @@ pub async fn run_graph_from_checkpoint(
             env: HashMap::new(),
             checkpoint: Some(checkpoint.clone()),
         },
-    ))
+    )
     .await;
+    let executed = pipeline::execute(initialized).await;
     executed.outcome
 }
 

@@ -7,7 +7,7 @@ use fabro_workflows::records::{CheckpointExt, ConclusionExt, RunRecordExt, Start
 use serde::Serialize;
 
 use fabro_workflows::records::{Checkpoint, Conclusion, RunRecord, StartRecord};
-use fabro_workflows::run_lookup::{resolve_run, runs_base};
+use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflows::run_status::RunStatus;
 
 use crate::args::InspectArgs;
@@ -25,14 +25,54 @@ pub(crate) struct InspectOutput {
     pub sandbox: Option<serde_json::Value>,
 }
 
-pub(crate) fn run(args: &InspectArgs) -> Result<()> {
+pub(crate) async fn run(args: &InspectArgs) -> Result<()> {
     let cli_settings = load_cli_settings(None)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let run = resolve_run(&base, &args.run)?;
-    let output = inspect_run_dir(&run.run_id, &run.path, run.status);
+    let store = crate::store::build_store(&cli_settings.storage_dir())?;
+    let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
+    let output =
+        match crate::store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await? {
+            Some(run_store) => {
+                inspect_run_store(&run.run_id, &run.path, run.status, run_store.as_ref()).await
+            }
+            None => inspect_run_dir(&run.run_id, &run.path, run.status),
+        };
     let json = serde_json::to_string_pretty(&[output])?;
     println!("{json}");
     Ok(())
+}
+
+async fn inspect_run_store(
+    run_id: &str,
+    run_dir: &Path,
+    status: RunStatus,
+    run_store: &dyn fabro_store::RunStore,
+) -> InspectOutput {
+    match run_store.get_snapshot().await {
+        Ok(Some(snapshot)) => InspectOutput {
+            run_id: run_id.to_string(),
+            run_dir: run_dir.to_path_buf(),
+            status: snapshot
+                .status
+                .as_ref()
+                .map(|record| record.status)
+                .unwrap_or(status),
+            run_record: serde_json::to_value(snapshot.run).ok(),
+            start_record: snapshot
+                .start
+                .and_then(|record| serde_json::to_value(record).ok()),
+            conclusion: snapshot
+                .conclusion
+                .and_then(|record| serde_json::to_value(record).ok()),
+            checkpoint: snapshot
+                .checkpoint
+                .and_then(|record| serde_json::to_value(record).ok()),
+            sandbox: snapshot
+                .sandbox
+                .and_then(|record| serde_json::to_value(record).ok()),
+        },
+        _ => inspect_run_dir(run_id, run_dir, status),
+    }
 }
 
 fn inspect_run_dir(run_id: &str, run_dir: &Path, status: RunStatus) -> InspectOutput {

@@ -7,6 +7,7 @@ mod logging;
 mod shared;
 #[cfg(feature = "sleep_inhibitor")]
 mod sleep_inhibitor;
+mod store;
 
 use anyhow::Result;
 use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands};

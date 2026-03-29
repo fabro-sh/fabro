@@ -27,6 +27,7 @@ fabro-types = { path = "../fabro-types", features = ["exedev"] }
 fabro-util = { path = "../fabro-util" }
 fabro-db = { path = "../fabro-db" }
 fabro-api-types = { path = "../fabro-api-types" }
+fabro-store = { path = "../fabro-store" }
 chrono.workspace = true
 futures-util.workspace = true
 axum = "0.8"
@@ -59,6 +60,7 @@ sha2.workspace = true
 hex.workspace = true
 reqwest.workspace = true
 bytes = "1"
+object_store.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }

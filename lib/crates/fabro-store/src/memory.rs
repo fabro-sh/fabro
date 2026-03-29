@@ -44,11 +44,17 @@ struct InMemoryRunStore {
 }
 
 impl InMemoryRunStore {
-    fn new(run_id: &str, created_at: DateTime<Utc>, db_prefix: String) -> Result<Self> {
+    fn new(
+        run_id: &str,
+        created_at: DateTime<Utc>,
+        db_prefix: String,
+        run_dir: Option<String>,
+    ) -> Result<Self> {
         let record = CatalogRecord {
             run_id: run_id.to_string(),
             created_at,
             db_prefix,
+            run_dir,
         };
         let mut data = BTreeMap::new();
         data.insert(keys::init().to_string(), serde_json::to_vec(&record)?);
@@ -217,11 +223,12 @@ impl Store for InMemoryStore {
         &self,
         run_id: &str,
         created_at: DateTime<Utc>,
-    ) -> Result<Box<dyn RunStore>> {
+        run_dir: Option<&str>,
+    ) -> Result<Arc<dyn RunStore>> {
         let mut runs = self.runs.lock().await;
         if let Some(existing) = runs.get(run_id) {
             if existing.record.created_at == created_at {
-                return Ok(Box::new(Arc::clone(&existing.run_store)));
+                return Ok(Arc::clone(&existing.run_store) as Arc<dyn RunStore>);
             }
             return Err(StoreError::RunAlreadyExists(run_id.to_string()));
         }
@@ -231,24 +238,30 @@ impl Store for InMemoryStore {
             run_id,
             created_at,
             db_prefix.clone(),
+            run_dir.map(ToOwned::to_owned),
         )?);
         let catalog = InMemoryCatalog {
             record: CatalogRecord {
                 run_id: run_id.to_string(),
                 created_at,
                 db_prefix,
+                run_dir: run_dir.map(ToOwned::to_owned),
             },
             run_store: Arc::clone(&run_store),
         };
         runs.insert(run_id.to_string(), catalog);
-        Ok(Box::new(run_store))
+        Ok(run_store as Arc<dyn RunStore>)
     }
 
-    async fn open_run(&self, run_id: &str) -> Result<Option<Box<dyn RunStore>>> {
+    async fn open_run(&self, run_id: &str) -> Result<Option<Arc<dyn RunStore>>> {
         let runs = self.runs.lock().await;
         Ok(runs
             .get(run_id)
-            .map(|catalog| Box::new(Arc::clone(&catalog.run_store)) as Box<dyn RunStore>))
+            .map(|catalog| Arc::clone(&catalog.run_store) as Arc<dyn RunStore>))
+    }
+
+    async fn open_run_reader(&self, run_id: &str) -> Result<Option<Arc<dyn RunStore>>> {
+        self.open_run(run_id).await
     }
 
     async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>> {
@@ -276,7 +289,7 @@ impl Store for InMemoryStore {
 }
 
 #[async_trait]
-impl RunStore for Arc<InMemoryRunStore> {
+impl RunStore for InMemoryRunStore {
     async fn put_run(&self, record: &RunRecord) -> Result<()> {
         self.validate_run_record(record)?;
         self.put_json(keys::run().to_string(), record).await
@@ -577,6 +590,7 @@ fn build_run_summary(
         run_id: record.run_id.clone(),
         created_at: record.created_at,
         db_prefix: record.db_prefix.clone(),
+        run_dir: record.run_dir.clone(),
         workflow_name,
         workflow_slug: run.as_ref().and_then(|run| run.workflow_slug.clone()),
         goal,
@@ -730,7 +744,7 @@ mod tests {
     async fn create_run_put_get_and_snapshot_round_trip() {
         let store = InMemoryStore::default();
         let created_at = dt("2026-03-27T12:00:00Z");
-        let run = store.create_run("run-1", created_at).await.unwrap();
+        let run = store.create_run("run-1", created_at, None).await.unwrap();
 
         let run_record = sample_run_record("run-1", created_at);
         let start_record = sample_start_record("run-1", created_at);
@@ -851,7 +865,7 @@ mod tests {
     async fn append_event_validates_payload_shape_and_run_id() {
         let store = InMemoryStore::default();
         let run = store
-            .create_run("run-1", dt("2026-03-27T12:00:00Z"))
+            .create_run("run-1", dt("2026-03-27T12:00:00Z"), None)
             .await
             .unwrap();
 
@@ -876,7 +890,7 @@ mod tests {
     async fn put_run_rejects_created_at_mismatch() {
         let store = InMemoryStore::default();
         let created_at = dt("2026-03-27T12:00:00Z");
-        let run = store.create_run("run-1", created_at).await.unwrap();
+        let run = store.create_run("run-1", created_at, None).await.unwrap();
         let err = run
             .put_run(&sample_run_record(
                 "run-1",
@@ -891,7 +905,7 @@ mod tests {
     async fn watch_events_from_receives_existing_and_live_events() {
         let store = InMemoryStore::default();
         let run = store
-            .create_run("run-1", dt("2026-03-27T12:00:00Z"))
+            .create_run("run-1", dt("2026-03-27T12:00:00Z"), None)
             .await
             .unwrap();
         let first = EventPayload::new(
@@ -942,7 +956,7 @@ mod tests {
     async fn checkpoint_history_round_trips() {
         let store = InMemoryStore::default();
         let run = store
-            .create_run("run-1", dt("2026-03-27T12:00:00Z"))
+            .create_run("run-1", dt("2026-03-27T12:00:00Z"), None)
             .await
             .unwrap();
         let checkpoint = sample_checkpoint();
@@ -961,7 +975,7 @@ mod tests {
     async fn node_visit_storage_round_trips() {
         let store = InMemoryStore::default();
         let run = store
-            .create_run("run-1", dt("2026-03-27T12:00:00Z"))
+            .create_run("run-1", dt("2026-03-27T12:00:00Z"), None)
             .await
             .unwrap();
 
@@ -990,13 +1004,13 @@ mod tests {
         let early = dt("2026-03-27T10:00:00Z");
         let late = dt("2026-03-27T12:00:00Z");
 
-        let early_run = store.create_run("run-early", early).await.unwrap();
+        let early_run = store.create_run("run-early", early, None).await.unwrap();
         early_run
             .put_run(&sample_run_record("run-early", early))
             .await
             .unwrap();
 
-        let late_run = store.create_run("run-late", late).await.unwrap();
+        let late_run = store.create_run("run-late", late, None).await.unwrap();
         late_run
             .put_run(&sample_run_record("run-late", late))
             .await
@@ -1043,7 +1057,7 @@ mod tests {
     async fn delete_run_is_idempotent() {
         let store = InMemoryStore::default();
         store
-            .create_run("run-1", dt("2026-03-27T12:00:00Z"))
+            .create_run("run-1", dt("2026-03-27T12:00:00Z"), None)
             .await
             .unwrap();
         store.delete_run("run-1").await.unwrap();
@@ -1057,14 +1071,14 @@ mod tests {
         let ts = dt("2026-03-27T12:00:00Z");
 
         // First create succeeds.
-        store.create_run("run-1", ts).await.unwrap();
+        store.create_run("run-1", ts, None).await.unwrap();
 
         // Retry with exact same created_at succeeds (idempotent).
-        store.create_run("run-1", ts).await.unwrap();
+        store.create_run("run-1", ts, None).await.unwrap();
 
         // Different created_at for the same run_id is rejected.
         let different_ts = dt("2026-03-27T12:00:01Z");
-        match store.create_run("run-1", different_ts).await {
+        match store.create_run("run-1", different_ts, None).await {
             Err(StoreError::RunAlreadyExists(_)) => {} // expected
             Err(other) => panic!("expected RunAlreadyExists, got: {other:?}"),
             Ok(_) => panic!("expected RunAlreadyExists, but create_run succeeded"),

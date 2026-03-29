@@ -11,6 +11,7 @@ use crate::run_status::{RunStatus, StatusReason, write_run_status};
 use crate::sandbox_git::git_push_host;
 use fabro_hooks::{HookContext, HookEvent, HookRunner};
 use fabro_retro::retro::extract_stage_durations;
+use fabro_store::RunStore;
 
 use super::types::{Concluded, FinalizeOptions, Retroed};
 
@@ -80,6 +81,114 @@ pub fn build_conclusion(
     let mut has_pricing = false;
 
     let (stages, total_cost, total_retries) = if let Some(ref cp) = checkpoint {
+        let mut stages = Vec::new();
+        let mut cost_sum: Option<f64> = None;
+        let mut retries_sum: u32 = 0;
+
+        for node_id in &cp.completed_nodes {
+            let outcome = cp.node_outcomes.get(node_id);
+            let retries = cp
+                .node_retries
+                .get(node_id)
+                .copied()
+                .unwrap_or(1)
+                .saturating_sub(1);
+            retries_sum += retries;
+
+            let cost = outcome.and_then(|o| o.usage.as_ref()).and_then(|u| u.cost);
+            if let Some(c) = cost {
+                *cost_sum.get_or_insert(0.0) += c;
+                has_pricing = true;
+            }
+
+            if let Some(usage) = outcome.and_then(|o| o.usage.as_ref()) {
+                total_input_tokens += usage.input_tokens;
+                total_output_tokens += usage.output_tokens;
+                total_cache_read_tokens += usage.cache_read_tokens.unwrap_or(0);
+                total_cache_write_tokens += usage.cache_write_tokens.unwrap_or(0);
+                total_reasoning_tokens += usage.reasoning_tokens.unwrap_or(0);
+            }
+
+            stages.push(StageSummary {
+                stage_id: node_id.clone(),
+                stage_label: node_id.clone(),
+                duration_ms: stage_durations.get(node_id).copied().unwrap_or(0),
+                cost,
+                retries,
+            });
+        }
+        (stages, cost_sum, retries_sum)
+    } else {
+        (vec![], None, 0)
+    };
+
+    Conclusion {
+        timestamp: chrono::Utc::now(),
+        status,
+        duration_ms: run_duration_ms,
+        failure_reason,
+        final_git_commit_sha,
+        stages,
+        total_cost,
+        total_retries,
+        total_input_tokens,
+        total_output_tokens,
+        total_cache_read_tokens,
+        total_cache_write_tokens,
+        total_reasoning_tokens,
+        has_pricing,
+    }
+}
+
+pub(crate) async fn build_conclusion_from_store(
+    run_store: &dyn RunStore,
+    run_dir: &Path,
+    status: StageStatus,
+    failure_reason: Option<String>,
+    run_duration_ms: u64,
+    final_git_commit_sha: Option<String>,
+) -> Conclusion {
+    let checkpoint = match run_store.get_checkpoint().await {
+        Ok(checkpoint) => checkpoint,
+        Err(err) => {
+            tracing::warn!(error = %err, "Failed to load checkpoint from store while building conclusion");
+            Checkpoint::load(&run_dir.join("checkpoint.json")).ok()
+        }
+    };
+    let stage_durations = match run_store.list_events().await {
+        Ok(events) => crate::extract_stage_durations_from_events(&events),
+        Err(err) => {
+            tracing::warn!(error = %err, "Failed to load events from store while building conclusion");
+            extract_stage_durations(run_dir)
+        }
+    };
+
+    build_conclusion_from_parts(
+        checkpoint.as_ref(),
+        &stage_durations,
+        status,
+        failure_reason,
+        run_duration_ms,
+        final_git_commit_sha,
+    )
+}
+
+fn build_conclusion_from_parts(
+    checkpoint: Option<&Checkpoint>,
+    stage_durations: &std::collections::HashMap<String, u64>,
+    status: StageStatus,
+    failure_reason: Option<String>,
+    run_duration_ms: u64,
+    final_git_commit_sha: Option<String>,
+) -> Conclusion {
+    let mut total_input_tokens: i64 = 0;
+    let mut total_output_tokens: i64 = 0;
+    let mut total_cache_read_tokens: i64 = 0;
+    let mut total_cache_write_tokens: i64 = 0;
+    let mut total_reasoning_tokens: i64 = 0;
+    let mut has_pricing = false;
+
+    let (stages, total_cost, total_retries) = if let Some(cp) = checkpoint {
         let mut stages = Vec::new();
         let mut cost_sum: Option<f64> = None;
         let mut retries_sum: u32 = 0;
@@ -231,6 +340,7 @@ pub async fn finalize(
         graph,
         outcome,
         run_options,
+        run_store: _run_store,
         hook_runner,
         emitter,
         sandbox,
@@ -240,13 +350,15 @@ pub async fn finalize(
 
     let (final_status, failure_reason, run_status, status_reason) =
         classify_engine_result(&outcome);
-    let conclusion = build_conclusion(
+    let conclusion = build_conclusion_from_store(
+        options.run_store.as_ref(),
         &options.run_dir,
         final_status,
         failure_reason,
         duration_ms,
         options.last_git_sha.clone(),
-    );
+    )
+    .await;
 
     write_finalize_commit(&run_options, &options.run_dir).await;
 
@@ -287,6 +399,19 @@ pub async fn finalize(
     }
 
     persist_terminal_outcome(&options.run_dir, &conclusion, run_status, status_reason);
+    if let Err(err) = options.run_store.put_conclusion(&conclusion).await {
+        tracing::warn!(error = %err, "Failed to save conclusion to store");
+    }
+    if let Err(err) = options
+        .run_store
+        .put_status(&fabro_types::RunStatusRecord::new(
+            run_status,
+            status_reason,
+        ))
+        .await
+    {
+        tracing::warn!(error = %err, "Failed to save terminal status to store");
+    }
 
     Ok(Concluded {
         run_id: run_options.run_id.clone(),
@@ -304,8 +429,10 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use chrono::Utc;
     use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
+    use fabro_store::{InMemoryStore, Store};
 
     use super::*;
     use crate::pipeline::types::Retroed;
@@ -333,10 +460,19 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();
+        let run_store = InMemoryStore::default()
+            .create_run(
+                "run-test",
+                Utc::now(),
+                Some(run_dir.to_string_lossy().as_ref()),
+            )
+            .await
+            .unwrap();
         let retroed = Retroed {
             graph: Graph::new("test"),
             outcome: Ok(Outcome::success()),
             run_options: test_run_options(&run_dir),
+            run_store: Arc::clone(&run_store),
             hook_runner: None,
             emitter: Arc::new(EventEmitter::new()),
             sandbox: Arc::new(fabro_agent::LocalSandbox::new(
@@ -351,6 +487,7 @@ mod tests {
             &FinalizeOptions {
                 run_dir: run_dir.clone(),
                 run_id: "run-test".to_string(),
+                run_store,
                 workflow_name: "test".to_string(),
                 hook_runner: None,
                 preserve_sandbox: true,

@@ -11,12 +11,14 @@ use fabro_config::{project as project_config, run as run_config, sandbox as sand
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec, detect_clone_params};
+use fabro_store::RunStore;
 use serde::Serialize;
 
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{
-    EventEmitter, ProgressLogger, RunNoticeLevel, WorkflowRunEvent, append_progress_event,
+    EventEmitter, ProgressLogger, RunNoticeLevel, StoreProgressLogger, WorkflowRunEvent,
+    append_progress_event, build_redacted_event_payload,
 };
 use crate::git::GitAuthor;
 use crate::handler::HandlerRegistry;
@@ -28,7 +30,7 @@ use crate::pipeline::{
 };
 use crate::records::{Checkpoint, Conclusion, ConclusionExt, RunRecord, RunRecordExt};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
-use crate::run_status::{self, RunStatus, RunStatusRecordExt, StatusReason};
+use crate::run_status::{self, RunStatus, StatusReason};
 use fabro_config::run::PullRequestSettings;
 use fabro_retro::retro::Retro;
 use fabro_sandbox::daytona::DaytonaConfig;
@@ -48,6 +50,7 @@ struct RunSession {
     sandbox_env: SandboxEnvSpec,
     devcontainer: Option<DevcontainerSpec>,
     seed_context: Option<Context>,
+    run_store: Arc<dyn RunStore>,
     git_author: GitAuthor,
     git: Option<GitCheckpointOptions>,
     github_app: Option<fabro_github::GitHubAppCredentials>,
@@ -65,6 +68,7 @@ pub struct StartServices {
     pub cancel_token: Option<Arc<AtomicBool>>,
     pub emitter: Arc<EventEmitter>,
     pub interviewer: Arc<dyn Interviewer>,
+    pub run_store: Arc<dyn RunStore>,
     pub git_author: GitAuthor,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
     pub on_node: crate::OnNodeCallback,
@@ -79,13 +83,24 @@ pub struct Started {
 
 /// Start a fresh workflow run. Errors if a checkpoint already exists (use `resume()` instead).
 pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, FabroError> {
-    if run_dir.join("checkpoint.json").exists() {
+    if services
+        .run_store
+        .get_checkpoint()
+        .await
+        .map_err(|err| FabroError::engine(err.to_string()))?
+        .is_some()
+    {
         return Err(FabroError::Precondition(
             "checkpoint.json exists in run directory — did you mean to resume?".to_string(),
         ));
     }
 
-    if let Ok(record) = run_status::RunStatusRecord::load(&run_dir.join("status.json")) {
+    if let Some(record) = services
+        .run_store
+        .get_status()
+        .await
+        .map_err(|err| FabroError::engine(err.to_string()))?
+    {
         if !matches!(record.status, RunStatus::Submitted | RunStatus::Starting) {
             return Err(FabroError::Precondition(format!(
                 "cannot start run: status is {:?}, expected submitted",
@@ -102,13 +117,39 @@ pub(super) async fn execute_persisted_run(
     checkpoint: Option<Checkpoint>,
     services: StartServices,
 ) -> Result<Started, FabroError> {
-    let mut bootstrap_guard = DetachedRunBootstrapGuard::arm(run_dir);
+    let run_store = Arc::clone(&services.run_store);
+    if let Err(err) = run_store
+        .put_status(&run_status::RunStatusRecord::new(
+            RunStatus::Starting,
+            Some(StatusReason::SandboxInitializing),
+        ))
+        .await
+    {
+        let error = FabroError::engine(err.to_string());
+        let _ = persist_detached_failure(
+            run_store.as_ref(),
+            run_dir,
+            "bootstrap",
+            StatusReason::BootstrapFailed,
+            &error,
+        )
+        .await;
+        return Err(error);
+    }
 
-    let persisted = match Persisted::load(run_dir) {
+    let mut bootstrap_guard = DetachedRunBootstrapGuard::arm(run_dir, Arc::clone(&run_store));
+
+    let persisted = match Persisted::load_from_store(services.run_store.as_ref(), run_dir).await {
         Ok(persisted) => persisted,
         Err(err) => {
-            let _ =
-                persist_detached_failure(run_dir, "bootstrap", StatusReason::BootstrapFailed, &err);
+            let _ = persist_detached_failure(
+                run_store.as_ref(),
+                run_dir,
+                "bootstrap",
+                StatusReason::BootstrapFailed,
+                &err,
+            )
+            .await;
             bootstrap_guard.defuse();
             return Err(err);
         }
@@ -117,15 +158,21 @@ pub(super) async fn execute_persisted_run(
     let session = match RunSession::new(&persisted, services) {
         Ok(session) => session,
         Err(err) => {
-            let _ =
-                persist_detached_failure(run_dir, "bootstrap", StatusReason::BootstrapFailed, &err);
+            let _ = persist_detached_failure(
+                run_store.as_ref(),
+                run_dir,
+                "bootstrap",
+                StatusReason::BootstrapFailed,
+                &err,
+            )
+            .await;
             bootstrap_guard.defuse();
             return Err(err);
         }
     };
 
     bootstrap_guard.defuse();
-    let mut completion_guard = DetachedRunCompletionGuard::arm(run_dir);
+    let mut completion_guard = DetachedRunCompletionGuard::arm(run_dir, Arc::clone(&run_store));
     let run_start = Instant::now();
     let started = Box::pin(session.run(persisted, checkpoint)).await;
 
@@ -135,14 +182,20 @@ pub(super) async fn execute_persisted_run(
             Ok(started)
         }
         Err(err) => {
-            persist_terminal_engine_failure(run_dir, &err, run_start.elapsed());
+            persist_terminal_engine_failure(run_store.as_ref(), run_dir, &err, run_start.elapsed())
+                .await;
             completion_guard.defuse();
             Err(err)
         }
     }
 }
 
-fn persist_terminal_engine_failure(run_dir: &Path, error: &FabroError, duration: Duration) {
+async fn persist_terminal_engine_failure(
+    run_store: &dyn RunStore,
+    run_dir: &Path,
+    error: &FabroError,
+    duration: Duration,
+) {
     let engine_result: Result<Outcome, FabroError> = Err(error.clone());
     let (final_status, failure_reason, run_status, status_reason) =
         classify_engine_result(&engine_result);
@@ -154,6 +207,15 @@ fn persist_terminal_engine_failure(run_dir: &Path, error: &FabroError, duration:
         None,
     );
     persist_terminal_outcome(run_dir, &conclusion, run_status, status_reason);
+    if let Err(err) = run_store.put_conclusion(&conclusion).await {
+        tracing::warn!(error = %err, "Failed to save terminal engine failure conclusion to store");
+    }
+    if let Err(err) = run_store
+        .put_status(&run_status::RunStatusRecord::new(run_status, status_reason))
+        .await
+    {
+        tracing::warn!(error = %err, "Failed to save terminal engine failure status to store");
+    }
 }
 
 impl RunSession {
@@ -298,6 +360,7 @@ impl RunSession {
             sandbox_env,
             devcontainer,
             seed_context: None,
+            run_store: services.run_store,
             git_author: services.git_author,
             git: None,
             github_app: services.github_app.clone(),
@@ -414,9 +477,13 @@ impl RunSession {
 
         ProgressLogger::new(persisted.run_dir(), record.run_id.clone())
             .register(self.emitter.as_ref());
+        let store_progress_logger =
+            StoreProgressLogger::new(Arc::clone(&self.run_store), record.run_id.clone());
+        store_progress_logger.register(self.emitter.as_ref());
 
         let init_options = InitOptions {
             run_id: record.run_id.clone(),
+            run_store: Arc::clone(&self.run_store),
             dry_run: run_options.dry_run_enabled(),
             emitter: self.emitter,
             sandbox: self.sandbox,
@@ -449,6 +516,7 @@ impl RunSession {
         });
 
         let executed = pipeline::execute(initialized).await;
+        store_progress_logger.flush().await;
         let failed = !matches!(
             executed.outcome.as_ref().map(|outcome| &outcome.status),
             Ok(StageStatus::Success | StageStatus::PartialSuccess)
@@ -456,6 +524,7 @@ impl RunSession {
 
         let retro_opts = RetroOptions {
             run_id: executed.run_options.run_id.clone(),
+            run_store: Arc::clone(&executed.run_store),
             workflow_name: executed.graph.name.clone(),
             goal: executed.graph.goal().to_string(),
             run_dir: executed.run_options.run_dir.clone(),
@@ -476,6 +545,7 @@ impl RunSession {
         let finalize_opts = FinalizeOptions {
             run_dir: retroed.run_options.run_dir.clone(),
             run_id: retroed.run_options.run_id.clone(),
+            run_store: Arc::clone(&retroed.run_store),
             workflow_name: retroed.graph.name.clone(),
             hook_runner: retroed.hook_runner.clone(),
             preserve_sandbox: self.preserve_sandbox,
@@ -483,6 +553,7 @@ impl RunSession {
         };
         let pr_opts = PullRequestOptions {
             run_dir: retroed.run_options.run_dir.clone(),
+            run_store: Some(Arc::clone(&retroed.run_store)),
             pr_config: self.pr_config,
             github_app: self.pr_github_app,
             origin_url: self.pr_origin_url,
@@ -492,6 +563,7 @@ impl RunSession {
         let retro = retroed.retro.clone();
         let concluded = pipeline::finalize(retroed, &finalize_opts).await?;
         let finalized = pipeline::pull_request(concluded, &pr_opts).await;
+        store_progress_logger.flush().await;
 
         scopeguard::ScopeGuard::into_inner(cleanup_guard);
 
@@ -505,11 +577,12 @@ impl RunSession {
 
 struct DetachedRunBootstrapGuard {
     run_dir: PathBuf,
+    run_store: Arc<dyn RunStore>,
     active: bool,
 }
 
 impl DetachedRunBootstrapGuard {
-    fn arm(run_dir: &Path) -> Self {
+    fn arm(run_dir: &Path, run_store: Arc<dyn RunStore>) -> Self {
         run_status::write_run_status(
             run_dir,
             RunStatus::Starting,
@@ -517,6 +590,7 @@ impl DetachedRunBootstrapGuard {
         );
         Self {
             run_dir: run_dir.to_path_buf(),
+            run_store,
             active: true,
         }
     }
@@ -534,6 +608,17 @@ impl Drop for DetachedRunBootstrapGuard {
                 RunStatus::Failed,
                 Some(StatusReason::SandboxInitFailed),
             );
+            let run_store = Arc::clone(&self.run_store);
+            if let Ok(handle) = Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = run_store
+                        .put_status(&run_status::RunStatusRecord::new(
+                            RunStatus::Failed,
+                            Some(StatusReason::SandboxInitFailed),
+                        ))
+                        .await;
+                });
+            }
         }
     }
 }
@@ -542,13 +627,17 @@ const POSTRUN_ABORTED_MESSAGE: &str = "Run aborted before post-run finalization 
 
 struct DetachedRunCompletionGuard {
     run_dir: PathBuf,
+    run_store: Arc<dyn RunStore>,
+    run_id: Option<String>,
     active: bool,
 }
 
 impl DetachedRunCompletionGuard {
-    fn arm(run_dir: &Path) -> Self {
+    fn arm(run_dir: &Path, run_store: Arc<dyn RunStore>) -> Self {
         Self {
             run_dir: run_dir.to_path_buf(),
+            run_store,
+            run_id: load_run_id(run_dir),
             active: true,
         }
     }
@@ -587,6 +676,45 @@ impl Drop for DetachedRunCompletionGuard {
                 },
             );
         }
+        let run_store = Arc::clone(&self.run_store);
+        let run_id = self.run_id.clone();
+        if let Ok(handle) = Handle::try_current() {
+            handle.spawn(async move {
+                let _ = run_store
+                    .put_status(&run_status::RunStatusRecord::new(
+                        RunStatus::Failed,
+                        Some(StatusReason::WorkflowError),
+                    ))
+                    .await;
+                if let Err(err) = run_store
+                    .put_conclusion(&build_failure_conclusion(POSTRUN_ABORTED_MESSAGE))
+                    .await
+                {
+                    tracing::warn!(
+                        error = %err,
+                        "Failed to save post-run abort conclusion to store"
+                    );
+                }
+                if let Some(run_id) = run_id {
+                    let event = WorkflowRunEvent::RunNotice {
+                        level: RunNoticeLevel::Error,
+                        code: "postrun_aborted".to_string(),
+                        message: POSTRUN_ABORTED_MESSAGE.to_string(),
+                    };
+                    match build_redacted_event_payload(&event, &run_id) {
+                        Ok(payload) => {
+                            let _ = run_store.append_event(&payload).await;
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                error = %err,
+                                "Failed to build post-run abort event payload"
+                            );
+                        }
+                    }
+                }
+            });
+        }
     }
 }
 
@@ -603,7 +731,8 @@ fn load_run_id(run_dir: &Path) -> Option<String> {
         })
 }
 
-fn persist_detached_failure(
+async fn persist_detached_failure(
+    run_store: &dyn RunStore,
     run_dir: &Path,
     phase: &'static str,
     reason: StatusReason,
@@ -631,8 +760,20 @@ fn persist_detached_failure(
     )
     .map_err(|err| FabroError::Io(err.to_string()))?;
 
-    write_failure_conclusion(run_dir, &message, Some(reason))?;
+    let conclusion = write_failure_conclusion(run_dir, &message, Some(reason))?;
     run_status::write_run_status(run_dir, RunStatus::Failed, Some(reason));
+    if let Err(err) = run_store.put_conclusion(&conclusion).await {
+        tracing::warn!(error = %err, "Failed to save detached failure conclusion to store");
+    }
+    if let Err(err) = run_store
+        .put_status(&run_status::RunStatusRecord::new(
+            RunStatus::Failed,
+            Some(reason),
+        ))
+        .await
+    {
+        tracing::warn!(error = %err, "Failed to save detached failure status to store");
+    }
 
     if let Some(run_id) = load_run_id(run_dir) {
         append_progress_event(
@@ -641,10 +782,25 @@ fn persist_detached_failure(
             &WorkflowRunEvent::RunNotice {
                 level: RunNoticeLevel::Error,
                 code: format!("{phase}_failed"),
-                message,
+                message: message.clone(),
             },
         )
         .map_err(|err| FabroError::Io(err.to_string()))?;
+        let event = WorkflowRunEvent::RunNotice {
+            level: RunNoticeLevel::Error,
+            code: format!("{phase}_failed"),
+            message,
+        };
+        match build_redacted_event_payload(&event, &run_id) {
+            Ok(payload) => {
+                if let Err(err) = run_store.append_event(&payload).await {
+                    tracing::warn!(error = %err, "Failed to append detached failure event to store");
+                }
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "Failed to build detached failure event payload");
+            }
+        }
     }
 
     Ok(())
@@ -654,12 +810,18 @@ fn write_failure_conclusion(
     run_dir: &Path,
     message: &str,
     _reason: Option<StatusReason>,
-) -> Result<(), FabroError> {
+) -> Result<Conclusion, FabroError> {
     if run_dir.join("conclusion.json").exists() {
-        return Ok(());
+        return Conclusion::load(&run_dir.join("conclusion.json")).map_err(Into::into);
     }
 
-    let conclusion = Conclusion {
+    let conclusion = build_failure_conclusion(message);
+    conclusion.save(&run_dir.join("conclusion.json"))?;
+    Ok(conclusion)
+}
+
+fn build_failure_conclusion(message: &str) -> Conclusion {
+    Conclusion {
         timestamp: Utc::now(),
         status: StageStatus::Fail,
         duration_ms: 0,
@@ -674,9 +836,7 @@ fn write_failure_conclusion(
         total_cache_write_tokens: 0,
         total_reasoning_tokens: 0,
         has_pricing: false,
-    };
-    conclusion.save(&run_dir.join("conclusion.json"))?;
-    Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -686,6 +846,7 @@ mod tests {
 
     use chrono::Utc;
     use fabro_config::FabroSettings;
+    use fabro_store::InMemoryStore;
 
     use super::*;
     use crate::context::Context;
@@ -734,7 +895,8 @@ mod tests {
         registry
     }
 
-    fn test_start_services(
+    async fn test_start_services(
+        run_dir: &Path,
         emitter: Arc<EventEmitter>,
         registry: Arc<HandlerRegistry>,
     ) -> StartServices {
@@ -742,6 +904,9 @@ mod tests {
             cancel_token: None,
             emitter,
             interviewer: Arc::new(fabro_interview::AutoApproveInterviewer),
+            run_store: crate::operations::open_or_hydrate_run(&InMemoryStore::default(), run_dir)
+                .await
+                .unwrap(),
             git_author: crate::git::GitAuthor::default(),
             github_app: None,
             on_node: None,
@@ -778,9 +943,12 @@ mod tests {
         }
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
-        let started = start(&run_dir, test_start_services(emitter, registry))
-            .await
-            .unwrap();
+        let started = start(
+            &run_dir,
+            test_start_services(&run_dir, emitter, registry).await,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             started.finalized.conclusion.final_git_commit_sha.as_deref(),
@@ -799,9 +967,12 @@ mod tests {
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
 
-        let started = start(&run_dir, test_start_services(emitter, registry))
-            .await
-            .unwrap();
+        let started = start(
+            &run_dir,
+            test_start_services(&run_dir, emitter, registry).await,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
         assert!(run_dir.join("conclusion.json").exists());
@@ -826,7 +997,7 @@ mod tests {
                         visited.lock().unwrap().push(node_id.to_string());
                     }
                 })),
-                ..test_start_services(emitter, registry)
+                ..test_start_services(&run_dir, emitter, registry).await
             },
         )
         .await
@@ -846,7 +1017,11 @@ mod tests {
         persisted_workflow(MINIMAL_DOT, &run_dir);
         std::fs::write(run_dir.join("checkpoint.json"), "{}").unwrap();
 
-        let result = start(&run_dir, test_start_services(emitter, registry)).await;
+        let result = start(
+            &run_dir,
+            test_start_services(&run_dir, emitter, registry).await,
+        )
+        .await;
 
         assert!(
             matches!(&result, Err(crate::error::FabroError::Precondition(_))),
@@ -864,7 +1039,11 @@ mod tests {
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
 
-        let result = resume(&run_dir, test_start_services(emitter, registry)).await;
+        let result = resume(
+            &run_dir,
+            test_start_services(&run_dir, emitter, registry).await,
+        )
+        .await;
 
         assert!(
             matches!(&result, Err(crate::error::FabroError::Precondition(_))),
@@ -914,7 +1093,11 @@ mod tests {
         .save(&run_dir.join("conclusion.json"))
         .unwrap();
 
-        let result = resume(&run_dir, test_start_services(emitter, registry)).await;
+        let result = resume(
+            &run_dir,
+            test_start_services(&run_dir, emitter, registry).await,
+        )
+        .await;
 
         assert!(
             matches!(&result, Err(crate::error::FabroError::Precondition(_))),

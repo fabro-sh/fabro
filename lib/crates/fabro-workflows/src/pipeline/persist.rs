@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use fabro_store::RunStore;
+
 use crate::error::FabroError;
 use crate::records::{RunRecord, RunRecordExt};
 
@@ -51,6 +53,31 @@ pub(crate) fn load(run_dir: &Path) -> Result<Persisted, FabroError> {
         }
         Err(err) => return Err(err.into()),
     };
+
+    Ok(Persisted::new(
+        graph,
+        source,
+        Vec::new(),
+        run_dir.to_path_buf(),
+        run_record,
+    ))
+}
+
+pub(crate) async fn load_from_store(
+    run_store: &dyn RunStore,
+    run_dir: &Path,
+) -> Result<Persisted, FabroError> {
+    let run_record = run_store
+        .get_run()
+        .await
+        .map_err(|err| FabroError::engine(err.to_string()))?
+        .ok_or_else(|| FabroError::Precondition("run record missing from store".to_string()))?;
+    let graph = run_record.graph.clone();
+    let source = run_store
+        .get_graph()
+        .await
+        .map_err(|err| FabroError::engine(err.to_string()))?
+        .unwrap_or_default();
 
     Ok(Persisted::new(
         graph,

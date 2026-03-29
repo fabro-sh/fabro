@@ -11,10 +11,10 @@ pub(crate) async fn dispatch(cmd: RunsCommands) -> Result<()> {
     match cmd {
         RunsCommands::Ps(args) => {
             let styles = Styles::detect_stdout();
-            list::list_command(&args, &styles)
+            list::list_command(&args, &styles).await
         }
         RunsCommands::Rm(args) => rm::remove_command(&args).await,
-        RunsCommands::Inspect(args) => inspect::run(&args),
+        RunsCommands::Inspect(args) => inspect::run(&args).await,
     }
 }
 

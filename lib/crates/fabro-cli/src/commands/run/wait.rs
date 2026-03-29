@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 use fabro_workflows::records::{Conclusion, ConclusionExt};
-use fabro_workflows::run_lookup::{resolve_run, runs_base};
+use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflows::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
 use tracing::info;
 
@@ -12,13 +12,16 @@ use crate::args::WaitArgs;
 use crate::cli_config::load_cli_settings;
 use crate::shared::format_duration_ms;
 
-pub(crate) fn run(args: &WaitArgs, styles: &Styles) -> Result<()> {
+pub(crate) async fn run(args: &WaitArgs, styles: &Styles) -> Result<()> {
     let cli_settings = load_cli_settings(None)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let run_info = resolve_run(&base, &args.run)?;
+    let store = crate::store::build_store(&cli_settings.storage_dir())?;
+    let run_info = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
 
     info!(run_id = %run_info.run_id, "Waiting for run to complete");
 
+    let run_store =
+        crate::store::open_run_reader(&cli_settings.storage_dir(), &run_info.run_id).await?;
     let status_path = run_info.path.join("status.json");
     let deadline = args
         .timeout
@@ -26,9 +29,19 @@ pub(crate) fn run(args: &WaitArgs, styles: &Styles) -> Result<()> {
     let interval = std::time::Duration::from_millis(args.interval);
 
     let final_status = loop {
-        let status = match RunStatusRecord::load(&status_path) {
-            Ok(record) => record.status,
-            Err(_) => RunStatus::Dead,
+        let status = match run_store.as_ref() {
+            Some(run_store) => match run_store.get_status().await {
+                Ok(Some(record)) => record.status,
+                Ok(None) => RunStatus::Dead,
+                Err(_) => match RunStatusRecord::load(&status_path) {
+                    Ok(record) => record.status,
+                    Err(_) => RunStatus::Dead,
+                },
+            },
+            None => match RunStatusRecord::load(&status_path) {
+                Ok(record) => record.status,
+                Err(_) => RunStatus::Dead,
+            },
         };
 
         if status.is_terminal() {
@@ -51,7 +64,15 @@ pub(crate) fn run(args: &WaitArgs, styles: &Styles) -> Result<()> {
     };
 
     let conclusion_path = run_info.path.join("conclusion.json");
-    let conclusion = Conclusion::load(&conclusion_path).ok();
+    let conclusion = match run_store.as_ref() {
+        Some(run_store) => run_store
+            .get_conclusion()
+            .await
+            .ok()
+            .flatten()
+            .or_else(|| Conclusion::load(&conclusion_path).ok()),
+        None => Conclusion::load(&conclusion_path).ok(),
+    };
 
     if args.json {
         let json_value = build_json_output(final_status, &run_info.run_id, conclusion.as_ref());

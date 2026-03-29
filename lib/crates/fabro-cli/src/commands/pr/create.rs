@@ -9,7 +9,7 @@ use fabro_workflows::pull_request::maybe_open_pull_request;
 use fabro_workflows::records::{
     Conclusion, ConclusionExt, RunRecord, RunRecordExt, StartRecord, StartRecordExt,
 };
-use fabro_workflows::run_lookup::{resolve_run, runs_base};
+use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 use tracing::info;
 
 use crate::args::PrCreateArgs;
@@ -29,14 +29,45 @@ async fn create_from(
     args: PrCreateArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {
-    let run_dir = resolve_run(base, &args.run_id)?.path;
+    let storage_dir = base.parent().unwrap_or(base);
+    let store = crate::store::build_store(storage_dir)?;
+    let run = resolve_run_combined(store.as_ref(), base, &args.run_id).await?;
+    let run_dir = run.path.clone();
+    let run_store = crate::store::open_run_reader(storage_dir, &run.run_id).await?;
 
-    let record = RunRecord::load(&run_dir).context("Failed to load run.json")?;
+    let record = match run_store.as_ref() {
+        Some(run_store) => run_store
+            .get_run()
+            .await
+            .ok()
+            .flatten()
+            .or_else(|| RunRecord::load(&run_dir).ok())
+            .context("Failed to load run.json")?,
+        None => RunRecord::load(&run_dir).context("Failed to load run.json")?,
+    };
 
-    let start = StartRecord::load(&run_dir).context("Failed to load start.json")?;
+    let start = match run_store.as_ref() {
+        Some(run_store) => run_store
+            .get_start()
+            .await
+            .ok()
+            .flatten()
+            .or_else(|| StartRecord::load(&run_dir).ok())
+            .context("Failed to load start.json")?,
+        None => StartRecord::load(&run_dir).context("Failed to load start.json")?,
+    };
 
-    let conclusion = Conclusion::load(&run_dir.join("conclusion.json"))
-        .context("Failed to load conclusion.json — is the run finished?")?;
+    let conclusion = match run_store.as_ref() {
+        Some(run_store) => run_store
+            .get_conclusion()
+            .await
+            .ok()
+            .flatten()
+            .or_else(|| Conclusion::load(&run_dir.join("conclusion.json")).ok())
+            .context("Failed to load conclusion.json — is the run finished?")?,
+        None => Conclusion::load(&run_dir.join("conclusion.json"))
+            .context("Failed to load conclusion.json — is the run finished?")?,
+    };
 
     match conclusion.status {
         StageStatus::Success | StageStatus::PartialSuccess => {}
@@ -103,6 +134,7 @@ async fn create_from(
         &model,
         true,
         None,
+        run_store.as_deref(),
         &run_dir,
         None,
     )

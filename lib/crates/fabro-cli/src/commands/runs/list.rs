@@ -8,7 +8,7 @@ use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 
 use fabro_util::text::strip_goal_decoration;
-use fabro_workflows::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs};
+use fabro_workflows::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_combined};
 use fabro_workflows::run_status::RunStatus;
 
 use crate::args::RunsListArgs;
@@ -17,10 +17,11 @@ use crate::shared::{color_if, format_duration_ms, tilde_path};
 
 use super::short_run_id;
 
-pub(crate) fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
+pub(crate) async fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
     let cli_settings = load_cli_settings(None)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let runs = scan_runs(&base)?;
+    let store = crate::store::build_store(&cli_settings.storage_dir())?;
+    let runs = scan_runs_combined(store.as_ref(), &base).await?;
     let label_filters = parse_label_filters(&args.filter.label);
     let filtered = filter_runs(
         &runs,

@@ -5,7 +5,9 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
+use fabro_store::{EventPayload, RunStore};
 use serde::{Deserialize, Serialize};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::error::FabroError;
 use crate::outcome::{FailureDetail, StageUsage};
@@ -819,6 +821,17 @@ pub fn build_event_envelope(event: &WorkflowRunEvent, run_id: &str) -> serde_jso
     serde_json::Value::Object(envelope)
 }
 
+pub fn build_redacted_event_payload(
+    event: &WorkflowRunEvent,
+    run_id: &str,
+) -> Result<EventPayload> {
+    let envelope = build_event_envelope(event, run_id);
+    let line = serde_json::to_string(&envelope)?;
+    let line = redact_jsonl_line(&line);
+    let value = serde_json::from_str(&line).context("Failed to parse redacted event payload")?;
+    EventPayload::new(value, run_id).map_err(anyhow::Error::from)
+}
+
 pub fn append_progress_event(run_dir: &Path, run_id: &str, event: &WorkflowRunEvent) -> Result<()> {
     let envelope = build_event_envelope(event, run_id);
     let line = serde_json::to_string(&envelope)?;
@@ -870,6 +883,83 @@ impl ProgressLogger {
             }
             let _ = append_progress_event(&run_dir, &run_id.lock().unwrap(), event);
         });
+    }
+}
+
+enum StoreProgressCommand {
+    Event(EventPayload),
+    Flush(oneshot::Sender<()>),
+}
+
+#[derive(Clone)]
+pub struct StoreProgressLogger {
+    tx: mpsc::UnboundedSender<StoreProgressCommand>,
+    run_id: Arc<std::sync::Mutex<String>>,
+}
+
+impl StoreProgressLogger {
+    #[must_use]
+    pub fn new(run_store: Arc<dyn RunStore>, run_id: impl Into<String>) -> Self {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            while let Some(command) = rx.recv().await {
+                match command {
+                    StoreProgressCommand::Event(payload) => {
+                        if let Err(err) = run_store.append_event(&payload).await {
+                            tracing::warn!(error = %err, "Failed to append event to run store");
+                        }
+                    }
+                    StoreProgressCommand::Flush(tx) => {
+                        let _ = tx.send(());
+                    }
+                }
+            }
+        });
+
+        Self {
+            tx,
+            run_id: Arc::new(std::sync::Mutex::new(run_id.into())),
+        }
+    }
+
+    pub fn register(&self, emitter: &EventEmitter) {
+        let tx = self.tx.clone();
+        let run_id = Arc::clone(&self.run_id);
+        emitter.on_event(move |event| {
+            if let WorkflowRunEvent::WorkflowRunStarted {
+                run_id: started_run_id,
+                ..
+            } = event
+            {
+                (*run_id.lock().unwrap()).clone_from(started_run_id);
+            }
+
+            let run_id = run_id.lock().unwrap().clone();
+            match build_redacted_event_payload(event, &run_id) {
+                Ok(payload) => {
+                    if tx.send(StoreProgressCommand::Event(payload)).is_err() {
+                        tracing::warn!(
+                            "Store progress logger channel closed while appending event"
+                        );
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "Failed to build store event payload");
+                }
+            }
+        });
+    }
+
+    pub async fn flush(&self) {
+        let (tx, rx) = oneshot::channel();
+        if self.tx.send(StoreProgressCommand::Flush(tx)).is_err() {
+            tracing::warn!("Store progress logger channel closed before flush");
+            return;
+        }
+        if rx.await.is_err() {
+            tracing::warn!("Store progress logger flush dropped before completion");
+        }
     }
 }
 

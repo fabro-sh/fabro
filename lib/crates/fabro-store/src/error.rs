@@ -14,6 +14,8 @@ pub enum StoreError {
     RunNotFound(String),
     #[error("Run already exists: {0}")]
     RunAlreadyExists(String),
+    #[error("run store is read-only")]
+    ReadOnly,
     #[error("{0}")]
     Other(String),
 }
