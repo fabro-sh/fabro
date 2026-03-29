@@ -20,6 +20,7 @@ pub struct CatalogRecord {
     pub run_id: String,
     pub created_at: DateTime<Utc>,
     pub db_prefix: String,
+    pub run_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -27,6 +28,7 @@ pub struct RunSummary {
     pub run_id: String,
     pub created_at: DateTime<Utc>,
     pub db_prefix: String,
+    pub run_dir: Option<String>,
     pub workflow_name: Option<String>,
     pub workflow_slug: Option<String>,
     pub goal: Option<String>,

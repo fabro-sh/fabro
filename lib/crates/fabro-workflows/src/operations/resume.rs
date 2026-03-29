@@ -4,21 +4,30 @@ use fabro_store::RuntimeState;
 
 use crate::error::FabroError;
 use crate::outcome::StageStatus;
-use crate::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt};
-use crate::run_status::{self, RunStatus, RunStatusRecordExt};
+use crate::run_status::{self, RunStatus};
 
 use super::start::{StartServices, Started, execute_persisted_run};
 
 /// Resume a workflow run from its checkpoint. Errors if no checkpoint is found.
 pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, FabroError> {
-    if let Ok(record) = run_status::RunStatusRecord::load(&run_dir.join("status.json")) {
+    if let Some(record) = services
+        .run_store
+        .get_status()
+        .await
+        .map_err(|err| FabroError::engine(err.to_string()))?
+    {
         if record.status == RunStatus::Succeeded {
             return Err(FabroError::Precondition(
                 "run already finished successfully — nothing to resume".to_string(),
             ));
         }
     }
-    if let Ok(conclusion) = Conclusion::load(&run_dir.join("conclusion.json")) {
+    if let Some(conclusion) = services
+        .run_store
+        .get_conclusion()
+        .await
+        .map_err(|err| FabroError::engine(err.to_string()))?
+    {
         if matches!(
             conclusion.status,
             StageStatus::Success | StageStatus::PartialSuccess | StageStatus::Skipped
@@ -29,12 +38,23 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
         }
     }
 
-    let cp_path = run_dir.join("checkpoint.json");
-    let checkpoint = Checkpoint::load(&cp_path)
-        .map_err(|e| FabroError::Precondition(format!("no checkpoint to resume from: {e}")))?;
+    let checkpoint = services
+        .run_store
+        .get_checkpoint()
+        .await
+        .map_err(|err| FabroError::engine(err.to_string()))?
+        .ok_or_else(|| FabroError::Precondition("no checkpoint to resume from".to_string()))?;
 
     cleanup_resume_artifacts(run_dir);
     run_status::write_run_status(run_dir, RunStatus::Submitted, None);
+    services
+        .run_store
+        .put_status(&run_status::RunStatusRecord::new(
+            RunStatus::Submitted,
+            None,
+        ))
+        .await
+        .map_err(|err| FabroError::engine(err.to_string()))?;
 
     Box::pin(execute_persisted_run(run_dir, Some(checkpoint), services)).await
 }

@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use fabro_config::run::MergeStrategy;
+use fabro_store::RunStore;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
@@ -321,6 +322,7 @@ pub async fn build_pr_body(
     diff: &str,
     goal: &str,
     model: &str,
+    run_store: Option<&dyn RunStore>,
     run_dir: &Path,
     conclusion: Option<&Conclusion>,
 ) -> Result<String, String> {
@@ -328,14 +330,58 @@ pub async fn build_pr_body(
 
     let plan_text = read_plan_text(run_dir);
     let loaded_conclusion = if conclusion.is_none() {
-        Conclusion::load(&run_dir.join("conclusion.json")).ok()
+        match run_store {
+            Some(run_store) => run_store
+                .get_conclusion()
+                .await
+                .inspect_err(|err| {
+                    tracing::warn!(error = %err, "Failed to load conclusion from store for PR body");
+                })
+                .ok()
+                .flatten()
+                .or_else(|| Conclusion::load(&run_dir.join("conclusion.json")).ok()),
+            None => Conclusion::load(&run_dir.join("conclusion.json")).ok(),
+        }
     } else {
         None
     };
     let conclusion = conclusion.or(loaded_conclusion.as_ref());
-    let retro = Retro::load(run_dir).ok();
-    let run_record = RunRecord::load(run_dir).ok();
-    let dot_source = read_dot_source(run_dir);
+    let retro = match run_store {
+        Some(run_store) => run_store
+            .get_retro()
+            .await
+            .inspect_err(|err| {
+                tracing::warn!(error = %err, "Failed to load retro from store for PR body");
+            })
+            .ok()
+            .flatten()
+            .or_else(|| Retro::load(run_dir).ok()),
+        None => Retro::load(run_dir).ok(),
+    };
+    let run_record = match run_store {
+        Some(run_store) => run_store
+            .get_run()
+            .await
+            .inspect_err(|err| {
+                tracing::warn!(error = %err, "Failed to load run record from store for PR body");
+            })
+            .ok()
+            .flatten()
+            .or_else(|| RunRecord::load(run_dir).ok()),
+        None => RunRecord::load(run_dir).ok(),
+    };
+    let dot_source = match run_store {
+        Some(run_store) => run_store
+            .get_graph()
+            .await
+            .inspect_err(|err| {
+                tracing::warn!(error = %err, "Failed to load graph from store for PR body");
+            })
+            .ok()
+            .flatten()
+            .or_else(|| read_dot_source(run_dir)),
+        None => read_dot_source(run_dir),
+    };
 
     // Build LLM prompt
     let system = if plan_text.is_some() {
@@ -413,6 +459,7 @@ pub async fn maybe_open_pull_request(
     model: &str,
     draft: bool,
     auto_merge: Option<AutoMergeOptions>,
+    run_store: Option<&dyn RunStore>,
     run_dir: &Path,
     conclusion: Option<&Conclusion>,
 ) -> Result<Option<PullRequestRecord>, String> {
@@ -424,7 +471,7 @@ pub async fn maybe_open_pull_request(
     let https_url = ssh_url_to_https(origin_url);
     let (owner, repo) = github_app::parse_github_owner_repo(&https_url)?;
 
-    let body = build_pr_body(diff, goal, model, run_dir, conclusion).await?;
+    let body = build_pr_body(diff, goal, model, run_store, run_dir, conclusion).await?;
     let body = truncate_pr_body(&body);
 
     let title = pr_title_from_goal(goal);
@@ -528,6 +575,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                         &options.model,
                         pr_cfg.draft,
                         auto_merge,
+                        options.run_store.as_deref(),
                         &options.run_dir,
                         Some(&conclusion),
                     )
@@ -1014,6 +1062,7 @@ mod tests {
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
+            None,
             tmp.path(),
             Some(&conclusion),
         )
@@ -1216,6 +1265,7 @@ mod tests {
             "",
             "claude-sonnet-4-20250514",
             false,
+            None,
             None,
             tmp.path(),
             None,

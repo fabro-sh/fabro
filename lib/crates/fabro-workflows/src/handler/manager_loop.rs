@@ -5,7 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use fabro_config::FabroSettings;
+use fabro_store::{InMemoryStore, Store};
 
 use crate::condition::evaluate_condition;
 use crate::context::keys;
@@ -196,6 +198,14 @@ impl Handler for SubWorkflowHandler {
         let hook_runner = services.hook_runner.clone();
         let env = services.env.clone();
         let dry_run = services.dry_run;
+        let run_store = InMemoryStore::default()
+            .create_run(
+                &child_run_options.run_id,
+                Utc::now(),
+                Some(child_run_options.run_dir.to_string_lossy().as_ref()),
+            )
+            .await
+            .map_err(|err| FabroError::engine(err.to_string()))?;
 
         // Spawn child engine
         let mut child_handle = tokio::spawn(async move {
@@ -203,6 +213,7 @@ impl Handler for SubWorkflowHandler {
                 graph: child_graph,
                 source: String::new(),
                 run_options: child_run_options,
+                run_store,
                 checkpoint: None,
                 seed_context: Some(child_context),
                 emitter,

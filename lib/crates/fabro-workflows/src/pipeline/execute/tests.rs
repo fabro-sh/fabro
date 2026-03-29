@@ -12,6 +12,7 @@ use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_hooks::HookConfig;
 use fabro_interview::AutoApproveInterviewer;
 use fabro_sandbox::SandboxSpec;
+use fabro_store::InMemoryStore;
 
 use super::*;
 use crate::context::{self, Context};
@@ -139,6 +140,12 @@ fn test_lifecycle(setup_commands: Vec<String>) -> LifecycleOptions {
     }
 }
 
+async fn test_run_store(run_dir: &Path) -> Arc<dyn fabro_store::RunStore> {
+    crate::operations::open_or_hydrate_run(&InMemoryStore::default(), run_dir)
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn execute_runs_start_to_exit_and_returns_final_context() {
     let temp = tempfile::tempdir().unwrap();
@@ -149,6 +156,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
         persisted_workflow(graph, source, &run_dir, "run-test"),
         InitOptions {
             run_id: "run-test".to_string(),
+            run_store: test_run_store(&run_dir).await,
             dry_run: false,
             emitter: Arc::new(crate::event::EventEmitter::new()),
             sandbox: SandboxSpec::Local {
@@ -215,6 +223,7 @@ async fn run_with_lifecycle(
         persisted_workflow(graph.clone(), String::new(), &run_dir, &run_id),
         InitOptions {
             run_id,
+            run_store: test_run_store(&run_dir).await,
             dry_run: false,
             emitter,
             sandbox: SandboxSpec::Local {

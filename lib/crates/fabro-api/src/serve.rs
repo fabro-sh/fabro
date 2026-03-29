@@ -6,6 +6,7 @@ use fabro_config::server::{load_server_settings, resolve_storage_dir};
 use fabro_model::{Catalog, Provider};
 use fabro_util::terminal::Styles;
 use fabro_workflows::git::GitAuthor;
+use object_store::local::LocalFileSystem;
 use tokio::net::TcpListener;
 use tokio::time::interval;
 use tracing::{error, info, warn};
@@ -16,7 +17,7 @@ use fabro_config::FabroSettings;
 
 use crate::github_webhooks::WebhookManager;
 use crate::jwt_auth::{AuthMode, AuthStrategy, decode_pem_env, resolve_auth_mode};
-use crate::server::{build_router, create_app_state_with_options, spawn_scheduler};
+use crate::server::{build_router, create_app_state_with_store, spawn_scheduler};
 use crate::tls::{ClientAuth, build_rustls_config, serve_tls};
 use fabro_llm::client::Client as LlmClient;
 use fabro_sandbox::SandboxProvider;
@@ -148,13 +149,18 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         let cfg = shared_settings.read().expect("config lock poisoned");
         cfg.hooks.clone()
     };
-    let state = create_app_state_with_options(
+    let store_path = data_dir.join("store");
+    std::fs::create_dir_all(&store_path)?;
+    let object_store = Arc::new(LocalFileSystem::new_with_prefix(&store_path)?);
+    let store = Arc::new(fabro_store::SlateStore::new(object_store, ""));
+    let state = create_app_state_with_store(
         db,
         factory,
         dry_run_mode,
         max_concurrent_runs,
         git_author,
         hooks,
+        store,
     );
     spawn_scheduler(Arc::clone(&state));
     let router = build_router(state, auth_mode);

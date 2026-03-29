@@ -16,7 +16,8 @@ use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest,
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
 };
-use fabro_retro::retro::{Retro, derive_retro, extract_stage_durations};
+use fabro_retro::retro::{Retro, derive_retro};
+use fabro_store::{InMemoryStore, Store};
 use fabro_util::redact::redact_jsonl_line;
 use fabro_workflows::error::FabroError;
 use fabro_workflows::git::GitAuthor;
@@ -123,6 +124,7 @@ type RegistryFactoryOverride = dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry +
 pub struct AppState {
     runs: Mutex<HashMap<String, ManagedRun>>,
     aggregate_usage: Mutex<AggregateUsageTotals>,
+    store: Arc<dyn Store>,
     llm_spec_factory: Box<LlmSpecFactory>,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
     pub dry_run: bool,
@@ -406,6 +408,7 @@ pub fn create_app_state_with_registry_factory(
         5,
         GitAuthor::default(),
         Vec::new(),
+        Arc::new(InMemoryStore::default()),
     )
 }
 
@@ -418,6 +421,26 @@ pub fn create_app_state_with_options(
     git_author: GitAuthor,
     hooks: Vec<fabro_hooks::HookDefinition>,
 ) -> Arc<AppState> {
+    create_app_state_with_store(
+        db,
+        llm_spec_factory,
+        dry_run,
+        max_concurrent_runs,
+        git_author,
+        hooks,
+        Arc::new(InMemoryStore::default()),
+    )
+}
+
+pub fn create_app_state_with_store(
+    db: sqlx::SqlitePool,
+    llm_spec_factory: impl Fn() -> LlmSpec + Send + Sync + 'static,
+    dry_run: bool,
+    max_concurrent_runs: usize,
+    git_author: GitAuthor,
+    hooks: Vec<fabro_hooks::HookDefinition>,
+    store: Arc<dyn Store>,
+) -> Arc<AppState> {
     build_app_state(
         db,
         Box::new(llm_spec_factory),
@@ -426,6 +449,7 @@ pub fn create_app_state_with_options(
         max_concurrent_runs,
         git_author,
         hooks,
+        store,
     )
 }
 
@@ -437,10 +461,12 @@ fn build_app_state(
     max_concurrent_runs: usize,
     git_author: GitAuthor,
     hooks: Vec<fabro_hooks::HookDefinition>,
+    store: Arc<dyn Store>,
 ) -> Arc<AppState> {
     Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
         aggregate_usage: Mutex::new(AggregateUsageTotals::default()),
+        store,
         llm_spec_factory,
         registry_factory_override,
         dry_run,
@@ -671,7 +697,21 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         }
     }
 
-    let persisted = match Persisted::load(&run_dir) {
+    let run_store = match operations::open_or_hydrate_run(state.store.as_ref(), &run_dir).await {
+        Ok(run_store) => run_store,
+        Err(e) => {
+            tracing::error!(run_id = %run_id, error = %e, "Failed to open or hydrate run store");
+            let mut runs = state.runs.lock().expect("runs lock poisoned");
+            if let Some(managed_run) = runs.get_mut(&run_id) {
+                managed_run.status = RunStatus::Failed;
+                managed_run.error = Some(format!("Failed to open or hydrate run store: {e}"));
+                managed_run.event_tx = None;
+            }
+            state.scheduler_notify.notify_one();
+            return;
+        }
+    };
+    let persisted = match Persisted::load_from_store(run_store.as_ref(), &run_dir).await {
         Ok(persisted) => persisted,
         Err(e) => {
             tracing::error!(run_id = %run_id, error = %e, "Failed to load persisted run");
@@ -706,6 +746,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         let interviewer = Arc::clone(&interviewer) as Arc<dyn Interviewer>;
         let run_id = run_id.clone();
         let run_options = run_options.clone();
+        let run_store = Arc::clone(&run_store);
         let hooks = state.hooks.clone();
         let dry_run = state.dry_run;
         async move {
@@ -713,6 +754,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
                 persisted,
                 InitOptions {
                     run_id,
+                    run_store,
                     dry_run,
                     emitter,
                     sandbox,
@@ -761,13 +803,26 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
     };
 
     // Save final checkpoint
-    let checkpoint = Checkpoint::load(&run_options.run_dir.join("checkpoint.json")).ok();
+    let checkpoint = match run_store.get_checkpoint().await {
+        Ok(checkpoint) => checkpoint
+            .or_else(|| Checkpoint::load(&run_options.run_dir.join("checkpoint.json")).ok()),
+        Err(err) => {
+            tracing::warn!(run_id = %run_id, error = %err, "Failed to load checkpoint from store");
+            Checkpoint::load(&run_options.run_dir.join("checkpoint.json")).ok()
+        }
+    };
 
     // Auto-derive retro and accumulate aggregate usage
     if let Some(ref cp) = checkpoint {
         let failed = result.is_err();
         let completed_stages = fabro_workflows::build_completed_stages(cp, failed);
-        let stage_durations = extract_stage_durations(&run_options.run_dir);
+        let stage_durations = match run_store.list_events().await {
+            Ok(events) => fabro_workflows::extract_stage_durations_from_events(&events),
+            Err(err) => {
+                tracing::warn!(run_id = %run_id, error = %err, "Failed to load run events from store");
+                fabro_retro::retro::extract_stage_durations(&run_options.run_dir)
+            }
+        };
         let retro = derive_retro(
             &run_id,
             "workflow",
@@ -777,6 +832,9 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
             &stage_durations,
         );
         let _ = retro.save(&run_options.run_dir);
+        if let Err(err) = run_store.put_retro(&retro).await {
+            tracing::warn!(run_id = %run_id, error = %err, "Failed to save retro to store");
+        }
 
         // Accumulate aggregate usage
         let mut agg = state
@@ -1523,9 +1581,32 @@ async fn get_retro(
         return (StatusCode::OK, Json(serde_json::json!(null))).into_response();
     };
 
-    match Retro::load(&run_dir) {
-        Ok(retro) => (StatusCode::OK, Json(retro)).into_response(),
-        Err(_) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
+    match state.store.open_run_reader(&id).await {
+        Ok(Some(run_store)) => match run_store.get_retro().await {
+            Ok(Some(retro)) => (StatusCode::OK, Json(retro)).into_response(),
+            Ok(None) => match Retro::load(&run_dir) {
+                Ok(retro) => (StatusCode::OK, Json(retro)).into_response(),
+                Err(_) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
+            },
+            Err(err) => {
+                tracing::warn!(run_id = %id, error = %err, "Failed to load retro from store");
+                match Retro::load(&run_dir) {
+                    Ok(retro) => (StatusCode::OK, Json(retro)).into_response(),
+                    Err(_) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
+                }
+            }
+        },
+        Ok(None) => match Retro::load(&run_dir) {
+            Ok(retro) => (StatusCode::OK, Json(retro)).into_response(),
+            Err(_) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
+        },
+        Err(err) => {
+            tracing::warn!(run_id = %id, error = %err, "Failed to open run store reader");
+            match Retro::load(&run_dir) {
+                Ok(retro) => (StatusCode::OK, Json(retro)).into_response(),
+                Err(_) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
+            }
+        }
     }
 }
 

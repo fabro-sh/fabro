@@ -1,4 +1,5 @@
 use std::pin::Pin;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -37,8 +38,10 @@ pub trait Store: Send + Sync {
         &self,
         run_id: &str,
         created_at: DateTime<Utc>,
-    ) -> Result<Box<dyn RunStore>>;
-    async fn open_run(&self, run_id: &str) -> Result<Option<Box<dyn RunStore>>>;
+        run_dir: Option<&str>,
+    ) -> Result<Arc<dyn RunStore>>;
+    async fn open_run(&self, run_id: &str) -> Result<Option<Arc<dyn RunStore>>>;
+    async fn open_run_reader(&self, run_id: &str) -> Result<Option<Arc<dyn RunStore>>>;
     async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>>;
     async fn delete_run(&self, run_id: &str) -> Result<()>;
 }

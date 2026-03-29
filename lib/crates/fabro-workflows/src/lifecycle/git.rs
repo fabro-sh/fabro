@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use fabro_store::RunStore;
 
 use fabro_core::error::{CoreError, Result as CoreResult};
 use fabro_core::graph::NodeSpec;
@@ -38,6 +39,7 @@ pub(crate) struct GitLifecycle {
     pub emitter: Arc<EventEmitter>,
     pub run_dir: PathBuf,
     pub run_id: String,
+    pub run_store: Arc<dyn RunStore>,
     pub run_options: Arc<RunOptions>,
     pub start_node_id: Option<String>,
     // Cross-lifecycle data (shared with EventLifecycle)
@@ -61,9 +63,30 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             self.run_options.host_repo_path.as_ref(),
         ) {
             let store = MetadataStore::new(repo_path, &self.run_options.git_author);
-            let run_json = std::fs::read(self.run_dir.join("run.json")).ok();
-            let start_json = std::fs::read(self.run_dir.join("start.json")).ok();
-            let sandbox_json = std::fs::read(self.run_dir.join("sandbox.json")).ok();
+            let run_json = self
+                .run_store
+                .get_run()
+                .await
+                .ok()
+                .flatten()
+                .and_then(|record| serde_json::to_vec_pretty(&record).ok())
+                .or_else(|| std::fs::read(self.run_dir.join("run.json")).ok());
+            let start_json = self
+                .run_store
+                .get_start()
+                .await
+                .ok()
+                .flatten()
+                .and_then(|record| serde_json::to_vec_pretty(&record).ok())
+                .or_else(|| std::fs::read(self.run_dir.join("start.json")).ok());
+            let sandbox_json = self
+                .run_store
+                .get_sandbox()
+                .await
+                .ok()
+                .flatten()
+                .and_then(|record| serde_json::to_vec_pretty(&record).ok())
+                .or_else(|| std::fs::read(self.run_dir.join("sandbox.json")).ok());
             let mut files: Vec<(&str, &[u8])> = Vec::new();
             if let Some(ref data) = run_json {
                 files.push(("run.json", data));
@@ -111,39 +134,45 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         ) {
             let store = MetadataStore::new(repo_path, &self.run_options.git_author);
             // Build checkpoint JSON for shadow branch
-            let checkpoint_path = self.run_dir.join("checkpoint.json");
-            std::fs::read(&checkpoint_path).ok().and_then(|cp_json| {
-                let artifact_store = self.artifact_store.lock().unwrap();
-                let mut extra_entries: Vec<(String, Vec<u8>)> = artifact_store
-                    .list()
-                    .iter()
-                    .filter_map(|info| {
-                        info.file_path.as_ref().and_then(|path| {
-                            std::fs::read(path)
-                                .ok()
-                                .map(|data| (format!("artifacts/{}.json", info.id), data))
+            self.run_store
+                .get_checkpoint()
+                .await
+                .ok()
+                .flatten()
+                .and_then(|checkpoint| serde_json::to_vec_pretty(&checkpoint).ok())
+                .or_else(|| std::fs::read(self.run_dir.join("checkpoint.json")).ok())
+                .and_then(|cp_json| {
+                    let artifact_store = self.artifact_store.lock().unwrap();
+                    let mut extra_entries: Vec<(String, Vec<u8>)> = artifact_store
+                        .list()
+                        .iter()
+                        .filter_map(|info| {
+                            info.file_path.as_ref().and_then(|path| {
+                                std::fs::read(path)
+                                    .ok()
+                                    .map(|data| (format!("artifacts/{}.json", info.id), data))
+                            })
                         })
-                    })
-                    .collect();
-                extra_entries.extend(scan_node_files(&self.run_dir));
-                let extra_refs: Vec<(&str, &[u8])> = extra_entries
-                    .iter()
-                    .map(|(k, v)| (k.as_str(), v.as_slice()))
-                    .collect();
-                match store.write_checkpoint(&self.run_id, &cp_json, &extra_refs) {
-                    Ok(sha) => Some(sha),
-                    Err(e) => {
-                        self.emitter.emit(&WorkflowRunEvent::RunNotice {
-                            level: RunNoticeLevel::Warn,
-                            code: "checkpoint_metadata_write_failed".to_string(),
-                            message: format!(
-                                "[node: {node_id}] metadata checkpoint write failed: {e}"
-                            ),
-                        });
-                        None
+                        .collect();
+                    extra_entries.extend(scan_node_files(&self.run_dir));
+                    let extra_refs: Vec<(&str, &[u8])> = extra_entries
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), v.as_slice()))
+                        .collect();
+                    match store.write_checkpoint(&self.run_id, &cp_json, &extra_refs) {
+                        Ok(sha) => Some(sha),
+                        Err(e) => {
+                            self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                                level: RunNoticeLevel::Warn,
+                                code: "checkpoint_metadata_write_failed".to_string(),
+                                message: format!(
+                                    "[node: {node_id}] metadata checkpoint write failed: {e}"
+                                ),
+                            });
+                            None
+                        }
                     }
-                }
-            })
+                })
         } else {
             None
         };
@@ -179,6 +208,30 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                             code: "checkpoint_resave_failed".to_string(),
                             message: format!(
                                 "[node: {node_id}] checkpoint re-save with SHA failed: {e}"
+                            ),
+                        });
+                    }
+                }
+                match self.run_store.get_checkpoint().await {
+                    Ok(Some(mut checkpoint)) => {
+                        checkpoint.git_commit_sha = Some(sha.clone());
+                        if let Err(err) = self.run_store.put_checkpoint(&checkpoint).await {
+                            self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                                level: RunNoticeLevel::Warn,
+                                code: "checkpoint_store_resave_failed".to_string(),
+                                message: format!(
+                                    "[node: {node_id}] checkpoint store re-save with SHA failed: {err}"
+                                ),
+                            });
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                            level: RunNoticeLevel::Warn,
+                            code: "checkpoint_store_load_failed".to_string(),
+                            message: format!(
+                                "[node: {node_id}] checkpoint store load failed: {err}"
                             ),
                         });
                     }

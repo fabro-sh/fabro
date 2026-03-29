@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use async_trait::async_trait;
+use fabro_store::RunStore;
 use fabro_store::RuntimeState;
 
 use fabro_core::error::Result as CoreResult;
@@ -83,6 +84,7 @@ impl WorkflowLifecycle {
         sandbox: &Arc<dyn Sandbox>,
         graph: Arc<GvGraph>,
         run_dir: &PathBuf,
+        run_store: Arc<dyn RunStore>,
         run_options: &Arc<RunOptions>,
         is_resume: bool,
         on_node: crate::OnNodeCallback,
@@ -140,6 +142,7 @@ impl WorkflowLifecycle {
         let disk = DiskLifecycle {
             run_dir: run_dir.clone(),
             run_id: run_options.run_id.clone(),
+            run_store: Arc::clone(&run_store),
             graph: Arc::clone(&graph),
             run_options: Arc::clone(run_options),
             emitter: Arc::clone(emitter),
@@ -155,6 +158,7 @@ impl WorkflowLifecycle {
             emitter: Arc::clone(emitter),
             run_dir: run_dir.clone(),
             run_id: run_options.run_id.clone(),
+            run_store,
             run_options: Arc::clone(run_options),
             start_node_id,
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),

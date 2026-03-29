@@ -5,14 +5,12 @@ use fabro_retro::RetroExt;
 use fabro_retro::retro::{Retro, derive_retro, extract_stage_durations};
 use fabro_retro::retro_agent::{dry_run_narrative, run_retro_agent};
 
-use crate::event::WorkflowRunEvent;
-use crate::records::{Checkpoint, CheckpointExt};
-
 use super::types::{Executed, RetroOptions, Retroed};
+use crate::event::WorkflowRunEvent;
 
 pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
-    let cp = match Checkpoint::load(&options.run_dir.join("checkpoint.json")) {
-        Ok(cp) => cp,
+    let cp = match options.run_store.get_checkpoint().await {
+        Ok(Some(cp)) => cp,
         Err(e) => {
             tracing::warn!(error = %e, "Could not load checkpoint, skipping retro");
             if let Some(ref emitter) = options.emitter {
@@ -23,10 +21,26 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             }
             return None;
         }
+        Ok(None) => {
+            tracing::warn!("Could not load checkpoint, skipping retro");
+            if let Some(ref emitter) = options.emitter {
+                emitter.emit(&WorkflowRunEvent::RetroFailed {
+                    error: "checkpoint not found".to_string(),
+                    duration_ms: 0,
+                });
+            }
+            return None;
+        }
     };
 
     let completed_stages = crate::build_completed_stages(&cp, options.failed);
-    let stage_durations = extract_stage_durations(&options.run_dir);
+    let stage_durations = match options.run_store.list_events().await {
+        Ok(events) => crate::extract_stage_durations_from_events(&events),
+        Err(err) => {
+            tracing::warn!(error = %err, "Could not load events from store, falling back to disk");
+            extract_stage_durations(&options.run_dir)
+        }
+    };
     let mut retro = derive_retro(
         &options.run_id,
         &options.workflow_name,
@@ -38,6 +52,9 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
 
     if let Err(e) = retro.save(&options.run_dir) {
         tracing::warn!(error = %e, "Failed to save initial retro");
+    }
+    if let Err(err) = options.run_store.put_retro(&retro).await {
+        tracing::warn!(error = %err, "Failed to save initial retro to store");
     }
 
     let retro_start = std::time::Instant::now();
@@ -101,6 +118,9 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             if let Err(e) = retro.save(&options.run_dir) {
                 tracing::warn!(error = %e, "Failed to save retro with narrative");
             }
+            if let Err(err) = options.run_store.put_retro(&retro).await {
+                tracing::warn!(error = %err, "Failed to save retro with narrative to store");
+            }
         }
         Err(e) => {
             tracing::debug!(error = %e, "Retro agent skipped");
@@ -119,6 +139,7 @@ pub async fn retro(executed: Executed, options: &RetroOptions) -> Retroed {
         graph,
         outcome,
         run_options,
+        run_store,
         hook_runner,
         emitter,
         sandbox,
@@ -141,6 +162,7 @@ pub async fn retro(executed: Executed, options: &RetroOptions) -> Retroed {
         graph,
         outcome,
         run_options,
+        run_store,
         hook_runner,
         emitter,
         sandbox,
@@ -154,17 +176,19 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
+    use chrono::Utc;
     use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
+    use fabro_store::{InMemoryStore, Store};
 
     use super::*;
     use crate::context::Context;
     use crate::event::{EventEmitter, WorkflowRunEvent};
     use crate::pipeline::types::Executed;
-    use crate::records::Checkpoint;
+    use crate::records::{Checkpoint, CheckpointExt};
     use crate::run_options::RunOptions;
 
-    fn write_checkpoint(run_dir: &std::path::Path) {
+    fn write_checkpoint(run_dir: &std::path::Path) -> Checkpoint {
         let context = Context::new();
         context.set("response.work", serde_json::json!("done"));
         let mut outcomes = HashMap::new();
@@ -181,6 +205,23 @@ mod tests {
             HashMap::new(),
         );
         checkpoint.save(&run_dir.join("checkpoint.json")).unwrap();
+        checkpoint
+    }
+
+    async fn test_run_store(
+        run_dir: &std::path::Path,
+        checkpoint: &Checkpoint,
+    ) -> Arc<dyn fabro_store::RunStore> {
+        let run_store = InMemoryStore::default()
+            .create_run(
+                "run-test",
+                Utc::now(),
+                Some(run_dir.to_string_lossy().as_ref()),
+            )
+            .await
+            .unwrap();
+        run_store.put_checkpoint(checkpoint).await.unwrap();
+        run_store
     }
 
     fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
@@ -205,7 +246,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();
-        write_checkpoint(&run_dir);
+        let checkpoint = write_checkpoint(&run_dir);
 
         let emitter = Arc::new(EventEmitter::new());
         let sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::new(fabro_agent::LocalSandbox::new(
@@ -215,6 +256,7 @@ mod tests {
             graph: Graph::new("test"),
             outcome: Ok(crate::outcome::Outcome::success()),
             run_options: test_run_options(&run_dir),
+            run_store: test_run_store(&run_dir, &checkpoint).await,
             hook_runner: None,
             emitter: Arc::clone(&emitter),
             sandbox: Arc::clone(&sandbox),
@@ -229,6 +271,7 @@ mod tests {
             executed,
             &RetroOptions {
                 run_id: "run-test".to_string(),
+                run_store: test_run_store(&run_dir, &checkpoint).await,
                 workflow_name: "test".to_string(),
                 goal: "Ship it".to_string(),
                 run_dir: run_dir.clone(),
@@ -253,7 +296,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();
-        write_checkpoint(&run_dir);
+        let checkpoint = write_checkpoint(&run_dir);
 
         let emitter = Arc::new(EventEmitter::new());
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -265,6 +308,7 @@ mod tests {
         let retro = run_retro(
             &RetroOptions {
                 run_id: "run-test".to_string(),
+                run_store: test_run_store(&run_dir, &checkpoint).await,
                 workflow_name: "test".to_string(),
                 goal: "Ship it".to_string(),
                 run_dir: run_dir.clone(),

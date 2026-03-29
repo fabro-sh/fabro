@@ -2,11 +2,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
+use fabro_config::FabroSettingsExt;
 use fabro_interview::FileInterviewer;
 use fabro_store::RuntimeState;
 use fabro_workflows::event::EventEmitter;
 use fabro_workflows::git::GitAuthor;
-use fabro_workflows::operations::{StartServices, resume as resume_run, start as start_run};
+use fabro_workflows::operations::{
+    StartServices, open_or_hydrate_run, resume as resume_run, start as start_run,
+};
 use fabro_workflows::records::{RunRecord, RunRecordExt};
 
 use crate::cli_config;
@@ -19,14 +22,17 @@ pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bo
         super::launcher::remove_launcher_record(&path);
     });
 
+    let run_record = RunRecord::load(&run_dir)?;
     let cli_settings = cli_config::load_cli_settings(None)?;
-    let on_node: fabro_workflows::OnNodeCallback = RunRecord::load(&run_dir).ok().map(|record| {
-        let short_id = super::short_run_id(&record.run_id).to_string();
+    let on_node: fabro_workflows::OnNodeCallback = Some({
+        let short_id = super::short_run_id(&run_record.run_id).to_string();
         fabro_proctitle::set(&format!("fabro: {short_id}"));
         Arc::new(move |node_id: &str| {
             fabro_proctitle::set(&format!("fabro: {short_id} {node_id}"));
         }) as Arc<dyn Fn(&str) + Send + Sync>
     });
+    let store = crate::store::build_store(&run_record.settings.storage_dir())?;
+    let run_store = open_or_hydrate_run(store.as_ref(), &run_dir).await?;
 
     let github_app = shared::github::build_github_app_credentials(cli_settings.app_id());
     let git_author = GitAuthor::from_options(
@@ -43,6 +49,7 @@ pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bo
             runtime_state.interview_response_path(),
             runtime_state.interview_claim_path(),
         )),
+        run_store,
         git_author,
         github_app,
         on_node,

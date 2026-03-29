@@ -495,12 +495,12 @@ pub async fn initialize(
     options.emitter.emit(&WorkflowRunEvent::SandboxInitialized {
         working_directory: sandbox.working_directory().to_string(),
     });
-    if let Err(e) = options
-        .sandbox
-        .to_sandbox_record(&*sandbox)
-        .save(&run_dir.join("sandbox.json"))
-    {
+    let sandbox_record = options.sandbox.to_sandbox_record(&*sandbox);
+    if let Err(e) = sandbox_record.save(&run_dir.join("sandbox.json")) {
         tracing::warn!(error = %e, "Failed to save sandbox record");
+    }
+    if let Err(err) = options.run_store.put_sandbox(&sandbox_record).await {
+        tracing::warn!(error = %err, "Failed to save sandbox record to store");
     }
 
     let env = build_sandbox_env(
@@ -630,6 +630,7 @@ pub async fn initialize(
         graph,
         source,
         run_options: options.run_options,
+        run_store: options.run_store,
         checkpoint: options.checkpoint,
         seed_context: options.seed_context,
         emitter: options.emitter,
@@ -655,6 +656,7 @@ mod tests {
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_interview::AutoApproveInterviewer;
     use fabro_sandbox::SandboxSpec;
+    use fabro_store::InMemoryStore;
 
     use super::*;
     use crate::pipeline::types::InitOptions;
@@ -735,6 +737,12 @@ mod tests {
             persisted,
             InitOptions {
                 run_id: "run-test".to_string(),
+                run_store: crate::operations::open_or_hydrate_run(
+                    &InMemoryStore::default(),
+                    &run_dir,
+                )
+                .await
+                .unwrap(),
                 dry_run: false,
                 emitter,
                 sandbox: SandboxSpec::Local {
@@ -798,6 +806,12 @@ mod tests {
             persisted,
             InitOptions {
                 run_id: "run-test".to_string(),
+                run_store: crate::operations::open_or_hydrate_run(
+                    &InMemoryStore::default(),
+                    &run_dir,
+                )
+                .await
+                .unwrap(),
                 dry_run: false,
                 emitter,
                 sandbox: SandboxSpec::Local {
