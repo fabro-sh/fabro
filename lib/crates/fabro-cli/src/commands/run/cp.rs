@@ -28,7 +28,7 @@ enum CopyDirection {
 
 pub(crate) async fn cp_command(args: CpArgs) -> Result<()> {
     let direction = parse_direction(&args.src, &args.dst)?;
-    let cli_settings = load_cli_settings(None)?;
+    let cli_settings = load_cli_settings()?;
     let base = runs_base(&cli_settings.storage_dir());
 
     match direction {

@@ -18,7 +18,7 @@ use crate::shared::{color_if, format_duration_ms, tilde_path};
 use super::short_run_id;
 
 pub(crate) async fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
-    let cli_settings = load_cli_settings(None)?;
+    let cli_settings = load_cli_settings()?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = crate::store::build_store(&cli_settings.storage_dir())?;
     let runs = scan_runs_combined(store.as_ref(), &base).await?;

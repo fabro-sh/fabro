@@ -13,7 +13,7 @@ pub(super) async fn merge_command(
     args: PrMergeArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {
-    let cli_settings = load_cli_settings(None)?;
+    let cli_settings = load_cli_settings()?;
     let base = runs_base(&cli_settings.storage_dir());
     merge_from(&base, args, github_app).await
 }

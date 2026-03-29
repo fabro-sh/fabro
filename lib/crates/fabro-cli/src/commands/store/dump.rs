@@ -12,7 +12,7 @@ use crate::cli_config::load_cli_settings;
 use crate::store;
 
 pub(crate) async fn dump_command(args: &StoreDumpArgs) -> Result<()> {
-    let cli_settings = load_cli_settings(None)?;
+    let cli_settings = load_cli_settings()?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;

@@ -153,7 +153,7 @@ async fn check_github_app_installation() {
     };
 
     // Load CLI config to get app_id and slug
-    let Ok(cli_settings) = load_cli_settings(None) else {
+    let Ok(cli_settings) = load_cli_settings() else {
         return;
     };
 

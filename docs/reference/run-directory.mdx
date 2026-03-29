@@ -19,7 +19,7 @@ The naming format is `YYYYMMDD-{run_id}`, where `run_id` is the ULID assigned to
 
 | File | Format | When written | Description |
 |---|---|---|---|
-| `run.json` | JSON | Run create | Run metadata — `run_id`, `created_at`, `config` (FabroConfig), `graph` (Graph), `workflow_slug`, `working_directory`, `host_repo_path`, `base_branch`, `labels` |
+| `run.json` | JSON | Run create | Run metadata — `run_id`, `created_at`, `config` (resolved configuration), `graph` (Graph), `workflow_slug`, `working_directory`, `host_repo_path`, `base_branch`, `labels` |
 | `start.json` | JSON | Run start | Start metadata — `run_id`, `start_time`, `run_branch`, `base_sha` |
 | `workflow.fabro` | Graphviz | Run create | Copy of the original workflow graph when the raw DOT source is available |
 | `run.pid` | Text | Legacy only | Legacy process ID file from older runs. Current detached launches use launcher records instead, and current attach/resume no longer read `run.pid`. |

@@ -2,9 +2,7 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::args::{ConfigCommand, ConfigNamespace, ConfigShowArgs};
-use fabro_config::cli::load_cli_config;
-use fabro_config::project::{ResolveSettingsInput, discover_project_config, resolve_settings};
-use fabro_config::{FabroConfig, FabroSettings};
+use fabro_config::{ConfigLayer, FabroSettings};
 
 pub(crate) fn dispatch(ns: ConfigNamespace) -> anyhow::Result<()> {
     match ns.command {
@@ -13,24 +11,13 @@ pub(crate) fn dispatch(ns: ConfigNamespace) -> anyhow::Result<()> {
 }
 
 fn merged_config(workflow: Option<&Path>) -> anyhow::Result<FabroSettings> {
-    if let Some(workflow) = workflow {
-        let cli_config = load_cli_config(None)?;
-        let cwd = std::env::current_dir()?;
-        return resolve_settings(ResolveSettingsInput {
-            workflow_path: workflow.to_path_buf(),
-            cwd,
-            defaults: cli_config,
-            overrides: FabroConfig::default(),
-            apply_project_config: true,
-        });
-    }
-
     let cwd = std::env::current_dir()?;
-    let project_config = discover_project_config(&cwd)?
-        .map(|(_, config)| config)
-        .unwrap_or_default();
-    let cli_config = load_cli_config(None)?;
-    FabroConfig::combine(project_config, cli_config).try_into()
+    let base = match workflow {
+        Some(path) => ConfigLayer::for_workflow(path, &cwd)?,
+        None => ConfigLayer::project(&cwd)?,
+    };
+
+    base.combine(ConfigLayer::cli()?).resolve()
 }
 
 pub(crate) fn show_command(args: &ConfigShowArgs) -> anyhow::Result<()> {

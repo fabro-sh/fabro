@@ -16,7 +16,7 @@ use crate::cli_config::load_cli_settings;
 use crate::shared::github::build_github_app_credentials;
 
 pub(crate) async fn dispatch(ns: PrNamespace) -> Result<()> {
-    let cli_settings = load_cli_settings(None)?;
+    let cli_settings = load_cli_settings()?;
     let github_app = build_github_app_credentials(cli_settings.app_id());
 
     match ns.command {

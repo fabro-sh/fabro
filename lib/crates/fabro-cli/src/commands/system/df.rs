@@ -14,7 +14,7 @@ use crate::cli_config::load_cli_settings;
 use crate::shared::format_size;
 
 pub(super) async fn df_command(args: &DfArgs) -> Result<()> {
-    let cli_settings = load_cli_settings(None)?;
+    let cli_settings = load_cli_settings()?;
     let data_dir = cli_settings.storage_dir();
     let runs_base_dir = runs_base(&data_dir);
     let logs_base_dir = logs_base(&data_dir);

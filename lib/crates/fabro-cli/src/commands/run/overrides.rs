@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use fabro_config::run::LlmConfig;
-use fabro_config::{FabroConfig, sandbox as sandbox_config};
+use fabro_config::{ConfigLayer, sandbox as sandbox_config};
 use fabro_sandbox::SandboxProvider;
 
 use crate::args::{PreflightArgs, RunArgs};
@@ -19,7 +19,7 @@ pub(crate) fn parse_labels(labels: &[String]) -> HashMap<String, String> {
         .collect()
 }
 
-impl TryFrom<&RunArgs> for FabroConfig {
+impl TryFrom<&RunArgs> for ConfigLayer {
     type Error = anyhow::Error;
 
     fn try_from(args: &RunArgs) -> Result<Self, Self::Error> {
@@ -61,7 +61,7 @@ impl TryFrom<&RunArgs> for FabroConfig {
     }
 }
 
-impl TryFrom<&PreflightArgs> for FabroConfig {
+impl TryFrom<&PreflightArgs> for ConfigLayer {
     type Error = anyhow::Error;
 
     fn try_from(args: &PreflightArgs) -> Result<Self, Self::Error> {

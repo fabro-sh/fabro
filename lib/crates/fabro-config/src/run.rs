@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use crate::combine::Combine;
-use crate::config::FabroConfig;
+use crate::config::ConfigLayer;
 use crate::sandbox::DockerfileSource;
 pub use fabro_types::settings::run::{
     AssetsSettings, CheckpointSettings, GitHubSettings, LlmSettings, MergeStrategy,
@@ -129,7 +129,7 @@ impl From<SetupConfig> for SetupSettings {
 /// `${env.VARNAME}` references in `[sandbox.env]` are NOT resolved here —
 /// call [`resolve_sandbox_env`] separately after snapshotting, so that
 /// plaintext secrets are never written to disk.
-pub fn load_run_config(path: &Path) -> anyhow::Result<FabroConfig> {
+pub fn load_run_config(path: &Path) -> anyhow::Result<ConfigLayer> {
     let contents = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read {}", path.display()))?;
     let mut config = parse_run_config(&contents)?;
@@ -144,7 +144,7 @@ pub fn load_run_config(path: &Path) -> anyhow::Result<FabroConfig> {
 ///
 /// Only whole-value references are supported (no partial interpolation).
 /// Missing host env vars produce a hard error.
-pub fn resolve_sandbox_env(config: &mut FabroConfig) -> anyhow::Result<()> {
+pub fn resolve_sandbox_env(config: &mut ConfigLayer) -> anyhow::Result<()> {
     if let Some(env) = config.sandbox.as_mut().and_then(|s| s.env.as_mut()) {
         resolve_env_refs(env)?;
     }
@@ -172,7 +172,7 @@ pub fn resolve_env_refs(env: &mut HashMap<String, String>) -> anyhow::Result<()>
 
 /// If the config contains a `dockerfile = { path = "..." }`, read the file
 /// and replace it with `DockerfileSource::Inline(contents)`.
-fn resolve_dockerfile(config: &mut FabroConfig, config_dir: &Path) -> anyhow::Result<()> {
+fn resolve_dockerfile(config: &mut ConfigLayer, config_dir: &Path) -> anyhow::Result<()> {
     let source = config
         .sandbox
         .as_mut()
@@ -204,8 +204,8 @@ pub fn resolve_graph_path(toml_path: &Path, graph: &str) -> PathBuf {
     }
 }
 
-pub fn parse_run_config(contents: &str) -> anyhow::Result<FabroConfig> {
-    let mut config: FabroConfig =
+pub fn parse_run_config(contents: &str) -> anyhow::Result<ConfigLayer> {
+    let mut config: ConfigLayer =
         toml::from_str(contents).context("Failed to parse run config TOML")?;
 
     if config.graph.is_none() {
