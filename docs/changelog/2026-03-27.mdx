@@ -1,0 +1,30 @@
+---
+title: "fabro config show, preflight subcommand, and storage-dir"
+date: "2026-03-27"
+---
+
+## `fabro config show`
+
+A new `fabro config show` command displays the fully resolved configuration for a workflow, showing how CLI flags, environment variables, project config, and workflow defaults are layered together. This makes it easy to debug configuration issues without guessing which layer is winning.
+
+```bash
+fabro config show my-workflow
+```
+
+## `fabro preflight`
+
+Preflight validation has been extracted from `fabro run --preflight` into its own top-level command. This makes it easier to validate a workflow before running it, especially in CI pipelines where you want a separate validation step.
+
+```bash
+fabro preflight my-workflow
+```
+
+<Warning>
+**`--run-dir` renamed to `--storage-dir`.** The `--run-dir` CLI flag has been renamed to `--storage-dir` to better reflect its purpose as the base storage directory. Runs are now created under `<storage-dir>/runs/` automatically. The `data_dir` config key is also renamed to `storage_dir` (a serde alias preserves backward compatibility for config files).
+</Warning>
+
+## More
+
+<Accordion title="CLI">
+- Added `goal_file` and `labels` fields to workflow configuration for specifying goals from files and tagging runs with metadata
+</Accordion>

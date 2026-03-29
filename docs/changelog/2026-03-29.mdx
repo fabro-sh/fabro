@@ -1,0 +1,18 @@
+---
+title: "Store dump export command"
+date: "2026-03-29"
+---
+
+## `fabro store dump`
+
+A new `fabro store dump` command exports the contents of the run store to a human-readable format for debugging and inspection. This is useful for diagnosing issues with run state, verifying data integrity after migrations, or extracting run data for external analysis.
+
+```bash
+fabro store dump <run-id>
+```
+
+## More
+
+<Accordion title="Fixes">
+- Fixed store migration gaps affecting retro agent data, finalize commits, engine failure records, and hydration tolerance
+</Accordion>

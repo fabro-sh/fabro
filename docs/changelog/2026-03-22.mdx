@@ -1,0 +1,15 @@
+---
+title: "fabro resume subcommand"
+date: "2026-03-22"
+---
+
+## `fabro resume`
+
+Resuming workflows previously required constructing a `fabro run --run-branch fabro/run/<RUN_ID>` invocation manually. The new `fabro resume` subcommand accepts a run ID or prefix directly, matching the ergonomics of `fabro rewind` and `fabro fork`. Checkpoint-file-based resumption is also supported.
+
+```bash
+fabro resume abc123
+fabro resume --checkpoint path/to/checkpoint.json --workflow workflow.fabro
+```
+
+The unified foreground run path now uses the `create` → `start` → `attach` lifecycle internally, ensuring consistent behavior whether you run, resume, or rewind a workflow.

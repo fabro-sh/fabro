@@ -1,0 +1,30 @@
+---
+title: "Unlimited tool rounds and workflow syntax improvements"
+date: "2026-03-23"
+---
+
+## Unlimited agent tool rounds
+
+Agent stages no longer have an artificial cap on tool rounds per input or subagent turns. Previously, the default limits could cause agents to stop mid-task on complex operations. Both `max_tool_rounds_per_input` and subagent `max_turns` now default to unlimited, so agents run until they complete their work or hit the context window.
+
+## More
+
+<Accordion title="Workflows">
+- Condition expressions now support quoted strings: `edge [label="status == \"ready\""]`
+- `"end"` and `"End"` are now recognized as exit node identifiers alongside `"END"`
+- Edge selection now falls back to the default edge when no condition matches, instead of erroring
+- `default_max_retries` attribute renamed to `max_retries` on graph-level stylesheets
+- Removed `error_policy` and `k_of_n`/`quorum` attributes from parallel nodes — parallel stages now always wait for all branches
+</Accordion>
+
+<Accordion title="Improvements">
+- Subagents are now automatically cleaned up when a session closes, preventing orphaned background processes
+- All 5xx HTTP status codes from LLM providers are now classified as retryable server errors
+- Request timeouts from LLM providers are now treated as non-retryable by default to avoid redundant retries on slow requests
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed workflow slug lookup failing for split and resumed runs
+- Fixed split run metadata being lost across engine restarts
+- Fixed split run lifecycle lookup returning stale state
+</Accordion>

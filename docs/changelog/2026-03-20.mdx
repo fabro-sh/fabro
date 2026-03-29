@@ -1,0 +1,35 @@
+---
+title: "Composable run lifecycle: create, start, attach"
+date: "2026-03-20"
+---
+
+## `fabro create` / `start` / `attach`
+
+`fabro run` has been decomposed into three composable primitives following the Docker-style lifecycle model. `fabro create` allocates the run directory, `fabro start` spawns the detached engine process, and `fabro attach` tails progress with live rendering and handles human-in-the-loop interactions. `fabro run` remains the all-in-one command — it now composes these three steps internally, and `--detach` simply skips the attach step.
+
+This enables new automation patterns: create a run, start it in the background, and attach later — or script CI pipelines that create and start without ever attaching.
+
+```bash
+fabro create my-workflow --goal "Implement feature X"
+fabro start <run-id>
+fabro attach <run-id>
+```
+
+## More
+
+<Accordion title="CLI">
+- Added Linux ARM64 (`aarch64-unknown-linux-gnu`) release target
+- `fabro logs` and `fabro attach` now show tool details for `spawn_agent`, `use_skill`, `list_dir`, and all remaining agent tools
+- Subagent IDs now use short hex strings instead of UUIDs for readability
+</Accordion>
+
+<Accordion title="Workflows">
+- `StageStarted` events are now emitted on retry attempts for better observability
+- Added bundled `implement-issue` workflow for implementing GitHub issues via `fabro run implement-issue`
+- Added bundled `gh-triage` workflow for checking open PRs and issues via `gh` CLI
+- Model aliases in graph nodes are now resolved to canonical IDs at parse time
+</Accordion>
+
+<Accordion title="Fixes">
+- Updated `tar` crate to 0.4.45 (security fix)
+</Accordion>
