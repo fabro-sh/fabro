@@ -8,10 +8,10 @@ mod mtls_e2e {
     use std::path::Path;
     use std::process::{Command, Stdio};
 
-    use fabro_api::jwt_auth::{AuthMode, AuthStrategy};
-    use fabro_api::server::{build_router, create_app_state};
-    use fabro_api::server_config::TlsSettings;
-    use fabro_api::tls::{ClientAuth, build_rustls_config};
+    use fabro_server::jwt_auth::{AuthMode, AuthStrategy};
+    use fabro_server::server::{build_router, create_app_state};
+    use fabro_server::server_config::TlsSettings;
+    use fabro_server::tls::{ClientAuth, build_rustls_config};
     use fabro_workflows::pipeline::LlmSpec;
     use tokio::net::TcpListener;
 
@@ -195,7 +195,7 @@ mod mtls_e2e {
         let router = build_router(state, auth_mode);
 
         tokio::spawn(async move {
-            let _ = fabro_api::tls::serve_tls(listener, tls_acceptor, router).await;
+            let _ = fabro_server::tls::serve_tls(listener, tls_acceptor, router).await;
         });
 
         addr
@@ -391,7 +391,7 @@ mod mtls_e2e {
             AuthStrategy::Mtls,
             AuthStrategy::Jwt {
                 key: Arc::new(decoding_key),
-                validation: Arc::new(fabro_api::jwt_auth::jwt_validation()),
+                validation: Arc::new(fabro_server::jwt_auth::jwt_validation()),
                 allowed_usernames: vec!["brynary".to_string()],
             },
         ]);
@@ -428,8 +428,8 @@ mod server_lifecycle {
 
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use fabro_api::server::{build_router, create_app_state_with_registry_factory};
     use fabro_interview::Interviewer;
+    use fabro_server::server::{build_router, create_app_state_with_registry_factory};
     use fabro_workflows::handler::HandlerRegistry;
     use fabro_workflows::handler::agent::AgentHandler;
     use fabro_workflows::handler::exit::ExitHandler;
@@ -471,8 +471,11 @@ mod server_lifecycle {
     async fn full_http_lifecycle_approve_and_complete() {
         let state =
             create_app_state_with_registry_factory(test_db().await, test_llm_spec, gate_registry);
-        fabro_api::server::spawn_scheduler(Arc::clone(&state));
-        let app = build_router(Arc::clone(&state), fabro_api::jwt_auth::AuthMode::Disabled);
+        fabro_server::server::spawn_scheduler(Arc::clone(&state));
+        let app = build_router(
+            Arc::clone(&state),
+            fabro_server::jwt_auth::AuthMode::Disabled,
+        );
 
         // 1. Start run
         let req = Request::builder()
@@ -568,8 +571,11 @@ mod server_lifecycle {
     async fn full_http_lifecycle_cancel() {
         let state =
             create_app_state_with_registry_factory(test_db().await, test_llm_spec, gate_registry);
-        fabro_api::server::spawn_scheduler(Arc::clone(&state));
-        let app = build_router(Arc::clone(&state), fabro_api::jwt_auth::AuthMode::Disabled);
+        fabro_server::server::spawn_scheduler(Arc::clone(&state));
+        let app = build_router(
+            Arc::clone(&state),
+            fabro_server::jwt_auth::AuthMode::Disabled,
+        );
 
         // Start a run that will block at the human gate
         let req = Request::builder()
@@ -621,7 +627,7 @@ mod sse_events {
 
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use fabro_api::server::{build_router, create_app_state};
+    use fabro_server::server::{build_router, create_app_state};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
@@ -636,8 +642,11 @@ mod sse_events {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sse_stream_contains_expected_event_types() {
         let state = create_app_state(test_db().await, test_llm_spec);
-        fabro_api::server::spawn_scheduler(Arc::clone(&state));
-        let app = build_router(Arc::clone(&state), fabro_api::jwt_auth::AuthMode::Disabled);
+        fabro_server::server::spawn_scheduler(Arc::clone(&state));
+        let app = build_router(
+            Arc::clone(&state),
+            fabro_server::jwt_auth::AuthMode::Disabled,
+        );
 
         // Start run
         let req = Request::builder()
@@ -765,7 +774,7 @@ mod serve_dry_run {
 
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use fabro_api::server::{build_router, create_app_state};
+    use fabro_server::server::{build_router, create_app_state};
     use tower::ServiceExt;
 
     const MINIMAL_DOT: &str = r#"digraph Test {
@@ -778,8 +787,8 @@ mod serve_dry_run {
     /// Build the router exactly as `serve_command` does in dry-run mode.
     async fn dry_run_app() -> axum::Router {
         let state = create_app_state(test_db().await, test_llm_spec);
-        fabro_api::server::spawn_scheduler(Arc::clone(&state));
-        build_router(state, fabro_api::jwt_auth::AuthMode::Disabled)
+        fabro_server::server::spawn_scheduler(Arc::clone(&state));
+        build_router(state, fabro_server::jwt_auth::AuthMode::Disabled)
     }
 
     async fn body_json(body: Body) -> serde_json::Value {

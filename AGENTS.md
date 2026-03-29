@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Rust
 - `cargo build --workspace` — build all crates
 - `cargo nextest run --workspace` — run all unit tests
-- `cargo nextest run -p fabro-api` — test a single crate
+- `cargo nextest run -p fabro-server` — test a single crate
 - `cargo nextest run -p fabro-workflows -- test_name` — run a single test
 - `set -a && source .env && set +a && cargo nextest run --workspace --profile e2e --run-ignored only` — run all E2E live tests (requires credentials in `.env`, see `.env.example`)
 - `set -a && source .env && set +a && cargo nextest run -p fabro-llm --profile e2e --run-ignored only` — run E2E tests for a single crate
@@ -41,8 +41,8 @@ The OpenAPI spec at `docs/api-reference/fabro-api.yaml` is the source of truth f
 
 1. Edit `docs/api-reference/fabro-api.yaml`
 2. `cargo build -p fabro-api-types` — build.rs regenerates Rust types via typify
-3. Write/update handler in `lib/crates/fabro-api/src/server.rs`, add route to `build_router()`
-4. `cargo nextest run -p fabro-api` — conformance test catches spec/router drift
+3. Write/update handler in `lib/crates/fabro-server/src/server.rs`, add route to `build_router()`
+4. `cargo nextest run -p fabro-server` — conformance test catches spec/router drift
 5. `cd lib/packages/fabro-api-client && bun run generate` — regenerates TypeScript Axios client
 
 ## Architecture
@@ -53,7 +53,7 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 - **fabro-cli** — CLI entry point. Commands: `run`, `exec`, `serve`, `validate`, `parse`, `cp`, `model`, `doctor`, `init`, `install`, `ps`, `system prune`, `llm`
 - **fabro-workflows** — Core workflow engine. Parses Graphviz graphs, runs stages, manages checkpoints/resume, hooks, retros, and human-in-the-loop interactions
 - **fabro-agent** — AI coding agent with tool use (Bash, Read, Write, Edit, Glob, Grep, WebFetch). `Sandbox` trait abstracts execution environments
-- **fabro-api** — Axum HTTP server. Routes for runs, sessions, models, completions, usage. SSE event streaming. Demo mode via header
+- **fabro-server** — Axum HTTP server. Routes for runs, sessions, models, completions, usage. SSE event streaming. Demo mode via header
 - **fabro-exe** — SSH-based sandbox implementation (`ExeSandbox`)
 - **fabro-sprites** — Sprites VM sandbox implementation via `sprite` CLI
 - **fabro-llm** — Unified LLM client with providers: Anthropic, OpenAI, Gemini, OpenAI-compatible, plus retry/middleware/streaming

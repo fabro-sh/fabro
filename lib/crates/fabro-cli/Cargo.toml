@@ -11,7 +11,7 @@ path = "src/main.rs"
 
 [features]
 default = []
-server = ["dep:fabro-api"]
+server = ["dep:fabro-server"]
 exedev = ["fabro-sandbox/exe", "fabro-config/exedev", "fabro-workflows/exedev", "fabro-types/exedev"]
 sleep_inhibitor = ["dep:core-foundation"]
 
@@ -36,7 +36,7 @@ fabro-git-storage = { path = "../fabro-git-storage" }
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-validate = { path = "../fabro-validate" }
 fabro-workflows = { path = "../fabro-workflows" }
-fabro-api = { path = "../fabro-api", optional = true }
+fabro-server = { path = "../fabro-server", optional = true }
 fabro-telemetry = { path = "../fabro-telemetry" }
 fabro-store = { path = "../fabro-store" }
 fabro-types = { path = "../fabro-types" }

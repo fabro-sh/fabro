@@ -185,7 +185,7 @@ async fn main_inner() -> (String, Result<()>) {
             #[cfg(feature = "server")]
             Commands::Serve(args) => {
                 let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-                fabro_api::serve::serve_command(args, styles).await?;
+                fabro_server::serve::serve_command(args, styles).await?;
             }
             Commands::Doctor { verbose, dry_run } => {
                 let cli_settings = cli_config::load_cli_settings(None)?;
