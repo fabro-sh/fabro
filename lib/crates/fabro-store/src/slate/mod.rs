@@ -3,6 +3,7 @@ mod run_store;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -10,7 +11,7 @@ use futures::TryStreamExt;
 use object_store::ObjectStore;
 use object_store::path::Path;
 use slatedb::DbReader;
-use slatedb::config::DbReaderOptions;
+use slatedb::config::{DbReaderOptions, Settings};
 use tokio::sync::Mutex;
 
 use crate::keys;
@@ -21,6 +22,7 @@ use run_store::{SlateRunStore, SlateRunStoreInner};
 pub struct SlateStore {
     object_store: Arc<dyn ObjectStore>,
     base_prefix: String,
+    flush_interval: Duration,
     active_runs: Arc<Mutex<HashMap<String, std::sync::Weak<SlateRunStoreInner>>>>,
 }
 
@@ -28,15 +30,21 @@ impl std::fmt::Debug for SlateStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SlateStore")
             .field("base_prefix", &self.base_prefix)
+            .field("flush_interval", &self.flush_interval)
             .finish_non_exhaustive()
     }
 }
 
 impl SlateStore {
-    pub fn new(object_store: Arc<dyn ObjectStore>, base_prefix: impl Into<String>) -> Self {
+    pub fn new(
+        object_store: Arc<dyn ObjectStore>,
+        base_prefix: impl Into<String>,
+        flush_interval: Duration,
+    ) -> Self {
         Self {
             object_store,
             base_prefix: normalize_base_prefix(base_prefix.into()),
+            flush_interval,
             active_runs: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -46,7 +54,15 @@ impl SlateStore {
     }
 
     async fn open_db(&self, db_prefix: &str) -> Result<slatedb::Db> {
-        Ok(slatedb::Db::open(db_prefix.to_string(), self.object_store.clone()).await?)
+        Ok(
+            slatedb::Db::builder(db_prefix.to_string(), self.object_store.clone())
+                .with_settings(Settings {
+                    flush_interval: Some(self.flush_interval),
+                    ..Settings::default()
+                })
+                .build()
+                .await?,
+        )
     }
 
     async fn open_reader(&self, db_prefix: &str) -> Result<DbReader> {
@@ -382,7 +398,7 @@ mod tests {
 
     fn make_store() -> (Arc<dyn ObjectStore>, SlateStore) {
         let object_store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
-        let store = SlateStore::new(object_store.clone(), "runs/");
+        let store = SlateStore::new(object_store.clone(), "runs/", Duration::from_millis(5));
         (object_store, store)
     }
 
@@ -498,7 +514,12 @@ mod tests {
         record: &CatalogRecord,
         include_init: bool,
     ) -> slatedb::Db {
-        let db = slatedb::Db::open(record.db_prefix.clone(), object_store)
+        let db = slatedb::Db::builder(record.db_prefix.clone(), object_store)
+            .with_settings(slatedb::config::Settings {
+                flush_interval: Some(Duration::from_millis(5)),
+                ..slatedb::config::Settings::default()
+            })
+            .build()
             .await
             .unwrap();
         if include_init {
@@ -858,7 +879,12 @@ mod tests {
         let (object_store, store) = make_store();
         let created_at = dt("2026-03-27T12:00:00Z");
         let db_prefix = catalog::db_prefix("runs/", created_at, "run-1");
-        let db = slatedb::Db::open(db_prefix.clone(), object_store)
+        let db = slatedb::Db::builder(db_prefix.clone(), object_store)
+            .with_settings(slatedb::config::Settings {
+                flush_interval: Some(Duration::from_millis(5)),
+                ..slatedb::config::Settings::default()
+            })
+            .build()
             .await
             .unwrap();
         let mismatched = CatalogRecord {
