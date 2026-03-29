@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
+use fabro_store::{NodeVisitRef, RunStore};
 
 use crate::context::Context;
 use crate::context::keys;
@@ -89,6 +90,7 @@ impl Handler for FanInHandler {
                 &node.id,
                 &services.emitter,
                 &services.sandbox,
+                services.run_store.clone(),
             )
             .await?
         } else {
@@ -224,6 +226,7 @@ async fn llm_evaluate(
     node_id: &str,
     emitter: &Arc<EventEmitter>,
     sandbox: &Arc<dyn Sandbox>,
+    run_store: Option<Arc<dyn RunStore>>,
 ) -> Result<Candidate, FabroError> {
     let results_text =
         serde_json::to_string_pretty(results).unwrap_or_else(|_| results.to_string());
@@ -237,7 +240,18 @@ async fn llm_evaluate(
     let visit = visit_from_context(context);
     let stage_dir = node_dir(run_dir, node_id, visit);
     fs::create_dir_all(&stage_dir).await?;
-    fs::write(stage_dir.join("prompt.md"), &full_prompt).await?;
+    let node_ref = NodeVisitRef {
+        node_id,
+        visit: u32::try_from(visit).unwrap_or(u32::MAX),
+    };
+    if let Some(ref store) = run_store {
+        store
+            .put_node_prompt(&node_ref, &full_prompt)
+            .await
+            .map_err(|err| FabroError::handler(err.to_string()))?;
+    } else {
+        fs::write(stage_dir.join("prompt.md"), &full_prompt).await?;
+    }
 
     // Build a synthetic node for the backend call
     let eval_node = Node::new("fan_in_eval");
@@ -267,7 +281,14 @@ async fn llm_evaluate(
                 .unwrap_or_else(|| "unknown".to_string());
             let response_text =
                 serde_json::to_string_pretty(&outcome).unwrap_or_else(|_| "{}".to_string());
-            fs::write(stage_dir.join("response.md"), &response_text).await?;
+            if let Some(ref store) = run_store {
+                store
+                    .put_node_response(&node_ref, &response_text)
+                    .await
+                    .map_err(|err| FabroError::handler(err.to_string()))?;
+            } else {
+                fs::write(stage_dir.join("response.md"), &response_text).await?;
+            }
             Ok(Candidate {
                 id: best_id,
                 status: outcome.status.to_string(),
@@ -276,7 +297,14 @@ async fn llm_evaluate(
         }
         Ok(CodergenResult::Text { text, .. }) => {
             // Write response to logs
-            fs::write(stage_dir.join("response.md"), &text).await?;
+            if let Some(ref store) = run_store {
+                store
+                    .put_node_response(&node_ref, &text)
+                    .await
+                    .map_err(|err| FabroError::handler(err.to_string()))?;
+            } else {
+                fs::write(stage_dir.join("response.md"), &text).await?;
+            }
 
             // The LLM responded with text; try to find a matching candidate ID
             let text = text.trim().to_string();

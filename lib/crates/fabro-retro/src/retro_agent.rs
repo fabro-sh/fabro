@@ -196,8 +196,7 @@ pub async fn run_retro_agent(
          rather than reading the entire file. When done, call the `submit_retro` tool with your analysis."
     );
 
-    // Write prompt.md
-    let _ = std::fs::write(retro_dir.join("prompt.md"), &prompt);
+    write_retro_prompt(run_store, &retro_dir, &prompt).await?;
 
     let process_result = session
         .process_input(&prompt)
@@ -239,9 +238,9 @@ pub async fn run_retro_agent(
     };
 
     // Write artifacts (on both success and failure)
+    write_retro_response(run_store, &retro_dir, response_text).await?;
     write_retro_artifacts(
         &retro_dir,
-        response_text,
         provider.as_str(),
         model,
         outcome,
@@ -271,18 +270,47 @@ pub fn dry_run_narrative() -> RetroNarrative {
     }
 }
 
-/// Write retro artifact files (response.md, provider_used.json, status.json) into `retro_dir`.
+async fn write_retro_prompt(
+    run_store: Option<&dyn RunStore>,
+    retro_dir: &Path,
+    prompt: &str,
+) -> anyhow::Result<()> {
+    if let Some(store) = run_store {
+        store
+            .put_retro_prompt(prompt)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to save retro prompt to store: {e}"))?;
+    } else {
+        std::fs::write(retro_dir.join("prompt.md"), prompt)?;
+    }
+    Ok(())
+}
+
+async fn write_retro_response(
+    run_store: Option<&dyn RunStore>,
+    retro_dir: &Path,
+    response: &str,
+) -> anyhow::Result<()> {
+    if let Some(store) = run_store {
+        store
+            .put_retro_response(response)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to save retro response to store: {e}"))?;
+    } else {
+        std::fs::write(retro_dir.join("response.md"), response)?;
+    }
+    Ok(())
+}
+
+/// Write retro artifact files (provider_used.json, status.json) into `retro_dir`.
 /// Called on both success and failure paths so artifacts are always available for debugging.
 fn write_retro_artifacts(
     retro_dir: &Path,
-    response: &str,
     provider: &str,
     model: &str,
     outcome: &str,
     failure_reason: Option<&str>,
 ) {
-    let _ = std::fs::write(retro_dir.join("response.md"), response);
-
     let provider_used = serde_json::json!({
         "mode": "agent",
         "provider": provider,
@@ -546,7 +574,6 @@ mod tests {
         std::fs::write(retro_dir.join("prompt.md"), "Analyze the run data").unwrap();
         write_retro_artifacts(
             &retro_dir,
-            "response text",
             "anthropic",
             "claude-sonnet-4-20250514",
             "success",
@@ -557,28 +584,11 @@ mod tests {
     }
 
     #[test]
-    fn writes_response_md() {
-        let dir = tempfile::tempdir().unwrap();
-        let retro_dir = dir.path().join("retro");
-        std::fs::create_dir_all(&retro_dir).unwrap();
-        write_retro_artifacts(
-            &retro_dir,
-            "The run completed successfully with minor issues.",
-            "anthropic",
-            "claude-sonnet-4-20250514",
-            "success",
-            None,
-        );
-        let content = std::fs::read_to_string(retro_dir.join("response.md")).unwrap();
-        assert_eq!(content, "The run completed successfully with minor issues.");
-    }
-
-    #[test]
     fn writes_provider_used_json() {
         let dir = tempfile::tempdir().unwrap();
         let retro_dir = dir.path().join("retro");
         std::fs::create_dir_all(&retro_dir).unwrap();
-        write_retro_artifacts(&retro_dir, "resp", "openai", "gpt-4o", "success", None);
+        write_retro_artifacts(&retro_dir, "openai", "gpt-4o", "success", None);
         let content = std::fs::read_to_string(retro_dir.join("provider_used.json")).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(parsed["mode"], "agent");
@@ -593,7 +603,6 @@ mod tests {
         std::fs::create_dir_all(&retro_dir).unwrap();
         write_retro_artifacts(
             &retro_dir,
-            "resp",
             "anthropic",
             "claude-sonnet-4-20250514",
             "success",
@@ -613,7 +622,6 @@ mod tests {
         std::fs::create_dir_all(&retro_dir).unwrap();
         write_retro_artifacts(
             &retro_dir,
-            "resp",
             "anthropic",
             "claude-sonnet-4-20250514",
             "error",

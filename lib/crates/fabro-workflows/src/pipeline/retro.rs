@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use fabro_agent::SessionEvent;
-use fabro_retro::RetroExt;
 use fabro_retro::retro::{Retro, derive_retro, extract_stage_durations};
 use fabro_retro::retro_agent::{dry_run_narrative, run_retro_agent};
 
@@ -50,9 +49,6 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
         &stage_durations,
     );
 
-    if let Err(e) = retro.save(&options.run_dir) {
-        tracing::warn!(error = %e, "Failed to save initial retro");
-    }
     if let Err(err) = options.run_store.put_retro(&retro).await {
         tracing::warn!(error = %err, "Failed to save initial retro to store");
     }
@@ -116,9 +112,6 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
     match narrative_result {
         Ok(narrative) => {
             retro.apply_narrative(narrative);
-            if let Err(e) = retro.save(&options.run_dir) {
-                tracing::warn!(error = %e, "Failed to save retro with narrative");
-            }
             if let Err(err) = options.run_store.put_retro(&retro).await {
                 tracing::warn!(error = %err, "Failed to save retro with narrative to store");
             }
@@ -213,7 +206,7 @@ mod tests {
         run_dir: &std::path::Path,
         checkpoint: &Checkpoint,
     ) -> Arc<dyn fabro_store::RunStore> {
-        let run_store = InMemoryStore::default()
+        let inner = InMemoryStore::default()
             .create_run(
                 "run-test",
                 Utc::now(),
@@ -221,6 +214,9 @@ mod tests {
             )
             .await
             .unwrap();
+        let run_store: Arc<dyn fabro_store::RunStore> = Arc::new(
+            fabro_store::DiskProjectingRunStore::new(inner, run_dir.to_path_buf()),
+        );
         run_store.put_checkpoint(checkpoint).await.unwrap();
         run_store
     }

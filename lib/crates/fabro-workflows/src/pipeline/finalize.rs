@@ -406,7 +406,6 @@ pub async fn finalize(
         );
     }
 
-    persist_terminal_outcome(&options.run_dir, &conclusion, run_status, status_reason);
     if let Err(err) = options.run_store.put_conclusion(&conclusion).await {
         tracing::warn!(error = %err, "Failed to save conclusion to store");
     }
@@ -468,7 +467,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();
-        let run_store = InMemoryStore::default()
+        let inner_store = InMemoryStore::default()
             .create_run(
                 "run-test",
                 Utc::now(),
@@ -476,6 +475,9 @@ mod tests {
             )
             .await
             .unwrap();
+        let run_store: Arc<dyn fabro_store::RunStore> = Arc::new(
+            fabro_store::DiskProjectingRunStore::new(inner_store, run_dir.clone()),
+        );
         let retroed = Retroed {
             graph: Graph::new("test"),
             outcome: Ok(Outcome::success()),
@@ -495,7 +497,7 @@ mod tests {
             &FinalizeOptions {
                 run_dir: run_dir.clone(),
                 run_id: "run-test".to_string(),
-                run_store,
+                run_store: Arc::clone(&run_store),
                 workflow_name: "test".to_string(),
                 hook_runner: None,
                 preserve_sandbox: true,

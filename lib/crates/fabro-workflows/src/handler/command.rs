@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use async_trait::async_trait;
+use fabro_store::NodeVisitRef;
 
 use crate::context::Context;
 use crate::context::keys;
@@ -90,6 +91,10 @@ impl Handler for CommandHandler {
         let visit = visit_from_context(context);
         let stage_dir = node_dir(run_dir, &node.id, visit);
         fs::create_dir_all(&stage_dir).await?;
+        let node_ref = NodeVisitRef {
+            node_id: &node.id,
+            visit: u32::try_from(visit).unwrap_or(u32::MAX),
+        };
 
         let invocation = serde_json::json!({
             "command": script,
@@ -123,8 +128,19 @@ impl Handler for CommandHandler {
             .await
             .map_err(|e| FabroError::handler(format!("Failed to spawn script: {e}")))?;
 
-        fs::write(stage_dir.join("stdout.log"), &result.stdout).await?;
-        fs::write(stage_dir.join("stderr.log"), &result.stderr).await?;
+        if let Some(ref store) = services.run_store {
+            store
+                .put_node_stdout(&node_ref, &result.stdout)
+                .await
+                .map_err(|err| FabroError::handler(err.to_string()))?;
+            store
+                .put_node_stderr(&node_ref, &result.stderr)
+                .await
+                .map_err(|err| FabroError::handler(err.to_string()))?;
+        } else {
+            fs::write(stage_dir.join("stdout.log"), &result.stdout).await?;
+            fs::write(stage_dir.join("stderr.log"), &result.stderr).await?;
+        }
 
         let timing = serde_json::json!({
             "duration_ms": result.duration_ms,

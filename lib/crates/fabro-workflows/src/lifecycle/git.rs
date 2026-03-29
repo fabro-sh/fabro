@@ -17,7 +17,6 @@ use crate::git::scan_node_files;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageStatus, StageUsage};
-use crate::records::{Checkpoint, CheckpointExt};
 use crate::run_dir::node_dir;
 use crate::run_options::RunOptions;
 use crate::sandbox_git::{git_checkpoint, git_diff, git_push_host};
@@ -198,20 +197,6 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                     push_results: Vec::new(),
                 };
 
-                // Re-save checkpoint.json with SHA
-                let checkpoint_path = self.run_dir.join("checkpoint.json");
-                if let Ok(mut cp) = Checkpoint::load(&checkpoint_path) {
-                    cp.git_commit_sha = Some(sha.clone());
-                    if let Err(e) = cp.save(&checkpoint_path) {
-                        self.emitter.emit(&WorkflowRunEvent::RunNotice {
-                            level: RunNoticeLevel::Warn,
-                            code: "checkpoint_resave_failed".to_string(),
-                            message: format!(
-                                "[node: {node_id}] checkpoint re-save with SHA failed: {e}"
-                            ),
-                        });
-                    }
-                }
                 match self.run_store.get_checkpoint().await {
                     Ok(Some(mut checkpoint)) => {
                         checkpoint.git_commit_sha = Some(sha.clone());

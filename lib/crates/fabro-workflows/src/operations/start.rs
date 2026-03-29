@@ -11,14 +11,14 @@ use fabro_config::{project as project_config, run as run_config, sandbox as sand
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec, detect_clone_params};
-use fabro_store::RunStore;
+use fabro_store::{DiskProjectingRunStore, RunStore};
 use serde::Serialize;
 
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{
-    EventEmitter, ProgressLogger, RunNoticeLevel, StoreProgressLogger, WorkflowRunEvent,
-    append_progress_event, build_redacted_event_payload,
+    EventEmitter, RunNoticeLevel, StoreProgressLogger, WorkflowRunEvent, append_progress_event,
+    build_redacted_event_payload,
 };
 use crate::git::GitAuthor;
 use crate::handler::HandlerRegistry;
@@ -26,7 +26,7 @@ use crate::outcome::{Outcome, StageStatus};
 use crate::pipeline::{
     self, DevcontainerSpec, FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted,
     PullRequestOptions, RetroOptions, SandboxEnvSpec, build_conclusion_from_store,
-    classify_engine_result, persist_terminal_outcome,
+    classify_engine_result,
 };
 use crate::records::{Checkpoint, Conclusion, ConclusionExt, RunRecord, RunRecordExt};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
@@ -115,8 +115,13 @@ pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, F
 pub(super) async fn execute_persisted_run(
     run_dir: &Path,
     checkpoint: Option<Checkpoint>,
-    services: StartServices,
+    mut services: StartServices,
 ) -> Result<Started, FabroError> {
+    let inner_store = Arc::clone(&services.run_store);
+    services.run_store = Arc::new(DiskProjectingRunStore::new(
+        inner_store,
+        run_dir.to_path_buf(),
+    ));
     let run_store = Arc::clone(&services.run_store);
     if let Err(err) = run_store
         .put_status(&run_status::RunStatusRecord::new(
@@ -208,7 +213,6 @@ async fn persist_terminal_engine_failure(
         None,
     )
     .await;
-    persist_terminal_outcome(run_dir, &conclusion, run_status, status_reason);
     if let Err(err) = run_store.put_conclusion(&conclusion).await {
         tracing::warn!(error = %err, "Failed to save terminal engine failure conclusion to store");
     }
@@ -477,8 +481,6 @@ impl RunSession {
             });
         }
 
-        ProgressLogger::new(persisted.run_dir(), record.run_id.clone())
-            .register(self.emitter.as_ref());
         let store_progress_logger =
             StoreProgressLogger::new(Arc::clone(&self.run_store), record.run_id.clone());
         store_progress_logger.register(self.emitter.as_ref());

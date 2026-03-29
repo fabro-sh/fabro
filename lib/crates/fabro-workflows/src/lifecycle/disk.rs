@@ -16,10 +16,9 @@ use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{OutcomeExt, StageUsage};
-use crate::records::{Checkpoint, CheckpointExt};
-use crate::run_dir::{write_node_status, write_start_record};
+use crate::records::{Checkpoint, StartRecord};
 use crate::run_options::RunOptions;
-use crate::run_status::{RunStatus, write_run_status};
+use crate::run_status::RunStatus;
 use fabro_graphviz::graph::types::Graph as GvGraph;
 
 type WfRunState = RunState<Option<StageUsage>>;
@@ -40,10 +39,13 @@ pub(crate) struct DiskLifecycle {
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
     async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
-        // Write start.json
-        let start_record = write_start_record(&self.run_dir, &self.run_options);
-        // Write run status as Running
-        write_run_status(&self.run_dir, RunStatus::Running, None);
+        let git_state = self.run_options.git.as_ref();
+        let start_record = StartRecord {
+            run_id: self.run_id.clone(),
+            start_time: chrono::Utc::now(),
+            run_branch: git_state.and_then(|g| g.run_branch.clone()),
+            base_sha: git_state.and_then(|g| g.base_sha.clone()),
+        };
         if let Err(err) = self.run_store.put_start(&start_record).await {
             self.emitter.emit(&WorkflowRunEvent::RunNotice {
                 level: RunNoticeLevel::Warn,
@@ -73,7 +75,6 @@ impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
     ) -> CoreResult<()> {
         let gv = node.inner();
         let visit = state.node_visits.get(gv.id.as_str()).copied().unwrap_or(1);
-        write_node_status(&self.run_dir, &gv.id, visit, &result.outcome);
         let node_status = NodeStatusRecord {
             status: result.outcome.status.clone(),
             notes: result.outcome.notes.clone(),
@@ -130,15 +131,6 @@ impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
             loop_failure_signatures: loop_sigs,
             restart_failure_signatures: restart_sigs,
         };
-
-        let checkpoint_path = self.run_dir.join("checkpoint.json");
-        if let Err(e) = checkpoint.save(&checkpoint_path) {
-            self.emitter.emit(&WorkflowRunEvent::RunNotice {
-                level: RunNoticeLevel::Warn,
-                code: "checkpoint_disk_save_failed".to_string(),
-                message: format!("[node: {}] checkpoint save failed: {e}", node.id()),
-            });
-        }
         if let Err(err) = self.run_store.put_checkpoint(&checkpoint).await {
             self.emitter.emit(&WorkflowRunEvent::RunNotice {
                 level: RunNoticeLevel::Warn,

@@ -7,8 +7,7 @@ use fabro_agent::Sandbox;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_llm::client::Client;
 use fabro_sandbox::{
-    ReadBeforeWriteSandbox, SandboxEventCallback, SandboxRecordExt, WorkdirStrategy,
-    WorktreeConfig, WorktreeSandbox,
+    ReadBeforeWriteSandbox, SandboxEventCallback, WorkdirStrategy, WorktreeConfig, WorktreeSandbox,
 };
 use shlex::try_quote;
 
@@ -496,9 +495,6 @@ pub async fn initialize(
         working_directory: sandbox.working_directory().to_string(),
     });
     let sandbox_record = options.sandbox.to_sandbox_record(&*sandbox);
-    if let Err(e) = sandbox_record.save(&run_dir.join("sandbox.json")) {
-        tracing::warn!(error = %e, "Failed to save sandbox record");
-    }
     if let Err(err) = options.run_store.put_sandbox(&sandbox_record).await {
         tracing::warn!(error = %err, "Failed to save sandbox record to store");
     }
@@ -739,10 +735,18 @@ mod tests {
                 run_id: "run-test".to_string(),
                 run_store: {
                     let store: &dyn fabro_store::Store = &InMemoryStore::default();
-                    store
-                        .create_run("test-run", chrono::Utc::now(), None)
+                    let inner = store
+                        .create_run(
+                            "test-run",
+                            chrono::Utc::now(),
+                            Some(run_dir.to_string_lossy().as_ref()),
+                        )
                         .await
-                        .unwrap()
+                        .unwrap();
+                    Arc::new(fabro_store::DiskProjectingRunStore::new(
+                        inner,
+                        run_dir.clone(),
+                    ))
                 },
                 dry_run: false,
                 emitter,
@@ -809,10 +813,18 @@ mod tests {
                 run_id: "run-test".to_string(),
                 run_store: {
                     let store: &dyn fabro_store::Store = &InMemoryStore::default();
-                    store
-                        .create_run("test-run", chrono::Utc::now(), None)
+                    let inner = store
+                        .create_run(
+                            "test-run",
+                            chrono::Utc::now(),
+                            Some(run_dir.to_string_lossy().as_ref()),
+                        )
                         .await
-                        .unwrap()
+                        .unwrap();
+                    Arc::new(fabro_store::DiskProjectingRunStore::new(
+                        inner,
+                        run_dir.clone(),
+                    ))
                 },
                 dry_run: false,
                 emitter,

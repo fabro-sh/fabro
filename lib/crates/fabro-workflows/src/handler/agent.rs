@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
+use fabro_store::NodeVisitRef;
 
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
@@ -255,7 +256,18 @@ impl Handler for AgentHandler {
         let visit = visit_from_context(context);
         let stage_dir = node_dir(run_dir, &node.id, visit);
         fs::create_dir_all(&stage_dir).await?;
-        fs::write(stage_dir.join("prompt.md"), &prompt).await?;
+        let node_ref = NodeVisitRef {
+            node_id: &node.id,
+            visit: u32::try_from(visit).unwrap_or(u32::MAX),
+        };
+        if let Some(ref store) = services.run_store {
+            store
+                .put_node_prompt(&node_ref, &prompt)
+                .await
+                .map_err(|err| FabroError::handler(err.to_string()))?;
+        } else {
+            fs::write(stage_dir.join("prompt.md"), &prompt).await?;
+        }
 
         // 3. Call LLM backend (agent loop)
         let thread_id = context.thread_id();
@@ -314,7 +326,14 @@ impl Handler for AgentHandler {
             };
 
         // 4. Write response to logs
-        fs::write(stage_dir.join("response.md"), &response_text).await?;
+        if let Some(ref store) = services.run_store {
+            store
+                .put_node_response(&node_ref, &response_text)
+                .await
+                .map_err(|err| FabroError::handler(err.to_string()))?;
+        } else {
+            fs::write(stage_dir.join("response.md"), &response_text).await?;
+        }
 
         // 7. Build and write status
         let mut outcome = Outcome::success();

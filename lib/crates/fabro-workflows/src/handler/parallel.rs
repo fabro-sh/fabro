@@ -262,6 +262,7 @@ impl Handler for ParallelHandler {
             let registry = Arc::clone(&services.registry);
             let emitter = Arc::clone(&services.emitter);
             let hook_runner = services.hook_runner.clone();
+            let run_store = services.run_store.clone();
             let env = services.env.clone();
             let dry_run = services.dry_run;
             let graph = graph.clone();
@@ -309,6 +310,7 @@ impl Handler for ParallelHandler {
                     registry: Arc::clone(&registry),
                     emitter: Arc::clone(&emitter),
                     sandbox: Arc::clone(&setup.sandbox),
+                    run_store: run_store.clone(),
                     git_state: std::sync::RwLock::new(None),
                     hook_runner: hook_runner.clone(),
                     env: env.clone(),
