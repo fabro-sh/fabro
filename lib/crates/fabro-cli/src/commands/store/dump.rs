@@ -1,9 +1,9 @@
 use std::io::{ErrorKind, Write};
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use fabro_config::FabroSettingsExt;
-use fabro_store::{NodeVisitRef, RunStore};
+use fabro_store::{NodeVisitRef, RunSnapshot, RunStore};
 use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 use serde::Serialize;
 
@@ -25,7 +25,6 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs) -> Result<()> {
             )
         })?;
 
-    prepare_output_dir(&args.output)?;
     let file_count = export_run(run_store.as_ref(), &args.output).await?;
     println!(
         "Exported {file_count} files for run {} to {}",
@@ -41,8 +40,45 @@ pub(crate) async fn export_run(run_store: &dyn RunStore, output_dir: &Path) -> R
         .await?
         .context("run has no data in the store")?;
 
-    std::fs::create_dir_all(output_dir)?;
+    let output_state = inspect_output_dir(output_dir)?;
+    let staging_parent = output_parent_dir(output_dir);
+    std::fs::create_dir_all(staging_parent)
+        .with_context(|| format!("failed to create {}", staging_parent.display()))?;
 
+    let staging_dir = tempfile::Builder::new()
+        .prefix(".fabro-store-dump-")
+        .tempdir_in(staging_parent)
+        .with_context(|| {
+            format!(
+                "failed to create staging dir in {}",
+                staging_parent.display()
+            )
+        })?;
+    let staging_path = staging_dir.path().to_path_buf();
+
+    let file_count = export_run_to_dir(run_store, &snapshot, &staging_path).await?;
+
+    if matches!(output_state, OutputDirState::ExistingEmpty) {
+        std::fs::remove_dir(output_dir)
+            .with_context(|| format!("failed to replace {}", output_dir.display()))?;
+    }
+    std::fs::rename(&staging_path, output_dir).with_context(|| {
+        format!(
+            "failed to move staged export {} into {}",
+            staging_path.display(),
+            output_dir.display()
+        )
+    })?;
+    let _ = staging_dir.keep();
+
+    Ok(file_count)
+}
+
+async fn export_run_to_dir(
+    run_store: &dyn RunStore,
+    snapshot: &RunSnapshot,
+    output_dir: &Path,
+) -> Result<usize> {
     let mut file_count = 0;
 
     write_json_file(&output_dir.join("run.json"), &snapshot.run)?;
@@ -77,9 +113,10 @@ pub(crate) async fn export_run(run_store: &dyn RunStore, output_dir: &Path) -> R
     )?);
 
     for node in &snapshot.nodes {
+        let node_id = validate_single_path_segment("node id", &node.node_id)?;
         let base = output_dir
             .join("nodes")
-            .join(&node.node_id)
+            .join(node_id)
             .join(format!("visit-{}", node.visit));
         file_count += usize::from(write_optional_text_file(
             &base.join("prompt.md"),
@@ -129,6 +166,7 @@ pub(crate) async fn export_run(run_store: &dyn RunStore, output_dir: &Path) -> R
     }
 
     for artifact_id in run_store.list_artifact_values().await? {
+        let artifact_id_segment = validate_single_path_segment("artifact id", &artifact_id)?;
         let value = run_store
             .get_artifact_value(&artifact_id)
             .await?
@@ -137,13 +175,15 @@ pub(crate) async fn export_run(run_store: &dyn RunStore, output_dir: &Path) -> R
             &output_dir
                 .join("artifacts")
                 .join("values")
-                .join(format!("{artifact_id}.json")),
+                .join(format!("{}.json", artifact_id_segment.display())),
             &value,
         )?;
         file_count += 1;
     }
 
     for (node_id, visit, filename) in run_store.list_all_assets().await? {
+        let node_id_segment = validate_single_path_segment("node id", &node_id)?;
+        let filename_path = validate_relative_path("asset filename", &filename)?;
         let node = NodeVisitRef {
             node_id: &node_id,
             visit,
@@ -152,15 +192,17 @@ pub(crate) async fn export_run(run_store: &dyn RunStore, output_dir: &Path) -> R
             .get_asset(&node, &filename)
             .await?
             .with_context(|| {
-                format!("asset {filename:?} for node {node_id:?} visit {visit} is missing from the store")
+                format!(
+                    "asset {filename:?} for node {node_id:?} visit {visit} is missing from the store"
+                )
             })?;
         write_bytes_file(
             &output_dir
                 .join("artifacts")
                 .join("nodes")
-                .join(&node_id)
+                .join(node_id_segment)
                 .join(format!("visit-{visit}"))
-                .join(&filename),
+                .join(filename_path),
             data.as_ref(),
         )?;
         file_count += 1;
@@ -169,7 +211,13 @@ pub(crate) async fn export_run(run_store: &dyn RunStore, output_dir: &Path) -> R
     Ok(file_count)
 }
 
-fn prepare_output_dir(path: &Path) -> Result<()> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputDirState {
+    Missing,
+    ExistingEmpty,
+}
+
+fn inspect_output_dir(path: &Path) -> Result<OutputDirState> {
     match std::fs::symlink_metadata(path) {
         Ok(metadata) => {
             if metadata.file_type().is_symlink() || !metadata.is_dir() {
@@ -181,15 +229,12 @@ fn prepare_output_dir(path: &Path) -> Result<()> {
             if entries.next().transpose()?.is_some() {
                 return Err(output_dir_error(path));
             }
-        }
-        Err(err) if err.kind() == ErrorKind::NotFound => {
-            std::fs::create_dir_all(path)
-                .with_context(|| format!("failed to create {}", path.display()))?;
-        }
-        Err(err) => return Err(err.into()),
-    }
 
-    Ok(())
+            Ok(OutputDirState::ExistingEmpty)
+        }
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(OutputDirState::Missing),
+        Err(err) => Err(err.into()),
+    }
 }
 
 fn output_dir_error(path: &Path) -> anyhow::Error {
@@ -197,6 +242,38 @@ fn output_dir_error(path: &Path) -> anyhow::Error {
         "output path {} already exists and is not an empty directory; remove it first or choose a different path",
         path.display()
     )
+}
+
+fn output_parent_dir(path: &Path) -> &Path {
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    }
+}
+
+fn validate_single_path_segment(kind: &str, value: &str) -> Result<PathBuf> {
+    let path = validate_relative_path(kind, value)?;
+    if path.components().count() != 1 {
+        bail!("{kind} {value:?} must be a single path segment");
+    }
+    Ok(path)
+}
+
+fn validate_relative_path(kind: &str, value: &str) -> Result<PathBuf> {
+    let mut normalized = PathBuf::new();
+    for component in Path::new(value).components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                bail!("{kind} {value:?} must be a relative path without '..'");
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        bail!("{kind} {value:?} must not be empty");
+    }
+    Ok(normalized)
 }
 
 fn write_optional_json_file<T>(path: &Path, value: Option<&T>) -> Result<bool>
@@ -577,12 +654,39 @@ mod tests {
         assert!(!output.path().join("nodes/artifact-only").exists());
     }
 
+    #[tokio::test]
+    async fn export_run_rejects_path_traversal_and_leaves_no_partial_output() {
+        let store = InMemoryStore::default();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let run = store.create_run("run-1", created_at, None).await.unwrap();
+
+        run.put_run(&sample_run_record("run-1", created_at))
+            .await
+            .unwrap();
+        run.put_asset(
+            &NodeVisitRef {
+                node_id: "code",
+                visit: 1,
+            },
+            "../escape.txt",
+            b"boom",
+        )
+        .await
+        .unwrap();
+
+        let temp = tempfile::tempdir().unwrap();
+        let output = temp.path().join("dump");
+        let err = export_run(run.as_ref(), &output).await.unwrap_err();
+        assert!(err.to_string().contains("asset filename"));
+        assert!(!output.exists());
+    }
+
     #[test]
-    fn prepare_output_dir_rejects_non_empty_directory() {
+    fn inspect_output_dir_rejects_non_empty_directory() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("existing.txt"), "x").unwrap();
 
-        let err = prepare_output_dir(dir.path()).unwrap_err();
+        let err = inspect_output_dir(dir.path()).unwrap_err();
         assert!(
             err.to_string()
                 .contains("already exists and is not an empty directory")
