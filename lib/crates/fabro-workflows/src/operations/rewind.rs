@@ -166,13 +166,31 @@ fn backfill_run_shas(store: &Store, run_id: &str, timeline: &mut [TimelineEntry]
         return;
     }
 
+    let node_commits = run_commit_shas_by_node(store, run_id);
+    let mut node_indices: HashMap<String, usize> = HashMap::new();
+
+    for entry in timeline.iter_mut() {
+        if entry.run_commit_sha.is_some() {
+            continue;
+        }
+        if let Some(shas) = node_commits.get(&entry.node_name) {
+            let idx = node_indices.entry(entry.node_name.clone()).or_insert(0);
+            if *idx < shas.len() {
+                entry.run_commit_sha = Some(shas[*idx].clone());
+                *idx += 1;
+            }
+        }
+    }
+}
+
+pub(crate) fn run_commit_shas_by_node(store: &Store, run_id: &str) -> HashMap<String, Vec<String>> {
     let run_branch = format!("{RUN_BRANCH_PREFIX}{run_id}");
     let Ok(sig) = Signature::now("Fabro", "noreply@fabro.sh") else {
-        return;
+        return HashMap::new();
     };
     let bs = BranchStore::new(store, &run_branch, &sig);
     let Ok(run_commits) = bs.log(10_000) else {
-        return;
+        return HashMap::new();
     };
 
     let prefix = format!("fabro({run_id}): ");
@@ -191,20 +209,8 @@ fn backfill_run_shas(store: &Store, run_id: &str, timeline: &mut [TimelineEntry]
     for shas in node_commits.values_mut() {
         shas.reverse();
     }
-    let mut node_indices: HashMap<String, usize> = HashMap::new();
 
-    for entry in timeline.iter_mut() {
-        if entry.run_commit_sha.is_some() {
-            continue;
-        }
-        if let Some(shas) = node_commits.get(&entry.node_name) {
-            let idx = node_indices.entry(entry.node_name.clone()).or_insert(0);
-            if *idx < shas.len() {
-                entry.run_commit_sha = Some(shas[*idx].clone());
-                *idx += 1;
-            }
-        }
-    }
+    node_commits
 }
 
 fn detect_parallel_interior(graph: &Graph) -> HashMap<String, String> {

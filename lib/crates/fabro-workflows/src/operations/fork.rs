@@ -4,6 +4,7 @@ use fabro_git_storage::gitobj::Store;
 use git2::{Oid, Signature};
 
 use crate::git::{MetadataStore, RUN_BRANCH_PREFIX, push_run_branches};
+use crate::records::Checkpoint;
 use crate::records::RunRecord;
 use crate::records::StartRecord;
 
@@ -116,21 +117,25 @@ fn fork_from_entry(
                 entry.metadata_commit_oid
             )
         })?;
+    let mut checkpoint: Checkpoint = serde_json::from_slice(&checkpoint_bytes)
+        .context("failed to parse source checkpoint.json")?;
+    checkpoint.git_commit_sha.clone_from(&entry.run_commit_sha);
+    let checkpoint_bytes =
+        serde_json::to_vec_pretty(&checkpoint).context("failed to serialize checkpoint.json")?;
 
-    let mut file_entries: Vec<(&str, &[u8])> = vec![
-        ("run.json", &new_run_record_bytes),
-        ("checkpoint.json", &checkpoint_bytes),
-    ];
+    let mut init_entries: Vec<(&str, &[u8])> = vec![("run.json", &new_run_record_bytes)];
     if let Some(ref start_record) = new_start_record_bytes {
-        file_entries.push(("start.json", start_record));
+        init_entries.push(("start.json", start_record));
     }
     if let Some(ref sandbox) = sandbox_bytes {
-        file_entries.push(("sandbox.json", sandbox));
+        init_entries.push(("sandbox.json", sandbox));
     }
 
-    let commit_msg = format!("fork from {} @{}", source_run_id, entry.ordinal);
     new_bs
-        .write_entries(&file_entries, &commit_msg)
+        .write_entries(&init_entries, "init run")
+        .map_err(|e| anyhow::anyhow!("failed to write init metadata entries: {e}"))?;
+    new_bs
+        .write_entry("checkpoint.json", &checkpoint_bytes, "checkpoint")
         .map_err(|e| anyhow::anyhow!("failed to write metadata entries: {e}"))?;
 
     if push {
@@ -242,7 +247,7 @@ mod tests {
     fn fork_creates_new_run_and_metadata_branches() {
         let (_dir, store) = temp_repo();
         let source_run_id = "run-source";
-        let _run_oids = setup_source_run(&store, source_run_id, &["start", "build", "test"]);
+        let run_oids = setup_source_run(&store, source_run_id, &["start", "build", "test"]);
 
         let new_run_id = fork(
             &store,
@@ -265,6 +270,14 @@ mod tests {
         let run_json = bs.read_entry("run.json").unwrap().unwrap();
         let run_record: RunRecord = serde_json::from_slice(&run_json).unwrap();
         assert_eq!(run_record.run_id, new_run_id);
+
+        let timeline = build_timeline(&store, &new_run_id).unwrap();
+        assert_eq!(timeline.entries.len(), 1);
+        assert_eq!(timeline.entries[0].node_name, "build");
+        assert_eq!(
+            timeline.entries[0].run_commit_sha,
+            Some(run_oids[1].to_string())
+        );
     }
 
     #[test]

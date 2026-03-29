@@ -1,8 +1,20 @@
+use std::collections::{BTreeSet, HashMap};
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
+
 use assert_cmd::Command;
+use chrono::TimeZone;
 use fabro_config::FabroSettings;
 use fabro_config::mcp::McpTransport;
-use fabro_store::RuntimeState;
+use fabro_git_storage::branchstore::BranchStore;
+use fabro_git_storage::gitobj::Store as GitStore;
+use fabro_store::{NodeVisitRef, RuntimeState, SlateStore, Store as _};
+use fabro_types::{Checkpoint, Graph, RunRecord, StartRecord};
+use git2::{Repository, Signature};
+use object_store::local::LocalFileSystem;
 use predicates::prelude::*;
+use tokio::runtime::Runtime;
 
 #[allow(deprecated)]
 fn arc() -> Command {
@@ -203,6 +215,193 @@ commands = ["workflow-setup"]
     .unwrap();
 
     (home, project, storage_dir)
+}
+
+fn init_cli_home(storage_dir: &Path) -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    let home_fabro = home.path().join(".fabro");
+    std::fs::create_dir_all(&home_fabro).unwrap();
+    let storage_dir = serde_json::to_string(&storage_dir.to_string_lossy().into_owned()).unwrap();
+    std::fs::write(
+        home_fabro.join("cli.toml"),
+        format!("storage_dir = {storage_dir}\n"),
+    )
+    .unwrap();
+    home
+}
+
+fn list_metadata_run_ids(repo_dir: &Path) -> BTreeSet<String> {
+    let repo = Repository::discover(repo_dir).unwrap();
+    repo.references()
+        .unwrap()
+        .flatten()
+        .filter_map(|reference| reference.name().map(ToOwned::to_owned))
+        .filter_map(|name| {
+            name.strip_prefix("refs/heads/fabro/meta/")
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+fn seed_run_branch(repo_dir: &Path, run_id: &str, nodes: &[&str]) -> Vec<String> {
+    let repo = Repository::discover(repo_dir).unwrap();
+    let store = GitStore::new(repo);
+    let sig = Signature::now("Fabro", "noreply@fabro.sh").unwrap();
+    let run_branch = format!("fabro/run/{run_id}");
+    let empty_tree = store.write_empty_tree().unwrap();
+    let mut shas = Vec::new();
+    let mut parent = None;
+
+    for node in nodes {
+        let parents = parent.into_iter().collect::<Vec<_>>();
+        let oid = store
+            .write_commit(
+                empty_tree,
+                &parents,
+                &format!("fabro({run_id}): {node} (completed)"),
+                &sig,
+            )
+            .unwrap();
+        store.update_ref(&run_branch, oid).unwrap();
+        shas.push(oid.to_string());
+        parent = Some(oid);
+    }
+
+    shas
+}
+
+fn checkpoint_record(
+    current_node: &str,
+    completed_nodes: &[&str],
+    node_visits: &[(&str, usize)],
+    git_commit_sha: Option<&str>,
+) -> Checkpoint {
+    Checkpoint {
+        timestamp: chrono::Utc
+            .with_ymd_and_hms(2026, 1, 1, 0, 0, 0)
+            .single()
+            .unwrap(),
+        current_node: current_node.to_string(),
+        completed_nodes: completed_nodes
+            .iter()
+            .map(|node| (*node).to_string())
+            .collect(),
+        node_retries: HashMap::new(),
+        context_values: HashMap::new(),
+        node_outcomes: HashMap::new(),
+        next_node_id: None,
+        git_commit_sha: git_commit_sha.map(ToOwned::to_owned),
+        loop_failure_signatures: HashMap::new(),
+        restart_failure_signatures: HashMap::new(),
+        node_visits: node_visits
+            .iter()
+            .map(|(node, visit)| ((*node).to_string(), *visit))
+            .collect(),
+    }
+}
+
+async fn seed_durable_run(storage_dir: &Path, repo_dir: &Path, run_id: &str) {
+    let store_path = storage_dir.join("store");
+    std::fs::create_dir_all(&store_path).unwrap();
+    let object_store = Arc::new(LocalFileSystem::new_with_prefix(&store_path).unwrap());
+    let store = SlateStore::new(object_store, "", Duration::from_millis(5));
+    let created_at = chrono::Utc
+        .with_ymd_and_hms(2026, 1, 1, 0, 0, 0)
+        .single()
+        .unwrap();
+    let run_store = store.create_run(run_id, created_at, None).await.unwrap();
+
+    let run_record = RunRecord {
+        run_id: run_id.to_string(),
+        created_at,
+        settings: FabroSettings::default(),
+        graph: Graph::default(),
+        workflow_slug: None,
+        working_directory: repo_dir.to_path_buf(),
+        host_repo_path: Some(repo_dir.to_string_lossy().into_owned()),
+        base_branch: None,
+        labels: HashMap::new(),
+    };
+    run_store.put_run(&run_record).await.unwrap();
+    run_store
+        .put_start(&StartRecord {
+            run_id: run_id.to_string(),
+            start_time: created_at,
+            run_branch: Some(format!("fabro/run/{run_id}")),
+            base_sha: None,
+        })
+        .await
+        .unwrap();
+
+    let start = NodeVisitRef {
+        node_id: "start",
+        visit: 1,
+    };
+    run_store
+        .put_node_prompt(&start, "start prompt")
+        .await
+        .unwrap();
+    let build = NodeVisitRef {
+        node_id: "build",
+        visit: 1,
+    };
+    run_store
+        .put_node_prompt(&build, "build prompt")
+        .await
+        .unwrap();
+
+    run_store
+        .append_checkpoint(&checkpoint_record(
+            "start",
+            &["start"],
+            &[("start", 1)],
+            None,
+        ))
+        .await
+        .unwrap();
+    run_store
+        .append_checkpoint(&checkpoint_record(
+            "build",
+            &["start", "build"],
+            &[("start", 1), ("build", 1)],
+            None,
+        ))
+        .await
+        .unwrap();
+}
+
+fn metadata_checkpoints(repo_dir: &Path, run_id: &str) -> Vec<Checkpoint> {
+    let repo = Repository::discover(repo_dir).unwrap();
+    let store = GitStore::new(repo);
+    let sig = Signature::now("Fabro", "noreply@fabro.sh").unwrap();
+    let branch = format!("fabro/meta/{run_id}");
+    let bs = BranchStore::new(&store, &branch, &sig);
+
+    bs.log(100)
+        .unwrap()
+        .iter()
+        .rev()
+        .filter(|commit| commit.message.starts_with("checkpoint"))
+        .map(|commit| {
+            serde_json::from_slice::<Checkpoint>(
+                &store
+                    .read_blob_at(commit.oid, "checkpoint.json")
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap()
+        })
+        .collect()
+}
+
+fn latest_metadata_checkpoint(repo_dir: &Path, run_id: &str) -> Checkpoint {
+    let repo = Repository::discover(repo_dir).unwrap();
+    let store = GitStore::new(repo);
+    let tip = store
+        .resolve_ref(&format!("fabro/meta/{run_id}"))
+        .unwrap()
+        .unwrap();
+    serde_json::from_slice(&store.read_blob_at(tip, "checkpoint.json").unwrap().unwrap()).unwrap()
 }
 
 // == LLM: prompt ==============================================================
@@ -760,6 +959,121 @@ fn run_help_no_longer_shows_resume_or_run_branch() {
         .success()
         .stdout(predicate::str::contains("--resume").not())
         .stdout(predicate::str::contains("--run-branch").not());
+}
+
+#[test]
+fn rewind_and_fork_recover_missing_metadata_from_store() {
+    let storage_root = tempfile::tempdir().unwrap();
+    let storage_dir = storage_root.path().join("fabro-data");
+    let configured_home = init_cli_home(&storage_dir);
+    let repo_dir = tempfile::tempdir().unwrap();
+    Repository::init(repo_dir.path()).unwrap();
+
+    let source_run_id = "run-recovery-source";
+    let expected_shas = seed_run_branch(repo_dir.path(), source_run_id, &["start", "build"]);
+    Runtime::new().unwrap().block_on(seed_durable_run(
+        &storage_dir,
+        repo_dir.path(),
+        source_run_id,
+    ));
+
+    assert!(
+        list_metadata_run_ids(repo_dir.path()).is_empty(),
+        "metadata branch should start missing"
+    );
+
+    let rewind_list = arc()
+        .env("HOME", configured_home.path())
+        .env("NO_COLOR", "1")
+        .current_dir(repo_dir.path())
+        .args(["rewind", source_run_id, "--list"])
+        .timeout(Duration::from_secs(15))
+        .assert()
+        .success()
+        .get_output()
+        .stderr
+        .clone();
+    let rewind_list = String::from_utf8(rewind_list).unwrap();
+    assert!(
+        rewind_list.contains("@1"),
+        "expected first checkpoint: {rewind_list}"
+    );
+    assert!(
+        rewind_list.contains("@2"),
+        "expected second checkpoint: {rewind_list}"
+    );
+    assert!(
+        !rewind_list.contains("no run commit"),
+        "rebuilt timeline should persist backfilled SHAs: {rewind_list}"
+    );
+
+    let rebuilt_checkpoints = metadata_checkpoints(repo_dir.path(), source_run_id);
+    assert_eq!(rebuilt_checkpoints.len(), 2);
+    assert_eq!(
+        rebuilt_checkpoints[0].git_commit_sha.as_deref(),
+        Some(expected_shas[0].as_str())
+    );
+    assert_eq!(
+        rebuilt_checkpoints[1].git_commit_sha.as_deref(),
+        Some(expected_shas[1].as_str())
+    );
+
+    let before_child = list_metadata_run_ids(repo_dir.path());
+    arc()
+        .env("HOME", configured_home.path())
+        .env("NO_COLOR", "1")
+        .current_dir(repo_dir.path())
+        .args(["fork", source_run_id, "--no-push"])
+        .timeout(Duration::from_secs(15))
+        .assert()
+        .success();
+    let after_child = list_metadata_run_ids(repo_dir.path());
+    let child_run_ids: Vec<_> = after_child.difference(&before_child).cloned().collect();
+    assert_eq!(child_run_ids.len(), 1, "expected one child run");
+    let child_run_id = &child_run_ids[0];
+
+    let child_checkpoint = latest_metadata_checkpoint(repo_dir.path(), child_run_id);
+    assert_eq!(
+        child_checkpoint.git_commit_sha.as_deref(),
+        Some(expected_shas[1].as_str())
+    );
+
+    let child_rewind = arc()
+        .env("HOME", configured_home.path())
+        .env("NO_COLOR", "1")
+        .current_dir(repo_dir.path())
+        .args(["rewind", child_run_id, "@1", "--no-push"])
+        .timeout(Duration::from_secs(15))
+        .assert()
+        .success()
+        .get_output()
+        .stderr
+        .clone();
+    let child_rewind = String::from_utf8(child_rewind).unwrap();
+    assert!(
+        child_rewind.contains("Rewound run branch"),
+        "expected child rewind to move the run branch: {child_rewind}"
+    );
+    assert!(
+        !child_rewind.contains("has no git_commit_sha"),
+        "child rewind should not lose git_commit_sha: {child_rewind}"
+    );
+
+    let before_grandchild = after_child;
+    arc()
+        .env("HOME", configured_home.path())
+        .env("NO_COLOR", "1")
+        .current_dir(repo_dir.path())
+        .args(["fork", child_run_id, "--no-push"])
+        .timeout(Duration::from_secs(15))
+        .assert()
+        .success();
+    let after_grandchild = list_metadata_run_ids(repo_dir.path());
+    let grandchild_run_ids: Vec<_> = after_grandchild
+        .difference(&before_grandchild)
+        .cloned()
+        .collect();
+    assert_eq!(grandchild_run_ids.len(), 1, "expected one grandchild run");
 }
 
 // == Bug regression: create/start/attach lifecycle ============================

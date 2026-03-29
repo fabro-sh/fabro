@@ -9,9 +9,11 @@ use fabro_store::{
     ListRunsQuery, NodeVisitRef, RunStore as DurableRunStore, Store as DurableStore,
 };
 use git2::{Repository, Signature};
+use ulid::Ulid;
 
-use super::rewind::{RunTimeline, build_timeline};
+use super::rewind::{self, RunTimeline, build_timeline};
 use crate::git::MetadataStore;
+use crate::records::Checkpoint;
 
 pub async fn rebuild_metadata_branch(
     git_store: &GitStore,
@@ -29,69 +31,91 @@ pub async fn rebuild_metadata_branch(
         .ok_or_else(|| anyhow::anyhow!("run record not found for {run_id}"))?;
 
     let sig = Signature::now("Fabro", "noreply@fabro.sh")?;
-    let bs = BranchStore::new(git_store, &branch, &sig);
-    bs.ensure_branch()?;
+    let scratch_branch = format!("fabro/meta-rebuild/{run_id}/{}", Ulid::new());
+    let bs = BranchStore::new(git_store, &scratch_branch, &sig);
 
-    let mut init_entries = Vec::new();
-    init_entries.push((
-        "run.json".to_string(),
-        serde_json::to_vec_pretty(&run_record)?,
-    ));
-    if let Some(start) = run_store.get_start().await? {
-        init_entries.push(("start.json".to_string(), serde_json::to_vec_pretty(&start)?));
-    }
-    if let Some(sandbox) = run_store.get_sandbox().await? {
+    let result = async {
+        bs.ensure_branch()?;
+
+        let mut init_entries = Vec::new();
         init_entries.push((
-            "sandbox.json".to_string(),
-            serde_json::to_vec_pretty(&sandbox)?,
+            "run.json".to_string(),
+            serde_json::to_vec_pretty(&run_record)?,
         ));
-    }
-    write_entries(&bs, &init_entries, "init run")?;
+        if let Some(start) = run_store.get_start().await? {
+            init_entries.push(("start.json".to_string(), serde_json::to_vec_pretty(&start)?));
+        }
+        if let Some(sandbox) = run_store.get_sandbox().await? {
+            init_entries.push((
+                "sandbox.json".to_string(),
+                serde_json::to_vec_pretty(&sandbox)?,
+            ));
+        }
+        write_entries(&bs, &init_entries, "init run")?;
 
-    for (_seq, checkpoint) in run_store.list_checkpoints().await? {
-        let mut entries = Vec::new();
-        entries.push((
-            "checkpoint.json".to_string(),
-            serde_json::to_vec_pretty(&checkpoint)?,
-        ));
+        let mut checkpoints = run_store.list_checkpoints().await?;
+        backfill_missing_checkpoint_shas(git_store, run_id, &mut checkpoints);
 
-        for node_id in &checkpoint.completed_nodes {
-            let max_visit = checkpoint.node_visits.get(node_id).copied().unwrap_or(1);
-            for visit in 1..=max_visit {
-                let visit = u32::try_from(visit)
-                    .with_context(|| format!("visit {visit} for node {node_id} exceeds u32"))?;
-                let node = run_store.get_node(&NodeVisitRef { node_id, visit }).await?;
+        for (_seq, checkpoint) in checkpoints {
+            let mut entries = Vec::new();
+            entries.push((
+                "checkpoint.json".to_string(),
+                serde_json::to_vec_pretty(&checkpoint)?,
+            ));
 
-                if let Some(prompt) = node.prompt {
-                    entries.push((
-                        node_file_path(node_id, visit, "prompt.md"),
-                        prompt.into_bytes(),
-                    ));
-                }
-                if let Some(response) = node.response {
-                    entries.push((
-                        node_file_path(node_id, visit, "response.md"),
-                        response.into_bytes(),
-                    ));
-                }
-                if let Some(status) = node.status {
-                    entries.push((
-                        node_file_path(node_id, visit, "status.json"),
-                        serde_json::to_vec_pretty(&status)?,
-                    ));
+            for node_id in &checkpoint.completed_nodes {
+                let max_visit = checkpoint.node_visits.get(node_id).copied().unwrap_or(1);
+                for visit in 1..=max_visit {
+                    let visit = u32::try_from(visit)
+                        .with_context(|| format!("visit {visit} for node {node_id} exceeds u32"))?;
+                    let node = run_store.get_node(&NodeVisitRef { node_id, visit }).await?;
+
+                    if let Some(prompt) = node.prompt {
+                        entries.push((
+                            node_file_path(node_id, visit, "prompt.md"),
+                            prompt.into_bytes(),
+                        ));
+                    }
+                    if let Some(response) = node.response {
+                        entries.push((
+                            node_file_path(node_id, visit, "response.md"),
+                            response.into_bytes(),
+                        ));
+                    }
+                    if let Some(status) = node.status {
+                        entries.push((
+                            node_file_path(node_id, visit, "status.json"),
+                            serde_json::to_vec_pretty(&status)?,
+                        ));
+                    }
                 }
             }
+
+            write_entries(&bs, &entries, "checkpoint")?;
         }
 
-        write_entries(&bs, &entries, "checkpoint")?;
-    }
+        if let Some(retro) = run_store.get_retro().await? {
+            let entries = vec![("retro.json".to_string(), serde_json::to_vec_pretty(&retro)?)];
+            write_entries(&bs, &entries, "finalize run")?;
+        }
 
-    if let Some(retro) = run_store.get_retro().await? {
-        let entries = vec![("retro.json".to_string(), serde_json::to_vec_pretty(&retro)?)];
-        write_entries(&bs, &entries, "finalize run")?;
+        Ok::<(), anyhow::Error>(())
     }
+    .await;
 
-    Ok(())
+    let final_result = match result {
+        Ok(()) => {
+            let scratch_tip = git_store
+                .resolve_ref(&scratch_branch)?
+                .ok_or_else(|| anyhow::anyhow!("scratch metadata branch missing after rebuild"))?;
+            git_store.update_ref(&branch, scratch_tip)?;
+            Ok(())
+        }
+        Err(err) => Err(err),
+    };
+
+    let _ = git_store.delete_ref(&scratch_branch);
+    final_result
 }
 
 pub async fn build_timeline_or_rebuild(
@@ -175,6 +199,38 @@ fn write_entries(
         .collect();
     branch_store.write_entries(&refs, message)?;
     Ok(())
+}
+
+fn backfill_missing_checkpoint_shas(
+    git_store: &GitStore,
+    run_id: &str,
+    checkpoints: &mut [(u32, Checkpoint)],
+) {
+    if !checkpoints
+        .iter()
+        .any(|(_, checkpoint)| checkpoint.git_commit_sha.is_none())
+    {
+        return;
+    }
+
+    let node_commits = rewind::run_commit_shas_by_node(git_store, run_id);
+    let mut node_indices: HashMap<String, usize> = HashMap::new();
+
+    for (_seq, checkpoint) in checkpoints.iter_mut() {
+        if checkpoint.git_commit_sha.is_some() {
+            continue;
+        }
+
+        if let Some(shas) = node_commits.get(&checkpoint.current_node) {
+            let idx = node_indices
+                .entry(checkpoint.current_node.clone())
+                .or_insert(0);
+            if *idx < shas.len() {
+                checkpoint.git_commit_sha = Some(shas[*idx].clone());
+                *idx += 1;
+            }
+        }
+    }
 }
 
 fn node_file_path(node_id: &str, visit: u32, filename: &str) -> String {
@@ -337,6 +393,31 @@ mod tests {
             .await
             .unwrap();
         run_store
+    }
+
+    fn seed_run_branch(git_store: &GitStore, run_id: &str, nodes: &[&str]) -> Vec<String> {
+        let sig = test_sig();
+        let run_branch = format!("fabro/run/{run_id}");
+        let empty_tree = git_store.write_empty_tree().unwrap();
+        let mut shas = Vec::new();
+        let mut parent = None;
+
+        for node in nodes {
+            let parents = parent.into_iter().collect::<Vec<_>>();
+            let oid = git_store
+                .write_commit(
+                    empty_tree,
+                    &parents,
+                    &format!("fabro({run_id}): {node} (completed)"),
+                    &sig,
+                )
+                .unwrap();
+            git_store.update_ref(&run_branch, oid).unwrap();
+            shas.push(oid.to_string());
+            parent = Some(oid);
+        }
+
+        shas
     }
 
     #[tokio::test]
@@ -693,5 +774,123 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(from_refs, "abc-123");
+    }
+
+    #[tokio::test]
+    async fn rebuild_metadata_branch_persists_backfilled_run_shas_in_checkpoint_blobs() {
+        let (_dir, git_store) = temp_repo();
+        let durable_store = InMemoryStore::default();
+        let run_store = create_run_store(&durable_store, "run-1", None).await;
+
+        run_store
+            .append_checkpoint(&sample_checkpoint(
+                "start",
+                &["start"],
+                &[("start", 1)],
+                None,
+            ))
+            .await
+            .unwrap();
+        run_store
+            .append_checkpoint(&sample_checkpoint(
+                "build",
+                &["start", "build"],
+                &[("start", 1), ("build", 1)],
+                None,
+            ))
+            .await
+            .unwrap();
+
+        let expected_shas = seed_run_branch(&git_store, "run-1", &["start", "build"]);
+
+        rebuild_metadata_branch(&git_store, run_store.as_ref(), "run-1")
+            .await
+            .unwrap();
+
+        let sig = test_sig();
+        let branch = MetadataStore::branch_name("run-1");
+        let bs = BranchStore::new(&git_store, &branch, &sig);
+        let checkpoint_commits: Vec<_> = bs
+            .log(100)
+            .unwrap()
+            .iter()
+            .rev()
+            .filter(|commit| commit.message.starts_with("checkpoint"))
+            .map(|commit| commit.oid)
+            .collect();
+
+        let first: Checkpoint = serde_json::from_slice(
+            &git_store
+                .read_blob_at(checkpoint_commits[0], "checkpoint.json")
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let second: Checkpoint = serde_json::from_slice(
+            &git_store
+                .read_blob_at(checkpoint_commits[1], "checkpoint.json")
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            first.git_commit_sha.as_deref(),
+            Some(expected_shas[0].as_str())
+        );
+        assert_eq!(
+            second.git_commit_sha.as_deref(),
+            Some(expected_shas[1].as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn rebuild_metadata_branch_is_atomic_on_failure() {
+        let (_dir, git_store) = temp_repo();
+        let durable_store = InMemoryStore::default();
+        let run_store = create_run_store(&durable_store, "run-1", None).await;
+
+        let bad_node = "bad\0node";
+        let bad_visit = NodeVisitRef {
+            node_id: bad_node,
+            visit: 1,
+        };
+        run_store
+            .put_node_prompt(&bad_visit, "prompt")
+            .await
+            .unwrap();
+        run_store
+            .append_checkpoint(&sample_checkpoint(
+                bad_node,
+                &[bad_node],
+                &[(bad_node, 1)],
+                None,
+            ))
+            .await
+            .unwrap();
+
+        let err = rebuild_metadata_branch(&git_store, run_store.as_ref(), "run-1")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("nul") || err.to_string().contains("NUL"));
+        assert!(
+            git_store
+                .resolve_ref(&MetadataStore::branch_name("run-1"))
+                .unwrap()
+                .is_none()
+        );
+
+        let scratch_refs: Vec<_> = git_store
+            .repo()
+            .references()
+            .unwrap()
+            .flatten()
+            .filter_map(|reference| reference.name().map(ToOwned::to_owned))
+            .filter(|name| name.starts_with("refs/heads/fabro/meta-rebuild/run-1/"))
+            .collect();
+        assert!(
+            scratch_refs.is_empty(),
+            "leftover scratch refs: {scratch_refs:?}"
+        );
     }
 }
