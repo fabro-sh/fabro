@@ -87,11 +87,11 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         }
         RunCommands::Rewind(args) => {
             let styles = Styles::detect_stderr();
-            rewind::run(&args, &styles)
+            rewind::run(&args, &styles).await
         }
         RunCommands::Fork(args) => {
             let styles = Styles::detect_stderr();
-            fork::run(&args, &styles)
+            fork::run(&args, &styles).await
         }
         RunCommands::Wait(args) => {
             let styles = Styles::detect_stderr();
