@@ -1,13 +1,13 @@
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::exit)]
 
 mod args;
-mod cli_config;
 mod commands;
 mod logging;
 mod shared;
 #[cfg(feature = "sleep_inhibitor")]
 mod sleep_inhibitor;
 mod store;
+mod user_config;
 
 use anyhow::Result;
 use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands};
@@ -115,7 +115,7 @@ async fn main_inner() -> (String, Result<()>) {
                     Err(err) => return (command_name, Err(err)),
                 }
             } else {
-                match cli_config::load_cli_settings() {
+                match user_config::load_user_settings() {
                     Ok(cli_settings) => (
                         cli_settings.log.as_ref().and_then(|l| l.level.clone()),
                         cli_settings.upgrade_check_enabled(),
@@ -126,7 +126,7 @@ async fn main_inner() -> (String, Result<()>) {
         }
         #[cfg(not(feature = "server"))]
         {
-            match cli_config::load_cli_settings() {
+            match user_config::load_user_settings() {
                 Ok(cli_settings) => (
                     cli_settings.log.as_ref().and_then(|l| l.level.clone()),
                     cli_settings.upgrade_check_enabled(),
@@ -189,7 +189,7 @@ async fn main_inner() -> (String, Result<()>) {
                     .await?;
             }
             Commands::Doctor { verbose, dry_run } => {
-                let cli_settings = cli_config::load_cli_settings()?;
+                let cli_settings = user_config::load_user_settings()?;
                 let verbose = verbose || cli_settings.verbose_enabled();
                 let exit_code = commands::doctor::run_doctor(verbose, !dry_run).await;
                 std::process::exit(exit_code);

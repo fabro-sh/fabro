@@ -105,7 +105,7 @@
             "pages": [
               "reference/dot-language",
               "reference/cli",
-              "reference/cli-configuration",
+              "reference/user-configuration",
               "reference/run-directory",
               "reference/sdk",
               "reference/architecture",

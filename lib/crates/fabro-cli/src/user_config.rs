@@ -2,7 +2,7 @@
 use std::path::Path;
 
 #[allow(unused_imports)]
-pub(crate) use fabro_config::cli::*;
+pub(crate) use fabro_config::user::*;
 
 use fabro_config::ConfigLayer;
 use fabro_config::FabroSettings;
@@ -12,19 +12,19 @@ use crate::args::GlobalArgs;
 #[cfg(feature = "server")]
 use tracing::debug;
 
-pub(crate) fn load_cli_settings() -> anyhow::Result<FabroSettings> {
-    ConfigLayer::cli()?.resolve()
+pub(crate) fn load_user_settings() -> anyhow::Result<FabroSettings> {
+    ConfigLayer::user()?.resolve()
 }
 
-pub(crate) fn cli_layer_with_globals(globals: &GlobalArgs) -> anyhow::Result<ConfigLayer> {
-    let layer = ConfigLayer::cli()?;
+pub(crate) fn user_layer_with_globals(globals: &GlobalArgs) -> anyhow::Result<ConfigLayer> {
+    let layer = ConfigLayer::user()?;
     Ok(apply_global_overrides(layer, globals))
 }
 
-pub(crate) fn load_cli_settings_with_globals(
+pub(crate) fn load_user_settings_with_globals(
     globals: &GlobalArgs,
 ) -> anyhow::Result<FabroSettings> {
-    cli_layer_with_globals(globals)?.resolve()
+    user_layer_with_globals(globals)?.resolve()
 }
 
 pub(crate) fn apply_global_overrides(mut layer: ConfigLayer, globals: &GlobalArgs) -> ConfigLayer {

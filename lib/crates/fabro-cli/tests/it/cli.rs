@@ -6,9 +6,9 @@ use std::time::Duration;
 use assert_cmd::Command;
 use chrono::TimeZone;
 use fabro_config::FabroSettings;
-#[cfg(feature = "server")]
-use fabro_config::cli::ExecutionMode;
 use fabro_config::mcp::McpTransport;
+#[cfg(feature = "server")]
+use fabro_config::user::ExecutionMode;
 use fabro_git_storage::branchstore::BranchStore;
 use fabro_git_storage::gitobj::Store as GitStore;
 use fabro_store::{NodeVisitRef, RuntimeState, SlateStore, Store as _};
@@ -36,7 +36,7 @@ fn setup_config_show_fixture() -> (tempfile::TempDir, tempfile::TempDir) {
     let home_fabro = home.path().join(".fabro");
     std::fs::create_dir_all(&home_fabro).unwrap();
     std::fs::write(
-        home_fabro.join("cli.toml"),
+        home_fabro.join("user.toml"),
         r#"
 verbose = true
 
@@ -160,7 +160,7 @@ fn setup_external_workflow_fixture() -> (tempfile::TempDir, tempfile::TempDir, s
     let home_fabro = home.path().join(".fabro");
     std::fs::create_dir_all(&home_fabro).unwrap();
     std::fs::write(
-        home_fabro.join("cli.toml"),
+        home_fabro.join("user.toml"),
         format!(
             r#"
 storage_dir = "{}"
@@ -225,7 +225,7 @@ fn init_cli_home(storage_dir: &Path) -> tempfile::TempDir {
     std::fs::create_dir_all(&home_fabro).unwrap();
     let storage_dir = serde_json::to_string(&storage_dir.to_string_lossy().into_owned()).unwrap();
     std::fs::write(
-        home_fabro.join("cli.toml"),
+        home_fabro.join("user.toml"),
         format!("storage_dir = {storage_dir}\n"),
     )
     .unwrap();
@@ -2021,15 +2021,81 @@ fn config_show_missing_run_config_errors() {
 }
 
 #[test]
+fn config_show_legacy_cli_config_warns_and_ignores_it() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+
+    let home_fabro = home.path().join(".fabro");
+    std::fs::create_dir_all(&home_fabro).unwrap();
+    std::fs::write(
+        home_fabro.join("cli.toml"),
+        r#"
+verbose = true
+
+[llm]
+model = "legacy-model"
+"#,
+    )
+    .unwrap();
+
+    let assert = arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args(["config", "show"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("ignoring legacy config file"))
+        .stderr(predicate::str::contains("Rename it to"));
+
+    let cfg = parse_config_show(&assert.get_output().stdout);
+    assert_eq!(cfg.verbose, None);
+    assert_eq!(cfg.llm, None);
+}
+
+#[test]
+fn config_show_user_config_wins_over_legacy_cli_config() {
+    let (home, project) = setup_config_show_fixture();
+    std::fs::write(
+        home.path().join(".fabro").join("cli.toml"),
+        r#"
+[llm]
+model = "legacy-model"
+
+[vars]
+shared = "legacy"
+"#,
+    )
+    .unwrap();
+
+    let assert = arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args(["config", "show"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("ignoring legacy config file"));
+
+    let cfg = parse_config_show(&assert.get_output().stdout);
+    let llm = cfg.llm.as_ref().expect("llm config");
+    assert_eq!(llm.model.as_deref(), Some("project-model"));
+    assert_eq!(
+        cfg.vars
+            .as_ref()
+            .and_then(|vars| vars.get("shared").map(String::as_str)),
+        Some("project")
+    );
+}
+
+#[test]
 #[cfg(feature = "server")]
 fn config_show_server_url_overrides_cli_defaults() {
     let (home, project) = setup_config_show_fixture();
-    let cli_toml = home.path().join(".fabro").join("cli.toml");
+    let user_toml = home.path().join(".fabro").join("user.toml");
     std::fs::write(
-        &cli_toml,
+        &user_toml,
         format!(
             "{}\nmode = \"standalone\"\n[server]\nbase_url = \"https://config.example.com\"\n",
-            std::fs::read_to_string(&cli_toml).unwrap()
+            std::fs::read_to_string(&user_toml).unwrap()
         ),
     )
     .unwrap();

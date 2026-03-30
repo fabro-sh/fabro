@@ -3,17 +3,14 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-pub mod cli;
 pub mod hook;
 pub mod mcp;
 pub mod project;
 pub mod run;
 pub mod sandbox;
 pub mod server;
+pub mod user;
 
-pub use cli::{
-    ClientTlsSettings, ExecSettings, ExecutionMode, OutputFormat, PermissionLevel, ServerSettings,
-};
 pub use hook::{HookConfig, HookDefinition, HookEvent, HookType, TlsMode};
 pub use mcp::{
     McpServerConfig, McpServerEntry, McpTransport, default_startup_timeout_secs,
@@ -34,6 +31,9 @@ pub use server::{
     ApiAuthStrategy, ApiSettings, AuthProvider, AuthSettings, FeaturesSettings, GitAuthorSettings,
     GitProvider, GitSettings, LogSettings, TlsSettings, WebSettings, WebhookSettings,
     WebhookStrategy,
+};
+pub use user::{
+    ClientTlsSettings, ExecSettings, ExecutionMode, OutputFormat, PermissionLevel, ServerSettings,
 };
 
 fn is_default_checkpoint(c: &CheckpointSettings) -> bool {

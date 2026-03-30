@@ -9,12 +9,12 @@ use fabro_workflows::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt
 use tracing::info;
 
 use crate::args::{GlobalArgs, WaitArgs};
-use crate::cli_config::load_cli_settings_with_globals;
 use crate::shared::format_duration_ms;
 use crate::store;
+use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_cli_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run_info = resolve_run_combined(store.as_ref(), &base, &args.run).await?;

@@ -9,12 +9,12 @@ use tracing::{debug, info};
 use fabro_workflows::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_combined};
 
 use crate::args::{GlobalArgs, RunsPruneArgs};
-use crate::cli_config::load_cli_settings_with_globals;
 use crate::shared::format_size;
 use crate::store;
+use crate::user_config::load_user_settings_with_globals;
 
 pub(super) async fn prune_command(args: &RunsPruneArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_cli_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     prune_from(args, store.as_ref(), &base).await

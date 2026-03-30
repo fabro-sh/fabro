@@ -12,12 +12,12 @@ use fabro_workflows::pull_request::PullRequestRecord;
 use fabro_workflows::run_lookup::resolve_run_combined;
 
 use crate::args::{GlobalArgs, PrCommand, PrNamespace};
-use crate::cli_config::load_cli_settings_with_globals;
 use crate::shared::github::build_github_app_credentials;
 use crate::store;
+use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn dispatch(ns: PrNamespace, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_cli_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_globals(globals)?;
     let github_app = build_github_app_credentials(cli_settings.app_id());
 
     match ns.command {

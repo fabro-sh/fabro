@@ -11,7 +11,7 @@ use crate::shared::{print_diagnostics, relative_path};
 pub(crate) fn run(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
     let settings = ConfigLayer::for_workflow(&args.workflow, &cwd)?
-        .combine(ConfigLayer::cli()?)
+        .combine(ConfigLayer::user()?)
         .resolve()?;
     let resolution = resolve_workflow_path(&args.workflow, &cwd)?;
     let validated = validate(ValidateInput {

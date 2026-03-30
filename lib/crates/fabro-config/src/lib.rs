@@ -1,6 +1,5 @@
 extern crate self as fabro_config;
 
-pub mod cli;
 pub mod combine;
 pub mod config;
 pub mod dotenv;
@@ -11,6 +10,7 @@ pub mod run;
 pub mod sandbox;
 pub mod server;
 pub mod settings;
+pub mod user;
 
 pub use config::ConfigLayer;
 pub use fabro_types::Combine;

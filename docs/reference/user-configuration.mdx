@@ -1,25 +1,25 @@
 ---
-title: "CLI Configuration"
-description: "Configure default settings for the Fabro CLI with cli.toml"
+title: "User Configuration"
+description: "Configure default user settings for Fabro with user.toml"
 ---
 
-Fabro loads CLI defaults from `~/.fabro/cli.toml` so you don't have to pass common flags every time. The file is optional — if it doesn't exist, built-in defaults are used.
+Fabro loads user defaults from `~/.fabro/user.toml` so you don't have to pass common flags every time. The file is optional — if it doesn't exist, built-in defaults are used.
 
 ## File location
 
-The default path is `~/.fabro/cli.toml`. Fabro silently skips loading if the file is missing.
+The default path is `~/.fabro/user.toml`. Fabro silently skips loading if the file is missing.
 
 ## Precedence
 
 CLI flags always take the highest priority:
 
 1. **CLI flags** — always win
-2. **`cli.toml`** — used when no flag is provided
+2. **`user.toml`** — used when no flag is provided
 3. **Built-in defaults** — used when neither flag nor config is set
 
 ## Full example
 
-```toml title="cli.toml"
+```toml title="user.toml"
 verbose = true
 upgrade_check = true
 mode = "server"
@@ -184,7 +184,7 @@ Optional mTLS configuration for authenticating with the server. When present, th
 
 Paths support `~/` expansion. Example:
 
-```toml title="cli.toml"
+```toml title="user.toml"
 [server.tls]
 cert = "~/.fabro/tls/client.crt"
 key = "~/.fabro/tls/client.key"
@@ -195,7 +195,7 @@ ca = "~/.fabro/tls/ca.crt"
 
 Enable auto-PR globally so workflows open a GitHub pull request on successful completion — even when running with a `.fabro` file instead of a `run.toml`.
 
-```toml title="cli.toml"
+```toml title="user.toml"
 [pull_request]
 enabled = true
 ```
@@ -204,7 +204,7 @@ enabled = true
 |---|---|---|
 | `enabled` | Automatically create a PR after successful runs | `false` |
 
-Precedence: `run.toml` > `fabro.toml` (project config) > `cli.toml` > `server.toml` > built-in default (`false`).
+Precedence: `run.toml` > `fabro.toml` (project config) > `user.toml` > `server.toml` > built-in default (`false`).
 
 ## `[mcp_servers]` section
 
@@ -214,7 +214,7 @@ Configure [MCP servers](/agents/mcp) to connect to during `fabro exec` sessions.
 
 Spawn a local process and communicate over stdin/stdout:
 
-```toml title="cli.toml"
+```toml title="user.toml"
 [mcp_servers.filesystem]
 type = "stdio"
 command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
@@ -237,7 +237,7 @@ NODE_ENV = "production"
 
 Connect to a remote MCP server over Streamable HTTP:
 
-```toml title="cli.toml"
+```toml title="user.toml"
 [mcp_servers.sentry]
 type = "http"
 url = "https://mcp.sentry.dev/mcp"
@@ -256,7 +256,7 @@ Authorization = "Bearer sk-xxx"
 
 ### Sandbox transport
 
-Run an MCP server inside the workflow's sandbox and connect via preview URL. Only available with remote sandbox providers ([Daytona](/integrations/daytona)) that support port previews. Typically configured in [run config TOML](/execution/run-configuration#mcp_servers) rather than `cli.toml`.
+Run an MCP server inside the workflow's sandbox and connect via preview URL. Only available with remote sandbox providers ([Daytona](/integrations/daytona)) that support port previews. Typically configured in [run config TOML](/execution/run-configuration#mcp_servers) rather than `user.toml`.
 
 ```toml title="run.toml"
 [mcp_servers.playwright]

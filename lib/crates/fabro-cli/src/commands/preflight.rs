@@ -17,13 +17,13 @@ use fabro_workflows::git::{GitSyncStatus, sync_status};
 use fabro_workflows::operations::{ValidateInput, WorkflowInput, validate};
 
 use crate::args::{GlobalArgs, PreflightArgs};
-use crate::cli_config::{cli_layer_with_globals, load_cli_settings_with_globals};
 use crate::shared::github::build_github_app_credentials;
+use crate::user_config::{load_user_settings_with_globals, user_layer_with_globals};
 
 pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let cli = cli_layer_with_globals(globals)?;
-    let cli_settings: FabroSettings = load_cli_settings_with_globals(globals)?;
+    let cli = user_layer_with_globals(globals)?;
+    let cli_settings: FabroSettings = load_user_settings_with_globals(globals)?;
     args.verbose = args.verbose || cli_settings.verbose_enabled();
 
     let github_app = build_github_app_credentials(cli_settings.app_id());

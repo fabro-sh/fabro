@@ -38,7 +38,7 @@ pub(crate) struct GlobalArgs {
     pub storage_dir: Option<PathBuf>,
 
     #[cfg(feature = "server")]
-    /// Server URL (overrides server.base_url from cli.toml)
+    /// Server URL (overrides server.base_url from user.toml)
     #[arg(
         long,
         global = true,

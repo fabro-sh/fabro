@@ -13,15 +13,15 @@ use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrCreateArgs};
-use crate::cli_config::load_cli_settings_with_globals;
 use crate::store;
+use crate::user_config::load_user_settings_with_globals;
 
 pub(super) async fn create_command(
     args: PrCreateArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
 ) -> Result<()> {
-    let cli_settings = load_cli_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     create_from(&base, args, github_app).await
 }

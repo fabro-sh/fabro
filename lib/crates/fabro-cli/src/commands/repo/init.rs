@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use tokio::task::spawn_blocking;
 
-use crate::cli_config::load_cli_settings;
 use crate::shared::github::build_github_app_credentials;
+use crate::user_config::load_user_settings;
 
 pub(super) fn git_repo_root() -> Result<PathBuf> {
     let output = std::process::Command::new("git")
@@ -153,7 +153,7 @@ async fn check_github_app_installation() {
     };
 
     // Load CLI config to get app_id and slug
-    let Ok(cli_settings) = load_cli_settings() else {
+    let Ok(cli_settings) = load_user_settings() else {
         return;
     };
 

@@ -5,11 +5,11 @@ use fabro_workflows::assets::scan_assets;
 use fabro_workflows::run_lookup::{resolve_run, runs_base};
 
 use crate::args::{AssetListArgs, GlobalArgs};
-use crate::cli_config::load_cli_settings_with_globals;
 use crate::shared::format_size;
+use crate::user_config::load_user_settings_with_globals;
 
 pub(super) fn list_command(args: &AssetListArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_cli_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     let run = resolve_run(&base, &args.run_id)?;
     let runtime_state = RuntimeState::new(&run.path);

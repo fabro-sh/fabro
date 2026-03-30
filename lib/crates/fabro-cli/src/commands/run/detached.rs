@@ -12,9 +12,9 @@ use fabro_workflows::operations::{
 };
 use fabro_workflows::records::{RunRecord, RunRecordExt};
 
-use crate::cli_config;
 use crate::shared;
 use crate::store;
+use crate::user_config;
 
 pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bool) -> Result<()> {
     let _ = fabro_proctitle::init();
@@ -24,7 +24,7 @@ pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bo
     });
 
     let run_record = RunRecord::load(&run_dir)?;
-    let cli_settings = cli_config::load_cli_settings()?;
+    let cli_settings = user_config::load_user_settings()?;
     let on_node: fabro_workflows::OnNodeCallback = Some({
         let short_id = super::short_run_id(&run_record.run_id).to_string();
         fabro_proctitle::set(&format!("fabro: {short_id}"));

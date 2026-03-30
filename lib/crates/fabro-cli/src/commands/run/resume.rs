@@ -5,8 +5,8 @@ use fabro_workflows::records::{RunRecord, RunRecordExt};
 use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 
 use crate::args::{GlobalArgs, ResumeArgs};
-use crate::cli_config::load_cli_settings_with_globals;
 use crate::store;
+use crate::user_config::load_user_settings_with_globals;
 
 /// Resume an interrupted workflow run.
 ///
@@ -18,7 +18,7 @@ pub(crate) async fn resume_command(
     styles: &'static Styles,
     globals: &GlobalArgs,
 ) -> anyhow::Result<()> {
-    let cli_settings = load_cli_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;

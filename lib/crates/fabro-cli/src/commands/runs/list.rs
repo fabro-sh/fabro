@@ -12,9 +12,9 @@ use fabro_workflows::run_lookup::{StatusFilter, filter_runs, runs_base, scan_run
 use fabro_workflows::run_status::RunStatus;
 
 use crate::args::{GlobalArgs, RunsListArgs};
-use crate::cli_config::load_cli_settings_with_globals;
 use crate::shared::{color_if, format_duration_ms, tilde_path};
 use crate::store;
+use crate::user_config::load_user_settings_with_globals;
 
 use super::short_run_id;
 
@@ -23,7 +23,7 @@ pub(crate) async fn list_command(
     styles: &Styles,
     globals: &GlobalArgs,
 ) -> Result<()> {
-    let cli_settings = load_cli_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let runs = scan_runs_combined(store.as_ref(), &base).await?;

@@ -6,14 +6,14 @@ use fabro_workflows::run_lookup::runs_base;
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrCloseArgs};
-use crate::cli_config::load_cli_settings_with_globals;
+use crate::user_config::load_user_settings_with_globals;
 
 pub(super) async fn close_command(
     args: PrCloseArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
 ) -> Result<()> {
-    let cli_settings = load_cli_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     close_from(&base, args, github_app).await
 }

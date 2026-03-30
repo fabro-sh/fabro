@@ -11,13 +11,13 @@ use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflows::run_status::{RunStatus, RunStatusRecord, write_run_status};
 
 use crate::args::{GlobalArgs, RunsRemoveArgs};
-use crate::cli_config::load_cli_settings_with_globals;
 use crate::store;
+use crate::user_config::load_user_settings_with_globals;
 
 use super::short_run_id;
 
 pub(crate) async fn remove_command(args: &RunsRemoveArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_cli_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     remove_from(args, store.as_ref(), &base).await

@@ -6,10 +6,10 @@ use fabro_config::mcp::McpServerEntry;
 use fabro_mcp::config::McpServerConfig;
 
 use crate::args::GlobalArgs;
-use crate::cli_config;
+use crate::user_config;
 
 pub(crate) async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = cli_config::load_cli_settings_with_globals(globals)?;
+    let cli_settings = user_config::load_user_settings_with_globals(globals)?;
     #[cfg(feature = "sleep_inhibitor")]
     let _sleep_guard = crate::sleep_inhibitor::guard(cli_settings.prevent_idle_sleep_enabled());
     let exec_defaults = cli_settings.exec.as_ref();
@@ -20,7 +20,7 @@ pub(crate) async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result
         exec_defaults.and_then(|a| a.output_format),
     );
     #[cfg(feature = "server")]
-    let resolved = cli_config::resolve_mode(
+    let resolved = user_config::resolve_mode(
         globals.storage_dir.as_deref(),
         globals.server_url.as_deref(),
         &cli_settings,
@@ -33,9 +33,9 @@ pub(crate) async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result
     #[cfg(feature = "server")]
     {
         match resolved.mode {
-            cli_config::ExecutionMode::Server => {
+            user_config::ExecutionMode::Server => {
                 tracing::info!(mode = "server", "Agent session starting");
-                let http_client = cli_config::build_server_client(resolved.tls.as_ref())?;
+                let http_client = user_config::build_server_client(resolved.tls.as_ref())?;
                 let provider_name = args
                     .provider
                     .clone()
@@ -53,7 +53,7 @@ pub(crate) async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result
                     .map_err(|e| anyhow::anyhow!("Failed to register fabro server adapter: {e}"))?;
                 run_with_args_and_client(args, Some(client), mcp_servers).await?
             }
-            cli_config::ExecutionMode::Standalone => {
+            user_config::ExecutionMode::Standalone => {
                 tracing::info!(mode = "standalone", "Agent session starting");
                 run_with_args(args, mcp_servers).await?
             }

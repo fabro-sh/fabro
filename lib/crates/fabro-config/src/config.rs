@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{self, ExecConfig, ExecutionMode, ServerConfig};
 use crate::combine::Combine;
 use crate::hook::{HookConfig, HookDefinition};
 use crate::mcp::McpServerEntry;
@@ -14,6 +13,7 @@ use crate::run::{
 use crate::sandbox::SandboxConfig;
 use crate::server::{self, ApiConfig, Features, GitConfig, LogConfig, WebConfig};
 use crate::settings::FabroSettings;
+use crate::user::{self, ExecConfig, ExecutionMode, ServerConfig};
 
 fn is_default_checkpoint(c: &CheckpointConfig) -> bool {
     c.exclude_globs.is_empty()
@@ -21,7 +21,7 @@ fn is_default_checkpoint(c: &CheckpointConfig) -> bool {
 
 /// Unified sparse configuration type for all Fabro config sources.
 ///
-/// Loading functions (`load_cli_config`, `load_server_config`, `load_run_config`,
+/// Loading functions (`load_user_config`, `load_server_config`, `load_run_config`,
 /// `parse_project_config`) all return this type. Fields irrelevant to a
 /// particular source are left unset (`None` / empty).
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -76,7 +76,7 @@ pub struct ConfigLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github: Option<GitHubConfig>,
 
-    // --- CLI config fields ---
+    // --- User config fields ---
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<ExecutionMode>,
 
@@ -222,9 +222,9 @@ impl ConfigLayer {
             .unwrap_or_default())
     }
 
-    /// Load CLI defaults from `~/.fabro/cli.toml`.
-    pub fn cli() -> anyhow::Result<Self> {
-        cli::load_cli_config(None)
+    /// Load user defaults from `~/.fabro/user.toml`.
+    pub fn user() -> anyhow::Result<Self> {
+        user::load_user_config(None)
     }
 
     /// Load server defaults from `~/.fabro/server.toml`.

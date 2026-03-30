@@ -21,7 +21,7 @@ use regex::Regex;
 #[cfg(feature = "server")]
 use semver::Version;
 
-use crate::cli_config::load_cli_settings;
+use crate::user_config::load_user_settings;
 
 // ---------------------------------------------------------------------------
 // System dependency types and parsers (server mode only)
@@ -194,23 +194,46 @@ fn apply_live_result(
     }
 }
 
-pub(crate) fn check_config(path: Option<PathBuf>) -> CheckResult {
-    match path {
-        Some(p) => CheckResult {
+pub(crate) fn check_config(
+    user_path: Option<PathBuf>,
+    legacy_path: Option<PathBuf>,
+) -> CheckResult {
+    match (user_path, legacy_path) {
+        (Some(p), None) => CheckResult {
             name: "Configuration".to_string(),
             status: CheckStatus::Pass,
             summary: p.display().to_string(),
             details: vec![CheckDetail::new(format!("Loaded from {}", p.display()))],
             remediation: None,
         },
-        None => CheckResult {
+        (Some(p), Some(legacy)) => CheckResult {
             name: "Configuration".to_string(),
             status: CheckStatus::Warning,
-            summary: "no config file found".to_string(),
+            summary: p.display().to_string(),
+            details: vec![
+                CheckDetail::new(format!("Loaded from {}", p.display())),
+                CheckDetail::new(format!("Ignoring legacy config file {}", legacy.display())),
+            ],
+            remediation: Some(format!("Delete or rename {}", legacy.display())),
+        },
+        (None, Some(legacy)) => CheckResult {
+            name: "Configuration".to_string(),
+            status: CheckStatus::Warning,
+            summary: "legacy config file ignored".to_string(),
+            details: vec![
+                CheckDetail::new(format!("Found legacy config file {}", legacy.display())),
+                CheckDetail::new("Rename it to ~/.fabro/user.toml".to_string()),
+            ],
+            remediation: Some(format!("Rename {} to ~/.fabro/user.toml", legacy.display())),
+        },
+        (None, None) => CheckResult {
+            name: "Configuration".to_string(),
+            status: CheckStatus::Warning,
+            summary: "no user config file found".to_string(),
             details: vec![CheckDetail::new(
-                "Create ~/.fabro/cli.toml to configure Arc".to_string(),
+                "Create ~/.fabro/user.toml to configure Fabro".to_string(),
             )],
-            remediation: Some("Create ~/.fabro/cli.toml".to_string()),
+            remediation: Some("Create ~/.fabro/user.toml".to_string()),
         },
     }
 }
@@ -938,10 +961,12 @@ pub(crate) async fn run_doctor(verbose: bool, live: bool) -> i32 {
     spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
     // Gather state
-    let cli_settings = load_cli_settings().unwrap_or_default();
+    let cli_settings = load_user_settings().unwrap_or_default();
 
-    let config_path = dirs::home_dir().map(|h| h.join(".fabro").join("cli.toml"));
-    let config_exists = config_path.as_ref().is_some_and(|p| p.exists());
+    let user_config_path = fabro_config::user::default_user_config_path();
+    let user_config_exists = user_config_path.as_ref().is_some_and(|p| p.exists());
+    let legacy_config_path = fabro_config::user::legacy_user_config_path();
+    let legacy_config_exists = legacy_config_path.as_ref().is_some_and(|p| p.exists());
 
     let llm_statuses: Vec<(Provider, bool)> = Provider::ALL
         .iter()
@@ -1142,7 +1167,18 @@ pub(crate) async fn run_doctor(verbose: bool, live: bool) -> i32 {
         CheckSection {
             title: "Required".into(),
             checks: vec![
-                check_config(if config_exists { config_path } else { None }),
+                check_config(
+                    if user_config_exists {
+                        user_config_path
+                    } else {
+                        None
+                    },
+                    if legacy_config_exists {
+                        legacy_config_path
+                    } else {
+                        None
+                    },
+                ),
                 check_llm_providers(&llm_statuses, llm_live_results.as_deref()),
                 check_github_app(&github_status),
             ],
@@ -1195,16 +1231,29 @@ mod tests {
 
     #[test]
     fn check_config_pass_with_path() {
-        let result = check_config(Some(PathBuf::from("/home/user/.fabro/cli.toml")));
+        let result = check_config(Some(PathBuf::from("/home/user/.fabro/user.toml")), None);
         assert_eq!(result.status, CheckStatus::Pass);
-        assert!(result.summary.contains(".fabro/cli.toml"));
+        assert!(result.summary.contains(".fabro/user.toml"));
     }
 
     #[test]
     fn check_config_warning_without_path() {
-        let result = check_config(None);
+        let result = check_config(None, None);
         assert_eq!(result.status, CheckStatus::Warning);
         assert!(result.remediation.is_some());
+    }
+
+    #[test]
+    fn check_config_warning_for_legacy_only_path() {
+        let result = check_config(None, Some(PathBuf::from("/home/user/.fabro/cli.toml")));
+        assert_eq!(result.status, CheckStatus::Warning);
+        assert!(result.summary.contains("legacy"));
+        assert!(
+            result
+                .remediation
+                .as_deref()
+                .is_some_and(|remediation| remediation.contains(".fabro/user.toml"))
+        );
     }
 
     // -- check_llm_providers --

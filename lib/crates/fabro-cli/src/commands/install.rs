@@ -439,28 +439,31 @@ async fn setup_github_app(
         .context("missing 'pem' in GitHub response")?
         .to_string();
 
-    // Write non-secret config to cli.toml
-    let cli_toml_path = arc_dir.join("cli.toml");
-    let existing = std::fs::read_to_string(&cli_toml_path).unwrap_or_default();
+    // Write non-secret config to user.toml
+    let user_toml_path = arc_dir.join(fabro_config::user::USER_CONFIG_FILENAME);
+    let existing = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
     let mut doc: toml::Value = if existing.is_empty() {
         toml::Value::Table(toml::Table::default())
     } else {
-        toml::from_str(&existing).context("failed to parse existing cli.toml")?
+        toml::from_str(&existing).context("failed to parse existing user.toml")?
     };
-    let table = doc.as_table_mut().context("cli.toml root is not a table")?;
+    let table = doc
+        .as_table_mut()
+        .context("user.toml root is not a table")?;
     let git = table
         .entry("git")
         .or_insert(toml::Value::Table(toml::Table::default()));
     let git_table = git
         .as_table_mut()
-        .context("cli.toml [git] is not a table")?;
+        .context("user.toml [git] is not a table")?;
     git_table.insert("app_id".into(), toml::Value::String(app_id));
     git_table.insert("slug".into(), toml::Value::String(slug.clone()));
     git_table.insert("client_id".into(), toml::Value::String(client_id));
-    std::fs::write(&cli_toml_path, toml::to_string_pretty(&doc)?)?;
+    std::fs::write(&user_toml_path, toml::to_string_pretty(&doc)?)?;
     eprintln!(
         "  {}",
-        s.dim.apply_to(format!("Wrote {}", cli_toml_path.display()))
+        s.dim
+            .apply_to(format!("Wrote {}", user_toml_path.display()))
     );
     eprintln!(
         "  {}",
@@ -649,8 +652,8 @@ pub(crate) async fn run_install(web_url: &str) -> Result<()> {
         if setup_github {
             let github_env_pairs = setup_github_app(&arc_dir, &s, web_url).await?;
             let slug = {
-                let cli_toml_path = arc_dir.join("cli.toml");
-                let toml_content = std::fs::read_to_string(&cli_toml_path).unwrap_or_default();
+                let user_toml_path = arc_dir.join(fabro_config::user::USER_CONFIG_FILENAME);
+                let toml_content = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
                 let doc: toml::Value = toml::from_str(&toml_content)
                     .unwrap_or(toml::Value::Table(toml::Table::default()));
                 doc.get("git")

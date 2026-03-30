@@ -10,12 +10,12 @@ use fabro_workflows::run_lookup::{logs_base, runs_base, scan_runs_combined};
 use fabro_workflows::run_status::RunStatus;
 
 use crate::args::{DfArgs, GlobalArgs};
-use crate::cli_config::load_cli_settings_with_globals;
 use crate::shared::format_size;
 use crate::store;
+use crate::user_config::load_user_settings_with_globals;
 
 pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_cli_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_globals(globals)?;
     let data_dir = cli_settings.storage_dir();
     let runs_base_dir = runs_base(&data_dir);
     let logs_base_dir = logs_base(&data_dir);

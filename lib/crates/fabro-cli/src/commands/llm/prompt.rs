@@ -18,21 +18,21 @@ pub(super) async fn execute(
 
     #[cfg(feature = "server")]
     {
-        let resolved = crate::cli_config::resolve_mode(
+        let resolved = crate::user_config::resolve_mode(
             globals.storage_dir.as_deref(),
             globals.server_url.as_deref(),
             cli_settings,
         );
         match resolved.mode {
-            crate::cli_config::ExecutionMode::Server => {
-                let client = crate::cli_config::build_server_client(resolved.tls.as_ref())?;
+            crate::user_config::ExecutionMode::Server => {
+                let client = crate::user_config::build_server_client(resolved.tls.as_ref())?;
                 let server = ServerConnection {
                     client,
                     base_url: resolved.server_base_url,
                 };
                 run_prompt_via_server(args, &server).await?;
             }
-            crate::cli_config::ExecutionMode::Standalone => {
+            crate::user_config::ExecutionMode::Standalone => {
                 run_prompt(args).await?;
             }
         }

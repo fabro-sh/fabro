@@ -12,7 +12,7 @@ These flags apply to all subcommands:
 | `--debug` | Enable DEBUG-level logging (default is INFO) |
 | `--no-upgrade-check` | Skip the automatic background upgrade check |
 | `--storage-dir <DIR>` | Storage directory for local run data (default: `~/.fabro`). Implies standalone mode. |
-| `--server-url <URL>` | Fabro API server URL (overrides `server.base_url` from `cli.toml`). Implies server mode. |
+| `--server-url <URL>` | Fabro API server URL (overrides `server.base_url` from `user.toml`). Implies server mode. |
 | `-h, --help` | Print help |
 | `-V, --version` | Print version |
 
@@ -20,9 +20,9 @@ Fabro loads environment variables from `~/.fabro/.env`.
 
 ## Configuration
 
-CLI defaults can be set in `~/.fabro/cli.toml` so you don't have to pass common flags every time:
+CLI defaults can be set in `~/.fabro/user.toml` so you don't have to pass common flags every time:
 
-```toml title="cli.toml"
+```toml title="user.toml"
 [exec]
 provider = "anthropic"
 model = "claude-opus-4-6"
@@ -33,7 +33,7 @@ output_format = "text"
 model = "claude-sonnet-4-5"
 ```
 
-CLI flags always override `cli.toml` values, which override hardcoded defaults.
+CLI flags always override `user.toml` values, which override hardcoded defaults.
 
 ---
 
@@ -47,7 +47,7 @@ fabro config show demo
 fabro config show run.toml
 ```
 
-With no argument, Fabro prints the merged ambient defaults from `~/.fabro/cli.toml` and the nearest `fabro.toml`.
+With no argument, Fabro prints the merged ambient defaults from `~/.fabro/user.toml` and the nearest `fabro.toml`.
 
 When you pass a workflow name or path:
 
@@ -750,7 +750,7 @@ fabro upgrade --version 0.6.0
 | `--force` | Upgrade even if already on the target version |
 | `--dry-run` | Preview what would happen without making changes |
 
-Fabro refuses to downgrade unless you specify an explicit `--version`. A daily background check notifies you when a new version is available — disable it with `upgrade_check = false` in [`cli.toml`](/reference/cli-configuration#upgrade_check) or the `--no-upgrade-check` global flag.
+Fabro refuses to downgrade unless you specify an explicit `--version`. A daily background check notifies you when a new version is available — disable it with `upgrade_check = false` in [`user.toml`](/reference/user-configuration#upgrade_check) or the `--no-upgrade-check` global flag.
 
 ## `fabro asset list`
 

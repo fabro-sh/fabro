@@ -20,7 +20,7 @@ static RANKDIR_RE: LazyLock<regex::Regex> =
 pub(crate) fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
     let settings = ConfigLayer::for_workflow(&args.workflow, &cwd)?
-        .combine(ConfigLayer::cli()?)
+        .combine(ConfigLayer::user()?)
         .resolve()?;
     let resolution = resolve_workflow_path(&args.workflow, &cwd)?;
     let validated = validate(ValidateInput {

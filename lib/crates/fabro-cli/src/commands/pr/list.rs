@@ -8,15 +8,15 @@ use futures::future::join_all;
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrListArgs};
-use crate::cli_config::load_cli_settings_with_globals;
 use crate::store;
+use crate::user_config::load_user_settings_with_globals;
 
 pub(super) async fn list_command(
     args: PrListArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
 ) -> Result<()> {
-    let cli_settings = load_cli_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     list_from(store.as_ref(), &base, args, github_app).await

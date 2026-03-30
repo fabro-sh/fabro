@@ -11,12 +11,12 @@ use fabro_workflows::sandbox_git::GIT_REMOTE;
 use tracing::{debug, info};
 
 use crate::args::{DiffArgs, GlobalArgs};
-use crate::cli_config::load_cli_settings_with_globals;
 use crate::store;
+use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
     info!(run_id = %args.run, "Showing diff");
-    let cli_settings = load_cli_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
