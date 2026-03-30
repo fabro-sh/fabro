@@ -1,7 +1,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use cli_table::format::{Border, Separator};
-use cli_table::{Cell, CellStruct, Color, Style, Table, print_stderr};
+use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_config::FabroSettingsExt;
 use fabro_git_storage::gitobj::Store;
 use fabro_util::terminal::Styles;
@@ -61,9 +61,9 @@ pub(crate) fn print_timeline(timeline: &RunTimeline, styles: &Styles) {
 
     let use_color = styles.use_color;
     let title = vec![
-        "@".cell().bold(true),
-        "Node".cell().bold(true),
-        "Details".cell().bold(true),
+        "@".cell().bold(use_color),
+        "Node".cell().bold(use_color),
+        "Details".cell().bold(use_color),
     ];
 
     let rows: Vec<Vec<CellStruct>> = timeline
@@ -100,10 +100,19 @@ pub(crate) fn print_timeline(timeline: &RunTimeline, styles: &Styles) {
         })
         .collect();
 
+    let color_choice = if use_color {
+        cli_table::ColorChoice::Auto
+    } else {
+        cli_table::ColorChoice::Never
+    };
     let table = rows
         .table()
         .title(title)
+        .color_choice(color_choice)
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    let _ = print_stderr(table);
+    #[allow(clippy::print_stderr)]
+    if let Ok(display) = table.display() {
+        eprintln!("{display}");
+    }
 }

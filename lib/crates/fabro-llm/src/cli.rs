@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use cli_table::format::{Border, Justify, Separator};
-use cli_table::{Cell, CellStruct, Color, Style, Table, print_stdout};
+use cli_table::{Cell, CellStruct, Color, Style, Table};
 use futures::{StreamExt, stream};
 use serde::Deserialize;
 use tokio::task;
@@ -122,6 +122,14 @@ fn color_if(use_color: bool, color: Color) -> Option<Color> {
     if use_color { Some(color) } else { None }
 }
 
+fn color_choice(use_color: bool) -> cli_table::ColorChoice {
+    if use_color {
+        cli_table::ColorChoice::Auto
+    } else {
+        cli_table::ColorChoice::Never
+    }
+}
+
 fn model_row(model: &Model, use_color: bool) -> Vec<CellStruct> {
     let aliases = model.aliases.join(", ");
     let cost = format!(
@@ -149,14 +157,14 @@ fn model_row(model: &Model, use_color: bool) -> Vec<CellStruct> {
     ]
 }
 
-fn models_title() -> Vec<CellStruct> {
+fn models_title(use_color: bool) -> Vec<CellStruct> {
     vec![
-        "MODEL".cell().bold(true),
-        "PROVIDER".cell().bold(true),
-        "ALIASES".cell().bold(true),
-        "CONTEXT".cell().bold(true).justify(Justify::Right),
-        "COST".cell().bold(true).justify(Justify::Right),
-        "SPEED".cell().bold(true).justify(Justify::Right),
+        "MODEL".cell().bold(use_color),
+        "PROVIDER".cell().bold(use_color),
+        "ALIASES".cell().bold(use_color),
+        "CONTEXT".cell().bold(use_color).justify(Justify::Right),
+        "COST".cell().bold(use_color).justify(Justify::Right),
+        "SPEED".cell().bold(use_color).justify(Justify::Right),
     ]
 }
 
@@ -166,10 +174,14 @@ fn print_models_table(models: &[Model], s: &Styles) {
     let rows: Vec<Vec<CellStruct>> = models.iter().map(|m| model_row(m, use_color)).collect();
     let table = rows
         .table()
-        .title(models_title())
+        .title(models_title(use_color))
+        .color_choice(color_choice(use_color))
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    let _ = print_stdout(table);
+    #[allow(clippy::print_stdout)]
+    {
+        println!("{}", table.display().unwrap());
+    }
 }
 
 fn read_stdin_prompt() -> Option<String> {
@@ -948,8 +960,8 @@ async fn test_models_via_server(
     }
 
     let use_color = s.use_color;
-    let mut title = models_title();
-    title.push("RESULT".cell().bold(true));
+    let mut title = models_title(use_color);
+    title.push("RESULT".cell().bold(use_color));
 
     let mut rows: Vec<Vec<CellStruct>> = Vec::new();
     let mut failures = 0u32;
@@ -985,9 +997,11 @@ async fn test_models_via_server(
     let table = rows
         .table()
         .title(title)
+        .color_choice(color_choice(use_color))
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    print_stdout(table)?;
+    #[allow(clippy::print_stdout)]
+    println!("{}", table.display()?);
 
     if failures > 0 {
         bail!("{failures} model(s) failed");
@@ -1134,8 +1148,8 @@ async fn test_models(
     sorted_results.sort_by_key(|(idx, _, _)| *idx);
 
     let use_color = s.use_color;
-    let mut title = models_title();
-    title.push("RESULT".cell().bold(true));
+    let mut title = models_title(use_color);
+    title.push("RESULT".cell().bold(use_color));
 
     let mut rows: Vec<Vec<CellStruct>> = Vec::new();
     let mut failures = 0u32;
@@ -1155,9 +1169,11 @@ async fn test_models(
     let table = rows
         .table()
         .title(title)
+        .color_choice(color_choice(use_color))
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    print_stdout(table)?;
+    #[allow(clippy::print_stdout)]
+    println!("{}", table.display()?);
 
     if failures > 0 {
         bail!("{failures} model(s) failed");

@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use cli_table::format::{Border, Justify, Separator};
-use cli_table::{Cell, CellStruct, Style, Table, print_stdout};
+use cli_table::{Cell, CellStruct, Style, Table};
 use fabro_config::FabroSettingsExt;
 
 use fabro_workflows::run_lookup::{logs_base, runs_base, scan_runs_combined};
@@ -121,12 +121,19 @@ async fn df_from(
     };
     let log_reclaim_pct = if total_log_size > 0 { 100 } else { 0 };
 
+    let use_color = console::colors_enabled();
+    let color_choice = if use_color {
+        cli_table::ColorChoice::Auto
+    } else {
+        cli_table::ColorChoice::Never
+    };
+
     let summary_title = vec![
-        "TYPE".cell().bold(true),
-        "COUNT".cell().bold(true).justify(Justify::Right),
-        "ACTIVE".cell().bold(true).justify(Justify::Right),
-        "SIZE".cell().bold(true).justify(Justify::Right),
-        "RECLAIMABLE".cell().bold(true).justify(Justify::Right),
+        "TYPE".cell().bold(use_color),
+        "COUNT".cell().bold(use_color).justify(Justify::Right),
+        "ACTIVE".cell().bold(use_color).justify(Justify::Right),
+        "SIZE".cell().bold(use_color).justify(Justify::Right),
+        "RECLAIMABLE".cell().bold(use_color).justify(Justify::Right),
     ];
     let summary_rows: Vec<Vec<CellStruct>> = vec![
         vec![
@@ -160,9 +167,11 @@ async fn df_from(
     let summary_table = summary_rows
         .table()
         .title(summary_title)
+        .color_choice(color_choice)
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    print_stdout(summary_table)?;
+    #[allow(clippy::print_stdout)]
+    println!("{}", summary_table.display()?);
 
     println!();
     println!("Data directory: {}", data_dir.display());
@@ -173,11 +182,11 @@ async fn df_from(
 
     println!();
     let verbose_title = vec![
-        "RUN ID".cell().bold(true),
-        "WORKFLOW".cell().bold(true),
-        "STATUS".cell().bold(true),
-        "AGE".cell().bold(true).justify(Justify::Right),
-        "SIZE".cell().bold(true).justify(Justify::Right),
+        "RUN ID".cell().bold(use_color),
+        "WORKFLOW".cell().bold(use_color),
+        "STATUS".cell().bold(use_color),
+        "AGE".cell().bold(use_color).justify(Justify::Right),
+        "SIZE".cell().bold(use_color).justify(Justify::Right),
     ];
 
     let now = Utc::now();
@@ -213,9 +222,11 @@ async fn df_from(
     let verbose_table = verbose_rows
         .table()
         .title(verbose_title)
+        .color_choice(color_choice)
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    print_stdout(verbose_table)?;
+    #[allow(clippy::print_stdout)]
+    println!("{}", verbose_table.display()?);
     println!();
     println!("* = reclaimable");
 

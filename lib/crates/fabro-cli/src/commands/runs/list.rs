@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 use chrono::Utc;
 use cli_table::format::{Border, Separator};
-use cli_table::{Cell, CellStruct, Color, Style, Table, print_stdout};
+use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 
@@ -68,12 +68,12 @@ pub(crate) async fn list_command(
     let use_color = styles.use_color;
     let now = Utc::now();
     let title = vec![
-        "RUN ID".cell().bold(true),
-        "WORKFLOW".cell().bold(true),
-        "STATUS".cell().bold(true),
-        "DIRECTORY".cell().bold(true),
-        "DURATION".cell().bold(true),
-        "GOAL".cell().bold(true),
+        "RUN ID".cell().bold(use_color),
+        "WORKFLOW".cell().bold(use_color),
+        "STATUS".cell().bold(use_color),
+        "DIRECTORY".cell().bold(use_color),
+        "DURATION".cell().bold(use_color),
+        "GOAL".cell().bold(use_color),
     ];
 
     let rows: Vec<Vec<CellStruct>> = display_runs
@@ -112,12 +112,19 @@ pub(crate) async fn list_command(
         })
         .collect();
 
+    let color_choice = if use_color {
+        cli_table::ColorChoice::Auto
+    } else {
+        cli_table::ColorChoice::Never
+    };
     let table = rows
         .table()
         .title(title)
+        .color_choice(color_choice)
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    print_stdout(table)?;
+    #[allow(clippy::print_stdout)]
+    println!("{}", table.display()?);
 
     eprintln!("\n{} run(s) listed.", display_runs.len());
     Ok(())
