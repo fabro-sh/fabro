@@ -1,5 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 
+use crate::support::{fabro_json_snapshot, read_json};
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -25,4 +27,238 @@ fn help() {
       -h, --help                           Print help
     ----- stderr -----
     ");
+}
+
+fn launcher_path(context: &fabro_test::TestContext, run_id: &str) -> std::path::PathBuf {
+    context.storage_dir.join("launchers").join(format!("{run_id}.json"))
+}
+
+#[test]
+fn detached_uses_cached_graph_after_source_deleted() {
+    let context = test_context!();
+    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAF";
+    let workflow_path = context.temp_dir.join("workflow.fabro");
+
+    context.write_temp(
+        "workflow.fabro",
+        "\
+digraph CachedGraph {
+  start [shape=Mdiamond, label=\"Start\"]
+  exit  [shape=Msquare, label=\"Exit\"]
+  start -> exit
+}
+",
+    );
+
+    context
+        .command()
+        .args([
+            "create",
+            "--dry-run",
+            "--auto-approve",
+            "--run-id",
+            run_id,
+            workflow_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let run_dir = context.find_run_dir(run_id);
+    std::fs::remove_file(&workflow_path).unwrap();
+
+    context
+        .command()
+        .args([
+            "__detached",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "--launcher-path",
+            launcher_path(&context, run_id).to_str().unwrap(),
+        ])
+        .timeout(std::time::Duration::from_secs(15))
+        .assert()
+        .success();
+
+    let conclusion = read_json(run_dir.join("conclusion.json"));
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "status": conclusion["status"],
+        }),
+        @r#"
+        {
+          "status": "success"
+        }
+        "#
+    );
+}
+
+#[test]
+fn detached_uses_snapshotted_app_id_for_github_credentials() {
+    let context = test_context!();
+    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAG";
+    let workflow_path = context.temp_dir.join("workflow.fabro");
+
+    context.write_home(
+        ".fabro/user.toml",
+        "\
+version = 1
+
+[git]
+app_id = \"snapshotted-app-id\"
+",
+    );
+    context.write_temp(
+        "workflow.fabro",
+        "\
+digraph GitHubApp {
+  start [shape=Mdiamond, label=\"Start\"]
+  exit  [shape=Msquare, label=\"Exit\"]
+  start -> exit
+}
+",
+    );
+
+    context
+        .command()
+        .args([
+            "create",
+            "--dry-run",
+            "--auto-approve",
+            "--run-id",
+            run_id,
+            workflow_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let run_dir = context.find_run_dir(run_id);
+    let run_record = read_json(run_dir.join("run.json"));
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "app_id": run_record["settings"]["git"]["app_id"],
+        }),
+        @r#"
+        {
+          "app_id": "snapshotted-app-id"
+        }
+        "#
+    );
+
+    context.write_home(".fabro/user.toml", "version = 1\n");
+
+    let mut cmd = context.command();
+    cmd.env("GITHUB_APP_PRIVATE_KEY", "%%%not-base64%%%");
+    cmd.args([
+        "__detached",
+        "--run-dir",
+        run_dir.to_str().unwrap(),
+        "--launcher-path",
+        launcher_path(&context, run_id).to_str().unwrap(),
+    ]);
+    cmd.timeout(std::time::Duration::from_secs(10));
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: GITHUB_APP_PRIVATE_KEY is not valid PEM or base64: Invalid symbol 37, offset 0.
+    ");
+}
+
+#[test]
+fn detached_resume_rejects_completed_run_without_mutating_it() {
+    let context = test_context!();
+    context.write_temp(
+        "workflow.fabro",
+        "\
+digraph Test {
+  start [shape=Mdiamond, label=\"Start\"]
+  exit  [shape=Msquare, label=\"Exit\"]
+  start -> exit
+}
+",
+    );
+
+    let run = context
+        .command()
+        .current_dir(&context.temp_dir)
+        .args([
+            "run",
+            "--dry-run",
+            "--auto-approve",
+            "--no-retro",
+            "--detach",
+            context.temp_dir.join("workflow.fabro").to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    let run_id = String::from_utf8(run.get_output().stdout.clone())
+        .unwrap()
+        .trim()
+        .to_string();
+
+    context
+        .command()
+        .args(["wait", &run_id])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+
+    let inspect_before = context
+        .command()
+        .args(["inspect", &run_id])
+        .assert()
+        .success();
+    let before: serde_json::Value =
+        serde_json::from_slice(&inspect_before.get_output().stdout).unwrap();
+    let before_summary = serde_json::json!({
+        "run_dir": before[0]["run_dir"],
+        "start_time": before[0]["start_record"]["start_time"],
+        "conclusion_timestamp": before[0]["conclusion"]["timestamp"],
+        "conclusion_status": before[0]["conclusion"]["status"],
+    });
+    let run_dir = before_summary["run_dir"].as_str().unwrap().to_string();
+    fabro_json_snapshot!(context, &before_summary, @r#"
+    {
+      "run_dir": "[DRY_RUN_DIR]",
+      "start_time": "[TIMESTAMP]",
+      "conclusion_timestamp": "[TIMESTAMP]",
+      "conclusion_status": "success"
+    }
+    "#);
+
+    let mut cmd = context.command();
+    cmd.args([
+        "__detached",
+        "--run-dir",
+        &run_dir,
+        "--launcher-path",
+        launcher_path(&context, &run_id).to_str().unwrap(),
+        "--resume",
+    ]);
+    cmd.timeout(std::time::Duration::from_secs(10));
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: Precondition failed: run already finished successfully — nothing to resume
+    ");
+
+    let inspect_after = context
+        .command()
+        .args(["inspect", &run_id])
+        .assert()
+        .success();
+    let after: serde_json::Value = serde_json::from_slice(&inspect_after.get_output().stdout).unwrap();
+    let after_summary = serde_json::json!({
+        "run_dir": after[0]["run_dir"],
+        "start_time": after[0]["start_record"]["start_time"],
+        "conclusion_timestamp": after[0]["conclusion"]["timestamp"],
+        "conclusion_status": after[0]["conclusion"]["status"],
+    });
+
+    assert_eq!(after_summary, before_summary);
 }

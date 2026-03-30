@@ -2,6 +2,7 @@ mod agent_linear;
 mod command_agent_mixed;
 mod command_pipeline;
 mod conditional_branching;
+mod dry_run_examples;
 mod full_stack;
 mod human_gate;
 

@@ -27,3 +27,22 @@ fn help() {
     ----- stderr -----
     ");
 }
+
+#[test]
+fn resume_requires_run_arg() {
+    let context = test_context!();
+    let mut cmd = context.command();
+    cmd.args(["resume"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 2
+    ----- stdout -----
+    ----- stderr -----
+    error: the following required arguments were not provided:
+      <RUN>
+
+    Usage: fabro resume --no-upgrade-check --storage-dir <STORAGE_DIR> <RUN>
+
+    For more information, try '--help'.
+    ");
+}

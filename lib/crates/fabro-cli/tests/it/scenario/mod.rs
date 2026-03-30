@@ -1,5 +1,6 @@
 mod exec;
 mod lifecycle;
+mod recovery;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
