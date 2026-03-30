@@ -1,0 +1,49 @@
+use fabro_test::test_context;
+
+use super::{completed_nodes, find_run_dir, fixture, read_conclusion, sandbox_tests, timeout_for};
+
+sandbox_tests!(command_pipeline);
+
+fn scenario_command_pipeline(sandbox: &str) {
+    dotenvy::dotenv().ok();
+    let context = test_context!();
+
+    context
+        .validate()
+        .arg(fixture("command_pipeline.fabro"))
+        .assert()
+        .success();
+
+    context
+        .run_cmd()
+        .args(["--auto-approve", "--no-retro", "--sandbox", sandbox])
+        .arg(fixture("command_pipeline.fabro"))
+        .timeout(timeout_for(sandbox))
+        .assert()
+        .success();
+
+    let run_dir = find_run_dir(&context.storage_dir);
+    let conclusion = read_conclusion(&run_dir);
+    assert_eq!(
+        conclusion["status"].as_str(),
+        Some("success"),
+        "conclusion status should be success"
+    );
+
+    let nodes = completed_nodes(&run_dir);
+    assert!(
+        nodes.contains(&"step1".to_string()),
+        "step1 should be completed"
+    );
+    assert!(
+        nodes.contains(&"step2".to_string()),
+        "step2 should be completed"
+    );
+
+    let stdout1 = std::fs::read_to_string(run_dir.join("nodes/step1/stdout.log"))
+        .expect("step1 stdout.log should exist");
+    assert!(
+        stdout1.contains("hello-from-step1"),
+        "step1 stdout should contain hello-from-step1, got: {stdout1}"
+    );
+}
