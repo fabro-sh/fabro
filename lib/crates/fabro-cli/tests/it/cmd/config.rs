@@ -73,10 +73,8 @@ fn parse_config_show(stdout: &[u8]) -> FabroSettings {
 /// Set up home config and project config for config show tests.
 /// Uses `context.home_dir` for the home directory. Returns project tempdir.
 fn setup_config_show_fixture(context: &fabro_test::TestContext) -> tempfile::TempDir {
-    let home_fabro = context.home_dir.join(".fabro");
-    std::fs::create_dir_all(&home_fabro).unwrap();
-    std::fs::write(
-        home_fabro.join("user.toml"),
+    context.write_home(
+        ".fabro/user.toml",
         r#"
 verbose = true
 
@@ -110,8 +108,7 @@ labels = { cli_only = "1", shared = "cli" }
 CLI_ONLY = "1"
 SHARED = "cli"
 "#,
-    )
-    .unwrap();
+    );
 
     let project = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -200,10 +197,8 @@ fn setup_external_workflow_fixture(
 ) -> (tempfile::TempDir, PathBuf) {
     let storage_dir = context.home_dir.join("fabro-data");
 
-    let home_fabro = context.home_dir.join(".fabro");
-    std::fs::create_dir_all(&home_fabro).unwrap();
-    std::fs::write(
-        home_fabro.join("user.toml"),
+    context.write_home(
+        ".fabro/user.toml",
         format!(
             r#"
 storage_dir = "{}"
@@ -214,8 +209,7 @@ commands = ["cli-setup"]
 "#,
             storage_dir.display()
         ),
-    )
-    .unwrap();
+    );
 
     let project = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -525,18 +519,15 @@ fn config_show_legacy_cli_config_warns_and_ignores_it() {
     let context = test_context!();
     let project = tempfile::tempdir().unwrap();
 
-    let home_fabro = context.home_dir.join(".fabro");
-    std::fs::create_dir_all(&home_fabro).unwrap();
-    std::fs::write(
-        home_fabro.join("cli.toml"),
+    context.write_home(
+        ".fabro/cli.toml",
         r#"
 verbose = true
 
 [llm]
 model = "legacy-model"
 "#,
-    )
-    .unwrap();
+    );
 
     let assert = context
         .command()
@@ -556,8 +547,8 @@ model = "legacy-model"
 fn config_show_user_config_wins_over_legacy_cli_config() {
     let context = test_context!();
     let project = setup_config_show_fixture(&context);
-    std::fs::write(
-        context.home_dir.join(".fabro").join("cli.toml"),
+    context.write_home(
+        ".fabro/cli.toml",
         r#"
 [llm]
 model = "legacy-model"
@@ -565,8 +556,7 @@ model = "legacy-model"
 [vars]
 shared = "legacy"
 "#,
-    )
-    .unwrap();
+    );
 
     let assert = context
         .command()
@@ -592,15 +582,14 @@ shared = "legacy"
 fn config_show_server_url_overrides_cli_defaults() {
     let context = test_context!();
     let project = setup_config_show_fixture(&context);
-    let user_toml = context.home_dir.join(".fabro").join("user.toml");
-    std::fs::write(
-        &user_toml,
+    let user_toml_path = context.home_dir.join(".fabro/user.toml");
+    let existing = std::fs::read_to_string(&user_toml_path).unwrap();
+    context.write_home(
+        ".fabro/user.toml",
         format!(
-            "{}\nmode = \"standalone\"\n[server]\nbase_url = \"https://config.example.com\"\n",
-            std::fs::read_to_string(&user_toml).unwrap()
+            "{existing}\nmode = \"standalone\"\n[server]\nbase_url = \"https://config.example.com\"\n"
         ),
-    )
-    .unwrap();
+    );
 
     let output = context
         .command()
