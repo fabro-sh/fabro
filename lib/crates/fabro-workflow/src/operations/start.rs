@@ -760,22 +760,19 @@ impl Drop for DetachedRunCompletionGuard {
                         "Failed to save post-run abort conclusion to store"
                     );
                 }
-                if let Some((run_id, line)) = serialized_notice.or(run_id
-                    .and_then(|run_id| {
-                        let envelope = canonicalize_event(
-                            &run_id,
-                            &WorkflowRunEvent::RunNotice {
-                                level: RunNoticeLevel::Error,
-                                code: code.to_string(),
-                                message: message.to_string(),
-                            },
-                        );
-                        redacted_event_json(&envelope)
-                            .ok()
-                            .map(|line| (run_id, line))
-                    })
-                )
-                {
+                if let Some((run_id, line)) = serialized_notice.or(run_id.and_then(|run_id| {
+                    let envelope = canonicalize_event(
+                        &run_id,
+                        &WorkflowRunEvent::RunNotice {
+                            level: RunNoticeLevel::Error,
+                            code: code.to_string(),
+                            message: message.to_string(),
+                        },
+                    );
+                    redacted_event_json(&envelope)
+                        .ok()
+                        .map(|line| (run_id, line))
+                })) {
                     match event_payload_from_redacted_json(&line, &run_id) {
                         Ok(payload) => {
                             let _ = run_store.append_event(&payload).await;

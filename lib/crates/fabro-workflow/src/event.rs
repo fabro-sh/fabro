@@ -993,7 +993,8 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
         WorkflowRunEvent::StageCompleted { .. } | WorkflowRunEvent::StageFailed { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "node_id");
-            let node_label = default_node_label(node_id.as_ref(), remove_string(&mut fields, "name"));
+            let node_label =
+                default_node_label(node_id.as_ref(), remove_string(&mut fields, "name"));
             flatten_failure_detail(&mut fields);
             EnvelopeFields {
                 session_id: None,
@@ -1012,7 +1013,8 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
         | WorkflowRunEvent::AssetCaptured { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "node_id");
-            let node_label = default_node_label(node_id.as_ref(), remove_string(&mut fields, "name"));
+            let node_label =
+                default_node_label(node_id.as_ref(), remove_string(&mut fields, "name"));
             EnvelopeFields {
                 session_id: None,
                 parent_session_id: None,
