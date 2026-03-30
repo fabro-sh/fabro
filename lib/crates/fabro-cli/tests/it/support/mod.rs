@@ -41,23 +41,34 @@ pub(crate) fn read_jsonl(path: impl AsRef<Path>) -> Vec<Value> {
 }
 
 pub(crate) fn compact_progress_event(event: &Value) -> Value {
+    fn event_value<'a>(event: &'a Value, key: &str) -> Option<&'a Value> {
+        event
+            .get(key)
+            .or_else(|| {
+                event
+                    .get("properties")
+                    .and_then(|properties| properties.get(key))
+            })
+            .filter(|value| !value.is_null())
+    }
+
     let mut compact = serde_json::Map::new();
     for key in [
         "event",
-        "sandbox_provider",
-        "workflow_name",
+        "provider",
+        "name",
         "goal",
         "node_id",
         "node_label",
         "handler_type",
-        "stage_index",
+        "index",
         "status",
-        "from_node_id",
-        "to_node_id",
+        "from_node",
+        "to_node",
         "reason",
         "artifact_count",
     ] {
-        if let Some(value) = event.get(key).filter(|value| !value.is_null()) {
+        if let Some(value) = event_value(event, key) {
             compact.insert(key.to_string(), value.clone());
         }
     }

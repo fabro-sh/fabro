@@ -77,6 +77,14 @@ fn test_run_id(label: &str) -> RunId {
     }
 }
 
+fn test_emitter(label: &str) -> EventEmitter {
+    EventEmitter::new(test_run_id(label))
+}
+
+fn test_emitter_arc(label: &str) -> Arc<EventEmitter> {
+    Arc::new(test_emitter(label))
+}
+
 fn test_run_options(run_dir: &Path, run_id: &str) -> RunOptions {
     RunOptions {
         run_dir: run_dir.to_path_buf(),
@@ -169,7 +177,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
             run_id: test_run_id("run-test"),
             run_store: test_run_store(&run_dir, &test_run_id("run-test")).await,
             dry_run: false,
-            emitter: Arc::new(crate::event::EventEmitter::default()),
+            emitter: test_emitter_arc("run-test"),
             sandbox: SandboxSpec::Local {
                 working_directory: std::env::current_dir().unwrap(),
             },
@@ -426,7 +434,7 @@ async fn execute_runs_simple_workflow() {
     let dir = tempfile::tempdir().unwrap();
     let outcome = run_graph(
         make_registry(),
-        Arc::new(EventEmitter::default()),
+        test_emitter_arc("test-run"),
         local_env(),
         &simple_graph(),
         &test_run_options(dir.path(), "test-run"),
@@ -441,7 +449,7 @@ async fn execute_saves_checkpoint() {
     let dir = tempfile::tempdir().unwrap();
     run_graph(
         make_registry(),
-        Arc::new(EventEmitter::default()),
+        test_emitter_arc("test-run"),
         local_env(),
         &simple_graph(),
         &test_run_options(dir.path(), "test-run"),
@@ -456,7 +464,7 @@ async fn execute_emits_events() {
     let dir = tempfile::tempdir().unwrap();
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let events_clone = Arc::clone(&events);
-    let emitter = EventEmitter::default();
+    let emitter = test_emitter("test-run");
     emitter.on_event(move |event| {
         events_clone.lock().unwrap().push(format!("{event:?}"));
     });
@@ -479,7 +487,7 @@ async fn execute_error_when_no_start_node() {
     let dir = tempfile::tempdir().unwrap();
     let result = run_graph(
         make_registry(),
-        Arc::new(EventEmitter::default()),
+        test_emitter_arc("test-run"),
         local_env(),
         &Graph::new("empty"),
         &test_run_options(dir.path(), "test-run"),
@@ -493,7 +501,7 @@ async fn execute_mirrors_graph_goal_to_context() {
     let dir = tempfile::tempdir().unwrap();
     run_graph(
         make_registry(),
-        Arc::new(EventEmitter::default()),
+        test_emitter_arc("test-run"),
         local_env(),
         &simple_graph(),
         &test_run_options(dir.path(), "test-run"),
@@ -542,7 +550,7 @@ async fn execute_conditional_routing_uses_unconditional_success_path() {
 
     run_graph(
         make_registry(),
-        Arc::new(EventEmitter::default()),
+        test_emitter_arc("test-run"),
         local_env(),
         &g,
         &test_run_options(dir.path(), "test-run"),
@@ -567,7 +575,7 @@ async fn execute_writes_start_json_and_node_status() {
 
     run_graph(
         make_registry(),
-        Arc::new(EventEmitter::default()),
+        test_emitter_arc("test-run"),
         local_env(),
         &simple_graph(),
         &run_options,
@@ -629,7 +637,7 @@ async fn timeout_causes_fail_status_json() {
     registry.register("slow", Box::new(SlowHandler { sleep_ms: 500 }));
     run_graph(
         registry,
-        Arc::new(EventEmitter::default()),
+        test_emitter_arc("test-run"),
         local_env(),
         &g,
         &test_run_options(dir.path(), "test-run"),
@@ -671,7 +679,7 @@ async fn execute_cancelled_mid_run() {
 
     let result = run_graph(
         registry,
-        Arc::new(EventEmitter::default()),
+        test_emitter_arc("test-run"),
         local_env(),
         &g,
         &run_options,
@@ -689,7 +697,7 @@ async fn max_node_visits_errors_on_cycle() {
 
     let result = run_graph(
         make_registry(),
-        Arc::new(EventEmitter::default()),
+        test_emitter_arc("test-run"),
         local_env(),
         &g,
         &test_run_options(dir.path(), "test-run"),
@@ -724,7 +732,7 @@ async fn panic_handler_writes_panic_txt() {
     registry.register("panicker", Box::new(PanickingHandler));
     let _ = run_graph(
         registry,
-        Arc::new(EventEmitter::default()),
+        test_emitter_arc("test-run"),
         local_env(),
         &g,
         &test_run_options(dir.path(), "test-run"),
@@ -745,7 +753,7 @@ async fn loop_circuit_breaker_aborts_on_repeated_failure() {
 
     let result = run_graph(
         registry,
-        Arc::new(EventEmitter::default()),
+        test_emitter_arc("test-run"),
         local_env(),
         &looping_fail_graph(),
         &test_run_options(dir.path(), "test-run"),
@@ -794,7 +802,7 @@ async fn stall_watchdog_triggers_on_hung_handler() {
     registry.register("slow", Box::new(SlowHandler { sleep_ms: 60_000 }));
     let result = run_graph(
         registry,
-        Arc::new(EventEmitter::default()),
+        test_emitter_arc("test-run"),
         local_env(),
         &g,
         &test_run_options(dir.path(), "test-run"),
@@ -843,7 +851,7 @@ async fn retry_emits_stage_started_per_attempt() {
 
     let events = Arc::new(std::sync::Mutex::new(Vec::<RunEventEnvelope>::new()));
     let events_clone = Arc::clone(&events);
-    let emitter = EventEmitter::default();
+    let emitter = test_emitter("retry-events-test");
     emitter.on_event(move |event| {
         events_clone.lock().unwrap().push(event.clone());
     });
@@ -883,7 +891,7 @@ async fn run_with_lifecycle_emits_initialize_and_setup_events() {
     let dir = tempfile::tempdir().unwrap();
     let events = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let events_clone = Arc::clone(&events);
-    let emitter = EventEmitter::default();
+    let emitter = test_emitter("order-test");
     emitter.on_event(move |event| {
         let name = match event.event.as_str() {
             "sandbox.initialized" => "SandboxInitialized",
@@ -965,7 +973,7 @@ async fn git_checkpoint_skips_start_node() {
 
     let events = Arc::new(std::sync::Mutex::new(Vec::<RunEventEnvelope>::new()));
     let events_clone = Arc::clone(&events);
-    let emitter = EventEmitter::default();
+    let emitter = test_emitter("git-cp-test");
     emitter.on_event(move |event| {
         events_clone.lock().unwrap().push(event.clone());
     });

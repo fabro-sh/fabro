@@ -51,12 +51,12 @@ fn scenario_full_stack(sandbox: &str) {
 
     // Progress events
     assert!(
-        has_event(&run_dir, "WorkflowRunStarted"),
-        "progress should contain WorkflowRunStarted"
+        has_event(&run_dir, "run.started"),
+        "progress should contain run.started"
     );
     assert!(
-        has_event(&run_dir, "WorkflowRunCompleted"),
-        "progress should contain WorkflowRunCompleted"
+        has_event(&run_dir, "run.completed"),
+        "progress should contain run.completed"
     );
 
     // All expected nodes completed

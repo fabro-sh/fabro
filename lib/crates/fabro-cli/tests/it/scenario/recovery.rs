@@ -59,14 +59,19 @@ fn latest_metadata_checkpoint(repo_dir: &Path, run_id: &str) -> Checkpoint {
 fn run_commit_shas_by_node(run_dir: &Path) -> serde_json::Map<String, serde_json::Value> {
     let mut shas_by_node = serde_json::Map::new();
     for event in read_jsonl(run_dir.join("progress.jsonl")) {
-        if event["event"].as_str() != Some("GitCommit") {
+        if !matches!(event["event"].as_str(), Some("git.commit" | "GitCommit")) {
             continue;
         }
 
         let Some(node_id) = event["node_id"].as_str() else {
             continue;
         };
-        let Some(sha) = event["sha"].as_str() else {
+        let Some(sha) = event
+            .get("properties")
+            .and_then(|properties| properties.get("sha"))
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| event["sha"].as_str())
+        else {
             continue;
         };
 

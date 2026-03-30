@@ -974,7 +974,7 @@ mod tests {
     async fn start_captures_checkpoint_git_sha_in_conclusion() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::default());
+        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
         let injected = Arc::new(AtomicBool::new(false));
 
@@ -1016,7 +1016,7 @@ mod tests {
     async fn start_loads_persisted_from_run_dir() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::default());
+        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
@@ -1036,7 +1036,7 @@ mod tests {
     async fn start_invokes_on_node_callback_before_execution() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::default());
+        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
         let visited = Arc::new(Mutex::new(Vec::new()));
 
@@ -1065,7 +1065,7 @@ mod tests {
     async fn start_errors_when_checkpoint_exists() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::default());
+        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
@@ -1102,7 +1102,7 @@ mod tests {
     async fn resume_errors_when_checkpoint_missing() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::default());
+        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
@@ -1124,7 +1124,7 @@ mod tests {
     async fn resume_errors_when_run_already_finished_successfully() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::default());
+        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
