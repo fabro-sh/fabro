@@ -50,7 +50,7 @@ export const InsightsApiAxiosParamCreator = function (configuration?: Configurat
         createSavedQuery: async (saveQueryRequest: SaveQueryRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'saveQueryRequest' is not null or undefined
             assertParamExists('createSavedQuery', 'saveQueryRequest', saveQueryRequest)
-            const localVarPath = `/insights/queries`;
+            const localVarPath = `/api/v1/insights/queries`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -92,7 +92,7 @@ export const InsightsApiAxiosParamCreator = function (configuration?: Configurat
         deleteSavedQuery: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('deleteSavedQuery', 'id', id)
-            const localVarPath = `/insights/queries/{id}`
+            const localVarPath = `/api/v1/insights/queries/{id}`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -133,7 +133,7 @@ export const InsightsApiAxiosParamCreator = function (configuration?: Configurat
         executeQuery: async (executeQueryRequest: ExecuteQueryRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'executeQueryRequest' is not null or undefined
             assertParamExists('executeQuery', 'executeQueryRequest', executeQueryRequest)
-            const localVarPath = `/insights/execute`;
+            const localVarPath = `/api/v1/insights/execute`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -174,7 +174,7 @@ export const InsightsApiAxiosParamCreator = function (configuration?: Configurat
          * @throws {RequiredError}
          */
         listQueryHistory: async (pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/insights/history`;
+            const localVarPath = `/api/v1/insights/history`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -221,7 +221,7 @@ export const InsightsApiAxiosParamCreator = function (configuration?: Configurat
          * @throws {RequiredError}
          */
         listSavedQueries: async (pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/insights/queries`;
+            const localVarPath = `/api/v1/insights/queries`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -269,7 +269,7 @@ export const InsightsApiAxiosParamCreator = function (configuration?: Configurat
         retrieveSavedQuery: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('retrieveSavedQuery', 'id', id)
-            const localVarPath = `/insights/queries/{id}`
+            const localVarPath = `/api/v1/insights/queries/{id}`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -313,7 +313,7 @@ export const InsightsApiAxiosParamCreator = function (configuration?: Configurat
             assertParamExists('updateSavedQuery', 'id', id)
             // verify required parameter 'saveQueryRequest' is not null or undefined
             assertParamExists('updateSavedQuery', 'saveQueryRequest', saveQueryRequest)
-            const localVarPath = `/insights/queries/{id}`
+            const localVarPath = `/api/v1/insights/queries/{id}`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);

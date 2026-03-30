@@ -15,7 +15,7 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { RunSettings } from './run-configuration';
+import type { RunSettings } from './run-settings';
 
 /**
  * Full detail of a workflow definition including graph and resolved settings.
@@ -30,7 +30,7 @@ export interface WorkflowDetail {
      */
     'slug': string;
     /**
-     * DOT graph filename.
+     * Graphviz graph filename.
      */
     'filename': string;
     /**
@@ -39,7 +39,8 @@ export interface WorkflowDetail {
     'description': string;
     'settings': RunSettings;
     /**
-     * DOT language source defining the workflow graph.
+     * Graphviz DOT language source defining the workflow graph.
      */
     'graph': string;
 }
+

@@ -4,9 +4,14 @@
 
 #![allow(clippy::absolute_paths)]
 
+fn api(path: &str) -> String {
+    format!("/api/v1{path}")
+}
+
 // Skip on macOS: LibreSSL generates certs with extensions rustls rejects
 #[cfg(target_os = "linux")]
 mod mtls_e2e {
+    use super::api;
     use std::path::Path;
     use std::process::{Command, Stdio};
 
@@ -239,7 +244,7 @@ mod mtls_e2e {
         let client = build_client(&pki.ca_cert, Some(&pki.client_cert), Some(&pki.client_key));
 
         let response = client
-            .get(format!("https://127.0.0.1:{}/runs", addr.port()))
+            .get(format!("https://127.0.0.1:{}{}", addr.port(), api("/runs")))
             .send()
             .await
             .expect("request with valid client cert should succeed");
@@ -275,7 +280,7 @@ mod mtls_e2e {
         );
 
         let result = client
-            .get(format!("https://127.0.0.1:{}/runs", addr.port()))
+            .get(format!("https://127.0.0.1:{}{}", addr.port(), api("/runs")))
             .send()
             .await;
 
@@ -308,7 +313,7 @@ mod mtls_e2e {
         let client = build_client(&pki.ca_cert, None, None);
 
         let result = client
-            .get(format!("https://127.0.0.1:{}/runs", addr.port()))
+            .get(format!("https://127.0.0.1:{}{}", addr.port(), api("/runs")))
             .send()
             .await;
 
@@ -394,7 +399,7 @@ mod mtls_e2e {
         let token = sign_jwt(&encoding_key, "https://github.com/brynary");
 
         let response = client
-            .get(format!("https://127.0.0.1:{}/runs", addr.port()))
+            .get(format!("https://127.0.0.1:{}{}", addr.port(), api("/runs")))
             .bearer_auth(&token)
             .send()
             .await
@@ -414,6 +419,7 @@ mod mtls_e2e {
 
 mod server_lifecycle {
     use super::super::helpers::test_db;
+    use super::api;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -470,7 +476,7 @@ mod server_lifecycle {
         // 1. Start run
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": GATE_DOT})).unwrap(),
@@ -488,7 +494,7 @@ mod server_lifecycle {
             tokio::time::sleep(Duration::from_millis(10)).await;
             let req = Request::builder()
                 .method("GET")
-                .uri(format!("/runs/{run_id}/questions"))
+                .uri(api(&format!("/runs/{run_id}/questions")))
                 .body(Body::empty())
                 .unwrap();
             let response = app.clone().oneshot(req).await.unwrap();
@@ -504,7 +510,9 @@ mod server_lifecycle {
         // 3. Submit answer selecting first option (Approve)
         let req = Request::builder()
             .method("POST")
-            .uri(format!("/runs/{run_id}/questions/{question_id}/answer"))
+            .uri(api(&format!(
+                "/runs/{run_id}/questions/{question_id}/answer"
+            )))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"value": "A"})).unwrap(),
@@ -519,7 +527,7 @@ mod server_lifecycle {
             tokio::time::sleep(Duration::from_millis(10)).await;
             let req = Request::builder()
                 .method("GET")
-                .uri(format!("/runs/{run_id}"))
+                .uri(api(&format!("/runs/{run_id}")))
                 .body(Body::empty())
                 .unwrap();
             let response = app.clone().oneshot(req).await.unwrap();
@@ -535,7 +543,7 @@ mod server_lifecycle {
         // 5. Verify context endpoint returns an object
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}/context"))
+            .uri(api(&format!("/runs/{run_id}/context")))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -546,7 +554,7 @@ mod server_lifecycle {
         // 6. Verify no pending questions
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}/questions"))
+            .uri(api(&format!("/runs/{run_id}/questions")))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -569,7 +577,7 @@ mod server_lifecycle {
         // Start a run that will block at the human gate
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": GATE_DOT})).unwrap(),
@@ -585,7 +593,7 @@ mod server_lifecycle {
         // Cancel it
         let req = Request::builder()
             .method("POST")
-            .uri(format!("/runs/{run_id}/cancel"))
+            .uri(api(&format!("/runs/{run_id}/cancel")))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -596,7 +604,7 @@ mod server_lifecycle {
         // Verify status is cancelled
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}"))
+            .uri(api(&format!("/runs/{run_id}")))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -611,6 +619,7 @@ mod server_lifecycle {
 
 mod sse_events {
     use super::super::helpers::test_db;
+    use super::api;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -640,7 +649,7 @@ mod sse_events {
         // Start run
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": SIMPLE_DOT})).unwrap(),
@@ -660,7 +669,7 @@ mod sse_events {
         // Get SSE stream
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}/events"))
+            .uri(api(&format!("/runs/{run_id}/events")))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -731,7 +740,7 @@ mod sse_events {
 
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}/checkpoint"))
+            .uri(api(&format!("/runs/{run_id}/checkpoint")))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -758,6 +767,7 @@ mod sse_events {
 
 mod serve_dry_run {
     use super::super::helpers::test_db;
+    use super::api;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -792,7 +802,7 @@ mod serve_dry_run {
         // POST /runs to start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -812,7 +822,7 @@ mod serve_dry_run {
         // GET /runs/{id} to verify completion
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}"))
+            .uri(api(&format!("/runs/{run_id}")))
             .body(Body::empty())
             .unwrap();
 
@@ -829,7 +839,7 @@ mod serve_dry_run {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/models/claude-opus-4-6/test")
+            .uri(api("/models/claude-opus-4-6/test"))
             .header("content-type", "application/json")
             .body(Body::empty())
             .unwrap();
@@ -849,7 +859,7 @@ mod serve_dry_run {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/models/nonexistent-model-xyz/test")
+            .uri(api("/models/nonexistent-model-xyz/test"))
             .header("content-type", "application/json")
             .body(Body::empty())
             .unwrap();
@@ -864,7 +874,7 @@ mod serve_dry_run {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": "not valid dot"})).unwrap(),
@@ -873,5 +883,98 @@ mod serve_dry_run {
 
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}
+
+mod route_prefixes {
+    use super::super::helpers::test_db;
+    use super::api;
+
+    use axum::body::Body;
+    use axum::http::{Method, Request, StatusCode};
+    use fabro_server::server::{build_router, create_app_state};
+    use tower::ServiceExt;
+
+    async fn body_json(body: Body) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn old_unversioned_routes_return_404() {
+        let app = build_router(
+            create_app_state(test_db().await),
+            fabro_server::jwt_auth::AuthMode::Disabled,
+        );
+
+        let cases = [
+            (Method::GET, "/runs"),
+            (Method::GET, "/workflows"),
+            (Method::GET, "/models"),
+            (Method::GET, "/sessions"),
+            (Method::GET, "/usage"),
+            (Method::GET, "/settings"),
+            (Method::GET, "/openapi.json"),
+            (Method::GET, "/user"),
+            (Method::POST, "/completions"),
+        ];
+
+        for (method, path) in cases {
+            let req = Request::builder()
+                .method(method.clone())
+                .uri(path)
+                .body(Body::empty())
+                .unwrap();
+            let response = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn root_and_health_stay_at_root() {
+        let app = build_router(
+            create_app_state(test_db().await),
+            fabro_server::jwt_auth::AuthMode::Disabled,
+        );
+
+        let root_req = Request::builder()
+            .method("GET")
+            .uri("/")
+            .body(Body::empty())
+            .unwrap();
+        let root_response = app.clone().oneshot(root_req).await.unwrap();
+        assert_eq!(root_response.status(), StatusCode::OK);
+        let root_body = body_json(root_response.into_body()).await;
+        assert_eq!(root_body["urls"]["openapi_url"], api("/openapi.json"));
+        assert_eq!(root_body["urls"]["current_user_url"], api("/user"));
+        assert_eq!(root_body["urls"]["health_url"], "/health");
+
+        let health_req = Request::builder()
+            .method("GET")
+            .uri("/health")
+            .body(Body::empty())
+            .unwrap();
+        let health_response = app.oneshot(health_req).await.unwrap();
+        assert_eq!(health_response.status(), StatusCode::OK);
+        let health_body = body_json(health_response.into_body()).await;
+        assert_eq!(health_body["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn moved_routes_not_at_root_of_api_prefix() {
+        let app = build_router(
+            create_app_state(test_db().await),
+            fabro_server::jwt_auth::AuthMode::Disabled,
+        );
+
+        for path in ["/api/v1/health", "/api/v1/"] {
+            let req = Request::builder()
+                .method("GET")
+                .uri(path)
+                .body(Body::empty())
+                .unwrap();
+            let response = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "GET {path}");
+        }
     }
 }

@@ -22,7 +22,7 @@ export const OpenItemKind = {
     TECH_DEBT: 'tech_debt',
     FOLLOW_UP: 'follow_up',
     INVESTIGATION: 'investigation',
-    TEST_GAP: 'test_gap'
+    TEST_GAP: 'test_gap',
 } as const;
 
 export type OpenItemKind = typeof OpenItemKind[keyof typeof OpenItemKind];

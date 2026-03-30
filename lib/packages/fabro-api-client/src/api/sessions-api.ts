@@ -50,7 +50,7 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
         createSession: async (createSessionRequest: CreateSessionRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'createSessionRequest' is not null or undefined
             assertParamExists('createSession', 'createSessionRequest', createSessionRequest)
-            const localVarPath = `/sessions`;
+            const localVarPath = `/api/v1/sessions`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -91,7 +91,7 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
          * @throws {RequiredError}
          */
         listSessions: async (pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/sessions`;
+            const localVarPath = `/api/v1/sessions`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -139,7 +139,7 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
         retrieveSession: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('retrieveSession', 'id', id)
-            const localVarPath = `/sessions/{id}`
+            const localVarPath = `/api/v1/sessions/{id}`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -183,7 +183,7 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
             assertParamExists('sendSessionMessage', 'id', id)
             // verify required parameter 'sendMessageRequest' is not null or undefined
             assertParamExists('sendSessionMessage', 'sendMessageRequest', sendMessageRequest)
-            const localVarPath = `/sessions/{id}/messages`
+            const localVarPath = `/api/v1/sessions/{id}/messages`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -227,7 +227,7 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
         streamSessionEvents: async (id: string, lastEventID?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('streamSessionEvents', 'id', id)
-            const localVarPath = `/sessions/{id}/events`
+            const localVarPath = `/api/v1/sessions/{id}/events`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);

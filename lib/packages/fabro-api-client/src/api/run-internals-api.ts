@@ -48,7 +48,7 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
         listRunStages: async (id: string, pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('listRunStages', 'id', id)
-            const localVarPath = `/runs/{id}/stages`
+            const localVarPath = `/api/v1/runs/{id}/stages`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -102,7 +102,7 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             assertParamExists('listStageTurns', 'id', id)
             // verify required parameter 'stageId' is not null or undefined
             assertParamExists('listStageTurns', 'stageId', stageId)
-            const localVarPath = `/runs/{id}/stages/{stageId}/turns`
+            const localVarPath = `/api/v1/runs/{id}/stages/{stageId}/turns`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)))
                 .replace(`{${"stageId"}}`, encodeURIComponent(String(stageId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
@@ -152,48 +152,7 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
         retrieveRunCheckpoint: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('retrieveRunCheckpoint', 'id', id)
-            const localVarPath = `/runs/{id}/checkpoint`
-                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication mTLS required
-            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
-
-            // authentication BearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * Returns the structured settings used to launch this run.
-         * @summary Retrieve Run Settings
-         * @param {string} id Unique run identifier (ULID).
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        retrieveRunSettings: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'id' is not null or undefined
-            assertParamExists('retrieveRunSettings', 'id', id)
-            const localVarPath = `/runs/{id}/settings`
+            const localVarPath = `/api/v1/runs/{id}/checkpoint`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -234,7 +193,48 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
         retrieveRunContext: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('retrieveRunContext', 'id', id)
-            const localVarPath = `/runs/{id}/context`
+            const localVarPath = `/api/v1/runs/{id}/context`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns the structured settings used to launch this run.
+         * @summary Retrieve Run Settings
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        retrieveRunSettings: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('retrieveRunSettings', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/settings`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -319,19 +319,6 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns the structured settings used to launch this run.
-         * @summary Retrieve Run Settings
-         * @param {string} id Unique run identifier (ULID).
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunSettings>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunSettings(id, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.retrieveRunSettings']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
          * Returns the key-value context map accumulated during the run. Empty if the run has not started.
          * @summary Retrieve Run Context
          * @param {string} id Unique run identifier (ULID).
@@ -342,6 +329,19 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunContext(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.retrieveRunContext']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns the structured settings used to launch this run.
+         * @summary Retrieve Run Settings
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunSettings>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunSettings(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.retrieveRunSettings']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
     }
@@ -389,16 +389,6 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.retrieveRunCheckpoint(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns the structured settings used to launch this run.
-         * @summary Retrieve Run Settings
-         * @param {string} id Unique run identifier (ULID).
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunSettings> {
-            return localVarFp.retrieveRunSettings(id, options).then((request) => request(axios, basePath));
-        },
-        /**
          * Returns the key-value context map accumulated during the run. Empty if the run has not started.
          * @summary Retrieve Run Context
          * @param {string} id Unique run identifier (ULID).
@@ -407,6 +397,16 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
          */
         retrieveRunContext(id: string, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
             return localVarFp.retrieveRunContext(id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns the structured settings used to launch this run.
+         * @summary Retrieve Run Settings
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunSettings> {
+            return localVarFp.retrieveRunSettings(id, options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -454,17 +454,6 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
-     * Returns the structured settings used to launch this run.
-     * @summary Retrieve Run Settings
-     * @param {string} id Unique run identifier (ULID).
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public retrieveRunSettings(id: string, options?: RawAxiosRequestConfig) {
-        return RunInternalsApiFp(this.configuration).retrieveRunSettings(id, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
      * Returns the key-value context map accumulated during the run. Empty if the run has not started.
      * @summary Retrieve Run Context
      * @param {string} id Unique run identifier (ULID).
@@ -474,4 +463,16 @@ export class RunInternalsApi extends BaseAPI {
     public retrieveRunContext(id: string, options?: RawAxiosRequestConfig) {
         return RunInternalsApiFp(this.configuration).retrieveRunContext(id, options).then((request) => request(this.axios, this.basePath));
     }
+
+    /**
+     * Returns the structured settings used to launch this run.
+     * @summary Retrieve Run Settings
+     * @param {string} id Unique run identifier (ULID).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public retrieveRunSettings(id: string, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).retrieveRunSettings(id, options).then((request) => request(this.axios, this.basePath));
+    }
 }
+

@@ -61,7 +61,7 @@ pub struct ApiConfig {
 }
 
 fn default_base_url() -> String {
-    "http://localhost:3000".to_string()
+    "http://localhost:3000/api/v1".to_string()
 }
 
 impl TryFrom<ApiConfig> for ApiSettings {

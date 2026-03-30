@@ -458,10 +458,14 @@ mod tests {
         serde_json::from_slice(&bytes).unwrap()
     }
 
+    fn api(path: &str) -> String {
+        format!("/api/v1{path}")
+    }
+
     async fn create_test_session(app: &axum::Router) -> serde_json::Value {
         let req = Request::builder()
             .method("POST")
-            .uri("/sessions")
+            .uri(api("/sessions"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({
@@ -499,7 +503,7 @@ mod tests {
 
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/sessions/{session_id}"))
+            .uri(api(&format!("/sessions/{session_id}")))
             .body(Body::empty())
             .unwrap();
 
@@ -520,7 +524,7 @@ mod tests {
 
         let req = Request::builder()
             .method("GET")
-            .uri("/sessions/a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+            .uri(api("/sessions/a1b2c3d4-e5f6-7890-abcd-ef1234567890"))
             .body(Body::empty())
             .unwrap();
 
@@ -536,7 +540,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri(format!("/sessions/{session_id}/messages"))
+            .uri(api(&format!("/sessions/{session_id}/messages")))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({
@@ -559,7 +563,9 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/sessions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/messages")
+            .uri(api(
+                "/sessions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/messages",
+            ))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({
@@ -579,7 +585,7 @@ mod tests {
 
         let req = Request::builder()
             .method("GET")
-            .uri("/sessions")
+            .uri(api("/sessions"))
             .body(Body::empty())
             .unwrap();
 
@@ -598,7 +604,7 @@ mod tests {
 
         let req = Request::builder()
             .method("GET")
-            .uri("/sessions")
+            .uri(api("/sessions"))
             .body(Body::empty())
             .unwrap();
 
@@ -620,7 +626,7 @@ mod tests {
 
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/sessions/{session_id}/events"))
+            .uri(api(&format!("/sessions/{session_id}/events")))
             .body(Body::empty())
             .unwrap();
 

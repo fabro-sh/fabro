@@ -15,11 +15,11 @@
 
 
 /**
- * Request body for starting a new run from a DOT graph source.
+ * Request body for starting a new run from a Graphviz graph source.
  */
 export interface StartRunRequest {
     /**
-     * DOT language source defining the workflow graph.
+     * Graphviz DOT language source defining the workflow graph.
      */
     'dot_source': string;
 }

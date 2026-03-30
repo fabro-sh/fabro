@@ -51,7 +51,7 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             assertParamExists('generatePreviewUrl', 'id', id)
             // verify required parameter 'previewUrlRequest' is not null or undefined
             assertParamExists('generatePreviewUrl', 'previewUrlRequest', previewUrlRequest)
-            const localVarPath = `/runs/{id}/preview`
+            const localVarPath = `/api/v1/runs/{id}/preview`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -96,7 +96,7 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
         listRunQuestions: async (id: string, pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('listRunQuestions', 'id', id)
-            const localVarPath = `/runs/{id}/questions`
+            const localVarPath = `/api/v1/runs/{id}/questions`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -148,7 +148,7 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             assertParamExists('steerRun', 'id', id)
             // verify required parameter 'steerRequest' is not null or undefined
             assertParamExists('steerRun', 'steerRequest', steerRequest)
-            const localVarPath = `/runs/{id}/steer`
+            const localVarPath = `/api/v1/runs/{id}/steer`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -197,7 +197,7 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             assertParamExists('submitRunAnswer', 'qid', qid)
             // verify required parameter 'submitAnswerRequest' is not null or undefined
             assertParamExists('submitRunAnswer', 'submitAnswerRequest', submitAnswerRequest)
-            const localVarPath = `/runs/{id}/questions/{qid}/answer`
+            const localVarPath = `/api/v1/runs/{id}/questions/{qid}/answer`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)))
                 .replace(`{${"qid"}}`, encodeURIComponent(String(qid)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.

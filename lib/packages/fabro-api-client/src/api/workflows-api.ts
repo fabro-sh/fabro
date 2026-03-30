@@ -46,7 +46,7 @@ export const WorkflowsApiAxiosParamCreator = function (configuration?: Configura
         listWorkflowRuns: async (name: string, pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'name' is not null or undefined
             assertParamExists('listWorkflowRuns', 'name', name)
-            const localVarPath = `/workflows/{name}/runs`
+            const localVarPath = `/api/v1/workflows/{name}/runs`
                 .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -94,7 +94,7 @@ export const WorkflowsApiAxiosParamCreator = function (configuration?: Configura
          * @throws {RequiredError}
          */
         listWorkflows: async (pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/workflows`;
+            const localVarPath = `/api/v1/workflows`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -133,7 +133,7 @@ export const WorkflowsApiAxiosParamCreator = function (configuration?: Configura
             };
         },
         /**
-         * Returns the full detail of a workflow including its DOT graph, resolved settings, and description.
+         * Returns the full detail of a workflow including its Graphviz graph, resolved settings, and description.
          * @summary Retrieve Workflow
          * @param {string} name URL-safe slug identifying a workflow definition.
          * @param {*} [options] Override http request option.
@@ -142,7 +142,7 @@ export const WorkflowsApiAxiosParamCreator = function (configuration?: Configura
         retrieveWorkflow: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'name' is not null or undefined
             assertParamExists('retrieveWorkflow', 'name', name)
-            const localVarPath = `/workflows/{name}`
+            const localVarPath = `/api/v1/workflows/{name}`
                 .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -212,7 +212,7 @@ export const WorkflowsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns the full detail of a workflow including its DOT graph, resolved settings, and description.
+         * Returns the full detail of a workflow including its Graphviz graph, resolved settings, and description.
          * @summary Retrieve Workflow
          * @param {string} name URL-safe slug identifying a workflow definition.
          * @param {*} [options] Override http request option.
@@ -257,7 +257,7 @@ export const WorkflowsApiFactory = function (configuration?: Configuration, base
             return localVarFp.listWorkflows(pageLimit, pageOffset, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns the full detail of a workflow including its DOT graph, resolved settings, and description.
+         * Returns the full detail of a workflow including its Graphviz graph, resolved settings, and description.
          * @summary Retrieve Workflow
          * @param {string} name URL-safe slug identifying a workflow definition.
          * @param {*} [options] Override http request option.
@@ -299,7 +299,7 @@ export class WorkflowsApi extends BaseAPI {
     }
 
     /**
-     * Returns the full detail of a workflow including its DOT graph, resolved settings, and description.
+     * Returns the full detail of a workflow including its Graphviz graph, resolved settings, and description.
      * @summary Retrieve Workflow
      * @param {string} name URL-safe slug identifying a workflow definition.
      * @param {*} [options] Override http request option.
@@ -309,3 +309,4 @@ export class WorkflowsApi extends BaseAPI {
         return WorkflowsApiFp(this.configuration).retrieveWorkflow(name, options).then((request) => request(this.axios, this.basePath));
     }
 }
+

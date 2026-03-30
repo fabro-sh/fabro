@@ -145,20 +145,23 @@ impl AppState {
 /// with the `X-Fabro-Demo: 1` header are dispatched to the demo router;
 /// all other requests go to the real router.
 pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
-    let common = Router::new()
+    let root_routes = Router::new()
         .route("/", get(root))
-        .route("/health", get(health))
+        .route("/health", get(health));
+
+    let api_common = Router::new()
         .route("/openapi.json", get(openapi_spec))
         .route("/user", get(get_user));
 
-    let demo_router = common
-        .clone()
-        .merge(demo_routes())
+    let demo_router = Router::new()
+        .merge(root_routes.clone())
+        .nest("/api/v1", api_common.clone().merge(demo_routes()))
         .layer(axum::Extension(AuthMode::Disabled))
         .with_state(state.clone());
 
-    let real_router = common
-        .merge(real_routes())
+    let real_router = Router::new()
+        .merge(root_routes)
+        .nest("/api/v1", api_common.merge(real_routes()))
         .layer(axum::Extension(auth_mode))
         .with_state(state);
 
@@ -324,8 +327,8 @@ async fn not_implemented() -> Response {
 async fn root() -> Response {
     Json(serde_json::json!({
         "urls": {
-            "openapi_url": "/openapi.json",
-            "current_user_url": "/user",
+            "openapi_url": "/api/v1/openapi.json",
+            "current_user_url": "/api/v1/user",
             "health_url": "/health"
         }
     }))
@@ -1650,13 +1653,17 @@ mod tests {
         serde_json::from_slice(&bytes).unwrap()
     }
 
+    fn api(path: &str) -> String {
+        format!("/api/v1{path}")
+    }
+
     #[tokio::test]
     async fn test_model_unknown_returns_404() {
         let app = test_app_with(test_db().await);
 
         let req = Request::builder()
             .method("POST")
-            .uri("/models/nonexistent-model-xyz/test")
+            .uri(api("/models/nonexistent-model-xyz/test"))
             .header("content-type", "application/json")
             .body(Body::empty())
             .unwrap();
@@ -1671,7 +1678,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/models/claude-opus-4-6/test")
+            .uri(api("/models/claude-opus-4-6/test"))
             .header("content-type", "application/json")
             .body(Body::empty())
             .unwrap();
@@ -1691,7 +1698,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/models/claude-opus-4-6/test")
+            .uri(api("/models/claude-opus-4-6/test"))
             .header("content-type", "application/json")
             .body(Body::empty())
             .unwrap();
@@ -1711,7 +1718,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/models/nonexistent-model-xyz/test")
+            .uri(api("/models/nonexistent-model-xyz/test"))
             .header("content-type", "application/json")
             .body(Body::empty())
             .unwrap();
@@ -1726,7 +1733,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -1747,7 +1754,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": "not a graph"})).unwrap(),
@@ -1766,7 +1773,7 @@ mod tests {
         // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -1783,7 +1790,7 @@ mod tests {
         // Check status
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}"))
+            .uri(api(&format!("/runs/{run_id}")))
             .body(Body::empty())
             .unwrap();
 
@@ -1809,7 +1816,7 @@ mod tests {
 
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{missing_run_id}"))
+            .uri(api(&format!("/runs/{missing_run_id}")))
             .body(Body::empty())
             .unwrap();
 
@@ -1825,7 +1832,7 @@ mod tests {
         // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -1839,7 +1846,7 @@ mod tests {
         // Get questions (should be empty for a run without wait.human nodes)
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}/questions"))
+            .uri(api(&format!("/runs/{run_id}/questions")))
             .body(Body::empty())
             .unwrap();
 
@@ -1858,7 +1865,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri(format!("/runs/{missing_run_id}/questions/q1/answer"))
+            .uri(api(&format!("/runs/{missing_run_id}/questions/q1/answer")))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"value": "yes"})).unwrap(),
@@ -1876,7 +1883,7 @@ mod tests {
 
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{missing_run_id}/events"))
+            .uri(api(&format!("/runs/{missing_run_id}/events")))
             .body(Body::empty())
             .unwrap();
 
@@ -1892,7 +1899,7 @@ mod tests {
         // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -1906,7 +1913,7 @@ mod tests {
         // Get checkpoint immediately (before run completes, may be null)
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}/checkpoint"))
+            .uri(api(&format!("/runs/{run_id}/checkpoint")))
             .body(Body::empty())
             .unwrap();
 
@@ -1922,7 +1929,7 @@ mod tests {
         // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -1936,7 +1943,7 @@ mod tests {
         // Get context
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}/context"))
+            .uri(api(&format!("/runs/{run_id}/context")))
             .body(Body::empty())
             .unwrap();
 
@@ -1955,7 +1962,7 @@ mod tests {
         // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -1969,7 +1976,7 @@ mod tests {
         // Cancel it
         let req = Request::builder()
             .method("POST")
-            .uri(format!("/runs/{run_id}/cancel"))
+            .uri(api(&format!("/runs/{run_id}/cancel")))
             .body(Body::empty())
             .unwrap();
 
@@ -1989,7 +1996,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri(format!("/runs/{missing_run_id}/cancel"))
+            .uri(api(&format!("/runs/{missing_run_id}/cancel")))
             .body(Body::empty())
             .unwrap();
 
@@ -2005,7 +2012,7 @@ mod tests {
         // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -2022,7 +2029,7 @@ mod tests {
         // Request the SSE stream
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}/events"))
+            .uri(api(&format!("/runs/{run_id}/events")))
             .body(Body::empty())
             .unwrap();
 
@@ -2056,7 +2063,7 @@ mod tests {
         // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -2073,7 +2080,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             let req = Request::builder()
                 .method("GET")
-                .uri(format!("/runs/{run_id}"))
+                .uri(api(&format!("/runs/{run_id}")))
                 .body(Body::empty())
                 .unwrap();
             let response = app.clone().oneshot(req).await.unwrap();
@@ -2095,7 +2102,7 @@ mod tests {
         // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -2109,7 +2116,7 @@ mod tests {
         // Request graph SVG
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}/graph"))
+            .uri(api(&format!("/runs/{run_id}/graph")))
             .body(Body::empty())
             .unwrap();
 
@@ -2146,7 +2153,7 @@ mod tests {
 
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{missing_run_id}/graph"))
+            .uri(api(&format!("/runs/{missing_run_id}/graph")))
             .body(Body::empty())
             .unwrap();
 
@@ -2162,7 +2169,7 @@ mod tests {
         // List should be empty initially
         let req = Request::builder()
             .method("GET")
-            .uri("/runs")
+            .uri(api("/runs"))
             .body(Body::empty())
             .unwrap();
 
@@ -2175,7 +2182,7 @@ mod tests {
         // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -2189,7 +2196,7 @@ mod tests {
         // List should now contain one run
         let req = Request::builder()
             .method("GET")
-            .uri("/runs")
+            .uri(api("/runs"))
             .body(Body::empty())
             .unwrap();
 
@@ -2210,7 +2217,7 @@ mod tests {
 
         let req = Request::builder()
             .method("GET")
-            .uri("/usage")
+            .uri(api("/usage"))
             .body(Body::empty())
             .unwrap();
 
@@ -2234,7 +2241,7 @@ mod tests {
         // Start a run
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -2251,7 +2258,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             let req = Request::builder()
                 .method("GET")
-                .uri(format!("/runs/{run_id}"))
+                .uri(api(&format!("/runs/{run_id}")))
                 .body(Body::empty())
                 .unwrap();
             let response = app.clone().oneshot(req).await.unwrap();
@@ -2266,7 +2273,7 @@ mod tests {
         // Check aggregate usage
         let req = Request::builder()
             .method("GET")
-            .uri("/usage")
+            .uri(api("/usage"))
             .body(Body::empty())
             .unwrap();
 
@@ -2284,7 +2291,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -2299,7 +2306,7 @@ mod tests {
         // Check status is queued (no scheduler running)
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}"))
+            .uri(api(&format!("/runs/{run_id}")))
             .body(Body::empty())
             .unwrap();
 
@@ -2357,7 +2364,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -2393,7 +2400,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({ "dot_source": dot })).unwrap(),
@@ -2427,7 +2434,7 @@ mod tests {
         // Submit a run (no scheduler, stays queued)
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -2441,7 +2448,7 @@ mod tests {
         // Cancel it
         let req = Request::builder()
             .method("POST")
-            .uri(format!("/runs/{run_id}/cancel"))
+            .uri(api(&format!("/runs/{run_id}/cancel")))
             .body(Body::empty())
             .unwrap();
 
@@ -2451,7 +2458,7 @@ mod tests {
         // Verify status is cancelled
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}"))
+            .uri(api(&format!("/runs/{run_id}")))
             .body(Body::empty())
             .unwrap();
 
@@ -2474,7 +2481,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -2547,7 +2554,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -2563,7 +2570,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri(format!("/runs/{run_id}/cancel"))
+            .uri(api(&format!("/runs/{run_id}/cancel")))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -2573,7 +2580,7 @@ mod tests {
 
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{run_id}/events"))
+            .uri(api(&format!("/runs/{run_id}/events")))
             .body(Body::empty())
             .unwrap();
         let response = app.oneshot(req).await.unwrap();
@@ -2590,7 +2597,7 @@ mod tests {
         for _ in 0..2 {
             let req = Request::builder()
                 .method("POST")
-                .uri("/runs")
+                .uri(api("/runs"))
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -2605,7 +2612,7 @@ mod tests {
         // Check queue positions via individual status
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{}", run_ids[0]))
+            .uri(api(&format!("/runs/{}", run_ids[0])))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -2614,7 +2621,7 @@ mod tests {
 
         let req = Request::builder()
             .method("GET")
-            .uri(format!("/runs/{}", run_ids[1]))
+            .uri(api(&format!("/runs/{}", run_ids[1])))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -2632,7 +2639,7 @@ mod tests {
         for _ in 0..2 {
             let req = Request::builder()
                 .method("POST")
-                .uri("/runs")
+                .uri(api("/runs"))
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -2650,7 +2657,7 @@ mod tests {
         // Check statuses: at most 1 should be starting/running, the other queued
         let req = Request::builder()
             .method("GET")
-            .uri("/runs")
+            .uri(api("/runs"))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -2678,7 +2685,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/runs")
+            .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
@@ -2692,7 +2699,7 @@ mod tests {
         // Try to submit an answer to a queued run
         let req = Request::builder()
             .method("POST")
-            .uri(format!("/runs/{run_id}/questions/q1/answer"))
+            .uri(api(&format!("/runs/{run_id}/questions/q1/answer")))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"value": "yes"})).unwrap(),
@@ -2710,7 +2717,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/completions")
+            .uri(api("/completions"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({
@@ -2740,7 +2747,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/completions")
+            .uri(api("/completions"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({
@@ -2770,7 +2777,7 @@ mod tests {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/completions")
+            .uri(api("/completions"))
             .header("content-type", "application/json")
             .body(Body::from("{}"))
             .unwrap();

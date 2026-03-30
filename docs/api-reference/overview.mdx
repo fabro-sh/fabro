@@ -11,17 +11,17 @@ The Fabro API is a REST API for managing workflow runs, interactive sessions, an
 
 ## Base URL
 
-The API is served by `fabro serve`, which defaults to:
+The versioned API is served by `fabro serve`, which defaults to:
 
 ```
-http://localhost:3000
+http://localhost:3000/api/v1
 ```
 
 The base URL is configurable via `server.toml`:
 
 ```toml title="server.toml"
 [api]
-base_url = "https://fabro.example.com"
+base_url = "https://fabro.example.com/api/v1"
 ```
 
 ## Authentication
@@ -142,8 +142,8 @@ When `has_more` is `true`, increment the offset by the limit to fetch the next p
 
 ## Versioning
 
-The Fabro API does not currently use versioning. All endpoints reflect the latest behavior of the running server. Breaking changes will be communicated in the [changelog](/changelog/2026-03-06).
+The Fabro API is versioned under `/api/v1`. All versioned endpoints, including the OpenAPI document, live under that prefix. Future breaking changes can be introduced under a new versioned prefix while preserving existing clients.
 
 ## Discovery
 
-The root endpoint (`GET /`) returns discovery URLs. The health endpoint (`GET /health`) can be used for liveness checks. The OpenAPI spec is available at `GET /openapi.json`.
+The root endpoint (`GET /`) returns discovery URLs. The health endpoint (`GET /health`) can be used for liveness checks. The OpenAPI spec is available at `GET /api/v1/openapi.json`.

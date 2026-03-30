@@ -25,7 +25,7 @@ upgrade_check = true
 mode = "server"
 
 [server]
-base_url = "https://fabro.example.com:3000"
+base_url = "https://fabro.example.com:3000/api/v1"
 
 [server.tls]
 cert = "~/.fabro/tls/client.crt"
@@ -164,12 +164,12 @@ Configuration for server mode.
 
 | Key | Description | Default |
 |---|---|---|
-| `base_url` | Server URL | `"http://localhost:3000"` |
+| `base_url` | Server URL | `"http://localhost:3000/api/v1"` |
 
 Passing `--server-url` implies server mode and overrides `server.base_url`:
 
 ```bash
-fabro --server-url https://fabro.example.com:3000 model list
+fabro --server-url https://fabro.example.com:3000/api/v1 model list
 ```
 
 ### `[server.tls]` section

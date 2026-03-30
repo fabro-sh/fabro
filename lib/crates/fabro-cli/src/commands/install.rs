@@ -198,7 +198,7 @@ provider = "github"
 allowed_usernames = ["{username}"]
 
 [api]
-base_url = "https://localhost:3000"
+base_url = "https://localhost:3000/api/v1"
 authentication_strategies = ["jwt", "mtls"]
 
 [api.tls]

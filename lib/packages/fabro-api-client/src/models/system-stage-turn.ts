@@ -26,7 +26,7 @@ export interface SystemStageTurn {
 }
 
 export const SystemStageTurnKindEnum = {
-    SYSTEM: 'system'
+    SYSTEM: 'system',
 } as const;
 
 export type SystemStageTurnKindEnum = typeof SystemStageTurnKindEnum[keyof typeof SystemStageTurnKindEnum];

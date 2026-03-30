@@ -46,47 +46,47 @@ struct PaginatedEndpoint {
 
 const ENDPOINTS: &[PaginatedEndpoint] = &[
     PaginatedEndpoint {
-        path: "/workflows",
+        path: "/api/v1/workflows",
         name: "listWorkflows",
     },
     PaginatedEndpoint {
-        path: "/workflows/implement/runs",
+        path: "/api/v1/workflows/implement/runs",
         name: "listWorkflowRuns",
     },
     PaginatedEndpoint {
-        path: "/retros",
+        path: "/api/v1/retros",
         name: "listRetros",
     },
     PaginatedEndpoint {
-        path: "/sessions",
+        path: "/api/v1/sessions",
         name: "listSessions",
     },
     PaginatedEndpoint {
-        path: "/insights/queries",
+        path: "/api/v1/insights/queries",
         name: "listSavedQueries",
     },
     PaginatedEndpoint {
-        path: "/insights/history",
+        path: "/api/v1/insights/history",
         name: "listQueryHistory",
     },
     PaginatedEndpoint {
-        path: "/models",
+        path: "/api/v1/models",
         name: "listModels",
     },
     PaginatedEndpoint {
-        path: "/runs/run-1/stages/detect-drift/turns",
+        path: "/api/v1/runs/run-1/stages/detect-drift/turns",
         name: "listStageTurns",
     },
     PaginatedEndpoint {
-        path: "/runs/run-1/questions",
+        path: "/api/v1/runs/run-1/questions",
         name: "listRunQuestions",
     },
     PaginatedEndpoint {
-        path: "/runs/run-1/stages",
+        path: "/api/v1/runs/run-1/stages",
         name: "listRunStages",
     },
     PaginatedEndpoint {
-        path: "/runs/run-1/verification",
+        path: "/api/v1/runs/run-1/verification",
         name: "retrieveRunVerification",
     },
 ];

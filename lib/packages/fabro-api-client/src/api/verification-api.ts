@@ -52,7 +52,7 @@ export const VerificationApiAxiosParamCreator = function (configuration?: Config
         createSignoff: async (createSignoffRequest: CreateSignoffRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'createSignoffRequest' is not null or undefined
             assertParamExists('createSignoff', 'createSignoffRequest', createSignoffRequest)
-            const localVarPath = `/verification/signoffs`;
+            const localVarPath = `/api/v1/verification/signoffs`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -96,7 +96,7 @@ export const VerificationApiAxiosParamCreator = function (configuration?: Config
          * @throws {RequiredError}
          */
         listSignoffs: async (control?: string, repository?: string, commitSha?: string, pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/verification/signoffs`;
+            const localVarPath = `/api/v1/verification/signoffs`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -155,7 +155,7 @@ export const VerificationApiAxiosParamCreator = function (configuration?: Config
          * @throws {RequiredError}
          */
         listVerificationControls: async (pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/verification/controls`;
+            const localVarPath = `/api/v1/verification/controls`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -194,7 +194,7 @@ export const VerificationApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
-         * Returns paginated verification criteria with their controls and performance metrics. Each criterion contains controls; retrieve a specific control via `/verification/controls/{id}`.
+         * Returns paginated verification criteria with their controls and performance metrics. Each criterion contains controls; retrieve a specific control via `/api/v1/verification/controls/{id}`.
          * @summary List Verification Criteria
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
@@ -202,7 +202,7 @@ export const VerificationApiAxiosParamCreator = function (configuration?: Config
          * @throws {RequiredError}
          */
         listVerificationCriteria: async (pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/verification/criteria`;
+            const localVarPath = `/api/v1/verification/criteria`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -250,7 +250,7 @@ export const VerificationApiAxiosParamCreator = function (configuration?: Config
         retrieveSignoff: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('retrieveSignoff', 'id', id)
-            const localVarPath = `/verification/signoffs/{id}`
+            const localVarPath = `/api/v1/verification/signoffs/{id}`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -291,7 +291,7 @@ export const VerificationApiAxiosParamCreator = function (configuration?: Config
         retrieveVerificationControl: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('retrieveVerificationControl', 'id', id)
-            const localVarPath = `/verification/controls/{id}`
+            const localVarPath = `/api/v1/verification/controls/{id}`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -332,7 +332,7 @@ export const VerificationApiAxiosParamCreator = function (configuration?: Config
         retrieveVerificationCriterion: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('retrieveVerificationCriterion', 'id', id)
-            const localVarPath = `/verification/criteria/{id}`
+            const localVarPath = `/api/v1/verification/criteria/{id}`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -417,7 +417,7 @@ export const VerificationApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns paginated verification criteria with their controls and performance metrics. Each criterion contains controls; retrieve a specific control via `/verification/controls/{id}`.
+         * Returns paginated verification criteria with their controls and performance metrics. Each criterion contains controls; retrieve a specific control via `/api/v1/verification/controls/{id}`.
          * @summary List Verification Criteria
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
@@ -514,7 +514,7 @@ export const VerificationApiFactory = function (configuration?: Configuration, b
             return localVarFp.listVerificationControls(pageLimit, pageOffset, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns paginated verification criteria with their controls and performance metrics. Each criterion contains controls; retrieve a specific control via `/verification/controls/{id}`.
+         * Returns paginated verification criteria with their controls and performance metrics. Each criterion contains controls; retrieve a specific control via `/api/v1/verification/controls/{id}`.
          * @summary List Verification Criteria
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
@@ -600,7 +600,7 @@ export class VerificationApi extends BaseAPI {
     }
 
     /**
-     * Returns paginated verification criteria with their controls and performance metrics. Each criterion contains controls; retrieve a specific control via `/verification/controls/{id}`.
+     * Returns paginated verification criteria with their controls and performance metrics. Each criterion contains controls; retrieve a specific control via `/api/v1/verification/controls/{id}`.
      * @summary List Verification Criteria
      * @param {number} [pageLimit] Maximum number of items to return per page.
      * @param {number} [pageOffset] Number of items to skip before returning results.

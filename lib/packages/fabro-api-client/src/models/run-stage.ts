@@ -35,7 +35,7 @@ export interface RunStage {
      */
     'duration_secs'?: number;
     /**
-     * Node identifier in the DOT graph source.
+     * Node identifier in the Graphviz graph source.
      */
     'dot_id'?: string;
 }

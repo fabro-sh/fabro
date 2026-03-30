@@ -35,7 +35,7 @@ export const SettingsApiAxiosParamCreator = function (configuration?: Configurat
          * @throws {RequiredError}
          */
         retrieveServerSettings: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/settings`;
+            const localVarPath = `/api/v1/settings`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -121,3 +121,4 @@ export class SettingsApi extends BaseAPI {
         return SettingsApiFp(this.configuration).retrieveServerSettings(options).then((request) => request(this.axios, this.basePath));
     }
 }
+

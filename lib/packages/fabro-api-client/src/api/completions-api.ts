@@ -42,7 +42,7 @@ export const CompletionsApiAxiosParamCreator = function (configuration?: Configu
         createCompletion: async (createCompletionRequest: CreateCompletionRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'createCompletionRequest' is not null or undefined
             assertParamExists('createCompletion', 'createCompletionRequest', createCompletionRequest)
-            const localVarPath = `/completions`;
+            const localVarPath = `/api/v1/completions`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;

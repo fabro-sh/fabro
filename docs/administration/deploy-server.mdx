@@ -54,7 +54,7 @@ See [Server Configuration](/administration/server-configuration) for the full `s
 In server mode, workflows are submitted via the REST API and executed in the background:
 
 ```bash
-curl -X POST http://localhost:3000/runs \
+curl -X POST http://localhost:3000/api/v1/runs \
   -H "Content-Type: application/json" \
   -d '{"workflow": "implement-feature", "goal": "Add user authentication"}'
 ```
@@ -63,7 +63,7 @@ The server returns immediately with a run ID. A background scheduler promotes qu
 
 ## Run lifecycle
 
-1. **Submit** — `POST /runs` creates the run with status `Queued`.
+1. **Submit** — `POST /api/v1/runs` creates the run with status `Queued`.
 2. **Schedule** — The scheduler picks up queued runs up to `max_concurrent_runs`.
 3. **Execute** — The engine walks the graph, streaming events to all subscribers.
 4. **Complete** — The run transitions to `Completed`, `Failed`, or `Cancelled`.
@@ -116,13 +116,13 @@ The CLI can delegate commands to a running Fabro server instead of executing loc
 mode = "server"
 
 [server]
-base_url = "https://fabro.example.com:3000"
+base_url = "https://fabro.example.com:3000/api/v1"
 ```
 
 Or use the `--server-url` flag:
 
 ```bash
-fabro --server-url https://fabro.example.com:3000 model list
+fabro --server-url https://fabro.example.com:3000/api/v1 model list
 ```
 
 This applies to commands like `fabro model list`, `fabro llm chat`, and `fabro exec`. See [User Configuration](/reference/user-configuration#mode) for the full options including mTLS setup.

@@ -11,7 +11,7 @@ A steering message is injected into the agent's conversation as a user-role mess
 
 The delivery flow:
 
-1. You send a `POST /runs/{id}/steer` request with your guidance text
+1. You send a `POST /api/v1/runs/{id}/steer` request with your guidance text
 2. The message is queued on the agent session's steering queue
 3. Before the next LLM call, Fabro drains the queue and injects each message as a `Steering` turn in the conversation history
 4. The LLM sees the guidance alongside its existing context and adjusts accordingly

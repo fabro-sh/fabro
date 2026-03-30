@@ -22,7 +22,7 @@ export const VerificationType = {
     AI: 'ai',
     AUTOMATED: 'automated',
     ANALYSIS: 'analysis',
-    AI_ANALYSIS: 'ai-analysis'
+    AI_ANALYSIS: 'ai-analysis',
 } as const;
 
 export type VerificationType = typeof VerificationType[keyof typeof VerificationType];

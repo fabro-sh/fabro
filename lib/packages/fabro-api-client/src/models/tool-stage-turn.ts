@@ -33,7 +33,7 @@ export interface ToolStageTurn {
 }
 
 export const ToolStageTurnKindEnum = {
-    TOOL: 'tool'
+    TOOL: 'tool',
 } as const;
 
 export type ToolStageTurnKindEnum = typeof ToolStageTurnKindEnum[keyof typeof ToolStageTurnKindEnum];

@@ -51,7 +51,7 @@ pub(crate) struct ResolvedMode {
 }
 
 #[cfg(feature = "server")]
-const DEFAULT_SERVER_URL: &str = "http://localhost:3000";
+const DEFAULT_SERVER_URL: &str = "http://localhost:3000/api/v1";
 
 #[cfg(feature = "server")]
 pub(crate) fn resolve_mode(

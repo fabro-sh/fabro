@@ -35,7 +35,7 @@ export const UsageApiAxiosParamCreator = function (configuration?: Configuration
          * @throws {RequiredError}
          */
         getAggregateUsage: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/usage`;
+            const localVarPath = `/api/v1/usage`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;

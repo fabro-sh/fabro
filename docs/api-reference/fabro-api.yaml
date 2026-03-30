@@ -71,7 +71,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
 
-  /openapi.json:
+  /api/v1/openapi.json:
     get:
       operationId: getOpenApiSpec
       tags: [Discovery]
@@ -86,7 +86,7 @@ paths:
               schema:
                 type: object
 
-  /user:
+  /api/v1/user:
     get:
       operationId: getUser
       tags: [Discovery]
@@ -108,7 +108,7 @@ paths:
 
   # ── Runs ──────────────────────────────────────────────────────────────
 
-  /runs:
+  /api/v1/runs:
     get:
       operationId: listRuns
       tags: [Runs]
@@ -149,7 +149,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}:
+  /api/v1/runs/{id}:
     get:
       operationId: retrieveRun
       tags: [Runs]
@@ -171,7 +171,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/cancel:
+  /api/v1/runs/{id}/cancel:
     post:
       operationId: cancelRun
       tags: [Runs]
@@ -199,7 +199,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/pause:
+  /api/v1/runs/{id}/pause:
     post:
       operationId: pauseRun
       tags: [Runs]
@@ -227,7 +227,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/unpause:
+  /api/v1/runs/{id}/unpause:
     post:
       operationId: unpauseRun
       tags: [Runs]
@@ -255,7 +255,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/graph:
+  /api/v1/runs/{id}/graph:
     get:
       operationId: retrieveRunGraph
       tags: [Runs]
@@ -283,7 +283,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/checkpoint:
+  /api/v1/runs/{id}/checkpoint:
     get:
       operationId: retrieveRunCheckpoint
       tags: [Run Internals]
@@ -307,7 +307,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/context:
+  /api/v1/runs/{id}/context:
     get:
       operationId: retrieveRunContext
       tags: [Run Internals]
@@ -330,7 +330,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/events:
+  /api/v1/runs/{id}/events:
     get:
       operationId: streamRunEvents
       tags: [Runs]
@@ -358,7 +358,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/questions:
+  /api/v1/runs/{id}/questions:
     get:
       operationId: listRunQuestions
       tags: [Human-in-the-Loop]
@@ -382,7 +382,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/questions/{qid}/answer:
+  /api/v1/runs/{id}/questions/{qid}/answer:
     post:
       operationId: submitRunAnswer
       tags: [Human-in-the-Loop]
@@ -419,7 +419,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/retro:
+  /api/v1/runs/{id}/retro:
     get:
       operationId: retrieveRetro
       tags: [Retros]
@@ -443,7 +443,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/stages:
+  /api/v1/runs/{id}/stages:
     get:
       operationId: listRunStages
       tags: [Run Internals]
@@ -467,7 +467,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/stages/{stageId}/turns:
+  /api/v1/runs/{id}/stages/{stageId}/turns:
     get:
       operationId: listStageTurns
       tags: [Run Internals]
@@ -492,7 +492,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/files:
+  /api/v1/runs/{id}/files:
     get:
       operationId: retrieveRunFiles
       tags: [Run Outputs]
@@ -517,7 +517,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/usage:
+  /api/v1/runs/{id}/usage:
     get:
       operationId: retrieveRunUsage
       tags: [Run Outputs]
@@ -539,7 +539,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/verification:
+  /api/v1/runs/{id}/verification:
     get:
       operationId: retrieveRunVerification
       tags: [Run Outputs]
@@ -563,7 +563,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/settings:
+  /api/v1/runs/{id}/settings:
     get:
       operationId: retrieveRunSettings
       tags: [Run Internals]
@@ -585,7 +585,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/steer:
+  /api/v1/runs/{id}/steer:
     post:
       operationId: steerRun
       tags: [Human-in-the-Loop]
@@ -615,7 +615,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /runs/{id}/preview:
+  /api/v1/runs/{id}/preview:
     post:
       operationId: generatePreviewUrl
       tags: [Human-in-the-Loop]
@@ -651,7 +651,7 @@ paths:
 
   # ── Workflows ─────────────────────────────────────────────────────────
 
-  /workflows:
+  /api/v1/workflows:
     get:
       operationId: listWorkflows
       tags: [Workflows]
@@ -668,7 +668,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaginatedWorkflowList"
 
-  /workflows/{name}:
+  /api/v1/workflows/{name}:
     get:
       operationId: retrieveWorkflow
       tags: [Workflows]
@@ -690,7 +690,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /workflows/{name}/runs:
+  /api/v1/workflows/{name}/runs:
     get:
       operationId: listWorkflowRuns
       tags: [Workflows]
@@ -716,12 +716,12 @@ paths:
 
   # ── Verification ──────────────────────────────────────────────────────
 
-  /verification/criteria:
+  /api/v1/verification/criteria:
     get:
       operationId: listVerificationCriteria
       tags: [Verification]
       summary: List Verification Criteria
-      description: Returns paginated verification criteria with their controls and performance metrics. Each criterion contains controls; retrieve a specific control via `/verification/controls/{id}`.
+      description: Returns paginated verification criteria with their controls and performance metrics. Each criterion contains controls; retrieve a specific control via `/api/v1/verification/controls/{id}`.
       parameters:
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/PageOffset"
@@ -733,7 +733,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaginatedVerificationCriterionList"
 
-  /verification/criteria/{id}:
+  /api/v1/verification/criteria/{id}:
     get:
       operationId: retrieveVerificationCriterion
       tags: [Verification]
@@ -755,7 +755,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /verification/controls:
+  /api/v1/verification/controls:
     get:
       operationId: listVerificationControls
       tags: [Verification]
@@ -772,7 +772,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaginatedVerificationControlList"
 
-  /verification/controls/{id}:
+  /api/v1/verification/controls/{id}:
     get:
       operationId: retrieveVerificationControl
       tags: [Verification]
@@ -794,7 +794,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /verification/signoffs:
+  /api/v1/verification/signoffs:
     get:
       operationId: listSignoffs
       tags: [Verification]
@@ -838,7 +838,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /verification/signoffs/{id}:
+  /api/v1/verification/signoffs/{id}:
     get:
       operationId: retrieveSignoff
       tags: [Verification]
@@ -862,7 +862,7 @@ paths:
 
   # ── Retros ────────────────────────────────────────────────────────────
 
-  /retros:
+  /api/v1/retros:
     get:
       operationId: listRetros
       tags: [Retros]
@@ -883,7 +883,7 @@ paths:
 
   # ── Sessions ──────────────────────────────────────────────────────────
 
-  /sessions:
+  /api/v1/sessions:
     get:
       operationId: listSessions
       tags: [Sessions]
@@ -918,7 +918,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/CreateSessionResponse"
 
-  /sessions/{id}:
+  /api/v1/sessions/{id}:
     get:
       operationId: retrieveSession
       tags: [Sessions]
@@ -940,7 +940,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /sessions/{id}/messages:
+  /api/v1/sessions/{id}/messages:
     post:
       operationId: sendSessionMessage
       tags: [Sessions]
@@ -968,7 +968,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /sessions/{id}/events:
+  /api/v1/sessions/{id}/events:
     get:
       operationId: streamSessionEvents
       tags: [Sessions]
@@ -1016,7 +1016,7 @@ paths:
 
   # ── Insights ──────────────────────────────────────────────────────────
 
-  /insights/queries:
+  /api/v1/insights/queries:
     get:
       operationId: listSavedQueries
       tags: [Insights]
@@ -1051,7 +1051,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SavedQuery"
 
-  /insights/queries/{id}:
+  /api/v1/insights/queries/{id}:
     get:
       operationId: retrieveSavedQuery
       tags: [Insights]
@@ -1115,7 +1115,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /insights/execute:
+  /api/v1/insights/execute:
     post:
       operationId: executeQuery
       tags: [Insights]
@@ -1141,7 +1141,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /insights/history:
+  /api/v1/insights/history:
     get:
       operationId: listQueryHistory
       tags: [Insights]
@@ -1160,7 +1160,7 @@ paths:
 
   # ── Usage ────────────────────────────────────────────────────────────
 
-  /usage:
+  /api/v1/usage:
     get:
       operationId: getAggregateUsage
       tags: [Usage]
@@ -1176,7 +1176,7 @@ paths:
 
   # ── Models ───────────────────────────────────────────────────────────
 
-  /models:
+  /api/v1/models:
     get:
       operationId: listModels
       tags: [Models]
@@ -1193,7 +1193,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaginatedModelList"
 
-  /models/{id}/test:
+  /api/v1/models/{id}/test:
     post:
       operationId: testModel
       tags: [Models]
@@ -1222,7 +1222,7 @@ paths:
 
   # ── Completions ───────────────────────────────────────────────────────
 
-  /completions:
+  /api/v1/completions:
     post:
       operationId: createCompletion
       tags: [Completions]
@@ -1255,7 +1255,7 @@ paths:
 
   # ── Settings ──────────────────────────────────────────────────────────
 
-  /settings:
+  /api/v1/settings:
     get:
       operationId: retrieveServerSettings
       tags: [Settings]
@@ -4498,11 +4498,11 @@ components:
         openapi_url:
           type: string
           description: URL of the OpenAPI JSON specification.
-          example: /openapi.json
+          example: /api/v1/openapi.json
         current_user_url:
           type: string
           description: URL of the current user endpoint.
-          example: /user
+          example: /api/v1/user
         health_url:
           type: string
           description: URL of the health check endpoint.

@@ -283,7 +283,7 @@ Start an interactive multi-turn chat session. In server mode, the session is bac
 ```bash
 fabro llm chat
 fabro llm chat -m claude-opus-4-6 -s "You are a helpful coding assistant"
-fabro llm chat --server-url http://localhost:3000
+fabro llm chat --server-url http://localhost:3000/api/v1
 ```
 
 | Flag | Description |
@@ -301,7 +301,7 @@ List available LLM models from the built-in catalog. Running `fabro model` with 
 fabro model list
 fabro model list -p anthropic
 fabro model list -q sonnet
-fabro model list --server-url http://localhost:3000
+fabro model list --server-url http://localhost:3000/api/v1
 ```
 
 | Flag | Description |

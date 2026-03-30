@@ -23,7 +23,7 @@ export const SmoothnessRating = {
     SMOOTH: 'smooth',
     BUMPY: 'bumpy',
     STRUGGLED: 'struggled',
-    FAILED: 'failed'
+    FAILED: 'failed',
 } as const;
 
 export type SmoothnessRating = typeof SmoothnessRating[keyof typeof SmoothnessRating];

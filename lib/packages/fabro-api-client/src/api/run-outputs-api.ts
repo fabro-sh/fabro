@@ -47,7 +47,7 @@ export const RunOutputsApiAxiosParamCreator = function (configuration?: Configur
         retrieveRunFiles: async (id: string, checkpoint?: string, pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('retrieveRunFiles', 'id', id)
-            const localVarPath = `/runs/{id}/files`
+            const localVarPath = `/api/v1/runs/{id}/files`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -100,7 +100,7 @@ export const RunOutputsApiAxiosParamCreator = function (configuration?: Configur
         retrieveRunUsage: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('retrieveRunUsage', 'id', id)
-            const localVarPath = `/runs/{id}/usage`
+            const localVarPath = `/api/v1/runs/{id}/usage`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -143,7 +143,7 @@ export const RunOutputsApiAxiosParamCreator = function (configuration?: Configur
         retrieveRunVerification: async (id: string, pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('retrieveRunVerification', 'id', id)
-            const localVarPath = `/runs/{id}/verification`
+            const localVarPath = `/api/v1/runs/{id}/verification`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);

@@ -23,7 +23,7 @@ export const FrictionKind = {
     TIMEOUT: 'timeout',
     WRONG_APPROACH: 'wrong_approach',
     TOOL_FAILURE: 'tool_failure',
-    AMBIGUITY: 'ambiguity'
+    AMBIGUITY: 'ambiguity',
 } as const;
 
 export type FrictionKind = typeof FrictionKind[keyof typeof FrictionKind];

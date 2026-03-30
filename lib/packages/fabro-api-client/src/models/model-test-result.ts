@@ -34,7 +34,7 @@ export interface ModelTestResult {
 
 export const ModelTestResultStatusEnum = {
     OK: 'ok',
-    ERROR: 'error'
+    ERROR: 'error',
 } as const;
 
 export type ModelTestResultStatusEnum = typeof ModelTestResultStatusEnum[keyof typeof ModelTestResultStatusEnum];

@@ -33,7 +33,7 @@ export interface WorkflowListItem {
      */
     'slug': string;
     /**
-     * DOT graph filename.
+     * Graphviz graph filename.
      */
     'filename': string;
     'last_run'?: WorkflowLastRun;

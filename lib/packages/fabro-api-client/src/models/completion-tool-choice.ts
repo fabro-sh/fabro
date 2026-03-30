@@ -32,7 +32,7 @@ export const CompletionToolChoiceModeEnum = {
     AUTO: 'auto',
     NONE: 'none',
     REQUIRED: 'required',
-    NAMED: 'named'
+    NAMED: 'named',
 } as const;
 
 export type CompletionToolChoiceModeEnum = typeof CompletionToolChoiceModeEnum[keyof typeof CompletionToolChoiceModeEnum];

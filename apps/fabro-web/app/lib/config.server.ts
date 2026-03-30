@@ -48,7 +48,7 @@ const WEB_DEFAULTS: WebConfig = {
 };
 
 const API_DEFAULTS: ApiConfig = {
-  base_url: "http://localhost:3000",
+  base_url: "http://localhost:3000/api/v1",
   authentication_strategy: "jwt",
 };
 

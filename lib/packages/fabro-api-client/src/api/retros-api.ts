@@ -45,7 +45,7 @@ export const RetrosApiAxiosParamCreator = function (configuration?: Configuratio
          * @throws {RequiredError}
          */
         listRetros: async (workflow?: string, smoothness?: SmoothnessRating, pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/retros`;
+            const localVarPath = `/api/v1/retros`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -101,7 +101,7 @@ export const RetrosApiAxiosParamCreator = function (configuration?: Configuratio
         retrieveRetro: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('retrieveRetro', 'id', id)
-            const localVarPath = `/runs/{id}/retro`
+            const localVarPath = `/api/v1/runs/{id}/retro`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);

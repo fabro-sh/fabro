@@ -71,7 +71,7 @@ export const DiscoveryApiAxiosParamCreator = function (configuration?: Configura
          * @throws {RequiredError}
          */
         getOpenApiSpec: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/openapi.json`;
+            const localVarPath = `/api/v1/openapi.json`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -131,7 +131,7 @@ export const DiscoveryApiAxiosParamCreator = function (configuration?: Configura
          * @throws {RequiredError}
          */
         getUser: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/user`;
+            const localVarPath = `/api/v1/user`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;

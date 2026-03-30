@@ -23,7 +23,7 @@ export const QuestionType = {
     MULTIPLE_CHOICE: 'multiple_choice',
     MULTI_SELECT: 'multi_select',
     FREEFORM: 'freeform',
-    CONFIRMATION: 'confirmation'
+    CONFIRMATION: 'confirmation',
 } as const;
 
 export type QuestionType = typeof QuestionType[keyof typeof QuestionType];

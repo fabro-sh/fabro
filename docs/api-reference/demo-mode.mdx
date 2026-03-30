@@ -22,7 +22,7 @@ Requests **without** the header are routed to the real API as usual, so demo and
 ### With curl
 
 ```bash
-curl http://localhost:3000/runs -H "X-Fabro-Demo: 1"
+curl http://localhost:3000/api/v1/runs -H "X-Fabro-Demo: 1"
 ```
 
 ### With the Web UI
@@ -54,5 +54,5 @@ Demo mode implements every API endpoint. Read endpoints return static data repre
 ## Limitations
 
 - **No state changes.** Write operations return a success response but nothing is persisted. Creating a run returns a fixed ID; it won't appear in subsequent list calls.
-- **No SSE streaming.** Event stream endpoints (`/runs/{id}/events`, `/sessions/{id}/events`) return immediately rather than streaming.
+- **No SSE streaming.** Event stream endpoints (`/api/v1/runs/{id}/events`, `/api/v1/sessions/{id}/events`) return immediately rather than streaming.
 - **Static data only.** The same data is returned regardless of path parameters — requesting any run ID returns the same run detail.

@@ -44,7 +44,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
         cancelRun: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('cancelRun', 'id', id)
-            const localVarPath = `/runs/{id}/cancel`
+            const localVarPath = `/api/v1/runs/{id}/cancel`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -84,7 +84,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
          * @throws {RequiredError}
          */
         listRuns: async (pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/runs`;
+            const localVarPath = `/api/v1/runs`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -132,7 +132,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
         pauseRun: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('pauseRun', 'id', id)
-            const localVarPath = `/runs/{id}/pause`
+            const localVarPath = `/api/v1/runs/{id}/pause`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -173,7 +173,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
         retrieveRun: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('retrieveRun', 'id', id)
-            const localVarPath = `/runs/{id}`
+            const localVarPath = `/api/v1/runs/{id}`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -214,7 +214,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
         retrieveRunGraph: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('retrieveRunGraph', 'id', id)
-            const localVarPath = `/runs/{id}/graph`
+            const localVarPath = `/api/v1/runs/{id}/graph`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -246,7 +246,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Queues a new workflow run from a DOT graph source. The run is created in `queued` status and will be picked up by the scheduler.
+         * Queues a new workflow run from a Graphviz graph source. The run is created in `queued` status and will be picked up by the scheduler.
          * @summary Start Run
          * @param {StartRunRequest} startRunRequest 
          * @param {*} [options] Override http request option.
@@ -255,7 +255,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
         startRun: async (startRunRequest: StartRunRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'startRunRequest' is not null or undefined
             assertParamExists('startRun', 'startRunRequest', startRunRequest)
-            const localVarPath = `/runs`;
+            const localVarPath = `/api/v1/runs`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -297,7 +297,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
         streamRunEvents: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('streamRunEvents', 'id', id)
-            const localVarPath = `/runs/{id}/events`
+            const localVarPath = `/api/v1/runs/{id}/events`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -338,7 +338,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
         unpauseRun: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('unpauseRun', 'id', id)
-            const localVarPath = `/runs/{id}/unpause`
+            const localVarPath = `/api/v1/runs/{id}/unpause`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -445,7 +445,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Queues a new workflow run from a DOT graph source. The run is created in `queued` status and will be picked up by the scheduler.
+         * Queues a new workflow run from a Graphviz graph source. The run is created in `queued` status and will be picked up by the scheduler.
          * @summary Start Run
          * @param {StartRunRequest} startRunRequest 
          * @param {*} [options] Override http request option.
@@ -544,7 +544,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.retrieveRunGraph(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Queues a new workflow run from a DOT graph source. The run is created in `queued` status and will be picked up by the scheduler.
+         * Queues a new workflow run from a Graphviz graph source. The run is created in `queued` status and will be picked up by the scheduler.
          * @summary Start Run
          * @param {StartRunRequest} startRunRequest 
          * @param {*} [options] Override http request option.
@@ -637,7 +637,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Queues a new workflow run from a DOT graph source. The run is created in `queued` status and will be picked up by the scheduler.
+     * Queues a new workflow run from a Graphviz graph source. The run is created in `queued` status and will be picked up by the scheduler.
      * @summary Start Run
      * @param {StartRunRequest} startRunRequest 
      * @param {*} [options] Override http request option.

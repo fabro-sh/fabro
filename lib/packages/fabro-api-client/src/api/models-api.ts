@@ -41,7 +41,7 @@ export const ModelsApiAxiosParamCreator = function (configuration?: Configuratio
          * @throws {RequiredError}
          */
         listModels: async (pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/models`;
+            const localVarPath = `/api/v1/models`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -89,7 +89,7 @@ export const ModelsApiAxiosParamCreator = function (configuration?: Configuratio
         testModel: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('testModel', 'id', id)
-            const localVarPath = `/models/{id}/test`
+            const localVarPath = `/api/v1/models/{id}/test`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);

@@ -46,7 +46,7 @@ Key server config options:
 
 ### Run lifecycle
 
-1. **Submit** — `POST /runs` with a Graphviz workflow source. The run is created with status `Queued` and the response returns immediately with the run ID.
+1. **Submit** — `POST /api/v1/runs` with a Graphviz workflow source. The run is created with status `Queued` and the response returns immediately with the run ID.
 2. **Schedule** — A background scheduler promotes queued runs to `Running` in FIFO order, up to the concurrency limit.
 3. **Execute** — The engine walks the graph, streaming events to all subscribers.
 4. **Complete** — The run transitions to `Completed`, `Failed`, or `Cancelled`.
