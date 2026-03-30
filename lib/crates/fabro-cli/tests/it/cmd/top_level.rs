@@ -9,7 +9,7 @@ fn version() {
     success: true
     exit_code: 0
     ----- stdout -----
-    fabro [VERSION] (c6ff6c9 2026-03-30)
+    fabro [VERSION] ([BUILD])
     ----- stderr -----
     ");
 }

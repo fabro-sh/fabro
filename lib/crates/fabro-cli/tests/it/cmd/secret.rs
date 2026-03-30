@@ -1,4 +1,12 @@
 use fabro_test::{fabro_snapshot, test_context};
+use predicates;
+
+#[allow(deprecated)]
+fn fabro() -> assert_cmd::Command {
+    let mut cmd = assert_cmd::Command::cargo_bin("fabro").unwrap();
+    cmd.env("NO_COLOR", "1");
+    cmd
+}
 
 #[test]
 fn help() {
@@ -29,4 +37,123 @@ fn help() {
       -h, --help                       Print help
     ----- stderr -----
     ");
+}
+
+#[test]
+fn test_secret_lifecycle() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let secret = |args: &[&str]| -> assert_cmd::assert::Assert {
+        fabro().env("HOME", tmp.path()).args(args).assert()
+    };
+
+    // 1. set FOO=bar
+    secret(&["secret", "set", "FOO", "bar"]).success();
+
+    // 2. get FOO -> stdout is "bar\n"
+    secret(&["secret", "get", "FOO"]).success().stdout("bar\n");
+
+    // 3. list -> contains FOO
+    secret(&["secret", "list"])
+        .success()
+        .stdout(predicates::str::contains("FOO"));
+
+    // 4. update FOO
+    secret(&["secret", "set", "FOO", "updated"]).success();
+
+    // 5. get FOO -> "updated\n"
+    secret(&["secret", "get", "FOO"])
+        .success()
+        .stdout("updated\n");
+
+    // 6. rm FOO
+    secret(&["secret", "rm", "FOO"]).success();
+
+    // 7. get FOO -> fails
+    secret(&["secret", "get", "FOO"]).failure();
+}
+
+#[test]
+fn test_secret_list_show_values() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let secret = |args: &[&str]| -> assert_cmd::assert::Assert {
+        fabro().env("HOME", tmp.path()).args(args).assert()
+    };
+
+    secret(&["secret", "set", "A", "1"]).success();
+    secret(&["secret", "set", "B", "2"]).success();
+
+    // Without --show-values: just keys
+    let out = secret(&["secret", "list"]).success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("A"));
+    assert!(stdout.contains("B"));
+    assert!(!stdout.contains("A=1"));
+
+    // With --show-values: KEY=VALUE
+    secret(&["secret", "list", "--show-values"])
+        .success()
+        .stdout(predicates::str::contains("A=1"))
+        .stdout(predicates::str::contains("B=2"));
+}
+
+#[test]
+fn test_secret_list_alias_ls() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    fabro()
+        .env("HOME", tmp.path())
+        .args(["secret", "set", "X", "y"])
+        .assert()
+        .success();
+
+    fabro()
+        .env("HOME", tmp.path())
+        .args(["secret", "ls"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("X"));
+}
+
+#[test]
+fn test_secret_get_missing_key() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    fabro()
+        .env("HOME", tmp.path())
+        .args(["secret", "get", "NOPE"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("secret not found"));
+}
+
+#[test]
+fn test_secret_rm_missing_key() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    fabro()
+        .env("HOME", tmp.path())
+        .args(["secret", "rm", "NOPE"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("secret not found"));
+}
+
+#[test]
+fn test_secret_value_with_equals() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    fabro()
+        .env("HOME", tmp.path())
+        .args(["secret", "set", "URL", "https://x.com?a=1&b=2"])
+        .assert()
+        .success();
+
+    fabro()
+        .env("HOME", tmp.path())
+        .args(["secret", "get", "URL"])
+        .assert()
+        .success()
+        .stdout("https://x.com?a=1&b=2\n");
 }

@@ -2,9 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use assert_cmd::Command;
-use assert_cmd::assert::Assert;
 use fabro_store::RuntimeState;
-use predicates::str::contains;
 use serde_json::Value;
 
 // ---------------------------------------------------------------------------
@@ -21,12 +19,6 @@ fn fabro() -> Command {
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../test/scenario")
-        .join(name)
-}
-
-fn fixture_root(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../test")
         .join(name)
 }
 
@@ -50,7 +42,7 @@ fn find_run_dir(storage_dir: &Path) -> PathBuf {
     let runs_base = storage_dir.join("runs");
     let entries: Vec<_> = std::fs::read_dir(&runs_base)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", runs_base.display()))
-        .filter_map(Result::ok)
+        .filter_map(|e| e.ok())
         .filter(|e| e.path().is_dir())
         .collect();
     assert_eq!(
@@ -431,269 +423,6 @@ fn scenario_full_stack(sandbox: &str) {
     );
 }
 
-// ---------------------------------------------------------------------------
-// repo deinit
-// ---------------------------------------------------------------------------
-
-fn init_git_repo(path: &Path) {
-    std::process::Command::new("git")
-        .args(["init"])
-        .current_dir(path)
-        .output()
-        .expect("git init should succeed");
-}
-
-fn init_fabro_project(path: &Path) {
-    std::fs::write(path.join("fabro.toml"), "version = 1\n").unwrap();
-    let workflow_dir = path.join("fabro/workflows/hello");
-    std::fs::create_dir_all(&workflow_dir).unwrap();
-    std::fs::write(workflow_dir.join("workflow.fabro"), "digraph {}").unwrap();
-    std::fs::write(workflow_dir.join("workflow.toml"), "version = 1\n").unwrap();
-}
-
-#[test]
-fn test_repo_deinit_removes_fabro_toml_and_dir() {
-    let tmp = tempfile::tempdir().unwrap();
-    init_git_repo(tmp.path());
-    init_fabro_project(tmp.path());
-
-    assert!(tmp.path().join("fabro.toml").exists());
-    assert!(tmp.path().join("fabro").exists());
-
-    fabro()
-        .args(["repo", "deinit"])
-        .current_dir(tmp.path())
-        .assert()
-        .success();
-
-    assert!(
-        !tmp.path().join("fabro.toml").exists(),
-        "fabro.toml should be removed"
-    );
-    assert!(
-        !tmp.path().join("fabro").exists(),
-        "fabro/ directory should be removed"
-    );
-}
-
-#[test]
-fn test_repo_deinit_fails_when_not_initialized() {
-    let tmp = tempfile::tempdir().unwrap();
-    init_git_repo(tmp.path());
-
-    fabro()
-        .args(["repo", "deinit"])
-        .current_dir(tmp.path())
-        .assert()
-        .failure()
-        .stderr(contains("not initialized"));
-}
-
-// ---------------------------------------------------------------------------
-// repo init --skill
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_repo_init_skill_installs_skill_files() {
-    let tmp = tempfile::tempdir().unwrap();
-    init_git_repo(tmp.path());
-
-    fabro()
-        .args(["repo", "init", "--skill"])
-        .current_dir(tmp.path())
-        .assert()
-        .success();
-
-    // Skill files should be installed under .claude/skills/fabro-create-workflow/
-    let skill_dir = tmp.path().join(".claude/skills/fabro-create-workflow");
-    assert!(skill_dir.join("SKILL.md").exists(), "SKILL.md should exist");
-    assert!(
-        skill_dir.join("references/dot-language.md").exists(),
-        "dot-language.md should exist"
-    );
-}
-
-#[test]
-fn test_repo_init_help_does_not_show_skill() {
-    let out = fabro().args(["repo", "init", "--help"]).assert().success();
-    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
-    assert!(
-        !stdout.contains("--skill"),
-        "--skill should be hidden from help"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// secret subcommand lifecycle
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_secret_lifecycle() {
-    let tmp = tempfile::tempdir().unwrap();
-
-    let secret = |args: &[&str]| -> Assert { fabro().env("HOME", tmp.path()).args(args).assert() };
-
-    // 1. set FOO=bar
-    secret(&["secret", "set", "FOO", "bar"]).success();
-
-    // 2. get FOO → stdout is "bar\n"
-    secret(&["secret", "get", "FOO"]).success().stdout("bar\n");
-
-    // 3. list → contains FOO
-    secret(&["secret", "list"])
-        .success()
-        .stdout(contains("FOO"));
-
-    // 4. update FOO
-    secret(&["secret", "set", "FOO", "updated"]).success();
-
-    // 5. get FOO → "updated\n"
-    secret(&["secret", "get", "FOO"])
-        .success()
-        .stdout("updated\n");
-
-    // 6. rm FOO
-    secret(&["secret", "rm", "FOO"]).success();
-
-    // 7. get FOO → fails
-    secret(&["secret", "get", "FOO"]).failure();
-}
-
-#[test]
-fn test_secret_list_show_values() {
-    let tmp = tempfile::tempdir().unwrap();
-
-    let secret = |args: &[&str]| -> Assert { fabro().env("HOME", tmp.path()).args(args).assert() };
-
-    secret(&["secret", "set", "A", "1"]).success();
-    secret(&["secret", "set", "B", "2"]).success();
-
-    // Without --show-values: just keys
-    let out = secret(&["secret", "list"]).success();
-    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
-    assert!(stdout.contains('A'));
-    assert!(stdout.contains('B'));
-    assert!(!stdout.contains("A=1"));
-
-    // With --show-values: KEY=VALUE
-    secret(&["secret", "list", "--show-values"])
-        .success()
-        .stdout(contains("A=1"))
-        .stdout(contains("B=2"));
-}
-
-#[test]
-fn test_secret_list_alias_ls() {
-    let tmp = tempfile::tempdir().unwrap();
-
-    fabro()
-        .env("HOME", tmp.path())
-        .args(["secret", "set", "X", "y"])
-        .assert()
-        .success();
-
-    fabro()
-        .env("HOME", tmp.path())
-        .args(["secret", "ls"])
-        .assert()
-        .success()
-        .stdout(contains("X"));
-}
-
-#[test]
-fn test_secret_get_missing_key() {
-    let tmp = tempfile::tempdir().unwrap();
-
-    fabro()
-        .env("HOME", tmp.path())
-        .args(["secret", "get", "NOPE"])
-        .assert()
-        .failure()
-        .stderr(contains("secret not found"));
-}
-
-#[test]
-fn test_secret_rm_missing_key() {
-    let tmp = tempfile::tempdir().unwrap();
-
-    fabro()
-        .env("HOME", tmp.path())
-        .args(["secret", "rm", "NOPE"])
-        .assert()
-        .failure()
-        .stderr(contains("secret not found"));
-}
-
-#[test]
-fn test_secret_value_with_equals() {
-    let tmp = tempfile::tempdir().unwrap();
-
-    fabro()
-        .env("HOME", tmp.path())
-        .args(["secret", "set", "URL", "https://x.com?a=1&b=2"])
-        .assert()
-        .success();
-
-    fabro()
-        .env("HOME", tmp.path())
-        .args(["secret", "get", "URL"])
-        .assert()
-        .success()
-        .stdout("https://x.com?a=1&b=2\n");
-}
-
-// ---------------------------------------------------------------------------
-// Standalone tests (no sandbox parametrization)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_validate_rejects_invalid() {
-    fabro()
-        .args(["validate", fixture_root("invalid.fabro").to_str().unwrap()])
-        .assert()
-        .failure();
-}
-
-#[test]
-fn test_model_list() {
-    fabro()
-        .args(["model", "list"])
-        .assert()
-        .success()
-        .stdout(contains("claude-haiku"));
-}
-
-#[test]
-fn test_workflow_list() {
-    let tmp = tempfile::tempdir().unwrap();
-
-    // Minimal project structure: fabro.toml + a workflow
-    std::fs::write(tmp.path().join("fabro.toml"), "version = 1\n").unwrap();
-    let wf_dir = tmp.path().join("workflows/my_test_wf");
-    std::fs::create_dir_all(&wf_dir).unwrap();
-    std::fs::write(
-        wf_dir.join("workflow.toml"),
-        "version = 1\ngoal = \"A test workflow\"\n",
-    )
-    .unwrap();
-
-    fabro()
-        .args(["workflow", "list"])
-        .current_dir(tmp.path())
-        .assert()
-        .success()
-        // workflow list prints to stderr
-        .stderr(contains("my_test_wf"));
-}
-
-#[test]
-#[ignore = "scenario: requires ANTHROPIC_API_KEY"]
-fn test_doctor() {
-    dotenvy::dotenv().ok();
-    fabro().args(["doctor"]).assert().success();
-}
-
-// ---------------------------------------------------------------------------
 // Run lifecycle: ps / inspect / logs / rm / system df
 // ---------------------------------------------------------------------------
 
@@ -703,7 +432,7 @@ fn local_run_lifecycle() {
     dotenvy::dotenv().ok();
     let tmp = tempfile::tempdir().unwrap();
 
-    let fabro_home = |args: &[&str]| -> Assert {
+    let fabro_home = |args: &[&str]| -> assert_cmd::assert::Assert {
         fabro()
             .env("HOME", tmp.path())
             .args(args)
