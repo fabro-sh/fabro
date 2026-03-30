@@ -1,13 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 use predicates::prelude::*;
 
-#[allow(deprecated)]
-fn arc() -> assert_cmd::Command {
-    let mut cmd = assert_cmd::Command::cargo_bin("fabro").unwrap();
-    cmd.arg("--no-upgrade-check");
-    cmd
-}
-
 #[test]
 fn invalid_permissions() {
     let context = test_context!();
@@ -44,13 +37,13 @@ fn no_prompt() {
 
 #[test]
 fn exec_missing_api_key_exits_with_error() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    arc()
-        .args(["exec", "test prompt"])
-        .env_clear()
-        .env("HOME", tmp.path().to_str().unwrap())
-        .current_dir(tmp.path())
-        .assert()
+    let context = test_context!();
+    let mut cmd = context.exec_cmd();
+    cmd.arg("test prompt");
+    cmd.env_clear();
+    cmd.env("HOME", &context.home_dir);
+    cmd.current_dir(&context.temp_dir);
+    cmd.assert()
         .failure()
         .stderr(predicate::str::contains("API key not set"));
 }
@@ -59,10 +52,10 @@ fn exec_missing_api_key_exits_with_error() {
 #[ignore = "requires API key"]
 fn exec_creates_file() {
     dotenvy::dotenv().ok();
-    let tmp = tempfile::tempdir().expect("tempdir");
-    arc()
+    let context = test_context!();
+    context
+        .exec_cmd()
         .args([
-            "exec",
             "--auto-approve",
             "--permissions",
             "full",
@@ -72,11 +65,11 @@ fn exec_creates_file() {
             "claude-haiku-4-5",
             "Create a file called hello.txt containing exactly 'Hello'",
         ])
-        .current_dir(tmp.path())
+        .current_dir(&context.temp_dir)
         .timeout(std::time::Duration::from_secs(120))
         .assert()
         .success();
-    let path = tmp.path().join("hello.txt");
+    let path = context.temp_dir.join("hello.txt");
     assert!(path.exists(), "hello.txt should have been created");
     let content = std::fs::read_to_string(&path).expect("read hello.txt");
     assert!(
@@ -89,10 +82,10 @@ fn exec_creates_file() {
 #[ignore = "requires API key"]
 fn exec_shell_command() {
     dotenvy::dotenv().ok();
-    let tmp = tempfile::tempdir().expect("tempdir");
-    arc()
+    let context = test_context!();
+    context
+        .exec_cmd()
         .args([
-            "exec",
             "--auto-approve",
             "--permissions",
             "full",
@@ -102,7 +95,7 @@ fn exec_shell_command() {
             "claude-haiku-4-5",
             "Run the shell command `echo arc_test_marker_42` and tell me what it printed",
         ])
-        .current_dir(tmp.path())
+        .current_dir(&context.temp_dir)
         .timeout(std::time::Duration::from_secs(120))
         .assert()
         .success();
@@ -112,10 +105,10 @@ fn exec_shell_command() {
 #[ignore = "requires API key"]
 fn exec_read_only_blocks_write() {
     dotenvy::dotenv().ok();
-    let tmp = tempfile::tempdir().expect("tempdir");
-    arc()
+    let context = test_context!();
+    context
+        .exec_cmd()
         .args([
-            "exec",
             "--auto-approve",
             "--permissions",
             "read-only",
@@ -125,12 +118,12 @@ fn exec_read_only_blocks_write() {
             "claude-haiku-4-5",
             "Create a file called forbidden.txt containing 'should not exist'",
         ])
-        .current_dir(tmp.path())
+        .current_dir(&context.temp_dir)
         .timeout(std::time::Duration::from_secs(120))
         .assert()
         .success();
     assert!(
-        !tmp.path().join("forbidden.txt").exists(),
+        !context.temp_dir.join("forbidden.txt").exists(),
         "forbidden.txt should NOT exist under read-only permissions"
     );
 }
@@ -139,10 +132,10 @@ fn exec_read_only_blocks_write() {
 #[ignore = "requires API key"]
 fn exec_json_output_format() {
     dotenvy::dotenv().ok();
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let output = arc()
+    let context = test_context!();
+    let output = context
+        .exec_cmd()
         .args([
-            "exec",
             "--auto-approve",
             "--permissions",
             "full",
@@ -154,7 +147,7 @@ fn exec_json_output_format() {
             "claude-haiku-4-5",
             "Create a file called test.txt containing 'test'",
         ])
-        .current_dir(tmp.path())
+        .current_dir(&context.temp_dir)
         .timeout(std::time::Duration::from_secs(120))
         .assert()
         .success()
@@ -178,11 +171,11 @@ fn exec_json_output_format() {
 #[ignore = "requires API key"]
 fn exec_read_and_edit() {
     dotenvy::dotenv().ok();
-    let tmp = tempfile::tempdir().expect("tempdir");
-    std::fs::write(tmp.path().join("data.txt"), "old content").expect("write data.txt");
-    arc()
+    let context = test_context!();
+    std::fs::write(context.temp_dir.join("data.txt"), "old content").expect("write data.txt");
+    context
+        .exec_cmd()
         .args([
-            "exec",
             "--auto-approve",
             "--permissions",
             "full",
@@ -192,11 +185,12 @@ fn exec_read_and_edit() {
             "claude-haiku-4-5",
             "Read data.txt then replace its entire content with 'new content'",
         ])
-        .current_dir(tmp.path())
+        .current_dir(&context.temp_dir)
         .timeout(std::time::Duration::from_secs(120))
         .assert()
         .success();
-    let content = std::fs::read_to_string(tmp.path().join("data.txt")).expect("read data.txt");
+    let content =
+        std::fs::read_to_string(context.temp_dir.join("data.txt")).expect("read data.txt");
     assert!(
         content.contains("new content"),
         "Expected 'new content' in data.txt, got: {content}"

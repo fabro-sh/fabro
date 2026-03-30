@@ -1,19 +1,13 @@
+use fabro_test::test_context;
 use predicates;
-
-#[allow(deprecated)]
-fn fabro() -> assert_cmd::Command {
-    let mut cmd = assert_cmd::Command::cargo_bin("fabro").unwrap();
-    cmd.env("NO_COLOR", "1");
-    cmd
-}
 
 #[test]
 fn list() {
-    let tmp = tempfile::tempdir().unwrap();
+    let context = test_context!();
 
     // Minimal project structure: fabro.toml + a workflow
-    std::fs::write(tmp.path().join("fabro.toml"), "version = 1\n").unwrap();
-    let wf_dir = tmp.path().join("workflows/my_test_wf");
+    std::fs::write(context.temp_dir.join("fabro.toml"), "version = 1\n").unwrap();
+    let wf_dir = context.temp_dir.join("workflows/my_test_wf");
     std::fs::create_dir_all(&wf_dir).unwrap();
     std::fs::write(
         wf_dir.join("workflow.toml"),
@@ -21,9 +15,10 @@ fn list() {
     )
     .unwrap();
 
-    fabro()
+    context
+        .command()
         .args(["workflow", "list"])
-        .current_dir(tmp.path())
+        .current_dir(&context.temp_dir)
         .assert()
         .success()
         // workflow list prints to stderr

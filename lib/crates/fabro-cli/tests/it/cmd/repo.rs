@@ -1,13 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 use predicates;
 
-#[allow(deprecated)]
-fn fabro() -> assert_cmd::Command {
-    let mut cmd = assert_cmd::Command::cargo_bin("fabro").unwrap();
-    cmd.env("NO_COLOR", "1");
-    cmd
-}
-
 fn init_git_repo(path: &std::path::Path) {
     std::process::Command::new("git")
         .args(["init"])
@@ -55,37 +48,39 @@ fn help() {
 
 #[test]
 fn test_repo_deinit_removes_fabro_toml_and_dir() {
-    let tmp = tempfile::tempdir().unwrap();
-    init_git_repo(tmp.path());
-    init_fabro_project(tmp.path());
+    let context = test_context!();
+    init_git_repo(&context.temp_dir);
+    init_fabro_project(&context.temp_dir);
 
-    assert!(tmp.path().join("fabro.toml").exists());
-    assert!(tmp.path().join("fabro").exists());
+    assert!(context.temp_dir.join("fabro.toml").exists());
+    assert!(context.temp_dir.join("fabro").exists());
 
-    fabro()
-        .args(["repo", "deinit"])
-        .current_dir(tmp.path())
+    context
+        .repo()
+        .arg("deinit")
+        .current_dir(&context.temp_dir)
         .assert()
         .success();
 
     assert!(
-        !tmp.path().join("fabro.toml").exists(),
+        !context.temp_dir.join("fabro.toml").exists(),
         "fabro.toml should be removed"
     );
     assert!(
-        !tmp.path().join("fabro").exists(),
+        !context.temp_dir.join("fabro").exists(),
         "fabro/ directory should be removed"
     );
 }
 
 #[test]
 fn test_repo_deinit_fails_when_not_initialized() {
-    let tmp = tempfile::tempdir().unwrap();
-    init_git_repo(tmp.path());
+    let context = test_context!();
+    init_git_repo(&context.temp_dir);
 
-    fabro()
-        .args(["repo", "deinit"])
-        .current_dir(tmp.path())
+    context
+        .repo()
+        .arg("deinit")
+        .current_dir(&context.temp_dir)
         .assert()
         .failure()
         .stderr(predicates::str::contains("not initialized"));
@@ -93,17 +88,20 @@ fn test_repo_deinit_fails_when_not_initialized() {
 
 #[test]
 fn test_repo_init_skill_installs_skill_files() {
-    let tmp = tempfile::tempdir().unwrap();
-    init_git_repo(tmp.path());
+    let context = test_context!();
+    init_git_repo(&context.temp_dir);
 
-    fabro()
-        .args(["repo", "init", "--skill"])
-        .current_dir(tmp.path())
+    context
+        .repo()
+        .args(["init", "--skill"])
+        .current_dir(&context.temp_dir)
         .assert()
         .success();
 
     // Skill files should be installed under .claude/skills/fabro-create-workflow/
-    let skill_dir = tmp.path().join(".claude/skills/fabro-create-workflow");
+    let skill_dir = context
+        .temp_dir
+        .join(".claude/skills/fabro-create-workflow");
     assert!(skill_dir.join("SKILL.md").exists(), "SKILL.md should exist");
     assert!(
         skill_dir.join("references/dot-language.md").exists(),
@@ -113,7 +111,8 @@ fn test_repo_init_skill_installs_skill_files() {
 
 #[test]
 fn test_repo_init_help_does_not_show_skill() {
-    let out = fabro().args(["repo", "init", "--help"]).assert().success();
+    let context = test_context!();
+    let out = context.repo().args(["init", "--help"]).assert().success();
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
     assert!(
         !stdout.contains("--skill"),

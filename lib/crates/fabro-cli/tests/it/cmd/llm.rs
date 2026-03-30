@@ -1,13 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 use predicates::prelude::*;
 
-#[allow(deprecated)]
-fn arc() -> assert_cmd::Command {
-    let mut cmd = assert_cmd::Command::cargo_bin("fabro").unwrap();
-    cmd.arg("--no-upgrade-check");
-    cmd
-}
-
 #[test]
 fn prompt_bad_option() {
     let context = test_context!();
@@ -64,8 +57,10 @@ fn prompt_schema_invalid() {
 
 #[test]
 fn prompt_reads_from_stdin() {
-    let result = arc()
-        .args(["llm", "prompt", "--no-stream", "-m", "test-model"])
+    let context = test_context!();
+    let result = context
+        .llm()
+        .args(["prompt", "--no-stream", "-m", "test-model"])
         .write_stdin("hello from stdin")
         .assert()
         .failure();
@@ -76,9 +71,10 @@ fn prompt_reads_from_stdin() {
 
 #[test]
 fn prompt_concatenates_stdin_and_arg() {
-    let result = arc()
+    let context = test_context!();
+    let result = context
+        .llm()
         .args([
-            "llm",
             "prompt",
             "--no-stream",
             "-m",
@@ -95,9 +91,11 @@ fn prompt_concatenates_stdin_and_arg() {
 #[test]
 #[ignore = "requires API key"]
 fn prompt_no_stream_generates_response() {
-    arc()
+    dotenvy::dotenv().ok();
+    let context = test_context!();
+    context
+        .llm()
         .args([
-            "llm",
             "prompt",
             "--no-stream",
             "-m",
@@ -112,9 +110,11 @@ fn prompt_no_stream_generates_response() {
 #[test]
 #[ignore = "requires API key"]
 fn prompt_stream_generates_response() {
-    arc()
+    dotenvy::dotenv().ok();
+    let context = test_context!();
+    context
+        .llm()
         .args([
-            "llm",
             "prompt",
             "-m",
             "claude-sonnet-4-5",
@@ -128,9 +128,11 @@ fn prompt_stream_generates_response() {
 #[test]
 #[ignore = "requires API key"]
 fn prompt_usage_shows_tokens() {
-    arc()
+    dotenvy::dotenv().ok();
+    let context = test_context!();
+    context
+        .llm()
         .args([
-            "llm",
             "prompt",
             "--no-stream",
             "-u",
@@ -146,9 +148,12 @@ fn prompt_usage_shows_tokens() {
 #[test]
 #[ignore = "requires API key"]
 fn prompt_schema_no_stream_generates_json() {
-    let assert = arc()
+    dotenvy::dotenv().ok();
+    let context = test_context!();
+    let assert = context
+        .llm()
         .args([
-            "llm", "prompt", "--no-stream", "-m", "claude-sonnet-4-5",
+            "prompt", "--no-stream", "-m", "claude-sonnet-4-5",
             "--schema", r#"{"type":"object","properties":{"greeting":{"type":"string"}},"required":["greeting"]}"#,
             "Return a JSON object with a greeting field set to hello",
         ])
@@ -167,9 +172,12 @@ fn prompt_schema_no_stream_generates_json() {
 #[test]
 #[ignore = "requires API key"]
 fn prompt_schema_stream_generates_json() {
-    let assert = arc()
+    dotenvy::dotenv().ok();
+    let context = test_context!();
+    let assert = context
+        .llm()
         .args([
-            "llm", "prompt", "-m", "claude-sonnet-4-5",
+            "prompt", "-m", "claude-sonnet-4-5",
             "--schema", r#"{"type":"object","properties":{"greeting":{"type":"string"}},"required":["greeting"]}"#,
             "Return a JSON object with a greeting field set to hello",
         ])
@@ -188,7 +196,10 @@ fn prompt_schema_stream_generates_json() {
 #[test]
 #[ignore = "requires API key"]
 fn chat_multi_turn_with_system_prompt() {
-    let assert = arc()
+    dotenvy::dotenv().ok();
+    let context = test_context!();
+    let assert = context
+        .command()
         .args([
             "llm",
             "chat",

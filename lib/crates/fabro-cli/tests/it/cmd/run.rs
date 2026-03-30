@@ -19,26 +19,6 @@ fn fixture(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../../test/{name}"))
 }
 
-#[allow(deprecated)]
-fn arc() -> assert_cmd::Command {
-    let mut cmd = assert_cmd::Command::cargo_bin("fabro").unwrap();
-    cmd.arg("--no-upgrade-check");
-    cmd
-}
-
-fn init_cli_home(storage_dir: &Path) -> tempfile::TempDir {
-    let home = tempfile::tempdir().unwrap();
-    let home_fabro = home.path().join(".fabro");
-    std::fs::create_dir_all(&home_fabro).unwrap();
-    let storage_dir = serde_json::to_string(&storage_dir.to_string_lossy().into_owned()).unwrap();
-    std::fs::write(
-        home_fabro.join("user.toml"),
-        format!("storage_dir = {storage_dir}\n"),
-    )
-    .unwrap();
-    home
-}
-
 fn list_metadata_run_ids(repo_dir: &Path) -> BTreeSet<String> {
     let repo = Repository::discover(repo_dir).unwrap();
     repo.references()
@@ -217,12 +197,12 @@ fn latest_metadata_checkpoint(repo_dir: &Path, run_id: &str) -> Checkpoint {
 /// Helper: create a minimal run directory that `resolve_run` can find.
 /// Sets up run.json, status.json, and progress.jsonl.
 fn setup_run_dir(
-    home: &std::path::Path,
+    storage_dir: &std::path::Path,
     run_id: &str,
     spec_overrides: serde_json::Value,
     progress_lines: &[&str],
 ) -> std::path::PathBuf {
-    let run_dir = home.join(".fabro").join("runs").join(run_id);
+    let run_dir = storage_dir.join("runs").join(run_id);
     std::fs::create_dir_all(&run_dir).unwrap();
 
     // Build defaults, then merge overrides
@@ -282,8 +262,8 @@ fn setup_run_dir(
     run_dir
 }
 
-fn find_run_dir(home: &std::path::Path, run_id: &str) -> std::path::PathBuf {
-    let runs_dir = home.join(".fabro").join("runs");
+fn find_run_dir(storage_dir: &std::path::Path, run_id: &str) -> std::path::PathBuf {
+    let runs_dir = storage_dir.join("runs");
     std::fs::read_dir(&runs_dir)
         .unwrap()
         .flatten()
@@ -535,23 +515,21 @@ fn dry_run_legacy_tool() {
 
 #[test]
 fn dry_run_writes_jsonl_and_live_json() {
-    let tmp = tempfile::tempdir().unwrap();
-    let storage_dir = tmp.path().join("fabro-data");
+    let context = test_context!();
 
-    arc()
+    context
+        .command()
         .args([
             "run",
             "--dry-run",
             "--auto-approve",
-            "--storage-dir",
-            storage_dir.to_str().unwrap(),
             "../../../test/simple.fabro",
         ])
         .assert()
         .success();
 
     // Find the single run directory under storage_dir/runs/
-    let runs_base = storage_dir.join("runs");
+    let runs_base = context.storage_dir.join("runs");
     assert!(runs_base.exists(), "runs/ directory should exist");
     let entries: Vec<_> = std::fs::read_dir(&runs_base)
         .unwrap()
@@ -605,19 +583,17 @@ fn dry_run_writes_jsonl_and_live_json() {
 
 #[test]
 fn run_id_passthrough_uses_provided_ulid() {
-    let tmp = tempfile::tempdir().unwrap();
-    let storage_dir = tmp.path().join("fabro-data");
     let my_ulid = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    let context = test_context!();
 
-    arc()
+    context
+        .command()
         .args([
             "run",
             "--dry-run",
             "--auto-approve",
             "--run-id",
             my_ulid,
-            "--storage-dir",
-            storage_dir.to_str().unwrap(),
             "../../../test/simple.fabro",
         ])
         .assert()
@@ -629,7 +605,9 @@ fn run_id_passthrough_uses_provided_ulid() {
 
 #[test]
 fn detach_flag_appears_in_help() {
-    arc()
+    let context = test_context!();
+    context
+        .command()
         .args(["run", "--help"])
         .assert()
         .success()
@@ -638,7 +616,9 @@ fn detach_flag_appears_in_help() {
 
 #[test]
 fn detach_prints_ulid_and_exits() {
-    let output = arc()
+    let context = test_context!();
+    let output = context
+        .command()
         .args([
             "run",
             "--detach",
@@ -664,17 +644,15 @@ fn detach_prints_ulid_and_exits() {
 
 #[test]
 fn detach_creates_run_dir_with_detach_log() {
-    let tmp = tempfile::tempdir().unwrap();
-    let storage_dir = tmp.path().join("fabro-data");
+    let context = test_context!();
 
-    let output = arc()
+    let output = context
+        .command()
         .args([
             "run",
             "--detach",
             "--dry-run",
             "--auto-approve",
-            "--storage-dir",
-            storage_dir.to_str().unwrap(),
             "../../../test/simple.fabro",
         ])
         .assert()
@@ -689,7 +667,7 @@ fn detach_creates_run_dir_with_detach_log() {
 
     // Run dir should have been created under storage_dir/runs/ and the launcher
     // log should live under storage_dir/launchers/.
-    let runs_base = storage_dir.join("runs");
+    let runs_base = context.storage_dir.join("runs");
     assert!(runs_base.exists(), "runs/ directory should exist");
     let entries: Vec<_> = std::fs::read_dir(&runs_base)
         .unwrap()
@@ -698,7 +676,8 @@ fn detach_creates_run_dir_with_detach_log() {
     assert_eq!(entries.len(), 1, "should have exactly one run directory");
     let run_dir = entries[0].path();
     assert!(
-        storage_dir
+        context
+            .storage_dir
             .join("launchers")
             .join(format!("{ulid}.log"))
             .exists(),
@@ -711,7 +690,9 @@ fn detach_creates_run_dir_with_detach_log() {
 
 #[test]
 fn resume_help_shows_expected_args() {
-    arc()
+    let context = test_context!();
+    context
+        .command()
         .args(["resume", "--help"])
         .assert()
         .success()
@@ -722,12 +703,15 @@ fn resume_help_shows_expected_args() {
 
 #[test]
 fn resume_requires_run_arg() {
-    arc().args(["resume"]).assert().failure();
+    let context = test_context!();
+    context.command().args(["resume"]).assert().failure();
 }
 
 #[test]
 fn run_help_no_longer_shows_resume_or_run_branch() {
-    arc()
+    let context = test_context!();
+    context
+        .command()
         .args(["run", "--help"])
         .assert()
         .success()
@@ -737,16 +721,14 @@ fn run_help_no_longer_shows_resume_or_run_branch() {
 
 #[test]
 fn rewind_and_fork_recover_missing_metadata_from_store() {
-    let storage_root = tempfile::tempdir().unwrap();
-    let storage_dir = storage_root.path().join("fabro-data");
-    let configured_home = init_cli_home(&storage_dir);
+    let context = test_context!();
     let repo_dir = tempfile::tempdir().unwrap();
     Repository::init(repo_dir.path()).unwrap();
 
     let source_run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
     let expected_shas = seed_run_branch(repo_dir.path(), source_run_id, &["start", "build"]);
     Runtime::new().unwrap().block_on(seed_durable_run(
-        &storage_dir,
+        &context.storage_dir,
         repo_dir.path(),
         source_run_id,
     ));
@@ -756,9 +738,8 @@ fn rewind_and_fork_recover_missing_metadata_from_store() {
         "metadata branch should start missing"
     );
 
-    let rewind_list = arc()
-        .env("HOME", configured_home.path())
-        .env("NO_COLOR", "1")
+    let rewind_list = context
+        .command()
         .current_dir(repo_dir.path())
         .args(["rewind", source_run_id, "--list"])
         .timeout(Duration::from_secs(15))
@@ -793,9 +774,8 @@ fn rewind_and_fork_recover_missing_metadata_from_store() {
     );
 
     let before_child = list_metadata_run_ids(repo_dir.path());
-    arc()
-        .env("HOME", configured_home.path())
-        .env("NO_COLOR", "1")
+    context
+        .command()
         .current_dir(repo_dir.path())
         .args(["fork", source_run_id, "--no-push"])
         .timeout(Duration::from_secs(15))
@@ -812,9 +792,8 @@ fn rewind_and_fork_recover_missing_metadata_from_store() {
         Some(expected_shas[1].as_str())
     );
 
-    let child_rewind = arc()
-        .env("HOME", configured_home.path())
-        .env("NO_COLOR", "1")
+    let child_rewind = context
+        .command()
         .current_dir(repo_dir.path())
         .args(["rewind", child_run_id, "@1", "--no-push"])
         .timeout(Duration::from_secs(15))
@@ -834,9 +813,8 @@ fn rewind_and_fork_recover_missing_metadata_from_store() {
     );
 
     let before_grandchild = after_child;
-    arc()
-        .env("HOME", configured_home.path())
-        .env("NO_COLOR", "1")
+    context
+        .command()
         .current_dir(repo_dir.path())
         .args(["fork", child_run_id, "--no-push"])
         .timeout(Duration::from_secs(15))
@@ -854,7 +832,7 @@ fn rewind_and_fork_recover_missing_metadata_from_store() {
 
 #[test]
 fn completed_run_preserves_workflow_slug_for_lookup() {
-    let home = tempfile::tempdir().unwrap();
+    let context = test_context!();
     let project = tempfile::tempdir().unwrap();
     let workflow_dir = project.path().join("workflows").join("sluggy");
     std::fs::create_dir_all(&workflow_dir).unwrap();
@@ -871,8 +849,8 @@ digraph BarBaz {
     )
     .unwrap();
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .current_dir(project.path())
         .args([
             "create",
@@ -885,30 +863,30 @@ digraph BarBaz {
         .assert()
         .success();
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .current_dir(project.path())
         .args(["start", "sluggy"])
         .assert()
         .success();
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .current_dir(project.path())
         .args(["attach", "01ARZ3NDEKTSV4RRFFQ69G5FAX"])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success();
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .current_dir(project.path())
         .args(["attach", "sluggy"])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success();
 
-    let run_dir = find_run_dir(home.path(), "01ARZ3NDEKTSV4RRFFQ69G5FAX");
+    let run_dir = find_run_dir(&context.storage_dir, "01ARZ3NDEKTSV4RRFFQ69G5FAX");
     let run_record: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(run_dir.join("run.json")).unwrap()).unwrap();
     assert_eq!(run_record["graph"]["name"].as_str(), Some("BarBaz"));
@@ -917,7 +895,7 @@ digraph BarBaz {
 
 #[test]
 fn standalone_file_run_uses_file_stem_slug_for_lookup() {
-    let home = tempfile::tempdir().unwrap();
+    let context = test_context!();
     let workflow_dir = tempfile::tempdir().unwrap();
     let workflow_path = workflow_dir.path().join("alpha.fabro");
     std::fs::write(
@@ -932,8 +910,8 @@ digraph FooWorkflow {
     )
     .unwrap();
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .args([
             "create",
             "--dry-run",
@@ -945,20 +923,20 @@ digraph FooWorkflow {
         .assert()
         .success();
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .args(["start", "alpha"])
         .assert()
         .success();
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .args(["attach", "alpha"])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success();
 
-    let run_dir = find_run_dir(home.path(), "01ARZ3NDEKTSV4RRFFQ69G5FAY");
+    let run_dir = find_run_dir(&context.storage_dir, "01ARZ3NDEKTSV4RRFFQ69G5FAY");
     let run_record: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(run_dir.join("run.json")).unwrap()).unwrap();
     assert_eq!(run_record["graph"]["name"].as_str(), Some("FooWorkflow"));
@@ -967,11 +945,11 @@ digraph FooWorkflow {
 
 #[test]
 fn dry_run_create_start_attach_works_with_default_run_lookup() {
-    let home = tempfile::tempdir().unwrap();
     let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";
+    let context = test_context!();
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .args([
             "create",
             "--dry-run",
@@ -984,20 +962,16 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
         .success()
         .stdout(predicate::str::contains(run_id));
 
-    let run_dir = find_run_dir(home.path(), run_id);
+    let run_dir = find_run_dir(&context.storage_dir, run_id);
     assert!(
         run_dir.join("run.json").exists(),
         "create should persist run.json so the run is discoverable"
     );
 
-    arc()
-        .env("HOME", home.path())
-        .args(["start", run_id])
-        .assert()
-        .success();
+    context.command().args(["start", run_id]).assert().success();
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .args(["attach", run_id])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
@@ -1008,11 +982,11 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
 
 #[test]
 fn dry_run_detach_attach_works_with_default_run_lookup() {
-    let home = tempfile::tempdir().unwrap();
     let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FB0";
+    let context = test_context!();
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .args([
             "run",
             "--detach",
@@ -1026,8 +1000,8 @@ fn dry_run_detach_attach_works_with_default_run_lookup() {
         .success()
         .stdout(predicate::str::contains(run_id));
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .args(["attach", run_id])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
@@ -1036,10 +1010,9 @@ fn dry_run_detach_attach_works_with_default_run_lookup() {
 
 #[test]
 fn start_by_workflow_name_prefers_newly_created_submitted_run() {
-    let home = tempfile::tempdir().unwrap();
-    let old_run_dir = home
-        .path()
-        .join(".fabro")
+    let context = test_context!();
+    let old_run_dir = context
+        .storage_dir
         .join("runs")
         .join("01ARZ3NDEKTSV4RRFFQ69G5FB1");
     std::fs::create_dir_all(&old_run_dir).unwrap();
@@ -1068,8 +1041,8 @@ fn start_by_workflow_name_prefers_newly_created_submitted_run() {
     .unwrap();
 
     let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FB2";
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .args([
             "create",
             "--dry-run",
@@ -1082,20 +1055,20 @@ fn start_by_workflow_name_prefers_newly_created_submitted_run() {
         .success()
         .stdout(predicate::str::contains(run_id));
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .args(["start", "smoke"])
         .assert()
         .success();
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .args(["attach", run_id])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success();
 
-    let new_run_dir = find_run_dir(home.path(), run_id);
+    let new_run_dir = find_run_dir(&context.storage_dir, run_id);
     let status = std::fs::read_to_string(new_run_dir.join("status.json")).unwrap();
     assert!(
         status.contains("\"status\": \"succeeded\""),
@@ -1108,9 +1081,11 @@ fn start_by_workflow_name_prefers_newly_created_submitted_run() {
 // the engine should read the snapshot saved at create time.
 #[test]
 fn bug2_detached_uses_cached_graph_not_original_path() {
-    let dir = tempfile::tempdir().unwrap();
-    let storage_dir = dir.path().join("storage");
-    let run_dir = storage_dir.join("runs").join("01ARZ3NDEKTSV4RRFFQ69G5FB3");
+    let context = test_context!();
+    let run_dir = context
+        .storage_dir
+        .join("runs")
+        .join("01ARZ3NDEKTSV4RRFFQ69G5FB3");
     std::fs::create_dir_all(&run_dir).unwrap();
 
     let dot = "\
@@ -1153,19 +1128,20 @@ digraph G {
     std::fs::write(run_dir.join("graph.fabro"), dot).unwrap();
 
     // __detached should use graph.fabro and never reference the deleted file.
-    let output = arc()
+    let output = context
+        .command()
         .args([
             "__detached",
             "--run-dir",
             run_dir.to_str().unwrap(),
             "--launcher-path",
-            storage_dir
+            context
+                .storage_dir
                 .join("launchers")
                 .join("01ARZ3NDEKTSV4RRFFQ69G5FB3.json")
                 .to_str()
                 .unwrap(),
         ])
-        .env("NO_COLOR", "1")
         .timeout(std::time::Duration::from_secs(15))
         .output()
         .expect("process should start");
@@ -1180,9 +1156,8 @@ digraph G {
 
 #[test]
 fn bug4_detached_resume_rejects_completed_run_without_mutating_it() {
-    let home = tempfile::tempdir().unwrap();
-    let project = tempfile::tempdir().unwrap();
-    let workflow_path = project.path().join("workflow.fabro");
+    let context = test_context!();
+    let workflow_path = context.temp_dir.join("workflow.fabro");
     std::fs::write(
         &workflow_path,
         "\
@@ -1195,9 +1170,9 @@ digraph Test {
     )
     .unwrap();
 
-    let run = arc()
-        .env("HOME", home.path())
-        .current_dir(project.path())
+    let run = context
+        .command()
+        .current_dir(&context.temp_dir)
         .args([
             "run",
             "--dry-run",
@@ -1213,15 +1188,15 @@ digraph Test {
         .trim()
         .to_string();
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .args(["wait", &run_id])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success();
 
-    let inspect_before = arc()
-        .env("HOME", home.path())
+    let inspect_before = context
+        .command()
         .args(["inspect", &run_id])
         .assert()
         .success();
@@ -1237,15 +1212,15 @@ digraph Test {
         .unwrap()
         .to_string();
 
-    let storage_dir = home.path().join(".fabro");
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .args([
             "__detached",
             "--run-dir",
             &run_dir,
             "--launcher-path",
-            storage_dir
+            context
+                .storage_dir
                 .join("launchers")
                 .join(format!("{run_id}.json"))
                 .to_str()
@@ -1257,8 +1232,8 @@ digraph Test {
         .failure()
         .stderr(predicate::str::contains("nothing to resume"));
 
-    let inspect_after = arc()
-        .env("HOME", home.path())
+    let inspect_after = context
+        .command()
         .args(["inspect", &run_id])
         .assert()
         .success();
@@ -1277,10 +1252,9 @@ digraph Test {
 
 #[test]
 fn bug5_detached_uses_snapshotted_app_id_for_github_credentials() {
-    let storage_dir = tempfile::tempdir().unwrap();
-    let home = init_cli_home(storage_dir.path());
-    let run_dir = storage_dir
-        .path()
+    let context = test_context!();
+    let run_dir = context
+        .storage_dir
         .join("runs")
         .join("01ARZ3NDEKTSV4RRFFQ69G5FB4");
     std::fs::create_dir_all(&run_dir).unwrap();
@@ -1324,16 +1298,16 @@ digraph G {
     .unwrap();
     std::fs::write(run_dir.join("graph.fabro"), dot).unwrap();
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .env("GITHUB_APP_PRIVATE_KEY", "%%%not-base64%%%")
         .args([
             "__detached",
             "--run-dir",
             run_dir.to_str().unwrap(),
             "--launcher-path",
-            storage_dir
-                .path()
+            context
+                .storage_dir
                 .join("launchers")
                 .join("01ARZ3NDEKTSV4RRFFQ69G5FB4.json")
                 .to_str()
@@ -1351,10 +1325,10 @@ digraph G {
 // engine consumes interview_response.json, so reattach remains safe.
 #[test]
 fn bug3_attach_leaves_interview_request_until_engine_consumes_response() {
-    let home = tempfile::tempdir().unwrap();
+    let context = test_context!();
 
     let run_dir = setup_run_dir(
-        home.path(),
+        &context.storage_dir,
         "01ARZ3NDEKTSV4RRFFQ69G5FB5",
         serde_json::json!({}),
         &[
@@ -1390,9 +1364,8 @@ fn bug3_attach_leaves_interview_request_until_engine_consumes_response() {
     .unwrap();
 
     // Pipe "y\n" so ConsoleInterviewer doesn't block on stdin
-    let _ = arc()
-        .env("HOME", home.path())
-        .env("NO_COLOR", "1")
+    let _ = context
+        .command()
         .args(["attach", "01ARZ3NDEKTSV4RRFFQ69G5FB5"])
         .write_stdin("y\n")
         .timeout(std::time::Duration::from_secs(5))
@@ -1414,10 +1387,10 @@ fn bug3_attach_leaves_interview_request_until_engine_consumes_response() {
 
 #[test]
 fn attach_closed_stdin_keeps_interview_pending() {
-    let home = tempfile::tempdir().unwrap();
+    let context = test_context!();
 
     let run_dir = setup_run_dir(
-        home.path(),
+        &context.storage_dir,
         "01ARZ3NDEKTSV4RRFFQ69G5FB6",
         serde_json::json!({}),
         &[
@@ -1449,9 +1422,8 @@ fn attach_closed_stdin_keeps_interview_pending() {
     )
     .unwrap();
 
-    let assert = arc()
-        .env("HOME", home.path())
-        .env("NO_COLOR", "1")
+    let assert = context
+        .command()
         .args(["attach", "01ARZ3NDEKTSV4RRFFQ69G5FB6"])
         .timeout(std::time::Duration::from_secs(5))
         .assert()
@@ -1480,13 +1452,13 @@ fn attach_closed_stdin_keeps_interview_pending() {
 // Currently ProgressUI is created with verbose=false regardless of config.
 #[test]
 fn bug4_attach_respects_verbose_from_spec() {
-    let home = tempfile::tempdir().unwrap();
+    let context = test_context!();
 
     // Use pre-rename field names so handle_json_line can parse them
     // (isolates this test from bug 1). With 2 turns and 1 tool call,
     // verbose mode should display "(2 turns, 1 tools, ...)" in the output.
     let run_dir = setup_run_dir(
-        home.path(),
+        &context.storage_dir,
         "01ARZ3NDEKTSV4RRFFQ69G5FB7",
         serde_json::json!({"verbose": true}),
         &[
@@ -1519,9 +1491,8 @@ fn bug4_attach_respects_verbose_from_spec() {
     )
     .unwrap();
 
-    let output = arc()
-        .env("HOME", home.path())
-        .env("NO_COLOR", "1")
+    let output = context
+        .command()
         .args(["attach", "01ARZ3NDEKTSV4RRFFQ69G5FB7"])
         .timeout(std::time::Duration::from_secs(10))
         .output()

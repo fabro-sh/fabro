@@ -1,20 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 use predicates::prelude::*;
 
-#[allow(deprecated)]
-fn arc() -> assert_cmd::Command {
-    let mut cmd = assert_cmd::Command::cargo_bin("fabro").unwrap();
-    cmd.arg("--no-upgrade-check");
-    cmd
-}
-
-#[allow(deprecated)]
-fn fabro() -> assert_cmd::Command {
-    let mut cmd = assert_cmd::Command::cargo_bin("fabro").unwrap();
-    cmd.env("NO_COLOR", "1");
-    cmd
-}
-
 #[test]
 fn help() {
     let context = test_context!();
@@ -80,15 +66,16 @@ fn dry_run_flag() {
 #[ignore = "scenario: requires ANTHROPIC_API_KEY"]
 fn live_doctor() {
     dotenvy::dotenv().ok();
-    fabro().args(["doctor"]).assert().success();
+    let context = test_context!();
+    context.doctor().assert().success();
 }
 
 #[test]
 fn doctor_no_color_when_no_color_set() {
-    arc()
-        .args(["doctor", "--dry-run"])
-        .env_clear()
-        .env("NO_COLOR", "1")
-        .assert()
-        .stdout(predicate::str::contains("\x1b[").not());
+    let context = test_context!();
+    let mut cmd = context.doctor();
+    cmd.arg("--dry-run");
+    cmd.env_clear();
+    cmd.env("NO_COLOR", "1");
+    cmd.assert().stdout(predicate::str::contains("\x1b[").not());
 }
