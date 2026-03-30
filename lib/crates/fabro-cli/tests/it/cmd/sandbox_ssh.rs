@@ -3,26 +3,24 @@ use fabro_test::{fabro_snapshot, test_context};
 #[test]
 fn help() {
     let context = test_context!();
-    let mut cmd = context.preview();
-    cmd.arg("--help");
+    let mut cmd = context.command();
+    cmd.args(["sandbox", "ssh", "--help"]);
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
-    Get a preview URL for a port on a run's sandbox
+    SSH into a run's sandbox
 
-    Usage: fabro sandbox preview [OPTIONS] <RUN> <PORT>
+    Usage: fabro sandbox ssh [OPTIONS] <RUN>
 
     Arguments:
-      <RUN>   Run ID or prefix
-      <PORT>  Port number
+      <RUN>  Run ID or prefix
 
     Options:
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --signed                     Generate a signed URL (embeds auth token, no headers needed)
+          --ttl <TTL>                  SSH access expiry in minutes (default 60) [default: 60]
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --ttl <TTL>                  Signed URL expiry in seconds (default 3600, requires --signed) [default: 3600]
-          --open                       Open URL in browser (implies --signed)
+          --print                      Print the SSH command instead of connecting
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
