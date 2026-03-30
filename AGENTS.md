@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `cd apps/marketing && bunx vercel --prod` — deploy to Vercel (project: website, domain: fabro.sh)
 
 ### Dev servers
-1. `fabro serve` — starts the Rust API server (demo mode is per-request via `X-Fabro-Demo: 1` header)
+1. `fabro server start` — starts the Rust API server (demo mode is per-request via `X-Fabro-Demo: 1` header)
 2. `cd apps/fabro-web && bun run dev` — starts the React dev server
 3. Mintlify docs dev server (requires Docker — `mintlify dev` needs Node LTS which may not match the host):
    ```

@@ -327,14 +327,14 @@ fabro model test -m claude-sonnet-4-5
 
 ---
 
-## `fabro serve`
+## `fabro server start`
 
 Start the HTTP API server that exposes the [REST API](/api-reference) for launching and managing workflow runs.
 
 ```bash
-fabro serve
-fabro serve --port 8080 --host 0.0.0.0
-fabro serve --sandbox daytona --max-concurrent-runs 4
+fabro server start
+fabro server start --port 8080 --host 0.0.0.0
+fabro server start --sandbox daytona --max-concurrent-runs 4
 ```
 
 | Flag | Description | Default |

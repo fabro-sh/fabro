@@ -11,6 +11,8 @@ mod user_config;
 
 use anyhow::Result;
 use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands};
+#[cfg(feature = "server")]
+use args::{ServerCommand, ServerNamespace};
 use clap::Parser;
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
 use fabro_util::printer::Printer;
@@ -106,7 +108,10 @@ async fn main_inner() -> (String, Result<()>) {
     let (config_log_level, upgrade_check_enabled) = {
         #[cfg(feature = "server")]
         {
-            if let Commands::Serve(args) = command.as_ref() {
+            if let Commands::Server(ServerNamespace {
+                command: ServerCommand::Start(args),
+            }) = command.as_ref()
+            {
                 match fabro_config::server::load_server_settings(args.config.as_deref()) {
                     Ok(server_settings) => (
                         server_settings.log.as_ref().and_then(|l| l.level.clone()),
@@ -136,8 +141,8 @@ async fn main_inner() -> (String, Result<()>) {
         }
     };
 
-    let log_prefix = if command_name == "serve" {
-        "serve"
+    let log_prefix = if command_name == "server start" {
+        "server"
     } else {
         "cli"
     };
@@ -183,7 +188,8 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::RunsCmd(cmd) => commands::runs::dispatch(cmd, &globals).await?,
             Commands::Model { command } => commands::model::execute(command, &globals).await?,
             #[cfg(feature = "server")]
-            Commands::Serve(args) => {
+            Commands::Server(ns) => {
+                let ServerCommand::Start(args) = ns.command;
                 let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
                 fabro_server::serve::serve_command(args, styles, globals.storage_dir.clone())
                     .await?;

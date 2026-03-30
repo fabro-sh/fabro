@@ -764,9 +764,9 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         command: Option<ModelsCommand>,
     },
-    /// Start the HTTP API server
+    /// Server operations
     #[cfg(feature = "server")]
-    Serve(fabro_server::serve::ServeArgs),
+    Server(ServerNamespace),
     /// Check environment and integration health
     Doctor {
         /// Show detailed information for each check
@@ -855,7 +855,9 @@ impl Commands {
                 None => "model",
             },
             #[cfg(feature = "server")]
-            Self::Serve(_) => "serve",
+            Self::Server(ns) => match &ns.command {
+                ServerCommand::Start(_) => "server start",
+            },
             Self::Doctor { .. } => "doctor",
             Self::Repo(ns) => match &ns.command {
                 RepoCommand::Init { .. } => "repo init",
@@ -964,6 +966,20 @@ pub(crate) enum SecretCommand {
     Rm(SecretRmArgs),
     /// Set a secret value
     Set(SecretSetArgs),
+}
+
+#[cfg(feature = "server")]
+#[derive(Args)]
+pub(crate) struct ServerNamespace {
+    #[command(subcommand)]
+    pub(crate) command: ServerCommand,
+}
+
+#[cfg(feature = "server")]
+#[derive(Subcommand)]
+pub(crate) enum ServerCommand {
+    /// Start the HTTP API server
+    Start(fabro_server::serve::ServeArgs),
 }
 
 #[derive(Args)]

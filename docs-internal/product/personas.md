@@ -6,7 +6,7 @@ Fabro is for expert engineers who want to encode software processes as workflows
 
 - **Solo expert engineer**: runs workflows locally to automate planning, implementation, testing, and review loops.
 - **Tech lead or platform engineer**: defines shared workflows, model routing rules, and quality gates for a team.
-- **Infrastructure engineer**: deploys `fabro serve`, configures sandboxes and auth, and keeps the system reliable.
+- **Infrastructure engineer**: deploys `fabro server start`, configures sandboxes and auth, and keeps the system reliable.
 
 ## Good fits
 

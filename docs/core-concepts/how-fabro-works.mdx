@@ -14,7 +14,7 @@ Fabro is a workflow engine that reads a graph definition, executes nodes one at 
 Fabro has two interfaces, both backed by the same workflow engine:
 
 - **Standalone mode** (`fabro run`) — Run a single workflow synchronously in your terminal. Best for local development, one-off runs, and CI/CD.
-- **Server mode** (`fabro serve`) — Start an HTTP API server with a web UI, concurrent run scheduling, and team access. Best for production use and running at scale.
+- **Server mode** (`fabro server start`) — Start an HTTP API server with a web UI, concurrent run scheduling, and team access. Best for production use and running at scale.
 
 Both modes parse the same Graphviz files, use the same execution engine, and support the same sandbox providers. See [Server Mode](/administration/deploy-server) for a detailed comparison and setup guide, or [Architecture](/reference/architecture) for internals.
 

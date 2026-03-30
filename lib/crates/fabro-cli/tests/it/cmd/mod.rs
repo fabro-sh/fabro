@@ -50,7 +50,7 @@ mod secret_rm;
 mod secret_set;
 mod send_analytics;
 mod send_panic;
-mod serve;
+mod server;
 mod ssh;
 mod start;
 mod store;

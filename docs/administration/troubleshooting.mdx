@@ -28,7 +28,7 @@ It checks:
 
 **Sandbox creation failures** — For Docker: ensure the Docker daemon is running and the configured image exists. For Daytona: verify `DAYTONA_API_KEY` is set and the `gh` CLI is authenticated. For Exe: verify your SSH keys are configured for `exe.dev` and that `ssh exe.dev` connects successfully.
 
-**Port already in use** — Change the port with `fabro serve --port 3001` or stop the conflicting process.
+**Port already in use** — Change the port with `fabro server start --port 3001` or stop the conflicting process.
 
 **SSE streams disconnecting** — If using a reverse proxy, ensure buffering is disabled and the connection timeout is long enough for workflow runs. See the [reverse proxy example](/administration/deployment#binding-and-tls).
 

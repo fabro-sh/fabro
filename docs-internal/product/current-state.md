@@ -7,7 +7,7 @@ This snapshot is intentionally brief and omits volatile counts, benchmarks, and 
 Fabro currently presents as:
 
 - a CLI for defining and running workflows
-- an API server via `fabro serve`
+- an API server via `fabro server start`
 - a React web app for monitoring runs and inspecting workflows
 - a docs site and example workflows
 
