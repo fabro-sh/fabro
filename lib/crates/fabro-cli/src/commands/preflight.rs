@@ -26,7 +26,7 @@ pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> an
     let cli_settings: FabroSettings = load_user_settings_with_globals(globals)?;
     args.verbose = args.verbose || cli_settings.verbose_enabled();
 
-    let github_app = build_github_app_credentials(cli_settings.app_id());
+    let github_app = build_github_app_credentials(cli_settings.app_id())?;
     let cli_args_config = ConfigLayer::try_from(&args)?;
     let cwd = std::env::current_dir()?;
     let settings = cli_args_config

@@ -54,21 +54,35 @@ pub struct GitHubAppCredentials {
 }
 
 impl GitHubAppCredentials {
-    pub fn from_env(app_id: Option<&str>) -> Option<Self> {
-        let app_id = app_id?;
-        let raw = std::env::var("GITHUB_APP_PRIVATE_KEY").ok()?;
-        let private_key_pem = if raw.starts_with("-----") {
-            raw
-        } else {
-            let pem_bytes =
-                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &raw).ok()?;
-            String::from_utf8(pem_bytes).ok()?
+    pub fn private_key_from_env() -> Result<Option<String>, String> {
+        let Ok(raw) = std::env::var("GITHUB_APP_PRIVATE_KEY") else {
+            return Ok(None);
         };
-        Some(Self {
+        decode_pem_env("GITHUB_APP_PRIVATE_KEY", &raw).map(Some)
+    }
+
+    pub fn from_env(app_id: Option<&str>) -> Result<Option<Self>, String> {
+        let Some(app_id) = app_id else {
+            return Ok(None);
+        };
+        let Some(private_key_pem) = Self::private_key_from_env()? else {
+            return Ok(None);
+        };
+        Ok(Some(Self {
             app_id: app_id.to_string(),
             private_key_pem,
-        })
+        }))
     }
+}
+
+fn decode_pem_env(name: &str, raw: &str) -> Result<String, String> {
+    if raw.starts_with("-----") {
+        return Ok(raw.to_string());
+    }
+    let pem_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw)
+        .map_err(|err| format!("{name} is not valid PEM or base64: {err}"))?;
+    String::from_utf8(pem_bytes)
+        .map_err(|err| format!("{name} base64 decoded to invalid UTF-8: {err}"))
 }
 
 /// HTTP method used in GitHub API calls.
@@ -959,6 +973,28 @@ pub async fn create_installation_access_token_for_projects(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decode_pem_env_accepts_raw_pem() {
+        let pem = "-----BEGIN TEST KEY-----\nabc\n-----END TEST KEY-----";
+        assert_eq!(decode_pem_env("GITHUB_APP_PRIVATE_KEY", pem).unwrap(), pem);
+    }
+
+    #[test]
+    fn decode_pem_env_accepts_base64_pem() {
+        let pem = "-----BEGIN TEST KEY-----\nabc\n-----END TEST KEY-----";
+        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, pem);
+        assert_eq!(
+            decode_pem_env("GITHUB_APP_PRIVATE_KEY", &encoded).unwrap(),
+            pem
+        );
+    }
+
+    #[test]
+    fn decode_pem_env_rejects_invalid_base64() {
+        let err = decode_pem_env("GITHUB_APP_PRIVATE_KEY", "%%%not-base64%%%").unwrap_err();
+        assert!(err.contains("GITHUB_APP_PRIVATE_KEY is not valid PEM or base64"));
+    }
 
     // -----------------------------------------------------------------------
     // parse_github_owner_repo

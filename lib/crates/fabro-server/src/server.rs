@@ -490,6 +490,13 @@ fn compute_queue_positions(runs: &HashMap<String, ManagedRun>) -> HashMap<String
         .collect()
 }
 
+fn clear_live_run_state(run: &mut ManagedRun) {
+    run.interviewer = None;
+    run.event_tx = None;
+    run.cancel_tx = None;
+    run.cancel_token = None;
+}
+
 async fn start_run(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
@@ -625,6 +632,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         if let Some(managed_run) = runs.get_mut(&run_id) {
             if managed_run.status != RunStatus::Starting {
                 // Was cancelled during setup
+                clear_live_run_state(managed_run);
                 state.scheduler_notify.notify_one();
                 return;
             }
@@ -642,7 +650,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
             if let Some(managed_run) = runs.get_mut(&run_id) {
                 managed_run.status = RunStatus::Failed;
                 managed_run.error = Some(format!("Failed to open or hydrate run store: {e}"));
-                managed_run.event_tx = None;
+                clear_live_run_state(managed_run);
             }
             state.scheduler_notify.notify_one();
             return;
@@ -656,14 +664,28 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
             if let Some(managed_run) = runs.get_mut(&run_id) {
                 managed_run.status = RunStatus::Failed;
                 managed_run.error = Some(format!("Failed to load persisted run: {e}"));
-                managed_run.event_tx = None;
+                clear_live_run_state(managed_run);
             }
             state.scheduler_notify.notify_one();
             return;
         }
     };
-    let github_app =
-        fabro_github::GitHubAppCredentials::from_env(persisted.run_record().settings.app_id());
+    let github_app = match fabro_github::GitHubAppCredentials::from_env(
+        persisted.run_record().settings.app_id(),
+    ) {
+        Ok(github_app) => github_app,
+        Err(e) => {
+            tracing::error!(run_id = %run_id, error = %e, "Invalid GitHub App credentials");
+            let mut runs = state.runs.lock().expect("runs lock poisoned");
+            if let Some(managed_run) = runs.get_mut(&run_id) {
+                managed_run.status = RunStatus::Failed;
+                managed_run.error = Some(format!("Invalid GitHub App credentials: {e}"));
+                clear_live_run_state(managed_run);
+            }
+            state.scheduler_notify.notify_one();
+            return;
+        }
+    };
     let services = operations::StartServices {
         cancel_token: Some(Arc::clone(&cancel_token)),
         emitter: Arc::clone(&emitter),
@@ -757,9 +779,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
             }
         }
         managed_run.run_dir = Some(run_dir);
-        managed_run.event_tx = None;
-        managed_run.cancel_tx = None;
-        managed_run.cancel_token = None;
+        clear_live_run_state(managed_run);
     }
     drop(runs);
     state.scheduler_notify.notify_one();
@@ -2457,6 +2477,49 @@ mod tests {
             status_record.reason,
             Some(fabro_workflows::run_status::StatusReason::Cancelled)
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancel_before_run_transitions_to_running_closes_event_stream() {
+        let state = create_app_state_with_registry_factory(test_db().await, |interviewer| {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            fabro_workflows::handler::default_registry(interviewer, || None)
+        });
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/runs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap().to_string();
+
+        let runner = tokio::spawn(execute_run(Arc::clone(&state), run_id.clone()));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/runs/{run_id}/cancel"))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        runner.await.unwrap();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(format!("/runs/{run_id}/events"))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::GONE);
     }
 
     #[tokio::test]

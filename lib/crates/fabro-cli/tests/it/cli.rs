@@ -1587,6 +1587,75 @@ digraph Test {
     );
 }
 
+#[test]
+fn bug5_detached_uses_snapshotted_app_id_for_github_credentials() {
+    let storage_dir = tempfile::tempdir().unwrap();
+    let home = init_cli_home(storage_dir.path());
+    let run_dir = storage_dir.path().join("runs").join("20260101-test-bug5");
+    std::fs::create_dir_all(&run_dir).unwrap();
+
+    let dot = "\
+digraph G {
+  start [shape=Mdiamond, label=\"Start\"]
+  exit  [shape=Msquare,  label=\"Exit\"]
+  start -> exit
+}";
+
+    let run_record = serde_json::json!({
+        "run_id": "test-bug5",
+        "created_at": "2026-01-01T00:00:00Z",
+        "settings": {
+            "dry_run": true,
+            "auto_approve": true,
+            "no_retro": true,
+            "llm": {
+                "model": "test-model"
+            },
+            "sandbox": {
+                "provider": "local"
+            },
+            "git": {
+                "app_id": "snapshotted-app-id"
+            }
+        },
+        "graph": {
+            "name": "G",
+            "nodes": {},
+            "edges": [],
+            "attrs": {}
+        },
+        "working_directory": run_dir.to_str().unwrap(),
+    });
+    std::fs::write(
+        run_dir.join("run.json"),
+        serde_json::to_string(&run_record).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(run_dir.join("graph.fabro"), dot).unwrap();
+
+    arc()
+        .env("HOME", home.path())
+        .env("GITHUB_APP_PRIVATE_KEY", "%%%not-base64%%%")
+        .args([
+            "__detached",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "--launcher-path",
+            storage_dir
+                .path()
+                .join("launchers")
+                .join("test-bug5.json")
+                .to_str()
+                .unwrap(),
+        ])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "GITHUB_APP_PRIVATE_KEY is not valid PEM or base64",
+        ));
+}
+
 // Bug 3: attach loop must leave interview_request.json in place until the
 // engine consumes interview_response.json, so reattach remains safe.
 #[test]

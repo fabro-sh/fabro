@@ -173,15 +173,22 @@ async fn check_github_app_installation() {
     let slug = cli_settings.slug().map(String::from);
 
     // Build GitHub App credentials
-    let Some(creds) = build_github_app_credentials(Some(&app_id)) else {
-        eprintln!(
-            "\n  Set {} to enable GitHub App integration",
-            console::Style::new()
-                .cyan()
-                .bold()
-                .apply_to("GITHUB_APP_PRIVATE_KEY")
-        );
-        return;
+    let creds = match build_github_app_credentials(Some(&app_id)) {
+        Ok(Some(creds)) => creds,
+        Ok(None) => {
+            eprintln!(
+                "\n  Set {} to enable GitHub App integration",
+                console::Style::new()
+                    .cyan()
+                    .bold()
+                    .apply_to("GITHUB_APP_PRIVATE_KEY")
+            );
+            return;
+        }
+        Err(err) => {
+            eprintln!("\n  Warning: invalid GITHUB_APP_PRIVATE_KEY: {err}");
+            return;
+        }
     };
 
     let jwt = match fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem) {

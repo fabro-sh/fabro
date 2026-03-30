@@ -14,7 +14,7 @@ use clap::Args;
 use fabro_config::FabroSettings;
 
 use crate::github_webhooks::WebhookManager;
-use crate::jwt_auth::{AuthMode, AuthStrategy, decode_pem_env, resolve_auth_mode};
+use crate::jwt_auth::{AuthMode, AuthStrategy, resolve_auth_mode};
 use crate::server::{build_router, create_app_state_with_store, spawn_scheduler};
 use crate::tls::{ClientAuth, build_rustls_config, serve_tls};
 use fabro_llm::client::Client as LlmClient;
@@ -182,9 +182,24 @@ pub async fn serve_command(
     let webhook_manager = match webhook_app_id {
         Some(app_id) => {
             let secret = std::env::var("GITHUB_APP_WEBHOOK_SECRET").ok();
-            let private_key_pem = read_github_private_key();
-            if let (Some(secret), Some(pem)) = (secret, private_key_pem) {
-                match WebhookManager::start(secret.into_bytes(), &app_id, &pem).await {
+            let github_app = match fabro_github::GitHubAppCredentials::from_env(Some(&app_id)) {
+                Ok(github_app) => github_app,
+                Err(err) => {
+                    warn!(
+                        error = %err,
+                        "Webhook config present but GITHUB_APP_PRIVATE_KEY is invalid; skipping webhook listener"
+                    );
+                    None
+                }
+            };
+            if let (Some(secret), Some(github_app)) = (secret, github_app) {
+                match WebhookManager::start(
+                    secret.into_bytes(),
+                    &github_app.app_id,
+                    &github_app.private_key_pem,
+                )
+                .await
+                {
                     Ok(manager) => Some(manager),
                     Err(err) => {
                         error!(error = %err, "Failed to start webhook listener");
@@ -266,12 +281,6 @@ pub async fn serve_command(
     }
 
     Ok(())
-}
-
-/// Read the GitHub App private key from the environment, decoding base64 if needed.
-fn read_github_private_key() -> Option<String> {
-    let raw = std::env::var("GITHUB_APP_PRIVATE_KEY").ok()?;
-    Some(decode_pem_env("GITHUB_APP_PRIVATE_KEY", &raw))
 }
 
 /// Derive client certificate verification mode from the resolved auth strategies.
