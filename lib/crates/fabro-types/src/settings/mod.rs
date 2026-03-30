@@ -21,11 +21,9 @@ pub use run::{
     AssetsSettings, CheckpointSettings, GitHubSettings, LlmSettings, MergeStrategy,
     PullRequestSettings, SetupSettings,
 };
-#[cfg(feature = "exedev")]
-pub use sandbox::ExeSettings;
 pub use sandbox::{
     DaytonaNetwork, DaytonaSettings, DaytonaSnapshotSettings, DockerfileSource,
-    LocalSandboxSettings, SandboxSettings, SshSettings, WorktreeMode,
+    LocalSandboxSettings, SandboxSettings, WorktreeMode,
 };
 pub use server::{
     ApiAuthStrategy, ApiSettings, AuthProvider, AuthSettings, FeaturesSettings, GitAuthorSettings,

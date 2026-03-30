@@ -10,8 +10,6 @@ description = "Sandbox trait and implementations for Fabro agent execution envir
 default = ["local"]
 local = []
 docker = ["dep:bollard", "dep:tar", "dep:futures"]
-ssh = ["dep:openssh", "dep:fabro-github", "dep:fabro-config"]
-exe = ["ssh", "fabro-config/exedev", "fabro-types/exedev"]
 sprites = ["dep:chrono", "dep:rand"]
 daytona = ["dep:daytona-sdk", "dep:daytona-api-client", "dep:git2", "dep:fabro-github", "dep:fabro-config", "dep:chrono", "dep:rand"]
 test-support = []
@@ -41,8 +39,7 @@ bollard = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 
-# ssh / exe / daytona
-openssh = { workspace = true, optional = true }
+# daytona
 fabro-config = { path = "../fabro-config", optional = true }
 fabro-github = { path = "../fabro-github", optional = true }
 fabro-types = { path = "../fabro-types" }

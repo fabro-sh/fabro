@@ -1769,7 +1769,6 @@ async fn daytona_cp_upload_download_round_trip() {
         identifier: Some(sandbox_name.clone()),
         host_working_directory: None,
         container_mount_point: None,
-        data_host: None,
     };
 
     // 3. Save to temp dir and reload (verify serialization round-trip)

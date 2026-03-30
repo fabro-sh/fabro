@@ -293,10 +293,6 @@ impl Sandbox for WorktreeSandbox {
         Some(&self.config.worktree_path)
     }
 
-    fn data_host(&self) -> Option<&str> {
-        self.inner.data_host()
-    }
-
     async fn setup_git_for_run(&self, run_id: &str) -> Result<Option<crate::GitRunInfo>, String> {
         self.inner.setup_git_for_run(run_id).await
     }

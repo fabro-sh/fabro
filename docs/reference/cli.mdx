@@ -77,7 +77,7 @@ fabro run run.toml
 | `--model <MODEL>` | Override default LLM model |
 | `--provider <PROVIDER>` | Override default LLM provider |
 | `-v, --verbose` | Enable verbose output |
-| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, `daytona`, `ssh`, or `exe` |
+| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, or `daytona` |
 | `--label <KEY=VALUE>` | Attach a label to this run (repeatable) |
 | `--goal <GOAL>` | Override the workflow goal (exposed as `$goal` in prompts) |
 | `--goal-file <FILE>` | Read the goal from a file instead of inline text |
@@ -102,7 +102,7 @@ fabro preflight run.toml
 | `--model <MODEL>` | Override default LLM model |
 | `--provider <PROVIDER>` | Override default LLM provider |
 | `-v, --verbose` | Enable verbose output |
-| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, `daytona`, `ssh`, or `exe` |
+| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, or `daytona` |
 
 ## `fabro resume`
 
@@ -344,7 +344,7 @@ fabro serve --sandbox daytona --max-concurrent-runs 4
 | `--model <MODEL>` | Override default LLM model | — |
 | `--provider <PROVIDER>` | Override default LLM provider | — |
 | `--dry-run` | Execute with simulated LLM backend | — |
-| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, `daytona`, `ssh`, or `exe` | — |
+| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, or `daytona` | — |
 | `--max-concurrent-runs <N>` | Maximum number of concurrent run executions | — |
 | `--config <PATH>` | Path to server config file | `~/.fabro/server.toml` |
 
@@ -356,7 +356,7 @@ If no LLM provider API keys are configured, the server automatically falls back 
 
 ## `fabro sandbox cp`
 
-Copy files between a run's sandbox and the local filesystem. The run must have a persisted sandbox record (Daytona, exe.dev, or a preserved local/Docker sandbox).
+Copy files between a run's sandbox and the local filesystem. The run must have a persisted sandbox record (Daytona or a preserved local/Docker sandbox).
 
 ```bash
 fabro sandbox cp <run-id>:/path/in/sandbox ./local-dir     # download

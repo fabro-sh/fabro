@@ -297,6 +297,27 @@ impl DaytonaSandbox {
 
 use fabro_github::ssh_url_to_https;
 
+/// Parameters for cloning a git repo into the sandbox during initialization.
+#[derive(Clone, Debug)]
+pub struct GitCloneParams {
+    /// Clean HTTPS URL (no embedded credentials).
+    pub url: String,
+    /// Branch to clone. If None, uses the remote's default.
+    pub branch: Option<String>,
+}
+
+pub fn detect_clone_params(cwd: &Path) -> Option<GitCloneParams> {
+    let (detected_url, branch) = match detect_repo_info(cwd) {
+        Ok(info) => info,
+        Err(err) => {
+            tracing::warn!("No git repo detected for sandbox clone: {err}");
+            return None;
+        }
+    };
+    let url = fabro_github::ssh_url_to_https(&detected_url);
+    Some(GitCloneParams { url, branch })
+}
+
 /// Detect the git remote URL and current branch from a local repository.
 ///
 /// Uses `git2` to discover the repo at `path`, reads the `origin` remote URL

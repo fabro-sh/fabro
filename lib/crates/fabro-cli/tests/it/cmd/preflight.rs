@@ -26,7 +26,7 @@ fn help() {
           --provider <PROVIDER>        Override default LLM provider
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
       -v, --verbose                    Enable verbose output
-          --sandbox <SANDBOX>          Sandbox for agent tools [possible values: local, docker, daytona, ssh]
+          --sandbox <SANDBOX>          Sandbox for agent tools [possible values: local, docker, daytona]
       -h, --help                       Print help
     ----- stderr -----
     ");

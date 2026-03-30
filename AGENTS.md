@@ -54,8 +54,6 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 - **fabro-workflows** — Core workflow engine. Parses Graphviz graphs, runs stages, manages checkpoints/resume, hooks, retros, and human-in-the-loop interactions
 - **fabro-agent** — AI coding agent with tool use (Bash, Read, Write, Edit, Glob, Grep, WebFetch). `Sandbox` trait abstracts execution environments
 - **fabro-server** — Axum HTTP server. Routes for runs, sessions, models, completions, usage. SSE event streaming. Demo mode via header
-- **fabro-exe** — SSH-based sandbox implementation (`ExeSandbox`)
-- **fabro-sprites** — Sprites VM sandbox implementation via `sprite` CLI
 - **fabro-llm** — Unified LLM client with providers: Anthropic, OpenAI, Gemini, OpenAI-compatible, plus retry/middleware/streaming
 - **fabro-api-types** — Auto-generated Rust types from OpenAPI spec (build.rs + typify)
 - **fabro-github** — GitHub App auth (JWT signing, installation tokens, PR creation)
@@ -72,7 +70,7 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 - **lib/packages/fabro-api-client** — Auto-generated TypeScript Axios client from OpenAPI spec
 
 ### Key design patterns
-- **Sandbox trait** — Uniform interface for local, Docker, SSH (ExeSandbox), Sprites, and Daytona execution environments
+- **Sandbox trait** — Uniform interface for local, Docker, and Daytona execution environments
 - **Graphviz graph workflows** — Stages and transitions defined as Graphviz graph attributes
 - **OpenAPI-first** — `fabro-api.yaml` drives both Rust type generation (typify) and TypeScript client generation (openapi-generator)
 - **Checkpoint/resume** — Workflows can be paused, checkpointed, and resumed
@@ -86,7 +84,7 @@ When working on Rust crates, read the relevant strategy doc **before** making ch
 
 ## Shell quoting in sandbox code
 
-When interpolating values into shell command strings (in `fabro-exe` and `fabro-workflows`), always use the `shell_quote()` helper (backed by `shlex::try_quote`). Never use manual `replace('\'', "'\\''")` or unquoted interpolation. This applies to file paths, branch names, URLs, env vars, image names, glob patterns, and any other user-controlled input assembled into a shell script.
+When interpolating values into shell command strings (in `fabro-workflows`), always use the `shell_quote()` helper (backed by `shlex::try_quote`). Never use manual `replace('\'', "'\\''")` or unquoted interpolation. This applies to file paths, branch names, URLs, env vars, image names, glob patterns, and any other user-controlled input assembled into a shell script.
 
 ## Rust import style
 

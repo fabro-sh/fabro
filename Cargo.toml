@@ -58,7 +58,6 @@ insta = "1"
 fabro-test = { path = "lib/crates/fabro-test" }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
-openssh = "0.11"
 daytona-sdk = { git = "https://github.com/brynary/daytona-sdk-rust", rev = "06033ca", package = "daytona-sdk" }
 daytona-api-client = { git = "https://github.com/brynary/daytona-sdk-rust", rev = "06033ca", package = "daytona-api-client" }
 sentry = { version = "0.35", default-features = false, features = ["backtrace", "contexts", "ureq", "rustls"] }

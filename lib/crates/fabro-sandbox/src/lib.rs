@@ -11,9 +11,6 @@ pub mod sandbox_record;
 
 pub mod worktree;
 
-#[cfg(feature = "ssh")]
-pub(crate) mod ssh_common;
-
 pub mod local;
 
 #[cfg(feature = "docker")]
@@ -21,12 +18,6 @@ pub mod docker;
 
 #[cfg(feature = "sprites")]
 pub mod sprites;
-
-#[cfg(feature = "ssh")]
-pub mod ssh;
-
-#[cfg(feature = "exe")]
-pub mod exe;
 
 #[cfg(feature = "daytona")]
 pub mod daytona;
@@ -53,5 +44,5 @@ pub use docker::{DockerSandbox, DockerSandboxConfig};
 
 pub use sandbox_record::{SandboxRecord, SandboxRecordExt};
 
-#[cfg(all(feature = "ssh", feature = "daytona"))]
-pub use ssh_common::detect_clone_params;
+#[cfg(feature = "daytona")]
+pub use daytona::detect_clone_params;

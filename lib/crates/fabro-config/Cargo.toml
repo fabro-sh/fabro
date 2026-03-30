@@ -11,7 +11,6 @@ doctest = false
 
 [features]
 default = []
-exedev = ["fabro-types/exedev"]
 clap = ["dep:clap", "fabro-types/clap"]
 
 [lints]

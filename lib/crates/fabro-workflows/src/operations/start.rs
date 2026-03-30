@@ -10,7 +10,7 @@ use fabro_config::sandbox::WorktreeMode;
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
-use fabro_sandbox::{SandboxProvider, SandboxSpec, detect_clone_params};
+use fabro_sandbox::{SandboxProvider, SandboxSpec};
 use fabro_store::{DiskProjectingRunStore, ProjectionError, RunStore};
 use fabro_types::RunId;
 use serde::Serialize;
@@ -35,7 +35,6 @@ use fabro_config::run::PullRequestSettings;
 use fabro_retro::retro::Retro;
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::daytona::detect_repo_info;
-use fabro_sandbox::ssh::SshConfig;
 use tokio::runtime::Handle;
 
 struct RunSession {
@@ -320,30 +319,6 @@ impl RunSession {
                 run_id: Some(record.run_id),
                 clone_branch: detected_base_branch.or_else(|| record.base_branch.clone()),
             },
-            #[cfg(feature = "exedev")]
-            SandboxProvider::Exe => SandboxSpec::Exe {
-                config: resolve_exe_config(&settings).unwrap_or_default(),
-                clone_params: detect_clone_params(&working_directory),
-                run_id: Some(record.run_id),
-                github_app: services.github_app.clone(),
-                mgmt_destination: "exe.dev".to_string(),
-            },
-            #[cfg(not(feature = "exedev"))]
-            SandboxProvider::Exe => {
-                return Err(FabroError::Precondition(
-                    "exe sandbox requires the exedev feature".to_string(),
-                ));
-            }
-            SandboxProvider::Ssh => SandboxSpec::Ssh {
-                config: resolve_ssh_config(&settings).ok_or_else(|| {
-                    FabroError::Precondition(
-                        "--sandbox ssh requires [sandbox.ssh] config".to_string(),
-                    )
-                })?,
-                clone_params: detect_clone_params(&working_directory),
-                run_id: Some(record.run_id),
-                github_app: services.github_app.clone(),
-            },
         };
 
         let sandbox_env = SandboxEnvSpec {
@@ -436,19 +411,6 @@ fn resolve_daytona_config(settings: &FabroSettings) -> Option<DaytonaConfig> {
     settings
         .sandbox_settings()
         .and_then(|sandbox| sandbox.daytona.clone())
-}
-
-#[cfg(feature = "exedev")]
-fn resolve_exe_config(settings: &FabroSettings) -> Option<fabro_sandbox::exe::ExeConfig> {
-    settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.exe.clone())
-}
-
-fn resolve_ssh_config(settings: &FabroSettings) -> Option<SshConfig> {
-    settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.ssh.clone())
 }
 
 fn resolve_fallback_chain(

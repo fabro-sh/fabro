@@ -53,9 +53,6 @@ pub(crate) enum CliSandboxProvider {
     Local,
     Docker,
     Daytona,
-    #[cfg(feature = "exedev")]
-    Exe,
-    Ssh,
 }
 
 impl From<CliSandboxProvider> for fabro_sandbox::SandboxProvider {
@@ -64,9 +61,6 @@ impl From<CliSandboxProvider> for fabro_sandbox::SandboxProvider {
             CliSandboxProvider::Local => Self::Local,
             CliSandboxProvider::Docker => Self::Docker,
             CliSandboxProvider::Daytona => Self::Daytona,
-            #[cfg(feature = "exedev")]
-            CliSandboxProvider::Exe => Self::Exe,
-            CliSandboxProvider::Ssh => Self::Ssh,
         }
     }
 }
@@ -77,11 +71,6 @@ impl From<fabro_sandbox::SandboxProvider> for CliSandboxProvider {
             fabro_sandbox::SandboxProvider::Local => Self::Local,
             fabro_sandbox::SandboxProvider::Docker => Self::Docker,
             fabro_sandbox::SandboxProvider::Daytona => Self::Daytona,
-            #[cfg(feature = "exedev")]
-            fabro_sandbox::SandboxProvider::Exe => Self::Exe,
-            #[cfg(not(feature = "exedev"))]
-            fabro_sandbox::SandboxProvider::Exe => Self::Local,
-            fabro_sandbox::SandboxProvider::Ssh => Self::Ssh,
         }
     }
 }

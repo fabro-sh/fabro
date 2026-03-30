@@ -5,11 +5,11 @@ description: "Sandboxing workflow execution"
 
 Sandboxes isolate agent execution from the host machine. When an agent runs a shell command, edits a file, or searches code, it does so inside a sandbox — preventing unintended side effects on the host and providing a reproducible environment for each run.
 
-Fabro supports six sandbox providers: `local` (no isolation), `docker` (container-level), `daytona` (cloud VM), `ssh` (any SSH host), `exe` (cloud VM via [exe.dev](https://exe.dev)), and `sprites` (persistent VM via [Sprites](https://sprites.dev), in progress). See [Environments](/execution/environments) for full provider-specific configuration.
+Fabro supports three sandbox providers: `local` (no isolation), `docker` (container-level), and `daytona` (cloud VM). See [Environments](/execution/environments) for full provider-specific configuration.
 
 ## Network access control
 
-For cloud sandboxes (Daytona), you can control outbound network access with the `network` field in `[sandbox.daytona]`. Three modes are available: `"allow_all"` (default), `"block"`, and `{ allow_list = ["..."] }` for CIDR-based egress filtering. The exe.dev provider does not currently support network access controls.
+For cloud sandboxes (Daytona), you can control outbound network access with the `network` field in `[sandbox.daytona]`. Three modes are available: `"allow_all"` (default), `"block"`, and `{ allow_list = ["..."] }` for CIDR-based egress filtering.
 
 Server defaults in `server.toml` apply when a run config doesn't specify `network`. Individual run configs can override the server default.
 

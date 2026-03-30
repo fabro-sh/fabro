@@ -114,20 +114,6 @@ pub struct DaytonaSnapshotSettings {
     pub dockerfile: Option<DockerfileSource>,
 }
 
-#[cfg(feature = "exedev")]
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct ExeSettings {
-    pub image: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct SshSettings {
-    pub destination: String,
-    pub working_directory: String,
-    pub config_file: Option<String>,
-    pub preview_url_base: Option<String>,
-}
-
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 #[serde(rename_all = "snake_case")]
 pub enum WorktreeMode {
@@ -151,8 +137,5 @@ pub struct SandboxSettings {
     pub devcontainer: Option<bool>,
     pub local: Option<LocalSandboxSettings>,
     pub daytona: Option<DaytonaSettings>,
-    #[cfg(feature = "exedev")]
-    pub exe: Option<ExeSettings>,
-    pub ssh: Option<SshSettings>,
     pub env: Option<HashMap<String, String>>,
 }

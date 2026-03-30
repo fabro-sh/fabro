@@ -356,7 +356,6 @@ mod tests {
             identifier: None,
             host_working_directory: None,
             container_mount_point: None,
-            data_host: None,
         }
     }
 

@@ -1771,7 +1771,6 @@ dependencies = [
  "git2",
  "glob",
  "libc",
- "openssh",
  "rand 0.8.5",
  "serde",
  "serde_json",
@@ -4024,20 +4023,6 @@ dependencies = [
  "indexmap 2.13.0",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "openssh"
-version = "0.11.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d534c4bfecb0ed71dea4db444a5922a294d15cf40e700548f27295e1feb0ef18"
-dependencies = [
- "libc",
- "once_cell",
- "shell-escape",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]
