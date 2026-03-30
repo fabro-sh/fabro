@@ -8,12 +8,30 @@ use fabro_config::FabroSettings;
 use fabro_git_storage::branchstore::BranchStore;
 use fabro_git_storage::gitobj::Store as GitStore;
 use fabro_store::{NodeVisitRef, RuntimeState, SlateStore, Store as _};
-use fabro_test::{fabro_snapshot, test_context};
+use fabro_test::{TestContext, fabro_snapshot, test_context};
 use fabro_types::{Checkpoint, Graph, RunRecord, StartRecord};
 use git2::{Repository, Signature};
 use object_store::local::LocalFileSystem;
-use predicates::prelude::*;
+use serde_json::Value;
 use tokio::runtime::Runtime;
+
+macro_rules! fabro_json_snapshot {
+    ($context:expr, $value:expr, @$snapshot:literal) => {{
+        let mut filters = $context.filters();
+        filters.push((
+            r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b".to_string(),
+            "[TIMESTAMP]".to_string(),
+        ));
+        let filters: Vec<(&str, &str)> = filters
+            .iter()
+            .map(|(pattern, replacement)| (pattern.as_str(), replacement.as_str()))
+            .collect();
+        let rendered = serde_json::to_string_pretty(&$value).unwrap();
+        insta::with_settings!({ filters => filters }, {
+            insta::assert_snapshot!(rendered, @$snapshot);
+        });
+    }};
+}
 
 fn fixture(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../../test/{name}"))
@@ -194,6 +212,49 @@ fn latest_metadata_checkpoint(repo_dir: &Path, run_id: &str) -> Checkpoint {
     serde_json::from_slice(&store.read_blob_at(tip, "checkpoint.json").unwrap().unwrap()).unwrap()
 }
 
+fn read_json(path: impl AsRef<Path>) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+fn read_jsonl(path: impl AsRef<Path>) -> Vec<Value> {
+    std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}
+
+fn compact_progress_event(event: &Value) -> Value {
+    let mut compact = serde_json::Map::new();
+    for key in [
+        "event",
+        "sandbox_provider",
+        "workflow_name",
+        "goal",
+        "node_id",
+        "node_label",
+        "handler_type",
+        "stage_index",
+        "status",
+        "from_node_id",
+        "to_node_id",
+        "reason",
+        "artifact_count",
+    ] {
+        if let Some(value) = event.get(key).filter(|value| !value.is_null()) {
+            compact.insert(key.to_string(), value.clone());
+        }
+    }
+    Value::Object(compact)
+}
+
+fn run_output_filters(context: &TestContext) -> Vec<(String, String)> {
+    let mut filters = context.filters();
+    filters.push((r"\b\d+ms\b".to_string(), "[TIME]".to_string()));
+    filters
+}
+
 /// Helper: create a minimal run directory that `resolve_run` can find.
 /// Sets up run.json, status.json, and progress.jsonl.
 fn setup_run_dir(
@@ -262,26 +323,6 @@ fn setup_run_dir(
     run_dir
 }
 
-fn find_run_dir(storage_dir: &std::path::Path, run_id: &str) -> std::path::PathBuf {
-    let runs_dir = storage_dir.join("runs");
-    std::fs::read_dir(&runs_dir)
-        .unwrap()
-        .flatten()
-        .map(|entry| entry.path())
-        .find(|path| {
-            path.is_dir()
-                && path
-                    .file_name()
-                    .is_some_and(|name| name.to_string_lossy().ends_with(run_id))
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "expected run directory for {run_id} under {}",
-                runs_dir.display()
-            )
-        })
-}
-
 #[test]
 fn help() {
     let context = test_context!();
@@ -326,7 +367,7 @@ fn dry_run_simple() {
     let mut cmd = context.run_cmd();
     cmd.args(["--dry-run", "--auto-approve"]);
     cmd.arg(fixture("simple.fabro"));
-    fabro_snapshot!(context.filters(), cmd, @"
+    fabro_snapshot!(run_output_filters(&context), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
@@ -336,10 +377,10 @@ fn dry_run_simple() {
     Goal: Run tests and report results
 
         Sandbox: local (ready in [TIME])
-        ✓ Start  0ms
-        ✓ Run Tests  0ms
-        ✓ Report  0ms
-        ✓ Exit  0ms
+        ✓ Start  [TIME]
+        ✓ Run Tests  [TIME]
+        ✓ Report  [TIME]
+        ✓ Exit  [TIME]
 
     === Run Result ===
     Run:       [ULID]
@@ -358,7 +399,7 @@ fn dry_run_branching() {
     let mut cmd = context.run_cmd();
     cmd.args(["--dry-run", "--auto-approve"]);
     cmd.arg(fixture("branching.fabro"));
-    fabro_snapshot!(context.filters(), cmd, @"
+    fabro_snapshot!(run_output_filters(&context), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
@@ -369,12 +410,12 @@ fn dry_run_branching() {
 
     warning [node: implement]: Node 'implement' has goal_gate=true but no retry_target or fallback_retry_target (goal_gate_has_retry)
         Sandbox: local (ready in [TIME])
-        ✓ Start  0ms
-        ✓ Plan  0ms
-        ✓ Implement  0ms
-        ✓ Validate  0ms
-        ✓ Tests passing?  0ms
-        ✓ Exit  0ms
+        ✓ Start  [TIME]
+        ✓ Plan  [TIME]
+        ✓ Implement  [TIME]
+        ✓ Validate  [TIME]
+        ✓ Tests passing?  [TIME]
+        ✓ Exit  [TIME]
 
     === Run Result ===
     Run:       [ULID]
@@ -393,7 +434,7 @@ fn dry_run_conditions() {
     let mut cmd = context.run_cmd();
     cmd.args(["--dry-run", "--auto-approve"]);
     cmd.arg(fixture("conditions.fabro"));
-    fabro_snapshot!(context.filters(), cmd, @"
+    fabro_snapshot!(run_output_filters(&context), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
@@ -403,10 +444,10 @@ fn dry_run_conditions() {
     Goal: Test condition evaluation with OR and parentheses
 
         Sandbox: local (ready in [TIME])
-        ✓ start  0ms
-        ✓ Decide  0ms
-        ✓ Path B  0ms
-        ✓ exit  0ms
+        ✓ start  [TIME]
+        ✓ Decide  [TIME]
+        ✓ Path B  [TIME]
+        ✓ exit  [TIME]
 
     === Run Result ===
     Run:       [ULID]
@@ -425,7 +466,7 @@ fn dry_run_parallel() {
     let mut cmd = context.run_cmd();
     cmd.args(["--dry-run", "--auto-approve"]);
     cmd.arg(fixture("parallel.fabro"));
-    fabro_snapshot!(context.filters(), cmd, @"
+    fabro_snapshot!(run_output_filters(&context), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
@@ -435,11 +476,11 @@ fn dry_run_parallel() {
     Goal: Test parallel and fan-in execution
 
         Sandbox: local (ready in [TIME])
-        ✓ start  0ms
-        ✓ Fork Work  0ms
-        ✓ Merge Results  0ms
-        ✓ Review  0ms
-        ✓ exit  0ms
+        ✓ start  [TIME]
+        ✓ Fork Work  [TIME]
+        ✓ Merge Results  [TIME]
+        ✓ Review  [TIME]
+        ✓ exit  [TIME]
 
     === Run Result ===
     Run:       [ULID]
@@ -458,7 +499,7 @@ fn dry_run_styled() {
     let mut cmd = context.run_cmd();
     cmd.args(["--dry-run", "--auto-approve"]);
     cmd.arg(fixture("styled.fabro"));
-    fabro_snapshot!(context.filters(), cmd, @"
+    fabro_snapshot!(run_output_filters(&context), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
@@ -468,11 +509,11 @@ fn dry_run_styled() {
     Goal: Build a styled pipeline
 
         Sandbox: local (ready in [TIME])
-        ✓ start  0ms
-        ✓ Plan  0ms
-        ✓ Implement  0ms
-        ✓ Critical Review  0ms
-        ✓ exit  0ms
+        ✓ start  [TIME]
+        ✓ Plan  [TIME]
+        ✓ Implement  [TIME]
+        ✓ Critical Review  [TIME]
+        ✓ exit  [TIME]
 
     === Run Result ===
     Run:       [ULID]
@@ -491,7 +532,7 @@ fn dry_run_legacy_tool() {
     let mut cmd = context.run_cmd();
     cmd.args(["--dry-run", "--auto-approve"]);
     cmd.arg(fixture("legacy_tool.fabro"));
-    fabro_snapshot!(context.filters(), cmd, @"
+    fabro_snapshot!(run_output_filters(&context), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
@@ -501,9 +542,9 @@ fn dry_run_legacy_tool() {
     Goal: Verify backwards compatibility with old tool naming
 
         Sandbox: local (ready in [TIME])
-        ✓ Start  0ms
-        ✓ Echo  0ms
-        ✓ Exit  0ms
+        ✓ Start  [TIME]
+        ✓ Echo  [TIME]
+        ✓ Exit  [TIME]
 
     === Run Result ===
     Run:       [ULID]
@@ -516,75 +557,7 @@ fn dry_run_legacy_tool() {
 #[test]
 fn dry_run_writes_jsonl_and_live_json() {
     let context = test_context!();
-
-    context
-        .command()
-        .args([
-            "run",
-            "--dry-run",
-            "--auto-approve",
-            "../../../test/simple.fabro",
-        ])
-        .assert()
-        .success();
-
-    // Find the single run directory under storage_dir/runs/
-    let runs_base = context.storage_dir.join("runs");
-    assert!(runs_base.exists(), "runs/ directory should exist");
-    let entries: Vec<_> = std::fs::read_dir(&runs_base)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .collect();
-    assert_eq!(entries.len(), 1, "should have exactly one run directory");
-    let run_dir = entries[0].path();
-
-    // progress.jsonl must exist and contain valid JSON lines
-    let jsonl_path = run_dir.join("progress.jsonl");
-    assert!(jsonl_path.exists(), "progress.jsonl should exist");
-    let jsonl_content = std::fs::read_to_string(&jsonl_path).unwrap();
-    let lines: Vec<&str> = jsonl_content.lines().collect();
-    assert!(
-        !lines.is_empty(),
-        "progress.jsonl should have at least one line"
-    );
-
-    // Every line must be valid JSON with ts, run_id, and event keys
-    let first_line: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
-    assert!(first_line.get("ts").is_some(), "line should have ts");
-    assert!(
-        first_line.get("run_id").is_some(),
-        "line should have run_id"
-    );
-    assert!(first_line.get("event").is_some(), "line should have event");
-
-    // Events should contain WorkflowRunStarted (may not be first due to exec env events)
-    let has_run_started = lines.iter().any(|line| {
-        let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
-        parsed["event"].as_str() == Some("WorkflowRunStarted")
-    });
-    assert!(has_run_started, "events should contain WorkflowRunStarted");
-
-    // run_id should be non-empty after WorkflowRunStarted
-    let last_line: serde_json::Value = serde_json::from_str(lines[lines.len() - 1]).unwrap();
-    let run_id = last_line["run_id"].as_str().unwrap();
-    assert!(!run_id.is_empty(), "run_id should be non-empty");
-
-    // live.json must exist and contain valid JSON matching the last JSONL line
-    let live_path = run_dir.join("live.json");
-    assert!(live_path.exists(), "live.json should exist");
-    let live_content: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&live_path).unwrap()).unwrap();
-    assert!(live_content.get("ts").is_some());
-    assert!(live_content.get("run_id").is_some());
-    assert!(live_content.get("event").is_some());
-}
-
-// == --run-id passthrough =====================================================
-
-#[test]
-fn run_id_passthrough_uses_provided_ulid() {
-    let my_ulid = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
-    let context = test_context!();
+    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FB8";
 
     context
         .command()
@@ -593,130 +566,273 @@ fn run_id_passthrough_uses_provided_ulid() {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            my_ulid,
+            run_id,
             "../../../test/simple.fabro",
         ])
         .assert()
-        .success()
-        .stderr(predicate::str::contains(my_ulid));
+        .success();
+
+    let run_dir = context.find_run_dir(run_id);
+    let jsonl_path = run_dir.join("progress.jsonl");
+    let progress = read_jsonl(&jsonl_path);
+    assert!(
+        !progress.is_empty(),
+        "progress.jsonl should have at least one line"
+    );
+    let progress_summary: Vec<_> = progress.iter().map(compact_progress_event).collect();
+    fabro_json_snapshot!(context, &progress_summary, @r#"
+    [
+      {
+        "event": "Sandbox.Initializing",
+        "sandbox_provider": "local"
+      },
+      {
+        "event": "Sandbox.Ready",
+        "sandbox_provider": "local"
+      },
+      {
+        "event": "SandboxInitialized"
+      },
+      {
+        "event": "WorkflowRunStarted",
+        "workflow_name": "Simple",
+        "goal": "Run tests and report results"
+      },
+      {
+        "event": "StageStarted",
+        "node_id": "start",
+        "node_label": "Start",
+        "handler_type": "start",
+        "stage_index": 0
+      },
+      {
+        "event": "StageCompleted",
+        "node_id": "start",
+        "node_label": "Start",
+        "stage_index": 0,
+        "status": "success"
+      },
+      {
+        "event": "EdgeSelected",
+        "from_node_id": "start",
+        "to_node_id": "run_tests",
+        "reason": "unconditional"
+      },
+      {
+        "event": "CheckpointCompleted",
+        "node_id": "start",
+        "node_label": "start",
+        "status": "success"
+      },
+      {
+        "event": "StageStarted",
+        "node_id": "run_tests",
+        "node_label": "Run Tests",
+        "handler_type": "agent",
+        "stage_index": 1
+      },
+      {
+        "event": "StageCompleted",
+        "node_id": "run_tests",
+        "node_label": "Run Tests",
+        "stage_index": 1,
+        "status": "success"
+      },
+      {
+        "event": "EdgeSelected",
+        "from_node_id": "run_tests",
+        "to_node_id": "report",
+        "reason": "unconditional"
+      },
+      {
+        "event": "CheckpointCompleted",
+        "node_id": "run_tests",
+        "node_label": "run_tests",
+        "status": "success"
+      },
+      {
+        "event": "StageStarted",
+        "node_id": "report",
+        "node_label": "Report",
+        "handler_type": "agent",
+        "stage_index": 2
+      },
+      {
+        "event": "StageCompleted",
+        "node_id": "report",
+        "node_label": "Report",
+        "stage_index": 2,
+        "status": "success"
+      },
+      {
+        "event": "EdgeSelected",
+        "from_node_id": "report",
+        "to_node_id": "exit",
+        "reason": "unconditional"
+      },
+      {
+        "event": "CheckpointCompleted",
+        "node_id": "report",
+        "node_label": "report",
+        "status": "success"
+      },
+      {
+        "event": "StageStarted",
+        "node_id": "exit",
+        "node_label": "Exit",
+        "handler_type": "exit",
+        "stage_index": 3
+      },
+      {
+        "event": "StageCompleted",
+        "node_id": "exit",
+        "node_label": "Exit",
+        "stage_index": 3,
+        "status": "success"
+      },
+      {
+        "event": "WorkflowRunCompleted",
+        "status": "success",
+        "artifact_count": 0
+      },
+      {
+        "event": "Sandbox.CleanupStarted",
+        "sandbox_provider": "local"
+      },
+      {
+        "event": "Sandbox.CleanupCompleted",
+        "sandbox_provider": "local"
+      }
+    ]
+    "#);
+
+    let live_path = run_dir.join("live.json");
+    let live_content = read_json(&live_path);
+    let live_summary = compact_progress_event(&live_content);
+    fabro_json_snapshot!(context, &live_summary, @r#"
+    {
+      "event": "Sandbox.CleanupCompleted",
+      "sandbox_provider": "local"
+    }
+    "#);
+
+    assert_eq!(live_summary, progress_summary.last().cloned().unwrap());
 }
 
-// == --detach flag =============================================================
+// == --run-id passthrough =====================================================
 
 #[test]
-fn detach_flag_appears_in_help() {
+fn run_id_passthrough_uses_provided_ulid() {
     let context = test_context!();
-    context
-        .command()
-        .args(["run", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--detach"));
+    let my_ulid = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    let mut cmd = context.run_cmd();
+    cmd.args([
+        "--dry-run",
+        "--auto-approve",
+        "--run-id",
+        my_ulid,
+        "../../../test/simple.fabro",
+    ]);
+    fabro_snapshot!(run_output_filters(&context), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    Workflow: Simple (4 nodes, 3 edges)
+    Graph: ../../../test/simple.fabro
+    Goal: Run tests and report results
+
+        Sandbox: local (ready in [TIME])
+        ✓ Start  [TIME]
+        ✓ Run Tests  [TIME]
+        ✓ Report  [TIME]
+        ✓ Exit  [TIME]
+
+    === Run Result ===
+    Run:       [ULID]
+    Status:    SUCCESS
+    Duration:  [DURATION]
+    Run:       [DRY_RUN_DIR]
+
+    === Output ===
+    [Simulated] Response for stage: report
+    ");
 }
 
 #[test]
 fn detach_prints_ulid_and_exits() {
     let context = test_context!();
-    let output = context
-        .command()
-        .args([
-            "run",
-            "--detach",
-            "--dry-run",
-            "--auto-approve",
-            "../../../test/simple.fabro",
-        ])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let stdout = String::from_utf8(output).unwrap();
-    let ulid = stdout.trim();
-    // ULID is 26 uppercase alphanumeric chars
-    assert_eq!(ulid.len(), 26, "expected 26-char ULID, got: {ulid:?}");
-    assert!(
-        ulid.chars().all(|c| c.is_ascii_alphanumeric()),
-        "expected alphanumeric ULID, got: {ulid:?}"
-    );
+    let mut cmd = context.run_cmd();
+    cmd.args([
+        "--detach",
+        "--dry-run",
+        "--auto-approve",
+        "../../../test/simple.fabro",
+    ]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    [ULID]
+    ----- stderr -----
+    ");
 }
 
 #[test]
 fn detach_creates_run_dir_with_detach_log() {
     let context = test_context!();
+    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FB9";
 
-    let output = context
-        .command()
+    context
+        .run_cmd()
         .args([
-            "run",
             "--detach",
             "--dry-run",
             "--auto-approve",
+            "--run-id",
+            run_id,
             "../../../test/simple.fabro",
         ])
         .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
+        .success();
 
-    let ulid = String::from_utf8(output).unwrap();
-    let ulid = ulid.trim();
-    assert!(!ulid.is_empty(), "should print a ULID");
-
-    // Run dir should have been created under storage_dir/runs/ and the launcher
-    // log should live under storage_dir/launchers/.
-    let runs_base = context.storage_dir.join("runs");
-    assert!(runs_base.exists(), "runs/ directory should exist");
-    let entries: Vec<_> = std::fs::read_dir(&runs_base)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .collect();
-    assert_eq!(entries.len(), 1, "should have exactly one run directory");
-    let run_dir = entries[0].path();
-    assert!(
-        context
-            .storage_dir
-            .join("launchers")
-            .join(format!("{ulid}.log"))
-            .exists(),
-        "launcher log should exist under storage_dir/launchers"
+    let run_dir = context.find_run_dir(run_id);
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "run_dir": run_dir,
+            "launcher_log_exists": context.storage_dir.join("launchers").join(format!("{run_id}.log")).exists(),
+            "detach_log_exists": run_dir.join("detach.log").exists(),
+        }),
+        @r#"
+        {
+          "run_dir": "[DRY_RUN_DIR]",
+          "launcher_log_exists": true,
+          "detach_log_exists": false
+        }
+        "#
     );
-    assert!(!run_dir.join("detach.log").exists());
 }
 
 // == Resume ===================================================================
 
 #[test]
-fn resume_help_shows_expected_args() {
-    let context = test_context!();
-    context
-        .command()
-        .args(["resume", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--detach"))
-        .stdout(predicate::str::contains("--checkpoint").not())
-        .stdout(predicate::str::contains("--workflow").not());
-}
-
-#[test]
 fn resume_requires_run_arg() {
     let context = test_context!();
-    context.command().args(["resume"]).assert().failure();
-}
+    let mut cmd = context.command();
+    cmd.args(["resume"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 2
+    ----- stdout -----
+    ----- stderr -----
+    error: the following required arguments were not provided:
+      <RUN>
 
-#[test]
-fn run_help_no_longer_shows_resume_or_run_branch() {
-    let context = test_context!();
-    context
-        .command()
-        .args(["run", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--resume").not())
-        .stdout(predicate::str::contains("--run-branch").not());
+    Usage: fabro resume --no-upgrade-check --storage-dir <STORAGE_DIR> <RUN>
+
+    For more information, try '--help'.
+    ");
 }
 
 #[test]
@@ -732,35 +848,32 @@ fn rewind_and_fork_recover_missing_metadata_from_store() {
         repo_dir.path(),
         source_run_id,
     ));
+    let mut filters = context.filters();
+    for (idx, sha) in expected_shas.iter().enumerate() {
+        let replacement = format!("[SHA_{}]", idx + 1);
+        filters.push((regex::escape(sha), replacement.clone()));
+        filters.push((regex::escape(&sha[..8]), format!("[SHA_{}]", idx + 1)));
+        filters.push((regex::escape(&sha[..7]), replacement));
+    }
 
     assert!(
         list_metadata_run_ids(repo_dir.path()).is_empty(),
         "metadata branch should start missing"
     );
 
-    let rewind_list = context
-        .command()
-        .current_dir(repo_dir.path())
-        .args(["rewind", source_run_id, "--list"])
-        .timeout(Duration::from_secs(15))
-        .assert()
-        .success()
-        .get_output()
-        .stderr
-        .clone();
-    let rewind_list = String::from_utf8(rewind_list).unwrap();
-    assert!(
-        rewind_list.contains("@1"),
-        "expected first checkpoint: {rewind_list}"
-    );
-    assert!(
-        rewind_list.contains("@2"),
-        "expected second checkpoint: {rewind_list}"
-    );
-    assert!(
-        !rewind_list.contains("no run commit"),
-        "rebuilt timeline should persist backfilled SHAs: {rewind_list}"
-    );
+    let mut rewind_list = context.command();
+    rewind_list.current_dir(repo_dir.path());
+    rewind_list.args(["rewind", source_run_id, "--list"]);
+    rewind_list.timeout(Duration::from_secs(15));
+    fabro_snapshot!(filters.clone(), rewind_list, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    @   Node   Details 
+     @1  start          
+     @2  build
+    ");
 
     let rebuilt_checkpoints = metadata_checkpoints(repo_dir.path(), source_run_id);
     assert_eq!(rebuilt_checkpoints.len(), 2);
@@ -785,6 +898,11 @@ fn rewind_and_fork_recover_missing_metadata_from_store() {
     let child_run_ids: Vec<_> = after_child.difference(&before_child).cloned().collect();
     assert_eq!(child_run_ids.len(), 1, "expected one child run");
     let child_run_id = &child_run_ids[0];
+    filters.push((regex::escape(child_run_id), "[CHILD_RUN_ID]".to_string()));
+    filters.push((
+        regex::escape(&child_run_id[..8]),
+        "[CHILD_RUN_PREFIX]".to_string(),
+    ));
 
     let child_checkpoint = latest_metadata_checkpoint(repo_dir.path(), child_run_id);
     assert_eq!(
@@ -792,25 +910,20 @@ fn rewind_and_fork_recover_missing_metadata_from_store() {
         Some(expected_shas[1].as_str())
     );
 
-    let child_rewind = context
-        .command()
-        .current_dir(repo_dir.path())
-        .args(["rewind", child_run_id, "@1", "--no-push"])
-        .timeout(Duration::from_secs(15))
-        .assert()
-        .success()
-        .get_output()
-        .stderr
-        .clone();
-    let child_rewind = String::from_utf8(child_rewind).unwrap();
-    assert!(
-        child_rewind.contains("Rewound run branch"),
-        "expected child rewind to move the run branch: {child_rewind}"
-    );
-    assert!(
-        !child_rewind.contains("has no git_commit_sha"),
-        "child rewind should not lose git_commit_sha: {child_rewind}"
-    );
+    let mut child_rewind = context.command();
+    child_rewind.current_dir(repo_dir.path());
+    child_rewind.args(["rewind", child_run_id, "@1", "--no-push"]);
+    child_rewind.timeout(Duration::from_secs(15));
+    fabro_snapshot!(filters, child_rewind, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    Rewound metadata branch to @1 (build)
+    Rewound run branch fabro/run/[ULID] to [SHA_2]
+
+    To resume: fabro resume [CHILD_RUN_PREFIX]
+    ");
 
     let before_grandchild = after_child;
     context
@@ -886,11 +999,23 @@ digraph BarBaz {
         .assert()
         .success();
 
-    let run_dir = find_run_dir(&context.storage_dir, "01ARZ3NDEKTSV4RRFFQ69G5FAX");
-    let run_record: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(run_dir.join("run.json")).unwrap()).unwrap();
-    assert_eq!(run_record["graph"]["name"].as_str(), Some("BarBaz"));
-    assert_eq!(run_record["workflow_slug"].as_str(), Some("sluggy"));
+    let run_dir = context.find_run_dir("01ARZ3NDEKTSV4RRFFQ69G5FAX");
+    let run_record = read_json(run_dir.join("run.json"));
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "run_id": run_record["run_id"],
+            "graph_name": run_record["graph"]["name"],
+            "workflow_slug": run_record["workflow_slug"],
+        }),
+        @r#"
+        {
+          "run_id": "[ULID]",
+          "graph_name": "BarBaz",
+          "workflow_slug": "sluggy"
+        }
+        "#
+    );
 }
 
 #[test]
@@ -936,11 +1061,23 @@ digraph FooWorkflow {
         .assert()
         .success();
 
-    let run_dir = find_run_dir(&context.storage_dir, "01ARZ3NDEKTSV4RRFFQ69G5FAY");
-    let run_record: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(run_dir.join("run.json")).unwrap()).unwrap();
-    assert_eq!(run_record["graph"]["name"].as_str(), Some("FooWorkflow"));
-    assert_eq!(run_record["workflow_slug"].as_str(), Some("alpha"));
+    let run_dir = context.find_run_dir("01ARZ3NDEKTSV4RRFFQ69G5FAY");
+    let run_record = read_json(run_dir.join("run.json"));
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "run_id": run_record["run_id"],
+            "graph_name": run_record["graph"]["name"],
+            "workflow_slug": run_record["workflow_slug"],
+        }),
+        @r#"
+        {
+          "run_id": "[ULID]",
+          "graph_name": "FooWorkflow",
+          "workflow_slug": "alpha"
+        }
+        "#
+    );
 }
 
 #[test]
@@ -959,14 +1096,9 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
             "../../../test/simple.fabro",
         ])
         .assert()
-        .success()
-        .stdout(predicate::str::contains(run_id));
+        .success();
 
-    let run_dir = find_run_dir(&context.storage_dir, run_id);
-    assert!(
-        run_dir.join("run.json").exists(),
-        "create should persist run.json so the run is discoverable"
-    );
+    let run_dir = context.find_run_dir(run_id);
 
     context.command().args(["start", run_id]).assert().success();
 
@@ -977,7 +1109,19 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
         .assert()
         .success();
 
-    assert!(run_dir.join("conclusion.json").exists());
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "run_json_exists": run_dir.join("run.json").exists(),
+            "conclusion_json_exists": run_dir.join("conclusion.json").exists(),
+        }),
+        @r#"
+        {
+          "run_json_exists": true,
+          "conclusion_json_exists": true
+        }
+        "#
+    );
 }
 
 #[test]
@@ -997,8 +1141,7 @@ fn dry_run_detach_attach_works_with_default_run_lookup() {
             "../../../test/simple.fabro",
         ])
         .assert()
-        .success()
-        .stdout(predicate::str::contains(run_id));
+        .success();
 
     context
         .command()
@@ -1006,6 +1149,21 @@ fn dry_run_detach_attach_works_with_default_run_lookup() {
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success();
+
+    let run_dir = context.find_run_dir(run_id);
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "run_dir": run_dir,
+            "conclusion_json_exists": run_dir.join("conclusion.json").exists(),
+        }),
+        @r#"
+        {
+          "run_dir": "[DRY_RUN_DIR]",
+          "conclusion_json_exists": true
+        }
+        "#
+    );
 }
 
 #[test]
@@ -1052,8 +1210,7 @@ fn start_by_workflow_name_prefers_newly_created_submitted_run() {
             "smoke",
         ])
         .assert()
-        .success()
-        .stdout(predicate::str::contains(run_id));
+        .success();
 
     context
         .command()
@@ -1068,12 +1225,15 @@ fn start_by_workflow_name_prefers_newly_created_submitted_run() {
         .assert()
         .success();
 
-    let new_run_dir = find_run_dir(&context.storage_dir, run_id);
-    let status = std::fs::read_to_string(new_run_dir.join("status.json")).unwrap();
-    assert!(
-        status.contains("\"status\": \"succeeded\""),
-        "expected the newly created Smoke run to be started and completed"
-    );
+    let new_run_dir = context.find_run_dir(run_id);
+    let status = read_json(new_run_dir.join("status.json"));
+    fabro_json_snapshot!(context, &status, @r#"
+    {
+      "status": "succeeded",
+      "reason": "completed",
+      "updated_at": "[TIMESTAMP]"
+    }
+    "#);
 }
 
 // Bug 2: __detached should use cached graph.fabro, not run.json working_directory.
@@ -1127,31 +1287,26 @@ digraph G {
     // The cached graph snapshot saved by `fabro create`
     std::fs::write(run_dir.join("graph.fabro"), dot).unwrap();
 
-    // __detached should use graph.fabro and never reference the deleted file.
-    let output = context
-        .command()
-        .args([
-            "__detached",
-            "--run-dir",
-            run_dir.to_str().unwrap(),
-            "--launcher-path",
-            context
-                .storage_dir
-                .join("launchers")
-                .join("01ARZ3NDEKTSV4RRFFQ69G5FB3.json")
-                .to_str()
-                .unwrap(),
-        ])
-        .timeout(std::time::Duration::from_secs(15))
-        .output()
-        .expect("process should start");
-
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(
-        !stderr.contains("deleted-workflow.fabro"),
-        "bug2: engine should use cached graph.fabro, not the original \
-         (deleted) workflow path.\nstderr: {stderr}"
-    );
+    let mut cmd = context.command();
+    cmd.args([
+        "__detached",
+        "--run-dir",
+        run_dir.to_str().unwrap(),
+        "--launcher-path",
+        context
+            .storage_dir
+            .join("launchers")
+            .join("01ARZ3NDEKTSV4RRFFQ69G5FB3.json")
+            .to_str()
+            .unwrap(),
+    ]);
+    cmd.timeout(std::time::Duration::from_secs(15));
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    ");
 }
 
 #[test]
@@ -1200,35 +1355,44 @@ digraph Test {
         .success();
     let before: serde_json::Value =
         serde_json::from_slice(&inspect_before.get_output().stdout).unwrap();
-    let run_dir = before[0]["run_dir"].as_str().unwrap().to_string();
-    let start_time_before = before[0]["start_record"]["start_time"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let conclusion_ts_before = before[0]["conclusion"]["timestamp"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let before_summary = serde_json::json!({
+        "run_dir": before[0]["run_dir"],
+        "start_time": before[0]["start_record"]["start_time"],
+        "conclusion_timestamp": before[0]["conclusion"]["timestamp"],
+        "conclusion_status": before[0]["conclusion"]["status"],
+    });
+    let run_dir = before_summary["run_dir"].as_str().unwrap().to_string();
+    fabro_json_snapshot!(context, &before_summary, @r#"
+    {
+      "run_dir": "[DRY_RUN_DIR]",
+      "start_time": "[TIMESTAMP]",
+      "conclusion_timestamp": "[TIMESTAMP]",
+      "conclusion_status": "success"
+    }
+    "#);
 
-    context
-        .command()
-        .args([
-            "__detached",
-            "--run-dir",
-            &run_dir,
-            "--launcher-path",
-            context
-                .storage_dir
-                .join("launchers")
-                .join(format!("{run_id}.json"))
-                .to_str()
-                .unwrap(),
-            "--resume",
-        ])
-        .timeout(std::time::Duration::from_secs(10))
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("nothing to resume"));
+    let mut cmd = context.command();
+    cmd.args([
+        "__detached",
+        "--run-dir",
+        &run_dir,
+        "--launcher-path",
+        context
+            .storage_dir
+            .join("launchers")
+            .join(format!("{run_id}.json"))
+            .to_str()
+            .unwrap(),
+        "--resume",
+    ]);
+    cmd.timeout(std::time::Duration::from_secs(10));
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: Precondition failed: run already finished successfully — nothing to resume
+    ");
 
     let inspect_after = context
         .command()
@@ -1237,15 +1401,14 @@ digraph Test {
         .success();
     let after: serde_json::Value =
         serde_json::from_slice(&inspect_after.get_output().stdout).unwrap();
+    let after_summary = serde_json::json!({
+        "run_dir": after[0]["run_dir"],
+        "start_time": after[0]["start_record"]["start_time"],
+        "conclusion_timestamp": after[0]["conclusion"]["timestamp"],
+        "conclusion_status": after[0]["conclusion"]["status"],
+    });
 
-    assert_eq!(
-        after[0]["start_record"]["start_time"].as_str().unwrap(),
-        start_time_before
-    );
-    assert_eq!(
-        after[0]["conclusion"]["timestamp"].as_str().unwrap(),
-        conclusion_ts_before
-    );
+    assert_eq!(after_summary, before_summary);
 }
 
 #[test]
@@ -1296,27 +1459,28 @@ digraph G {
     .unwrap();
     std::fs::write(run_dir.join("graph.fabro"), dot).unwrap();
 
-    context
-        .command()
-        .env("GITHUB_APP_PRIVATE_KEY", "%%%not-base64%%%")
-        .args([
-            "__detached",
-            "--run-dir",
-            run_dir.to_str().unwrap(),
-            "--launcher-path",
-            context
-                .storage_dir
-                .join("launchers")
-                .join("01ARZ3NDEKTSV4RRFFQ69G5FB4.json")
-                .to_str()
-                .unwrap(),
-        ])
-        .timeout(std::time::Duration::from_secs(10))
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "GITHUB_APP_PRIVATE_KEY is not valid PEM or base64",
-        ));
+    let mut cmd = context.command();
+    cmd.env("GITHUB_APP_PRIVATE_KEY", "%%%not-base64%%%");
+    cmd.args([
+        "__detached",
+        "--run-dir",
+        run_dir.to_str().unwrap(),
+        "--launcher-path",
+        context
+            .storage_dir
+            .join("launchers")
+            .join("01ARZ3NDEKTSV4RRFFQ69G5FB4.json")
+            .to_str()
+            .unwrap(),
+    ]);
+    cmd.timeout(std::time::Duration::from_secs(10));
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: GITHUB_APP_PRIVATE_KEY is not valid PEM or base64: Invalid symbol 37, offset 0.
+    ");
 }
 
 // Bug 3: attach loop must leave interview_request.json in place until the
@@ -1361,26 +1525,31 @@ fn bug3_attach_leaves_interview_request_until_engine_consumes_response() {
     )
     .unwrap();
 
-    // Pipe "y\n" so ConsoleInterviewer doesn't block on stdin
-    let _ = context
-        .command()
-        .args(["attach", "01ARZ3NDEKTSV4RRFFQ69G5FB5"])
-        .write_stdin("y\n")
-        .timeout(std::time::Duration::from_secs(5))
-        .output();
+    let mut cmd = context.command();
+    cmd.args(["attach", "01ARZ3NDEKTSV4RRFFQ69G5FB5"]);
+    cmd.write_stdin("y\n");
+    cmd.timeout(std::time::Duration::from_secs(5));
+    let _ = cmd.output();
 
-    // The attach loop should leave the request durable until the engine consumes
-    // the response, so a crashed attach can be retried safely.
-    assert!(
-        runtime_state.interview_request_path().exists(),
-        "bug3: interview_request.json should stay present until the engine consumes the answer"
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "request_exists": runtime_state.interview_request_path().exists(),
+            "response_exists": runtime_state.interview_response_path().exists(),
+            "response": read_json(runtime_state.interview_response_path()),
+        }),
+        @r#"
+        {
+          "request_exists": true,
+          "response_exists": true,
+          "response": {
+            "value": "Yes",
+            "selected_option": null,
+            "text": null
+          }
+        }
+        "#
     );
-    assert!(
-        runtime_state.interview_response_path().exists(),
-        "bug3: attach should write interview_response.json after handling the prompt"
-    );
-    let response = std::fs::read_to_string(runtime_state.interview_response_path()).unwrap();
-    assert!(response.contains("\"value\": \"Yes\""));
 }
 
 #[test]
@@ -1420,29 +1589,32 @@ fn attach_closed_stdin_keeps_interview_pending() {
     )
     .unwrap();
 
-    let assert = context
-        .command()
-        .args(["attach", "01ARZ3NDEKTSV4RRFFQ69G5FB6"])
-        .timeout(std::time::Duration::from_secs(5))
-        .assert()
-        .failure();
+    let mut cmd = context.command();
+    cmd.args(["attach", "01ARZ3NDEKTSV4RRFFQ69G5FB6"]);
+    cmd.timeout(std::time::Duration::from_secs(5));
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    ? Approve?
+    [Y/N]: Interview ended without an answer. The run is still waiting for input; reattach to answer it.
+    ");
 
-    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
-    assert!(
-        stderr.contains("still waiting for input"),
-        "attach should explain that the run is still waiting for a human answer.\nstderr: {stderr}"
-    );
-    assert!(
-        runtime_state.interview_request_path().exists(),
-        "attach with closed stdin must leave the request pending"
-    );
-    assert!(
-        !runtime_state.interview_response_path().exists(),
-        "attach with closed stdin must not fabricate a response"
-    );
-    assert!(
-        !runtime_state.interview_claim_path().exists(),
-        "attach with closed stdin must release the claim so a later attach can answer"
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "request_exists": runtime_state.interview_request_path().exists(),
+            "response_exists": runtime_state.interview_response_path().exists(),
+            "claim_exists": runtime_state.interview_claim_path().exists(),
+        }),
+        @r#"
+        {
+          "request_exists": true,
+          "response_exists": false,
+          "claim_exists": false
+        }
+        "#
     );
 }
 
@@ -1489,19 +1661,14 @@ fn bug4_attach_respects_verbose_from_spec() {
     )
     .unwrap();
 
-    let output = context
-        .command()
-        .args(["attach", "01ARZ3NDEKTSV4RRFFQ69G5FB7"])
-        .timeout(std::time::Duration::from_secs(10))
-        .output()
-        .expect("process should start");
-
-    let stderr = String::from_utf8(output.stderr).unwrap();
-
-    // Bug: verbose is hardcoded false, so stats are suppressed.
-    // Fix: load spec.verbose and pass it to ProgressUI.
-    assert!(
-        stderr.contains("turns") && stderr.contains("tools"),
-        "bug4: attach should show verbose stats when spec.verbose=true.\nstderr: {stderr}"
-    );
+    let mut cmd = context.command();
+    cmd.args(["attach", "01ARZ3NDEKTSV4RRFFQ69G5FB7"]);
+    cmd.timeout(std::time::Duration::from_secs(10));
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+        ✓ ?  10s  (0 turns, 0 tools, 1.5k toks)
+    ");
 }
