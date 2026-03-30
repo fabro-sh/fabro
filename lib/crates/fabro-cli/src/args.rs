@@ -812,6 +812,8 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         command: SandboxCommand,
     },
+    /// Generate shell completions
+    Completion(CompletionArgs),
     /// System maintenance commands
     System(SystemNamespace),
     /// Send a queued analytics event (internal)
@@ -893,6 +895,7 @@ impl Commands {
                 ProviderCommand::Login(_) => "provider login",
             },
             Self::Sandbox { command } => command.name(),
+            Self::Completion(_) => "completion",
             Self::System(ns) => match &ns.command {
                 SystemCommand::Prune(_) => "system prune",
                 SystemCommand::Df(_) => "system df",
@@ -1038,6 +1041,12 @@ pub(crate) struct ProviderNamespace {
 pub(crate) enum ProviderCommand {
     /// Log in to an LLM provider
     Login(ProviderLoginArgs),
+}
+
+#[derive(Args)]
+pub(crate) struct CompletionArgs {
+    /// Shell to generate completions for
+    pub shell: clap_complete::Shell,
 }
 
 #[derive(Args)]

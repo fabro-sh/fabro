@@ -13,7 +13,7 @@ use anyhow::Result;
 use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands};
 #[cfg(feature = "server")]
 use args::{ServerCommand, ServerNamespace};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -225,6 +225,27 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Provider(ns) => commands::provider::dispatch(ns).await?,
             Commands::Sandbox { command } => commands::sandbox::dispatch(command, &globals).await?,
             Commands::System(ns) => commands::system::dispatch(ns, &globals).await?,
+            Commands::Completion(args) => {
+                let mut cmd = Cli::command();
+                let shell = args.shell;
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut buf = Vec::new();
+                    clap_complete::generate(shell, &mut cmd, "fabro", &mut buf);
+                    buf
+                }));
+                match result {
+                    Ok(buf) => {
+                        use std::io::Write;
+                        std::io::stdout().write_all(&buf)?;
+                    }
+                    Err(_) => {
+                        anyhow::bail!(
+                            "Failed to generate completions for {shell}. \
+                             Try zsh, fish, elvish, or powershell instead."
+                        );
+                    }
+                }
+            }
             Commands::SendAnalytics { path } => {
                 let result = sender::upload(&path).await;
                 let _ = std::fs::remove_file(&path);

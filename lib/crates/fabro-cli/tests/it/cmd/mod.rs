@@ -2,6 +2,7 @@ mod asset;
 mod asset_cp;
 mod asset_list;
 mod attach;
+mod completion;
 mod config;
 mod config_show;
 mod cp;

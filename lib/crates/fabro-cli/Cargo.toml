@@ -42,6 +42,7 @@ fabro-store = { path = "../fabro-store" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 clap.workspace = true
+clap_complete.workspace = true
 cli-table.workspace = true
 console.workspace = true
 indicatif.workspace = true
