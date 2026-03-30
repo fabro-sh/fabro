@@ -1,13 +1,5 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-fn init_git_repo(path: &std::path::Path) {
-    std::process::Command::new("git")
-        .args(["init"])
-        .current_dir(path)
-        .output()
-        .expect("git init should succeed");
-}
-
 fn init_fabro_project(context: &fabro_test::TestContext) {
     context
         .write_temp("fabro.toml", "version = 1\n")
@@ -47,7 +39,7 @@ fn help() {
 #[test]
 fn test_repo_deinit_removes_fabro_toml_and_dir() {
     let context = test_context!();
-    init_git_repo(&context.temp_dir);
+    context.git_init();
     init_fabro_project(&context);
 
     assert!(context.temp_dir.join("fabro.toml").exists());
@@ -73,7 +65,7 @@ fn test_repo_deinit_removes_fabro_toml_and_dir() {
 #[test]
 fn test_repo_deinit_fails_when_not_initialized() {
     let context = test_context!();
-    init_git_repo(&context.temp_dir);
+    context.git_init();
 
     let mut cmd = context.repo();
     cmd.arg("deinit");
@@ -90,7 +82,7 @@ fn test_repo_deinit_fails_when_not_initialized() {
 #[test]
 fn test_repo_init_skill_installs_skill_files() {
     let context = test_context!();
-    init_git_repo(&context.temp_dir);
+    context.git_init();
 
     context
         .repo()

@@ -223,6 +223,16 @@ impl TestContext {
         self
     }
 
+    /// Initialize a git repository in `temp_dir`.
+    pub fn git_init(&self) -> &Self {
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&self.temp_dir)
+            .output()
+            .expect("git init should succeed");
+        self
+    }
+
     /// Write a file under `home_dir`, creating parent directories as needed.
     ///
     /// `path` is relative to `home_dir`.
