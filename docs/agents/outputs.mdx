@@ -276,10 +276,15 @@ Each collection writes a `manifest.json` summarizing what was captured:
   "total_bytes": 245760,
   "files_skipped": 0,
   "download_errors": 0,
-  "copied_paths": [
-    "test-results/screenshot.png",
-    "test-results/video.webm",
-    "playwright-report/index.html"
+  "hash_errors": 0,
+  "captured_assets": [
+    {
+      "path": "test-results/screenshot.png",
+      "mime": "image/png",
+      "content_md5": "a1b2c3...",
+      "content_sha256": "d4e5f6...",
+      "bytes": 81920
+    }
   ]
 }
 ```

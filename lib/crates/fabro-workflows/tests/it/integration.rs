@@ -12892,16 +12892,33 @@ async fn asset_collection_local_sandbox_success() {
         serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
     assert!(manifest["files_copied"].as_u64().unwrap() >= 1);
 
-    // Check that AssetsCaptured event was emitted
+    // Check that AssetCaptured events were emitted
     let captured_events = events.lock().unwrap();
-    let assets_events: Vec<&WorkflowRunEvent> = captured_events
+    let asset_events: Vec<&WorkflowRunEvent> = captured_events
         .iter()
-        .filter(|e| matches!(e, WorkflowRunEvent::AssetsCaptured { .. }))
+        .filter(|e| matches!(e, WorkflowRunEvent::AssetCaptured { .. }))
         .collect();
     assert!(
-        !assets_events.is_empty(),
-        "should emit at least one AssetsCaptured event"
+        !asset_events.is_empty(),
+        "should emit at least one AssetCaptured event"
     );
+    if let WorkflowRunEvent::AssetCaptured {
+        path,
+        mime,
+        content_md5,
+        content_sha256,
+        bytes,
+        attempt,
+        ..
+    } = asset_events[0]
+    {
+        assert!(!path.is_empty());
+        assert!(!mime.is_empty());
+        assert_eq!(content_md5.len(), 32);
+        assert_eq!(content_sha256.len(), 64);
+        assert!(*bytes > 0);
+        assert_eq!(*attempt, 1);
+    }
 }
 
 /// Local sandbox: assets are still collected even when the handler fails.

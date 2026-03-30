@@ -97,18 +97,24 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         };
         let stage_dir = self
             .assets_dir
-            .join(node_slug)
+            .join(&node_slug)
             .join(format!("retry_{}", ctx.attempt));
         let _ = std::fs::create_dir_all(&stage_dir);
 
         match collect_assets(&*self.sandbox, &stage_dir, &self.asset_globs, epoch).await {
             Ok(summary) if summary.files_copied > 0 => {
-                self.emitter.emit(&WorkflowRunEvent::AssetsCaptured {
-                    node_id: node_id.to_string(),
-                    files_copied: summary.files_copied,
-                    total_bytes: summary.total_bytes,
-                    files_skipped: summary.files_skipped,
-                });
+                for asset in &summary.captured_assets {
+                    self.emitter.emit(&WorkflowRunEvent::AssetCaptured {
+                        node_id: node_id.to_string(),
+                        attempt: ctx.attempt,
+                        node_slug: node_slug.clone(),
+                        path: asset.path.clone(),
+                        mime: asset.mime.clone(),
+                        content_md5: asset.content_md5.clone(),
+                        content_sha256: asset.content_sha256.clone(),
+                        bytes: asset.bytes,
+                    });
+                }
             }
             Ok(_) => {} // no files collected
             Err(e) => {

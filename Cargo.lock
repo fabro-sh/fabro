@@ -2013,6 +2013,8 @@ dependencies = [
  "futures",
  "git2",
  "hex",
+ "md5",
+ "mime_guess",
  "predicates",
  "rand 0.8.5",
  "regex",

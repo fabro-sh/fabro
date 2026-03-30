@@ -250,11 +250,15 @@ pub enum WorkflowRunEvent {
         node: String,
         idle_seconds: u64,
     },
-    AssetsCaptured {
+    AssetCaptured {
         node_id: String,
-        files_copied: usize,
-        total_bytes: u64,
-        files_skipped: usize,
+        attempt: u32,
+        node_slug: String,
+        path: String,
+        mime: String,
+        content_md5: String,
+        content_sha256: String,
+        bytes: u64,
     },
     SshAccessReady {
         ssh_command: String,
@@ -619,16 +623,15 @@ impl WorkflowRunEvent {
             Self::StallWatchdogTimeout { node, idle_seconds } => {
                 warn!(node, idle_seconds, "Stall watchdog timeout");
             }
-            Self::AssetsCaptured {
+            Self::AssetCaptured {
                 node_id,
-                files_copied,
-                total_bytes,
-                files_skipped,
+                node_slug,
+                attempt,
+                path,
+                bytes,
+                ..
             } => {
-                debug!(
-                    node_id,
-                    files_copied, total_bytes, files_skipped, "Assets captured"
-                );
+                debug!(node_id, node_slug, attempt, path, bytes, "Asset captured");
             }
             Self::SshAccessReady { ssh_command } => {
                 info!(ssh_command, "SSH access ready");
@@ -1164,6 +1167,8 @@ fn rename_fields(event_name: &str, fields: &mut serde_json::Map<String, serde_js
         rename(fields, "stage", "node_id");
         default_node_label(fields);
         rename(fields, "text", "prompt_text");
+    } else if event_name == "AssetCaptured" {
+        default_node_label(fields);
     } else if event_name.starts_with("Interview") && event_name != "InterviewCompleted" {
         // InterviewStarted, InterviewTimeout have `stage`
         rename(fields, "stage", "node_id");
@@ -1845,6 +1850,27 @@ mod tests {
     }
 
     #[test]
+    fn serde_round_trip_asset_captured() {
+        let event = WorkflowRunEvent::AssetCaptured {
+            node_id: "work".to_string(),
+            attempt: 2,
+            node_slug: "work-visit_3".to_string(),
+            path: "coverage/lcov.info".to_string(),
+            mime: "application/octet-stream".to_string(),
+            content_md5: "abc123".to_string(),
+            content_sha256: "def456".to_string(),
+            bytes: 512,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            deserialized,
+            WorkflowRunEvent::AssetCaptured { node_slug, bytes, .. }
+                if node_slug == "work-visit_3" && bytes == 512
+        ));
+    }
+
+    #[test]
     fn flatten_event_simple_variant() {
         let event = WorkflowRunEvent::StageStarted {
             node_id: "plan".to_string(),
@@ -2125,6 +2151,27 @@ mod tests {
         assert_eq!(fields["prompt_text"], "Approve?");
         assert!(!fields.contains_key("stage"));
         assert!(!fields.contains_key("text"));
+    }
+
+    #[test]
+    fn rename_fields_asset_captured() {
+        let event = WorkflowRunEvent::AssetCaptured {
+            node_id: "test_stage".to_string(),
+            attempt: 1,
+            node_slug: "test_stage".to_string(),
+            path: "test-results/report.xml".to_string(),
+            mime: "text/xml".to_string(),
+            content_md5: "d41d8cd98f00b204e9800998ecf8427e".to_string(),
+            content_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .to_string(),
+            bytes: 1024,
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "AssetCaptured");
+        assert_eq!(fields["node_id"], "test_stage");
+        assert_eq!(fields["node_label"], "test_stage");
+        assert_eq!(fields["path"], "test-results/report.xml");
+        assert_eq!(fields["bytes"], 1024);
     }
 
     #[test]

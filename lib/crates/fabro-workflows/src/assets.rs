@@ -57,17 +57,14 @@ pub fn scan_assets(assets_dir: &Path, node_filter: Option<&str>) -> Result<Vec<A
                 continue;
             };
 
-            for relative_path in &summary.copied_paths {
-                let absolute_path = retry_dir.join(relative_path);
-                let size = std::fs::metadata(&absolute_path)
-                    .map(|metadata| metadata.len())
-                    .unwrap_or(0);
+            for asset in &summary.captured_assets {
+                let absolute_path = retry_dir.join(&asset.path);
                 entries.push(AssetEntry {
                     node_slug: node_slug.clone(),
                     retry,
-                    relative_path: relative_path.clone(),
+                    relative_path: asset.path.clone(),
                     absolute_path,
-                    size,
+                    size: asset.bytes,
                 });
             }
         }

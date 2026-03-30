@@ -1,5 +1,6 @@
 use fabro_agent::Sandbox;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use tokio::fs;
 use tracing::{debug, warn};
@@ -12,6 +13,16 @@ pub struct DiscoveredFile {
     pub mtime_epoch_secs: f64,
 }
 
+/// Metadata for a single captured asset file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapturedAssetInfo {
+    pub path: String,
+    pub mime: String,
+    pub content_md5: String,
+    pub content_sha256: String,
+    pub bytes: u64,
+}
+
 /// Summary of an asset collection run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssetCollectionSummary {
@@ -19,7 +30,8 @@ pub struct AssetCollectionSummary {
     pub total_bytes: u64,
     pub files_skipped: usize,
     pub download_errors: usize,
-    pub copied_paths: Vec<String>,
+    pub hash_errors: usize,
+    pub captured_assets: Vec<CapturedAssetInfo>,
 }
 
 /// Directories to exclude from the find search and checkpoint commits.
@@ -242,6 +254,27 @@ fn normalize_paths(discovered: Vec<DiscoveredFile>, root: &str) -> Vec<Discovere
         .collect()
 }
 
+fn compute_asset_info(
+    relative_path: &str,
+    local_path: &Path,
+) -> std::result::Result<CapturedAssetInfo, String> {
+    let mime = mime_guess::from_path(relative_path)
+        .first_or_octet_stream()
+        .to_string();
+    let data = std::fs::read(local_path)
+        .map_err(|e| format!("failed to read {}: {e}", local_path.display()))?;
+    let bytes = u64::try_from(data.len()).unwrap_or(u64::MAX);
+    let content_md5 = format!("{:x}", md5::compute(&data));
+    let content_sha256 = hex::encode(Sha256::digest(&data));
+    Ok(CapturedAssetInfo {
+        path: relative_path.to_string(),
+        mime,
+        content_md5,
+        content_sha256,
+        bytes,
+    })
+}
+
 /// Collect asset files matching the configured globs that were created during this stage.
 pub async fn collect_assets(
     sandbox: &dyn Sandbox,
@@ -268,7 +301,8 @@ pub async fn collect_assets(
     let mut files_copied: usize = 0;
     let mut total_bytes: u64 = 0;
     let mut download_errors: usize = 0;
-    let mut copied_paths: Vec<String> = Vec::new();
+    let mut hash_errors: usize = 0;
+    let mut captured_assets: Vec<CapturedAssetInfo> = Vec::new();
 
     for file in &to_collect {
         let dest = stage_dir.join(&file.relative_path);
@@ -276,11 +310,22 @@ pub async fn collect_assets(
             .download_file_to_local(&file.relative_path, &dest)
             .await
         {
-            Ok(()) => {
-                files_copied += 1;
-                total_bytes += file.size;
-                copied_paths.push(file.relative_path.clone());
-            }
+            Ok(()) => match compute_asset_info(&file.relative_path, &dest) {
+                Ok(info) => {
+                    files_copied += 1;
+                    total_bytes += info.bytes;
+                    captured_assets.push(info);
+                }
+                Err(e) => {
+                    warn!(
+                        path = file.relative_path.as_str(),
+                        error = e.as_str(),
+                        "Asset hash failed"
+                    );
+                    let _ = std::fs::remove_file(&dest);
+                    hash_errors += 1;
+                }
+            },
             Err(e) => {
                 warn!(
                     path = file.relative_path.as_str(),
@@ -298,7 +343,8 @@ pub async fn collect_assets(
         total_bytes,
         files_skipped,
         download_errors,
-        copied_paths,
+        hash_errors,
+        captured_assets,
     };
 
     if files_copied > 0 {
@@ -339,8 +385,8 @@ pub fn collect_asset_paths(assets_dir: &Path) -> Vec<String> {
                 continue;
             };
             let retry_dir = retry_entry.path();
-            for relative_path in &summary.copied_paths {
-                let full_path = retry_dir.join(relative_path);
+            for asset in &summary.captured_assets {
+                let full_path = retry_dir.join(&asset.path);
                 all_paths.push(full_path.to_string_lossy().into_owned());
             }
         }
@@ -639,9 +685,19 @@ mod tests {
             .unwrap();
 
         assert_eq!(summary.files_copied, 1);
-        assert_eq!(summary.total_bytes, 1024);
+        assert_eq!(summary.total_bytes, 7);
         assert_eq!(summary.download_errors, 0);
-        assert_eq!(summary.copied_paths, vec!["test-results/r.xml"]);
+        assert_eq!(summary.hash_errors, 0);
+        assert_eq!(summary.captured_assets.len(), 1);
+        let asset = &summary.captured_assets[0];
+        assert_eq!(asset.path, "test-results/r.xml");
+        assert_eq!(asset.mime, "text/xml");
+        assert_eq!(asset.bytes, 7);
+        assert_eq!(asset.content_md5, "f1430934c390c118ed2f148e1d44d36c");
+        assert_eq!(
+            asset.content_sha256,
+            "28e51ddac37391b99c2b9053f1122d0bf84b02365e6fd8c6e8667378bd00f436"
+        );
 
         // Check that the file was written to the stage dir
         let dest = stage_dir.path().join("test-results/r.xml");
@@ -690,6 +746,7 @@ mod tests {
 
         assert_eq!(summary.files_copied, 0);
         assert_eq!(summary.download_errors, 2);
+        assert_eq!(summary.hash_errors, 0);
     }
 
     #[test]
@@ -708,9 +765,22 @@ mod tests {
                 total_bytes: 2048,
                 files_skipped: 0,
                 download_errors: 0,
-                copied_paths: vec![
-                    "test-results/report.xml".to_string(),
-                    "test-results/screenshot.png".to_string(),
+                hash_errors: 0,
+                captured_assets: vec![
+                    CapturedAssetInfo {
+                        path: "test-results/report.xml".to_string(),
+                        mime: "text/xml".to_string(),
+                        content_md5: "md5-report".to_string(),
+                        content_sha256: "sha256-report".to_string(),
+                        bytes: 1024,
+                    },
+                    CapturedAssetInfo {
+                        path: "test-results/screenshot.png".to_string(),
+                        mime: "image/png".to_string(),
+                        content_md5: "md5-screenshot".to_string(),
+                        content_sha256: "sha256-screenshot".to_string(),
+                        bytes: 1024,
+                    },
                 ],
             })
             .unwrap(),
@@ -726,7 +796,14 @@ mod tests {
                 total_bytes: 512,
                 files_skipped: 0,
                 download_errors: 0,
-                copied_paths: vec!["coverage/lcov.info".to_string()],
+                hash_errors: 0,
+                captured_assets: vec![CapturedAssetInfo {
+                    path: "coverage/lcov.info".to_string(),
+                    mime: "application/octet-stream".to_string(),
+                    content_md5: "md5-lcov".to_string(),
+                    content_sha256: "sha256-lcov".to_string(),
+                    bytes: 512,
+                }],
             })
             .unwrap(),
         )

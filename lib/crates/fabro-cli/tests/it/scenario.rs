@@ -788,7 +788,7 @@ fn local_run_lifecycle() {
     std::fs::write(asset_dir.join("output.txt"), "asset-content-42").unwrap();
     std::fs::write(
         asset_dir.join("manifest.json"),
-        r#"{"files_copied":1,"total_bytes":16,"files_skipped":0,"download_errors":0,"copied_paths":["output.txt"]}"#,
+        r#"{"files_copied":1,"total_bytes":16,"files_skipped":0,"download_errors":0,"hash_errors":0,"captured_assets":[{"path":"output.txt","mime":"text/plain","content_md5":"f02439728c0a94b7bfc465acb1201a1f","content_sha256":"0af9dea3e1c2dec968531c18c9331659b8268e8c9cf24b01cda7b8ce51d2ff00","bytes":16}]}"#,
     )
     .unwrap();
 
