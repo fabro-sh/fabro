@@ -496,10 +496,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 duration,
             );
             if token_total > 0 {
-                line.push_str(&format!(
-                    "  {}",
-                    styles.dim.apply_to(format_tokens(token_total))
-                ));
+                line.push_str("  ");
+                line.push_str(&styles.dim.apply_to(format_tokens(token_total)).to_string());
             }
             Some(line)
         }

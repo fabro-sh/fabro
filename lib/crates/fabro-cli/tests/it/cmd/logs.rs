@@ -46,6 +46,10 @@ fn logs_completed_run_outputs_raw_ndjson() {
         r#""duration_ms":\s*\d+"#.to_string(),
         r#""duration_ms": [DURATION_MS]"#.to_string(),
     ));
+    filters.push((
+        r#""id":"[0-9a-f-]+""#.to_string(),
+        r#""id":"[EVENT_ID]""#.to_string(),
+    ));
     let mut cmd = context.command();
     cmd.args(["logs", &run.run_id]);
 
@@ -53,27 +57,27 @@ fn logs_completed_run_outputs_raw_ndjson() {
     success: true
     exit_code: 0
     ----- stdout -----
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"Sandbox.Initializing","sandbox_provider":"local"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"Sandbox.Ready","url":null,"duration_ms": [DURATION_MS],"name":null,"cpu":null,"memory":null,"sandbox_provider":"local"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"SandboxInitialized","working_directory":"[TEMP_DIR]"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"WorkflowRunStarted","goal":"Run tests and report results","workflow_name":"Simple"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageStarted","node_id":"start","max_attempts":1,"node_label":"Start","handler_type":"start","attempt":1,"stage_index":0}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageCompleted","node_id":"start","max_attempts":1,"node_label":"Start","duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] start","files_touched":[],"attempt":1,"stage_index":0}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"EdgeSelected","is_jump":false,"from_node_id":"start","label":null,"condition":null,"reason":"unconditional","stage_status":"success","to_node_id":"run_tests"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"CheckpointCompleted","node_id":"start","status":"success","node_label":"start"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageStarted","node_id":"run_tests","max_attempts":1,"node_label":"Run Tests","handler_type":"agent","attempt":1,"stage_index":1}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageCompleted","node_id":"run_tests","max_attempts":1,"node_label":"Run Tests","duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] run_tests","files_touched":[],"attempt":1,"stage_index":1}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"EdgeSelected","is_jump":false,"from_node_id":"run_tests","label":null,"condition":null,"reason":"unconditional","stage_status":"success","to_node_id":"report"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"CheckpointCompleted","node_id":"run_tests","status":"success","node_label":"run_tests"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageStarted","node_id":"report","max_attempts":1,"node_label":"Report","handler_type":"agent","attempt":1,"stage_index":2}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageCompleted","node_id":"report","max_attempts":1,"node_label":"Report","duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] report","files_touched":[],"attempt":1,"stage_index":2}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"EdgeSelected","is_jump":false,"from_node_id":"report","label":null,"condition":null,"reason":"unconditional","stage_status":"success","to_node_id":"exit"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"CheckpointCompleted","node_id":"report","status":"success","node_label":"report"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageStarted","node_id":"exit","max_attempts":1,"node_label":"Exit","handler_type":"exit","attempt":1,"stage_index":3}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageCompleted","node_id":"exit","max_attempts":1,"node_label":"Exit","duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":null,"files_touched":[],"attempt":1,"stage_index":3}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"WorkflowRunCompleted","duration_ms": [DURATION_MS],"artifact_count":0,"status":"success"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"Sandbox.CleanupStarted","sandbox_provider":"local"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"Sandbox.CleanupCompleted","duration_ms": [DURATION_MS],"sandbox_provider":"local"}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.initializing","properties":{"provider":"local"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.ready","properties":{"provider":"local","duration_ms": [DURATION_MS],"name":null,"cpu":null,"memory":null,"url":null}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.initialized","properties":{"working_directory":"[TEMP_DIR]"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"run.started","properties":{"name":"Simple","goal":"Run tests and report results"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"start","node_label":"Start","properties":{"max_attempts":1,"attempt":1,"index":0,"handler_type":"start"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"start","node_label":"Start","properties":{"max_attempts":1,"attempt":1,"index":0,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] start","files_touched":[]}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"edge.selected","properties":{"from_node":"start","to_node":"run_tests","label":null,"condition":null,"reason":"unconditional","stage_status":"success","is_jump":false}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"checkpoint.completed","node_id":"start","node_label":"start","properties":{"status":"success"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"run_tests","node_label":"Run Tests","properties":{"max_attempts":1,"attempt":1,"index":1,"handler_type":"agent"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"run_tests","node_label":"Run Tests","properties":{"max_attempts":1,"attempt":1,"index":1,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] run_tests","files_touched":[]}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"edge.selected","properties":{"from_node":"run_tests","to_node":"report","label":null,"condition":null,"reason":"unconditional","stage_status":"success","is_jump":false}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"checkpoint.completed","node_id":"run_tests","node_label":"run_tests","properties":{"status":"success"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"report","node_label":"Report","properties":{"max_attempts":1,"attempt":1,"index":2,"handler_type":"agent"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"report","node_label":"Report","properties":{"max_attempts":1,"attempt":1,"index":2,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] report","files_touched":[]}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"edge.selected","properties":{"from_node":"report","to_node":"exit","label":null,"condition":null,"reason":"unconditional","stage_status":"success","is_jump":false}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"checkpoint.completed","node_id":"report","node_label":"report","properties":{"status":"success"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"exit","node_label":"Exit","properties":{"max_attempts":1,"attempt":1,"index":3,"handler_type":"exit"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"exit","node_label":"Exit","properties":{"max_attempts":1,"attempt":1,"index":3,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":null,"files_touched":[]}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"run.completed","properties":{"duration_ms": [DURATION_MS],"artifact_count":0,"status":"success"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.cleanup.started","properties":{"provider":"local"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.cleanup.completed","properties":{"provider":"local","duration_ms": [DURATION_MS]}}
     ----- stderr -----
     "###);
 }
@@ -91,6 +95,10 @@ fn logs_tail_limits_output() {
         r#""duration_ms":\s*\d+"#.to_string(),
         r#""duration_ms": [DURATION_MS]"#.to_string(),
     ));
+    filters.push((
+        r#""id":"[0-9a-f-]+""#.to_string(),
+        r#""id":"[EVENT_ID]""#.to_string(),
+    ));
     let mut cmd = context.command();
     cmd.args(["logs", "--tail", "2", &run.run_id]);
 
@@ -98,8 +106,8 @@ fn logs_tail_limits_output() {
     success: true
     exit_code: 0
     ----- stdout -----
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"Sandbox.CleanupStarted","sandbox_provider":"local"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"Sandbox.CleanupCompleted","duration_ms": [DURATION_MS],"sandbox_provider":"local"}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.cleanup.started","properties":{"provider":"local"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.cleanup.completed","properties":{"provider":"local","duration_ms": [DURATION_MS]}}
     ----- stderr -----
     "###);
 }
@@ -126,16 +134,16 @@ fn logs_pretty_formats_small_run() {
                 Run tests and report results
 
     [CLOCK] ▶ Start
-    [CLOCK] ✓ Start    [DURATION]  (0 turns, 0 tools, 0 toks)
+    [CLOCK] ✓ Start    [DURATION]
     [CLOCK]    → run_tests unconditional
     [CLOCK] ▶ Run Tests
-    [CLOCK] ✓ Run Tests    [DURATION]  (0 turns, 0 tools, 0 toks)
+    [CLOCK] ✓ Run Tests    [DURATION]
     [CLOCK]    → report unconditional
     [CLOCK] ▶ Report
-    [CLOCK] ✓ Report    [DURATION]  (0 turns, 0 tools, 0 toks)
+    [CLOCK] ✓ Report    [DURATION]
     [CLOCK]    → exit unconditional
     [CLOCK] ▶ Exit
-    [CLOCK] ✓ Exit    [DURATION]  (0 turns, 0 tools, 0 toks)
+    [CLOCK] ✓ Exit    [DURATION]
     [CLOCK] ✓ SUCCESS [DURATION]  
     ----- stderr -----
     "#);
@@ -154,6 +162,10 @@ fn logs_follow_detached_run_streams_until_completion() {
         r#""duration_ms":\s*\d+"#.to_string(),
         r#""duration_ms": [DURATION_MS]"#.to_string(),
     ));
+    filters.push((
+        r#""id":"[0-9a-f-]+""#.to_string(),
+        r#""id":"[EVENT_ID]""#.to_string(),
+    ));
     let mut cmd = context.command();
     cmd.args(["logs", "--follow", &run.run_id]);
 
@@ -161,27 +173,27 @@ fn logs_follow_detached_run_streams_until_completion() {
     success: true
     exit_code: 0
     ----- stdout -----
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"Sandbox.Initializing","sandbox_provider":"local"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"Sandbox.Ready","url":null,"duration_ms": [DURATION_MS],"name":null,"cpu":null,"memory":null,"sandbox_provider":"local"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"SandboxInitialized","working_directory":"[TEMP_DIR]"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"WorkflowRunStarted","goal":"Run tests and report results","workflow_name":"Simple"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageStarted","node_id":"start","max_attempts":1,"node_label":"Start","handler_type":"start","attempt":1,"stage_index":0}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageCompleted","node_id":"start","max_attempts":1,"node_label":"Start","duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] start","files_touched":[],"attempt":1,"stage_index":0}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"EdgeSelected","is_jump":false,"from_node_id":"start","label":null,"condition":null,"reason":"unconditional","stage_status":"success","to_node_id":"run_tests"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"CheckpointCompleted","node_id":"start","status":"success","node_label":"start"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageStarted","node_id":"run_tests","max_attempts":1,"node_label":"Run Tests","handler_type":"agent","attempt":1,"stage_index":1}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageCompleted","node_id":"run_tests","max_attempts":1,"node_label":"Run Tests","duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] run_tests","files_touched":[],"attempt":1,"stage_index":1}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"EdgeSelected","is_jump":false,"from_node_id":"run_tests","label":null,"condition":null,"reason":"unconditional","stage_status":"success","to_node_id":"report"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"CheckpointCompleted","node_id":"run_tests","status":"success","node_label":"run_tests"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageStarted","node_id":"report","max_attempts":1,"node_label":"Report","handler_type":"agent","attempt":1,"stage_index":2}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageCompleted","node_id":"report","max_attempts":1,"node_label":"Report","duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] report","files_touched":[],"attempt":1,"stage_index":2}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"EdgeSelected","is_jump":false,"from_node_id":"report","label":null,"condition":null,"reason":"unconditional","stage_status":"success","to_node_id":"exit"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"CheckpointCompleted","node_id":"report","status":"success","node_label":"report"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageStarted","node_id":"exit","max_attempts":1,"node_label":"Exit","handler_type":"exit","attempt":1,"stage_index":3}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"StageCompleted","node_id":"exit","max_attempts":1,"node_label":"Exit","duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":null,"files_touched":[],"attempt":1,"stage_index":3}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"WorkflowRunCompleted","duration_ms": [DURATION_MS],"artifact_count":0,"status":"success"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"Sandbox.CleanupStarted","sandbox_provider":"local"}
-    {"ts":"[TIMESTAMP]","run_id":"[ULID]","event":"Sandbox.CleanupCompleted","duration_ms": [DURATION_MS],"sandbox_provider":"local"}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.initializing","properties":{"provider":"local"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.ready","properties":{"provider":"local","duration_ms": [DURATION_MS],"name":null,"cpu":null,"memory":null,"url":null}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.initialized","properties":{"working_directory":"[TEMP_DIR]"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"run.started","properties":{"name":"Simple","goal":"Run tests and report results"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"start","node_label":"Start","properties":{"max_attempts":1,"attempt":1,"index":0,"handler_type":"start"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"start","node_label":"Start","properties":{"max_attempts":1,"attempt":1,"index":0,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] start","files_touched":[]}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"edge.selected","properties":{"from_node":"start","to_node":"run_tests","label":null,"condition":null,"reason":"unconditional","stage_status":"success","is_jump":false}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"checkpoint.completed","node_id":"start","node_label":"start","properties":{"status":"success"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"run_tests","node_label":"Run Tests","properties":{"max_attempts":1,"attempt":1,"index":1,"handler_type":"agent"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"run_tests","node_label":"Run Tests","properties":{"max_attempts":1,"attempt":1,"index":1,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] run_tests","files_touched":[]}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"edge.selected","properties":{"from_node":"run_tests","to_node":"report","label":null,"condition":null,"reason":"unconditional","stage_status":"success","is_jump":false}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"checkpoint.completed","node_id":"run_tests","node_label":"run_tests","properties":{"status":"success"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"report","node_label":"Report","properties":{"max_attempts":1,"attempt":1,"index":2,"handler_type":"agent"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"report","node_label":"Report","properties":{"max_attempts":1,"attempt":1,"index":2,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":"[Simulated] report","files_touched":[]}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"edge.selected","properties":{"from_node":"report","to_node":"exit","label":null,"condition":null,"reason":"unconditional","stage_status":"success","is_jump":false}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"checkpoint.completed","node_id":"report","node_label":"report","properties":{"status":"success"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.started","node_id":"exit","node_label":"Exit","properties":{"max_attempts":1,"attempt":1,"index":3,"handler_type":"exit"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"stage.completed","node_id":"exit","node_label":"Exit","properties":{"max_attempts":1,"attempt":1,"index":3,"duration_ms": [DURATION_MS],"status":"success","preferred_label":null,"suggested_next_ids":[],"usage":null,"notes":null,"files_touched":[]}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"run.completed","properties":{"duration_ms": [DURATION_MS],"artifact_count":0,"status":"success"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.cleanup.started","properties":{"provider":"local"}}
+    {"id":"[EVENT_ID]","ts":"[TIMESTAMP]","run_id":"[ULID]","event":"sandbox.cleanup.completed","properties":{"provider":"local","duration_ms": [DURATION_MS]}}
     ----- stderr -----
     "###);
 }

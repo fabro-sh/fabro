@@ -43,11 +43,19 @@ filter = "package(fabro-agent)"
 slow-timeout = { period = "5s", terminate-after = 3 }
 
 [[profile.default.overrides]]
+filter = "package(fabro-cli)"
+slow-timeout = { period = "5s", terminate-after = 3 }
+
+[[profile.default.overrides]]
 filter = "package(fabro-llm)"
 slow-timeout = { period = "5s", terminate-after = 3 }
 
 [[profile.default.overrides]]
 filter = "package(fabro-server)"
+slow-timeout = { period = "5s", terminate-after = 3 }
+
+[[profile.default.overrides]]
+filter = "package(fabro-tracker)"
 slow-timeout = { period = "5s", terminate-after = 3 }
 
 [profile.e2e]

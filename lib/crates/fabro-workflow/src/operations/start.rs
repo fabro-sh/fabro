@@ -761,7 +761,7 @@ impl Drop for DetachedRunCompletionGuard {
                     );
                 }
                 if let Some((run_id, line)) = serialized_notice.or(run_id
-                    .map(|run_id| {
+                    .and_then(|run_id| {
                         let envelope = canonicalize_event(
                             &run_id,
                             &WorkflowRunEvent::RunNotice {
@@ -774,7 +774,7 @@ impl Drop for DetachedRunCompletionGuard {
                             .ok()
                             .map(|line| (run_id, line))
                     })
-                    .flatten())
+                )
                 {
                     match event_payload_from_redacted_json(&line, &run_id) {
                         Ok(payload) => {

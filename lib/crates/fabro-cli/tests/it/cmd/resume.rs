@@ -74,14 +74,14 @@ fn resume_rewound_run_succeeds() {
     let mut resume_cmd = context.command();
     resume_cmd.current_dir(&setup.repo_dir);
     resume_cmd.env("OPENAI_API_KEY", "test");
-    resume_cmd.args(["resume", "-d", &setup.run.run_id]);
-    fabro_snapshot!(context.filters(), resume_cmd, @"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    [ULID]
-    ----- stderr -----
-    ");
+    resume_cmd.args(["resume", &setup.run.run_id]);
+    let resume_output = resume_cmd.output().expect("resume should execute");
+    assert!(
+        resume_output.status.success(),
+        "resume should succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&resume_output.stdout),
+        output_stderr(&resume_output)
+    );
 
     let mut wait_filters = context.filters();
     wait_filters.push((

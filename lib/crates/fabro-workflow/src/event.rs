@@ -962,8 +962,8 @@ fn flatten_failure_detail(fields: &mut Map<String, Value>) {
     }
 }
 
-fn default_node_label(node_id: &Option<String>, node_label: Option<String>) -> Option<String> {
-    node_label.or_else(|| node_id.clone())
+fn default_node_label(node_id: Option<&String>, node_label: Option<String>) -> Option<String> {
+    node_label.or_else(|| node_id.cloned())
 }
 
 fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
@@ -993,7 +993,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
         WorkflowRunEvent::StageCompleted { .. } | WorkflowRunEvent::StageFailed { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "node_id");
-            let node_label = default_node_label(&node_id, remove_string(&mut fields, "name"));
+            let node_label = default_node_label(node_id.as_ref(), remove_string(&mut fields, "name"));
             flatten_failure_detail(&mut fields);
             EnvelopeFields {
                 session_id: None,
@@ -1003,10 +1003,16 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
                 properties: Value::Object(fields),
             }
         }
-        WorkflowRunEvent::StageStarted { .. } | WorkflowRunEvent::StageRetrying { .. } => {
+        WorkflowRunEvent::StageStarted { .. }
+        | WorkflowRunEvent::StageRetrying { .. }
+        | WorkflowRunEvent::CheckpointCompleted { .. }
+        | WorkflowRunEvent::CheckpointFailed { .. }
+        | WorkflowRunEvent::SubgraphStarted { .. }
+        | WorkflowRunEvent::SubgraphCompleted { .. }
+        | WorkflowRunEvent::AssetCaptured { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "node_id");
-            let node_label = default_node_label(&node_id, remove_string(&mut fields, "name"));
+            let node_label = default_node_label(node_id.as_ref(), remove_string(&mut fields, "name"));
             EnvelopeFields {
                 session_id: None,
                 parent_session_id: None,
@@ -1022,7 +1028,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
         } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "stage");
-            let node_label = default_node_label(&node_id, None);
+            let node_label = default_node_label(node_id.as_ref(), None);
             fields.remove("session_id");
             fields.remove("parent_session_id");
             let properties = fields.remove("event").map_or_else(
@@ -1054,7 +1060,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
         WorkflowRunEvent::GitCommit { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "node_id");
-            let node_label = default_node_label(&node_id, None);
+            let node_label = default_node_label(node_id.as_ref(), None);
             EnvelopeFields {
                 session_id: None,
                 parent_session_id: None,
@@ -1067,7 +1073,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
         | WorkflowRunEvent::ParallelBranchCompleted { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "branch");
-            let node_label = default_node_label(&node_id, None);
+            let node_label = default_node_label(node_id.as_ref(), None);
             EnvelopeFields {
                 session_id: None,
                 parent_session_id: None,
@@ -1082,23 +1088,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
         | WorkflowRunEvent::Failover { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "stage");
-            let node_label = default_node_label(&node_id, None);
-            EnvelopeFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id,
-                node_label,
-                properties: Value::Object(fields),
-            }
-        }
-        WorkflowRunEvent::CheckpointCompleted { .. }
-        | WorkflowRunEvent::CheckpointFailed { .. }
-        | WorkflowRunEvent::SubgraphStarted { .. }
-        | WorkflowRunEvent::SubgraphCompleted { .. }
-        | WorkflowRunEvent::AssetCaptured { .. } => {
-            let mut fields = tagged_variant_fields(event);
-            let node_id = remove_string(&mut fields, "node_id");
-            let node_label = default_node_label(&node_id, remove_string(&mut fields, "name"));
+            let node_label = default_node_label(node_id.as_ref(), None);
             EnvelopeFields {
                 session_id: None,
                 parent_session_id: None,
@@ -1110,7 +1100,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
         WorkflowRunEvent::StallWatchdogTimeout { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "node");
-            let node_label = default_node_label(&node_id, None);
+            let node_label = default_node_label(node_id.as_ref(), None);
             EnvelopeFields {
                 session_id: None,
                 parent_session_id: None,
@@ -1362,7 +1352,7 @@ impl EventEmitter {
             .expect("listeners lock poisoned")
             .clone();
         for listener in &snapshot {
-            listener(&envelope);
+            listener(envelope);
         }
     }
 

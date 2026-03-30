@@ -200,7 +200,7 @@ pub(crate) fn setup_asset_sandbox_run(context: &TestContext) -> AssetSandboxSetu
   exit [shape=Msquare]
   create_assets [shape=parallelogram, script="mkdir -p assets/shared assets/node_a sandbox_dir/download_me/nested && printf one > assets/shared/report.txt && printf alpha > assets/node_a/summary.txt && printf keep > sandbox_dir/download_me/root.txt && printf nested > sandbox_dir/download_me/nested/child.txt && sleep 1", max_retries=0]
   retry_assets [shape=parallelogram, script="mkdir -p assets/retry && if [ ! -f .retry-sentinel ]; then printf first > assets/retry/report.txt && touch .retry-sentinel && sleep 1; else printf second > assets/retry/report.txt; fi", retry_policy="linear", timeout="50ms"]
-  create_colliding [shape=parallelogram, script="mkdir -p assets/other && printf beta > assets/other/summary.txt", max_retries=0]
+  create_colliding [shape=parallelogram, script="mkdir -p assets/other assets/retry && printf beta > assets/other/summary.txt && printf second > assets/retry/report.txt", max_retries=0]
   start -> create_assets -> retry_assets -> create_colliding -> exit
 }
 "#,

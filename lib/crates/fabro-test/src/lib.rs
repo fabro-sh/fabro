@@ -180,6 +180,27 @@ impl TestContext {
         cmd
     }
 
+    /// Build a `sandbox cp` subcommand.
+    pub fn cp(&self) -> Command {
+        let mut cmd = self.sandbox();
+        cmd.arg("cp");
+        cmd
+    }
+
+    /// Build a `sandbox ssh` subcommand.
+    pub fn ssh(&self) -> Command {
+        let mut cmd = self.sandbox();
+        cmd.arg("ssh");
+        cmd
+    }
+
+    /// Build a `sandbox preview` subcommand.
+    pub fn preview(&self) -> Command {
+        let mut cmd = self.sandbox();
+        cmd.arg("preview");
+        cmd
+    }
+
     /// Build an `init` subcommand.
     pub fn init_cmd(&self) -> Command {
         let mut cmd = self.command();
