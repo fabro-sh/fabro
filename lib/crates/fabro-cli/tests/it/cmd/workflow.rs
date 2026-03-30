@@ -5,15 +5,12 @@ use predicates;
 fn list() {
     let context = test_context!();
 
-    // Minimal project structure: fabro.toml + a workflow
-    std::fs::write(context.temp_dir.join("fabro.toml"), "version = 1\n").unwrap();
-    let wf_dir = context.temp_dir.join("workflows/my_test_wf");
-    std::fs::create_dir_all(&wf_dir).unwrap();
-    std::fs::write(
-        wf_dir.join("workflow.toml"),
-        "version = 1\ngoal = \"A test workflow\"\n",
-    )
-    .unwrap();
+    context
+        .write_temp("fabro.toml", "version = 1\n")
+        .write_temp(
+            "workflows/my_test_wf/workflow.toml",
+            "version = 1\ngoal = \"A test workflow\"\n",
+        );
 
     context
         .command()

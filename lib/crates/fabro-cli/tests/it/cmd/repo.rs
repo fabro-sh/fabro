@@ -9,12 +9,11 @@ fn init_git_repo(path: &std::path::Path) {
         .expect("git init should succeed");
 }
 
-fn init_fabro_project(path: &std::path::Path) {
-    std::fs::write(path.join("fabro.toml"), "version = 1\n").unwrap();
-    let workflow_dir = path.join("fabro/workflows/hello");
-    std::fs::create_dir_all(&workflow_dir).unwrap();
-    std::fs::write(workflow_dir.join("workflow.fabro"), "digraph {}").unwrap();
-    std::fs::write(workflow_dir.join("workflow.toml"), "version = 1\n").unwrap();
+fn init_fabro_project(context: &fabro_test::TestContext) {
+    context
+        .write_temp("fabro.toml", "version = 1\n")
+        .write_temp("fabro/workflows/hello/workflow.fabro", "digraph {}")
+        .write_temp("fabro/workflows/hello/workflow.toml", "version = 1\n");
 }
 
 #[test]
@@ -50,7 +49,7 @@ fn help() {
 fn test_repo_deinit_removes_fabro_toml_and_dir() {
     let context = test_context!();
     init_git_repo(&context.temp_dir);
-    init_fabro_project(&context.temp_dir);
+    init_fabro_project(&context);
 
     assert!(context.temp_dir.join("fabro.toml").exists());
     assert!(context.temp_dir.join("fabro").exists());

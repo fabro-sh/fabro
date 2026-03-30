@@ -172,7 +172,7 @@ fn exec_json_output_format() {
 fn exec_read_and_edit() {
     dotenvy::dotenv().ok();
     let context = test_context!();
-    std::fs::write(context.temp_dir.join("data.txt"), "old content").expect("write data.txt");
+    context.write_temp("data.txt", "old content");
     context
         .exec_cmd()
         .args([

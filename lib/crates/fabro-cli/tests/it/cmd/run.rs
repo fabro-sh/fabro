@@ -1157,9 +1157,8 @@ digraph G {
 #[test]
 fn bug4_detached_resume_rejects_completed_run_without_mutating_it() {
     let context = test_context!();
-    let workflow_path = context.temp_dir.join("workflow.fabro");
-    std::fs::write(
-        &workflow_path,
+    context.write_temp(
+        "workflow.fabro",
         "\
 digraph Test {
   start [shape=Mdiamond, label=\"Start\"]
@@ -1167,8 +1166,7 @@ digraph Test {
   start -> exit
 }
 ",
-    )
-    .unwrap();
+    );
 
     let run = context
         .command()
@@ -1179,7 +1177,7 @@ digraph Test {
             "--auto-approve",
             "--no-retro",
             "--detach",
-            workflow_path.to_str().unwrap(),
+            context.temp_dir.join("workflow.fabro").to_str().unwrap(),
         ])
         .assert()
         .success();
