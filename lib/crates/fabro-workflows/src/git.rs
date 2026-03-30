@@ -2,6 +2,8 @@ use std::fmt::Write;
 use std::path::Path;
 use std::process::Command;
 
+use fabro_config::FabroSettings;
+use fabro_config::server::GitAuthorSettings;
 use fabro_git_storage::branchstore::BranchStore;
 use fabro_git_storage::gitobj::Store;
 use git2::{Repository, Signature};
@@ -62,6 +64,19 @@ impl GitAuthor {
             );
         }
     }
+}
+
+impl From<&GitAuthorSettings> for GitAuthor {
+    fn from(value: &GitAuthorSettings) -> Self {
+        Self::from_options(value.name.clone(), value.email.clone())
+    }
+}
+
+pub fn git_author_from_settings(settings: &FabroSettings) -> GitAuthor {
+    settings
+        .git_author()
+        .map(GitAuthor::from)
+        .unwrap_or_default()
 }
 
 fn git_error(msg: impl Into<String>) -> FabroError {

@@ -242,7 +242,7 @@ pub async fn create_session(
         store.insert(session_id, session);
     }
 
-    spawn_generation(Arc::clone(&state.sessions), session_id, state.dry_run, 1);
+    spawn_generation(Arc::clone(&state.sessions), session_id, state.dry_run(), 1);
 
     (
         StatusCode::CREATED,
@@ -307,7 +307,7 @@ pub async fn send_message(
         }
     };
 
-    spawn_generation(Arc::clone(&state.sessions), id, state.dry_run, seq);
+    spawn_generation(Arc::clone(&state.sessions), id, state.dry_run(), seq);
 
     (
         StatusCode::ACCEPTED,
@@ -432,18 +432,6 @@ mod tests {
     use crate::jwt_auth::AuthMode;
     use crate::server::{build_router, create_app_state_with_options};
 
-    use fabro_workflows::pipeline::LlmSpec;
-
-    fn test_llm_spec() -> LlmSpec {
-        LlmSpec {
-            model: "test-model".to_string(),
-            provider: fabro_llm::Provider::Anthropic,
-            fallback_chain: Vec::new(),
-            mcp_servers: Vec::new(),
-            dry_run: true,
-        }
-    }
-
     async fn test_db() -> sqlx::SqlitePool {
         let pool = fabro_db::connect_memory().await.unwrap();
         fabro_db::initialize_db(&pool).await.unwrap();
@@ -454,11 +442,11 @@ mod tests {
         let db = test_db().await;
         let state = create_app_state_with_options(
             db,
-            test_llm_spec,
-            true,
+            fabro_config::FabroSettings {
+                dry_run: Some(true),
+                ..Default::default()
+            },
             5,
-            fabro_workflows::git::GitAuthor::default(),
-            Vec::new(),
         );
         build_router(state, AuthMode::Disabled)
     }

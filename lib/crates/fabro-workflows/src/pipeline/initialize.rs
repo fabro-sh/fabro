@@ -690,7 +690,6 @@ mod tests {
             cancel_token: None,
             run_id: "run-test".to_string(),
             labels: HashMap::new(),
-            git_author: crate::git::GitAuthor::default(),
             workflow_slug: None,
             github_app: None,
             host_repo_path: None,

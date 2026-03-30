@@ -77,7 +77,6 @@ fn test_run_options(run_dir: &Path, run_id: &str) -> RunOptions {
         host_repo_path: None,
         labels: HashMap::new(),
         github_app: None,
-        git_author: crate::git::GitAuthor::default(),
         base_branch: None,
         display_base_sha: None,
         workflow_slug: None,

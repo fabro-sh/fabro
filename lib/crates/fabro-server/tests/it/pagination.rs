@@ -1,6 +1,6 @@
 //! Tests that paginated list endpoints return `{ data, meta: { has_more } }`.
 
-use super::helpers::{test_db, test_llm_spec};
+use super::helpers::test_db;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_server::jwt_auth::AuthMode;
@@ -91,7 +91,7 @@ const ENDPOINTS: &[PaginatedEndpoint] = &[
 
 #[tokio::test]
 async fn paginated_endpoints_return_correct_shape() {
-    let state = create_app_state(test_db().await, test_llm_spec);
+    let state = create_app_state(test_db().await);
     let app = build_router(state, AuthMode::Disabled);
 
     for ep in ENDPOINTS {

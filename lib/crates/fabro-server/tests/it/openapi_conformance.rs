@@ -1,6 +1,6 @@
 //! Conformance tests: spec ↔ router ↔ Rust struct consistency.
 
-use super::helpers::{test_db, test_llm_spec};
+use super::helpers::test_db;
 use std::collections::BTreeSet;
 
 use axum::body::Body;
@@ -58,7 +58,7 @@ fn methods_for_path_item(item: &openapiv3::PathItem) -> Vec<Method> {
 #[tokio::test]
 async fn all_spec_routes_are_routable() {
     let spec = load_spec();
-    let state = create_app_state(test_db().await, test_llm_spec);
+    let state = create_app_state(test_db().await);
     let app = build_router(state, AuthMode::Disabled);
 
     let mut checked = 0;

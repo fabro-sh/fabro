@@ -277,7 +277,8 @@ pub async fn write_finalize_commit(
         return;
     };
 
-    let store = MetadataStore::new(repo_path, &run_options.git_author);
+    let git_author = run_options.git_author();
+    let store = MetadataStore::new(repo_path, &git_author);
     let mut entries = scan_node_files(run_dir);
     let retro_bytes = match run_store.get_retro().await {
         Ok(Some(retro)) => serde_json::to_vec_pretty(&retro).ok(),
@@ -452,7 +453,6 @@ mod tests {
             cancel_token: None,
             run_id: "run-test".to_string(),
             labels: HashMap::new(),
-            git_author: crate::git::GitAuthor::default(),
             workflow_slug: None,
             github_app: None,
             host_repo_path: None,

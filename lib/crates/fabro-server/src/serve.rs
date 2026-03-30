@@ -3,9 +3,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use fabro_config::server::{load_server_settings, resolve_storage_dir};
-use fabro_model::{Catalog, Provider};
 use fabro_util::terminal::Styles;
-use fabro_workflows::git::GitAuthor;
 use object_store::local::LocalFileSystem;
 use tokio::net::TcpListener;
 use tokio::time::interval;
@@ -21,7 +19,6 @@ use crate::server::{build_router, create_app_state_with_store, spawn_scheduler};
 use crate::tls::{ClientAuth, build_rustls_config, serve_tls};
 use fabro_llm::client::Client as LlmClient;
 use fabro_sandbox::SandboxProvider;
-use fabro_workflows::pipeline::LlmSpec;
 
 #[derive(Args)]
 pub struct ServeArgs {
@@ -56,6 +53,27 @@ pub struct ServeArgs {
     /// Path to server config file (default: ~/.fabro/server.toml)
     #[arg(long)]
     pub config: Option<PathBuf>,
+}
+
+fn apply_serve_overrides(
+    base: &FabroSettings,
+    args: &ServeArgs,
+    dry_run_mode: bool,
+) -> FabroSettings {
+    let mut settings = base.clone();
+    if dry_run_mode {
+        settings.dry_run = Some(true);
+    }
+    if let Some(ref model) = args.model {
+        settings.llm.get_or_insert_default().model = Some(model.clone());
+    }
+    if let Some(ref provider) = args.provider {
+        settings.llm.get_or_insert_default().provider = Some(provider.clone());
+    }
+    if let Some(sandbox) = args.sandbox {
+        settings.sandbox.get_or_insert_default().provider = Some(sandbox.to_string());
+    }
+    settings
 }
 
 /// Start the HTTP API server.
@@ -93,33 +111,16 @@ pub async fn serve_command(
     };
 
     // Initialize data directory and SQLite database
-    let config_path = args.config;
-    let server_settings = load_server_settings(config_path.as_deref())?;
-    let data_dir = storage_dir_override.unwrap_or_else(|| resolve_storage_dir(&server_settings));
+    let config_path = args.config.clone();
+    let disk_settings = load_server_settings(config_path.as_deref())?;
+    let data_dir = storage_dir_override.unwrap_or_else(|| resolve_storage_dir(&disk_settings));
 
     // Shared config for live reloading
-    let shared_settings = Arc::new(RwLock::new(server_settings));
-
-    // CLI overrides take precedence over config file values, even after reload
-    let cli_model = args.model;
-    let cli_provider = args.provider;
-
-    // Build registry factory that reads live config
-    let settings_for_factory = Arc::clone(&shared_settings);
-    let factory = move || {
-        let (model, provider_enum) = resolve_model_provider(
-            &settings_for_factory,
-            cli_model.as_deref(),
-            cli_provider.as_deref(),
-        );
-        LlmSpec {
-            model,
-            provider: provider_enum,
-            fallback_chain: Vec::new(),
-            mcp_servers: Vec::new(),
-            dry_run: dry_run_mode,
-        }
-    };
+    let shared_settings = Arc::new(RwLock::new(apply_serve_overrides(
+        &disk_settings,
+        &args,
+        dry_run_mode,
+    )));
     std::fs::create_dir_all(&data_dir)?;
     let db = fabro_db::connect(&data_dir.join("fabro.db")).await?;
     fabro_db::initialize_db(&db).await?;
@@ -141,18 +142,6 @@ pub async fn serve_command(
         (auth_mode, client_auth, max_concurrent_runs)
     };
 
-    let git_author = {
-        let cfg = shared_settings.read().expect("config lock poisoned");
-        let author = cfg.git_author();
-        GitAuthor::from_options(
-            author.and_then(|a| a.name.clone()),
-            author.and_then(|a| a.email.clone()),
-        )
-    };
-    let hooks = {
-        let cfg = shared_settings.read().expect("config lock poisoned");
-        cfg.hooks.clone()
-    };
     let store_path = data_dir.join("store");
     std::fs::create_dir_all(&store_path)?;
     let object_store = Arc::new(LocalFileSystem::new_with_prefix(&store_path)?);
@@ -161,15 +150,8 @@ pub async fn serve_command(
         "",
         Duration::from_millis(5),
     ));
-    let state = create_app_state_with_store(
-        db,
-        factory,
-        dry_run_mode,
-        max_concurrent_runs,
-        git_author,
-        hooks,
-        store,
-    );
+    let state =
+        create_app_state_with_store(db, Arc::clone(&shared_settings), max_concurrent_runs, store);
     spawn_scheduler(Arc::clone(&state));
     let router = build_router(state, auth_mode);
 
@@ -222,20 +204,32 @@ pub async fn serve_command(
     // Spawn config polling task
     let settings_for_poll = Arc::clone(&shared_settings);
     let config_path_for_poll = config_path.clone();
+    let args_for_poll = ServeArgs {
+        port: args.port,
+        host: args.host.clone(),
+        model: args.model.clone(),
+        provider: args.provider.clone(),
+        dry_run: args.dry_run,
+        sandbox: args.sandbox,
+        max_concurrent_runs: args.max_concurrent_runs,
+        config: config_path.clone(),
+    };
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(5));
         interval.tick().await; // skip first immediate tick
         loop {
             interval.tick().await;
             match load_server_settings(config_path_for_poll.as_deref()) {
-                Ok(new_settings) => {
+                Ok(new_disk_settings) => {
+                    let effective =
+                        apply_serve_overrides(&new_disk_settings, &args_for_poll, dry_run_mode);
                     let changed = {
                         let cfg = settings_for_poll.read().expect("config lock poisoned");
-                        *cfg != new_settings
+                        *cfg != effective
                     };
                     if changed {
                         let mut cfg = settings_for_poll.write().expect("config lock poisoned");
-                        *cfg = new_settings;
+                        *cfg = effective;
                         info!("Server config reloaded");
                     }
                 }
@@ -272,50 +266,6 @@ pub async fn serve_command(
     }
 
     Ok(())
-}
-
-/// Resolve model and provider from shared config, with CLI overrides taking precedence.
-fn resolve_model_provider(
-    shared_settings: &RwLock<FabroSettings>,
-    cli_model: Option<&str>,
-    cli_provider: Option<&str>,
-) -> (String, Provider) {
-    let cfg = shared_settings.read().expect("config lock poisoned");
-    let config_provider = cfg.llm.as_ref().and_then(|l| l.provider.as_deref());
-    let config_model = cfg.llm.as_ref().and_then(|l| l.model.as_deref());
-
-    let provider_str = cli_provider.or(config_provider);
-    let model = cli_model
-        .map(std::string::ToString::to_string)
-        .or_else(|| config_model.map(std::string::ToString::to_string))
-        .unwrap_or_else(|| {
-            // Look up default model from catalog for the given provider,
-            // falling back to the best provider with an API key configured.
-            provider_str
-                .and_then(|s| s.parse::<Provider>().ok())
-                .and_then(|p| Catalog::builtin().default_for_provider(p))
-                .unwrap_or_else(|| Catalog::builtin().default_from_env())
-                .id
-                .clone()
-        });
-
-    // Resolve model alias through catalog
-    let (model, provider_str) = match Catalog::builtin().get(&model) {
-        Some(info) => (
-            info.id.clone(),
-            provider_str
-                .map(std::string::ToString::to_string)
-                .or(Some(info.provider.to_string())),
-        ),
-        None => (model, provider_str.map(std::string::ToString::to_string)),
-    };
-
-    let provider_enum: Provider = provider_str
-        .as_deref()
-        .and_then(|s| s.parse::<Provider>().ok())
-        .unwrap_or_else(Provider::default_from_env);
-
-    (model, provider_enum)
 }
 
 /// Read the GitHub App private key from the environment, decoding base64 if needed.

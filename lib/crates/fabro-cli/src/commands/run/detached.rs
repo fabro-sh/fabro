@@ -6,7 +6,6 @@ use fabro_config::FabroSettingsExt;
 use fabro_interview::FileInterviewer;
 use fabro_store::RuntimeState;
 use fabro_workflows::event::EventEmitter;
-use fabro_workflows::git::GitAuthor;
 use fabro_workflows::operations::{
     StartServices, open_or_hydrate_run, resume as resume_run, start as start_run,
 };
@@ -14,8 +13,6 @@ use fabro_workflows::records::{RunRecord, RunRecordExt};
 
 use crate::shared;
 use crate::store;
-use crate::user_config;
-
 pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bool) -> Result<()> {
     let _ = fabro_proctitle::init();
 
@@ -24,7 +21,6 @@ pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bo
     });
 
     let run_record = RunRecord::load(&run_dir)?;
-    let cli_settings = user_config::load_user_settings()?;
     let on_node: fabro_workflows::OnNodeCallback = Some({
         let short_id = super::short_run_id(&run_record.run_id).to_string();
         fabro_proctitle::set(&format!("fabro: {short_id}"));
@@ -35,11 +31,7 @@ pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bo
     let store = store::build_store(&run_record.settings.storage_dir())?;
     let run_store = open_or_hydrate_run(store.as_ref(), &run_dir).await?;
 
-    let github_app = shared::github::build_github_app_credentials(cli_settings.app_id());
-    let git_author = GitAuthor::from_options(
-        cli_settings.git_author().and_then(|a| a.name.clone()),
-        cli_settings.git_author().and_then(|a| a.email.clone()),
-    );
+    let github_app = shared::github::build_github_app_credentials(run_record.settings.app_id());
     let runtime_state = RuntimeState::new(&run_dir);
 
     let services = StartServices {
@@ -51,7 +43,6 @@ pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bo
             runtime_state.interview_claim_path(),
         )),
         run_store,
-        git_author,
         github_app,
         on_node,
         registry_override: None,

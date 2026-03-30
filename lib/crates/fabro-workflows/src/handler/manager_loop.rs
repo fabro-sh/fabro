@@ -162,17 +162,12 @@ impl Handler for SubWorkflowHandler {
         let cancel_token = Arc::new(AtomicBool::new(false));
         let child_cancel = Arc::clone(&cancel_token);
 
-        let git_state = services.git_state();
         let child_run_options = RunOptions {
             settings: fabro_config::FabroSettings::default(),
             run_dir: child_logs,
             cancel_token: Some(cancel_token),
             run_id: format!("{parent_run_id}_child_{}", node.id),
             labels: HashMap::new(),
-            git_author: git_state
-                .as_ref()
-                .map(|gs| gs.git_author.clone())
-                .unwrap_or_default(),
             workflow_slug: None,
             github_app: None,
             base_branch: None,

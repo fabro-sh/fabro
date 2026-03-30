@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -20,7 +20,6 @@ use crate::event::{
     EventEmitter, RunNoticeLevel, StoreProgressLogger, WorkflowRunEvent, append_progress_event,
     build_redacted_event_payload,
 };
-use crate::git::GitAuthor;
 use crate::handler::HandlerRegistry;
 use crate::outcome::{Outcome, StageStatus};
 use crate::pipeline::{
@@ -51,7 +50,6 @@ struct RunSession {
     devcontainer: Option<DevcontainerSpec>,
     seed_context: Option<Context>,
     run_store: Arc<dyn RunStore>,
-    git_author: GitAuthor,
     git: Option<GitCheckpointOptions>,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     worktree_mode: Option<WorktreeMode>,
@@ -69,7 +67,6 @@ pub struct StartServices {
     pub emitter: Arc<EventEmitter>,
     pub interviewer: Arc<dyn Interviewer>,
     pub run_store: Arc<dyn RunStore>,
-    pub git_author: GitAuthor,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
     pub on_node: crate::OnNodeCallback,
     pub registry_override: Option<Arc<HandlerRegistry>>,
@@ -77,6 +74,7 @@ pub struct StartServices {
 
 pub struct Started {
     pub finalized: Finalized,
+    pub final_context: Option<Context>,
     pub retro: Option<Retro>,
     pub retro_duration: Duration,
 }
@@ -117,6 +115,7 @@ pub(super) async fn execute_persisted_run(
     checkpoint: Option<Checkpoint>,
     mut services: StartServices,
 ) -> Result<Started, FabroError> {
+    let cancel_token = services.cancel_token.clone();
     let inner_store = Arc::clone(&services.run_store);
     let projection_run_dir = run_dir.to_path_buf();
     services.run_store = Arc::new(
@@ -169,7 +168,8 @@ pub(super) async fn execute_persisted_run(
         return Err(error);
     }
 
-    let mut bootstrap_guard = DetachedRunBootstrapGuard::arm(run_dir, Arc::clone(&run_store));
+    let mut bootstrap_guard =
+        DetachedRunBootstrapGuard::arm(run_dir, Arc::clone(&run_store), cancel_token.clone());
 
     let persisted = match Persisted::load_from_store(services.run_store.as_ref(), run_dir).await {
         Ok(persisted) => persisted,
@@ -204,7 +204,8 @@ pub(super) async fn execute_persisted_run(
     };
 
     bootstrap_guard.defuse();
-    let mut completion_guard = DetachedRunCompletionGuard::arm(run_dir, Arc::clone(&run_store));
+    let mut completion_guard =
+        DetachedRunCompletionGuard::arm(run_dir, Arc::clone(&run_store), cancel_token);
     let run_start = Instant::now();
     let started = Box::pin(session.run(persisted, checkpoint)).await;
 
@@ -394,7 +395,6 @@ impl RunSession {
             devcontainer,
             seed_context: None,
             run_store: services.run_store,
-            git_author: services.git_author,
             git: None,
             github_app: services.github_app.clone(),
             worktree_mode: Some(resolve_worktree_mode(&settings)),
@@ -480,7 +480,6 @@ impl RunSession {
             cancel_token: self.cancel_token,
             run_id: record.run_id.clone(),
             labels: record.labels.clone(),
-            git_author: self.git_author,
             workflow_slug: record.workflow_slug.clone(),
             github_app: self.github_app.clone(),
             host_repo_path: record.host_repo_path.as_deref().map(PathBuf::from),
@@ -548,6 +547,7 @@ impl RunSession {
 
         let executed = pipeline::execute(initialized).await;
         store_progress_logger.flush().await;
+        let final_context = Some(executed.final_context.clone());
         let failed = !matches!(
             executed.outcome.as_ref().map(|outcome| &outcome.status),
             Ok(StageStatus::Success | StageStatus::PartialSuccess)
@@ -600,6 +600,7 @@ impl RunSession {
 
         Ok(Started {
             finalized,
+            final_context,
             retro,
             retro_duration,
         })
@@ -609,11 +610,16 @@ impl RunSession {
 struct DetachedRunBootstrapGuard {
     run_dir: PathBuf,
     run_store: Arc<dyn RunStore>,
+    cancel_token: Option<Arc<AtomicBool>>,
     active: bool,
 }
 
 impl DetachedRunBootstrapGuard {
-    fn arm(run_dir: &Path, run_store: Arc<dyn RunStore>) -> Self {
+    fn arm(
+        run_dir: &Path,
+        run_store: Arc<dyn RunStore>,
+        cancel_token: Option<Arc<AtomicBool>>,
+    ) -> Self {
         run_status::write_run_status(
             run_dir,
             RunStatus::Starting,
@@ -622,6 +628,7 @@ impl DetachedRunBootstrapGuard {
         Self {
             run_dir: run_dir.to_path_buf(),
             run_store,
+            cancel_token,
             active: true,
         }
     }
@@ -634,18 +641,23 @@ impl DetachedRunBootstrapGuard {
 impl Drop for DetachedRunBootstrapGuard {
     fn drop(&mut self) {
         if self.active {
-            run_status::write_run_status(
-                &self.run_dir,
-                RunStatus::Failed,
-                Some(StatusReason::SandboxInitFailed),
-            );
+            let cancelled = self
+                .cancel_token
+                .as_ref()
+                .is_some_and(|token| token.load(Ordering::SeqCst));
+            let reason = if cancelled {
+                StatusReason::Cancelled
+            } else {
+                StatusReason::SandboxInitFailed
+            };
+            run_status::write_run_status(&self.run_dir, RunStatus::Failed, Some(reason));
             let run_store = Arc::clone(&self.run_store);
             if let Ok(handle) = Handle::try_current() {
                 handle.spawn(async move {
                     let _ = run_store
                         .put_status(&run_status::RunStatusRecord::new(
                             RunStatus::Failed,
-                            Some(StatusReason::SandboxInitFailed),
+                            Some(reason),
                         ))
                         .await;
                 });
@@ -655,20 +667,27 @@ impl Drop for DetachedRunBootstrapGuard {
 }
 
 const POSTRUN_ABORTED_MESSAGE: &str = "Run aborted before post-run finalization completed.";
+const POSTRUN_CANCELLED_MESSAGE: &str = "Run cancelled before post-run finalization completed.";
 
 struct DetachedRunCompletionGuard {
     run_dir: PathBuf,
     run_store: Arc<dyn RunStore>,
     run_id: Option<String>,
+    cancel_token: Option<Arc<AtomicBool>>,
     active: bool,
 }
 
 impl DetachedRunCompletionGuard {
-    fn arm(run_dir: &Path, run_store: Arc<dyn RunStore>) -> Self {
+    fn arm(
+        run_dir: &Path,
+        run_store: Arc<dyn RunStore>,
+        cancel_token: Option<Arc<AtomicBool>>,
+    ) -> Self {
         Self {
             run_dir: run_dir.to_path_buf(),
             run_store,
             run_id: load_run_id(run_dir),
+            cancel_token,
             active: true,
         }
     }
@@ -684,17 +703,29 @@ impl Drop for DetachedRunCompletionGuard {
             return;
         }
 
-        run_status::write_run_status(
-            &self.run_dir,
-            RunStatus::Failed,
-            Some(StatusReason::WorkflowError),
-        );
+        let cancelled = self
+            .cancel_token
+            .as_ref()
+            .is_some_and(|token| token.load(Ordering::SeqCst));
+        let reason = if cancelled {
+            StatusReason::Cancelled
+        } else {
+            StatusReason::WorkflowError
+        };
+        let message = if cancelled {
+            POSTRUN_CANCELLED_MESSAGE
+        } else {
+            POSTRUN_ABORTED_MESSAGE
+        };
+        let code = if cancelled {
+            "postrun_cancelled"
+        } else {
+            "postrun_aborted"
+        };
+
+        run_status::write_run_status(&self.run_dir, RunStatus::Failed, Some(reason));
         if !self.run_dir.join("conclusion.json").exists() {
-            let _ = write_failure_conclusion(
-                &self.run_dir,
-                POSTRUN_ABORTED_MESSAGE,
-                Some(StatusReason::WorkflowError),
-            );
+            let _ = write_failure_conclusion(&self.run_dir, message, Some(reason));
         }
         if let Some(run_id) = load_run_id(&self.run_dir) {
             let _ = append_progress_event(
@@ -702,8 +733,8 @@ impl Drop for DetachedRunCompletionGuard {
                 &run_id,
                 &WorkflowRunEvent::RunNotice {
                     level: RunNoticeLevel::Error,
-                    code: "postrun_aborted".to_string(),
-                    message: POSTRUN_ABORTED_MESSAGE.to_string(),
+                    code: code.to_string(),
+                    message: message.to_string(),
                 },
             );
         }
@@ -714,11 +745,11 @@ impl Drop for DetachedRunCompletionGuard {
                 let _ = run_store
                     .put_status(&run_status::RunStatusRecord::new(
                         RunStatus::Failed,
-                        Some(StatusReason::WorkflowError),
+                        Some(reason),
                     ))
                     .await;
                 if let Err(err) = run_store
-                    .put_conclusion(&build_failure_conclusion(POSTRUN_ABORTED_MESSAGE))
+                    .put_conclusion(&build_failure_conclusion(message))
                     .await
                 {
                     tracing::warn!(
@@ -729,8 +760,8 @@ impl Drop for DetachedRunCompletionGuard {
                 if let Some(run_id) = run_id {
                     let event = WorkflowRunEvent::RunNotice {
                         level: RunNoticeLevel::Error,
-                        code: "postrun_aborted".to_string(),
-                        message: POSTRUN_ABORTED_MESSAGE.to_string(),
+                        code: code.to_string(),
+                        message: message.to_string(),
                     };
                     match build_redacted_event_payload(&event, &run_id) {
                         Ok(payload) => {
@@ -938,7 +969,6 @@ mod tests {
             run_store: crate::operations::open_or_hydrate_run(&InMemoryStore::default(), run_dir)
                 .await
                 .unwrap(),
-            git_author: crate::git::GitAuthor::default(),
             github_app: None,
             on_node: None,
             registry_override: Some(registry),

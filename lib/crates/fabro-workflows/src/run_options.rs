@@ -6,8 +6,6 @@ use std::sync::atomic::AtomicBool;
 use fabro_config::FabroSettings;
 use fabro_config::run::PullRequestSettings;
 
-use crate::git::GitAuthor;
-
 /// Git checkpoint options for a workflow run.
 #[derive(Clone)]
 pub struct GitCheckpointOptions {
@@ -26,8 +24,6 @@ pub struct RunOptions {
     pub run_id: String,
     /// User-defined key-value labels for this run.
     pub labels: HashMap<String, String>,
-    /// Git author identity for checkpoint commits.
-    pub git_author: GitAuthor,
     /// Workflow directory slug (e.g. "smoke" from `fabro/workflows/smoke/`).
     pub workflow_slug: Option<String>,
     /// GitHub App credentials for pushing metadata branches to origin.
@@ -49,6 +45,10 @@ impl RunOptions {
 
     pub fn checkpoint_exclude_globs(&self) -> &[String] {
         &self.settings.checkpoint.exclude_globs
+    }
+
+    pub fn git_author(&self) -> crate::git::GitAuthor {
+        crate::git::git_author_from_settings(&self.settings)
     }
 
     /// PR config (already normalized — disabled entries stripped at construction).

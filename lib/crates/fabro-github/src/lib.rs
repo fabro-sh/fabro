@@ -53,6 +53,24 @@ pub struct GitHubAppCredentials {
     pub private_key_pem: String,
 }
 
+impl GitHubAppCredentials {
+    pub fn from_env(app_id: Option<&str>) -> Option<Self> {
+        let app_id = app_id?;
+        let raw = std::env::var("GITHUB_APP_PRIVATE_KEY").ok()?;
+        let private_key_pem = if raw.starts_with("-----") {
+            raw
+        } else {
+            let pem_bytes =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &raw).ok()?;
+            String::from_utf8(pem_bytes).ok()?
+        };
+        Some(Self {
+            app_id: app_id.to_string(),
+            private_key_pem,
+        })
+    }
+}
+
 /// HTTP method used in GitHub API calls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpMethod {

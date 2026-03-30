@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use axum::extract::{self as axum_extract, Path, Query, State};
@@ -9,19 +9,17 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use fabro_config::sandbox::SandboxSettings;
+use fabro_config::FabroSettings;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate, generate_object};
 use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest,
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
 };
-use fabro_retro::retro;
 use fabro_retro::retro::Retro;
 use fabro_store::{InMemoryStore, Store};
 use fabro_util::redact::redact_jsonl_line;
 use fabro_workflows::error::FabroError;
-use fabro_workflows::git::GitAuthor;
 use fabro_workflows::handler::HandlerRegistry;
 use futures_util::stream;
 use tokio::sync::broadcast;
@@ -42,14 +40,11 @@ use crate::sessions as sessions_mod;
 use crate::sessions::{SessionStore, new_session_store};
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_retro::RetroExt;
-use fabro_sandbox::SandboxSpec;
 use fabro_workflows::context::Context;
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
 use fabro_workflows::operations::{self, CreateRunInput, WorkflowInput};
-use fabro_workflows::pipeline::{self, InitOptions, LlmSpec, Persisted, SandboxEnvSpec};
+use fabro_workflows::pipeline::Persisted;
 use fabro_workflows::records::{Checkpoint, CheckpointExt};
-use fabro_workflows::run_options::LifecycleOptions;
-use fabro_workflows::run_options::RunOptions;
 
 pub use fabro_api_types::{
     ApiQuestion, ApiQuestionOption, PaginatedRunList, PaginationMeta,
@@ -118,7 +113,6 @@ struct AggregateUsageTotals {
     by_model: HashMap<String, ModelUsageTotals>,
 }
 
-type LlmSpecFactory = dyn Fn() -> LlmSpec + Send + Sync;
 type RegistryFactoryOverride = dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync;
 
 /// Shared application state for the server.
@@ -126,16 +120,19 @@ pub struct AppState {
     runs: Mutex<HashMap<String, ManagedRun>>,
     aggregate_usage: Mutex<AggregateUsageTotals>,
     store: Arc<dyn Store>,
-    llm_spec_factory: Box<LlmSpecFactory>,
-    registry_factory_override: Option<Box<RegistryFactoryOverride>>,
-    pub dry_run: bool,
     pub db: sqlx::SqlitePool,
     max_concurrent_runs: usize,
     scheduler_notify: Notify,
-    pub hooks: Vec<fabro_hooks::HookDefinition>,
-    git_author: GitAuthor,
     pub sessions: SessionStore,
     llm_client: OnceCell<LlmClient>,
+    settings: Arc<RwLock<FabroSettings>>,
+    registry_factory_override: Option<Box<RegistryFactoryOverride>>,
+}
+
+impl AppState {
+    pub(crate) fn dry_run(&self) -> bool {
+        self.settings.read().unwrap().dry_run_enabled()
+    }
 }
 
 /// Build the axum Router with all run endpoints.
@@ -381,103 +378,65 @@ async fn get_aggregate_usage(
 }
 
 /// Create an `AppState` with the given LLM spec factory and database pool.
-pub fn create_app_state(
-    db: sqlx::SqlitePool,
-    llm_spec_factory: impl Fn() -> LlmSpec + Send + Sync + 'static,
-) -> Arc<AppState> {
-    create_app_state_with_options(
-        db,
-        llm_spec_factory,
-        false,
-        5,
-        GitAuthor::default(),
-        Vec::new(),
-    )
+pub fn create_app_state(db: sqlx::SqlitePool) -> Arc<AppState> {
+    create_app_state_with_options(db, FabroSettings::default(), 5)
 }
 
 #[doc(hidden)]
 pub fn create_app_state_with_registry_factory(
     db: sqlx::SqlitePool,
-    llm_spec_factory: impl Fn() -> LlmSpec + Send + Sync + 'static,
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
     build_app_state(
         db,
-        Box::new(llm_spec_factory),
+        Arc::new(RwLock::new(FabroSettings::default())),
         Some(Box::new(registry_factory_override)),
-        false,
         5,
-        GitAuthor::default(),
-        Vec::new(),
         Arc::new(InMemoryStore::default()),
     )
 }
 
-/// Create an `AppState` with the given database pool, LLM spec factory, dry-run flag, and concurrency limit.
+/// Create an `AppState` with the given database pool, settings, and concurrency limit.
 pub fn create_app_state_with_options(
     db: sqlx::SqlitePool,
-    llm_spec_factory: impl Fn() -> LlmSpec + Send + Sync + 'static,
-    dry_run: bool,
+    settings: FabroSettings,
     max_concurrent_runs: usize,
-    git_author: GitAuthor,
-    hooks: Vec<fabro_hooks::HookDefinition>,
 ) -> Arc<AppState> {
     create_app_state_with_store(
         db,
-        llm_spec_factory,
-        dry_run,
+        Arc::new(RwLock::new(settings)),
         max_concurrent_runs,
-        git_author,
-        hooks,
         Arc::new(InMemoryStore::default()),
     )
 }
 
 pub fn create_app_state_with_store(
     db: sqlx::SqlitePool,
-    llm_spec_factory: impl Fn() -> LlmSpec + Send + Sync + 'static,
-    dry_run: bool,
+    settings: Arc<RwLock<FabroSettings>>,
     max_concurrent_runs: usize,
-    git_author: GitAuthor,
-    hooks: Vec<fabro_hooks::HookDefinition>,
     store: Arc<dyn Store>,
 ) -> Arc<AppState> {
-    build_app_state(
-        db,
-        Box::new(llm_spec_factory),
-        None,
-        dry_run,
-        max_concurrent_runs,
-        git_author,
-        hooks,
-        store,
-    )
+    build_app_state(db, settings, None, max_concurrent_runs, store)
 }
 
 fn build_app_state(
     db: sqlx::SqlitePool,
-    llm_spec_factory: Box<LlmSpecFactory>,
+    settings: Arc<RwLock<FabroSettings>>,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
-    dry_run: bool,
     max_concurrent_runs: usize,
-    git_author: GitAuthor,
-    hooks: Vec<fabro_hooks::HookDefinition>,
     store: Arc<dyn Store>,
 ) -> Arc<AppState> {
     Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
         aggregate_usage: Mutex::new(AggregateUsageTotals::default()),
         store,
-        llm_spec_factory,
-        registry_factory_override,
-        dry_run,
         db,
         max_concurrent_runs,
         scheduler_notify: Notify::new(),
-        hooks,
-        git_author,
         sessions: new_session_store(),
         llm_client: OnceCell::new(),
+        settings,
+        registry_factory_override,
     })
 }
 
@@ -539,15 +498,7 @@ async fn start_run(
     let run_id = ulid::Ulid::new().to_string();
     info!(run_id = %run_id, "Run queued");
     let run_dir = std::env::temp_dir().join(format!("fabro-{}", uuid::Uuid::new_v4()));
-    let settings = fabro_config::FabroSettings {
-        dry_run: Some(state.dry_run),
-        hooks: state.hooks.clone(),
-        sandbox: Some(SandboxSettings {
-            provider: Some("local".to_string()),
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
+    let settings = state.settings.read().unwrap().clone();
     let created = match operations::create(CreateRunInput {
         workflow: WorkflowInput::DotSource {
             source: req.dot_source.clone(),
@@ -626,7 +577,7 @@ async fn start_run(
 /// Execute a single run: transitions queued → starting → running → completed/failed/cancelled.
 async fn execute_run(state: Arc<AppState>, run_id: String) {
     // Transition to Starting and set up cancel infrastructure
-    let (cancel_rx, run_dir) = {
+    let (cancel_rx, run_dir, event_tx, cancel_token) = {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = match runs.get_mut(&run_id) {
             Some(r) if r.status == RunStatus::Queued => r,
@@ -645,38 +596,23 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         managed_run.cancel_token = Some(Arc::clone(&cancel_token));
         managed_run.event_tx = Some(event_tx);
 
-        (cancel_rx, run_dir)
+        (
+            cancel_rx,
+            run_dir,
+            managed_run.event_tx.clone(),
+            cancel_token,
+        )
     };
 
-    // Create interviewer, sandbox, engine (this is the "provisioning" phase)
+    // Create interviewer and event plumbing (this is the "provisioning" phase)
     let interviewer = Arc::new(WebInterviewer::new());
     let context = Context::new();
-
-    let event_tx = {
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        runs.get(&run_id).and_then(|r| r.event_tx.clone())
-    };
-
     let emitter = EventEmitter::new();
     if let Some(tx_clone) = event_tx {
         emitter.on_event(move |event| {
             let _ = tx_clone.send(event.clone());
         });
     }
-
-    let cancel_token = {
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        runs.get(&run_id).and_then(|r| r.cancel_token.clone())
-    };
-    let Some(cancel_token) = cancel_token else {
-        return;
-    };
-
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let sandbox = SandboxSpec::Local {
-        working_directory: cwd,
-    };
-    let llm = (state.llm_spec_factory)();
     let registry_override = state
         .registry_factory_override
         .as_ref()
@@ -726,118 +662,46 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
             return;
         }
     };
-    let run_record = persisted.run_record().clone();
-    let run_options = RunOptions {
-        settings: run_record.settings,
-        run_dir: run_dir.clone(),
-        cancel_token: Some(cancel_token),
-        run_id: run_id.clone(),
-        labels: run_record.labels,
-        git_author: state.git_author.clone(),
-        workflow_slug: run_record.workflow_slug,
-        github_app: None,
-        base_branch: run_record.base_branch,
-        display_base_sha: None,
-        host_repo_path: run_record.host_repo_path.map(Into::into),
-        git: None,
+    let github_app =
+        fabro_github::GitHubAppCredentials::from_env(persisted.run_record().settings.app_id());
+    let services = operations::StartServices {
+        cancel_token: Some(Arc::clone(&cancel_token)),
+        emitter: Arc::clone(&emitter),
+        interviewer: Arc::clone(&interviewer) as Arc<dyn Interviewer>,
+        run_store: Arc::clone(&run_store),
+        github_app,
+        on_node: None,
+        registry_override,
     };
 
-    let execution = {
-        let emitter = Arc::clone(&emitter);
-        let interviewer = Arc::clone(&interviewer) as Arc<dyn Interviewer>;
-        let run_id = run_id.clone();
-        let run_options = run_options.clone();
-        let run_store = Arc::clone(&run_store);
-        let hooks = state.hooks.clone();
-        let dry_run = state.dry_run;
-        async move {
-            let initialized = pipeline::initialize(
-                persisted,
-                InitOptions {
-                    run_id,
-                    run_store,
-                    dry_run,
-                    emitter,
-                    sandbox,
-                    llm,
-                    interviewer,
-                    lifecycle: LifecycleOptions {
-                        setup_commands: Vec::new(),
-                        setup_command_timeout_ms: 300_000,
-                        devcontainer_phases: Vec::new(),
-                    },
-                    run_options,
-                    hooks: fabro_hooks::HookConfig { hooks },
-                    sandbox_env: SandboxEnvSpec {
-                        devcontainer_env: HashMap::new(),
-                        toml_env: HashMap::new(),
-                        github_permissions: None,
-                        origin_url: None,
-                    },
-                    devcontainer: None,
-                    git: None,
-                    worktree_mode: None,
-                    registry_override,
-                    checkpoint: None,
-                    seed_context: None,
-                },
-            )
-            .await?;
-            Ok::<_, FabroError>(pipeline::execute(initialized).await)
-        }
-    };
-
-    let (result, final_context) = tokio::select! {
-        result = execution => match result {
-            Ok(executed) => (executed.outcome, Some(executed.final_context)),
-            Err(err) => (Err(err), None),
-        },
+    let result = tokio::select! {
+        result = operations::start(&run_dir, services) => result,
         _ = cancel_rx => {
-            let mut runs = state.runs.lock().expect("runs lock poisoned");
-            if let Some(managed_run) = runs.get_mut(&run_id) {
-                managed_run.status = RunStatus::Cancelled;
-                managed_run.event_tx = None;
-            }
-            state.scheduler_notify.notify_one();
-            return;
+            cancel_token.store(true, Ordering::SeqCst);
+            Err(FabroError::Cancelled)
         }
     };
 
     // Save final checkpoint
     let checkpoint = match run_store.get_checkpoint().await {
-        Ok(checkpoint) => checkpoint
-            .or_else(|| Checkpoint::load(&run_options.run_dir.join("checkpoint.json")).ok()),
+        Ok(checkpoint) => {
+            checkpoint.or_else(|| Checkpoint::load(&run_dir.join("checkpoint.json")).ok())
+        }
         Err(err) => {
             tracing::warn!(run_id = %run_id, error = %err, "Failed to load checkpoint from store");
-            Checkpoint::load(&run_options.run_dir.join("checkpoint.json")).ok()
+            Checkpoint::load(&run_dir.join("checkpoint.json")).ok()
         }
     };
 
-    // Auto-derive retro and accumulate aggregate usage
+    // Accumulate aggregate usage after execution completes.
     if let Some(ref cp) = checkpoint {
-        let failed = result.is_err();
-        let completed_stages = fabro_workflows::build_completed_stages(cp, failed);
         let stage_durations = match run_store.list_events().await {
             Ok(events) => fabro_workflows::extract_stage_durations_from_events(&events),
             Err(err) => {
                 tracing::warn!(run_id = %run_id, error = %err, "Failed to load run events from store");
-                retro::extract_stage_durations(&run_options.run_dir)
+                fabro_retro::retro::extract_stage_durations(&run_dir)
             }
         };
-        let retro = retro::derive_retro(
-            &run_id,
-            "workflow",
-            "",
-            completed_stages,
-            0,
-            &stage_durations,
-        );
-        let _ = retro.save(&run_options.run_dir);
-        if let Err(err) = run_store.put_retro(&retro).await {
-            tracing::warn!(run_id = %run_id, error = %err, "Failed to save retro to store");
-        }
-
-        // Accumulate aggregate usage
         let mut agg = state
             .aggregate_usage
             .lock()
@@ -860,11 +724,22 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
 
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     if let Some(managed_run) = runs.get_mut(&run_id) {
-        match result {
-            Ok(_) => {
-                info!(run_id = %run_id, "Run completed");
-                managed_run.status = RunStatus::Completed;
-            }
+        match &result {
+            Ok(started) => match &started.finalized.outcome {
+                Ok(_) => {
+                    info!(run_id = %run_id, "Run completed");
+                    managed_run.status = RunStatus::Completed;
+                }
+                Err(FabroError::Cancelled) => {
+                    info!(run_id = %run_id, "Run cancelled");
+                    managed_run.status = RunStatus::Cancelled;
+                }
+                Err(e) => {
+                    error!(run_id = %run_id, error = %e, "Run failed");
+                    managed_run.status = RunStatus::Failed;
+                    managed_run.error = Some(e.to_string());
+                }
+            },
             Err(FabroError::Cancelled) => {
                 info!(run_id = %run_id, "Run cancelled");
                 managed_run.status = RunStatus::Cancelled;
@@ -876,11 +751,15 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
             }
         }
         managed_run.checkpoint = checkpoint;
-        if let Some(ctx) = final_context {
-            managed_run.context = Some(ctx);
+        if let Ok(started) = &result {
+            if let Some(ctx) = &started.final_context {
+                managed_run.context = Some(ctx.clone());
+            }
         }
-        managed_run.run_dir = Some(run_options.run_dir.clone());
+        managed_run.run_dir = Some(run_dir);
         managed_run.event_tx = None;
+        managed_run.cancel_tx = None;
+        managed_run.cancel_token = None;
     }
     drop(runs);
     state.scheduler_notify.notify_one();
@@ -1230,7 +1109,7 @@ async fn test_model(
         return ApiError::not_found(format!("Model not found: {id}")).into_response();
     };
 
-    if state.dry_run {
+    if state.dry_run() {
         return Json(serde_json::json!({
             "model_id": id,
             "status": "ok",
@@ -1408,7 +1287,7 @@ async fn create_completion(
     let use_stream = req.stream && req.schema.is_none();
 
     // Dry-run mode returns a stub response
-    if state.dry_run {
+    if state.dry_run() {
         let msg_id = ulid::Ulid::new().to_string();
         if use_stream {
             let finish_event = StreamEvent::finish(
@@ -1646,6 +1525,7 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
+    use fabro_workflows::records::{RunRecord, RunRecordExt};
     use tower::ServiceExt;
 
     const MINIMAL_DOT: &str = r#"digraph Test {
@@ -1655,14 +1535,23 @@ mod tests {
         start -> exit
     }"#;
 
-    fn test_llm_spec() -> LlmSpec {
-        LlmSpec {
-            model: "test-model".to_string(),
-            provider: fabro_llm::Provider::Anthropic,
-            fallback_chain: Vec::new(),
-            mcp_servers: Vec::new(),
-            dry_run: true,
+    fn dry_run_settings() -> FabroSettings {
+        FabroSettings {
+            dry_run: Some(true),
+            ..Default::default()
         }
+    }
+
+    fn command_dot(command: &str) -> String {
+        format!(
+            r#"digraph Test {{
+                graph [goal="Test"]
+                start [shape=Mdiamond]
+                exit [shape=Msquare]
+                command [shape=parallelogram, tool_command="{command}"]
+                start -> command -> exit
+            }}"#
+        )
     }
 
     async fn test_db() -> sqlx::SqlitePool {
@@ -1672,7 +1561,7 @@ mod tests {
     }
 
     fn test_app_with(db: sqlx::SqlitePool) -> Router {
-        let state = create_app_state(db, test_llm_spec);
+        let state = create_app_state(db);
         build_router(state, AuthMode::Disabled)
     }
 
@@ -1722,14 +1611,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_model_dry_run_returns_ok() {
-        let state = create_app_state_with_options(
-            test_db().await,
-            test_llm_spec,
-            true,
-            5,
-            GitAuthor::default(),
-            Vec::new(),
-        );
+        let state = create_app_state_with_options(test_db().await, dry_run_settings(), 5);
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -1749,14 +1631,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_model_dry_run_unknown_returns_404() {
-        let state = create_app_state_with_options(
-            test_db().await,
-            test_llm_spec,
-            true,
-            5,
-            GitAuthor::default(),
-            Vec::new(),
-        );
+        let state = create_app_state_with_options(test_db().await, dry_run_settings(), 5);
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -1810,7 +1685,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_run_status_returns_status() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = test_app_with_scheduler(state);
 
         // Start a run
@@ -1868,7 +1743,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_questions_returns_empty_list() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -1933,7 +1808,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_checkpoint_returns_null_initially() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -1963,7 +1838,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_context_returns_map() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -1996,7 +1871,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_run_succeeds() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -2045,7 +1920,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_events_returns_sse_stream() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = test_app_with_scheduler(state);
 
         // Start a run
@@ -2096,7 +1971,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn run_completes_and_status_is_completed() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = test_app_with_scheduler(state);
 
         // Start a run
@@ -2135,7 +2010,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_graph_returns_svg() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -2203,7 +2078,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_runs_returns_started_run() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // List should be empty initially
@@ -2252,7 +2127,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_aggregate_usage_returns_zeros_initially() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2275,7 +2150,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn aggregate_usage_increments_after_run_completes() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = test_app_with_scheduler(state);
 
         // Start a run
@@ -2326,7 +2201,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_runs_returns_queued_status() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2356,8 +2231,119 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn start_run_persists_full_settings_snapshot() {
+        let settings = FabroSettings {
+            dry_run: Some(true),
+            llm: Some(fabro_config::run::LlmSettings {
+                model: Some("claude-sonnet-4-5".to_string()),
+                provider: Some("anthropic".to_string()),
+                fallbacks: None,
+            }),
+            sandbox: Some(fabro_config::sandbox::SandboxSettings {
+                provider: Some("local".to_string()),
+                ..Default::default()
+            }),
+            hooks: vec![fabro_hooks::HookDefinition {
+                name: Some("snapshot-hook".to_string()),
+                event: fabro_hooks::HookEvent::RunStart,
+                command: Some("echo snapshot".to_string()),
+                hook_type: None,
+                matcher: None,
+                blocking: Some(false),
+                timeout_ms: Some(1_000),
+                sandbox: Some(false),
+            }],
+            git: Some(fabro_config::server::GitSettings {
+                app_id: Some("12345".to_string()),
+                author: fabro_config::server::GitAuthorSettings {
+                    name: Some("Snapshot Bot".to_string()),
+                    email: Some("snapshot@example.com".to_string()),
+                },
+                ..Default::default()
+            }),
+            web: Some(fabro_config::server::WebSettings {
+                url: "http://example.test".to_string(),
+                ..Default::default()
+            }),
+            api: Some(fabro_config::server::ApiSettings {
+                base_url: "http://api.example.test".to_string(),
+                ..Default::default()
+            }),
+            log: Some(fabro_config::server::LogSettings {
+                level: Some("debug".to_string()),
+            }),
+            ..Default::default()
+        };
+        let state = create_app_state_with_options(test_db().await, settings.clone(), 5);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/runs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap().to_string();
+
+        let run_dir = {
+            let runs = state.runs.lock().expect("runs lock poisoned");
+            runs.get(&run_id)
+                .and_then(|run| run.run_dir.clone())
+                .expect("run_dir should be recorded")
+        };
+        let run_record = RunRecord::load(&run_dir).unwrap();
+        let mut expected_settings = settings;
+        expected_settings.goal = Some("Test".to_string());
+
+        assert_eq!(run_record.settings, expected_settings);
+    }
+
+    #[tokio::test]
+    async fn config_change_after_submission_does_not_affect_execution() {
+        let output_dir = tempfile::tempdir().unwrap();
+        let output_path = output_dir.path().join("executed.txt");
+        let dot = command_dot(&format!("printf snapshot > {}", output_path.display()));
+        let initial_settings = dry_run_settings();
+        let state = create_app_state_with_options(test_db().await, initial_settings.clone(), 5);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/runs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({ "dot_source": dot })).unwrap(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap().to_string();
+
+        *state.settings.write().unwrap() = FabroSettings::default();
+
+        execute_run(Arc::clone(&state), run_id.clone()).await;
+
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        let managed_run = runs.get(&run_id).expect("run should still exist");
+        assert_eq!(managed_run.status, RunStatus::Completed);
+        drop(runs);
+
+        assert!(
+            !output_path.exists(),
+            "run should still use snapshotted dry-run settings"
+        );
+    }
+
+    #[tokio::test]
     async fn cancel_queued_run_succeeds() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = build_router(state, AuthMode::Disabled);
 
         // Submit a run (no scheduler, stays queued)
@@ -2396,9 +2382,86 @@ mod tests {
         assert_eq!(body["status"].as_str().unwrap(), "cancelled");
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancel_during_startup_persists_cancelled_reason() {
+        let settings = FabroSettings {
+            setup: Some(fabro_config::run::SetupSettings {
+                commands: vec!["sleep 5".to_string()],
+                timeout_ms: Some(30_000),
+            }),
+            ..Default::default()
+        };
+        let state = create_app_state_with_options(test_db().await, settings, 5);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/runs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap().to_string();
+
+        let runner = tokio::spawn(execute_run(Arc::clone(&state), run_id.clone()));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        {
+            let mut runs = state.runs.lock().expect("runs lock poisoned");
+            let managed_run = runs.get_mut(&run_id).expect("run should exist");
+            if let Some(token) = &managed_run.cancel_token {
+                token.store(true, Ordering::SeqCst);
+            }
+            if let Some(cancel_tx) = managed_run.cancel_tx.take() {
+                let _ = cancel_tx.send(());
+            }
+        }
+
+        runner.await.unwrap();
+
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        let managed_run = runs.get(&run_id).expect("run should exist");
+        assert_eq!(managed_run.status, RunStatus::Cancelled);
+        drop(runs);
+
+        let run_store = state
+            .store
+            .open_run_reader(&run_id)
+            .await
+            .unwrap()
+            .expect("run store should exist");
+
+        let mut status_record = None;
+        for _ in 0..50 {
+            if let Some(record) = run_store.get_status().await.unwrap() {
+                if record.status == fabro_workflows::run_status::RunStatus::Failed
+                    && record.reason == Some(fabro_workflows::run_status::StatusReason::Cancelled)
+                {
+                    status_record = Some(record);
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+
+        let status_record = status_record.expect("status record should be persisted");
+        assert_eq!(
+            status_record.status,
+            fabro_workflows::run_status::RunStatus::Failed
+        );
+        assert_eq!(
+            status_record.reason,
+            Some(fabro_workflows::run_status::StatusReason::Cancelled)
+        );
+    }
+
     #[tokio::test]
     async fn queue_position_reported_for_queued_runs() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = build_router(state, AuthMode::Disabled);
 
         // Submit two runs (no scheduler, both stay queued)
@@ -2440,14 +2503,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrency_limit_respected() {
-        let state = create_app_state_with_options(
-            test_db().await,
-            test_llm_spec,
-            false,
-            1,
-            GitAuthor::default(),
-            Vec::new(),
-        );
+        let state = create_app_state_with_options(test_db().await, FabroSettings::default(), 1);
         let app = test_app_with_scheduler(state);
 
         // Submit two runs with max_concurrent_runs=1
@@ -2496,7 +2552,7 @@ mod tests {
 
     #[tokio::test]
     async fn submit_answer_to_queued_run_returns_conflict() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2528,14 +2584,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_completion_non_streaming_returns_json() {
-        let state = create_app_state_with_options(
-            test_db().await,
-            test_llm_spec,
-            true,
-            5,
-            GitAuthor::default(),
-            Vec::new(),
-        );
+        let state = create_app_state_with_options(test_db().await, dry_run_settings(), 5);
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2565,14 +2614,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_completion_streaming_returns_sse() {
-        let state = create_app_state_with_options(
-            test_db().await,
-            test_llm_spec,
-            true,
-            5,
-            GitAuthor::default(),
-            Vec::new(),
-        );
+        let state = create_app_state_with_options(test_db().await, dry_run_settings(), 5);
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()

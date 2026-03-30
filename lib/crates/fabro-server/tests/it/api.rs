@@ -12,18 +12,7 @@ mod mtls_e2e {
     use fabro_server::server::{build_router, create_app_state};
     use fabro_server::server_config::TlsSettings;
     use fabro_server::tls::{ClientAuth, build_rustls_config};
-    use fabro_workflows::pipeline::LlmSpec;
     use tokio::net::TcpListener;
-
-    fn test_llm_spec() -> LlmSpec {
-        LlmSpec {
-            model: "test-model".to_string(),
-            provider: fabro_llm::Provider::Anthropic,
-            fallback_chain: Vec::new(),
-            mcp_servers: Vec::new(),
-            dry_run: true,
-        }
-    }
 
     async fn test_db() -> sqlx::SqlitePool {
         let pool = fabro_db::connect_memory().await.unwrap();
@@ -191,7 +180,7 @@ mod mtls_e2e {
         let rustls_config = build_rustls_config(tls_settings, client_auth);
         let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
 
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         let router = build_router(state, auth_mode);
 
         tokio::spawn(async move {
@@ -422,7 +411,7 @@ mod mtls_e2e {
 // ===========================================================================
 
 mod server_lifecycle {
-    use super::super::helpers::{test_db, test_llm_spec};
+    use super::super::helpers::test_db;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -469,8 +458,7 @@ mod server_lifecycle {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn full_http_lifecycle_approve_and_complete() {
-        let state =
-            create_app_state_with_registry_factory(test_db().await, test_llm_spec, gate_registry);
+        let state = create_app_state_with_registry_factory(test_db().await, gate_registry);
         fabro_server::server::spawn_scheduler(Arc::clone(&state));
         let app = build_router(
             Arc::clone(&state),
@@ -569,8 +557,7 @@ mod server_lifecycle {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn full_http_lifecycle_cancel() {
-        let state =
-            create_app_state_with_registry_factory(test_db().await, test_llm_spec, gate_registry);
+        let state = create_app_state_with_registry_factory(test_db().await, gate_registry);
         fabro_server::server::spawn_scheduler(Arc::clone(&state));
         let app = build_router(
             Arc::clone(&state),
@@ -621,7 +608,7 @@ mod server_lifecycle {
 // ===========================================================================
 
 mod sse_events {
-    use super::super::helpers::{test_db, test_llm_spec};
+    use super::super::helpers::test_db;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -641,7 +628,7 @@ mod sse_events {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sse_stream_contains_expected_event_types() {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         fabro_server::server::spawn_scheduler(Arc::clone(&state));
         let app = build_router(
             Arc::clone(&state),
@@ -768,7 +755,7 @@ mod sse_events {
 // ===========================================================================
 
 mod serve_dry_run {
-    use super::super::helpers::{test_db, test_llm_spec};
+    use super::super::helpers::test_db;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -786,7 +773,7 @@ mod serve_dry_run {
 
     /// Build the router exactly as `serve_command` does in dry-run mode.
     async fn dry_run_app() -> axum::Router {
-        let state = create_app_state(test_db().await, test_llm_spec);
+        let state = create_app_state(test_db().await);
         fabro_server::server::spawn_scheduler(Arc::clone(&state));
         build_router(state, fabro_server::jwt_auth::AuthMode::Disabled)
     }

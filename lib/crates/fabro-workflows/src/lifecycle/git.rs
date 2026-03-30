@@ -61,7 +61,8 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 .and_then(|g| g.meta_branch.as_ref()),
             self.run_options.host_repo_path.as_ref(),
         ) {
-            let store = MetadataStore::new(repo_path, &self.run_options.git_author);
+            let git_author = self.run_options.git_author();
+            let store = MetadataStore::new(repo_path, &git_author);
             let run_json = self
                 .run_store
                 .get_run()
@@ -131,7 +132,8 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 .and_then(|g| g.meta_branch.as_ref()),
             self.run_options.host_repo_path.as_ref(),
         ) {
-            let store = MetadataStore::new(repo_path, &self.run_options.git_author);
+            let git_author = self.run_options.git_author();
+            let store = MetadataStore::new(repo_path, &git_author);
             // Build checkpoint JSON for shadow branch
             self.run_store
                 .get_checkpoint()
@@ -178,6 +180,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
 
         // Run branch commit via sandbox
         let completed_count = state.completed_nodes.len();
+        let git_author = self.run_options.git_author();
         let commit_result = git_checkpoint(
             &*self.sandbox,
             &self.run_id,
@@ -186,7 +189,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             completed_count,
             shadow_sha,
             self.run_options.checkpoint_exclude_globs(),
-            &self.run_options.git_author,
+            &git_author,
         )
         .await;
 
