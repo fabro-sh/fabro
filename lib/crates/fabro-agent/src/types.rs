@@ -84,8 +84,8 @@ impl Turn {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionState {
     Idle,
-    Processing,
-    AwaitingInput,
+    Thinking,
+    Executing,
     Closed,
 }
 

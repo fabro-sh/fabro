@@ -481,9 +481,12 @@ impl Session {
     /// cleanup as appropriate for each transition.
     ///
     /// Valid transitions (matches the Attractor spec):
-    /// - Idle → Processing
-    /// - Processing → Idle  (emits ProcessingEnd)
-    /// - Processing → Closed (emits SessionEnded)
+    /// - Idle → Thinking
+    /// - Thinking → Executing
+    /// - Thinking → Idle  (emits ProcessingEnd)
+    /// - Executing → Thinking
+    /// - Thinking → Closed (emits SessionEnded)
+    /// - Executing → Closed (emits SessionEnded)
     /// - Idle → Closed (emits SessionEnded)
     /// - any → Closed (abort/error — emits SessionEnded)
     fn transition(&mut self, to: SessionState) {
@@ -495,9 +498,13 @@ impl Session {
         debug_assert!(
             matches!(
                 (from, to),
-                (SessionState::Idle, SessionState::Processing)
-                    | (SessionState::Processing, SessionState::Idle)
-                    | (_, SessionState::Closed)
+                (
+                    SessionState::Idle | SessionState::Executing,
+                    SessionState::Thinking
+                ) | (
+                    SessionState::Thinking,
+                    SessionState::Executing | SessionState::Idle
+                ) | (_, SessionState::Closed)
             ),
             "Invalid session state transition: {from:?} -> {to:?}"
         );
@@ -513,7 +520,9 @@ impl Session {
                 .emit(self.id.clone(), AgentEvent::SessionEnded);
         }
 
-        if from == SessionState::Processing && to == SessionState::Idle {
+        if matches!(from, SessionState::Thinking | SessionState::Executing)
+            && to == SessionState::Idle
+        {
             self.event_emitter
                 .emit(self.id.clone(), AgentEvent::ProcessingEnd);
         }
@@ -608,7 +617,7 @@ impl Session {
             return Err(AgentError::SessionClosed);
         }
 
-        self.transition(SessionState::Processing);
+        self.transition(SessionState::Thinking);
 
         // Expand skill references in input
         let expanded = if self.skills.is_empty() {
@@ -845,6 +854,7 @@ impl Session {
             round_count += 1;
 
             // Execute tool calls (parallel or sequential based on provider)
+            self.transition(SessionState::Executing);
             let results = execute_tool_calls(
                 &tool_calls,
                 true,
@@ -881,6 +891,7 @@ impl Session {
 
             // Drain steering after tool execution
             self.drain_steering();
+            self.transition(SessionState::Thinking);
 
             // Loop detection
             if self.config.enable_loop_detection
