@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use fabro_workflow::event::{WorkflowRunEvent, flatten_event};
+use fabro_workflow::event::RunEventEnvelope;
 
 mod event;
 mod info_display;
@@ -9,7 +9,7 @@ mod setup_display;
 mod stage_display;
 mod styles;
 
-use event::{ProgressEvent, from_flattened_fields};
+use event::{ProgressEvent, from_envelope_fields};
 use info_display::InfoDisplay;
 use renderer::ProgressRenderer;
 use setup_display::SetupDisplay;
@@ -68,24 +68,23 @@ impl ProgressUI {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn handle_event(&mut self, event: &WorkflowRunEvent) {
-        let (event_name, fields) = flatten_event(event);
-        if let Some(progress_event) = from_flattened_fields(&event_name, fields) {
+    pub(crate) fn handle_event(&mut self, event: &RunEventEnvelope) {
+        let Ok(Value::Object(envelope)) = serde_json::to_value(event) else {
+            return;
+        };
+        if let Some(progress_event) = from_envelope_fields(&event.event, &envelope) {
             self.dispatch(progress_event);
         }
     }
 
     pub(crate) fn handle_json_line(&mut self, line: &str) {
-        let Ok(Value::Object(mut envelope)) = serde_json::from_str(line) else {
+        let Ok(Value::Object(envelope)) = serde_json::from_str(line) else {
             return;
         };
-        let Some(event_name) = envelope
-            .remove("event")
-            .and_then(|value| value.as_str().map(str::to_owned))
-        else {
+        let Some(event_name) = envelope.get("event").and_then(|value| value.as_str()) else {
             return;
         };
-        if let Some(progress_event) = from_flattened_fields(&event_name, envelope) {
+        if let Some(progress_event) = from_envelope_fields(event_name, &envelope) {
             self.dispatch(progress_event);
         }
     }
@@ -428,7 +427,8 @@ mod tests {
 
     use fabro_agent::{AgentEvent, SandboxEvent};
     use fabro_llm::types::Usage;
-    use fabro_workflow::event::{RunNoticeLevel, flatten_event};
+    use fabro_types::fixtures;
+    use fabro_workflow::event::{RunNoticeLevel, WorkflowRunEvent, canonicalize_event};
     use fabro_workflow::outcome::StageUsage;
 
     use super::*;
@@ -469,6 +469,25 @@ mod tests {
             .expect("valid utf-8")
     }
 
+    fn emit(ui: &mut ProgressUI, event: WorkflowRunEvent) {
+        let envelope = canonicalize_event(&fixtures::RUN_1, &event);
+        ui.handle_event(&envelope);
+    }
+
+    fn emit_ref(ui: &mut ProgressUI, event: &WorkflowRunEvent) {
+        let envelope = canonicalize_event(&fixtures::RUN_1, event);
+        ui.handle_event(&envelope);
+    }
+
+    fn agent_event(stage: &str, event: AgentEvent) -> WorkflowRunEvent {
+        WorkflowRunEvent::Agent {
+            stage: stage.into(),
+            event,
+            session_id: None,
+            parent_session_id: None,
+        }
+    }
+
     fn stage_started(node_id: &str, name: &str) -> WorkflowRunEvent {
         WorkflowRunEvent::StageStarted {
             node_id: node_id.into(),
@@ -482,15 +501,15 @@ mod tests {
     }
 
     fn assistant_message(stage: &str, model: &str) -> WorkflowRunEvent {
-        WorkflowRunEvent::Agent {
-            stage: stage.into(),
-            event: AgentEvent::AssistantMessage {
+        agent_event(
+            stage,
+            AgentEvent::AssistantMessage {
                 text: "done".into(),
                 model: model.into(),
                 usage: Usage::default(),
                 tool_call_count: 0,
             },
-        }
+        )
     }
 
     fn stage_completed(node_id: &str, name: &str) -> WorkflowRunEvent {
@@ -524,20 +543,26 @@ mod tests {
     fn parallel_branches_tracked_as_tool_calls() {
         let mut ui = ProgressUI::new(true, false);
 
-        ui.handle_event(&stage_started("fork1", "Fork Analysis"));
+        emit(&mut ui, stage_started("fork1", "Fork Analysis"));
         assert!(ui.stage.active_stages.contains_key("fork1"));
         assert!(ui.stage.parallel_parent.is_none());
 
-        ui.handle_event(&WorkflowRunEvent::ParallelStarted {
-            branch_count: 2,
-            join_policy: "wait_all".into(),
-        });
+        emit(
+            &mut ui,
+            WorkflowRunEvent::ParallelStarted {
+                branch_count: 2,
+                join_policy: "wait_all".into(),
+            },
+        );
         assert_eq!(ui.stage.parallel_parent.as_deref(), Some("fork1"));
 
-        ui.handle_event(&WorkflowRunEvent::ParallelBranchStarted {
-            branch: "security".into(),
-            index: 0,
-        });
+        emit(
+            &mut ui,
+            WorkflowRunEvent::ParallelBranchStarted {
+                branch: "security".into(),
+                index: 0,
+            },
+        );
         let stage = &ui.stage.active_stages["fork1"];
         assert_eq!(stage.tool_calls.len(), 1);
         assert_eq!(stage.tool_calls[0].tool_call_id, "security");
@@ -546,12 +571,15 @@ mod tests {
             ToolCallStatus::Running
         ));
 
-        ui.handle_event(&WorkflowRunEvent::ParallelBranchCompleted {
-            branch: "security".into(),
-            index: 0,
-            duration_ms: 2000,
-            status: "success".into(),
-        });
+        emit(
+            &mut ui,
+            WorkflowRunEvent::ParallelBranchCompleted {
+                branch: "security".into(),
+                index: 0,
+                duration_ms: 2000,
+                status: "success".into(),
+            },
+        );
         let stage = &ui.stage.active_stages["fork1"];
         assert!(matches!(
             stage.tool_calls[0].status,
@@ -563,15 +591,21 @@ mod tests {
     fn parallel_branch_running_shows_triangle_glyph() {
         let mut ui = ProgressUI::new(true, false);
 
-        ui.handle_event(&stage_started("fork1", "Fork"));
-        ui.handle_event(&WorkflowRunEvent::ParallelStarted {
-            branch_count: 1,
-            join_policy: "wait_all".into(),
-        });
-        ui.handle_event(&WorkflowRunEvent::ParallelBranchStarted {
-            branch: "security".into(),
-            index: 0,
-        });
+        emit(&mut ui, stage_started("fork1", "Fork"));
+        emit(
+            &mut ui,
+            WorkflowRunEvent::ParallelStarted {
+                branch_count: 1,
+                join_policy: "wait_all".into(),
+            },
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::ParallelBranchStarted {
+                branch: "security".into(),
+                index: 0,
+            },
+        );
 
         let stage = &ui.stage.active_stages["fork1"];
         let message = stage.tool_calls[0].bar.message();
@@ -585,27 +619,33 @@ mod tests {
     fn compaction_sets_and_clears_bar() {
         let mut ui = ProgressUI::new(true, false);
 
-        ui.handle_event(&stage_started("s1", "Build"));
+        emit(&mut ui, stage_started("s1", "Build"));
         assert!(ui.stage.active_stages["s1"].compaction_bar.is_none());
 
-        ui.handle_event(&WorkflowRunEvent::Agent {
-            stage: "s1".into(),
-            event: AgentEvent::CompactionStarted {
-                estimated_tokens: 5000,
-                context_window_size: 8000,
-            },
-        });
+        emit(
+            &mut ui,
+            agent_event(
+                "s1",
+                AgentEvent::CompactionStarted {
+                    estimated_tokens: 5000,
+                    context_window_size: 8000,
+                },
+            ),
+        );
         assert!(ui.stage.active_stages["s1"].compaction_bar.is_some());
 
-        ui.handle_event(&WorkflowRunEvent::Agent {
-            stage: "s1".into(),
-            event: AgentEvent::CompactionCompleted {
-                original_turn_count: 20,
-                preserved_turn_count: 6,
-                summary_token_estimate: 500,
-                tracked_file_count: 3,
-            },
-        });
+        emit(
+            &mut ui,
+            agent_event(
+                "s1",
+                AgentEvent::CompactionCompleted {
+                    original_turn_count: 20,
+                    preserved_turn_count: 6,
+                    summary_token_estimate: 500,
+                    tracked_file_count: 3,
+                },
+            ),
+        );
         assert!(ui.stage.active_stages["s1"].compaction_bar.is_none());
     }
 
@@ -625,16 +665,16 @@ mod tests {
             WorkflowRunEvent::SandboxInitialized {
                 working_directory: "/home/daytona/workspace".into(),
             },
-            WorkflowRunEvent::Agent {
-                stage: "code".into(),
-                event: AgentEvent::ToolCallStarted {
+            agent_event(
+                "code",
+                AgentEvent::ToolCallStarted {
                     tool_name: "read_file".into(),
                     tool_call_id: "tc1".into(),
                     arguments: serde_json::json!({
                         "file_path": "/home/daytona/workspace/src/main.rs"
                     }),
                 },
-            },
+            ),
             assistant_message("code", "gpt-5-mini"),
             WorkflowRunEvent::EdgeSelected {
                 from_node: "code".into(),
@@ -655,17 +695,17 @@ mod tests {
                 max_attempts: 3,
                 delay_ms: 1500,
             },
-            WorkflowRunEvent::Agent {
-                stage: "code".into(),
-                event: AgentEvent::Warning {
+            agent_event(
+                "code",
+                AgentEvent::Warning {
                     kind: "context_window".into(),
                     message: "high usage".into(),
                     details: serde_json::json!({"usage_percent": 92}),
                 },
-            },
-            WorkflowRunEvent::Agent {
-                stage: "code".into(),
-                event: AgentEvent::LlmRetry {
+            ),
+            agent_event(
+                "code",
+                AgentEvent::LlmRetry {
                     provider: "openai".into(),
                     model: "gpt-5-mini".into(),
                     attempt: 2,
@@ -675,24 +715,24 @@ mod tests {
                         source: None,
                     },
                 },
-            },
-            WorkflowRunEvent::Agent {
-                stage: "code".into(),
-                event: AgentEvent::SubAgentSpawned {
+            ),
+            agent_event(
+                "code",
+                AgentEvent::SubAgentSpawned {
                     agent_id: "a1".into(),
                     depth: 1,
                     task: "review recent changes".into(),
                 },
-            },
-            WorkflowRunEvent::Agent {
-                stage: "code".into(),
-                event: AgentEvent::SubAgentCompleted {
+            ),
+            agent_event(
+                "code",
+                AgentEvent::SubAgentCompleted {
                     agent_id: "a1".into(),
                     depth: 1,
                     success: true,
                     turns_used: 3,
                 },
-            },
+            ),
             WorkflowRunEvent::SetupStarted { command_count: 1 },
             WorkflowRunEvent::SetupCommandCompleted {
                 command: "bun install".into(),
@@ -720,16 +760,12 @@ mod tests {
 
         let (mut event_ui, event_buffer) = capture_ui(true);
         for event in &events {
-            event_ui.handle_event(event);
+            emit_ref(&mut event_ui, event);
         }
 
         let (mut json_ui, json_buffer) = capture_ui(true);
         for event in &events {
-            let (event_name, fields) = flatten_event(event);
-            let mut envelope = serde_json::Map::new();
-            envelope.insert("event".into(), event_name.into());
-            envelope.extend(fields);
-            let line = serde_json::to_string(&serde_json::Value::Object(envelope)).unwrap();
+            let line = serde_json::to_string(&canonicalize_event(&fixtures::RUN_1, event)).unwrap();
             json_ui.handle_json_line(&line);
         }
 
@@ -740,26 +776,32 @@ mod tests {
     fn plain_default_stage_snapshot() {
         let (mut ui, buffer) = capture_ui(false);
 
-        ui.handle_event(&stage_started("plan", "Plan"));
-        ui.handle_event(&assistant_message("plan", "gpt-5-mini"));
-        ui.handle_event(&WorkflowRunEvent::Agent {
-            stage: "plan".into(),
-            event: AgentEvent::ToolCallStarted {
-                tool_name: "read_file".into(),
-                tool_call_id: "tc1".into(),
-                arguments: serde_json::json!({"path": "src/main.rs"}),
-            },
-        });
-        ui.handle_event(&WorkflowRunEvent::Agent {
-            stage: "plan".into(),
-            event: AgentEvent::ToolCallCompleted {
-                tool_name: "read_file".into(),
-                tool_call_id: "tc1".into(),
-                output: serde_json::json!({"ok": true}),
-                is_error: false,
-            },
-        });
-        ui.handle_event(&stage_completed("plan", "Plan"));
+        emit(&mut ui, stage_started("plan", "Plan"));
+        emit(&mut ui, assistant_message("plan", "gpt-5-mini"));
+        emit(
+            &mut ui,
+            agent_event(
+                "plan",
+                AgentEvent::ToolCallStarted {
+                    tool_name: "read_file".into(),
+                    tool_call_id: "tc1".into(),
+                    arguments: serde_json::json!({"path": "src/main.rs"}),
+                },
+            ),
+        );
+        emit(
+            &mut ui,
+            agent_event(
+                "plan",
+                AgentEvent::ToolCallCompleted {
+                    tool_name: "read_file".into(),
+                    tool_call_id: "tc1".into(),
+                    output: serde_json::json!({"ok": true}),
+                    is_error: false,
+                },
+            ),
+        );
+        emit(&mut ui, stage_completed("plan", "Plan"));
 
         insta::assert_snapshot!(rendered(&buffer), @r"
             ✓ Plan  $0.12   5s
@@ -770,47 +812,71 @@ mod tests {
     fn plain_default_setup_snapshot() {
         let (mut ui, buffer) = capture_ui(false);
 
-        ui.handle_event(&WorkflowRunEvent::Sandbox {
-            event: SandboxEvent::Initializing {
-                provider: "daytona".into(),
+        emit(
+            &mut ui,
+            WorkflowRunEvent::Sandbox {
+                event: SandboxEvent::Initializing {
+                    provider: "daytona".into(),
+                },
             },
-        });
-        ui.handle_event(&WorkflowRunEvent::Sandbox {
-            event: SandboxEvent::Ready {
-                provider: "daytona".into(),
-                duration_ms: 2500,
-                name: Some("sandbox-1".into()),
-                cpu: Some(4.0),
-                memory: Some(8.0),
-                url: None,
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::Sandbox {
+                event: SandboxEvent::Ready {
+                    provider: "daytona".into(),
+                    duration_ms: 2500,
+                    name: Some("sandbox-1".into()),
+                    cpu: Some(4.0),
+                    memory: Some(8.0),
+                    url: None,
+                },
             },
-        });
-        ui.handle_event(&WorkflowRunEvent::SshAccessReady {
-            ssh_command: "ssh daytona@example".into(),
-        });
-        ui.handle_event(&WorkflowRunEvent::SetupStarted { command_count: 2 });
-        ui.handle_event(&WorkflowRunEvent::SetupCompleted { duration_ms: 8200 });
-        ui.handle_event(&WorkflowRunEvent::CliEnsureCompleted {
-            cli_name: "gh".into(),
-            provider: "github".into(),
-            already_installed: false,
-            node_installed: false,
-            duration_ms: 600,
-        });
-        ui.handle_event(&WorkflowRunEvent::DevcontainerResolved {
-            dockerfile_lines: 24,
-            environment_count: 3,
-            lifecycle_command_count: 2,
-            workspace_folder: "/workspace".into(),
-        });
-        ui.handle_event(&WorkflowRunEvent::DevcontainerLifecycleStarted {
-            phase: "postCreate".into(),
-            command_count: 2,
-        });
-        ui.handle_event(&WorkflowRunEvent::DevcontainerLifecycleCompleted {
-            phase: "postCreate".into(),
-            duration_ms: 1800,
-        });
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::SshAccessReady {
+                ssh_command: "ssh daytona@example".into(),
+            },
+        );
+        emit(&mut ui, WorkflowRunEvent::SetupStarted { command_count: 2 });
+        emit(
+            &mut ui,
+            WorkflowRunEvent::SetupCompleted { duration_ms: 8200 },
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::CliEnsureCompleted {
+                cli_name: "gh".into(),
+                provider: "github".into(),
+                already_installed: false,
+                node_installed: false,
+                duration_ms: 600,
+            },
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::DevcontainerResolved {
+                dockerfile_lines: 24,
+                environment_count: 3,
+                lifecycle_command_count: 2,
+                workspace_folder: "/workspace".into(),
+            },
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::DevcontainerLifecycleStarted {
+                phase: "postCreate".into(),
+                command_count: 2,
+            },
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::DevcontainerLifecycleCompleted {
+                phase: "postCreate".into(),
+                duration_ms: 1800,
+            },
+        );
 
         insta::assert_snapshot!(rendered(&buffer), @r"
             Sandbox: daytona (ready in 2s)
@@ -829,102 +895,141 @@ mod tests {
     fn plain_verbose_snapshot() {
         let (mut ui, buffer) = capture_ui(true);
 
-        ui.handle_event(&stage_started("code", "Code"));
-        ui.handle_event(&WorkflowRunEvent::SandboxInitialized {
-            working_directory: "/home/daytona/workspace".into(),
-        });
-        ui.handle_event(&WorkflowRunEvent::Agent {
-            stage: "code".into(),
-            event: AgentEvent::ToolCallStarted {
-                tool_name: "read_file".into(),
-                tool_call_id: "tc1".into(),
-                arguments: serde_json::json!({
-                    "file_path": "/home/daytona/workspace/src/main.rs"
-                }),
+        emit(&mut ui, stage_started("code", "Code"));
+        emit(
+            &mut ui,
+            WorkflowRunEvent::SandboxInitialized {
+                working_directory: "/home/daytona/workspace".into(),
             },
-        });
-        ui.handle_event(&assistant_message("code", "gpt-5-mini"));
-        ui.handle_event(&WorkflowRunEvent::EdgeSelected {
-            from_node: "code".into(),
-            to_node: "review".into(),
-            label: Some("ship".into()),
-            condition: None,
-            reason: "condition".into(),
-            preferred_label: None,
-            suggested_next_ids: Vec::new(),
-            stage_status: "success".into(),
-            is_jump: false,
-        });
-        ui.handle_event(&WorkflowRunEvent::StageRetrying {
-            node_id: "code".into(),
-            name: "Code".into(),
-            index: 0,
-            attempt: 2,
-            max_attempts: 3,
-            delay_ms: 1500,
-        });
-        ui.handle_event(&WorkflowRunEvent::Agent {
-            stage: "code".into(),
-            event: AgentEvent::Warning {
-                kind: "context_window".into(),
-                message: "high usage".into(),
-                details: serde_json::json!({"usage_percent": 92}),
-            },
-        });
-        ui.handle_event(&WorkflowRunEvent::Agent {
-            stage: "code".into(),
-            event: AgentEvent::LlmRetry {
-                provider: "openai".into(),
-                model: "gpt-5-mini".into(),
-                attempt: 2,
-                delay_secs: 1.5,
-                error: fabro_llm::error::SdkError::Configuration {
-                    message: "busy".into(),
-                    source: None,
+        );
+        emit(
+            &mut ui,
+            agent_event(
+                "code",
+                AgentEvent::ToolCallStarted {
+                    tool_name: "read_file".into(),
+                    tool_call_id: "tc1".into(),
+                    arguments: serde_json::json!({
+                        "file_path": "/home/daytona/workspace/src/main.rs"
+                    }),
                 },
+            ),
+        );
+        emit(&mut ui, assistant_message("code", "gpt-5-mini"));
+        emit(
+            &mut ui,
+            WorkflowRunEvent::EdgeSelected {
+                from_node: "code".into(),
+                to_node: "review".into(),
+                label: Some("ship".into()),
+                condition: None,
+                reason: "condition".into(),
+                preferred_label: None,
+                suggested_next_ids: Vec::new(),
+                stage_status: "success".into(),
+                is_jump: false,
             },
-        });
-        ui.handle_event(&WorkflowRunEvent::Agent {
-            stage: "code".into(),
-            event: AgentEvent::SubAgentSpawned {
-                agent_id: "a1".into(),
-                depth: 1,
-                task: "review recent changes".into(),
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::StageRetrying {
+                node_id: "code".into(),
+                name: "Code".into(),
+                index: 0,
+                attempt: 2,
+                max_attempts: 3,
+                delay_ms: 1500,
             },
-        });
-        ui.handle_event(&WorkflowRunEvent::Agent {
-            stage: "code".into(),
-            event: AgentEvent::SubAgentCompleted {
-                agent_id: "a1".into(),
-                depth: 1,
-                success: true,
-                turns_used: 3,
+        );
+        emit(
+            &mut ui,
+            agent_event(
+                "code",
+                AgentEvent::Warning {
+                    kind: "context_window".into(),
+                    message: "high usage".into(),
+                    details: serde_json::json!({"usage_percent": 92}),
+                },
+            ),
+        );
+        emit(
+            &mut ui,
+            agent_event(
+                "code",
+                AgentEvent::LlmRetry {
+                    provider: "openai".into(),
+                    model: "gpt-5-mini".into(),
+                    attempt: 2,
+                    delay_secs: 1.5,
+                    error: fabro_llm::error::SdkError::Configuration {
+                        message: "busy".into(),
+                        source: None,
+                    },
+                },
+            ),
+        );
+        emit(
+            &mut ui,
+            agent_event(
+                "code",
+                AgentEvent::SubAgentSpawned {
+                    agent_id: "a1".into(),
+                    depth: 1,
+                    task: "review recent changes".into(),
+                },
+            ),
+        );
+        emit(
+            &mut ui,
+            agent_event(
+                "code",
+                AgentEvent::SubAgentCompleted {
+                    agent_id: "a1".into(),
+                    depth: 1,
+                    success: true,
+                    turns_used: 3,
+                },
+            ),
+        );
+        emit(&mut ui, WorkflowRunEvent::SetupStarted { command_count: 1 });
+        emit(
+            &mut ui,
+            WorkflowRunEvent::SetupCommandCompleted {
+                command: "bun install".into(),
+                index: 0,
+                exit_code: 0,
+                duration_ms: 2200,
             },
-        });
-        ui.handle_event(&WorkflowRunEvent::SetupStarted { command_count: 1 });
-        ui.handle_event(&WorkflowRunEvent::SetupCommandCompleted {
-            command: "bun install".into(),
-            index: 0,
-            exit_code: 0,
-            duration_ms: 2200,
-        });
-        ui.handle_event(&WorkflowRunEvent::SetupCompleted { duration_ms: 2200 });
-        ui.handle_event(&WorkflowRunEvent::DevcontainerLifecycleStarted {
-            phase: "postCreate".into(),
-            command_count: 1,
-        });
-        ui.handle_event(&WorkflowRunEvent::DevcontainerLifecycleCommandCompleted {
-            phase: "postCreate".into(),
-            command: "npm run setup".into(),
-            index: 0,
-            exit_code: 0,
-            duration_ms: 1400,
-        });
-        ui.handle_event(&WorkflowRunEvent::DevcontainerLifecycleCompleted {
-            phase: "postCreate".into(),
-            duration_ms: 1400,
-        });
-        ui.handle_event(&stage_completed("code", "Code"));
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::SetupCompleted { duration_ms: 2200 },
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::DevcontainerLifecycleStarted {
+                phase: "postCreate".into(),
+                command_count: 1,
+            },
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::DevcontainerLifecycleCommandCompleted {
+                phase: "postCreate".into(),
+                command: "npm run setup".into(),
+                index: 0,
+                exit_code: 0,
+                duration_ms: 1400,
+            },
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::DevcontainerLifecycleCompleted {
+                phase: "postCreate".into(),
+                duration_ms: 1400,
+            },
+        );
+        emit(&mut ui, stage_completed("code", "Code"));
 
         insta::assert_snapshot!(rendered(&buffer), @r#"
         → code → review  "ship"
@@ -946,19 +1051,28 @@ mod tests {
     fn plain_notice_snapshot() {
         let (mut ui, buffer) = capture_ui(false);
 
-        ui.handle_event(&WorkflowRunEvent::RunNotice {
-            level: RunNoticeLevel::Warn,
-            code: "sandbox_cleanup_failed".into(),
-            message: "sandbox cleanup failed".into(),
-        });
-        ui.handle_event(&WorkflowRunEvent::PullRequestCreated {
-            pr_url: "https://github.com/fabro-sh/fabro/pull/42".into(),
-            pr_number: 42,
-            draft: true,
-        });
-        ui.handle_event(&WorkflowRunEvent::PullRequestFailed {
-            error: "auth token expired".into(),
-        });
+        emit(
+            &mut ui,
+            WorkflowRunEvent::RunNotice {
+                level: RunNoticeLevel::Warn,
+                code: "sandbox_cleanup_failed".into(),
+                message: "sandbox cleanup failed".into(),
+            },
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::PullRequestCreated {
+                pr_url: "https://github.com/fabro-sh/fabro/pull/42".into(),
+                pr_number: 42,
+                draft: true,
+            },
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::PullRequestFailed {
+                error: "auth token expired".into(),
+            },
+        );
 
         insta::assert_snapshot!(rendered(&buffer), @r"
             Warning: sandbox cleanup failed [sandbox_cleanup_failed]
@@ -971,21 +1085,30 @@ mod tests {
     fn tty_parallel_branch_completion_uses_recorded_duration() {
         let mut ui = ProgressUI::new(true, false);
 
-        ui.handle_event(&stage_started("fork1", "Fork"));
-        ui.handle_event(&WorkflowRunEvent::ParallelStarted {
-            branch_count: 1,
-            join_policy: "wait_all".into(),
-        });
-        ui.handle_event(&WorkflowRunEvent::ParallelBranchStarted {
-            branch: "security".into(),
-            index: 0,
-        });
-        ui.handle_event(&WorkflowRunEvent::ParallelBranchCompleted {
-            branch: "security".into(),
-            index: 0,
-            duration_ms: 500,
-            status: "success".into(),
-        });
+        emit(&mut ui, stage_started("fork1", "Fork"));
+        emit(
+            &mut ui,
+            WorkflowRunEvent::ParallelStarted {
+                branch_count: 1,
+                join_policy: "wait_all".into(),
+            },
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::ParallelBranchStarted {
+                branch: "security".into(),
+                index: 0,
+            },
+        );
+        emit(
+            &mut ui,
+            WorkflowRunEvent::ParallelBranchCompleted {
+                branch: "security".into(),
+                index: 0,
+                duration_ms: 500,
+                status: "success".into(),
+            },
+        );
 
         let stage = &ui.stage.active_stages["fork1"];
         assert_eq!(stage.tool_calls[0].bar.prefix(), "500ms");
@@ -996,13 +1119,13 @@ mod tests {
         let mut ui = ProgressUI::new(true, false);
 
         ui.handle_json_line(
-            r#"{"ts":"2026-03-30T12:00:00.000Z","event":"StageStarted","node_id":"code","node_label":"Code"}"#,
+            r#"{"ts":"2026-03-30T12:00:00.000Z","event":"stage.started","node_id":"code","node_label":"Code","properties":{"attempt":1,"max_attempts":1}}"#,
         );
         ui.handle_json_line(
-            r#"{"ts":"2026-03-30T12:00:00.000Z","event":"Agent.ToolCallStarted","node_id":"code","tool_name":"read_file","tool_call_id":"tc1","arguments":{"path":"src/main.rs"}}"#,
+            r#"{"ts":"2026-03-30T12:00:00.000Z","event":"agent.tool.started","node_id":"code","properties":{"tool_name":"read_file","tool_call_id":"tc1","arguments":{"path":"src/main.rs"}}}"#,
         );
         ui.handle_json_line(
-            r#"{"ts":"2026-03-30T12:00:00.500Z","event":"Agent.ToolCallCompleted","node_id":"code","tool_call_id":"tc1","is_error":false}"#,
+            r#"{"ts":"2026-03-30T12:00:00.500Z","event":"agent.tool.completed","node_id":"code","properties":{"tool_call_id":"tc1","is_error":false}}"#,
         );
 
         let stage = &ui.stage.active_stages["code"];

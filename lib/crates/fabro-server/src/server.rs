@@ -45,7 +45,7 @@ use crate::sessions::{SessionStore, new_session_store};
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_retro::RetroExt;
 use fabro_workflow::context::Context;
-use fabro_workflow::event::{EventEmitter, WorkflowRunEvent};
+use fabro_workflow::event::{EventEmitter, RunEventEnvelope};
 use fabro_workflow::operations::{self, CreateRunInput, WorkflowInput};
 use fabro_workflow::pipeline::Persisted;
 use fabro_workflow::records::{Checkpoint, CheckpointExt};
@@ -92,7 +92,7 @@ struct ManagedRun {
     created_at: chrono::DateTime<chrono::Utc>,
     // Populated when running:
     interviewer: Option<Arc<WebInterviewer>>,
-    event_tx: Option<broadcast::Sender<WorkflowRunEvent>>,
+    event_tx: Option<broadcast::Sender<RunEventEnvelope>>,
     context: Option<Context>,
     checkpoint: Option<Checkpoint>,
     cancel_tx: Option<oneshot::Sender<()>>,
@@ -627,7 +627,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     // Create interviewer and event plumbing (this is the "provisioning" phase)
     let interviewer = Arc::new(WebInterviewer::new());
     let context = Context::new();
-    let emitter = EventEmitter::new();
+    let emitter = EventEmitter::new(run_id);
     if let Some(tx_clone) = event_tx {
         emitter.on_event(move |event| {
             let _ = tx_clone.send(event.clone());

@@ -486,7 +486,7 @@ pub async fn run_with_args_and_client(
     manager_for_callback
         .lock()
         .await
-        .set_event_callback(session.event_callback());
+        .set_event_callback(session.sub_agent_event_callback());
 
     // SIGINT handler
     let cancel_token = session.cancel_token();
@@ -522,6 +522,11 @@ pub async fn run_with_args_and_client(
             OutputFormat::Text => {
                 let s = styles;
                 while let Ok(event) = rx.recv().await {
+                    let child_prefix = if event.parent_session_id.is_some() {
+                        format!("[child {}] ", event.session_id)
+                    } else {
+                        String::new()
+                    };
                     match &event.event {
                         AgentEvent::ToolCallStarted {
                             tool_name,
@@ -531,7 +536,7 @@ pub async fn run_with_args_and_client(
                             eprintln!(
                                 "  {} {}{}",
                                 s.dim.apply_to("\u{25cf}"),
-                                s.bold_cyan.apply_to(tool_name),
+                                s.bold_cyan.apply_to(format!("{child_prefix}{tool_name}")),
                                 s.dim.apply_to(format!(
                                     "({})",
                                     format_tool_args(arguments, &cwd_str)
@@ -551,13 +556,17 @@ pub async fn run_with_args_and_client(
                             };
                             eprintln!(
                                 "  {}\n{}",
-                                s.dim.apply_to(format!("[{label}] {tool_name}:")),
+                                s.dim
+                                    .apply_to(format!("[{label}] {child_prefix}{tool_name}:")),
                                 serde_json::to_string_pretty(output)
                                     .unwrap_or_else(|_| output.to_string()),
                             );
                         }
                         AgentEvent::Error { error } => {
-                            eprintln!("  {}", s.red.apply_to(format!("\u{2717} {error}")),);
+                            eprintln!(
+                                "  {}",
+                                s.red.apply_to(format!("\u{2717} {child_prefix}{error}")),
+                            );
                         }
                         AgentEvent::SubAgentSpawned {
                             agent_id,
@@ -573,7 +582,7 @@ pub async fn run_with_args_and_client(
                             eprintln!(
                                 "  {}",
                                 s.dim.apply_to(format!(
-                                    "\u{25b6} subagent {agent_id} spawned (depth={depth}) task={task_preview:?}"
+                                    "{child_prefix}\u{25b6} subagent {agent_id} spawned (depth={depth}) task={task_preview:?}"
                                 )),
                             );
                         }
@@ -586,7 +595,7 @@ pub async fn run_with_args_and_client(
                             eprintln!(
                                 "  {}",
                                 s.dim.apply_to(format!(
-                                    "\u{25a0} subagent {agent_id} completed (depth={depth}, success={success}, turns={turns_used})"
+                                    "{child_prefix}\u{25a0} subagent {agent_id} completed (depth={depth}, success={success}, turns={turns_used})"
                                 )),
                             );
                         }
@@ -598,7 +607,7 @@ pub async fn run_with_args_and_client(
                             eprintln!(
                                 "  {}",
                                 s.red.apply_to(format!(
-                                    "\u{2717} subagent {agent_id} failed (depth={depth}): {error}"
+                                    "{child_prefix}\u{2717} subagent {agent_id} failed (depth={depth}): {error}"
                                 )),
                             );
                         }
@@ -606,19 +615,8 @@ pub async fn run_with_args_and_client(
                             eprintln!(
                                 "  {}",
                                 s.dim.apply_to(format!(
-                                    "\u{25a0} subagent {agent_id} closed (depth={depth})"
+                                    "{child_prefix}\u{25a0} subagent {agent_id} closed (depth={depth})"
                                 )),
-                            );
-                        }
-                        AgentEvent::SubAgentEvent {
-                            agent_id,
-                            event: child_event,
-                            ..
-                        } if verbose => {
-                            eprintln!(
-                                "  {}",
-                                s.dim
-                                    .apply_to(format!("[subagent {agent_id}] {child_event:?}")),
                             );
                         }
                         _ => {}

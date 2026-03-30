@@ -240,256 +240,218 @@ pub(super) enum ProgressEvent {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-pub(super) fn from_flattened_fields(
+pub(super) fn from_envelope_fields(
     event_name: &str,
-    fields: Map<String, Value>,
+    fields: &Map<String, Value>,
 ) -> Option<ProgressEvent> {
     match event_name {
-        "WorkflowRunStarted" => Some(ProgressEvent::WorkflowStarted {
-            worktree_dir: string_field(&fields, "worktree_dir"),
-            base_branch: string_field(&fields, "base_branch"),
-            base_sha: string_field(&fields, "base_sha"),
+        "run.started" => Some(ProgressEvent::WorkflowStarted {
+            worktree_dir: prop_string_field(fields, "worktree_dir"),
+            base_branch: prop_string_field(fields, "base_branch"),
+            base_sha: prop_string_field(fields, "base_sha"),
         }),
-        "SandboxInitialized" => Some(ProgressEvent::WorkingDirectorySet {
-            working_directory: string_field(&fields, "working_directory")?,
+        "sandbox.initialized" => Some(ProgressEvent::WorkingDirectorySet {
+            working_directory: prop_string_field(fields, "working_directory")?,
         }),
-        "Sandbox.Initializing" => Some(ProgressEvent::SandboxInitializing {
-            provider: string_field(&fields, "sandbox_provider")
-                .or_else(|| string_field(&fields, "provider"))
+        "sandbox.initializing" => Some(ProgressEvent::SandboxInitializing {
+            provider: prop_string_field(fields, "provider")
                 .unwrap_or_else(|| "unknown".to_string()),
         }),
-        "Sandbox.Ready" => Some(ProgressEvent::SandboxReady {
-            provider: string_field(&fields, "sandbox_provider")
-                .or_else(|| string_field(&fields, "provider"))
+        "sandbox.ready" => Some(ProgressEvent::SandboxReady {
+            provider: prop_string_field(fields, "provider")
                 .unwrap_or_else(|| "unknown".to_string()),
-            duration_ms: u64_field(&fields, "duration_ms"),
-            name: string_field(&fields, "name"),
-            cpu: f64_field(&fields, "cpu"),
-            memory: f64_field(&fields, "memory"),
-            url: string_field(&fields, "url"),
+            duration_ms: prop_u64_field(fields, "duration_ms"),
+            name: prop_string_field(fields, "name"),
+            cpu: prop_f64_field(fields, "cpu"),
+            memory: prop_f64_field(fields, "memory"),
+            url: prop_string_field(fields, "url"),
         }),
-        "SshAccessReady" => Some(ProgressEvent::SshAccessReady {
-            ssh_command: string_field(&fields, "ssh_command")?,
+        "ssh.ready" => Some(ProgressEvent::SshAccessReady {
+            ssh_command: prop_string_field(fields, "ssh_command")?,
         }),
-        "SetupStarted" => Some(ProgressEvent::SetupStarted {
-            command_count: u64_field(&fields, "command_count"),
+        "setup.started" => Some(ProgressEvent::SetupStarted {
+            command_count: prop_u64_field(fields, "command_count"),
         }),
-        "SetupCompleted" => Some(ProgressEvent::SetupCompleted {
-            duration_ms: u64_field(&fields, "duration_ms"),
+        "setup.completed" => Some(ProgressEvent::SetupCompleted {
+            duration_ms: prop_u64_field(fields, "duration_ms"),
         }),
-        "SetupCommandCompleted" => Some(ProgressEvent::SetupCommandCompleted {
-            command: string_field(&fields, "command").unwrap_or_else(|| "?".to_string()),
-            command_index: u64_field(&fields, "command_index").max(u64_field(&fields, "index")),
-            exit_code: i64_field(&fields, "exit_code"),
-            duration_ms: u64_field(&fields, "duration_ms"),
+        "setup.command.completed" => Some(ProgressEvent::SetupCommandCompleted {
+            command: prop_string_field(fields, "command").unwrap_or_else(|| "?".to_string()),
+            command_index: prop_u64_field(fields, "index"),
+            exit_code: prop_i64_field(fields, "exit_code"),
+            duration_ms: prop_u64_field(fields, "duration_ms"),
         }),
-        "CliEnsureStarted" => Some(ProgressEvent::CliEnsureStarted {
-            cli_name: string_field(&fields, "cli_name").unwrap_or_else(|| "?".to_string()),
+        "cli.ensure.started" => Some(ProgressEvent::CliEnsureStarted {
+            cli_name: prop_string_field(fields, "cli_name").unwrap_or_else(|| "?".to_string()),
         }),
-        "CliEnsureCompleted" => Some(ProgressEvent::CliEnsureCompleted {
-            cli_name: string_field(&fields, "cli_name").unwrap_or_else(|| "?".to_string()),
-            already_installed: bool_field(&fields, "already_installed"),
-            duration_ms: u64_field(&fields, "duration_ms"),
+        "cli.ensure.completed" => Some(ProgressEvent::CliEnsureCompleted {
+            cli_name: prop_string_field(fields, "cli_name").unwrap_or_else(|| "?".to_string()),
+            already_installed: prop_bool_field(fields, "already_installed"),
+            duration_ms: prop_u64_field(fields, "duration_ms"),
         }),
-        "CliEnsureFailed" => Some(ProgressEvent::CliEnsureFailed {
-            cli_name: string_field(&fields, "cli_name").unwrap_or_else(|| "?".to_string()),
+        "cli.ensure.failed" => Some(ProgressEvent::CliEnsureFailed {
+            cli_name: prop_string_field(fields, "cli_name").unwrap_or_else(|| "?".to_string()),
         }),
-        "DevcontainerResolved" => Some(ProgressEvent::DevcontainerResolved {
-            dockerfile_lines: u64_field(&fields, "dockerfile_lines"),
-            environment_count: u64_field(&fields, "environment_count"),
-            lifecycle_command_count: u64_field(&fields, "lifecycle_command_count"),
-            workspace_folder: string_field(&fields, "workspace_folder")
+        "devcontainer.resolved" => Some(ProgressEvent::DevcontainerResolved {
+            dockerfile_lines: prop_u64_field(fields, "dockerfile_lines"),
+            environment_count: prop_u64_field(fields, "environment_count"),
+            lifecycle_command_count: prop_u64_field(fields, "lifecycle_command_count"),
+            workspace_folder: prop_string_field(fields, "workspace_folder")
                 .unwrap_or_else(|| "?".to_string()),
         }),
-        "DevcontainerLifecycleStarted" => Some(ProgressEvent::DevcontainerLifecycleStarted {
-            phase: string_field(&fields, "phase").unwrap_or_else(|| "?".to_string()),
-            command_count: u64_field(&fields, "command_count"),
+        "devcontainer.lifecycle.started" => Some(ProgressEvent::DevcontainerLifecycleStarted {
+            phase: prop_string_field(fields, "phase").unwrap_or_else(|| "?".to_string()),
+            command_count: prop_u64_field(fields, "command_count"),
         }),
-        "DevcontainerLifecycleCompleted" => Some(ProgressEvent::DevcontainerLifecycleCompleted {
-            phase: string_field(&fields, "phase").unwrap_or_else(|| "?".to_string()),
-            duration_ms: u64_field(&fields, "duration_ms"),
+        "devcontainer.lifecycle.completed" => Some(ProgressEvent::DevcontainerLifecycleCompleted {
+            phase: prop_string_field(fields, "phase").unwrap_or_else(|| "?".to_string()),
+            duration_ms: prop_u64_field(fields, "duration_ms"),
         }),
-        "DevcontainerLifecycleFailed" => Some(ProgressEvent::DevcontainerLifecycleFailed {
-            phase: string_field(&fields, "phase").unwrap_or_else(|| "?".to_string()),
-            command: string_field(&fields, "command").unwrap_or_else(|| "?".to_string()),
-            exit_code: i64_field(&fields, "exit_code"),
-            stderr: display_field(&fields, "stderr").unwrap_or_default(),
+        "devcontainer.lifecycle.failed" => Some(ProgressEvent::DevcontainerLifecycleFailed {
+            phase: prop_string_field(fields, "phase").unwrap_or_else(|| "?".to_string()),
+            command: prop_string_field(fields, "command").unwrap_or_else(|| "?".to_string()),
+            exit_code: prop_i64_field(fields, "exit_code"),
+            stderr: prop_display_field(fields, "stderr").unwrap_or_default(),
         }),
-        "DevcontainerLifecycleCommandCompleted" => {
+        "devcontainer.lifecycle.command.completed" => {
             Some(ProgressEvent::DevcontainerLifecycleCommandCompleted {
-                command: string_field(&fields, "command").unwrap_or_else(|| "?".to_string()),
-                command_index: u64_field(&fields, "command_index").max(u64_field(&fields, "index")),
-                exit_code: i64_field(&fields, "exit_code"),
-                duration_ms: u64_field(&fields, "duration_ms"),
+                command: prop_string_field(fields, "command").unwrap_or_else(|| "?".to_string()),
+                command_index: prop_u64_field(fields, "index"),
+                exit_code: prop_i64_field(fields, "exit_code"),
+                duration_ms: prop_u64_field(fields, "duration_ms"),
             })
         }
-        "StageStarted" => Some(ProgressEvent::StageStarted {
-            node_id: string_field(&fields, "node_id").unwrap_or_else(|| "?".to_string()),
-            name: string_field(&fields, "node_label")
-                .or_else(|| string_field(&fields, "name"))
-                .unwrap_or_else(|| "?".to_string()),
-            script: string_field(&fields, "script"),
+        "stage.started" => Some(ProgressEvent::StageStarted {
+            node_id: string_field(fields, "node_id").unwrap_or_else(|| "?".to_string()),
+            name: string_field(fields, "node_label").unwrap_or_else(|| "?".to_string()),
+            script: prop_string_field(fields, "script"),
         }),
-        "StageCompleted" => Some(ProgressEvent::StageCompleted {
-            node_id: string_field(&fields, "node_id").unwrap_or_else(|| "?".to_string()),
-            name: string_field(&fields, "node_label")
-                .or_else(|| string_field(&fields, "name"))
-                .unwrap_or_else(|| "?".to_string()),
-            duration_ms: u64_field(&fields, "duration_ms"),
-            status: string_field(&fields, "status").unwrap_or_else(|| "success".to_string()),
-            usage: fields.get("usage").and_then(ProgressUsage::from_value),
+        "stage.completed" => Some(ProgressEvent::StageCompleted {
+            node_id: string_field(fields, "node_id").unwrap_or_else(|| "?".to_string()),
+            name: string_field(fields, "node_label").unwrap_or_else(|| "?".to_string()),
+            duration_ms: prop_u64_field(fields, "duration_ms"),
+            status: prop_string_field(fields, "status").unwrap_or_else(|| "success".to_string()),
+            usage: prop_value(fields, "usage").and_then(ProgressUsage::from_value),
         }),
-        "StageFailed" => Some(ProgressEvent::StageFailed {
-            node_id: string_field(&fields, "node_id").unwrap_or_else(|| "?".to_string()),
-            name: string_field(&fields, "node_label")
-                .or_else(|| string_field(&fields, "name"))
-                .unwrap_or_else(|| "?".to_string()),
-            error: display_field(&fields, "error")
-                .or_else(|| display_field(&fields, "failure_reason"))
+        "stage.failed" => Some(ProgressEvent::StageFailed {
+            node_id: string_field(fields, "node_id").unwrap_or_else(|| "?".to_string()),
+            name: string_field(fields, "node_label").unwrap_or_else(|| "?".to_string()),
+            error: prop_display_field(fields, "error")
                 .unwrap_or_else(|| "unknown error".to_string()),
         }),
-        "StageRetrying" => Some(ProgressEvent::StageRetrying {
-            name: string_field(&fields, "node_label")
-                .or_else(|| string_field(&fields, "name"))
-                .unwrap_or_else(|| "?".to_string()),
-            attempt: u64_field(&fields, "attempt"),
-            max_attempts: u64_field(&fields, "max_attempts"),
-            delay_ms: u64_field(&fields, "delay_ms"),
+        "stage.retrying" => Some(ProgressEvent::StageRetrying {
+            name: string_field(fields, "node_label").unwrap_or_else(|| "?".to_string()),
+            attempt: prop_u64_field(fields, "attempt"),
+            max_attempts: prop_u64_field(fields, "max_attempts"),
+            delay_ms: prop_u64_field(fields, "delay_ms"),
         }),
-        "ParallelStarted" => Some(ProgressEvent::ParallelStarted),
-        "ParallelBranchStarted" => Some(ProgressEvent::ParallelBranchStarted {
-            branch: string_field(&fields, "node_id")
-                .or_else(|| string_field(&fields, "branch"))
-                .unwrap_or_else(|| "?".to_string()),
+        "parallel.started" => Some(ProgressEvent::ParallelStarted),
+        "parallel.branch.started" => Some(ProgressEvent::ParallelBranchStarted {
+            branch: string_field(fields, "node_id").unwrap_or_else(|| "?".to_string()),
         }),
-        "ParallelBranchCompleted" => Some(ProgressEvent::ParallelBranchCompleted {
-            branch: string_field(&fields, "node_id")
-                .or_else(|| string_field(&fields, "branch"))
-                .unwrap_or_else(|| "?".to_string()),
-            duration_ms: u64_field(&fields, "duration_ms"),
-            status: string_field(&fields, "status").unwrap_or_else(|| "success".to_string()),
+        "parallel.branch.completed" => Some(ProgressEvent::ParallelBranchCompleted {
+            branch: string_field(fields, "node_id").unwrap_or_else(|| "?".to_string()),
+            duration_ms: prop_u64_field(fields, "duration_ms"),
+            status: prop_string_field(fields, "status").unwrap_or_else(|| "success".to_string()),
         }),
-        "ParallelCompleted" => Some(ProgressEvent::ParallelCompleted),
-        "Agent.AssistantMessage" => Some(ProgressEvent::AssistantMessage {
-            stage_node_id: string_field(&fields, "node_id")
-                .or_else(|| string_field(&fields, "stage"))
-                .unwrap_or_else(|| "?".to_string()),
-            model: string_field(&fields, "model").unwrap_or_else(|| "?".to_string()),
+        "parallel.completed" => Some(ProgressEvent::ParallelCompleted),
+        "agent.message" => Some(ProgressEvent::AssistantMessage {
+            stage_node_id: string_field(fields, "node_id").unwrap_or_else(|| "?".to_string()),
+            model: prop_string_field(fields, "model").unwrap_or_else(|| "?".to_string()),
         }),
-        "Agent.ToolCallStarted" => Some(ProgressEvent::ToolCallStarted {
-            stage_node_id: string_field(&fields, "node_id")
-                .or_else(|| string_field(&fields, "stage"))
+        "agent.tool.started" => Some(ProgressEvent::ToolCallStarted {
+            stage_node_id: string_field(fields, "node_id").unwrap_or_else(|| "?".to_string()),
+            tool_name: prop_string_field(fields, "tool_name").unwrap_or_else(|| "?".to_string()),
+            tool_call_id: prop_string_field(fields, "tool_call_id")
                 .unwrap_or_else(|| "?".to_string()),
-            tool_name: string_field(&fields, "tool_name").unwrap_or_else(|| "?".to_string()),
-            tool_call_id: string_field(&fields, "tool_call_id").unwrap_or_else(|| "?".to_string()),
-            arguments: fields
-                .get("arguments")
+            arguments: prop_value(fields, "arguments")
                 .cloned()
                 .unwrap_or_else(|| Value::Object(Map::new())),
-            timestamp: timestamp_field(&fields, "ts"),
+            timestamp: timestamp_field(fields, "ts"),
         }),
-        "Agent.ToolCallCompleted" => Some(ProgressEvent::ToolCallCompleted {
-            stage_node_id: string_field(&fields, "node_id")
-                .or_else(|| string_field(&fields, "stage"))
+        "agent.tool.completed" => Some(ProgressEvent::ToolCallCompleted {
+            stage_node_id: string_field(fields, "node_id").unwrap_or_else(|| "?".to_string()),
+            tool_call_id: prop_string_field(fields, "tool_call_id")
                 .unwrap_or_else(|| "?".to_string()),
-            tool_call_id: string_field(&fields, "tool_call_id").unwrap_or_else(|| "?".to_string()),
-            is_error: bool_field(&fields, "is_error"),
-            duration_ms: optional_u64_field(&fields, "duration_ms"),
-            timestamp: timestamp_field(&fields, "ts"),
+            is_error: prop_bool_field(fields, "is_error"),
+            duration_ms: prop_optional_u64_field(fields, "duration_ms"),
+            timestamp: timestamp_field(fields, "ts"),
         }),
-        "Agent.Warning" if string_field(&fields, "kind").as_deref() == Some("context_window") => {
-            let usage_percent = fields
-                .get("details")
+        "agent.warning"
+            if prop_string_field(fields, "kind").as_deref() == Some("context_window") =>
+        {
+            let usage_percent = prop_value(fields, "details")
                 .and_then(Value::as_object)
                 .and_then(|details| details.get("usage_percent"))
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
             Some(ProgressEvent::ContextWindowWarning {
-                stage_node_id: string_field(&fields, "node_id")
-                    .or_else(|| string_field(&fields, "stage"))
-                    .unwrap_or_else(|| "?".to_string()),
+                stage_node_id: string_field(fields, "node_id").unwrap_or_else(|| "?".to_string()),
                 usage_percent,
             })
         }
-        "Agent.CompactionStarted" => Some(ProgressEvent::CompactionStarted {
-            stage_node_id: string_field(&fields, "node_id")
-                .or_else(|| string_field(&fields, "stage"))
-                .unwrap_or_else(|| "?".to_string()),
+        "agent.compaction.started" => Some(ProgressEvent::CompactionStarted {
+            stage_node_id: string_field(fields, "node_id").unwrap_or_else(|| "?".to_string()),
         }),
-        "Agent.CompactionCompleted" => Some(ProgressEvent::CompactionCompleted {
-            stage_node_id: string_field(&fields, "node_id")
-                .or_else(|| string_field(&fields, "stage"))
-                .unwrap_or_else(|| "?".to_string()),
-            original_turn_count: u64_field(&fields, "original_turn_count"),
-            preserved_turn_count: u64_field(&fields, "preserved_turn_count"),
-            tracked_file_count: u64_field(&fields, "tracked_file_count"),
+        "agent.compaction.completed" => Some(ProgressEvent::CompactionCompleted {
+            stage_node_id: string_field(fields, "node_id").unwrap_or_else(|| "?".to_string()),
+            original_turn_count: prop_u64_field(fields, "original_turn_count"),
+            preserved_turn_count: prop_u64_field(fields, "preserved_turn_count"),
+            tracked_file_count: prop_u64_field(fields, "tracked_file_count"),
         }),
-        "Agent.LlmRetry" => {
-            let delay_secs = f64_field(&fields, "delay_secs").unwrap_or(0.0);
+        "agent.llm.retry" => {
+            let delay_secs = prop_f64_field(fields, "delay_secs").unwrap_or(0.0);
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let delay_ms = (delay_secs * 1000.0) as u64;
             Some(ProgressEvent::LlmRetry {
-                stage_node_id: string_field(&fields, "node_id")
-                    .or_else(|| string_field(&fields, "stage"))
-                    .unwrap_or_else(|| "?".to_string()),
-                model: string_field(&fields, "model").unwrap_or_else(|| "?".to_string()),
-                attempt: u64_field(&fields, "attempt"),
+                stage_node_id: string_field(fields, "node_id").unwrap_or_else(|| "?".to_string()),
+                model: prop_string_field(fields, "model").unwrap_or_else(|| "?".to_string()),
+                attempt: prop_u64_field(fields, "attempt"),
                 delay_ms,
-                error: display_field(&fields, "error")
+                error: prop_display_field(fields, "error")
                     .unwrap_or_else(|| "unknown error".to_string()),
             })
         }
-        "Agent.SubAgentSpawned" => Some(ProgressEvent::SubagentSpawned {
-            stage_node_id: string_field(&fields, "node_id")
-                .or_else(|| string_field(&fields, "stage"))
-                .unwrap_or_else(|| "?".to_string()),
-            agent_id: string_field(&fields, "agent_id").unwrap_or_else(|| "?".to_string()),
-            task: string_field(&fields, "task").unwrap_or_default(),
+        "agent.sub.spawned" => Some(ProgressEvent::SubagentSpawned {
+            stage_node_id: string_field(fields, "node_id").unwrap_or_else(|| "?".to_string()),
+            agent_id: prop_string_field(fields, "agent_id").unwrap_or_else(|| "?".to_string()),
+            task: prop_string_field(fields, "task").unwrap_or_default(),
         }),
-        "Agent.SubAgentCompleted" => Some(ProgressEvent::SubagentCompleted {
-            stage_node_id: string_field(&fields, "node_id")
-                .or_else(|| string_field(&fields, "stage"))
-                .unwrap_or_else(|| "?".to_string()),
-            agent_id: string_field(&fields, "agent_id").unwrap_or_else(|| "?".to_string()),
-            success: bool_field(&fields, "success"),
-            turns_used: u64_field(&fields, "turns_used"),
+        "agent.sub.completed" => Some(ProgressEvent::SubagentCompleted {
+            stage_node_id: string_field(fields, "node_id").unwrap_or_else(|| "?".to_string()),
+            agent_id: prop_string_field(fields, "agent_id").unwrap_or_else(|| "?".to_string()),
+            success: prop_bool_field(fields, "success"),
+            turns_used: prop_u64_field(fields, "turns_used"),
         }),
-        "EdgeSelected" => Some(ProgressEvent::EdgeSelected {
-            from_node: string_field(&fields, "from_node_id")
-                .or_else(|| string_field(&fields, "from_node"))
-                .unwrap_or_else(|| "?".to_string()),
-            to_node: string_field(&fields, "to_node_id")
-                .or_else(|| string_field(&fields, "to_node"))
-                .unwrap_or_else(|| "?".to_string()),
-            label: string_field(&fields, "label"),
-            condition: string_field(&fields, "condition"),
+        "edge.selected" => Some(ProgressEvent::EdgeSelected {
+            from_node: prop_string_field(fields, "from_node").unwrap_or_else(|| "?".to_string()),
+            to_node: prop_string_field(fields, "to_node").unwrap_or_else(|| "?".to_string()),
+            label: prop_string_field(fields, "label"),
+            condition: prop_string_field(fields, "condition"),
         }),
-        "LoopRestart" => Some(ProgressEvent::LoopRestart {
-            from_node: string_field(&fields, "from_node_id")
-                .or_else(|| string_field(&fields, "from_node"))
-                .unwrap_or_else(|| "?".to_string()),
-            to_node: string_field(&fields, "to_node_id")
-                .or_else(|| string_field(&fields, "to_node"))
-                .unwrap_or_else(|| "?".to_string()),
+        "loop.restart" => Some(ProgressEvent::LoopRestart {
+            from_node: prop_string_field(fields, "from_node").unwrap_or_else(|| "?".to_string()),
+            to_node: prop_string_field(fields, "to_node").unwrap_or_else(|| "?".to_string()),
         }),
-        "RetroStarted" => Some(ProgressEvent::RetroStarted),
-        "RetroCompleted" => Some(ProgressEvent::RetroCompleted {
-            duration_ms: u64_field(&fields, "duration_ms"),
+        "retro.started" => Some(ProgressEvent::RetroStarted),
+        "retro.completed" => Some(ProgressEvent::RetroCompleted {
+            duration_ms: prop_u64_field(fields, "duration_ms"),
         }),
-        "RetroFailed" => Some(ProgressEvent::RetroFailed {
-            duration_ms: u64_field(&fields, "duration_ms"),
+        "retro.failed" => Some(ProgressEvent::RetroFailed {
+            duration_ms: prop_u64_field(fields, "duration_ms"),
         }),
-        "RunNotice" => Some(ProgressEvent::RunNotice {
-            level: parse_run_notice_level(string_field(&fields, "level").as_deref()),
-            code: string_field(&fields, "code").unwrap_or_default(),
-            message: string_field(&fields, "message").unwrap_or_default(),
+        "run.notice" => Some(ProgressEvent::RunNotice {
+            level: parse_run_notice_level(prop_string_field(fields, "level").as_deref()),
+            code: prop_string_field(fields, "code").unwrap_or_default(),
+            message: prop_string_field(fields, "message").unwrap_or_default(),
         }),
-        "PullRequestCreated" => Some(ProgressEvent::PullRequestCreated {
-            pr_url: string_field(&fields, "pr_url").unwrap_or_else(|| "?".to_string()),
-            draft: bool_field(&fields, "draft"),
+        "pull_request.created" => Some(ProgressEvent::PullRequestCreated {
+            pr_url: prop_string_field(fields, "pr_url").unwrap_or_else(|| "?".to_string()),
+            draft: prop_bool_field(fields, "draft"),
         }),
-        "PullRequestFailed" => Some(ProgressEvent::PullRequestFailed {
-            error: display_field(&fields, "error").unwrap_or_else(|| "unknown error".to_string()),
+        "pull_request.failed" => Some(ProgressEvent::PullRequestFailed {
+            error: prop_display_field(fields, "error")
+                .unwrap_or_else(|| "unknown error".to_string()),
         }),
         _ => None,
     }
@@ -507,8 +469,21 @@ fn string_field(fields: &Map<String, Value>, key: &str) -> Option<String> {
     fields.get(key).and_then(Value::as_str).map(str::to_owned)
 }
 
-fn display_field(fields: &Map<String, Value>, key: &str) -> Option<String> {
-    let value = fields.get(key)?;
+fn prop_value<'a>(fields: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
+    fields
+        .get("properties")
+        .and_then(Value::as_object)
+        .and_then(|properties| properties.get(key))
+}
+
+fn prop_string_field(fields: &Map<String, Value>, key: &str) -> Option<String> {
+    prop_value(fields, key)
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+fn prop_display_field(fields: &Map<String, Value>, key: &str) -> Option<String> {
+    let value = prop_value(fields, key)?;
     match value {
         Value::Null => None,
         Value::String(value) => Some(value.clone()),
@@ -540,20 +515,30 @@ fn u64_field(fields: &Map<String, Value>, key: &str) -> u64 {
     fields.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
-fn optional_u64_field(fields: &Map<String, Value>, key: &str) -> Option<u64> {
-    fields.get(key).and_then(Value::as_u64)
+fn prop_u64_field(fields: &Map<String, Value>, key: &str) -> u64 {
+    prop_value(fields, key).and_then(Value::as_u64).unwrap_or(0)
 }
 
-fn i64_field(fields: &Map<String, Value>, key: &str) -> i64 {
-    fields.get(key).and_then(Value::as_i64).unwrap_or(0)
+fn prop_optional_u64_field(fields: &Map<String, Value>, key: &str) -> Option<u64> {
+    prop_value(fields, key).and_then(Value::as_u64)
+}
+
+fn prop_i64_field(fields: &Map<String, Value>, key: &str) -> i64 {
+    prop_value(fields, key).and_then(Value::as_i64).unwrap_or(0)
 }
 
 fn f64_field(fields: &Map<String, Value>, key: &str) -> Option<f64> {
     fields.get(key).and_then(Value::as_f64)
 }
 
-fn bool_field(fields: &Map<String, Value>, key: &str) -> bool {
-    fields.get(key).and_then(Value::as_bool).unwrap_or(false)
+fn prop_f64_field(fields: &Map<String, Value>, key: &str) -> Option<f64> {
+    prop_value(fields, key).and_then(Value::as_f64)
+}
+
+fn prop_bool_field(fields: &Map<String, Value>, key: &str) -> bool {
+    prop_value(fields, key)
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn timestamp_field(fields: &Map<String, Value>, key: &str) -> Option<DateTime<Utc>> {
@@ -566,13 +551,20 @@ fn timestamp_field(fields: &Map<String, Value>, key: &str) -> Option<DateTime<Ut
 #[cfg(test)]
 mod tests {
     use fabro_agent::AgentEvent;
-    use fabro_workflow::event::WorkflowRunEvent;
-    use fabro_workflow::event::flatten_event;
+    use fabro_types::fixtures;
+    use fabro_workflow::event::{WorkflowRunEvent, canonicalize_event};
 
     use super::*;
 
     fn json_map(value: Value) -> Map<String, Value> {
         value.as_object().cloned().expect("json object")
+    }
+
+    fn canonical_fields(event: &WorkflowRunEvent) -> (String, Map<String, Value>) {
+        let envelope = canonicalize_event(&fixtures::RUN_1, event);
+        let event_name = envelope.event.clone();
+        let fields = json_map(serde_json::to_value(envelope).expect("serializable envelope"));
+        (event_name, fields)
     }
 
     #[test]
@@ -583,7 +575,7 @@ mod tests {
             "label": "yes"
         }));
 
-        let event = from_flattened_fields("EdgeSelected", fields).unwrap();
+        let event = from_envelope_fields("edge.selected", &fields).unwrap();
         assert!(matches!(
             event,
             ProgressEvent::EdgeSelected {
@@ -613,8 +605,8 @@ mod tests {
             max_attempts: 1,
         };
 
-        let (name, fields) = flatten_event(&event);
-        let parsed = from_flattened_fields(&name, fields).unwrap();
+        let (name, fields) = canonical_fields(&event);
+        let parsed = from_envelope_fields(&name, &fields).unwrap();
         assert!(matches!(
             parsed,
             ProgressEvent::StageCompleted {
@@ -635,10 +627,12 @@ mod tests {
                 tool_call_id: "tc1".into(),
                 arguments: serde_json::json!({"path": "src/main.rs"}),
             },
+            session_id: None,
+            parent_session_id: None,
         };
 
-        let (name, fields) = flatten_event(&event);
-        let parsed = from_flattened_fields(&name, fields).unwrap();
+        let (name, fields) = canonical_fields(&event);
+        let parsed = from_envelope_fields(&name, &fields).unwrap();
         assert!(matches!(
             parsed,
             ProgressEvent::ToolCallStarted {
@@ -655,20 +649,24 @@ mod tests {
         let started_fields = json_map(serde_json::json!({
             "ts": "2026-03-30T12:00:00.000Z",
             "node_id": "code",
-            "tool_name": "read_file",
-            "tool_call_id": "tc1",
-            "arguments": {"path": "src/main.rs"}
+            "properties": {
+                "tool_name": "read_file",
+                "tool_call_id": "tc1",
+                "arguments": {"path": "src/main.rs"}
+            }
         }));
         let completed_fields = json_map(serde_json::json!({
             "ts": "2026-03-30T12:00:00.500Z",
             "node_id": "code",
-            "tool_call_id": "tc1",
-            "is_error": false,
-            "duration_ms": 500
+            "properties": {
+                "tool_call_id": "tc1",
+                "is_error": false,
+                "duration_ms": 500
+            }
         }));
 
-        let started = from_flattened_fields("Agent.ToolCallStarted", started_fields).unwrap();
-        let completed = from_flattened_fields("Agent.ToolCallCompleted", completed_fields).unwrap();
+        let started = from_envelope_fields("agent.tool.started", &started_fields).unwrap();
+        let completed = from_envelope_fields("agent.tool.completed", &completed_fields).unwrap();
 
         assert!(matches!(
             started,
@@ -704,8 +702,8 @@ mod tests {
             },
         };
 
-        let (name, fields) = flatten_event(&event);
-        let parsed = from_flattened_fields(&name, fields).unwrap();
+        let (name, fields) = canonical_fields(&event);
+        let parsed = from_envelope_fields(&name, &fields).unwrap();
         assert!(matches!(
             parsed,
             ProgressEvent::SandboxReady {
@@ -725,8 +723,8 @@ mod tests {
             message: "sandbox cleanup failed".into(),
         };
 
-        let (name, fields) = flatten_event(&event);
-        let parsed = from_flattened_fields(&name, fields).unwrap();
+        let (name, fields) = canonical_fields(&event);
+        let parsed = from_envelope_fields(&name, &fields).unwrap();
         assert!(matches!(
             parsed,
             ProgressEvent::RunNotice {

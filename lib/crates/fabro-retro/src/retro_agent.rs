@@ -649,6 +649,7 @@ mod tests {
             event: AgentEvent::SessionStarted,
             timestamp: SystemTime::now(),
             session_id: "retro-test".into(),
+            parent_session_id: None,
         })
         .unwrap();
 

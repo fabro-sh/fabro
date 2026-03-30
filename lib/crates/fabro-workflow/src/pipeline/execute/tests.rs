@@ -20,7 +20,7 @@ use fabro_types::{RunId, fixtures};
 use super::*;
 use crate::context::{self, Context};
 use crate::error::FabroError;
-use crate::event::{EventEmitter, WorkflowRunEvent};
+use crate::event::{EventEmitter, RunEventEnvelope};
 use crate::handler::start::StartHandler;
 use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
@@ -169,7 +169,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
             run_id: test_run_id("run-test"),
             run_store: test_run_store(&run_dir, &test_run_id("run-test")).await,
             dry_run: false,
-            emitter: Arc::new(crate::event::EventEmitter::new()),
+            emitter: Arc::new(crate::event::EventEmitter::default()),
             sandbox: SandboxSpec::Local {
                 working_directory: std::env::current_dir().unwrap(),
             },
@@ -426,7 +426,7 @@ async fn execute_runs_simple_workflow() {
     let dir = tempfile::tempdir().unwrap();
     let outcome = run_graph(
         make_registry(),
-        Arc::new(EventEmitter::new()),
+        Arc::new(EventEmitter::default()),
         local_env(),
         &simple_graph(),
         &test_run_options(dir.path(), "test-run"),
@@ -441,7 +441,7 @@ async fn execute_saves_checkpoint() {
     let dir = tempfile::tempdir().unwrap();
     run_graph(
         make_registry(),
-        Arc::new(EventEmitter::new()),
+        Arc::new(EventEmitter::default()),
         local_env(),
         &simple_graph(),
         &test_run_options(dir.path(), "test-run"),
@@ -456,7 +456,7 @@ async fn execute_emits_events() {
     let dir = tempfile::tempdir().unwrap();
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let events_clone = Arc::clone(&events);
-    let emitter = EventEmitter::new();
+    let emitter = EventEmitter::default();
     emitter.on_event(move |event| {
         events_clone.lock().unwrap().push(format!("{event:?}"));
     });
@@ -479,7 +479,7 @@ async fn execute_error_when_no_start_node() {
     let dir = tempfile::tempdir().unwrap();
     let result = run_graph(
         make_registry(),
-        Arc::new(EventEmitter::new()),
+        Arc::new(EventEmitter::default()),
         local_env(),
         &Graph::new("empty"),
         &test_run_options(dir.path(), "test-run"),
@@ -493,7 +493,7 @@ async fn execute_mirrors_graph_goal_to_context() {
     let dir = tempfile::tempdir().unwrap();
     run_graph(
         make_registry(),
-        Arc::new(EventEmitter::new()),
+        Arc::new(EventEmitter::default()),
         local_env(),
         &simple_graph(),
         &test_run_options(dir.path(), "test-run"),
@@ -542,7 +542,7 @@ async fn execute_conditional_routing_uses_unconditional_success_path() {
 
     run_graph(
         make_registry(),
-        Arc::new(EventEmitter::new()),
+        Arc::new(EventEmitter::default()),
         local_env(),
         &g,
         &test_run_options(dir.path(), "test-run"),
@@ -567,7 +567,7 @@ async fn execute_writes_start_json_and_node_status() {
 
     run_graph(
         make_registry(),
-        Arc::new(EventEmitter::new()),
+        Arc::new(EventEmitter::default()),
         local_env(),
         &simple_graph(),
         &run_options,
@@ -629,7 +629,7 @@ async fn timeout_causes_fail_status_json() {
     registry.register("slow", Box::new(SlowHandler { sleep_ms: 500 }));
     run_graph(
         registry,
-        Arc::new(EventEmitter::new()),
+        Arc::new(EventEmitter::default()),
         local_env(),
         &g,
         &test_run_options(dir.path(), "test-run"),
@@ -671,7 +671,7 @@ async fn execute_cancelled_mid_run() {
 
     let result = run_graph(
         registry,
-        Arc::new(EventEmitter::new()),
+        Arc::new(EventEmitter::default()),
         local_env(),
         &g,
         &run_options,
@@ -689,7 +689,7 @@ async fn max_node_visits_errors_on_cycle() {
 
     let result = run_graph(
         make_registry(),
-        Arc::new(EventEmitter::new()),
+        Arc::new(EventEmitter::default()),
         local_env(),
         &g,
         &test_run_options(dir.path(), "test-run"),
@@ -724,7 +724,7 @@ async fn panic_handler_writes_panic_txt() {
     registry.register("panicker", Box::new(PanickingHandler));
     let _ = run_graph(
         registry,
-        Arc::new(EventEmitter::new()),
+        Arc::new(EventEmitter::default()),
         local_env(),
         &g,
         &test_run_options(dir.path(), "test-run"),
@@ -745,7 +745,7 @@ async fn loop_circuit_breaker_aborts_on_repeated_failure() {
 
     let result = run_graph(
         registry,
-        Arc::new(EventEmitter::new()),
+        Arc::new(EventEmitter::default()),
         local_env(),
         &looping_fail_graph(),
         &test_run_options(dir.path(), "test-run"),
@@ -794,7 +794,7 @@ async fn stall_watchdog_triggers_on_hung_handler() {
     registry.register("slow", Box::new(SlowHandler { sleep_ms: 60_000 }));
     let result = run_graph(
         registry,
-        Arc::new(EventEmitter::new()),
+        Arc::new(EventEmitter::default()),
         local_env(),
         &g,
         &test_run_options(dir.path(), "test-run"),
@@ -841,9 +841,9 @@ async fn retry_emits_stage_started_per_attempt() {
     g.edges.push(Edge::new("start", "work"));
     g.edges.push(Edge::new("work", "exit"));
 
-    let events = Arc::new(std::sync::Mutex::new(Vec::<WorkflowRunEvent>::new()));
+    let events = Arc::new(std::sync::Mutex::new(Vec::<RunEventEnvelope>::new()));
     let events_clone = Arc::clone(&events);
-    let emitter = EventEmitter::new();
+    let emitter = EventEmitter::default();
     emitter.on_event(move |event| {
         events_clone.lock().unwrap().push(event.clone());
     });
@@ -870,11 +870,9 @@ async fn retry_emits_stage_started_per_attempt() {
     let collected = events.lock().unwrap();
     let work_started: Vec<_> = collected
         .iter()
-        .filter_map(|e| match e {
-            WorkflowRunEvent::StageStarted {
-                node_id, attempt, ..
-            } if node_id == "work" => Some(*attempt),
-            _ => None,
+        .filter_map(|event| {
+            (event.event == "stage.started" && event.node_id.as_deref() == Some("work"))
+                .then(|| event.properties["attempt"].as_u64().unwrap())
         })
         .collect();
     assert_eq!(work_started, vec![1, 2]);
@@ -885,13 +883,13 @@ async fn run_with_lifecycle_emits_initialize_and_setup_events() {
     let dir = tempfile::tempdir().unwrap();
     let events = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let events_clone = Arc::clone(&events);
-    let emitter = EventEmitter::new();
+    let emitter = EventEmitter::default();
     emitter.on_event(move |event| {
-        let name = match event {
-            WorkflowRunEvent::SandboxInitialized { .. } => "SandboxInitialized",
-            WorkflowRunEvent::SetupStarted { .. } => "SetupStarted",
-            WorkflowRunEvent::SetupCompleted { .. } => "SetupCompleted",
-            WorkflowRunEvent::WorkflowRunStarted { .. } => "WorkflowRunStarted",
+        let name = match event.event.as_str() {
+            "sandbox.initialized" => "SandboxInitialized",
+            "setup.started" => "SetupStarted",
+            "setup.completed" => "SetupCompleted",
+            "run.started" => "WorkflowRunStarted",
             _ => return,
         };
         events_clone.lock().unwrap().push(name.to_string());
@@ -965,9 +963,9 @@ async fn git_checkpoint_skips_start_node() {
     g.edges.push(Edge::new("start", "work"));
     g.edges.push(Edge::new("work", "exit"));
 
-    let events = Arc::new(std::sync::Mutex::new(Vec::<WorkflowRunEvent>::new()));
+    let events = Arc::new(std::sync::Mutex::new(Vec::<RunEventEnvelope>::new()));
     let events_clone = Arc::clone(&events);
-    let emitter = EventEmitter::new();
+    let emitter = EventEmitter::default();
     emitter.on_event(move |event| {
         events_clone.lock().unwrap().push(event.clone());
     });
@@ -996,13 +994,15 @@ async fn git_checkpoint_skips_start_node() {
     let collected = events.lock().unwrap();
     let checkpoint_node_ids: Vec<&str> = collected
         .iter()
-        .filter_map(|e| match e {
-            WorkflowRunEvent::CheckpointCompleted {
-                node_id,
-                git_commit_sha: Some(_),
-                ..
-            } => Some(node_id.as_str()),
-            _ => None,
+        .filter_map(|event| {
+            (event.event == "checkpoint.completed"
+                && event
+                    .properties
+                    .get("git_commit_sha")
+                    .and_then(|value| value.as_str())
+                    .is_some())
+            .then(|| event.node_id.as_deref())
+            .flatten()
         })
         .collect();
     assert!(!checkpoint_node_ids.contains(&"start"));

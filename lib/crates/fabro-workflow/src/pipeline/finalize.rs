@@ -489,7 +489,7 @@ mod tests {
             run_options: test_run_options(&run_dir),
             run_store: Arc::clone(&run_store),
             hook_runner: None,
-            emitter: Arc::new(EventEmitter::new()),
+            emitter: Arc::new(EventEmitter::default()),
             sandbox: Arc::new(fabro_agent::LocalSandbox::new(
                 std::env::current_dir().unwrap(),
             )),

@@ -348,7 +348,7 @@ mod tests {
     #[tokio::test]
     async fn shell_command_executed() {
         let sandbox = TestSandbox::new();
-        let emitter = EventEmitter::new();
+        let emitter = EventEmitter::default();
         let commands = vec![fabro_devcontainer::Command::Shell("echo hi".to_string())];
         run_devcontainer_lifecycle(&sandbox, &emitter, "on_create", &commands, 300_000)
             .await
@@ -361,7 +361,7 @@ mod tests {
     #[tokio::test]
     async fn args_command_joins() {
         let sandbox = TestSandbox::new();
-        let emitter = EventEmitter::new();
+        let emitter = EventEmitter::default();
         let commands = vec![fabro_devcontainer::Command::Args(vec![
             "echo".to_string(),
             "hi".to_string(),
@@ -380,8 +380,8 @@ mod tests {
 
     #[tokio::test]
     async fn emits_started_and_completed_events() {
-        let emitter = EventEmitter::new();
-        let events = Arc::new(Mutex::new(Vec::new()));
+        let emitter = EventEmitter::default();
+        let events = Arc::new(Mutex::new(Vec::<crate::event::RunEventEnvelope>::new()));
         let events_clone = Arc::clone(&events);
         emitter.on_event(move |event| {
             events_clone.lock().unwrap().push(event.clone());
@@ -392,28 +392,27 @@ mod tests {
             .await
             .unwrap();
         let events = events.lock().unwrap();
-        assert!(matches!(
-            &events[0],
-            WorkflowRunEvent::DevcontainerLifecycleStarted { phase, command_count } if phase == "on_create" && *command_count == 1
-        ));
-        assert!(matches!(
-            &events[1],
-            WorkflowRunEvent::DevcontainerLifecycleCommandStarted { phase, index, .. } if phase == "on_create" && *index == 0
-        ));
-        assert!(matches!(
-            &events[2],
-            WorkflowRunEvent::DevcontainerLifecycleCommandCompleted { phase, index, exit_code, .. } if phase == "on_create" && *index == 0 && *exit_code == 0
-        ));
-        assert!(matches!(
-            &events[3],
-            WorkflowRunEvent::DevcontainerLifecycleCompleted { phase, .. } if phase == "on_create"
-        ));
+        assert_eq!(events[0].event, "devcontainer.lifecycle.started");
+        assert_eq!(events[0].properties["phase"], "on_create");
+        assert_eq!(events[0].properties["command_count"], 1);
+
+        assert_eq!(events[1].event, "devcontainer.lifecycle.command.started");
+        assert_eq!(events[1].properties["phase"], "on_create");
+        assert_eq!(events[1].properties["index"], 0);
+
+        assert_eq!(events[2].event, "devcontainer.lifecycle.command.completed");
+        assert_eq!(events[2].properties["phase"], "on_create");
+        assert_eq!(events[2].properties["index"], 0);
+        assert_eq!(events[2].properties["exit_code"], 0);
+
+        assert_eq!(events[3].event, "devcontainer.lifecycle.completed");
+        assert_eq!(events[3].properties["phase"], "on_create");
     }
 
     #[tokio::test]
     async fn failed_command_emits_failed_and_returns_error() {
-        let emitter = EventEmitter::new();
-        let events = Arc::new(Mutex::new(Vec::new()));
+        let emitter = EventEmitter::default();
+        let events = Arc::new(Mutex::new(Vec::<crate::event::RunEventEnvelope>::new()));
         let events_clone = Arc::clone(&events);
         emitter.on_event(move |event| {
             events_clone.lock().unwrap().push(event.clone());
@@ -424,15 +423,16 @@ mod tests {
             run_devcontainer_lifecycle(&sandbox, &emitter, "on_create", &commands, 300_000).await;
         assert!(result.is_err());
         let events = events.lock().unwrap();
-        assert!(events.iter().any(|e| matches!(
-            e,
-            WorkflowRunEvent::DevcontainerLifecycleFailed { phase, exit_code, .. } if phase == "on_create" && *exit_code == 1
-        )));
+        assert!(events.iter().any(|event| {
+            event.event == "devcontainer.lifecycle.failed"
+                && event.properties["phase"] == "on_create"
+                && event.properties["exit_code"] == 1
+        }));
     }
 
     #[tokio::test]
     async fn empty_commands_is_noop() {
-        let emitter = EventEmitter::new();
+        let emitter = EventEmitter::default();
         let events = Arc::new(Mutex::new(Vec::new()));
         let events_clone = Arc::clone(&events);
         emitter.on_event(move |event| {
@@ -448,7 +448,7 @@ mod tests {
     #[tokio::test]
     async fn parallel_commands_run() {
         let sandbox = TestSandbox::new();
-        let emitter = EventEmitter::new();
+        let emitter = EventEmitter::default();
         let mut map = HashMap::new();
         map.insert("install".to_string(), "npm install".to_string());
         map.insert("build".to_string(), "npm run build".to_string());

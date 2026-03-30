@@ -969,7 +969,7 @@ mod tests {
     #[allow(unsafe_code)]
     async fn ensure_cli_skips_install_when_present() {
         let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(vec![ok_result()]));
-        let emitter = Arc::new(EventEmitter::new());
+        let emitter = Arc::new(EventEmitter::default());
 
         let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
         assert!(result.is_ok());
@@ -988,7 +988,7 @@ mod tests {
             fail_result(127), // claude --version
             ok_result(),      // combined node + npm install
         ]));
-        let emitter = Arc::new(EventEmitter::new());
+        let emitter = Arc::new(EventEmitter::default());
 
         let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
         assert!(result.is_ok());
@@ -1005,7 +1005,7 @@ mod tests {
             fail_result(127), // claude --version
             fail_result(1),   // combined install fails
         ]));
-        let emitter = Arc::new(EventEmitter::new());
+        let emitter = Arc::new(EventEmitter::default());
 
         let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
         assert!(result.is_err());

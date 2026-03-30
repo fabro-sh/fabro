@@ -314,8 +314,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
     let ts = format_timestamp(envelope.get("ts")?.as_str()?);
 
     match event {
-        "WorkflowRunStarted" => {
-            let name = str_field(&envelope, "workflow_name").unwrap_or("?");
+        "run.started" => {
+            let name = prop_str_field(&envelope, "name").unwrap_or("?");
             let run_id = str_field(&envelope, "run_id").unwrap_or("?");
             let header = format!(
                 "{} {} {}  {}",
@@ -324,7 +324,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.bold.apply_to(name),
                 styles.dim.apply_to(run_id),
             );
-            match str_field(&envelope, "goal") {
+            match prop_str_field(&envelope, "goal") {
                 Some(goal) if !goal.is_empty() => {
                     let body = render_indented_markdown(styles, goal, "            ");
                     Some(format!("{header}\n{body}\n"))
@@ -332,9 +332,9 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 _ => Some(header),
             }
         }
-        "WorkflowRunCompleted" => {
-            let duration = format_duration_ms(envelope.get("duration_ms"));
-            let status_str = match str_field(&envelope, "status") {
+        "run.completed" => {
+            let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
+            let status_str = match prop_str_field(&envelope, "status") {
                 Some(status) if !status.is_empty() => status,
                 _ => "success",
             };
@@ -343,7 +343,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 "success" | "partial_success" => &styles.bold_green,
                 _ => &styles.bold_red,
             };
-            let cost = format_cost(envelope.get("total_cost"));
+            let cost = format_cost(prop_field(&envelope, "total_cost"));
 
             let mut lines = vec![format!(
                 "{} {} {}  {}",
@@ -353,7 +353,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.dim.apply_to(&cost),
             )];
 
-            if let Some(usage) = envelope.get("usage") {
+            if let Some(usage) = prop_field(&envelope, "usage") {
                 let total = usage
                     .get("total_tokens")
                     .and_then(serde_json::Value::as_i64)
@@ -406,8 +406,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
 
             Some(lines.join("\n"))
         }
-        "WorkflowRunFailed" => {
-            let error = str_field(&envelope, "error").unwrap_or("unknown error");
+        "run.failed" => {
+            let error = prop_str_field(&envelope, "error").unwrap_or("unknown error");
             Some(format!(
                 "{} {} {}",
                 styles.dim.apply_to(&ts),
@@ -415,10 +415,10 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.red.apply_to(error),
             ))
         }
-        "RunNotice" => {
-            let level = str_field(&envelope, "level").unwrap_or("info");
-            let code = str_field(&envelope, "code").unwrap_or("");
-            let message = str_field(&envelope, "message").unwrap_or("");
+        "run.notice" => {
+            let level = prop_str_field(&envelope, "level").unwrap_or("info");
+            let code = prop_str_field(&envelope, "code").unwrap_or("");
+            let message = prop_str_field(&envelope, "message").unwrap_or("");
             let label = match level {
                 "warn" => styles.yellow.apply_to("Warning:").to_string(),
                 "error" => styles.bold_red.apply_to("Error:").to_string(),
@@ -437,7 +437,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 code_suffix,
             ))
         }
-        "StageStarted" => {
+        "stage.started" => {
             let label = str_field(&envelope, "node_label").unwrap_or("?");
             Some(format!(
                 "{} {} {}",
@@ -446,36 +446,39 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.bold.apply_to(label),
             ))
         }
-        "StageCompleted" => {
+        "stage.completed" => {
             let label = str_field(&envelope, "node_label").unwrap_or("?");
-            let duration = format_duration_ms(envelope.get("duration_ms"));
-            let cost = format_cost(envelope.get("cost"));
-            let turns = envelope
-                .get("turns")
+            let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
+            let usage = prop_field(&envelope, "usage");
+            let cost = format_cost(usage.and_then(|value| value.get("cost")));
+            let input_tokens = usage
+                .and_then(|value| value.get("input_tokens"))
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
-            let tools = envelope
-                .get("tool_calls")
+            let output_tokens = usage
+                .and_then(|value| value.get("output_tokens"))
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
-            let tokens = envelope
-                .get("total_tokens")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0);
-            let stats = format!("({turns} turns, {tools} tools, {})", format_tokens(tokens));
-            Some(format!(
-                "{} {} {}  {}  {}  {}",
+            let token_total = input_tokens.saturating_add(output_tokens);
+            let mut line = format!(
+                "{} {} {}  {}  {}",
                 styles.dim.apply_to(&ts),
                 styles.green.apply_to("\u{2713}"),
                 styles.bold.apply_to(label),
                 cost,
                 duration,
-                styles.dim.apply_to(&stats),
-            ))
+            );
+            if token_total > 0 {
+                line.push_str(&format!(
+                    "  {}",
+                    styles.dim.apply_to(format_tokens(token_total))
+                ));
+            }
+            Some(line)
         }
-        "StageFailed" => {
+        "stage.failed" => {
             let label = str_field(&envelope, "node_label").unwrap_or("?");
-            let error = str_field(&envelope, "error").unwrap_or("unknown error");
+            let error = prop_str_field(&envelope, "error").unwrap_or("unknown error");
             Some(format!(
                 "{} {} {}  {}",
                 styles.dim.apply_to(&ts),
@@ -484,10 +487,10 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.red.apply_to(error),
             ))
         }
-        "Agent.AssistantMessage" => {
+        "agent.message" => {
             let stage = str_field(&envelope, "node_id").unwrap_or("?");
-            let model = str_field(&envelope, "model").unwrap_or("?");
-            let text = str_field(&envelope, "text").unwrap_or("");
+            let model = prop_str_field(&envelope, "model").unwrap_or("?");
+            let text = prop_str_field(&envelope, "text").unwrap_or("");
             let header = format!(
                 "{} {} {} {}{}{}",
                 styles.dim.apply_to(&ts),
@@ -500,8 +503,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
             let body = render_indented_markdown(styles, text, "            ");
             Some(format!("{header}\n{body}\n"))
         }
-        "Agent.ToolCallStarted" => {
-            let tool = str_field(&envelope, "tool_name").unwrap_or("?");
+        "agent.tool.started" => {
+            let tool = prop_str_field(&envelope, "tool_name").unwrap_or("?");
             let detail = tool_detail(&envelope);
             let display = match detail {
                 Some(value) => format!("{tool}({value})"),
@@ -514,10 +517,9 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.dim.apply_to(&display),
             ))
         }
-        "Agent.ToolCallCompleted" => {
-            let tool = str_field(&envelope, "tool_name").unwrap_or("?");
-            let is_error = envelope
-                .get("is_error")
+        "agent.tool.completed" => {
+            let tool = prop_str_field(&envelope, "tool_name").unwrap_or("?");
+            let is_error = prop_field(&envelope, "is_error")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
             let detail = tool_detail(&envelope);
@@ -534,10 +536,10 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 display,
             ))
         }
-        "EdgeSelected" => {
-            let to = str_field(&envelope, "to_node_id").unwrap_or("?");
-            let reason = str_field(&envelope, "reason").unwrap_or("?");
-            let condition = str_field(&envelope, "condition");
+        "edge.selected" => {
+            let to = prop_str_field(&envelope, "to_node").unwrap_or("?");
+            let reason = prop_str_field(&envelope, "reason").unwrap_or("?");
+            let condition = prop_str_field(&envelope, "condition");
             let detail = match condition {
                 Some(value) => format!("  [{value}]"),
                 None => String::new(),
@@ -551,9 +553,9 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.dim.apply_to(&detail),
             ))
         }
-        "Sandbox.Ready" => {
-            let provider = str_field(&envelope, "sandbox_provider").unwrap_or("?");
-            let duration = format_duration_ms(envelope.get("duration_ms"));
+        "sandbox.ready" => {
+            let provider = prop_str_field(&envelope, "provider").unwrap_or("?");
+            let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
             Some(format!(
                 "{}   Sandbox: {}  {}",
                 styles.dim.apply_to(&ts),
@@ -561,12 +563,11 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.dim.apply_to(&duration),
             ))
         }
-        "SetupCompleted" => {
-            let count = envelope
-                .get("command_count")
+        "setup.completed" => {
+            let count = prop_field(&envelope, "command_count")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
-            let duration = format_duration_ms(envelope.get("duration_ms"));
+            let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
             Some(format!(
                 "{}   Setup: {} commands  {}",
                 styles.dim.apply_to(&ts),
@@ -574,13 +575,11 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.dim.apply_to(&duration),
             ))
         }
-        "Agent.CompactionCompleted" => {
-            let original = envelope
-                .get("original_turn_count")
+        "agent.compaction.completed" => {
+            let original = prop_field(&envelope, "original_turn_count")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
-            let preserved = envelope
-                .get("preserved_turn_count")
+            let preserved = prop_field(&envelope, "preserved_turn_count")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             Some(format!(
@@ -591,9 +590,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                     .apply_to(format!("compaction: {original}\u{2192}{preserved} turns")),
             ))
         }
-        "ParallelStarted" => {
-            let count = envelope
-                .get("branch_count")
+        "parallel.started" => {
+            let count = prop_field(&envelope, "branch_count")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             Some(format!(
@@ -603,7 +601,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 count,
             ))
         }
-        "ParallelBranchStarted" => {
+        "parallel.branch.started" => {
             let label = str_field(&envelope, "node_label").unwrap_or("?");
             Some(format!(
                 "{}     {} {}",
@@ -612,7 +610,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 label,
             ))
         }
-        "ParallelBranchCompleted" => {
+        "parallel.branch.completed" => {
             let label = str_field(&envelope, "node_label").unwrap_or("?");
             Some(format!(
                 "{}     {} {}",
@@ -621,8 +619,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 label,
             ))
         }
-        "ParallelCompleted" => {
-            let duration = format_duration_ms(envelope.get("duration_ms"));
+        "parallel.completed" => {
+            let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
             Some(format!(
                 "{} {} Parallel  {}",
                 styles.dim.apply_to(&ts),
@@ -630,10 +628,9 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 duration,
             ))
         }
-        "PullRequestCreated" => {
-            let url = str_field(&envelope, "pr_url").unwrap_or("?");
-            let draft = envelope
-                .get("draft")
+        "pull_request.created" => {
+            let url = prop_str_field(&envelope, "pr_url").unwrap_or("?");
+            let draft = prop_field(&envelope, "draft")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
             let label = if draft { "Draft PR:" } else { "PR:" };
@@ -644,8 +641,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 url,
             ))
         }
-        "PullRequestFailed" => {
-            let error = str_field(&envelope, "error").unwrap_or("unknown error");
+        "pull_request.failed" => {
+            let error = prop_str_field(&envelope, "error").unwrap_or("unknown error");
             Some(format!(
                 "{} {} {}",
                 styles.dim.apply_to(&ts),
@@ -653,8 +650,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.red.apply_to(error),
             ))
         }
-        "RetroCompleted" => {
-            let duration = format_duration_ms(envelope.get("duration_ms"));
+        "retro.completed" => {
+            let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
             Some(format!(
                 "{} {} Retro  {}",
                 styles.dim.apply_to(&ts),
@@ -662,9 +659,9 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 duration,
             ))
         }
-        "RetroFailed" => {
-            let error = str_field(&envelope, "error").unwrap_or("unknown error");
-            let duration = format_duration_ms(envelope.get("duration_ms"));
+        "retro.failed" => {
+            let error = prop_str_field(&envelope, "error").unwrap_or("unknown error");
+            let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
             Some(format!(
                 "{} {} Retro  {}  {}",
                 styles.dim.apply_to(&ts),
@@ -673,7 +670,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.red.apply_to(error),
             ))
         }
-        "RetroStarted" => Some(format!(
+        "retro.started" => Some(format!(
             "{} {} Retro",
             styles.dim.apply_to(&ts),
             styles.bold_cyan.apply_to("\u{25b6}"),
@@ -684,6 +681,14 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
 
 fn str_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
     value.get(key)?.as_str()
+}
+
+fn prop_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+    value.get("properties")?.get(key)
+}
+
+fn prop_str_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    prop_field(value, key)?.as_str()
 }
 
 fn format_timestamp(ts: &str) -> String {
@@ -724,8 +729,8 @@ fn format_tokens(tokens: u64) -> String {
 }
 
 fn tool_detail(envelope: &serde_json::Value) -> Option<String> {
-    let tool_name = str_field(envelope, "tool_name")?;
-    let arguments = envelope.get("arguments")?;
+    let tool_name = prop_str_field(envelope, "tool_name")?;
+    let arguments = prop_field(envelope, "arguments")?;
     let arg = |key: &str| arguments.get(key).and_then(|v| v.as_str());
 
     match tool_name {
