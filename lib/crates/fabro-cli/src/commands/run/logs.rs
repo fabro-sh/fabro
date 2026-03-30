@@ -251,6 +251,7 @@ async fn follow_store_logs(
         .context("Failed to watch store-backed run events")?;
     let stdout = io::stdout();
     let mut out = stdout.lock();
+    let mut next_seq = seq;
 
     loop {
         match time::timeout(Duration::from_millis(200), stream.next()).await {
@@ -264,25 +265,25 @@ async fn follow_store_logs(
                     writeln!(out, "{line}")?;
                 }
                 out.flush()?;
+                next_seq = event.seq.saturating_add(1);
             }
             Ok(Some(Err(err))) => return Err(err.into()),
             Ok(None) => break,
             Err(_) => {
-                if run_store
+                let concluded = run_store
                     .get_conclusion()
                     .await
                     .context("Failed to read conclusion from store while following logs")?
                     .is_some()
-                {
-                    debug!("Run concluded, stopping follow");
-                    break;
-                }
-                if run_store
-                    .get_status()
-                    .await
-                    .context("Failed to read status from store while following logs")?
-                    .is_some_and(|record| record.status.is_terminal())
-                {
+                    || run_store
+                        .get_status()
+                        .await
+                        .context("Failed to read status from store while following logs")?
+                        .is_some_and(|record| record.status.is_terminal());
+
+                if concluded {
+                    flush_remaining_store_events(run_store, next_seq, pretty, styles, &mut out)
+                        .await?;
                     debug!("Run reached terminal status, stopping follow");
                     break;
                 }
@@ -290,6 +291,32 @@ async fn follow_store_logs(
         }
     }
 
+    Ok(())
+}
+
+async fn flush_remaining_store_events(
+    run_store: &dyn RunStore,
+    next_seq: u32,
+    pretty: bool,
+    styles: &Styles,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let events = run_store
+        .list_events()
+        .await
+        .context("Failed to list store-backed run events while finalizing follow")?;
+
+    for event in events.into_iter().filter(|event| event.seq >= next_seq) {
+        let line = event_payload_line(&event)?;
+        if pretty {
+            if let Some(formatted) = format_event_pretty(&line, styles) {
+                writeln!(out, "{formatted}")?;
+            }
+        } else {
+            writeln!(out, "{line}")?;
+        }
+    }
+    out.flush()?;
     Ok(())
 }
 

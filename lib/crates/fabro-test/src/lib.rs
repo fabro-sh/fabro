@@ -54,12 +54,24 @@ impl TestContext {
 
         let filters = vec![
             (
+                regex::escape(&format!("/private{}", temp_dir.to_str().unwrap())),
+                "[TEMP_DIR]".to_string(),
+            ),
+            (
                 regex::escape(temp_dir.to_str().unwrap()),
                 "[TEMP_DIR]".to_string(),
             ),
             (
+                regex::escape(&format!("/private{}", home_dir.to_str().unwrap())),
+                "[HOME_DIR]".to_string(),
+            ),
+            (
                 regex::escape(home_dir.to_str().unwrap()),
                 "[HOME_DIR]".to_string(),
+            ),
+            (
+                regex::escape(&format!("/private{}", storage_dir.to_str().unwrap())),
+                "[STORAGE_DIR]".to_string(),
             ),
             (
                 regex::escape(storage_dir.to_str().unwrap()),

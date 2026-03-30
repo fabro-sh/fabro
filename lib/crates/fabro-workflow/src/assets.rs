@@ -80,6 +80,13 @@ pub fn scan_assets(
         }
     }
 
+    entries.sort_by(|left, right| {
+        left.node_slug
+            .cmp(&right.node_slug)
+            .then_with(|| left.retry.cmp(&right.retry))
+            .then_with(|| left.relative_path.cmp(&right.relative_path))
+    });
+
     Ok(entries)
 }
 

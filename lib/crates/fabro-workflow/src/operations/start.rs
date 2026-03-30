@@ -21,6 +21,7 @@ use crate::event::{
     EventEmitter, RunNoticeLevel, StoreProgressLogger, WorkflowRunEvent, append_progress_event,
     build_redacted_event_payload,
 };
+use crate::git::MetadataStore;
 use crate::handler::HandlerRegistry;
 use crate::outcome::{Outcome, StageStatus};
 use crate::pipeline::{
@@ -187,7 +188,7 @@ pub(super) async fn execute_persisted_run(
         }
     };
 
-    let session = match RunSession::new(&persisted, services) {
+    let session = match RunSession::new(&persisted, services).await {
         Ok(session) => session,
         Err(err) => {
             let _ = persist_detached_failure(
@@ -253,10 +254,22 @@ async fn persist_terminal_engine_failure(
 }
 
 impl RunSession {
-    fn new(persisted: &Persisted, services: StartServices) -> Result<Self, FabroError> {
+    async fn new(persisted: &Persisted, services: StartServices) -> Result<Self, FabroError> {
         let record = persisted.run_record();
         let mut settings = record.settings.clone();
         let working_directory = record.working_directory.clone();
+        let git = services
+            .run_store
+            .get_start()
+            .await
+            .map_err(|err| FabroError::engine(err.to_string()))?
+            .and_then(|start| {
+                start.run_branch.as_ref().map(|_| GitCheckpointOptions {
+                    base_sha: start.base_sha.clone(),
+                    run_branch: start.run_branch.clone(),
+                    meta_branch: Some(MetadataStore::branch_name(&record.run_id.to_string())),
+                })
+            });
 
         if let Some(env) = settings
             .sandbox
@@ -371,7 +384,7 @@ impl RunSession {
             devcontainer,
             seed_context: None,
             run_store: services.run_store,
-            git: None,
+            git,
             github_app: services.github_app.clone(),
             worktree_mode: Some(resolve_worktree_mode(&settings)),
             registry_override: services.registry_override,

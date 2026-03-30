@@ -1,5 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 
+use super::support::{setup_completed_dry_run, setup_created_dry_run};
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -25,5 +27,38 @@ fn help() {
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
       -h, --help                       Print help
     ----- stderr -----
+    ");
+}
+
+#[test]
+fn pr_create_unfinished_run_errors_before_network() {
+    let context = test_context!();
+    let run = setup_created_dry_run(&context);
+    let mut cmd = context.command();
+    cmd.args(["pr", "create", &run.run_id]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: Failed to load start.json
+      > I/O error: No such file or directory (os error 2)
+    ");
+}
+
+#[test]
+fn pr_create_completed_dry_run_without_run_branch_errors() {
+    let context = test_context!();
+    let run = setup_completed_dry_run(&context);
+    let mut cmd = context.command();
+    cmd.args(["pr", "create", &run.run_id]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: Run has no run_branch — was it run with git push enabled?
     ");
 }

@@ -1,0 +1,735 @@
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use std::process::Output;
+use std::time::{Duration, Instant};
+
+use fabro_test::TestContext;
+use serde_json::Value;
+
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+
+pub(crate) struct RunSetup {
+    pub(crate) run_id: String,
+    pub(crate) run_dir: PathBuf,
+}
+
+pub(crate) struct GitRunSetup {
+    pub(crate) run: RunSetup,
+    pub(crate) repo_dir: PathBuf,
+    pub(crate) base_sha: String,
+}
+
+pub(crate) struct ProjectFixture {
+    pub(crate) project_dir: PathBuf,
+    pub(crate) fabro_root: PathBuf,
+}
+
+pub(crate) struct AssetSandboxSetup {
+    pub(crate) run: RunSetup,
+    pub(crate) workspace_dir: PathBuf,
+}
+
+#[derive(Clone, Copy)]
+enum GitWorkflowKind {
+    Changed,
+    Noop,
+}
+
+pub(crate) fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../../test/{name}"))
+}
+
+pub(crate) fn output_stderr(output: &Output) -> String {
+    stderr(output)
+}
+
+pub(crate) fn output_stdout(output: &Output) -> String {
+    stdout(output)
+}
+
+pub(crate) fn read_json(path: &Path) -> Value {
+    let content = std::fs::read_to_string(path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+    serde_json::from_str(&content)
+        .unwrap_or_else(|err| panic!("failed to parse {}: {err}", path.display()))
+}
+
+pub(crate) fn read_text(path: &Path) -> String {
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()))
+}
+
+fn stdout(output: &Output) -> String {
+    String::from_utf8(output.stdout.clone()).expect("stdout should be valid UTF-8")
+}
+
+fn stderr(output: &Output) -> String {
+    String::from_utf8(output.stderr.clone()).expect("stderr should be valid UTF-8")
+}
+
+pub(crate) fn run_success(context: &TestContext, args: &[&str]) -> Output {
+    run_success_in(context, args, &context.temp_dir)
+}
+
+fn run_success_in(context: &TestContext, args: &[&str], cwd: &Path) -> Output {
+    let mut cmd = context.command();
+    cmd.current_dir(cwd);
+    cmd.timeout(COMMAND_TIMEOUT);
+    cmd.args(args);
+    let output = cmd.output().expect("command should execute");
+    if !output.status.success() {
+        panic!(
+            "command failed: fabro {}\nstdout:\n{}\nstderr:\n{}",
+            args.join(" "),
+            stdout(&output),
+            stderr(&output)
+        );
+    }
+    output
+}
+
+pub(crate) fn setup_completed_dry_run(context: &TestContext) -> RunSetup {
+    let workflow = fixture("simple.fabro");
+    run_success_in(
+        context,
+        &[
+            "run",
+            "--dry-run",
+            "--auto-approve",
+            "--no-retro",
+            "--sandbox",
+            "local",
+            workflow.to_str().unwrap(),
+        ],
+        &context.temp_dir,
+    );
+    only_run(context)
+}
+
+pub(crate) fn setup_created_dry_run(context: &TestContext) -> RunSetup {
+    let workflow = fixture("simple.fabro");
+    let output = run_success_in(
+        context,
+        &[
+            "create",
+            "--dry-run",
+            "--auto-approve",
+            "--no-retro",
+            "--sandbox",
+            "local",
+            workflow.to_str().unwrap(),
+        ],
+        &context.temp_dir,
+    );
+    let run_id = stdout(&output)
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .expect("create should print a run ID")
+        .to_string();
+    resolve_run(context, &run_id)
+}
+
+pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
+    let workflow = fixture("simple.fabro");
+    let output = run_success_in(
+        context,
+        &[
+            "run",
+            "--detach",
+            "--dry-run",
+            "--auto-approve",
+            "--no-retro",
+            "--sandbox",
+            "local",
+            workflow.to_str().unwrap(),
+        ],
+        &context.temp_dir,
+    );
+    let run_id = stdout(&output)
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .expect("run --detach should print a run ID")
+        .to_string();
+    let run = resolve_run(context, &run_id);
+    let deadline = Instant::now() + COMMAND_TIMEOUT;
+    while !run.run_dir.join("progress.jsonl").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for progress.jsonl for {run_id}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    run
+}
+
+pub(crate) fn setup_git_backed_changed_run(context: &TestContext) -> GitRunSetup {
+    setup_git_backed_run(context, GitWorkflowKind::Changed)
+}
+
+pub(crate) fn setup_git_backed_noop_run(context: &TestContext) -> GitRunSetup {
+    setup_git_backed_run(context, GitWorkflowKind::Noop)
+}
+
+pub(crate) fn setup_project_fixture(context: &TestContext) -> ProjectFixture {
+    let project_dir = context.temp_dir.join("project");
+    let fabro_root = project_dir.join("fabro");
+    write_text_file(
+        &project_dir.join("fabro.toml"),
+        "version = 1\n[fabro]\nroot = \"fabro/\"\n",
+    );
+    std::fs::create_dir_all(fabro_root.join("workflows"))
+        .unwrap_or_else(|err| panic!("failed to create {}: {err}", fabro_root.display()));
+    ProjectFixture {
+        project_dir,
+        fabro_root,
+    }
+}
+
+pub(crate) fn setup_asset_sandbox_run(context: &TestContext) -> AssetSandboxSetup {
+    let workspace_dir = context.temp_dir.join("asset-sandbox");
+    std::fs::create_dir_all(&workspace_dir)
+        .unwrap_or_else(|err| panic!("failed to create {}: {err}", workspace_dir.display()));
+
+    write_text_file(
+        &workspace_dir.join("asset_sandbox.fabro"),
+        r#"digraph AssetSandbox {
+  graph [goal="Exercise asset and sandbox commands", default_max_retries=0]
+  start [shape=Mdiamond]
+  exit [shape=Msquare]
+  create_assets [shape=parallelogram, script="mkdir -p assets/shared assets/node_a sandbox_dir/download_me/nested && printf one > assets/shared/report.txt && printf alpha > assets/node_a/summary.txt && printf keep > sandbox_dir/download_me/root.txt && printf nested > sandbox_dir/download_me/nested/child.txt && sleep 1", max_retries=0]
+  retry_assets [shape=parallelogram, script="mkdir -p assets/retry && if [ ! -f .retry-sentinel ]; then printf first > assets/retry/report.txt && touch .retry-sentinel && sleep 1; else printf second > assets/retry/report.txt; fi", retry_policy="linear", timeout="50ms"]
+  create_colliding [shape=parallelogram, script="mkdir -p assets/other && printf beta > assets/other/summary.txt", max_retries=0]
+  start -> create_assets -> retry_assets -> create_colliding -> exit
+}
+"#,
+    );
+    write_text_file(
+        &workspace_dir.join("run.toml"),
+        r#"version = 1
+graph = "asset_sandbox.fabro"
+goal = "Exercise asset and sandbox commands"
+
+[sandbox]
+provider = "local"
+preserve = true
+
+[sandbox.local]
+worktree_mode = "never"
+
+[assets]
+include = ["assets/**"]
+"#,
+    );
+
+    let mut cmd = context.command();
+    cmd.current_dir(&workspace_dir);
+    cmd.timeout(COMMAND_TIMEOUT);
+    cmd.env("OPENAI_API_KEY", "test");
+    cmd.args([
+        "run",
+        "--auto-approve",
+        "--no-retro",
+        "--sandbox",
+        "local",
+        "--provider",
+        "openai",
+        "run.toml",
+    ]);
+    let output = cmd.output().expect("command should execute");
+    if !output.status.success() {
+        panic!(
+            "command failed: fabro run --auto-approve --no-retro --sandbox local --provider openai run.toml\nstdout:\n{}\nstderr:\n{}",
+            stdout(&output),
+            stderr(&output)
+        );
+    }
+
+    let run = only_run(context);
+    assert!(
+        run.run_dir
+            .join("cache/artifacts/assets/retry_assets/retry_2/manifest.json")
+            .exists(),
+        "setup F should materialize retry_2 assets"
+    );
+    assert!(
+        run.run_dir.join("sandbox.json").exists(),
+        "setup F should persist sandbox.json"
+    );
+
+    AssetSandboxSetup { run, workspace_dir }
+}
+
+pub(crate) fn add_project_workflow(
+    project: &ProjectFixture,
+    name: &str,
+    goal: &str,
+    dot_source: &str,
+) -> PathBuf {
+    let workflow_dir = project.fabro_root.join("workflows").join(name);
+    std::fs::create_dir_all(&workflow_dir)
+        .unwrap_or_else(|err| panic!("failed to create {}: {err}", workflow_dir.display()));
+    write_text_file(&workflow_dir.join("workflow.fabro"), dot_source);
+    write_text_file(
+        &workflow_dir.join("workflow.toml"),
+        &format!("version = 1\ngoal = {goal:?}\ngraph = \"workflow.fabro\"\n"),
+    );
+    workflow_dir
+}
+
+pub(crate) fn add_user_workflow(context: &TestContext, name: &str, goal: &str) -> PathBuf {
+    let workflow_dir = context.home_dir.join(".fabro/workflows").join(name);
+    std::fs::create_dir_all(&workflow_dir)
+        .unwrap_or_else(|err| panic!("failed to create {}: {err}", workflow_dir.display()));
+    write_text_file(
+        &workflow_dir.join("workflow.toml"),
+        &format!("version = 1\ngoal = {goal:?}\ngraph = \"workflow.fabro\"\n"),
+    );
+    write_text_file(
+        &workflow_dir.join("workflow.fabro"),
+        &format!(
+            "digraph {} {{\n  graph [goal={goal:?}]\n  start [shape=Mdiamond]\n  exit [shape=Msquare]\n  start -> exit\n}}\n",
+            to_pascal_case(name),
+        ),
+    );
+    workflow_dir
+}
+
+pub(crate) fn write_sleep_workflow(path: &Path, name: &str, goal: &str, sleep_seconds: u64) {
+    write_text_file(
+        path,
+        &format!(
+            "digraph {} {{\n  graph [goal={goal:?}]\n  start [shape=Mdiamond]\n  exit [shape=Msquare]\n  wait [shape=parallelogram, script=\"sleep {sleep_seconds}\"]\n  start -> wait -> exit\n}}\n",
+            to_pascal_case(name),
+        ),
+    );
+}
+
+pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {
+    let deadline = Instant::now() + COMMAND_TIMEOUT;
+    loop {
+        if let Some(status) = read_json_if_exists(&run_dir.join("status.json"))
+            .and_then(|value| value["status"].as_str().map(ToOwned::to_owned))
+        {
+            if expected.iter().any(|candidate| *candidate == status) {
+                return status;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for status {:?} in {}",
+            expected,
+            run_dir.display()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+pub(crate) fn only_run(context: &TestContext) -> RunSetup {
+    let runs_dir = context.storage_dir.join("runs");
+    let entries: Vec<_> = std::fs::read_dir(&runs_dir)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", runs_dir.display()))
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        "expected exactly one run under {}",
+        runs_dir.display()
+    );
+    let run_dir = entries[0].clone();
+    let run_id = read_json(&run_dir.join("run.json"))["run_id"]
+        .as_str()
+        .expect("run.json should include run_id")
+        .to_string();
+    RunSetup { run_id, run_dir }
+}
+
+pub(crate) fn git_filters(context: &TestContext) -> Vec<(String, String)> {
+    let mut filters = context.filters();
+    filters.push((
+        r"\b[0-9A-HJKMNP-TV-Z]{8}\b".to_string(),
+        "[RUN_PREFIX]".to_string(),
+    ));
+    filters.push((r"\b[0-9a-f]{7,40}\b".to_string(), "[SHA]".to_string()));
+    filters
+}
+
+pub(crate) fn resolve_run(context: &TestContext, run_id: &str) -> RunSetup {
+    let deadline = Instant::now() + COMMAND_TIMEOUT;
+    loop {
+        if let Some(run_dir) = find_run_dir(&context.storage_dir, run_id) {
+            return RunSetup {
+                run_id: run_id.to_string(),
+                run_dir,
+            };
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for run dir for {run_id}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+pub(crate) fn find_run_dir(storage_dir: &Path, run_id: &str) -> Option<PathBuf> {
+    let runs_dir = storage_dir.join("runs");
+    let entries = std::fs::read_dir(&runs_dir).ok()?;
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.is_dir()
+                && path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().ends_with(run_id))
+        })
+}
+
+pub(crate) fn git_stdout(repo_dir: &Path, args: &[&str]) -> String {
+    stdout(&git_success(repo_dir, args))
+}
+
+pub(crate) fn metadata_run_ids(repo_dir: &Path) -> BTreeSet<String> {
+    git_stdout(repo_dir, &["branch", "--format=%(refname:short)"])
+        .lines()
+        .map(str::trim)
+        .filter_map(|line| line.strip_prefix("fabro/meta/"))
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+pub(crate) fn run_branch_commits(repo_dir: &Path, run_id: &str) -> Vec<String> {
+    git_stdout(
+        repo_dir,
+        &["rev-list", "--reverse", &format!("fabro/run/{run_id}")],
+    )
+    .lines()
+    .map(str::trim)
+    .filter(|line| !line.is_empty())
+    .map(ToOwned::to_owned)
+    .collect()
+}
+
+pub(crate) fn run_branch_commits_since_base(
+    repo_dir: &Path,
+    run_id: &str,
+    base_sha: &str,
+) -> Vec<String> {
+    git_stdout(
+        repo_dir,
+        &[
+            "rev-list",
+            "--reverse",
+            &format!("{base_sha}..fabro/run/{run_id}"),
+        ],
+    )
+    .lines()
+    .map(str::trim)
+    .filter(|line| !line.is_empty())
+    .map(ToOwned::to_owned)
+    .collect()
+}
+
+pub(crate) fn git_show_json(repo_dir: &Path, revspec: &str) -> Value {
+    let output = git_success(repo_dir, &["show", revspec]);
+    serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|err| panic!("failed to parse git show {revspec}: {err}"))
+}
+
+pub(crate) fn text_tree(root: &Path) -> Vec<String> {
+    fn visit(root: &Path, dir: &Path, entries: &mut Vec<String>) {
+        let mut children: Vec<_> = std::fs::read_dir(dir)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", dir.display()))
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .collect();
+        children.sort();
+
+        for path in children {
+            if path.is_dir() {
+                visit(root, &path, entries);
+                continue;
+            }
+
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or_else(|err| panic!("failed to strip prefix {}: {err}", root.display()))
+                .display()
+                .to_string();
+            let contents = std::fs::read_to_string(&path)
+                .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+            entries.push(format!("{rel} = {contents}"));
+        }
+    }
+
+    if !root.exists() {
+        return Vec::new();
+    }
+
+    let mut entries = Vec::new();
+    visit(root, root, &mut entries);
+    entries
+}
+
+pub(crate) fn compact_inspect(output: &Output) -> Value {
+    let items: Vec<Value> =
+        serde_json::from_str(&stdout(output)).expect("inspect output should be valid JSON");
+    Value::Array(
+        items.into_iter()
+            .map(|item| {
+                let run_record = item["run_record"].clone();
+                let checkpoint = item["checkpoint"].clone();
+                let conclusion = item["conclusion"].clone();
+                let sandbox = item["sandbox"].clone();
+                serde_json::json!({
+                    "run_id": "[ULID]",
+                    "status": item["status"],
+                    "run_record": {
+                        "goal": run_record.pointer("/settings/goal"),
+                        "workflow_name": run_record.pointer("/graph/name"),
+                        "workflow_slug": run_record.pointer("/workflow_slug"),
+                        "sandbox_provider": run_record.pointer("/settings/sandbox/provider"),
+                        "dry_run": run_record.pointer("/settings/dry_run"),
+                    },
+                    "start_record": item["start_record"].as_object().map(|record| {
+                        serde_json::json!({
+                            "has_start_time": record.contains_key("start_time"),
+                        })
+                    }),
+                    "conclusion": conclusion.as_object().map(|_| {
+                        serde_json::json!({
+                            "status": conclusion["status"],
+                            "duration_ms": "[DURATION_MS]",
+                            "stage_count": conclusion["stages"].as_array().map(|stages| stages.len()),
+                        })
+                    }),
+                    "checkpoint": checkpoint.as_object().map(|_| {
+                        serde_json::json!({
+                            "current_node": checkpoint["current_node"],
+                            "completed_nodes": checkpoint["completed_nodes"],
+                            "next_node_id": checkpoint["next_node_id"],
+                        })
+                    }),
+                    "sandbox": sandbox.as_object().map(|_| {
+                        serde_json::json!({
+                            "provider": sandbox["provider"],
+                        })
+                    }),
+                })
+            })
+            .collect(),
+    )
+}
+
+pub(crate) fn compact_git_inspect(output: &Output) -> Value {
+    let items: Vec<Value> =
+        serde_json::from_str(&stdout(output)).expect("inspect output should be valid JSON");
+    Value::Array(
+        items.into_iter()
+            .map(|item| {
+                let run_record = item["run_record"].clone();
+                let start_record = item["start_record"].clone();
+                let checkpoint = item["checkpoint"].clone();
+                let conclusion = item["conclusion"].clone();
+                let sandbox = item["sandbox"].clone();
+                serde_json::json!({
+                    "run_id": "[ULID]",
+                    "status": item["status"],
+                    "run_record": {
+                        "goal": run_record.pointer("/settings/goal"),
+                        "workflow_name": run_record.pointer("/graph/name"),
+                        "workflow_slug": run_record.pointer("/workflow_slug"),
+                        "llm_provider": run_record.pointer("/settings/llm/provider"),
+                        "sandbox_provider": run_record.pointer("/settings/sandbox/provider"),
+                    },
+                    "start_record": start_record.as_object().map(|_| {
+                        serde_json::json!({
+                            "has_start_time": true,
+                            "run_branch": "fabro/run/[ULID]",
+                            "base_sha": "[SHA]",
+                        })
+                    }),
+                    "conclusion": conclusion.as_object().map(|_| {
+                        serde_json::json!({
+                            "status": conclusion["status"],
+                            "duration_ms": "[DURATION_MS]",
+                            "final_git_commit_sha": "[SHA]",
+                            "stage_count": conclusion["stages"].as_array().map(|stages| stages.len()),
+                        })
+                    }),
+                    "checkpoint": checkpoint.as_object().map(|_| {
+                        serde_json::json!({
+                            "current_node": checkpoint["current_node"],
+                            "completed_nodes": checkpoint["completed_nodes"],
+                            "next_node_id": checkpoint["next_node_id"],
+                            "git_commit_sha": "[SHA]",
+                        })
+                    }),
+                    "sandbox": sandbox.as_object().map(|_| {
+                        serde_json::json!({
+                            "provider": sandbox["provider"],
+                            "working_directory": "[WORKTREE]",
+                        })
+                    }),
+                })
+            })
+            .collect(),
+    )
+}
+
+fn read_json_if_exists(path: &Path) -> Option<Value> {
+    if !path.exists() {
+        return None;
+    }
+    Some(read_json(path))
+}
+
+fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> GitRunSetup {
+    let repo_dir = context.temp_dir.join(match workflow {
+        GitWorkflowKind::Changed => "git-changed",
+        GitWorkflowKind::Noop => "git-noop",
+    });
+    std::fs::create_dir_all(&repo_dir)
+        .unwrap_or_else(|err| panic!("failed to create {}: {err}", repo_dir.display()));
+
+    git_success(&repo_dir, &["init", "-q"]);
+    git_success(&repo_dir, &["config", "user.name", "Fabro Test"]);
+    git_success(&repo_dir, &["config", "user.email", "test@example.com"]);
+
+    write_text_file(&repo_dir.join("story.txt"), "line 1\n");
+    write_text_file(
+        &repo_dir.join("flow.fabro"),
+        match workflow {
+            GitWorkflowKind::Changed => {
+                r#"digraph Flow {
+  graph [goal="Edit a tracked file"];
+  start [shape=Mdiamond];
+  exit [shape=Msquare];
+  step_one [shape=parallelogram, script="printf 'line 1\nline 2\n' > story.txt"];
+  step_two [shape=parallelogram, script="printf 'line 1\nline 2\nline 3\n' > story.txt"];
+  start -> step_one -> step_two -> exit;
+}
+"#
+            }
+            GitWorkflowKind::Noop => {
+                r#"digraph Flow {
+  graph [goal="Leave tracked files unchanged"];
+  start [shape=Mdiamond];
+  exit [shape=Msquare];
+  check [shape=parallelogram, script="test -f story.txt"];
+  start -> check -> exit;
+}
+"#
+            }
+        },
+    );
+
+    git_success(&repo_dir, &["add", "story.txt", "flow.fabro"]);
+    git_success(&repo_dir, &["commit", "-qm", "init"]);
+    let base_sha = git_stdout(&repo_dir, &["rev-parse", "HEAD"])
+        .trim()
+        .to_string();
+
+    let mut cmd = context.command();
+    cmd.current_dir(&repo_dir);
+    cmd.env("OPENAI_API_KEY", "test");
+    cmd.args([
+        "run",
+        "--sandbox",
+        "local",
+        "--no-retro",
+        "--provider",
+        "openai",
+        "flow.fabro",
+    ]);
+    let output = cmd.output().expect("command should execute");
+    if !output.status.success() {
+        panic!(
+            "command failed: fabro run --sandbox local --no-retro --provider openai flow.fabro\nstdout:\n{}\nstderr:\n{}",
+            stdout(&output),
+            stderr(&output)
+        );
+    }
+
+    let run = only_run(context);
+    let start = read_json(&run.run_dir.join("start.json"));
+    assert_eq!(
+        start["run_branch"].as_str(),
+        Some(format!("fabro/run/{}", run.run_id).as_str())
+    );
+    assert_eq!(start["base_sha"].as_str(), Some(base_sha.as_str()));
+    match workflow {
+        GitWorkflowKind::Changed => {
+            assert!(
+                run.run_dir.join("final.patch").exists(),
+                "changed git-backed run should emit final.patch"
+            );
+            assert!(
+                run.run_dir.join("nodes/step_one/diff.patch").exists(),
+                "changed git-backed run should emit a diff for step_one"
+            );
+            assert!(
+                run.run_dir.join("nodes/step_two/diff.patch").exists(),
+                "changed git-backed run should emit a diff for step_two"
+            );
+        }
+        GitWorkflowKind::Noop => {
+            assert!(
+                !run.run_dir.join("final.patch").exists(),
+                "no-op git-backed run should not emit final.patch"
+            );
+        }
+    }
+
+    GitRunSetup {
+        run,
+        repo_dir,
+        base_sha,
+    }
+}
+
+fn git_success(repo_dir: &Path, args: &[&str]) -> Output {
+    let output = std::process::Command::new("git")
+        .current_dir(repo_dir)
+        .args(args)
+        .output()
+        .expect("git command should execute");
+    if !output.status.success() {
+        panic!(
+            "git command failed: git {}\nstdout:\n{}\nstderr:\n{}",
+            args.join(" "),
+            stdout(&output),
+            stderr(&output)
+        );
+    }
+    output
+}
+
+fn write_text_file(path: &Path, content: &str) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", parent.display()));
+    }
+    std::fs::write(path, content)
+        .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
+}
+
+fn to_pascal_case(s: &str) -> String {
+    s.split(['-', '_'])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => {
+                    let upper: String = first.to_uppercase().collect();
+                    format!("{upper}{rest}", rest = chars.as_str())
+                }
+                None => String::new(),
+            }
+        })
+        .collect()
+}

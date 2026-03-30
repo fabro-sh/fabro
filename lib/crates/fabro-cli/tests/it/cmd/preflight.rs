@@ -1,5 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 
+use super::support::fixture;
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -29,5 +31,25 @@ fn help() {
           --sandbox <SANDBOX>          Sandbox for agent tools [possible values: local, docker, daytona]
       -h, --help                       Print help
     ----- stderr -----
+    ");
+}
+
+#[test]
+fn preflight_invalid_workflow_fails_with_validation_output() {
+    let context = test_context!();
+    let workflow = fixture("invalid.fabro");
+    let mut cmd = context.command();
+    cmd.args(["preflight", workflow.to_str().unwrap()]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    Workflow: Invalid (2 nodes, 1 edges)
+    Graph: ../../../test/invalid.fabro
+    error: Pipeline must have exactly one start node (shape=Mdiamond or id start/Start) (start_node)
+    error [node: exit]: Exit node 'exit' has 1 outgoing edge(s) but must have none (exit_no_outgoing)
+    error: Validation failed
     ");
 }

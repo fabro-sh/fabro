@@ -55,6 +55,7 @@ mod ssh;
 mod start;
 mod store;
 mod store_dump;
+mod support;
 mod system;
 mod system_df;
 mod system_prune;

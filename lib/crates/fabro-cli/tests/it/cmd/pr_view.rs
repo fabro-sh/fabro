@@ -1,5 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 
+use super::support::setup_completed_dry_run;
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -24,5 +26,22 @@ fn help() {
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
       -h, --help                       Print help
     ----- stderr -----
+    ");
+}
+
+#[test]
+fn pr_view_missing_pull_request_json_errors() {
+    let context = test_context!();
+    let run = setup_completed_dry_run(&context);
+    let mut cmd = context.command();
+    cmd.args(["pr", "view", &run.run_id]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: No pull_request.json found in run directory. Create one first with: fabro pr create [ULID]
+      > No such file or directory (os error 2)
     ");
 }

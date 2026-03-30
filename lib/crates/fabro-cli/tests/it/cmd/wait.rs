@@ -1,5 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 
+use super::support::{setup_completed_dry_run, setup_created_dry_run};
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -27,5 +29,67 @@ fn help() {
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
       -h, --help                       Print help
     ----- stderr -----
+    ");
+}
+
+#[test]
+fn wait_completed_run_prints_success_summary() {
+    let context = test_context!();
+    let run = setup_completed_dry_run(&context);
+    let mut filters = context.filters();
+    filters.push((
+        r"\b\d+(\.\d+)?(ms|s)\b".to_string(),
+        "[DURATION]".to_string(),
+    ));
+    let mut cmd = context.command();
+    cmd.args(["wait", &run.run_id]);
+
+    fabro_snapshot!(filters, cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    Succeeded [ULID]  [DURATION]
+    ");
+}
+
+#[test]
+fn wait_completed_run_json_outputs_status_and_duration() {
+    let context = test_context!();
+    let run = setup_completed_dry_run(&context);
+    let mut filters = context.filters();
+    filters.push((
+        r#""duration_ms":\s*\d+"#.to_string(),
+        r#""duration_ms": [DURATION_MS]"#.to_string(),
+    ));
+    let mut cmd = context.command();
+    cmd.args(["wait", "--json", &run.run_id]);
+
+    fabro_snapshot!(filters, cmd, @r###"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    {
+      "run_id": "[ULID]",
+      "status": "succeeded",
+      "duration_ms": [DURATION_MS]
+    }
+    ----- stderr -----
+    "###);
+}
+
+#[test]
+fn wait_submitted_run_times_out() {
+    let context = test_context!();
+    let run = setup_created_dry_run(&context);
+    let mut cmd = context.command();
+    cmd.args(["wait", "--timeout", "1", "--interval", "10", &run.run_id]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: Timed out after 1s waiting for run '[ULID]'
     ");
 }

@@ -26,3 +26,18 @@ fn help() {
     ----- stderr -----
     ");
 }
+
+#[test]
+fn model_test_unknown_model_errors() {
+    let context = test_context!();
+    let mut cmd = context.command();
+    cmd.args(["model", "test", "--model", "nonexistent-model-xyz"]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: Unknown model: nonexistent-model-xyz
+    ");
+}

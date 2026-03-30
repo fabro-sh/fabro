@@ -26,3 +26,39 @@ fn help() {
     ----- stderr -----
     "#);
 }
+
+#[test]
+fn upgrade_invalid_version_errors() {
+    let context = test_context!();
+    let mut cmd = context.command();
+    cmd.args(["upgrade", "--version", "not-a-semver"]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: invalid version: not-a-semver
+      > unexpected character 'n' while parsing major version number
+    ");
+}
+
+#[test]
+fn upgrade_already_on_current_version_short_circuits() {
+    let context = test_context!();
+    let mut filters = context.filters();
+    filters.push((
+        regex::escape(env!("CARGO_PKG_VERSION")),
+        "[VERSION]".to_string(),
+    ));
+    let mut cmd = context.command();
+    cmd.args(["upgrade", "--version", env!("CARGO_PKG_VERSION")]);
+
+    fabro_snapshot!(filters, cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    Already on version [VERSION]
+    ");
+}

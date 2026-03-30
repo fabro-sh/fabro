@@ -1,5 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 
+use super::support::{git_stdout, output_stderr, setup_git_backed_changed_run};
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -26,4 +28,68 @@ fn help() {
       -h, --help                       Print help
     ----- stderr -----
     ");
+}
+
+#[test]
+fn resume_rewound_run_succeeds() {
+    let context = test_context!();
+    let setup = setup_git_backed_changed_run(&context);
+
+    let rewind = context
+        .command()
+        .current_dir(&setup.repo_dir)
+        .args(["rewind", &setup.run.run_id, "@1", "--no-push"])
+        .output()
+        .expect("rewind should execute");
+    assert!(
+        rewind.status.success(),
+        "rewind should succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&rewind.stdout),
+        output_stderr(&rewind)
+    );
+    let rewound_head = git_stdout(
+        &setup.repo_dir,
+        &["rev-parse", &format!("fabro/run/{}", setup.run.run_id)],
+    );
+
+    let mut resume_cmd = context.command();
+    resume_cmd.current_dir(&setup.repo_dir);
+    resume_cmd.env("OPENAI_API_KEY", "test");
+    resume_cmd.args(["resume", "-d", &setup.run.run_id]);
+    fabro_snapshot!(context.filters(), resume_cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    [ULID]
+    ----- stderr -----
+    ");
+
+    let mut wait_filters = context.filters();
+    wait_filters.push((
+        r"\b\d+(\.\d+)?(ms|s)\b".to_string(),
+        "[DURATION]".to_string(),
+    ));
+    let mut wait_cmd = context.command();
+    wait_cmd.args(["wait", &setup.run.run_id]);
+    fabro_snapshot!(wait_filters, wait_cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    Succeeded [ULID]  [DURATION]
+    ");
+
+    assert_eq!(
+        std::fs::read_to_string(setup.run.run_dir.join("worktree/story.txt")).unwrap(),
+        "line 1\nline 2\nline 3\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(setup.repo_dir.join("story.txt")).unwrap(),
+        "line 1\n"
+    );
+    let resumed_head = git_stdout(
+        &setup.repo_dir,
+        &["rev-parse", &format!("fabro/run/{}", setup.run.run_id)],
+    );
+    assert_ne!(resumed_head.trim(), rewound_head.trim());
 }

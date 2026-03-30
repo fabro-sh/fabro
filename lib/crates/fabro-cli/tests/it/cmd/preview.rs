@@ -1,5 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 
+use super::support::setup_asset_sandbox_run;
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -28,5 +30,21 @@ fn help() {
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
       -h, --help                       Print help
     ----- stderr -----
+    ");
+}
+
+#[test]
+fn sandbox_preview_rejects_non_daytona_run() {
+    let context = test_context!();
+    let setup = setup_asset_sandbox_run(&context);
+    let mut cmd = context.preview();
+    cmd.args([&setup.run.run_id, "3000"]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: Preview URLs is only supported for Daytona sandboxes (this run uses 'local')
     ");
 }

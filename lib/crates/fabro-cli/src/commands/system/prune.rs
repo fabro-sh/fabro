@@ -61,14 +61,13 @@ async fn prune_from(args: &RunsPruneArgs, store: &dyn Store, base: &Path) -> Res
     if let Some(threshold) = staleness_threshold {
         let cutoff = Utc::now() - threshold;
         filtered.retain(|run| {
-            if run.status.is_active() {
-                return false;
-            }
             run.end_time
                 .or(run.start_time_dt)
                 .is_some_and(|time| time < cutoff)
         });
     }
+
+    filtered.retain(|run| !run.status.is_active());
 
     if filtered.is_empty() {
         eprintln!("No matching runs to prune.");

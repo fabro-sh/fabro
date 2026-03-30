@@ -85,6 +85,31 @@ fn exec_missing_api_key_exits_with_error() {
 }
 
 #[test]
+fn exec_uses_user_config_defaults() {
+    let context = test_context!();
+    context.write_home(
+        ".fabro/user.toml",
+        "[exec]\nprovider = \"openai\"\nmodel = \"gpt-4.1-mini\"\npermissions = \"read-only\"\noutput_format = \"json\"\n",
+    );
+
+    let mut cmd = context.exec_cmd();
+    cmd.arg("test prompt");
+    cmd.env_clear();
+    cmd.env("HOME", &context.home_dir);
+    cmd.env("FABRO_STORAGE_DIR", &context.storage_dir);
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+    cmd.current_dir(&context.temp_dir);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: API key not set for provider 'openai'
+    ");
+}
+
+#[test]
 #[ignore = "requires API key"]
 fn exec_creates_file() {
     dotenvy::dotenv().ok();

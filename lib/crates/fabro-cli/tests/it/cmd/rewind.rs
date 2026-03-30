@@ -1,4 +1,11 @@
-use fabro_test::{fabro_snapshot, test_context};
+use insta::assert_snapshot;
+
+use fabro_test::{fabro_snapshot, run_and_format, test_context};
+
+use super::support::{
+    git_filters, git_stdout, output_stderr as support_stderr, run_branch_commits_since_base,
+    setup_git_backed_changed_run,
+};
 
 #[test]
 fn help() {
@@ -28,4 +35,89 @@ fn help() {
       -h, --help                       Print help
     ----- stderr -----
     ");
+}
+
+#[test]
+fn rewind_outside_git_repo_errors() {
+    let context = test_context!();
+    let mut cmd = context.command();
+    cmd.current_dir(&context.temp_dir);
+    cmd.args(["rewind", "01ARZ3NDEKTSV4RRFFQ69G5FAW", "--list"]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: not in a git repository
+      > could not find repository at '.'; class=Repository (6); code=NotFound (-3)
+    ");
+}
+
+#[test]
+fn rewind_list_prints_timeline_for_completed_git_run() {
+    let context = test_context!();
+    let setup = setup_git_backed_changed_run(&context);
+    let mut cmd = context.command();
+    cmd.current_dir(&setup.repo_dir);
+    cmd.args(["rewind", &setup.run.run_id, "--list"]);
+
+    fabro_snapshot!(git_filters(&context), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    @   Node      Details 
+     @1  step_one          
+     @2  step_two
+    ");
+}
+
+#[test]
+fn rewind_target_updates_metadata_and_resume_hint() {
+    let context = test_context!();
+    let setup = setup_git_backed_changed_run(&context);
+    let expected_run_head =
+        run_branch_commits_since_base(&setup.repo_dir, &setup.run.run_id, &setup.base_sha)
+            .into_iter()
+            .next()
+            .expect("source run should have a first run commit");
+
+    let mut cmd = context.command();
+    cmd.current_dir(&setup.repo_dir);
+    cmd.args(["rewind", &setup.run.run_id, "@1", "--no-push"]);
+
+    let (snapshot, output) = run_and_format(&mut cmd, &git_filters(&context));
+    assert_snapshot!(snapshot, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    Rewound metadata branch to @1 (step_one)
+    Rewound run branch fabro/run/[ULID] to [SHA]
+
+    To resume: fabro resume [RUN_PREFIX]
+    ");
+    assert!(output.status.success(), "rewind should succeed");
+
+    let run_head = git_stdout(
+        &setup.repo_dir,
+        &["rev-parse", &format!("fabro/run/{}", setup.run.run_id)],
+    );
+    assert_eq!(run_head.trim(), expected_run_head);
+
+    let mut list_cmd = context.command();
+    list_cmd.current_dir(&setup.repo_dir);
+    list_cmd.args(["rewind", &setup.run.run_id, "--list"]);
+    let list_output = list_cmd.output().expect("rewind --list should execute");
+    assert!(list_output.status.success(), "rewind --list should succeed");
+    let list = support_stderr(&list_output);
+    assert!(
+        list.contains("@1"),
+        "rewound timeline should keep @1: {list}"
+    );
+    assert!(
+        !list.contains("@2"),
+        "rewound timeline should drop @2: {list}"
+    );
 }

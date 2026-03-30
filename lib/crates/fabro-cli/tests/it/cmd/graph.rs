@@ -1,5 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 
+use super::support::fixture;
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -62,5 +64,23 @@ fn help() {
       -h, --help
               Print help (see a summary with '-h')
     ----- stderr -----
+    ");
+}
+
+#[test]
+fn graph_invalid_workflow_fails_after_diagnostics() {
+    let context = test_context!();
+    let workflow = fixture("invalid.fabro");
+    let mut cmd = context.command();
+    cmd.args(["graph", workflow.to_str().unwrap()]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: Pipeline must have exactly one start node (shape=Mdiamond or id start/Start) (start_node)
+    error [node: exit]: Exit node 'exit' has 1 outgoing edge(s) but must have none (exit_no_outgoing)
+    error: Validation failed
     ");
 }

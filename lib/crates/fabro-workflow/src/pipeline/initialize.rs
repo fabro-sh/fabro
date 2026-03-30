@@ -7,7 +7,8 @@ use fabro_agent::Sandbox;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_llm::client::Client;
 use fabro_sandbox::{
-    ReadBeforeWriteSandbox, SandboxEventCallback, WorkdirStrategy, WorktreeConfig, WorktreeSandbox,
+    ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec, WorkdirStrategy, WorktreeConfig,
+    WorktreeSandbox,
 };
 use shlex::try_quote;
 
@@ -29,6 +30,7 @@ struct WorktreePlan {
     branch_name: String,
     base_sha: String,
     worktree_path: PathBuf,
+    skip_branch_creation: bool,
 }
 
 async fn run_hooks(
@@ -63,6 +65,20 @@ async fn resolve_worktree_plan(
         options.run_options.display_base_sha = None;
         return Ok(None);
     };
+
+    if options.checkpoint.is_some() && matches!(options.sandbox, SandboxSpec::Local { .. }) {
+        if let Some(git) = options.run_options.git.as_ref() {
+            if let (Some(run_branch), Some(base_sha)) = (&git.run_branch, &git.base_sha) {
+                options.run_options.display_base_sha = Some(base_sha.clone());
+                return Ok(Some(WorktreePlan {
+                    branch_name: run_branch.clone(),
+                    base_sha: base_sha.clone(),
+                    worktree_path: options.run_options.run_dir.join("worktree"),
+                    skip_branch_creation: true,
+                }));
+            }
+        }
+    }
 
     let host_repo_path = options
         .run_options
@@ -157,6 +173,7 @@ async fn resolve_worktree_plan(
                         branch_name: format!("{}{}", git::RUN_BRANCH_PREFIX, options.run_id),
                         base_sha,
                         worktree_path: options.run_options.run_dir.join("worktree"),
+                        skip_branch_creation: false,
                     }))
                 }
                 Err(e) => {
@@ -424,7 +441,7 @@ pub async fn initialize(
                 branch_name: plan.branch_name.clone(),
                 base_sha: plan.base_sha.clone(),
                 worktree_path: plan.worktree_path.to_string_lossy().into_owned(),
-                skip_branch_creation: false,
+                skip_branch_creation: plan.skip_branch_creation,
             },
         );
         worktree.set_event_callback(Arc::clone(&options.emitter).worktree_callback());

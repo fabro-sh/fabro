@@ -95,10 +95,10 @@ pub(super) fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Result<()>
                 .into_owned();
             if let Some((_, existing)) = by_filename.iter().find(|(name, _)| name == &filename) {
                 bail!(
-                    "Filename collision: '{}' exists in both node '{}' and '{}'. Use --tree to preserve directory structure, or --node to filter.",
+                    "Filename collision: '{}' exists in both {} and {}. Use --tree to preserve directory structure, or --node and/or --retry to filter.",
                     filename,
-                    existing.node_slug,
-                    entry.node_slug
+                    format_candidate(existing),
+                    format_candidate(entry)
                 );
             }
             by_filename.push((filename, entry));
@@ -134,6 +134,10 @@ fn parse_source(source: &str) -> (&str, Option<&str>) {
     }
 }
 
+fn format_candidate(entry: &AssetEntry) -> String {
+    format!("{}:retry_{}", entry.node_slug, entry.retry)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +168,18 @@ mod tests {
         let (id, path) = parse_source("./foo");
         assert_eq!(id, "./foo");
         assert_eq!(path, None);
+    }
+
+    #[test]
+    fn format_candidate_includes_retry() {
+        let entry = AssetEntry {
+            node_slug: "retry_assets".to_string(),
+            retry: 2,
+            relative_path: "assets/retry/report.txt".to_string(),
+            absolute_path: PathBuf::from("/tmp/report.txt"),
+            size: 6,
+        };
+
+        assert_eq!(format_candidate(&entry), "retry_assets:retry_2");
     }
 }

@@ -5,10 +5,14 @@ use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_config::FabroSettingsExt;
 use fabro_git_storage::gitobj::Store;
 use fabro_util::terminal::Styles;
+use fabro_workflow::git::MetadataStore;
 use fabro_workflow::operations::{
     RewindInput, RewindTarget, RunTimeline, build_timeline_or_rebuild,
     find_run_id_by_prefix_or_store, rewind,
 };
+use fabro_workflow::records::CheckpointExt;
+use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_status::{self, RunStatus};
 use git2::Repository;
 
 use crate::args::{GlobalArgs, RewindArgs};
@@ -24,6 +28,13 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
         find_run_id_by_prefix_or_store(&repo, durable_store.as_ref(), &args.run_id).await?;
     let store = Store::new(repo);
     let run_store = open_run_reader(&cli_settings.storage_dir(), &run_id).await?;
+    let run_info = resolve_run_combined(
+        durable_store.as_ref(),
+        &runs_base(&cli_settings.storage_dir()),
+        &run_id.to_string(),
+    )
+    .await
+    .ok();
 
     let timeline = build_timeline_or_rebuild(&store, run_store.as_deref(), &run_id).await?;
 
@@ -42,6 +53,9 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
             push: !args.no_push,
         },
     )?;
+    if let Some(run_info) = run_info.as_ref() {
+        reset_rewound_run_state(&store, durable_store.as_ref(), &run_id, &run_info.path).await?;
+    }
 
     let run_id_string = run_id.to_string();
 
@@ -50,6 +64,35 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
         &run_id_string[..8.min(run_id_string.len())]
     );
 
+    Ok(())
+}
+
+async fn reset_rewound_run_state(
+    git_store: &Store,
+    durable_store: &dyn fabro_store::Store,
+    run_id: &fabro_types::RunId,
+    run_dir: &std::path::Path,
+) -> Result<()> {
+    let checkpoint = MetadataStore::read_checkpoint(git_store.repo_dir(), &run_id.to_string())?
+        .context("rewound metadata branch is missing checkpoint.json")?;
+    checkpoint.save(&run_dir.join("checkpoint.json"))?;
+    run_status::write_run_status(run_dir, RunStatus::Submitted, None);
+
+    for name in [
+        "conclusion.json",
+        "pull_request.json",
+        "detached_failure.json",
+        "progress.jsonl",
+        "retro.json",
+        "final.patch",
+    ] {
+        let _ = std::fs::remove_file(run_dir.join(name));
+    }
+
+    durable_store
+        .delete_run(run_id)
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to reset durable store run: {err}"))?;
     Ok(())
 }
 

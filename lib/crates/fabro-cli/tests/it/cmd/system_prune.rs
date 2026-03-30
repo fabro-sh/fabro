@@ -1,5 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 
+use super::support::{setup_completed_dry_run, setup_created_dry_run};
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -28,4 +30,87 @@ fn help() {
       -h, --help                       Print help
     ----- stderr -----
     ");
+}
+
+#[test]
+fn system_prune_dry_run_lists_matching_runs_without_deleting() {
+    let context = test_context!();
+    let run = setup_completed_dry_run(&context);
+    let mut filters = context.filters();
+    filters.push((
+        r"\b\d{8}-dry-run-[0-9A-HJKMNP-TV-Z]{26}\b".to_string(),
+        "[RUN_DIR]".to_string(),
+    ));
+    filters.push((
+        r"\b\d+(\.\d+)?\s(?:[KMGT]?B|B)\b".to_string(),
+        "[SIZE]".to_string(),
+    ));
+
+    let mut cmd = context.command();
+    cmd.args(["system", "prune", "--workflow", "Simple"]);
+    fabro_snapshot!(filters, cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    would delete: 20260330-dry-run-[ULID] (Simple)
+    ----- stderr -----
+
+    1 run(s) would be deleted ([SIZE] freed). Pass --yes to confirm.
+    ");
+    assert!(
+        run.run_dir.exists(),
+        "dry-run prune should not delete the run"
+    );
+}
+
+#[test]
+fn system_prune_yes_deletes_matching_runs() {
+    let context = test_context!();
+    let run = setup_completed_dry_run(&context);
+    let mut filters = context.filters();
+    filters.push((
+        r"\b\d+(\.\d+)?\s(?:[KMGT]?B|B)\b".to_string(),
+        "[SIZE]".to_string(),
+    ));
+
+    let mut cmd = context.command();
+    cmd.args(["system", "prune", "--workflow", "Simple", "--yes"]);
+    fabro_snapshot!(filters, cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    1 run(s) deleted ([SIZE] freed).
+    ");
+    assert!(!run.run_dir.exists(), "matching run should be deleted");
+
+    let mut ps = context.ps();
+    ps.args(["-a", "--json"]);
+    fabro_snapshot!(context.filters(), ps, @r###"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    []
+    ----- stderr -----
+    "###);
+}
+
+#[test]
+fn system_prune_does_not_delete_active_or_submitted_runs() {
+    let context = test_context!();
+    let run = setup_created_dry_run(&context);
+    let mut cmd = context.command();
+    cmd.args(["system", "prune", "--workflow", "Simple", "--yes"]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    No matching runs to prune.
+    ");
+    assert!(
+        run.run_dir.exists(),
+        "submitted run should not be deleted by system prune"
+    );
 }
