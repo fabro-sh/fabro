@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use fabro_git_storage::gitobj::Store;
+use fabro_checkpoint::git::Store;
 use git2::{Repository, Signature};
 
 pub(super) fn temp_repo() -> (tempfile::TempDir, Store) {

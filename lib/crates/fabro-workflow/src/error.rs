@@ -343,6 +343,19 @@ impl From<fabro_validate::ValidationError> for FabroError {
     }
 }
 
+impl From<fabro_checkpoint::MetadataError> for FabroError {
+    fn from(err: fabro_checkpoint::MetadataError) -> Self {
+        let message = err.to_string();
+        match err {
+            fabro_checkpoint::MetadataError::Deserialize {
+                entity: "checkpoint",
+                ..
+            } => Self::Checkpoint(message),
+            _ => Self::engine(message),
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, FabroError>;
 
 #[cfg(test)]

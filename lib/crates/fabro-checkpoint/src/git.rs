@@ -565,7 +565,7 @@ mod tests {
     fn read_blob_at_returns_content() {
         let (_dir, store) = temp_repo();
         let sig = Signature::now("Test", "test@example.com").unwrap();
-        let bs = crate::branchstore::BranchStore::new(&store, "test/data", &sig);
+        let bs = crate::branch::BranchStore::new(&store, "test/data", &sig);
         bs.ensure_branch().unwrap();
         bs.write_entry("hello.txt", b"world", "add hello").unwrap();
 
@@ -580,7 +580,7 @@ mod tests {
     fn read_blob_at_returns_none_for_missing_path() {
         let (_dir, store) = temp_repo();
         let sig = Signature::now("Test", "test@example.com").unwrap();
-        let bs = crate::branchstore::BranchStore::new(&store, "test/data", &sig);
+        let bs = crate::branch::BranchStore::new(&store, "test/data", &sig);
         bs.ensure_branch().unwrap();
         bs.write_entry("hello.txt", b"world", "add hello").unwrap();
 

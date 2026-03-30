@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use fabro_git_storage::branchstore::BranchStore;
-use fabro_git_storage::gitobj::Store as GitStore;
+use fabro_checkpoint::branch::BranchStore;
+use fabro_checkpoint::git::Store as GitStore;
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::Checkpoint;
 use git2::{Repository, Signature};

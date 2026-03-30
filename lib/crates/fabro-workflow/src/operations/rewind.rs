@@ -3,8 +3,8 @@ use std::fmt::Write;
 use std::str::FromStr;
 
 use anyhow::{Context, Result, bail};
-use fabro_git_storage::branchstore::{BranchStore, CommitInfo};
-use fabro_git_storage::gitobj::Store;
+use fabro_checkpoint::branch::{BranchStore, CommitInfo};
+use fabro_checkpoint::git::Store;
 use fabro_types::RunId;
 use git2::{Oid, Repository, Signature};
 

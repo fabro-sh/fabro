@@ -2,7 +2,7 @@ use git2::{Oid, Signature};
 use tracing::{debug, warn};
 
 use crate::Result;
-use crate::gitobj::{FileMode, Store, TreeEntries};
+use crate::git::{FileMode, Store, TreeEntries};
 
 /// Metadata about a commit, returned by `log`.
 #[derive(Debug)]
@@ -219,7 +219,7 @@ pub fn sharded_path(id: &str, prefix_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gitobj::FileMode;
+    use crate::git::FileMode;
     use git2::Repository;
 
     fn temp_repo() -> (tempfile::TempDir, Store) {

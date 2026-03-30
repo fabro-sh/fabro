@@ -16,3 +16,17 @@ pub enum Error {
     #[error("branch {branch} not found")]
     BranchNotFound { branch: String },
 }
+
+#[derive(Debug, thiserror::Error)]
+pub enum MetadataError {
+    #[error(transparent)]
+    Storage(#[from] Error),
+
+    #[error("deserialize {entity} on branch {branch}")]
+    Deserialize {
+        entity: &'static str,
+        branch: String,
+        #[source]
+        source: serde_json::Error,
+    },
+}

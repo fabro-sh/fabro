@@ -1,10 +1,10 @@
 [package]
-name = "fabro-git-storage"
+name = "fabro-checkpoint"
 edition.workspace = true
 version.workspace = true
 publish = false
 license.workspace = true
-description = "Store structured data in git without touching the working directory"
+description = "Git-backed checkpoint storage for Fabro workflows"
 repository = "https://github.com/brynary/arc"
 
 [lib]
@@ -14,10 +14,13 @@ doctest = false
 workspace = true
 
 [dependencies]
+fabro-types = { path = "../fabro-types" }
 git2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-walkdir.workspace = true
 
 [dev-dependencies]
+chrono.workspace = true
 tempfile = "3"

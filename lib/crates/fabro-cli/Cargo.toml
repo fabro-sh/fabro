@@ -32,7 +32,7 @@ fabro-mcp = { path = "../fabro-mcp" }
 fabro-proctitle = { path = "../fabro-proctitle" }
 fabro-retro = { path = "../fabro-retro" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
-fabro-git-storage = { path = "../fabro-git-storage" }
+fabro-checkpoint = { path = "../fabro-checkpoint" }
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-validate = { path = "../fabro-validate" }
 fabro-workflow = { path = "../fabro-workflow" }

@@ -1447,6 +1447,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-checkpoint"
+version = "0.176.2"
+dependencies = [
+ "chrono",
+ "fabro-types",
+ "git2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "fabro-cli"
 version = "0.176.2"
 dependencies = [
@@ -1466,9 +1480,9 @@ dependencies = [
  "dirs",
  "dotenvy",
  "fabro-agent",
+ "fabro-checkpoint",
  "fabro-config",
  "fabro-devcontainer",
- "fabro-git-storage",
  "fabro-github",
  "fabro-graphviz",
  "fabro-hooks",
@@ -1579,17 +1593,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "fabro-git-storage"
-version = "0.176.2"
-dependencies = [
- "git2",
- "tempfile",
- "thiserror 2.0.18",
- "tracing",
- "walkdir",
 ]
 
 [[package]]
@@ -1993,10 +1996,10 @@ dependencies = [
  "dirs",
  "dotenvy",
  "fabro-agent",
+ "fabro-checkpoint",
  "fabro-config",
  "fabro-core",
  "fabro-devcontainer",
- "fabro-git-storage",
  "fabro-github",
  "fabro-graphviz",
  "fabro-hooks",

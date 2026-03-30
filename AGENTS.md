@@ -61,7 +61,7 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 - **fabro-mcp** — Model Context Protocol client/server
 - **fabro-slack** — Slack integration (socket mode, blocks API)
 - **fabro-devcontainer** — Parses `.devcontainer/devcontainer.json` for container setup
-- **fabro-git-storage** — Git-based storage with branch store and snapshots
+- **fabro-checkpoint** — Git-based checkpoint storage with branch store and metadata branches
 - **fabro-telemetry** — CLI analytics (Segment) and crash reporting (Sentry), with anonymous IDs, command sanitization, and detached subprocess delivery
 - **fabro-util** — Shared utilities (redaction, terminal formatting)
 
