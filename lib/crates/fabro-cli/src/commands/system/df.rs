@@ -61,7 +61,7 @@ async fn df_from(
         }
         if args.verbose {
             run_details.push(RunSizeInfo {
-                run_id: run.run_id.clone(),
+                run_id: run.run_id.to_string(),
                 workflow_name: run.workflow_name.clone(),
                 status: run.status,
                 start_time_dt: run.start_time_dt,

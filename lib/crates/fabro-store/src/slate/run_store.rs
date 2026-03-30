@@ -20,8 +20,8 @@ use crate::{
     RunStore, RunSummary, StoreError,
 };
 use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, Retro, RunRecord, RunStatusRecord, SandboxRecord,
-    StartRecord,
+    Checkpoint, Conclusion, NodeStatusRecord, Retro, RunId, RunRecord, RunStatusRecord,
+    SandboxRecord, StartRecord,
 };
 
 #[derive(Clone)]
@@ -30,7 +30,7 @@ pub(crate) struct SlateRunStore {
 }
 
 pub(crate) struct SlateRunStoreInner {
-    run_id: String,
+    run_id: RunId,
     created_at: DateTime<Utc>,
     db_prefix: String,
     run_dir: Option<String>,
@@ -92,7 +92,7 @@ impl SlateRunStore {
 
     pub(crate) fn record(&self) -> CatalogRecord {
         CatalogRecord {
-            run_id: self.inner.run_id.clone(),
+            run_id: self.inner.run_id,
             created_at: self.inner.created_at,
             db_prefix: self.inner.db_prefix.clone(),
             run_dir: self.inner.run_dir.clone(),
@@ -161,7 +161,7 @@ impl SlateRunStore {
         });
 
         Ok(RunSummary {
-            run_id: catalog.run_id.clone(),
+            run_id: catalog.run_id,
             created_at: catalog.created_at,
             db_prefix: catalog.db_prefix.clone(),
             run_dir: catalog.run_dir.clone(),

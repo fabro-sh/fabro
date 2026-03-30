@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use fabro_agent::{Sandbox, WorktreeConfig, WorktreeSandbox};
+use fabro_types::RunId;
 use tokio::sync::Semaphore;
 
 use crate::context::keys;
@@ -155,11 +156,12 @@ impl Handler for ParallelHandler {
             join_policy: join_policy.to_string(),
         });
         {
-            let mut hook_ctx = HookContext::new(
-                HookEvent::ParallelStart,
-                context.run_id(),
-                graph.name.clone(),
-            );
+            let run_id = context
+                .run_id()
+                .parse::<RunId>()
+                .map_err(|err| FabroError::handler(format!("invalid internal run_id: {err}")))?;
+            let mut hook_ctx =
+                HookContext::new(HookEvent::ParallelStart, run_id, graph.name.clone());
             set_hook_node(&mut hook_ctx, node);
             let _ = services.run_hooks(&hook_ctx).await;
         }
@@ -177,7 +179,7 @@ impl Handler for ParallelHandler {
         let base_sha: Option<String> = if let Some(ref gs) = git_state {
             let result = git_checkpoint(
                 &*services.sandbox,
-                &gs.run_id,
+                &gs.run_id.to_string(),
                 &node.id,
                 "parallel_base",
                 0,
@@ -219,9 +221,12 @@ impl Handler for ParallelHandler {
                 );
 
                 // Compute worktree path (each sandbox type knows its own path scheme)
-                let wt_path_str = services
-                    .sandbox
-                    .parallel_worktree_path(run_dir, &gs.run_id, &node.id, branch_key);
+                let wt_path_str = services.sandbox.parallel_worktree_path(
+                    run_dir,
+                    &gs.run_id.to_string(),
+                    &node.id,
+                    branch_key,
+                );
                 tracing::debug!(branch = %branch_name, path = %wt_path_str, "Creating worktree for parallel branch");
 
                 // Set up worktree via WorktreeSandbox
@@ -329,7 +334,9 @@ impl Handler for ParallelHandler {
 
                 // Checkpoint commit after branch execution (capture head_sha)
                 let head_sha = if has_git {
-                    let rid = run_id.as_deref().unwrap_or("unknown");
+                    let rid = run_id
+                        .map(|run_id| run_id.to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
                     let nid = &setup.target_id;
                     let status_str = outcome.status.to_string();
                     // Use exec_command to commit and capture HEAD in the branch worktree
@@ -482,11 +489,12 @@ impl Handler for ParallelHandler {
             failure_count: fail_count,
         });
         {
-            let mut hook_ctx = HookContext::new(
-                HookEvent::ParallelComplete,
-                context.run_id(),
-                graph.name.clone(),
-            );
+            let run_id = context
+                .run_id()
+                .parse::<RunId>()
+                .map_err(|err| FabroError::handler(format!("invalid internal run_id: {err}")))?;
+            let mut hook_ctx =
+                HookContext::new(HookEvent::ParallelComplete, run_id, graph.name.clone());
             set_hook_node(&mut hook_ctx, node);
             let _ = services.run_hooks(&hook_ctx).await;
         }
@@ -574,16 +582,26 @@ fn find_join_node(results: &[BranchResult], graph: &Graph) -> Option<String> {
 mod tests {
     use super::*;
     use fabro_graphviz::graph::{AttrValue, Edge};
+    use fabro_types::fixtures;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
+    }
+
+    fn test_context() -> Context {
+        let context = Context::new();
+        context.set(
+            crate::context::keys::INTERNAL_RUN_ID,
+            serde_json::json!(fixtures::RUN_1.to_string()),
+        );
+        context
     }
 
     #[tokio::test]
     async fn parallel_handler_no_branches() {
         let services = make_services();
         let node = Node::new("par");
-        let context = Context::new();
+        let context = test_context();
         let graph = Graph::new("test");
         let run_dir = Path::new("/tmp/test");
 
@@ -602,7 +620,7 @@ mod tests {
             "shape".to_string(),
             AttrValue::String("component".to_string()),
         );
-        let context = Context::new();
+        let context = test_context();
         let mut graph = Graph::new("test");
         graph.nodes.insert("par".to_string(), node.clone());
         graph
@@ -654,7 +672,7 @@ mod tests {
             "join_policy".to_string(),
             AttrValue::String("first_success".to_string()),
         );
-        let context = Context::new();
+        let context = test_context();
         let mut graph = Graph::new("test");
         graph.nodes.insert("par".to_string(), node.clone());
         graph
@@ -696,7 +714,7 @@ mod tests {
             "shape".to_string(),
             AttrValue::String("component".to_string()),
         );
-        let context = Context::new();
+        let context = test_context();
         let mut graph = Graph::new("test");
         graph.nodes.insert("par".to_string(), node.clone());
         graph

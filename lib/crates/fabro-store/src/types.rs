@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Result, StoreError};
 use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, Retro, RunRecord, RunStatus, RunStatusRecord,
+    Checkpoint, Conclusion, NodeStatusRecord, Retro, RunId, RunRecord, RunStatus, RunStatusRecord,
     SandboxRecord, StartRecord, StatusReason,
 };
 
@@ -17,7 +17,7 @@ pub struct NodeVisitRef<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogRecord {
-    pub run_id: String,
+    pub run_id: RunId,
     pub created_at: DateTime<Utc>,
     pub db_prefix: String,
     pub run_dir: Option<String>,
@@ -25,7 +25,7 @@ pub struct CatalogRecord {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSummary {
-    pub run_id: String,
+    pub run_id: RunId,
     pub created_at: DateTime<Utc>,
     pub db_prefix: String,
     pub run_dir: Option<String>,
@@ -70,13 +70,13 @@ pub struct NodeSnapshot {
 pub struct EventPayload(serde_json::Value);
 
 impl EventPayload {
-    pub fn new(value: serde_json::Value, expected_run_id: &str) -> Result<Self> {
+    pub fn new(value: serde_json::Value, expected_run_id: &RunId) -> Result<Self> {
         let payload = Self(value);
         payload.validate(expected_run_id)?;
         Ok(payload)
     }
 
-    pub fn validate(&self, expected_run_id: &str) -> Result<()> {
+    pub fn validate(&self, expected_run_id: &RunId) -> Result<()> {
         let obj = self.0.as_object().ok_or_else(|| {
             StoreError::InvalidEvent("event payload must be a JSON object".into())
         })?;
@@ -93,7 +93,9 @@ impl EventPayload {
         }
 
         match obj.get("run_id") {
-            Some(serde_json::Value::String(run_id)) if run_id == expected_run_id => Ok(()),
+            Some(serde_json::Value::String(run_id)) if run_id == &expected_run_id.to_string() => {
+                Ok(())
+            }
             Some(serde_json::Value::String(run_id)) => Err(StoreError::InvalidEvent(format!(
                 "payload run_id {run_id:?} does not match store run_id {expected_run_id:?}"
             ))),

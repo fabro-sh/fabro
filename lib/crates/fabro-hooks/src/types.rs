@@ -1,12 +1,13 @@
 pub use fabro_config::hook::HookEvent;
 
+use fabro_types::RunId;
 use serde::{Deserialize, Serialize};
 
 /// Rich JSON payload sent to hooks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookContext {
     pub event: HookEvent,
-    pub run_id: String,
+    pub run_id: RunId,
     pub workflow_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
@@ -44,7 +45,7 @@ pub struct HookContext {
 
 impl HookContext {
     #[must_use]
-    pub fn new(event: HookEvent, run_id: String, workflow_name: String) -> Self {
+    pub fn new(event: HookEvent, run_id: RunId, workflow_name: String) -> Self {
         Self {
             event,
             run_id,
@@ -126,12 +127,13 @@ pub struct HookResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fabro_types::fixtures;
 
     #[test]
     fn hook_context_serde_round_trip() {
         let ctx = HookContext {
             event: HookEvent::StageStart,
-            run_id: "run-123".into(),
+            run_id: fixtures::RUN_1,
             workflow_name: "test-wf".into(),
             cwd: Some("/tmp".into()),
             node_id: Some("plan".into()),
@@ -153,13 +155,13 @@ mod tests {
         let json = serde_json::to_string(&ctx).unwrap();
         let back: HookContext = serde_json::from_str(&json).unwrap();
         assert_eq!(back.event, HookEvent::StageStart);
-        assert_eq!(back.run_id, "run-123");
+        assert_eq!(back.run_id, fixtures::RUN_1);
         assert_eq!(back.node_id.as_deref(), Some("plan"));
     }
 
     #[test]
     fn hook_context_omits_none_fields() {
-        let ctx = HookContext::new(HookEvent::RunStart, "run-1".into(), "wf".into());
+        let ctx = HookContext::new(HookEvent::RunStart, fixtures::RUN_1, "wf".into());
         let json = serde_json::to_string(&ctx).unwrap();
         assert!(!json.contains("node_id"));
         assert!(!json.contains("failure_reason"));
@@ -258,7 +260,7 @@ mod tests {
 
     #[test]
     fn hook_context_with_tool_fields() {
-        let mut ctx = HookContext::new(HookEvent::PreToolUse, "run-1".into(), "wf".into());
+        let mut ctx = HookContext::new(HookEvent::PreToolUse, fixtures::RUN_1, "wf".into());
         ctx.tool_name = Some("shell".into());
         ctx.tool_input = Some(serde_json::json!({"command": "ls"}));
         ctx.tool_call_id = Some("call_123".into());
@@ -270,7 +272,7 @@ mod tests {
 
     #[test]
     fn hook_context_tool_output_serializes() {
-        let mut ctx = HookContext::new(HookEvent::PostToolUse, "run-1".into(), "wf".into());
+        let mut ctx = HookContext::new(HookEvent::PostToolUse, fixtures::RUN_1, "wf".into());
         ctx.tool_name = Some("shell".into());
         ctx.tool_output = Some("file1.txt\nfile2.txt".into());
         let json = serde_json::to_string(&ctx).unwrap();

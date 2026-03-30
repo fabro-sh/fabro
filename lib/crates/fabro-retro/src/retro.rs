@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use fabro_types::RunId;
 pub use fabro_types::retro::{
     AggregateStats, FrictionKind, FrictionPoint, Learning, LearningCategory, OpenItem,
     OpenItemKind, Retro, RetroNarrative, SmoothnessRating, StageRetro,
@@ -68,7 +69,7 @@ pub fn extract_stage_durations(run_dir: &Path) -> HashMap<String, u64> {
 }
 
 pub fn derive_retro(
-    run_id: &str,
+    run_id: RunId,
     workflow_name: &str,
     goal: &str,
     completed_stages: Vec<CompletedStage>,
@@ -133,7 +134,7 @@ pub fn derive_retro(
     };
 
     Retro {
-        run_id: run_id.to_string(),
+        run_id,
         workflow_name: workflow_name.to_string(),
         goal: goal.to_string(),
         timestamp: chrono::Utc::now(),

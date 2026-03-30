@@ -12,6 +12,7 @@ use crate::{
 use async_trait::async_trait;
 use daytona_sdk::api_types::SignedPortPreviewUrl;
 use fabro_github::GitHubAppCredentials;
+use fabro_types::RunId;
 use rand::Rng;
 use tokio::fs;
 use tokio::sync::OnceCell;
@@ -36,7 +37,7 @@ pub struct DaytonaSandbox {
     event_callback: Option<SandboxEventCallback>,
     /// HTTPS origin URL stored after clone so we can refresh push credentials later.
     origin_url: OnceCell<String>,
-    run_id: Option<String>,
+    run_id: Option<RunId>,
     /// Explicit branch to clone. When set, overrides the branch detected by
     /// `detect_repo_info` — avoids cloning a local-only worktree branch
     /// (e.g. `fabro/run/...`) that was never pushed to origin.
@@ -48,7 +49,7 @@ impl DaytonaSandbox {
     pub async fn new(
         config: DaytonaConfig,
         github_app: Option<GitHubAppCredentials>,
-        run_id: Option<String>,
+        run_id: Option<RunId>,
         clone_branch: Option<String>,
     ) -> Result<Self, String> {
         let client = daytona_sdk::Client::new()

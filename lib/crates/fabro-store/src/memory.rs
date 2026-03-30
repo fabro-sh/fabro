@@ -18,13 +18,13 @@ use crate::{
     RunSnapshot, RunStore, RunSummary, Store, StoreError,
 };
 use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, Retro, RunRecord, RunStatusRecord, SandboxRecord,
-    StartRecord,
+    Checkpoint, Conclusion, NodeStatusRecord, Retro, RunId, RunRecord, RunStatusRecord,
+    SandboxRecord, StartRecord,
 };
 
 #[derive(Debug, Default)]
 pub struct InMemoryStore {
-    runs: Mutex<HashMap<String, InMemoryCatalog>>,
+    runs: Mutex<HashMap<RunId, InMemoryCatalog>>,
 }
 
 #[derive(Debug, Clone)]
@@ -35,7 +35,7 @@ struct InMemoryCatalog {
 
 #[derive(Debug)]
 struct InMemoryRunStore {
-    run_id: String,
+    run_id: RunId,
     created_at: DateTime<Utc>,
     data: Mutex<BTreeMap<String, Vec<u8>>>,
     event_seq: AtomicU32,
@@ -45,13 +45,13 @@ struct InMemoryRunStore {
 
 impl InMemoryRunStore {
     fn new(
-        run_id: &str,
+        run_id: &RunId,
         created_at: DateTime<Utc>,
         db_prefix: String,
         run_dir: Option<String>,
     ) -> Result<Self> {
         let record = CatalogRecord {
-            run_id: run_id.to_string(),
+            run_id: *run_id,
             created_at,
             db_prefix,
             run_dir,
@@ -59,7 +59,7 @@ impl InMemoryRunStore {
         let mut data = BTreeMap::new();
         data.insert(keys::init().to_string(), serde_json::to_vec(&record)?);
         Ok(Self {
-            run_id: run_id.to_string(),
+            run_id: *run_id,
             created_at,
             data: Mutex::new(data),
             event_seq: AtomicU32::new(1),
@@ -247,7 +247,7 @@ impl InMemoryRunStore {
 impl Store for InMemoryStore {
     async fn create_run(
         &self,
-        run_id: &str,
+        run_id: &RunId,
         created_at: DateTime<Utc>,
         run_dir: Option<&str>,
     ) -> Result<Arc<dyn RunStore>> {
@@ -268,25 +268,25 @@ impl Store for InMemoryStore {
         )?);
         let catalog = InMemoryCatalog {
             record: CatalogRecord {
-                run_id: run_id.to_string(),
+                run_id: *run_id,
                 created_at,
                 db_prefix,
                 run_dir: run_dir.map(ToOwned::to_owned),
             },
             run_store: Arc::clone(&run_store),
         };
-        runs.insert(run_id.to_string(), catalog);
+        runs.insert(*run_id, catalog);
         Ok(run_store as Arc<dyn RunStore>)
     }
 
-    async fn open_run(&self, run_id: &str) -> Result<Option<Arc<dyn RunStore>>> {
+    async fn open_run(&self, run_id: &RunId) -> Result<Option<Arc<dyn RunStore>>> {
         let runs = self.runs.lock().await;
         Ok(runs
             .get(run_id)
             .map(|catalog| Arc::clone(&catalog.run_store) as Arc<dyn RunStore>))
     }
 
-    async fn open_run_reader(&self, run_id: &str) -> Result<Option<Arc<dyn RunStore>>> {
+    async fn open_run_reader(&self, run_id: &RunId) -> Result<Option<Arc<dyn RunStore>>> {
         self.open_run(run_id).await
     }
 
@@ -308,7 +308,7 @@ impl Store for InMemoryStore {
         Ok(summaries)
     }
 
-    async fn delete_run(&self, run_id: &str) -> Result<()> {
+    async fn delete_run(&self, run_id: &RunId) -> Result<()> {
         self.runs.lock().await.remove(run_id);
         Ok(())
     }
@@ -621,7 +621,7 @@ fn build_run_summary(
     });
 
     Ok(RunSummary {
-        run_id: record.run_id.clone(),
+        run_id: record.run_id,
         created_at: record.created_at,
         db_prefix: record.db_prefix.clone(),
         run_dir: record.run_dir.clone(),
@@ -649,11 +649,23 @@ mod tests {
     use std::time::Duration;
 
     use chrono::Duration as ChronoDuration;
-    use fabro_types::{AttrValue, FabroSettings, Graph, RunStatus, StageStatus, StatusReason};
+    use fabro_types::{
+        AttrValue, FabroSettings, Graph, RunId, RunStatus, StageStatus, StatusReason, fixtures,
+    };
     fn dt(rfc3339: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(rfc3339)
             .unwrap()
             .with_timezone(&Utc)
+    }
+
+    fn test_run_id(label: &str) -> RunId {
+        match label {
+            "run-1" => fixtures::RUN_1,
+            "run-early" => fixtures::RUN_2,
+            "run-late" => fixtures::RUN_3,
+            "other-run" => fixtures::RUN_4,
+            _ => panic!("unknown test run id: {label}"),
+        }
     }
 
     fn sample_run_record(run_id: &str, created_at: DateTime<Utc>) -> RunRecord {
@@ -663,7 +675,7 @@ mod tests {
             AttrValue::String("map the constellations".to_string()),
         );
         RunRecord {
-            run_id: run_id.to_string(),
+            run_id: test_run_id(run_id),
             created_at,
             settings: FabroSettings::default(),
             graph,
@@ -677,7 +689,7 @@ mod tests {
 
     fn sample_start_record(run_id: &str, created_at: DateTime<Utc>) -> StartRecord {
         StartRecord {
-            run_id: run_id.to_string(),
+            run_id: test_run_id(run_id),
             start_time: created_at + ChronoDuration::seconds(5),
             run_branch: Some("fabro/run/demo".to_string()),
             base_sha: Some("abc123".to_string()),
@@ -732,7 +744,7 @@ mod tests {
 
     fn sample_retro(run_id: &str) -> Retro {
         Retro {
-            run_id: run_id.to_string(),
+            run_id: test_run_id(run_id),
             workflow_name: "night-sky".to_string(),
             goal: "map the constellations".to_string(),
             timestamp: dt("2026-03-27T12:20:00Z"),
@@ -778,7 +790,10 @@ mod tests {
     async fn create_run_put_get_and_snapshot_round_trip() {
         let store = InMemoryStore::default();
         let created_at = dt("2026-03-27T12:00:00Z");
-        let run = store.create_run("run-1", created_at, None).await.unwrap();
+        let run = store
+            .create_run(&test_run_id("run-1"), created_at, None)
+            .await
+            .unwrap();
 
         let run_record = sample_run_record("run-1", created_at);
         let start_record = sample_start_record("run-1", created_at);
@@ -899,7 +914,10 @@ mod tests {
     async fn list_artifact_values_and_all_assets_include_asset_only_visits() {
         let store = InMemoryStore::default();
         let created_at = dt("2026-03-27T12:00:00Z");
-        let run = store.create_run("run-1", created_at, None).await.unwrap();
+        let run = store
+            .create_run(&test_run_id("run-1"), created_at, None)
+            .await
+            .unwrap();
         run.put_run(&sample_run_record("run-1", created_at))
             .await
             .unwrap();
@@ -955,7 +973,7 @@ mod tests {
     async fn append_event_validates_payload_shape_and_run_id() {
         let store = InMemoryStore::default();
         let run = store
-            .create_run("run-1", dt("2026-03-27T12:00:00Z"), None)
+            .create_run(&test_run_id("run-1"), dt("2026-03-27T12:00:00Z"), None)
             .await
             .unwrap();
 
@@ -980,7 +998,10 @@ mod tests {
     async fn put_run_rejects_created_at_mismatch() {
         let store = InMemoryStore::default();
         let created_at = dt("2026-03-27T12:00:00Z");
-        let run = store.create_run("run-1", created_at, None).await.unwrap();
+        let run = store
+            .create_run(&test_run_id("run-1"), created_at, None)
+            .await
+            .unwrap();
         let err = run
             .put_run(&sample_run_record(
                 "run-1",
@@ -995,25 +1016,25 @@ mod tests {
     async fn watch_events_from_receives_existing_and_live_events() {
         let store = InMemoryStore::default();
         let run = store
-            .create_run("run-1", dt("2026-03-27T12:00:00Z"), None)
+            .create_run(&test_run_id("run-1"), dt("2026-03-27T12:00:00Z"), None)
             .await
             .unwrap();
         let first = EventPayload::new(
             serde_json::json!({
                 "ts": "2026-03-27T12:00:00.000Z",
-                "run_id": "run-1",
+                "run_id": test_run_id("run-1").to_string(),
                 "event": "WorkflowRunStarted"
             }),
-            "run-1",
+            &test_run_id("run-1"),
         )
         .unwrap();
         let second = EventPayload::new(
             serde_json::json!({
                 "ts": "2026-03-27T12:00:01.000Z",
-                "run_id": "run-1",
+                "run_id": test_run_id("run-1").to_string(),
                 "event": "StageCompleted"
             }),
-            "run-1",
+            &test_run_id("run-1"),
         )
         .unwrap();
 
@@ -1046,7 +1067,7 @@ mod tests {
     async fn checkpoint_history_round_trips() {
         let store = InMemoryStore::default();
         let run = store
-            .create_run("run-1", dt("2026-03-27T12:00:00Z"), None)
+            .create_run(&test_run_id("run-1"), dt("2026-03-27T12:00:00Z"), None)
             .await
             .unwrap();
         let checkpoint = sample_checkpoint();
@@ -1065,7 +1086,7 @@ mod tests {
     async fn node_visit_storage_round_trips() {
         let store = InMemoryStore::default();
         let run = store
-            .create_run("run-1", dt("2026-03-27T12:00:00Z"), None)
+            .create_run(&test_run_id("run-1"), dt("2026-03-27T12:00:00Z"), None)
             .await
             .unwrap();
 
@@ -1094,13 +1115,19 @@ mod tests {
         let early = dt("2026-03-27T10:00:00Z");
         let late = dt("2026-03-27T12:00:00Z");
 
-        let early_run = store.create_run("run-early", early, None).await.unwrap();
+        let early_run = store
+            .create_run(&test_run_id("run-early"), early, None)
+            .await
+            .unwrap();
         early_run
             .put_run(&sample_run_record("run-early", early))
             .await
             .unwrap();
 
-        let late_run = store.create_run("run-late", late, None).await.unwrap();
+        let late_run = store
+            .create_run(&test_run_id("run-late"), late, None)
+            .await
+            .unwrap();
         late_run
             .put_run(&sample_run_record("run-late", late))
             .await
@@ -1120,7 +1147,7 @@ mod tests {
 
         let all = store.list_runs(&ListRunsQuery::default()).await.unwrap();
         assert_eq!(all.len(), 2);
-        assert_eq!(all[0].run_id, "run-late");
+        assert_eq!(all[0].run_id, test_run_id("run-late"));
         assert_eq!(all[0].workflow_name, Some("night-sky".to_string()));
         assert_eq!(all[0].goal, Some("map the constellations".to_string()));
         assert_eq!(
@@ -1140,19 +1167,25 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].run_id, "run-late");
+        assert_eq!(filtered[0].run_id, test_run_id("run-late"));
     }
 
     #[tokio::test]
     async fn delete_run_is_idempotent() {
         let store = InMemoryStore::default();
         store
-            .create_run("run-1", dt("2026-03-27T12:00:00Z"), None)
+            .create_run(&test_run_id("run-1"), dt("2026-03-27T12:00:00Z"), None)
             .await
             .unwrap();
-        store.delete_run("run-1").await.unwrap();
-        store.delete_run("run-1").await.unwrap();
-        assert!(store.open_run("run-1").await.unwrap().is_none());
+        store.delete_run(&test_run_id("run-1")).await.unwrap();
+        store.delete_run(&test_run_id("run-1")).await.unwrap();
+        assert!(
+            store
+                .open_run(&test_run_id("run-1"))
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -1161,14 +1194,23 @@ mod tests {
         let ts = dt("2026-03-27T12:00:00Z");
 
         // First create succeeds.
-        store.create_run("run-1", ts, None).await.unwrap();
+        store
+            .create_run(&test_run_id("run-1"), ts, None)
+            .await
+            .unwrap();
 
         // Retry with exact same created_at succeeds (idempotent).
-        store.create_run("run-1", ts, None).await.unwrap();
+        store
+            .create_run(&test_run_id("run-1"), ts, None)
+            .await
+            .unwrap();
 
         // Different created_at for the same run_id is rejected.
         let different_ts = dt("2026-03-27T12:00:01Z");
-        match store.create_run("run-1", different_ts, None).await {
+        match store
+            .create_run(&test_run_id("run-1"), different_ts, None)
+            .await
+        {
             Err(StoreError::RunAlreadyExists(_)) => {} // expected
             Err(other) => panic!("expected RunAlreadyExists, got: {other:?}"),
             Ok(_) => panic!("expected RunAlreadyExists, but create_run succeeded"),

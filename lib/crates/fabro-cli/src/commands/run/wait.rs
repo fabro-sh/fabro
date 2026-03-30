@@ -2,6 +2,7 @@ use std::io::Write;
 
 use anyhow::{Result, bail};
 use fabro_config::FabroSettingsExt;
+use fabro_types::RunId;
 use fabro_util::terminal::Styles;
 use fabro_workflows::records::{Conclusion, ConclusionExt};
 use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
@@ -92,7 +93,7 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
 
 fn build_json_output(
     status: RunStatus,
-    run_id: &str,
+    run_id: &RunId,
     conclusion: Option<&Conclusion>,
 ) -> serde_json::Value {
     let mut value = serde_json::json!({
@@ -110,7 +111,7 @@ fn build_json_output(
 
 fn print_human_output(
     status: RunStatus,
-    run_id: &str,
+    run_id: &RunId,
     conclusion: Option<&Conclusion>,
     styles: &Styles,
 ) {
@@ -145,6 +146,7 @@ fn print_human_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fabro_types::fixtures;
     use fabro_workflows::outcome::StageStatus;
     use fabro_workflows::records::Conclusion;
 
@@ -154,6 +156,7 @@ mod tests {
 
     #[test]
     fn json_output_succeeded_with_conclusion() {
+        let run_id = fixtures::RUN_1;
         let conclusion = Conclusion {
             timestamp: chrono::Utc::now(),
             status: StageStatus::Success,
@@ -170,8 +173,8 @@ mod tests {
             total_reasoning_tokens: 0,
             has_pricing: false,
         };
-        let json = build_json_output(RunStatus::Succeeded, "ABC123", Some(&conclusion));
-        assert_eq!(json["run_id"], "ABC123");
+        let json = build_json_output(RunStatus::Succeeded, &run_id, Some(&conclusion));
+        assert_eq!(json["run_id"], run_id.to_string());
         assert_eq!(json["status"], "succeeded");
         assert_eq!(json["duration_ms"], 12345);
         assert!((json["total_cost"].as_f64().unwrap() - 0.42).abs() < f64::EPSILON);
@@ -179,8 +182,9 @@ mod tests {
 
     #[test]
     fn json_output_failed_without_conclusion() {
-        let json = build_json_output(RunStatus::Failed, "DEF456", None);
-        assert_eq!(json["run_id"], "DEF456");
+        let run_id = fixtures::RUN_2;
+        let json = build_json_output(RunStatus::Failed, &run_id, None);
+        assert_eq!(json["run_id"], run_id.to_string());
         assert_eq!(json["status"], "failed");
         assert!(json.get("duration_ms").is_none());
         assert!(json.get("total_cost").is_none());
@@ -188,12 +192,13 @@ mod tests {
 
     #[test]
     fn json_output_dead_status() {
-        let json = build_json_output(RunStatus::Dead, "GHI789", None);
+        let json = build_json_output(RunStatus::Dead, &fixtures::RUN_3, None);
         assert_eq!(json["status"], "dead");
     }
 
     #[test]
     fn json_output_no_cost_when_none() {
+        let run_id = fixtures::RUN_4;
         let conclusion = Conclusion {
             timestamp: chrono::Utc::now(),
             status: StageStatus::Fail,
@@ -210,7 +215,7 @@ mod tests {
             total_reasoning_tokens: 0,
             has_pricing: false,
         };
-        let json = build_json_output(RunStatus::Failed, "JKL012", Some(&conclusion));
+        let json = build_json_output(RunStatus::Failed, &run_id, Some(&conclusion));
         assert!(json.get("total_cost").is_none());
         assert_eq!(json["duration_ms"], 500);
     }
@@ -218,6 +223,7 @@ mod tests {
     #[test]
     fn human_output_succeeded() {
         let styles = no_color_styles();
+        let run_id = fixtures::RUN_5;
         let conclusion = Conclusion {
             timestamp: chrono::Utc::now(),
             status: StageStatus::Success,
@@ -235,13 +241,13 @@ mod tests {
             has_pricing: false,
         };
         // Just verify no panic; actual stderr output is hard to capture
-        print_human_output(RunStatus::Succeeded, "ABC123", Some(&conclusion), &styles);
+        print_human_output(RunStatus::Succeeded, &run_id, Some(&conclusion), &styles);
     }
 
     #[test]
     fn human_output_failed_no_conclusion() {
         let styles = no_color_styles();
-        print_human_output(RunStatus::Failed, "DEF456", None, &styles);
+        print_human_output(RunStatus::Failed, &fixtures::RUN_6, None, &styles);
     }
 
     #[test]

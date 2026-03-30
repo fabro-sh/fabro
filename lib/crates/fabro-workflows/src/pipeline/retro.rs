@@ -41,7 +41,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
         }
     };
     let mut retro = derive_retro(
-        &options.run_id,
+        options.run_id,
         &options.workflow_name,
         &options.goal,
         completed_stages,
@@ -174,6 +174,7 @@ mod tests {
     use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
     use fabro_store::{InMemoryStore, Store};
+    use fabro_types::{RunId, fixtures};
 
     use super::*;
     use crate::context::Context;
@@ -181,6 +182,10 @@ mod tests {
     use crate::pipeline::types::Executed;
     use crate::records::{Checkpoint, CheckpointExt};
     use crate::run_options::RunOptions;
+
+    fn test_run_id() -> RunId {
+        fixtures::RUN_1
+    }
 
     fn write_checkpoint(run_dir: &std::path::Path) -> Checkpoint {
         let context = Context::new();
@@ -208,7 +213,7 @@ mod tests {
     ) -> Arc<dyn fabro_store::RunStore> {
         let inner = InMemoryStore::default()
             .create_run(
-                "run-test",
+                &test_run_id(),
                 Utc::now(),
                 Some(run_dir.to_string_lossy().as_ref()),
             )
@@ -226,7 +231,7 @@ mod tests {
             settings: FabroSettings::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,
-            run_id: "run-test".to_string(),
+            run_id: test_run_id(),
             labels: HashMap::new(),
             workflow_slug: None,
             github_app: None,
@@ -266,7 +271,7 @@ mod tests {
         let retroed = retro(
             executed,
             &RetroOptions {
-                run_id: "run-test".to_string(),
+                run_id: test_run_id(),
                 run_store: test_run_store(&run_dir, &checkpoint).await,
                 workflow_name: "test".to_string(),
                 goal: "Ship it".to_string(),
@@ -303,7 +308,7 @@ mod tests {
 
         let retro = run_retro(
             &RetroOptions {
-                run_id: "run-test".to_string(),
+                run_id: test_run_id(),
                 run_store: test_run_store(&run_dir, &checkpoint).await,
                 workflow_name: "test".to_string(),
                 goal: "Ship it".to_string(),

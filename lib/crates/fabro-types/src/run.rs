@@ -5,11 +5,12 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::graph::Graph;
+use crate::run_id::RunId;
 use crate::settings::FabroSettings;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunRecord {
-    pub run_id: String,
+    pub run_id: RunId,
     pub created_at: DateTime<Utc>,
     pub settings: FabroSettings,
     pub graph: Graph,

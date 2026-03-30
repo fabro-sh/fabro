@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use fabro_store::RunStore;
+use fabro_types::RunId;
 
 use fabro_core::error::{CoreError, Result as CoreResult};
 use fabro_core::graph::NodeSpec;
@@ -37,7 +38,7 @@ pub(crate) struct GitLifecycle {
     pub artifact_store: Arc<Mutex<ArtifactStore>>,
     pub emitter: Arc<EventEmitter>,
     pub run_dir: PathBuf,
-    pub run_id: String,
+    pub run_id: RunId,
     pub run_store: Arc<dyn RunStore>,
     pub run_options: Arc<RunOptions>,
     pub start_node_id: Option<String>,
@@ -97,7 +98,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             if let Some(ref data) = sandbox_json {
                 files.push(("sandbox.json", data));
             }
-            if let Err(e) = store.init_run(&self.run_id, &files) {
+            if let Err(e) = store.init_run(&self.run_id.to_string(), &files) {
                 tracing::warn!(
                     run_id = %self.run_id,
                     error = %e,
@@ -160,7 +161,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                         .iter()
                         .map(|(k, v)| (k.as_str(), v.as_slice()))
                         .collect();
-                    match store.write_checkpoint(&self.run_id, &cp_json, &extra_refs) {
+                    match store.write_checkpoint(&self.run_id.to_string(), &cp_json, &extra_refs) {
                         Ok(sha) => Some(sha),
                         Err(e) => {
                             self.emitter.emit(&WorkflowRunEvent::RunNotice {
@@ -183,7 +184,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         let git_author = self.run_options.git_author();
         let commit_result = git_checkpoint(
             &*self.sandbox,
-            &self.run_id,
+            &self.run_id.to_string(),
             node_id,
             &result.outcome.status.to_string(),
             completed_count,

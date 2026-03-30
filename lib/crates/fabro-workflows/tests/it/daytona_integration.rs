@@ -4,6 +4,8 @@
 //! Run with: `cargo test --package arc-workflows -- --ignored daytona`
 
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -14,6 +16,7 @@ use fabro_llm::provider::Provider;
 use fabro_sandbox::SandboxRecordExt;
 use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 use fabro_store::RuntimeState;
+use fabro_types::RunId;
 use fabro_workflows::artifact::sync_artifacts_to_env;
 use fabro_workflows::context::Context;
 use fabro_workflows::error::FabroError;
@@ -25,6 +28,13 @@ use fabro_workflows::outcome::{Outcome, OutcomeExt, StageStatus};
 use fabro_workflows::records::{Checkpoint, CheckpointExt};
 use fabro_workflows::run_options::{GitCheckpointOptions, RunOptions};
 use fabro_workflows::test_support::WorkflowRunner;
+use ulid::Ulid;
+
+fn test_run_id(label: &str) -> RunId {
+    let mut hasher = DefaultHasher::new();
+    label.hash(&mut hasher);
+    RunId::from(Ulid(u128::from(hasher.finish())))
+}
 
 async fn create_env() -> DaytonaSandbox {
     let creds = load_github_app_credentials();
@@ -394,7 +404,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -473,7 +483,7 @@ impl Handler for FileWriterHandler {
 
 /// Set up git inside a Daytona sandbox for checkpoint commits.
 /// Returns (run_id, base_sha, branch_name) on success.
-async fn setup_daytona_git(sandbox: &dyn Sandbox) -> (String, String, String) {
+async fn setup_daytona_git(sandbox: &dyn Sandbox) -> (RunId, String, String) {
     // Get current HEAD as base SHA
     let sha_result = sandbox
         .exec_command("git rev-parse HEAD", 10_000, None, None, None)
@@ -486,7 +496,7 @@ async fn setup_daytona_git(sandbox: &dyn Sandbox) -> (String, String, String) {
     );
     let base_sha = sha_result.stdout.trim().to_string();
 
-    let run_id = ulid::Ulid::new().to_string();
+    let run_id = RunId::from(Ulid::new());
     let branch_name = format!("fabro/run/{run_id}");
 
     let checkout_cmd = format!("git checkout -b {branch_name}");
@@ -584,7 +594,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "git-cp-test".into(),
+        run_id: test_run_id("git-cp-test"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -769,7 +779,7 @@ async fn daytona_parallel_git_branching_e2e() {
         settings: FabroSettings::default(),
         run_dir: run_tmp.path().to_path_buf(),
         cancel_token: None,
-        run_id: run_id.clone(),
+        run_id,
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -1138,13 +1148,13 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
 
-    let meta_branch = MetadataStore::branch_name(&run_id);
+    let meta_branch = MetadataStore::branch_name(&run_id.to_string());
     let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::new()), env.clone());
     let run_options = RunOptions {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: run_id.clone(),
+        run_id,
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -1164,7 +1174,7 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Assert shadow branch on host has checkpoint data
-    let checkpoint = MetadataStore::read_checkpoint(host_repo.path(), &run_id)
+    let checkpoint = MetadataStore::read_checkpoint(host_repo.path(), &run_id.to_string())
         .expect("read_checkpoint should not error")
         .expect("shadow branch should contain checkpoint data");
     assert!(
@@ -1288,7 +1298,7 @@ async fn daytona_asset_collection() {
         },
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "asset-test-daytona".into(),
+        run_id: test_run_id("asset-test-daytona"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -1533,7 +1543,7 @@ async fn daytona_git_push_run_branch_to_origin() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: run_id.clone(),
+        run_id,
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,

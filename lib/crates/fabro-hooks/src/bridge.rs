@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use fabro_agent::{Sandbox, ToolHookCallback, ToolHookDecision};
+use fabro_types::RunId;
 
 use crate::runner::HookRunner;
 use crate::types::{HookContext, HookDecision, HookEvent};
@@ -13,7 +14,7 @@ use crate::types::{HookContext, HookDecision, HookEvent};
 pub struct WorkflowToolHookCallback {
     pub hook_runner: Arc<HookRunner>,
     pub sandbox: Arc<dyn Sandbox>,
-    pub run_id: String,
+    pub run_id: RunId,
     pub workflow_name: String,
     pub work_dir: Option<PathBuf>,
     pub node_id: String,
@@ -75,6 +76,7 @@ mod tests {
     use crate::config::{HookConfig, HookDefinition};
     use crate::executor::HookExecutor;
     use crate::types::{HookContext, HookResult};
+    use fabro_types::fixtures;
     use std::path::Path;
     use std::sync::Mutex;
 
@@ -127,7 +129,7 @@ mod tests {
         WorkflowToolHookCallback {
             hook_runner,
             sandbox,
-            run_id: "run-1".into(),
+            run_id: fixtures::RUN_1,
             workflow_name: "test-wf".into(),
             work_dir: None,
             node_id: "plan".into(),
@@ -160,7 +162,7 @@ mod tests {
             contexts[0].tool_input,
             Some(serde_json::json!({"command": "ls"}))
         );
-        assert_eq!(contexts[0].run_id, "run-1");
+        assert_eq!(contexts[0].run_id, fixtures::RUN_1);
         assert_eq!(contexts[0].node_id.as_deref(), Some("plan"));
     }
 

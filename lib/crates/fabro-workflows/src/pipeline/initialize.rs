@@ -401,7 +401,7 @@ pub async fn initialize(
         options.run_options.git = Some(GitCheckpointOptions {
             base_sha: Some(plan.base_sha.clone()),
             run_branch: Some(plan.branch_name.clone()),
-            meta_branch: Some(MetadataStore::branch_name(&options.run_id)),
+            meta_branch: Some(MetadataStore::branch_name(&options.run_id.to_string())),
         });
     }
 
@@ -530,7 +530,10 @@ pub async fn initialize(
         .and_then(|g| g.run_branch.as_ref())
         .is_some();
     if !has_run_branch {
-        match sandbox.setup_git_for_run(&options.run_options.run_id).await {
+        match sandbox
+            .setup_git_for_run(&options.run_options.run_id.to_string())
+            .await
+        {
             Ok(Some(info)) => {
                 let base_sha = options
                     .run_options
@@ -542,7 +545,9 @@ pub async fn initialize(
                 options.run_options.git = Some(GitCheckpointOptions {
                     base_sha,
                     run_branch: Some(info.run_branch.clone()),
-                    meta_branch: Some(MetadataStore::branch_name(&options.run_options.run_id)),
+                    meta_branch: Some(MetadataStore::branch_name(
+                        &options.run_options.run_id.to_string(),
+                    )),
                 });
                 if options.run_options.base_branch.is_none() {
                     options.run_options.base_branch = info.base_branch;
@@ -653,11 +658,16 @@ mod tests {
     use fabro_interview::AutoApproveInterviewer;
     use fabro_sandbox::SandboxSpec;
     use fabro_store::InMemoryStore;
+    use fabro_types::{RunId, fixtures};
 
     use super::*;
     use crate::pipeline::types::InitOptions;
     use crate::records::RunRecord;
     use crate::run_options::RunOptions;
+
+    fn test_run_id() -> RunId {
+        fixtures::RUN_1
+    }
 
     fn simple_graph() -> (Graph, String) {
         let source = r#"digraph test {
@@ -688,7 +698,7 @@ mod tests {
             settings: FabroSettings::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,
-            run_id: "run-test".to_string(),
+            run_id: test_run_id(),
             labels: HashMap::new(),
             workflow_slug: None,
             github_app: None,
@@ -706,7 +716,7 @@ mod tests {
             vec![],
             run_dir.to_path_buf(),
             RunRecord {
-                run_id: "run-test".to_string(),
+                run_id: test_run_id(),
                 created_at: Utc::now(),
                 settings: FabroSettings::default(),
                 graph,
@@ -731,12 +741,12 @@ mod tests {
         let initialized = initialize(
             persisted,
             InitOptions {
-                run_id: "run-test".to_string(),
+                run_id: test_run_id(),
                 run_store: {
                     let store: &dyn fabro_store::Store = &InMemoryStore::default();
                     let inner = store
                         .create_run(
-                            "test-run",
+                            &test_run_id(),
                             chrono::Utc::now(),
                             Some(run_dir.to_string_lossy().as_ref()),
                         )
@@ -809,12 +819,12 @@ mod tests {
         let initialized = initialize(
             persisted,
             InitOptions {
-                run_id: "run-test".to_string(),
+                run_id: test_run_id(),
                 run_store: {
                     let store: &dyn fabro_store::Store = &InMemoryStore::default();
                     let inner = store
                         .create_run(
-                            "test-run",
+                            &test_run_id(),
                             chrono::Utc::now(),
                             Some(run_dir.to_string_lossy().as_ref()),
                         )

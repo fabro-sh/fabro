@@ -96,6 +96,7 @@ mod tests {
     use chrono::Utc;
     use fabro_config::FabroSettings;
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
+    use fabro_types::fixtures;
 
     use super::*;
     use crate::records::RunRecord;
@@ -146,7 +147,7 @@ mod tests {
 
     fn sample_record(graph: Graph) -> RunRecord {
         RunRecord {
-            run_id: "run-123".to_string(),
+            run_id: fixtures::RUN_1,
             created_at: Utc::now(),
             settings: FabroSettings {
                 dry_run: Some(true),

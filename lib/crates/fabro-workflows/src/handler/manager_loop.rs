@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use fabro_config::FabroSettings;
 use fabro_store::{InMemoryStore, Store};
+use fabro_types::RunId;
 
 use crate::condition::evaluate_condition;
 use crate::context::keys;
@@ -158,7 +159,6 @@ impl Handler for SubWorkflowHandler {
         let child_logs = run_dir.join(format!("nodes/{}_{visit}/child", node.id));
         let _ = std::fs::create_dir_all(&child_logs);
 
-        let parent_run_id = context.run_id();
         let cancel_token = Arc::new(AtomicBool::new(false));
         let child_cancel = Arc::clone(&cancel_token);
 
@@ -166,7 +166,7 @@ impl Handler for SubWorkflowHandler {
             settings: fabro_config::FabroSettings::default(),
             run_dir: child_logs,
             cancel_token: Some(cancel_token),
-            run_id: format!("{parent_run_id}_child_{}", node.id),
+            run_id: RunId::new(),
             labels: HashMap::new(),
             workflow_slug: None,
             github_app: None,

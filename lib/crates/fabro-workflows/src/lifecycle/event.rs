@@ -21,6 +21,7 @@ use crate::outcome::{
     FailureCategory, FailureDetail, Outcome, StageStatus, StageUsage, stage_usage_to_llm,
 };
 use fabro_graphviz::graph::types::Node as GvNode;
+use fabro_types::RunId;
 
 type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
@@ -37,7 +38,7 @@ fn node_script(node: &GvNode) -> Option<String> {
 pub(crate) struct EventLifecycle {
     pub emitter: Arc<EventEmitter>,
     pub graph_name: String,
-    pub run_id: String,
+    pub run_id: RunId,
     pub run_start: Mutex<Instant>,
     /// Set in on_edge_selected when loop_restart approved; emitted+cleared in on_run_start.
     pub restarted_from: Arc<Mutex<Option<(String, String)>>>,

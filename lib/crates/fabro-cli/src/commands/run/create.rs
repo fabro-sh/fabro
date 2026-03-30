@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::args::RunArgs;
 use fabro_config::{ConfigLayer, FabroSettings};
+use fabro_types::RunId;
 use fabro_util::terminal::Styles;
 use fabro_workflows::error::FabroError;
 use fabro_workflows::operations::{CreateRunInput, WorkflowInput, create};
@@ -16,7 +17,7 @@ pub(crate) fn create_run(
     cli_defaults: ConfigLayer,
     styles: &Styles,
     quiet: bool,
-) -> anyhow::Result<(String, PathBuf)> {
+) -> anyhow::Result<(RunId, PathBuf)> {
     let workflow_path = args
         .workflow
         .as_ref()
@@ -28,13 +29,20 @@ pub(crate) fn create_run(
         .combine(cli_defaults)
         .resolve()?;
 
+    let run_id = args
+        .run_id
+        .as_deref()
+        .map(str::parse::<RunId>)
+        .transpose()
+        .map_err(|err| anyhow::anyhow!("invalid run ID: {err}"))?;
+
     let created = match create(CreateRunInput {
         workflow: WorkflowInput::Path(workflow_path.clone()),
         settings,
         cwd,
         workflow_slug: None,
         run_dir: None,
-        run_id: args.run_id.clone(),
+        run_id,
         base_branch: None,
         host_repo_path: None,
     }) {

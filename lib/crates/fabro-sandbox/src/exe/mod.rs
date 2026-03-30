@@ -11,6 +11,7 @@ use crate::{
     format_lines_numbered,
 };
 use async_trait::async_trait;
+use fabro_types::RunId;
 use tokio_util::sync::CancellationToken;
 
 pub use crate::ssh_common::{GitCloneParams, SshOutput, SshRunner};
@@ -73,7 +74,7 @@ pub struct ExeSandbox {
     data_ssh_factory: DataSshFactory,
     config: ExeConfig,
     clone_params: Option<GitCloneParams>,
-    run_id: Option<String>,
+    run_id: Option<RunId>,
     origin_url: tokio::sync::OnceCell<String>,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 }
@@ -84,7 +85,7 @@ impl ExeSandbox {
         mgmt_ssh: Box<dyn SshRunner>,
         config: ExeConfig,
         clone_params: Option<GitCloneParams>,
-        run_id: Option<String>,
+        run_id: Option<RunId>,
         github_app: Option<fabro_github::GitHubAppCredentials>,
     ) -> Self {
         Self {

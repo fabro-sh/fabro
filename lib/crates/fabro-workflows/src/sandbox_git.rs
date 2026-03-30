@@ -2,6 +2,7 @@ use std::path::Path;
 
 use fabro_agent::Sandbox;
 use fabro_git_storage::trailerlink::{self, Trailer};
+use fabro_types::RunId;
 
 use crate::asset_snapshot;
 use crate::git::{GitAuthor, blocking_push_with_timeout, push_ref};
@@ -10,7 +11,7 @@ use fabro_sandbox::daytona::detect_repo_info;
 /// Captured git state for a workflow run, shared with handlers.
 #[derive(Debug, Clone)]
 pub struct GitState {
-    pub run_id: String,
+    pub run_id: RunId,
     pub base_sha: String,
     pub run_branch: Option<String>,
     pub meta_branch: Option<String>,

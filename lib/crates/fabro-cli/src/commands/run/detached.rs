@@ -22,7 +22,8 @@ pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bo
 
     let run_record = RunRecord::load(&run_dir)?;
     let on_node: fabro_workflows::OnNodeCallback = Some({
-        let short_id = super::short_run_id(&run_record.run_id).to_string();
+        let run_id = run_record.run_id.to_string();
+        let short_id = super::short_run_id(&run_id).to_string();
         fabro_proctitle::set(&format!("fabro: {short_id}"));
         Arc::new(move |node_id: &str| {
             fabro_proctitle::set(&format!("fabro: {short_id} {node_id}"));

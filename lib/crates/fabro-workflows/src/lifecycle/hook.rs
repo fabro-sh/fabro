@@ -16,6 +16,7 @@ use crate::hook_context::set_hook_node;
 use crate::outcome::{Outcome, OutcomeExt, StageStatus, StageUsage};
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_sandbox::Sandbox;
+use fabro_types::RunId;
 
 type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
@@ -26,7 +27,7 @@ pub(crate) struct HookLifecycle {
     pub hook_runner: Option<Arc<HookRunner>>,
     pub sandbox: Arc<dyn Sandbox>,
     pub hook_work_dir: Option<PathBuf>,
-    pub run_id: String,
+    pub run_id: RunId,
     pub graph_name: String,
 }
 

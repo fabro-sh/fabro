@@ -12,6 +12,7 @@ pub(crate) fn set_hook_node(ctx: &mut HookContext, node: &GvNode) {
 mod tests {
     use fabro_graphviz::graph::{AttrValue, Node};
     use fabro_hooks::HookEvent;
+    use fabro_types::fixtures;
 
     use super::*;
 
@@ -25,7 +26,7 @@ mod tests {
         node.attrs
             .insert("type".to_string(), AttrValue::String("human".to_string()));
 
-        let mut ctx = HookContext::new(HookEvent::StageStart, "run-1".into(), "graph".into());
+        let mut ctx = HookContext::new(HookEvent::StageStart, fixtures::RUN_1, "graph".into());
         set_hook_node(&mut ctx, &node);
 
         assert_eq!(ctx.node_id.as_deref(), Some("approve"));

@@ -12,7 +12,7 @@ use fabro_config::user::ExecutionMode;
 use fabro_git_storage::branchstore::BranchStore;
 use fabro_git_storage::gitobj::Store as GitStore;
 use fabro_store::{NodeVisitRef, RuntimeState, SlateStore, Store as _};
-use fabro_types::{Checkpoint, Graph, RunRecord, StartRecord};
+use fabro_types::{Checkpoint, Graph, RunId, RunRecord, StartRecord, fixtures};
 use git2::{Repository, Signature};
 use object_store::local::LocalFileSystem;
 use predicates::prelude::*;
@@ -302,7 +302,7 @@ fn checkpoint_record(
     }
 }
 
-async fn seed_durable_run(storage_dir: &Path, repo_dir: &Path, run_id: &str) {
+async fn seed_durable_run(storage_dir: &Path, repo_dir: &Path, run_id: RunId) {
     let store_path = storage_dir.join("store");
     std::fs::create_dir_all(&store_path).unwrap();
     let object_store = Arc::new(LocalFileSystem::new_with_prefix(&store_path).unwrap());
@@ -311,10 +311,10 @@ async fn seed_durable_run(storage_dir: &Path, repo_dir: &Path, run_id: &str) {
         .with_ymd_and_hms(2026, 1, 1, 0, 0, 0)
         .single()
         .unwrap();
-    let run_store = store.create_run(run_id, created_at, None).await.unwrap();
+    let run_store = store.create_run(&run_id, created_at, None).await.unwrap();
 
     let run_record = RunRecord {
-        run_id: run_id.to_string(),
+        run_id,
         created_at,
         settings: FabroSettings::default(),
         graph: Graph::default(),
@@ -327,7 +327,7 @@ async fn seed_durable_run(storage_dir: &Path, repo_dir: &Path, run_id: &str) {
     run_store.put_run(&run_record).await.unwrap();
     run_store
         .put_start(&StartRecord {
-            run_id: run_id.to_string(),
+            run_id,
             start_time: created_at,
             run_branch: Some(format!("fabro/run/{run_id}")),
             base_sha: None,
@@ -835,7 +835,7 @@ fn dry_run_writes_jsonl_and_live_json() {
 fn run_id_passthrough_uses_provided_ulid() {
     let tmp = tempfile::tempdir().unwrap();
     let storage_dir = tmp.path().join("fabro-data");
-    let my_ulid = "01JTEST1234567890ABCDE";
+    let my_ulid = fixtures::RUN_10.to_string();
 
     arc()
         .args([
@@ -843,14 +843,14 @@ fn run_id_passthrough_uses_provided_ulid() {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            my_ulid,
+            my_ulid.as_str(),
             "--storage-dir",
             storage_dir.to_str().unwrap(),
             "../../../test/simple.fabro",
         ])
         .assert()
         .success()
-        .stderr(predicate::str::contains(my_ulid));
+        .stderr(predicate::str::contains(&my_ulid));
 }
 
 // == --detach flag =============================================================
@@ -971,8 +971,10 @@ fn rewind_and_fork_recover_missing_metadata_from_store() {
     let repo_dir = tempfile::tempdir().unwrap();
     Repository::init(repo_dir.path()).unwrap();
 
-    let source_run_id = "run-recovery-source";
-    let expected_shas = seed_run_branch(repo_dir.path(), source_run_id, &["start", "build"]);
+    let source_run_id = fixtures::RUN_1;
+    let source_run_id_string = source_run_id.to_string();
+    let expected_shas =
+        seed_run_branch(repo_dir.path(), &source_run_id_string, &["start", "build"]);
     Runtime::new().unwrap().block_on(seed_durable_run(
         &storage_dir,
         repo_dir.path(),
@@ -988,7 +990,7 @@ fn rewind_and_fork_recover_missing_metadata_from_store() {
         .env("HOME", configured_home.path())
         .env("NO_COLOR", "1")
         .current_dir(repo_dir.path())
-        .args(["rewind", source_run_id, "--list"])
+        .args(["rewind", &source_run_id_string, "--list"])
         .timeout(Duration::from_secs(15))
         .assert()
         .success()
@@ -1009,7 +1011,7 @@ fn rewind_and_fork_recover_missing_metadata_from_store() {
         "rebuilt timeline should persist backfilled SHAs: {rewind_list}"
     );
 
-    let rebuilt_checkpoints = metadata_checkpoints(repo_dir.path(), source_run_id);
+    let rebuilt_checkpoints = metadata_checkpoints(repo_dir.path(), &source_run_id_string);
     assert_eq!(rebuilt_checkpoints.len(), 2);
     assert_eq!(
         rebuilt_checkpoints[0].git_commit_sha.as_deref(),
@@ -1025,7 +1027,7 @@ fn rewind_and_fork_recover_missing_metadata_from_store() {
         .env("HOME", configured_home.path())
         .env("NO_COLOR", "1")
         .current_dir(repo_dir.path())
-        .args(["fork", source_run_id, "--no-push"])
+        .args(["fork", &source_run_id_string, "--no-push"])
         .timeout(Duration::from_secs(15))
         .assert()
         .success();
@@ -1173,6 +1175,7 @@ fn completed_run_preserves_workflow_slug_for_lookup() {
     let home = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
     let workflow_dir = project.path().join("workflows").join("sluggy");
+    let run_id = fixtures::RUN_11.to_string();
     std::fs::create_dir_all(&workflow_dir).unwrap();
     let workflow_path = workflow_dir.join("workflow.fabro");
     std::fs::write(
@@ -1195,7 +1198,7 @@ digraph BarBaz {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            "opaque-run-999",
+            run_id.as_str(),
             workflow_path.to_str().unwrap(),
         ])
         .assert()
@@ -1211,7 +1214,7 @@ digraph BarBaz {
     arc()
         .env("HOME", home.path())
         .current_dir(project.path())
-        .args(["attach", "opaque-run-999"])
+        .args(["attach", run_id.as_str()])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success();
@@ -1224,7 +1227,7 @@ digraph BarBaz {
         .assert()
         .success();
 
-    let run_dir = find_run_dir(home.path(), "opaque-run-999");
+    let run_dir = find_run_dir(home.path(), &run_id);
     let run_record: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(run_dir.join("run.json")).unwrap()).unwrap();
     assert_eq!(run_record["graph"]["name"].as_str(), Some("BarBaz"));
@@ -1236,6 +1239,7 @@ fn standalone_file_run_uses_file_stem_slug_for_lookup() {
     let home = tempfile::tempdir().unwrap();
     let workflow_dir = tempfile::tempdir().unwrap();
     let workflow_path = workflow_dir.path().join("alpha.fabro");
+    let run_id = fixtures::RUN_12.to_string();
     std::fs::write(
         &workflow_path,
         "\
@@ -1255,7 +1259,7 @@ digraph FooWorkflow {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            "opaque-run-alpha",
+            run_id.as_str(),
             workflow_path.to_str().unwrap(),
         ])
         .assert()
@@ -1274,7 +1278,7 @@ digraph FooWorkflow {
         .assert()
         .success();
 
-    let run_dir = find_run_dir(home.path(), "opaque-run-alpha");
+    let run_dir = find_run_dir(home.path(), &run_id);
     let run_record: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(run_dir.join("run.json")).unwrap()).unwrap();
     assert_eq!(run_record["graph"]["name"].as_str(), Some("FooWorkflow"));
@@ -1284,7 +1288,7 @@ digraph FooWorkflow {
 #[test]
 fn dry_run_create_start_attach_works_with_default_run_lookup() {
     let home = tempfile::tempdir().unwrap();
-    let run_id = "drysplit-test-123";
+    let run_id = fixtures::RUN_13.to_string();
 
     arc()
         .env("HOME", home.path())
@@ -1293,14 +1297,14 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             "../../../test/simple.fabro",
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(run_id));
+        .stdout(predicate::str::contains(&run_id));
 
-    let run_dir = find_run_dir(home.path(), run_id);
+    let run_dir = find_run_dir(home.path(), &run_id);
     assert!(
         run_dir.join("run.json").exists(),
         "create should persist run.json so the run is discoverable"
@@ -1308,13 +1312,13 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
 
     arc()
         .env("HOME", home.path())
-        .args(["start", run_id])
+        .args(["start", run_id.as_str()])
         .assert()
         .success();
 
     arc()
         .env("HOME", home.path())
-        .args(["attach", run_id])
+        .args(["attach", run_id.as_str()])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success();
@@ -1325,7 +1329,7 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
 #[test]
 fn dry_run_detach_attach_works_with_default_run_lookup() {
     let home = tempfile::tempdir().unwrap();
-    let run_id = "drydetach-test-123";
+    let run_id = fixtures::RUN_14.to_string();
 
     arc()
         .env("HOME", home.path())
@@ -1335,16 +1339,16 @@ fn dry_run_detach_attach_works_with_default_run_lookup() {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             "../../../test/simple.fabro",
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(run_id));
+        .stdout(predicate::str::contains(&run_id));
 
     arc()
         .env("HOME", home.path())
-        .args(["attach", run_id])
+        .args(["attach", run_id.as_str()])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success();
@@ -1354,11 +1358,13 @@ fn dry_run_detach_attach_works_with_default_run_lookup() {
 fn start_by_workflow_name_prefers_newly_created_submitted_run() {
     let home = tempfile::tempdir().unwrap();
     let old_run_dir = home.path().join(".fabro").join("runs").join("old-smoke");
+    let old_run_id = fixtures::RUN_15.to_string();
+    let run_id = fixtures::RUN_16.to_string();
     std::fs::create_dir_all(&old_run_dir).unwrap();
     std::fs::write(
         old_run_dir.join("run.json"),
         serde_json::json!({
-            "run_id": "old-smoke",
+            "run_id": old_run_id,
             "created_at": "2026-01-01T00:00:00Z",
             "settings": {},
             "graph": {
@@ -1379,7 +1385,6 @@ fn start_by_workflow_name_prefers_newly_created_submitted_run() {
     )
     .unwrap();
 
-    let run_id = "new-smoke-run-123";
     arc()
         .env("HOME", home.path())
         .args([
@@ -1387,12 +1392,12 @@ fn start_by_workflow_name_prefers_newly_created_submitted_run() {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             "smoke",
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(run_id));
+        .stdout(predicate::str::contains(&run_id));
 
     arc()
         .env("HOME", home.path())
@@ -1402,12 +1407,12 @@ fn start_by_workflow_name_prefers_newly_created_submitted_run() {
 
     arc()
         .env("HOME", home.path())
-        .args(["attach", run_id])
+        .args(["attach", run_id.as_str()])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success();
 
-    let new_run_dir = find_run_dir(home.path(), run_id);
+    let new_run_dir = find_run_dir(home.path(), &run_id);
     let status = std::fs::read_to_string(new_run_dir.join("status.json")).unwrap();
     assert!(
         status.contains("\"status\": \"succeeded\""),
@@ -1423,6 +1428,7 @@ fn bug2_detached_uses_cached_graph_not_original_path() {
     let dir = tempfile::tempdir().unwrap();
     let storage_dir = dir.path().join("storage");
     let run_dir = storage_dir.join("runs").join("20260101-test-bug2");
+    let run_id = fixtures::RUN_17.to_string();
     std::fs::create_dir_all(&run_dir).unwrap();
 
     let dot = "\
@@ -1434,7 +1440,7 @@ digraph G {
 
     // run.json: working_directory is valid but original workflow path no longer exists
     let run_record = serde_json::json!({
-        "run_id": "test-bug2",
+        "run_id": run_id,
         "created_at": "2026-01-01T00:00:00Z",
         "settings": {
             "dry_run": true,
@@ -1592,6 +1598,7 @@ fn bug5_detached_uses_snapshotted_app_id_for_github_credentials() {
     let storage_dir = tempfile::tempdir().unwrap();
     let home = init_cli_home(storage_dir.path());
     let run_dir = storage_dir.path().join("runs").join("20260101-test-bug5");
+    let run_id = fixtures::RUN_18.to_string();
     std::fs::create_dir_all(&run_dir).unwrap();
 
     let dot = "\
@@ -1602,7 +1609,7 @@ digraph G {
 }";
 
     let run_record = serde_json::json!({
-        "run_id": "test-bug5",
+        "run_id": run_id,
         "created_at": "2026-01-01T00:00:00Z",
         "settings": {
             "dry_run": true,
@@ -1661,14 +1668,16 @@ digraph G {
 #[test]
 fn bug3_attach_leaves_interview_request_until_engine_consumes_response() {
     let home = tempfile::tempdir().unwrap();
+    let run_id = fixtures::RUN_7.to_string();
+    let stage_started = format!(
+        r#"{{"ts":"2026-01-01T00:00:01Z","run_id":"{run_id}","event":"StageStarted","node_id":"gate","name":"Gate","index":0,"attempt":1,"max_attempts":1}}"#
+    );
 
     let run_dir = setup_run_dir(
         home.path(),
-        "bug3-test",
+        &run_id,
         serde_json::json!({}),
-        &[
-            r#"{"ts":"2026-01-01T00:00:01Z","run_id":"bug3","event":"StageStarted","node_id":"gate","name":"Gate","index":0,"attempt":1,"max_attempts":1}"#,
-        ],
+        &[&stage_started],
     );
 
     // Terminal status still allows attach to answer the interview once before exiting.
@@ -1702,7 +1711,7 @@ fn bug3_attach_leaves_interview_request_until_engine_consumes_response() {
     let _ = arc()
         .env("HOME", home.path())
         .env("NO_COLOR", "1")
-        .args(["attach", "bug3-test"])
+        .args(["attach", &run_id])
         .write_stdin("y\n")
         .timeout(std::time::Duration::from_secs(5))
         .output();
@@ -1724,14 +1733,16 @@ fn bug3_attach_leaves_interview_request_until_engine_consumes_response() {
 #[test]
 fn attach_closed_stdin_keeps_interview_pending() {
     let home = tempfile::tempdir().unwrap();
+    let run_id = fixtures::RUN_8.to_string();
+    let stage_started = format!(
+        r#"{{"ts":"2026-01-01T00:00:01Z","run_id":"{run_id}","event":"StageStarted","node_id":"gate","name":"Gate","index":0,"attempt":1,"max_attempts":1}}"#
+    );
 
     let run_dir = setup_run_dir(
         home.path(),
-        "attach-closed-stdin",
+        &run_id,
         serde_json::json!({}),
-        &[
-            r#"{"ts":"2026-01-01T00:00:01Z","run_id":"attach-closed-stdin","event":"StageStarted","node_id":"gate","name":"Gate","index":0,"attempt":1,"max_attempts":1}"#,
-        ],
+        &[&stage_started],
     );
 
     std::fs::write(
@@ -1761,7 +1772,7 @@ fn attach_closed_stdin_keeps_interview_pending() {
     let assert = arc()
         .env("HOME", home.path())
         .env("NO_COLOR", "1")
-        .args(["attach", "attach-closed-stdin"])
+        .args(["attach", &run_id])
         .timeout(std::time::Duration::from_secs(5))
         .assert()
         .failure();
@@ -1790,21 +1801,34 @@ fn attach_closed_stdin_keeps_interview_pending() {
 #[test]
 fn bug4_attach_respects_verbose_from_spec() {
     let home = tempfile::tempdir().unwrap();
+    let run_id = fixtures::RUN_9.to_string();
 
     // Use pre-rename field names so handle_json_line can parse them
     // (isolates this test from bug 1). With 2 turns and 1 tool call,
     // verbose mode should display "(2 turns, 1 tools, …)" in the output.
     let run_dir = setup_run_dir(
         home.path(),
-        "bug4-test",
+        &run_id,
         serde_json::json!({"verbose": true}),
         &[
-            r#"{"ts":"2026-01-01T12:00:00Z","run_id":"bug4","event":"StageStarted","node_id":"code","name":"Code","index":0,"attempt":1,"max_attempts":1}"#,
-            r#"{"ts":"2026-01-01T12:00:01Z","run_id":"bug4","event":"Agent.AssistantMessage","stage":"code","model":"claude-sonnet"}"#,
-            r#"{"ts":"2026-01-01T12:00:02Z","run_id":"bug4","event":"Agent.AssistantMessage","stage":"code","model":"claude-sonnet"}"#,
-            r#"{"ts":"2026-01-01T12:00:03Z","run_id":"bug4","event":"Agent.ToolCallStarted","stage":"code","tool_name":"read_file","tool_call_id":"tc1","arguments":{}}"#,
-            r#"{"ts":"2026-01-01T12:00:04Z","run_id":"bug4","event":"Agent.ToolCallCompleted","stage":"code","tool_name":"read_file","tool_call_id":"tc1","is_error":false}"#,
-            r#"{"ts":"2026-01-01T12:00:10Z","run_id":"bug4","event":"StageCompleted","node_id":"code","name":"Code","index":0,"duration_ms":10000,"status":"success","usage":{"input_tokens":1000,"output_tokens":500}}"#,
+            &format!(
+                r#"{{"ts":"2026-01-01T12:00:00Z","run_id":"{run_id}","event":"StageStarted","node_id":"code","name":"Code","index":0,"attempt":1,"max_attempts":1}}"#
+            ),
+            &format!(
+                r#"{{"ts":"2026-01-01T12:00:01Z","run_id":"{run_id}","event":"Agent.AssistantMessage","stage":"code","model":"claude-sonnet"}}"#
+            ),
+            &format!(
+                r#"{{"ts":"2026-01-01T12:00:02Z","run_id":"{run_id}","event":"Agent.AssistantMessage","stage":"code","model":"claude-sonnet"}}"#
+            ),
+            &format!(
+                r#"{{"ts":"2026-01-01T12:00:03Z","run_id":"{run_id}","event":"Agent.ToolCallStarted","stage":"code","tool_name":"read_file","tool_call_id":"tc1","arguments":{{}}}}"#
+            ),
+            &format!(
+                r#"{{"ts":"2026-01-01T12:00:04Z","run_id":"{run_id}","event":"Agent.ToolCallCompleted","stage":"code","tool_name":"read_file","tool_call_id":"tc1","is_error":false}}"#
+            ),
+            &format!(
+                r#"{{"ts":"2026-01-01T12:00:10Z","run_id":"{run_id}","event":"StageCompleted","node_id":"code","name":"Code","index":0,"duration_ms":10000,"status":"success","usage":{{"input_tokens":1000,"output_tokens":500}}}}"#
+            ),
         ],
     );
 
@@ -1831,7 +1855,7 @@ fn bug4_attach_respects_verbose_from_spec() {
     let output = arc()
         .env("HOME", home.path())
         .env("NO_COLOR", "1")
-        .args(["attach", "bug4-test"])
+        .args(["attach", &run_id])
         .timeout(std::time::Duration::from_secs(10))
         .output()
         .expect("process should start");
@@ -1994,7 +2018,7 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
     let (home, project, storage_dir) = setup_external_workflow_fixture();
     let cwd = tempfile::tempdir().unwrap();
     let workflow = project.path().join("workflow.toml");
-    let run_id = "external-config-run";
+    let run_id = fixtures::RUN_19.to_string();
 
     arc()
         .env("HOME", home.path())
@@ -2005,7 +2029,7 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
             "--model",
             "gpt-5.2",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             workflow.to_str().unwrap(),
         ])
         .assert()
@@ -2020,7 +2044,7 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
             path.is_dir()
                 && path
                     .file_name()
-                    .is_some_and(|name| name.to_string_lossy().ends_with(run_id))
+                    .is_some_and(|name| name.to_string_lossy().ends_with(&run_id))
         })
         .unwrap_or_else(|| {
             panic!(

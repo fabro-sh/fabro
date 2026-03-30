@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use fabro_store::{ListRunsQuery, Store};
+use fabro_types::RunId;
 use serde::Serialize;
 
 use crate::records::{
@@ -13,7 +14,7 @@ use crate::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt, StatusRe
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunInfo {
-    pub run_id: String,
+    pub run_id: RunId,
     pub dir_name: String,
     pub workflow_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -116,7 +117,12 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
             let mtime = mtime_dt.map(|dt| dt.to_rfc3339()).unwrap_or_default();
 
             let run_id = std::fs::read_to_string(path.join("id.txt"))
-                .map_or_else(|_| dir_name.clone(), |s| s.trim().to_string());
+                .ok()
+                .and_then(|s| parse_run_id(&s))
+                .or_else(|| parse_run_id(&dir_name));
+            let Some(run_id) = run_id else {
+                continue;
+            };
 
             let status_info = read_status(&path);
             let is_orphan = matches!(status_info.status, RunStatus::Dead);
@@ -151,9 +157,9 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
 }
 
 pub async fn scan_runs_combined(store: &dyn Store, base: &Path) -> Result<Vec<RunInfo>> {
-    let mut runs_by_id: HashMap<String, RunInfo> = scan_runs(base)?
+    let mut runs_by_id: HashMap<RunId, RunInfo> = scan_runs(base)?
         .into_iter()
-        .map(|run| (run.run_id.clone(), run))
+        .map(|run| (run.run_id, run))
         .collect();
 
     if let Ok(store_runs) = store.list_runs(&ListRunsQuery::default()).await {
@@ -184,7 +190,7 @@ pub async fn scan_runs_combined(store: &dyn Store, base: &Path) -> Result<Vec<Ru
                 None
             };
             runs_by_id.insert(
-                summary.run_id.clone(),
+                summary.run_id,
                 RunInfo {
                     run_id: summary.run_id,
                     dir_name,
@@ -307,14 +313,14 @@ pub fn find_run_by_prefix(base: &Path, prefix: &str) -> Result<PathBuf> {
     let runs = scan_runs(base).context("Failed to scan runs")?;
     let matches: Vec<_> = runs
         .iter()
-        .filter(|run| run.run_id.starts_with(prefix))
+        .filter(|run| run_id_matches(run.run_id, prefix))
         .collect();
 
     match matches.len() {
         0 => bail!("No run found matching prefix '{prefix}'"),
         1 => Ok(matches[0].path.clone()),
         count => {
-            let ids: Vec<&str> = matches.iter().map(|run| run.run_id.as_str()).collect();
+            let ids: Vec<String> = matches.iter().map(|run| run.run_id.to_string()).collect();
             bail!(
                 "Ambiguous prefix '{prefix}': {count} runs match: {}",
                 ids.join(", ")
@@ -328,13 +334,16 @@ pub fn resolve_run(base: &Path, identifier: &str) -> Result<RunInfo> {
 
     let id_matches: Vec<_> = runs
         .iter()
-        .filter(|run| run.run_id.starts_with(identifier))
+        .filter(|run| run_id_matches(run.run_id, identifier))
         .collect();
 
     match id_matches.len() {
         1 => return Ok(id_matches[0].clone()),
         count if count > 1 => {
-            let ids: Vec<&str> = id_matches.iter().map(|run| run.run_id.as_str()).collect();
+            let ids: Vec<String> = id_matches
+                .iter()
+                .map(|run| run.run_id.to_string())
+                .collect();
             bail!(
                 "Ambiguous prefix '{identifier}': {count} runs match: {}",
                 ids.join(", ")
@@ -374,13 +383,16 @@ pub async fn resolve_run_combined(
 
     let id_matches: Vec<_> = runs
         .iter()
-        .filter(|run| run.run_id.starts_with(identifier))
+        .filter(|run| run_id_matches(run.run_id, identifier))
         .collect();
 
     match id_matches.len() {
         1 => return Ok(id_matches[0].clone()),
         count if count > 1 => {
-            let ids: Vec<&str> = id_matches.iter().map(|run| run.run_id.as_str()).collect();
+            let ids: Vec<String> = id_matches
+                .iter()
+                .map(|run| run.run_id.to_string())
+                .collect();
             bail!(
                 "Ambiguous prefix '{identifier}': {count} runs match: {}",
                 ids.join(", ")
@@ -411,4 +423,13 @@ pub async fn resolve_run_combined(
 
 fn collapse_separators(s: &str) -> String {
     s.chars().filter(|c| *c != '-' && *c != '_').collect()
+}
+
+fn parse_run_id(value: &str) -> Option<RunId> {
+    let value = value.trim();
+    (!value.is_empty()).then_some(value)?.parse().ok()
+}
+
+fn run_id_matches(run_id: RunId, prefix: &str) -> bool {
+    run_id.to_string().starts_with(prefix)
 }

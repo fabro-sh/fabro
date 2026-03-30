@@ -36,20 +36,23 @@ pub(crate) async fn run(args: &ForkArgs, styles: &Styles, globals: &GlobalArgs) 
     let new_run_id = fork(
         &store,
         &ForkRunInput {
-            source_run_id: run_id.clone(),
+            source_run_id: run_id,
             target,
             push: !args.no_push,
         },
     )?;
 
+    let run_id_string = run_id.to_string();
+    let new_run_id_string = new_run_id.to_string();
+
     eprintln!(
         "\nForked run {} -> {}",
-        &run_id[..8.min(run_id.len())],
-        &new_run_id[..8.min(new_run_id.len())]
+        &run_id_string[..8.min(run_id_string.len())],
+        &new_run_id_string[..8.min(new_run_id_string.len())]
     );
     eprintln!(
         "To resume: fabro resume {}",
-        &new_run_id[..8.min(new_run_id.len())]
+        &new_run_id_string[..8.min(new_run_id_string.len())]
     );
 
     Ok(())

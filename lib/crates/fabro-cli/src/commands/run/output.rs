@@ -69,7 +69,8 @@ pub(crate) fn print_diagnostics_from_error(
     print_diagnostics(diagnostics, styles);
 }
 
-pub(crate) fn print_run_summary(run_dir: &Path, run_id: &str, styles: &Styles) {
+pub(crate) fn print_run_summary(run_dir: &Path, run_id: impl std::fmt::Display, styles: &Styles) {
+    let run_id = run_id.to_string();
     let conclusion_path = run_dir.join("conclusion.json");
     let Ok(conclusion) = Conclusion::load(&conclusion_path) else {
         return;
@@ -85,7 +86,7 @@ pub(crate) fn print_run_summary(run_dir: &Path, run_id: &str, styles: &Styles) {
 
     print_run_conclusion(
         &conclusion,
-        run_id,
+        &run_id,
         run_dir,
         None,
         pr_url.as_deref(),
@@ -97,12 +98,13 @@ pub(crate) fn print_run_summary(run_dir: &Path, run_id: &str, styles: &Styles) {
 
 pub(crate) fn print_run_conclusion(
     conclusion: &Conclusion,
-    run_id: &str,
+    run_id: impl std::fmt::Display,
     run_dir: &Path,
     pushed_branch: Option<&str>,
     pr_url: Option<&str>,
     styles: &Styles,
 ) {
+    let run_id = run_id.to_string();
     eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="));
     eprintln!("{}", styles.dim.apply_to(format!("Run:       {run_id}")));
 

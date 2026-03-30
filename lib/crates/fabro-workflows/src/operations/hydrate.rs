@@ -95,7 +95,7 @@ pub async fn open_or_hydrate_run(
 
 async fn hydrate_events(
     run_dir: &Path,
-    run_id: &str,
+    run_id: &fabro_types::RunId,
     run_store: &dyn RunStore,
 ) -> Result<(), FabroError> {
     let progress_path = run_dir.join("progress.jsonl");
@@ -224,16 +224,20 @@ mod tests {
     use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
     use fabro_store::{InMemoryStore, Store};
-    use fabro_types::{Conclusion, RunStatus, RunStatusRecord, StageStatus};
+    use fabro_types::{Conclusion, RunStatus, RunStatusRecord, StageStatus, fixtures};
 
     use super::open_or_hydrate_run;
     use crate::event::{WorkflowRunEvent, append_progress_event};
     use crate::records::{Checkpoint, CheckpointExt, ConclusionExt, RunRecord, RunRecordExt};
     use crate::run_status::RunStatusRecordExt;
 
+    fn test_run_id() -> fabro_types::RunId {
+        fixtures::RUN_1
+    }
+
     fn write_run(run_dir: &Path) {
         let record = RunRecord {
-            run_id: "run-123".to_string(),
+            run_id: test_run_id(),
             created_at: Utc::now(),
             settings: FabroSettings::default(),
             graph: Graph::new("test"),
@@ -284,7 +288,7 @@ mod tests {
         conclusion.save(&run_dir.join("conclusion.json")).unwrap();
         append_progress_event(
             run_dir,
-            "run-123",
+            &test_run_id(),
             &WorkflowRunEvent::RunNotice {
                 level: crate::event::RunNoticeLevel::Info,
                 code: "hydrated".to_string(),
@@ -305,7 +309,7 @@ mod tests {
 
         assert_eq!(
             run_store.get_run().await.unwrap().unwrap().run_id,
-            "run-123"
+            test_run_id()
         );
         assert!(run_store.get_checkpoint().await.unwrap().is_some());
         assert!(run_store.get_conclusion().await.unwrap().is_some());

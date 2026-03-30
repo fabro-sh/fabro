@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicBool;
 
 use fabro_config::FabroSettings;
 use fabro_config::run::PullRequestSettings;
+use fabro_types::RunId;
 
 /// Git checkpoint options for a workflow run.
 #[derive(Clone)]
@@ -21,7 +22,7 @@ pub struct RunOptions {
     pub run_dir: PathBuf,
     pub cancel_token: Option<Arc<AtomicBool>>,
     /// Unique identifier for this workflow run.
-    pub run_id: String,
+    pub run_id: RunId,
     /// User-defined key-value labels for this run.
     pub labels: HashMap<String, String>,
     /// Workflow directory slug (e.g. "smoke" from `fabro/workflows/smoke/`).

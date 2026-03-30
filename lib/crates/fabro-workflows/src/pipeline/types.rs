@@ -12,6 +12,7 @@ use fabro_mcp::config::McpServerConfig;
 use fabro_model::FallbackTarget;
 use fabro_sandbox::SandboxSpec;
 use fabro_store::RunStore;
+use fabro_types::RunId;
 use fabro_validate::Diagnostic;
 
 use crate::context::Context;
@@ -230,7 +231,7 @@ pub struct DevcontainerSpec {
 }
 
 pub struct InitOptions {
-    pub run_id: String,
+    pub run_id: RunId,
     pub run_store: Arc<dyn RunStore>,
     pub dry_run: bool,
     pub emitter: Arc<EventEmitter>,
@@ -304,7 +305,7 @@ pub struct Retroed {
 /// Output of the FINALIZE phase.
 #[non_exhaustive]
 pub struct Concluded {
-    pub run_id: String,
+    pub run_id: RunId,
     pub outcome: Result<Outcome, FabroError>,
     pub conclusion: Conclusion,
     pub pushed_branch: Option<String>,
@@ -316,7 +317,7 @@ pub struct Concluded {
 /// Output of the PULL_REQUEST phase.
 #[non_exhaustive]
 pub struct Finalized {
-    pub run_id: String,
+    pub run_id: RunId,
     pub outcome: Result<Outcome, FabroError>,
     pub conclusion: Conclusion,
     pub pushed_branch: Option<String>,
@@ -331,7 +332,7 @@ pub struct TransformOptions {
 
 /// Options for the RETRO phase.
 pub struct RetroOptions {
-    pub run_id: String,
+    pub run_id: RunId,
     pub run_store: Arc<dyn RunStore>,
     pub workflow_name: String,
     pub goal: String,
@@ -349,7 +350,7 @@ pub struct RetroOptions {
 /// Options for the FINALIZE phase.
 pub struct FinalizeOptions {
     pub run_dir: PathBuf,
-    pub run_id: String,
+    pub run_id: RunId,
     pub run_store: Arc<dyn RunStore>,
     pub workflow_name: String,
     pub hook_runner: Option<Arc<HookRunner>>,

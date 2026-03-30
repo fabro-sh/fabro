@@ -5,6 +5,7 @@ use std::str::FromStr;
 use anyhow::{Context, Result, bail};
 use fabro_git_storage::branchstore::{BranchStore, CommitInfo};
 use fabro_git_storage::gitobj::Store;
+use fabro_types::RunId;
 use git2::{Oid, Repository, Signature};
 
 use crate::git::{MetadataStore, RUN_BRANCH_PREFIX, push_run_branches};
@@ -113,7 +114,7 @@ impl RunTimeline {
 
 #[derive(Debug, Clone)]
 pub struct RewindInput {
-    pub run_id: String,
+    pub run_id: RunId,
     pub target: RewindTarget,
     pub push: bool,
 }
@@ -248,14 +249,14 @@ fn detect_parallel_interior(graph: &Graph) -> HashMap<String, String> {
 }
 
 pub fn rewind(store: &Store, input: &RewindInput) -> Result<()> {
-    let timeline = build_timeline(store, &input.run_id)?;
+    let timeline = build_timeline(store, &input.run_id.to_string())?;
     let entry = timeline.resolve(&input.target)?;
     rewind_to_entry(store, &input.run_id, entry, input.push)
 }
 
 #[allow(clippy::print_stderr)]
-fn rewind_to_entry(store: &Store, run_id: &str, entry: &TimelineEntry, push: bool) -> Result<()> {
-    let meta_branch = MetadataStore::branch_name(run_id);
+fn rewind_to_entry(store: &Store, run_id: &RunId, entry: &TimelineEntry, push: bool) -> Result<()> {
+    let meta_branch = MetadataStore::branch_name(&run_id.to_string());
     store
         .update_ref(&meta_branch, entry.metadata_commit_oid)
         .map_err(|e| anyhow::anyhow!("failed to update metadata ref: {e}"))?;
@@ -304,7 +305,7 @@ fn rewind_to_entry(store: &Store, run_id: &str, entry: &TimelineEntry, push: boo
     Ok(())
 }
 
-pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<String> {
+pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<RunId> {
     let refs = repo.references()?;
     let pattern = "refs/heads/fabro/meta/";
     let mut matches = Vec::new();
@@ -314,11 +315,14 @@ pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<String> 
             continue;
         };
         if let Some(run_id) = name.strip_prefix(pattern) {
-            if run_id == prefix {
-                return Ok(run_id.to_string());
+            let Ok(run_id) = run_id.parse::<RunId>() else {
+                continue;
+            };
+            if run_id.to_string() == prefix {
+                return Ok(run_id);
             }
-            if run_id.starts_with(prefix) {
-                matches.push(run_id.to_string());
+            if run_id.to_string().starts_with(prefix) {
+                matches.push(run_id);
             }
         }
     }
@@ -367,6 +371,11 @@ fn load_parallel_map(store: &Store, run_id: &str) -> HashMap<String, String> {
 mod tests {
     use super::super::test_support::*;
     use super::*;
+    use fabro_types::{RunId, fixtures};
+
+    fn parse_run_id(value: &str) -> RunId {
+        value.parse().unwrap()
+    }
 
     #[test]
     fn parse_target_ordinal() {
@@ -485,7 +494,7 @@ mod tests {
     fn rewind_moves_metadata_ref() {
         let (_dir, store) = temp_repo();
         let sig = test_sig();
-        let branch = MetadataStore::branch_name("run-1");
+        let branch = MetadataStore::branch_name(&fixtures::RUN_1.to_string());
         let bs = BranchStore::new(&store, &branch, &sig);
         bs.ensure_branch().unwrap();
 
@@ -501,7 +510,7 @@ mod tests {
         rewind(
             &store,
             &RewindInput {
-                run_id: "run-1".to_string(),
+                run_id: fixtures::RUN_1,
                 target: RewindTarget::Ordinal(1),
                 push: false,
             },
@@ -516,11 +525,12 @@ mod tests {
     fn find_run_id_prefix_match() {
         let (_dir, store) = temp_repo();
         let sig = test_sig();
-        let branch = MetadataStore::branch_name("abc-123-long-id");
+        let run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        let branch = MetadataStore::branch_name(&run_id.to_string());
         let bs = BranchStore::new(&store, &branch, &sig);
         bs.ensure_branch().unwrap();
 
-        let result = find_run_id_by_prefix(store.repo(), "abc-123").unwrap();
-        assert_eq!(result, "abc-123-long-id");
+        let result = find_run_id_by_prefix(store.repo(), "01ARZ3").unwrap();
+        assert_eq!(result, run_id);
     }
 }

@@ -558,6 +558,7 @@ impl MetadataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fabro_types::fixtures;
     use std::fs;
 
     use crate::records::{CheckpointExt, RunRecordExt};
@@ -654,13 +655,18 @@ mod tests {
         init_repo(dir.path());
 
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        let run_record = br#"{"run_id":"RUN1","created_at":"2025-01-01T00:00:00Z","settings":{},"graph":{"name":"test","nodes":{},"edges":[],"attrs":{}},"working_directory":"/tmp"}"#;
-        store.init_run("RUN1", &[("run.json", run_record)]).unwrap();
+        let run_id = fixtures::RUN_1.to_string();
+        let run_record = format!(
+            r#"{{"run_id":"{run_id}","created_at":"2025-01-01T00:00:00Z","settings":{{}},"graph":{{"name":"test","nodes":{{}},"edges":[],"attrs":{{}}}},"working_directory":"/tmp"}}"#
+        );
+        store
+            .init_run(&run_id, &[("run.json", run_record.as_bytes())])
+            .unwrap();
 
-        let read_record = MetadataStore::read_run_record(dir.path(), "RUN1")
+        let read_record = MetadataStore::read_run_record(dir.path(), &run_id)
             .unwrap()
             .unwrap();
-        assert_eq!(read_record.run_id, "RUN1");
+        assert_eq!(read_record.run_id, fixtures::RUN_1);
         assert_eq!(read_record.workflow_name(), "test");
     }
 
@@ -834,27 +840,32 @@ mod tests {
         init_repo(dir.path());
 
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        let run_record = br#"{"run_id":"RUN5","created_at":"2025-01-01T00:00:00Z","settings":{},"graph":{"name":"test","nodes":{},"edges":[],"attrs":{}},"working_directory":"/tmp"}"#;
-        store.init_run("RUN5", &[("run.json", run_record)]).unwrap();
+        let run_id = fixtures::RUN_5.to_string();
+        let run_record = format!(
+            r#"{{"run_id":"{run_id}","created_at":"2025-01-01T00:00:00Z","settings":{{}},"graph":{{"name":"test","nodes":{{}},"edges":[],"attrs":{{}}}},"working_directory":"/tmp"}}"#
+        );
+        store
+            .init_run(&run_id, &[("run.json", run_record.as_bytes())])
+            .unwrap();
 
         store
             .write_files(
-                "RUN5",
+                &run_id,
                 &[("retro.json", b"{\"status\":\"ok\"}")],
                 "finalize",
             )
             .unwrap();
 
-        let data = MetadataStore::read_file(dir.path(), "RUN5", "retro.json")
+        let data = MetadataStore::read_file(dir.path(), &run_id, "retro.json")
             .unwrap()
             .unwrap();
         assert_eq!(data, b"{\"status\":\"ok\"}");
 
         // Original files still present
-        let record = MetadataStore::read_run_record(dir.path(), "RUN5")
+        let record = MetadataStore::read_run_record(dir.path(), &run_id)
             .unwrap()
             .unwrap();
-        assert_eq!(record.run_id, "RUN5");
+        assert_eq!(record.run_id, fixtures::RUN_5);
     }
 
     #[test]

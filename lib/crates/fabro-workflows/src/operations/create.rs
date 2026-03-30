@@ -6,6 +6,7 @@ use fabro_config::{FabroSettings, FabroSettingsExt};
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
+use fabro_types::RunId;
 
 use crate::error::FabroError;
 use crate::pipeline::types::PersistOptions;
@@ -27,7 +28,7 @@ pub struct CreateRunInput {
     pub cwd: PathBuf,
     pub workflow_slug: Option<String>,
     pub run_dir: Option<PathBuf>,
-    pub run_id: Option<String>,
+    pub run_id: Option<RunId>,
     pub host_repo_path: Option<String>,
     pub base_branch: Option<String>,
 }
@@ -35,7 +36,7 @@ pub struct CreateRunInput {
 #[derive(Debug)]
 pub struct CreatedRun {
     pub persisted: Persisted,
-    pub run_id: String,
+    pub run_id: RunId,
     pub run_dir: PathBuf,
     pub dot_path: Option<PathBuf>,
 }
@@ -43,7 +44,7 @@ pub struct CreatedRun {
 struct PersistCreateOptions {
     settings: FabroSettings,
     run_dir: Option<PathBuf>,
-    run_id: Option<String>,
+    run_id: Option<RunId>,
     workflow_slug: Option<String>,
     labels: HashMap<String, String>,
     base_branch: Option<String>,
@@ -76,12 +77,12 @@ pub fn create(request: CreateRunInput) -> Result<CreatedRun, FabroError> {
     } = request;
 
     let settings = resolved.settings.clone();
-    let run_id = run_id.unwrap_or_else(|| ulid::Ulid::new().to_string());
+    let run_id = run_id.unwrap_or_else(RunId::new);
     let storage_dir = settings.storage_dir();
     let run_dir = run_dir.unwrap_or_else(|| {
         make_run_dir(
             &storage_dir.join("runs"),
-            &run_id,
+            &run_id.to_string(),
             settings.dry_run_enabled(),
         )
     });
@@ -102,7 +103,7 @@ pub fn create(request: CreateRunInput) -> Result<CreatedRun, FabroError> {
         PersistCreateOptions {
             settings,
             run_dir: Some(run_dir.clone()),
-            run_id: Some(run_id.clone()),
+            run_id: Some(run_id),
             workflow_slug: workflow_slug.or(resolved.workflow_slug.clone()),
             labels: resolved.settings.labels.clone(),
             base_branch,
@@ -230,8 +231,9 @@ fn persist_validated(
 
     let settings = resolve_run_settings(settings, validated.graph());
 
-    let run_id = run_id.unwrap_or_else(|| ulid::Ulid::new().to_string());
-    let run_dir = run_dir.unwrap_or_else(|| default_run_dir(&run_id, settings.dry_run_enabled()));
+    let run_id = run_id.unwrap_or_else(RunId::new);
+    let run_dir =
+        run_dir.unwrap_or_else(|| default_run_dir(&run_id.to_string(), settings.dry_run_enabled()));
 
     let run_record = RunRecord {
         run_id,
@@ -319,6 +321,7 @@ pub(crate) fn make_run_dir(runs_base: &Path, run_id: &str, dry_run: bool) -> Pat
 mod tests {
     use super::*;
     use fabro_graphviz::graph::AttrValue;
+    use fabro_types::fixtures;
 
     use crate::operations::{ValidateInput, validate};
     use crate::run_status::RunStatusRecordExt;
@@ -564,13 +567,13 @@ mod tests {
             cwd: dir.path().to_path_buf(),
             workflow_slug: Some("slug".to_string()),
             run_dir: Some(dir.path().join("run")),
-            run_id: Some("run-123".to_string()),
+            run_id: Some(fixtures::RUN_1),
             host_repo_path: Some(dir.path().display().to_string()),
             base_branch: Some("main".to_string()),
         })
         .unwrap();
 
-        assert_eq!(created.run_id, "run-123");
+        assert_eq!(created.run_id, fixtures::RUN_1);
         assert_eq!(created.persisted.run_record().graph.goal(), "override goal");
         assert_eq!(
             created
@@ -670,7 +673,7 @@ mod tests {
             cwd: dir.path().to_path_buf(),
             workflow_slug: None,
             run_dir: Some(dir.path().join("run")),
-            run_id: Some("run-cwd".to_string()),
+            run_id: Some(fixtures::RUN_2),
             host_repo_path: None,
             base_branch: None,
         })

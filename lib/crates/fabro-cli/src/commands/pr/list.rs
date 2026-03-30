@@ -49,7 +49,7 @@ async fn list_from(
         let pr_path = run.path.join("pull_request.json");
         if let Ok(content) = std::fs::read_to_string(&pr_path) {
             if let Ok(record) = serde_json::from_str::<PullRequestRecord>(&content) {
-                entries.push((run.run_id.clone(), record));
+                entries.push((run.run_id.to_string(), record));
             }
         }
     }

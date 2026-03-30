@@ -1,4 +1,6 @@
 use std::collections::VecDeque;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,6 +14,7 @@ use fabro_interview::{
 };
 use fabro_llm::provider::Provider;
 use fabro_store::RuntimeState;
+use fabro_types::RunId;
 use fabro_validate::{Severity, validate, validate_or_raise};
 use fabro_workflows::context::Context;
 use fabro_workflows::error::{FabroError, FailureSignatureExt};
@@ -36,11 +39,18 @@ use fabro_workflows::test_support::{WorkflowRunner, run_graph_with_hooks};
 use fabro_workflows::transform::{
     StylesheetApplicationTransform, Transform, VariableExpansionTransform,
 };
+use ulid::Ulid;
 
 fn local_env() -> Arc<dyn fabro_agent::Sandbox> {
     Arc::new(fabro_agent::LocalSandbox::new(
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
     ))
+}
+
+fn test_run_id(label: &str) -> RunId {
+    let mut hasher = DefaultHasher::new();
+    label.hash(&mut hasher);
+    RunId::from(Ulid(u128::from(hasher.finish())))
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +208,7 @@ async fn end_to_end_linear_pipeline() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -338,7 +348,7 @@ async fn end_to_end_branching_pipeline() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -457,7 +467,7 @@ async fn end_to_end_human_gate_pipeline() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -552,7 +562,7 @@ async fn human_gate_aborted_input_fails_closed_without_fail_route() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -662,7 +672,7 @@ async fn human_gate_aborted_input_routes_via_outcome_fail_condition() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -774,7 +784,7 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -894,7 +904,7 @@ async fn goal_gate_routes_to_retry_target_when_present() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -1205,7 +1215,7 @@ async fn retry_on_failure_then_succeed() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -1279,7 +1289,7 @@ async fn pipeline_with_many_nodes() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -1600,7 +1610,7 @@ async fn smoke_test_with_mock_codergen_backend() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -1700,7 +1710,7 @@ async fn end_to_end_parallel_fan_out_fan_in() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -1812,7 +1822,7 @@ async fn resume_from_checkpoint_completes_pipeline() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -1910,7 +1920,7 @@ async fn resume_from_checkpoint_preserves_goal_gate_outcomes() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -1952,7 +1962,7 @@ async fn graph_goal_in_context() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -1987,7 +1997,7 @@ async fn event_streaming_lifecycle() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -2080,7 +2090,7 @@ async fn context_flow_between_stages() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -2132,7 +2142,7 @@ async fn tool_handler_e2e() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -2203,7 +2213,7 @@ async fn auto_approve_interviewer_e2e() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -2239,7 +2249,7 @@ async fn codergen_without_backend_simulated() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -2343,7 +2353,7 @@ async fn branching_loop_back_on_failure() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -2425,7 +2435,7 @@ async fn human_gate_loops_back() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -2482,7 +2492,7 @@ async fn scenario_ship_a_feature() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -2571,7 +2581,7 @@ async fn scenario_parallel_expert_review() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -2654,7 +2664,7 @@ async fn scenario_node_retries_on_retry_status() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -2715,7 +2725,7 @@ async fn scenario_loop_restart_resets_context() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -2782,7 +2792,7 @@ async fn scenario_bug_triage_router() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -2840,7 +2850,7 @@ async fn scenario_crash_recovery() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -2948,7 +2958,7 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -3026,7 +3036,7 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -3163,7 +3173,7 @@ async fn conditional_branching_success_fail_paths() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -3215,7 +3225,7 @@ async fn edge_selection_condition_match_wins_over_weight() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -3261,7 +3271,7 @@ async fn edge_selection_weight_breaks_ties() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -3299,7 +3309,7 @@ async fn edge_selection_lexical_tiebreak() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -3356,7 +3366,7 @@ async fn context_updates_visible_across_nodes() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -3399,7 +3409,7 @@ async fn stylesheet_applies_model_override() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -3454,7 +3464,7 @@ async fn custom_handler_registration_and_execution() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -3524,7 +3534,7 @@ async fn integration_smoke_plan_implement_review_done() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -3633,7 +3643,7 @@ async fn manager_loop_runs_child_engine_e2e() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -3766,7 +3776,7 @@ async fn manager_loop_context_flows_e2e() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -3838,7 +3848,7 @@ async fn manager_loop_child_dotfile_e2e() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -3939,7 +3949,7 @@ async fn import_e2e_through_engine() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4092,7 +4102,7 @@ async fn fidelity_default_is_compact() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4148,7 +4158,7 @@ async fn fidelity_graph_default_applied() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4200,7 +4210,7 @@ async fn fidelity_node_overrides_graph_default() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4258,7 +4268,7 @@ async fn fidelity_edge_overrides_node_and_graph() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4306,7 +4316,7 @@ async fn fidelity_full_produces_empty_preamble() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4364,7 +4374,7 @@ async fn fidelity_truncate_preamble_minimal() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4435,7 +4445,7 @@ async fn fidelity_summary_low_mode() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4501,7 +4511,7 @@ async fn fidelity_summary_medium_mode() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4567,7 +4577,7 @@ async fn fidelity_summary_high_mode() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4626,7 +4636,7 @@ async fn fidelity_full_sets_thread_id_in_context() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4696,7 +4706,7 @@ async fn fidelity_full_nodes_share_thread_id() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4776,7 +4786,7 @@ async fn fidelity_resume_degrades_full_to_summary_high() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4872,7 +4882,7 @@ async fn fidelity_resume_degrade_only_affects_first_hop() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4955,7 +4965,7 @@ async fn fidelity_resume_no_degrade_when_not_full() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -4996,7 +5006,7 @@ async fn fidelity_stored_in_checkpoint_context() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -5081,7 +5091,7 @@ async fn fidelity_precedence_multi_node_pipeline() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -5148,7 +5158,7 @@ async fn fidelity_compact_preamble_includes_completed_stages_and_context() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -5222,7 +5232,7 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
         settings: FabroSettings::default(),
         run_dir: dir_low.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -5288,7 +5298,7 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
         settings: FabroSettings::default(),
         run_dir: dir_med.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -5358,7 +5368,7 @@ async fn fidelity_thread_id_fallback_to_previous_node_in_pipeline() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -5411,7 +5421,7 @@ async fn fidelity_thread_id_from_node_class_in_pipeline() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -5467,7 +5477,7 @@ async fn fidelity_edge_thread_id_override_in_pipeline() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -5524,7 +5534,7 @@ async fn fidelity_full_without_explicit_thread_id_uses_previous_node() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -5591,7 +5601,7 @@ async fn fidelity_from_parsed_dot_pipeline() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -5638,7 +5648,7 @@ async fn fidelity_checkpoint_roundtrip_preserves_fidelity() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -5707,7 +5717,7 @@ async fn fidelity_node_thread_id_overrides_edge_thread_id_in_pipeline() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -5793,7 +5803,7 @@ async fn fidelity_resume_preserves_context_values_across_checkpoint() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -5922,7 +5932,7 @@ mod real_llm {
         })
     }
 
-    use super::local_env;
+    use super::{local_env, test_run_id};
     use fabro_graphviz::graph::{AttrValue, Edge, Graph};
     use fabro_interview::AutoApproveInterviewer;
     use fabro_workflows::event::EventEmitter;
@@ -6007,7 +6017,7 @@ mod real_llm {
             settings: FabroSettings::default(),
             run_dir: dir.path().to_path_buf(),
             cancel_token: None,
-            run_id: "test-run".into(),
+            run_id: test_run_id("test-run"),
             labels: std::collections::HashMap::new(),
             workflow_slug: None,
             github_app: None,
@@ -6120,7 +6130,7 @@ mod real_llm {
             settings: FabroSettings::default(),
             run_dir: dir.path().to_path_buf(),
             cancel_token: None,
-            run_id: "test-run".into(),
+            run_id: test_run_id("test-run"),
             labels: std::collections::HashMap::new(),
             workflow_slug: None,
             github_app: None,
@@ -6258,7 +6268,7 @@ mod real_llm {
             settings: FabroSettings::default(),
             run_dir: dir.path().to_path_buf(),
             cancel_token: None,
-            run_id: "test-run".into(),
+            run_id: test_run_id("test-run"),
             labels: std::collections::HashMap::new(),
             workflow_slug: None,
             github_app: None,
@@ -6364,7 +6374,7 @@ mod real_llm {
             settings: FabroSettings::default(),
             run_dir: dir.path().to_path_buf(),
             cancel_token: None,
-            run_id: "test-run".into(),
+            run_id: test_run_id("test-run"),
             labels: std::collections::HashMap::new(),
             workflow_slug: None,
             github_app: None,
@@ -6459,7 +6469,7 @@ async fn human_gate_freeform_only_routes_text() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -6588,7 +6598,7 @@ async fn human_gate_freeform_with_fixed_choice_match() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -6702,7 +6712,7 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -6829,7 +6839,7 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -6936,7 +6946,7 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -7220,7 +7230,7 @@ fn make_run_options(dir: &std::path::Path) -> RunOptions {
         settings: FabroSettings::default(),
         run_dir: dir.to_path_buf(),
         cancel_token: None,
-        run_id: "hook-test-run".into(),
+        run_id: test_run_id("hook-test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -7639,7 +7649,7 @@ async fn hook_receives_env_vars() {
     assert!(env_file.exists(), "Env file should be written by hook");
     let content = std::fs::read_to_string(&env_file).unwrap();
 
-    // Should contain lines like: event=stage_complete run=hook-test-run wf=HookTest node=work
+    // Should contain lines like: event=stage_complete run=<ulid> wf=HookTest node=work
     let lines: Vec<&str> = content.lines().collect();
     let work_line = lines.iter().find(|l| l.contains("node=work"));
     assert!(
@@ -7652,7 +7662,7 @@ async fn hook_receives_env_vars() {
         "FABRO_EVENT should be set: {line}"
     );
     assert!(
-        line.contains("run=hook-test-run"),
+        line.contains(&format!("run={}", test_run_id("hook-test-run"))),
         "FABRO_RUN_ID should be set: {line}"
     );
     assert!(
@@ -8325,7 +8335,7 @@ async fn arc_e2e_with_real_llm() {
         settings: FabroSettings::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -8452,7 +8462,7 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -8650,7 +8660,7 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -8864,7 +8874,7 @@ async fn artifact_pointers_rewritten_for_remote_sandbox() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -8993,7 +9003,7 @@ async fn node_dir_uses_visit_count_on_revisit() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -9966,7 +9976,7 @@ async fn full_pipeline_with_cli_backend_node() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -10096,7 +10106,7 @@ async fn stylesheet_backend_property_routes_to_cli() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -10316,8 +10326,9 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
             .unwrap();
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     };
+    let run_branch = format!("fabro/run/{}", test_run_id("test-docker"));
     std::process::Command::new("git")
-        .args(["branch", "fabro/run/test-docker", "HEAD"])
+        .args(["branch", &run_branch, "HEAD"])
         .current_dir(repo.path())
         .output()
         .unwrap();
@@ -10325,7 +10336,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
     std::process::Command::new("git")
         .args(["worktree", "add"])
         .arg(&worktree_path)
-        .arg("fabro/run/test-docker")
+        .arg(&run_branch)
         .current_dir(repo.path())
         .output()
         .unwrap();
@@ -10374,7 +10385,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         settings: FabroSettings::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-docker".into(),
+        run_id: test_run_id("test-docker"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -10383,7 +10394,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         host_repo_path: Some(worktree_path.clone()),
         git: Some(GitCheckpointOptions {
             base_sha: Some(base_sha.clone()),
-            run_branch: Some("fabro/run/test-docker".to_string()),
+            run_branch: Some(run_branch),
             meta_branch: None,
         }),
     };
@@ -10494,7 +10505,7 @@ async fn git_checkpoint_host_writes_shadow_branch() {
         .unwrap();
 
     // 2. Create a branch and worktree
-    let run_id = "test-shadow";
+    let run_id = test_run_id("test-shadow");
     let base_sha = {
         let out = std::process::Command::new("git")
             .args(["rev-parse", "HEAD"])
@@ -10571,12 +10582,12 @@ async fn git_checkpoint_host_writes_shadow_branch() {
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), env);
 
-    let meta_branch = MetadataStore::branch_name(run_id);
+    let meta_branch = MetadataStore::branch_name(&run_id.to_string());
     let run_options = RunOptions {
         settings: FabroSettings::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: run_id.into(),
+        run_id,
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -10597,7 +10608,7 @@ async fn git_checkpoint_host_writes_shadow_branch() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // 6. Assert shadow branch has checkpoint data on the host repo
-    let checkpoint = MetadataStore::read_checkpoint(repo.path(), run_id)
+    let checkpoint = MetadataStore::read_checkpoint(repo.path(), &run_id.to_string())
         .expect("read_checkpoint should not error")
         .expect("shadow branch should contain checkpoint data");
     assert!(
@@ -10630,7 +10641,7 @@ async fn git_checkpoint_host_writes_shadow_branch() {
     );
 
     // 8. Verify round-trip: shadow checkpoint's completed_nodes matches expected
-    let run_record = MetadataStore::read_run_record(repo.path(), run_id)
+    let run_record = MetadataStore::read_run_record(repo.path(), &run_id.to_string())
         .expect("read_run_record should not error")
         .expect("shadow branch should contain run record");
     assert_eq!(run_record.run_id, run_id);
@@ -10686,7 +10697,7 @@ async fn parallel_git_branching_host_e2e() {
             .unwrap();
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     };
-    let run_id = "par-git-test";
+    let run_id = test_run_id("par-git-test");
     let run_branch = format!("fabro/run/{run_id}");
     std::process::Command::new("git")
         .args(["branch", &run_branch, "HEAD"])
@@ -10773,7 +10784,7 @@ async fn parallel_git_branching_host_e2e() {
         settings: FabroSettings::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: run_id.into(),
+        run_id,
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -10980,8 +10991,9 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
             .unwrap();
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     };
+    let run_branch = format!("fabro/run/{}", test_run_id("empty-diff"));
     std::process::Command::new("git")
-        .args(["branch", "fabro/run/empty-diff", "HEAD"])
+        .args(["branch", &run_branch, "HEAD"])
         .current_dir(repo.path())
         .output()
         .unwrap();
@@ -10989,7 +11001,7 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
     std::process::Command::new("git")
         .args(["worktree", "add"])
         .arg(&worktree_path)
-        .arg("fabro/run/empty-diff")
+        .arg(&run_branch)
         .current_dir(repo.path())
         .output()
         .unwrap();
@@ -11035,7 +11047,7 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
         settings: FabroSettings::default(),
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "empty-diff".into(),
+        run_id: test_run_id("empty-diff"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -11044,7 +11056,7 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
         host_repo_path: Some(worktree_path.clone()),
         git: Some(GitCheckpointOptions {
             base_sha: Some(base_sha.clone()),
-            run_branch: Some("fabro/run/empty-diff".to_string()),
+            run_branch: Some(run_branch),
             meta_branch: None,
         }),
     };
@@ -11416,7 +11428,7 @@ async fn e2e_circuit_breaker_deterministic_self_loop() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-circuit-breaker".into(),
+        run_id: test_run_id("e2e-circuit-breaker"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -11462,7 +11474,7 @@ async fn e2e_circuit_breaker_custom_limit() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-custom-limit".into(),
+        run_id: test_run_id("e2e-custom-limit"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -11501,7 +11513,7 @@ async fn e2e_circuit_breaker_ignores_transient_failures() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-transient-no-breaker".into(),
+        run_id: test_run_id("e2e-transient-no-breaker"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -11547,7 +11559,7 @@ async fn e2e_circuit_breaker_different_reasons_separate_counters() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-varying-reasons".into(),
+        run_id: test_run_id("e2e-varying-reasons"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -11586,7 +11598,7 @@ async fn e2e_circuit_breaker_loop_restart() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-restart-breaker".into(),
+        run_id: test_run_id("e2e-restart-breaker"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -11647,7 +11659,7 @@ async fn e2e_failure_signature_persisted_in_context() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-sig-context".into(),
+        run_id: test_run_id("e2e-sig-context"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -11710,7 +11722,7 @@ async fn e2e_failure_signature_hint_overrides_reason_in_context() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-sig-hint".into(),
+        run_id: test_run_id("e2e-sig-hint"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -11765,7 +11777,7 @@ async fn e2e_signature_maps_persist_in_checkpoint() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-sig-persist".into(),
+        run_id: test_run_id("e2e-sig-persist"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -11891,7 +11903,7 @@ async fn e2e_circuit_breaker_emits_events_before_abort() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-events".into(),
+        run_id: test_run_id("e2e-events"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -11957,7 +11969,7 @@ async fn e2e_circuit_breaker_does_not_fire_below_limit() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-below-limit".into(),
+        run_id: test_run_id("e2e-below-limit"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12052,7 +12064,7 @@ async fn e2e_circuit_breaker_multi_stage_impl_verify_cycle() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-impl-verify-cycle".into(),
+        run_id: test_run_id("e2e-impl-verify-cycle"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12148,7 +12160,7 @@ async fn e2e_loop_restart_blocked_for_deterministic_failure() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-restart-blocked-det".into(),
+        run_id: test_run_id("e2e-restart-blocked-det"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12187,7 +12199,7 @@ async fn e2e_loop_restart_blocked_for_structural_failure() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-restart-blocked-struct".into(),
+        run_id: test_run_id("e2e-restart-blocked-struct"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12226,7 +12238,7 @@ async fn e2e_loop_restart_blocked_for_budget_exhausted_failure() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-restart-blocked-budget".into(),
+        run_id: test_run_id("e2e-restart-blocked-budget"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12265,7 +12277,7 @@ async fn e2e_loop_restart_blocked_for_canceled_failure() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-restart-blocked-canceled".into(),
+        run_id: test_run_id("e2e-restart-blocked-canceled"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12301,7 +12313,7 @@ async fn e2e_loop_restart_blocked_for_compilation_loop_failure() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-restart-blocked-comploop".into(),
+        run_id: test_run_id("e2e-restart-blocked-comploop"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12341,7 +12353,7 @@ async fn e2e_loop_restart_allowed_for_transient_infra() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "e2e-restart-allowed-transient".into(),
+        run_id: test_run_id("e2e-restart-allowed-transient"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12444,7 +12456,7 @@ async fn e2e_stall_watchdog_triggers_from_dot_parsed_pipeline() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "stall-e2e".into(),
+        run_id: test_run_id("stall-e2e"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12499,7 +12511,7 @@ async fn e2e_stall_watchdog_kept_alive_by_handler_events() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "stall-alive-e2e".into(),
+        run_id: test_run_id("stall-alive-e2e"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12544,7 +12556,7 @@ async fn e2e_stall_watchdog_disabled_with_zero_timeout() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "stall-disabled-e2e".into(),
+        run_id: test_run_id("stall-disabled-e2e"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12608,7 +12620,7 @@ async fn e2e_stall_watchdog_with_explicit_timeout_override() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "stall-override-e2e".into(),
+        run_id: test_run_id("stall-override-e2e"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12743,7 +12755,7 @@ async fn asset_collection_local_sandbox_success() {
         },
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "asset-test-local".into(),
+        run_id: test_run_id("asset-test-local"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12868,7 +12880,7 @@ async fn asset_collection_local_sandbox_on_failure() {
         },
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "asset-test-fail".into(),
+        run_id: test_run_id("asset-test-fail"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12959,7 +12971,7 @@ async fn asset_collection_docker_sandbox() {
         },
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "asset-test-docker".into(),
+        run_id: test_run_id("asset-test-docker"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -13022,7 +13034,7 @@ async fn wait_timer_e2e() {
         settings: FabroSettings::default(),
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: "test-run".into(),
+        run_id: test_run_id("test-run"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,

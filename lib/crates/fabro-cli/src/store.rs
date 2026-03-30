@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use fabro_store::{RunStore, SlateStore, Store};
+use fabro_types::RunId;
 use object_store::local::LocalFileSystem;
 
 pub(crate) fn build_store(storage_dir: &Path) -> Result<Arc<SlateStore>> {
@@ -19,7 +20,7 @@ pub(crate) fn build_store(storage_dir: &Path) -> Result<Arc<SlateStore>> {
 
 pub(crate) async fn open_run_reader(
     storage_dir: &Path,
-    run_id: &str,
+    run_id: &RunId,
 ) -> Result<Option<Arc<dyn RunStore>>> {
     build_store(storage_dir)?
         .open_run_reader(run_id)

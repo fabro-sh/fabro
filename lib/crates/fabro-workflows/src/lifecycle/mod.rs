@@ -16,6 +16,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use fabro_store::RunStore;
 use fabro_store::RuntimeState;
+use fabro_types::RunId;
 
 use fabro_core::error::Result as CoreResult;
 use fabro_core::graph::NodeSpec;
@@ -72,7 +73,7 @@ pub(crate) struct WorkflowLifecycle {
     is_initial_resume: AtomicBool,
     // Config needed for context seeding
     graph: Arc<GvGraph>,
-    run_id: String,
+    run_id: RunId,
     working_directory: Option<String>,
 }
 

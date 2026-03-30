@@ -13,6 +13,7 @@ use crate::{
     format_lines_numbered,
 };
 use async_trait::async_trait;
+use fabro_types::RunId;
 use tokio::fs;
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
@@ -32,7 +33,7 @@ pub struct SshSandbox {
     ssh: OnceCell<Box<dyn SshRunner>>,
     config: SshConfig,
     clone_params: Option<GitCloneParams>,
-    run_id: Option<String>,
+    run_id: Option<RunId>,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     rg_available: OnceCell<bool>,
     event_callback: Option<SandboxEventCallback>,
@@ -44,7 +45,7 @@ impl SshSandbox {
     pub fn new(
         config: SshConfig,
         clone_params: Option<GitCloneParams>,
-        run_id: Option<String>,
+        run_id: Option<RunId>,
         github_app: Option<fabro_github::GitHubAppCredentials>,
     ) -> Self {
         Self {

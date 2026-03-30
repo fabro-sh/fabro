@@ -5,6 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_store::NodeVisitRef;
+use fabro_types::RunId;
 
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
@@ -271,12 +272,16 @@ impl Handler for AgentHandler {
 
         // 3. Call LLM backend (agent loop)
         let thread_id = context.thread_id();
+        let run_id = context
+            .run_id()
+            .parse::<RunId>()
+            .map_err(|err| FabroError::handler(format!("invalid internal run_id: {err}")))?;
         let tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>> =
             services.hook_runner.as_ref().map(|hr| {
                 Arc::new(fabro_hooks::WorkflowToolHookCallback {
                     hook_runner: Arc::clone(hr),
                     sandbox: Arc::clone(&services.sandbox),
-                    run_id: context.run_id(),
+                    run_id,
                     workflow_name: graph.name.clone(),
                     work_dir: None,
                     node_id: node.id.clone(),
@@ -397,17 +402,27 @@ mod tests {
     use super::*;
     use crate::event::EventEmitter;
     use fabro_graphviz::graph::AttrValue;
+    use fabro_types::fixtures;
     use tempfile::TempDir;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
     }
 
+    fn test_context() -> Context {
+        let context = Context::new();
+        context.set(
+            crate::context::keys::INTERNAL_RUN_ID,
+            serde_json::json!(fixtures::RUN_1.to_string()),
+        );
+        context
+    }
+
     #[tokio::test]
     async fn codergen_handler_simulate() {
         let handler = AgentHandler::new(None);
         let node = Node::new("plan");
-        let context = Context::new();
+        let context = test_context();
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
@@ -436,7 +451,7 @@ mod tests {
             "prompt".to_string(),
             AttrValue::String("Achieve: $goal".to_string()),
         );
-        let context = Context::new();
+        let context = test_context();
         let mut graph = Graph::new("test");
         graph.attrs.insert(
             "goal".to_string(),
@@ -463,7 +478,7 @@ mod tests {
             "label".to_string(),
             AttrValue::String("Do work".to_string()),
         );
-        let context = Context::new();
+        let context = test_context();
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
@@ -482,7 +497,7 @@ mod tests {
     async fn codergen_handler_context_updates() {
         let handler = AgentHandler::new(None);
         let node = Node::new("step");
-        let context = Context::new();
+        let context = test_context();
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
@@ -515,7 +530,7 @@ mod tests {
 
         let handler = AgentHandler::new(None);
         let node = Node::new("step");
-        let context = Context::new();
+        let context = test_context();
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
@@ -573,7 +588,7 @@ mod tests {
 
         let handler = AgentHandler::new(Some(Box::new(DirectiveBackend)));
         let node = Node::new("step");
-        let context = Context::new();
+        let context = test_context();
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
@@ -632,7 +647,7 @@ mod tests {
 
         let handler = AgentHandler::new(Some(Box::new(LastFileBackend)));
         let node = Node::new("step");
-        let context = Context::new();
+        let context = test_context();
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
@@ -737,7 +752,7 @@ mod tests {
         let handler = AgentHandler::new(Some(Box::new(backend)));
 
         let node = Node::new("work");
-        let context = Context::new();
+        let context = test_context();
         // Simulate what the engine stores in internal.thread_id
         context.set(keys::INTERNAL_THREAD_ID, serde_json::json!("main"));
         let graph = Graph::new("test");
@@ -790,7 +805,7 @@ mod tests {
         let handler = AgentHandler::new(Some(Box::new(backend)));
 
         let node = Node::new("work");
-        let context = Context::new();
+        let context = test_context();
         // No thread context set
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
@@ -827,7 +842,7 @@ mod tests {
 
         let handler = AgentHandler::new(Some(Box::new(FailingBackend)));
         let node = Node::new("step");
-        let context = Context::new();
+        let context = test_context();
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
@@ -971,7 +986,7 @@ Some text in between.
 
         let handler = AgentHandler::new(Some(Box::new(ValidationFailBackend)));
         let node = Node::new("step");
-        let context = Context::new();
+        let context = test_context();
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
@@ -1025,7 +1040,7 @@ Some text in between.
             "prompt".to_string(),
             AttrValue::String("Summarize the results".to_string()),
         );
-        let context = Context::new();
+        let context = test_context();
         context.set(
             keys::CURRENT_PREAMBLE,
             serde_json::json!("## Test Output\n10 passed, 0 failed"),
@@ -1095,7 +1110,7 @@ Some text in between.
             "prompt".to_string(),
             AttrValue::String("Summarize the results".to_string()),
         );
-        let context = Context::new();
+        let context = test_context();
         // No preamble set -- context.get_string returns ""
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
@@ -1117,7 +1132,7 @@ Some text in between.
             "prompt".to_string(),
             AttrValue::String("Summarize".to_string()),
         );
-        let context = Context::new();
+        let context = test_context();
         context.set(
             keys::CURRENT_PREAMBLE,
             serde_json::json!("## Script Output\nAll tests passed"),

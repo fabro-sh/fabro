@@ -125,7 +125,7 @@ impl HookExecutorImpl {
 
         let mut env_vars = HashMap::new();
         env_vars.insert("FABRO_EVENT".to_string(), context.event.to_string());
-        env_vars.insert("FABRO_RUN_ID".to_string(), context.run_id.clone());
+        env_vars.insert("FABRO_RUN_ID".to_string(), context.run_id.to_string());
         env_vars.insert("FABRO_WORKFLOW".to_string(), context.workflow_name.clone());
         if let Some(ref node_id) = context.node_id {
             env_vars.insert("FABRO_NODE_ID".to_string(), node_id.clone());
@@ -603,9 +603,10 @@ mod tests {
     use super::*;
     use crate::config::HookType;
     use crate::types::HookEvent;
+    use fabro_types::fixtures;
 
     fn make_context() -> HookContext {
-        HookContext::new(HookEvent::StageStart, "run-1".into(), "test-wf".into())
+        HookContext::new(HookEvent::StageStart, fixtures::RUN_1, "test-wf".into())
     }
 
     fn make_sandbox() -> Arc<dyn Sandbox> {

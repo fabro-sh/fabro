@@ -18,6 +18,7 @@ use fabro_llm::types::{
 };
 use fabro_retro::retro::Retro;
 use fabro_store::{InMemoryStore, Store};
+use fabro_types::RunId;
 use fabro_util::redact::redact_jsonl_line;
 use fabro_workflows::error::FabroError;
 use fabro_workflows::handler::HandlerRegistry;
@@ -30,6 +31,7 @@ use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 use tower::{ServiceExt, service_fn};
+use ulid::Ulid;
 
 use tracing::{error, info};
 
@@ -117,7 +119,7 @@ type RegistryFactoryOverride = dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry +
 
 /// Shared application state for the server.
 pub struct AppState {
-    runs: Mutex<HashMap<String, ManagedRun>>,
+    runs: Mutex<HashMap<RunId, ManagedRun>>,
     aggregate_usage: Mutex<AggregateUsageTotals>,
     store: Arc<dyn Store>,
     pub db: sqlx::SqlitePool,
@@ -452,7 +454,7 @@ async fn list_runs(
     let all_items: Vec<RunStatusResponse> = runs
         .iter()
         .map(|(id, managed_run)| RunStatusResponse {
-            id: id.clone(),
+            id: id.to_string(),
             status: managed_run.status,
             error: managed_run
                 .error
@@ -477,8 +479,8 @@ async fn list_runs(
         .into_response()
 }
 
-fn compute_queue_positions(runs: &HashMap<String, ManagedRun>) -> HashMap<String, i64> {
-    let mut queued: Vec<(&String, &ManagedRun)> = runs
+fn compute_queue_positions(runs: &HashMap<RunId, ManagedRun>) -> HashMap<RunId, i64> {
+    let mut queued: Vec<(&RunId, &ManagedRun)> = runs
         .iter()
         .filter(|(_, r)| r.status == RunStatus::Queued)
         .collect();
@@ -486,8 +488,13 @@ fn compute_queue_positions(runs: &HashMap<String, ManagedRun>) -> HashMap<String
     queued
         .into_iter()
         .enumerate()
-        .map(|(i, (id, _))| (id.clone(), i64::try_from(i + 1).unwrap()))
+        .map(|(i, (id, _))| (*id, i64::try_from(i + 1).unwrap()))
         .collect()
+}
+
+fn parse_run_id_path(id: &str) -> Result<RunId, Response> {
+    id.parse::<RunId>()
+        .map_err(|_| ApiError::bad_request("Invalid run ID.").into_response())
 }
 
 fn clear_live_run_state(run: &mut ManagedRun) {
@@ -502,7 +509,7 @@ async fn start_run(
     State(state): State<Arc<AppState>>,
     Json(req): Json<StartRunRequest>,
 ) -> Response {
-    let run_id = ulid::Ulid::new().to_string();
+    let run_id = RunId::new();
     info!(run_id = %run_id, "Run queued");
     let run_dir = std::env::temp_dir().join(format!("fabro-{}", uuid::Uuid::new_v4()));
     let settings = state.settings.read().unwrap().clone();
@@ -515,7 +522,7 @@ async fn start_run(
         cwd: std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir()),
         workflow_slug: None,
         run_dir: Some(run_dir.clone()),
-        run_id: Some(run_id.clone()),
+        run_id: Some(run_id),
         host_repo_path: None,
         base_branch: None,
     }) {
@@ -549,7 +556,7 @@ async fn start_run(
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         runs.insert(
-            run_id.clone(),
+            run_id,
             ManagedRun {
                 dot_source: req.dot_source,
                 status: RunStatus::Queued,
@@ -571,7 +578,7 @@ async fn start_run(
     (
         StatusCode::CREATED,
         Json(RunStatusResponse {
-            id: run_id,
+            id: run_id.to_string(),
             status: RunStatus::Queued,
             error: None,
             queue_position: None,
@@ -582,7 +589,7 @@ async fn start_run(
 }
 
 /// Execute a single run: transitions queued → starting → running → completed/failed/cancelled.
-async fn execute_run(state: Arc<AppState>, run_id: String) {
+async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     // Transition to Starting and set up cancel infrastructure
     let (cancel_rx, run_dir, event_tx, cancel_token) = {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
@@ -828,6 +835,10 @@ async fn get_run_status(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
     let runs = state.runs.lock().expect("runs lock poisoned");
     match runs.get(&id) {
         Some(managed_run) => {
@@ -840,7 +851,7 @@ async fn get_run_status(
             (
                 StatusCode::OK,
                 Json(RunStatusResponse {
-                    id: id.clone(),
+                    id: id.to_string(),
                     status: managed_run.status,
                     error: managed_run
                         .error
@@ -863,6 +874,10 @@ async fn get_questions(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
     let runs = state.runs.lock().expect("runs lock poisoned");
     match runs.get(&id) {
         Some(managed_run) => {
@@ -910,6 +925,10 @@ async fn submit_answer(
     Path((id, qid)): Path<(String, String)>,
     Json(req): Json<SubmitAnswerRequest>,
 ) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
     let runs = state.runs.lock().expect("runs lock poisoned");
     match runs.get(&id) {
         Some(managed_run) => {
@@ -970,6 +989,10 @@ async fn get_events(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
     let rx = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         match runs.get(&id) {
@@ -1002,6 +1025,10 @@ async fn get_checkpoint(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
     let runs = state.runs.lock().expect("runs lock poisoned");
     match runs.get(&id) {
         Some(managed_run) => match &managed_run.checkpoint {
@@ -1017,6 +1044,10 @@ async fn get_context(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
     let runs = state.runs.lock().expect("runs lock poisoned");
     match runs.get(&id) {
         Some(managed_run) => match &managed_run.context {
@@ -1032,6 +1063,10 @@ async fn cancel_run(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     match runs.get_mut(&id) {
         Some(managed_run) => match managed_run.status {
@@ -1047,7 +1082,7 @@ async fn cancel_run(
                 (
                     StatusCode::OK,
                     Json(RunStatusResponse {
-                        id: id.clone(),
+                        id: id.to_string(),
                         status: RunStatus::Cancelled,
                         error: None,
                         queue_position: None,
@@ -1067,6 +1102,10 @@ async fn pause_run(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     match runs.get_mut(&id) {
         Some(managed_run) => match managed_run.status {
@@ -1076,7 +1115,7 @@ async fn pause_run(
                 (
                     StatusCode::OK,
                     Json(RunStatusResponse {
-                        id: id.clone(),
+                        id: id.to_string(),
                         status: RunStatus::Paused,
                         error: None,
                         queue_position: None,
@@ -1096,6 +1135,10 @@ async fn unpause_run(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     match runs.get_mut(&id) {
         Some(managed_run) => match managed_run.status {
@@ -1105,7 +1148,7 @@ async fn unpause_run(
                 (
                     StatusCode::OK,
                     Json(RunStatusResponse {
-                        id: id.clone(),
+                        id: id.to_string(),
                         status: RunStatus::Running,
                         error: None,
                         queue_position: None,
@@ -1308,7 +1351,7 @@ async fn create_completion(
 
     // Dry-run mode returns a stub response
     if state.dry_run() {
-        let msg_id = ulid::Ulid::new().to_string();
+        let msg_id = Ulid::new().to_string();
         if use_stream {
             let finish_event = StreamEvent::finish(
                 FinishReason::Stop,
@@ -1408,7 +1451,7 @@ async fn create_completion(
             .into_response()
     } else {
         // Non-streaming path
-        let msg_id = ulid::Ulid::new().to_string();
+        let msg_id = Ulid::new().to_string();
 
         if let Some(schema) = req.schema {
             // Structured output uses generate_object for JSON parsing logic
@@ -1469,6 +1512,10 @@ async fn get_retro(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
     let run_dir = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         match runs.get(&id) {
@@ -1529,6 +1576,10 @@ async fn get_graph(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
     let dot_source = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         match runs.get(&id) {
@@ -1545,6 +1596,7 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
+    use fabro_types::fixtures;
     use fabro_workflows::records::{RunRecord, RunRecordExt};
     use tower::ServiceExt;
 
@@ -1720,7 +1772,7 @@ mod tests {
 
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
         // Give run a moment to start
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -1736,7 +1788,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = body_json(response.into_body()).await;
-        assert_eq!(body["id"].as_str().unwrap(), run_id);
+        assert_eq!(body["id"].as_str().unwrap(), run_id.to_string());
         let status = body["status"].as_str().unwrap();
         assert!(
             status == "queued"
@@ -1750,10 +1802,11 @@ mod tests {
     #[tokio::test]
     async fn get_run_status_not_found() {
         let app = test_app_with(test_db().await);
+        let missing_run_id = fixtures::RUN_64;
 
         let req = Request::builder()
             .method("GET")
-            .uri("/runs/nonexistent")
+            .uri(format!("/runs/{missing_run_id}"))
             .body(Body::empty())
             .unwrap();
 
@@ -1778,7 +1831,7 @@ mod tests {
 
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
         // Get questions (should be empty for a run without wait.human nodes)
         let req = Request::builder()
@@ -1798,10 +1851,11 @@ mod tests {
     #[tokio::test]
     async fn submit_answer_not_found_run() {
         let app = test_app_with(test_db().await);
+        let missing_run_id = fixtures::RUN_64;
 
         let req = Request::builder()
             .method("POST")
-            .uri("/runs/nonexistent/questions/q1/answer")
+            .uri(format!("/runs/{missing_run_id}/questions/q1/answer"))
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_string(&serde_json::json!({"value": "yes"})).unwrap(),
@@ -1815,10 +1869,11 @@ mod tests {
     #[tokio::test]
     async fn get_events_not_found() {
         let app = test_app_with(test_db().await);
+        let missing_run_id = fixtures::RUN_64;
 
         let req = Request::builder()
             .method("GET")
-            .uri("/runs/nonexistent/events")
+            .uri(format!("/runs/{missing_run_id}/events"))
             .body(Body::empty())
             .unwrap();
 
@@ -1843,7 +1898,7 @@ mod tests {
 
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
         // Get checkpoint immediately (before run completes, may be null)
         let req = Request::builder()
@@ -1873,7 +1928,7 @@ mod tests {
 
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
         // Get context
         let req = Request::builder()
@@ -1906,7 +1961,7 @@ mod tests {
 
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
         // Cancel it
         let req = Request::builder()
@@ -1927,10 +1982,11 @@ mod tests {
     #[tokio::test]
     async fn cancel_nonexistent_run_returns_not_found() {
         let app = test_app_with(test_db().await);
+        let missing_run_id = fixtures::RUN_64;
 
         let req = Request::builder()
             .method("POST")
-            .uri("/runs/nonexistent/cancel")
+            .uri(format!("/runs/{missing_run_id}/cancel"))
             .body(Body::empty())
             .unwrap();
 
@@ -1955,7 +2011,7 @@ mod tests {
 
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
         // Wait for scheduler to promote run (creates event_tx)
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -2006,7 +2062,7 @@ mod tests {
 
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
         // Poll until run completes
         let mut status = String::new();
@@ -2045,7 +2101,7 @@ mod tests {
 
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
         // Request graph SVG
         let req = Request::builder()
@@ -2085,10 +2141,11 @@ mod tests {
     #[tokio::test]
     async fn get_graph_not_found() {
         let app = test_app_with(test_db().await);
+        let missing_run_id = fixtures::RUN_64;
 
         let req = Request::builder()
             .method("GET")
-            .uri("/runs/nonexistent/graph")
+            .uri(format!("/runs/{missing_run_id}/graph"))
             .body(Body::empty())
             .unwrap();
 
@@ -2126,7 +2183,7 @@ mod tests {
 
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
         // List should now contain one run
         let req = Request::builder()
@@ -2140,7 +2197,7 @@ mod tests {
         let body = body_json(response.into_body()).await;
         let items = body["data"].as_array().unwrap();
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0]["id"].as_str().unwrap(), run_id);
+        assert_eq!(items[0]["id"].as_str().unwrap(), run_id.to_string());
         assert!(items[0]["status"].as_str().is_some());
         assert!(!body["meta"]["has_more"].as_bool().unwrap());
     }
@@ -2185,7 +2242,7 @@ mod tests {
 
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
         // Poll until run completes
         let mut status = String::new();
@@ -2236,7 +2293,7 @@ mod tests {
         let response = app.clone().oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
         // Check status is queued (no scheduler running)
         let req = Request::builder()
@@ -2309,7 +2366,7 @@ mod tests {
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
         let run_dir = {
             let runs = state.runs.lock().expect("runs lock poisoned");
@@ -2344,11 +2401,11 @@ mod tests {
         let response = app.clone().oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
         *state.settings.write().unwrap() = FabroSettings::default();
 
-        execute_run(Arc::clone(&state), run_id.clone()).await;
+        execute_run(Arc::clone(&state), run_id).await;
 
         let runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = runs.get(&run_id).expect("run should still exist");
@@ -2378,7 +2435,7 @@ mod tests {
 
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
         // Cancel it
         let req = Request::builder()
@@ -2425,9 +2482,9 @@ mod tests {
         let response = app.clone().oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
-        let runner = tokio::spawn(execute_run(Arc::clone(&state), run_id.clone()));
+        let runner = tokio::spawn(execute_run(Arc::clone(&state), run_id));
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         {
@@ -2498,9 +2555,9 @@ mod tests {
         let response = app.clone().oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
-        let runner = tokio::spawn(execute_run(Arc::clone(&state), run_id.clone()));
+        let runner = tokio::spawn(execute_run(Arc::clone(&state), run_id));
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let req = Request::builder()

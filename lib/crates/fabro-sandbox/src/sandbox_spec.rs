@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use fabro_types::settings::WorktreeMode;
+use fabro_types::{RunId, settings::WorktreeMode};
 
 #[cfg(any(feature = "docker", feature = "daytona", feature = "exe"))]
 use anyhow::anyhow;
@@ -35,14 +35,14 @@ pub enum SandboxSpec {
     Daytona {
         config: DaytonaConfig,
         github_app: Option<GitHubAppCredentials>,
-        run_id: Option<String>,
+        run_id: Option<RunId>,
         clone_branch: Option<String>,
     },
     #[cfg(feature = "exe")]
     Exe {
         config: ExeConfig,
         clone_params: Option<ExeGitCloneParams>,
-        run_id: Option<String>,
+        run_id: Option<RunId>,
         github_app: Option<GitHubAppCredentials>,
         mgmt_destination: String,
     },
@@ -50,7 +50,7 @@ pub enum SandboxSpec {
     Ssh {
         config: SshConfig,
         clone_params: Option<SshGitCloneParams>,
-        run_id: Option<String>,
+        run_id: Option<RunId>,
         github_app: Option<GitHubAppCredentials>,
     },
 }

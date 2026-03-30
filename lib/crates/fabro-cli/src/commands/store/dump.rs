@@ -350,8 +350,8 @@ mod tests {
     use fabro_store::{EventEnvelope, EventPayload, InMemoryStore, Store as _};
     use fabro_types::{
         AggregateStats, AttrValue, Checkpoint, Conclusion, FabroSettings, Graph, NodeStatusRecord,
-        Retro, RunRecord, RunStatus, RunStatusRecord, SandboxRecord, StageStatus, StartRecord,
-        StatusReason,
+        Retro, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord, StageStatus,
+        StartRecord, StatusReason, fixtures,
     };
 
     fn dt(rfc3339: &str) -> DateTime<Utc> {
@@ -360,14 +360,18 @@ mod tests {
             .with_timezone(&Utc)
     }
 
-    fn sample_run_record(run_id: &str, created_at: DateTime<Utc>) -> RunRecord {
+    fn test_run_id() -> RunId {
+        fixtures::RUN_1
+    }
+
+    fn sample_run_record(run_id: RunId, created_at: DateTime<Utc>) -> RunRecord {
         let mut graph = Graph::new("night-sky");
         graph.attrs.insert(
             "goal".to_string(),
             AttrValue::String("map the constellations".to_string()),
         );
         RunRecord {
-            run_id: run_id.to_string(),
+            run_id,
             created_at,
             settings: FabroSettings::default(),
             graph,
@@ -379,11 +383,11 @@ mod tests {
         }
     }
 
-    fn sample_start_record(run_id: &str, created_at: DateTime<Utc>) -> StartRecord {
+    fn sample_start_record(run_id: RunId, created_at: DateTime<Utc>) -> StartRecord {
         StartRecord {
-            run_id: run_id.to_string(),
+            run_id,
             start_time: created_at + chrono::Duration::seconds(5),
-            run_branch: Some("fabro/run/demo".to_string()),
+            run_branch: Some(format!("fabro/run/{run_id}")),
             base_sha: Some("abc123".to_string()),
         }
     }
@@ -434,9 +438,9 @@ mod tests {
         }
     }
 
-    fn sample_retro(run_id: &str) -> Retro {
+    fn sample_retro(run_id: RunId) -> Retro {
         Retro {
-            run_id: run_id.to_string(),
+            run_id,
             workflow_name: "night-sky".to_string(),
             goal: "map the constellations".to_string(),
             timestamp: dt("2026-03-27T12:20:00Z"),
@@ -478,14 +482,14 @@ mod tests {
         }
     }
 
-    fn event_payload(run_id: &str, ts: &str, event: &str) -> EventPayload {
+    fn event_payload(run_id: RunId, ts: &str, event: &str) -> EventPayload {
         EventPayload::new(
             serde_json::json!({
                 "ts": ts,
-                "run_id": run_id,
+                "run_id": run_id.to_string(),
                 "event": event
             }),
-            run_id,
+            &run_id,
         )
         .unwrap()
     }
@@ -498,12 +502,13 @@ mod tests {
     async fn export_run_writes_expected_directory_tree() {
         let store = InMemoryStore::default();
         let created_at = dt("2026-03-27T12:00:00Z");
-        let run = store.create_run("run-1", created_at, None).await.unwrap();
+        let run_id = test_run_id();
+        let run = store.create_run(&run_id, created_at, None).await.unwrap();
 
-        run.put_run(&sample_run_record("run-1", created_at))
+        run.put_run(&sample_run_record(run_id, created_at))
             .await
             .unwrap();
-        run.put_start(&sample_start_record("run-1", created_at))
+        run.put_start(&sample_start_record(run_id, created_at))
             .await
             .unwrap();
         run.put_status(&sample_status()).await.unwrap();
@@ -514,7 +519,7 @@ mod tests {
             .await
             .unwrap();
         run.put_conclusion(&sample_conclusion()).await.unwrap();
-        run.put_retro(&sample_retro("run-1")).await.unwrap();
+        run.put_retro(&sample_retro(run_id)).await.unwrap();
         run.put_graph("digraph night_sky {}").await.unwrap();
         run.put_sandbox(&sample_sandbox()).await.unwrap();
 
@@ -532,14 +537,14 @@ mod tests {
         run.put_retro_prompt("How did it go?").await.unwrap();
         run.put_retro_response("Smooth enough").await.unwrap();
         run.append_event(&event_payload(
-            "run-1",
+            run_id,
             "2026-03-27T12:00:00.000Z",
             "WorkflowRunStarted",
         ))
         .await
         .unwrap();
         run.append_event(&event_payload(
-            "run-1",
+            run_id,
             "2026-03-27T12:00:01.000Z",
             "StageCompleted",
         ))
@@ -568,10 +573,10 @@ mod tests {
         assert_eq!(file_count, 22);
 
         let exported_run: RunRecord = read_json(&output.path().join("run.json"));
-        assert_eq!(exported_run.run_id, "run-1");
+        assert_eq!(exported_run.run_id, run_id);
 
         let exported_start: StartRecord = read_json(&output.path().join("start.json"));
-        assert_eq!(exported_start.run_id, "run-1");
+        assert_eq!(exported_start.run_id, run_id);
 
         let exported_status: RunStatusRecord = read_json(&output.path().join("status.json"));
         assert_eq!(exported_status.status, RunStatus::Running);
@@ -658,9 +663,10 @@ mod tests {
     async fn export_run_rejects_path_traversal_and_leaves_no_partial_output() {
         let store = InMemoryStore::default();
         let created_at = dt("2026-03-27T12:00:00Z");
-        let run = store.create_run("run-1", created_at, None).await.unwrap();
+        let run_id = test_run_id();
+        let run = store.create_run(&run_id, created_at, None).await.unwrap();
 
-        run.put_run(&sample_run_record("run-1", created_at))
+        run.put_run(&sample_run_record(run_id, created_at))
             .await
             .unwrap();
         run.put_asset(

@@ -8,6 +8,7 @@ use fabro_git_storage::gitobj::Store as GitStore;
 use fabro_store::{
     ListRunsQuery, NodeVisitRef, RunStore as DurableRunStore, Store as DurableStore,
 };
+use fabro_types::RunId;
 use git2::{Repository, Signature};
 use ulid::Ulid;
 
@@ -18,9 +19,9 @@ use crate::records::Checkpoint;
 pub async fn rebuild_metadata_branch(
     git_store: &GitStore,
     run_store: &dyn DurableRunStore,
-    run_id: &str,
+    run_id: &RunId,
 ) -> Result<()> {
-    let branch = MetadataStore::branch_name(run_id);
+    let branch = MetadataStore::branch_name(&run_id.to_string());
     if git_store.resolve_ref(&branch)?.is_some() {
         bail!("metadata branch already exists for run {run_id}");
     }
@@ -121,16 +122,16 @@ pub async fn rebuild_metadata_branch(
 pub async fn build_timeline_or_rebuild(
     git_store: &GitStore,
     run_store: Option<&dyn DurableRunStore>,
-    run_id: &str,
+    run_id: &RunId,
 ) -> Result<RunTimeline> {
-    let branch = MetadataStore::branch_name(run_id);
+    let branch = MetadataStore::branch_name(&run_id.to_string());
     if git_store.resolve_ref(&branch)?.is_some() {
-        return build_timeline(git_store, run_id);
+        return build_timeline(git_store, &run_id.to_string());
     }
 
     if let Some(run_store) = run_store {
         rebuild_metadata_branch(git_store, run_store, run_id).await?;
-        return build_timeline(git_store, run_id);
+        return build_timeline(git_store, &run_id.to_string());
     }
 
     Ok(RunTimeline {
@@ -143,7 +144,7 @@ pub async fn find_run_id_by_prefix_or_store(
     repo: &Repository,
     fabro_store: &dyn DurableStore,
     prefix: &str,
-) -> Result<String> {
+) -> Result<RunId> {
     if let Some(run_id) = find_run_id_by_prefix_in_refs(repo, prefix)? {
         return Ok(run_id);
     }
@@ -151,7 +152,7 @@ pub async fn find_run_id_by_prefix_or_store(
     let current_repo_root = canonical_repo_root(repo)?;
     let mut matches = Vec::new();
     for summary in fabro_store.list_runs(&ListRunsQuery::default()).await? {
-        if summary.run_id == prefix {
+        if summary.run_id.to_string() == prefix {
             if summary.host_repo_path.is_none() {
                 return Ok(summary.run_id);
             }
@@ -180,7 +181,7 @@ pub async fn find_run_id_by_prefix_or_store(
         let Ok(host_repo_root) = canonical_repo_root(&host_repo) else {
             continue;
         };
-        if host_repo_root == current_repo_root && summary.run_id.starts_with(prefix) {
+        if host_repo_root == current_repo_root && summary.run_id.to_string().starts_with(prefix) {
             matches.push(summary.run_id);
         }
     }
@@ -203,7 +204,7 @@ fn write_entries(
 
 fn backfill_missing_checkpoint_shas(
     git_store: &GitStore,
-    run_id: &str,
+    run_id: &RunId,
     checkpoints: &mut [(u32, Checkpoint)],
 ) {
     if !checkpoints
@@ -213,7 +214,7 @@ fn backfill_missing_checkpoint_shas(
         return;
     }
 
-    let node_commits = rewind::run_commit_shas_by_node(git_store, run_id);
+    let node_commits = rewind::run_commit_shas_by_node(git_store, &run_id.to_string());
     let mut node_indices: HashMap<String, usize> = HashMap::new();
 
     for (_seq, checkpoint) in checkpoints.iter_mut() {
@@ -241,7 +242,7 @@ fn node_file_path(node_id: &str, visit: u32, filename: &str) -> String {
     }
 }
 
-fn find_run_id_by_prefix_in_refs(repo: &Repository, prefix: &str) -> Result<Option<String>> {
+fn find_run_id_by_prefix_in_refs(repo: &Repository, prefix: &str) -> Result<Option<RunId>> {
     let refs = repo.references()?;
     let pattern = "refs/heads/fabro/meta/";
     let mut matches = Vec::new();
@@ -253,12 +254,15 @@ fn find_run_id_by_prefix_in_refs(repo: &Repository, prefix: &str) -> Result<Opti
         let Some(run_id) = name.strip_prefix(pattern) else {
             continue;
         };
+        let Ok(run_id) = run_id.parse::<RunId>() else {
+            continue;
+        };
 
-        if run_id == prefix {
-            return Ok(Some(run_id.to_string()));
+        if run_id.to_string() == prefix {
+            return Ok(Some(run_id));
         }
-        if run_id.starts_with(prefix) {
-            matches.push(run_id.to_string());
+        if run_id.to_string().starts_with(prefix) {
+            matches.push(run_id);
         }
     }
 
@@ -278,7 +282,7 @@ fn canonical_repo_root(repo: &Repository) -> Result<PathBuf> {
         .with_context(|| format!("failed to canonicalize repo root {}", root.display()))
 }
 
-fn resolve_prefix_matches(prefix: &str, matches: Vec<String>) -> Result<String> {
+fn resolve_prefix_matches(prefix: &str, matches: Vec<RunId>) -> Result<RunId> {
     match matches.len() {
         0 => bail!("no run found matching '{prefix}'"),
         1 => Ok(matches.into_iter().next().unwrap()),
@@ -302,7 +306,9 @@ mod tests {
     use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
     use fabro_store::{InMemoryStore, Store as _};
-    use fabro_types::{NodeStatusRecord, RunRecord, SandboxRecord, StageStatus, StartRecord};
+    use fabro_types::{
+        NodeStatusRecord, RunId, RunRecord, SandboxRecord, StageStatus, StartRecord, fixtures,
+    };
 
     use super::*;
     use crate::operations::test_support::{make_checkpoint_json, temp_repo, test_sig};
@@ -312,9 +318,17 @@ mod tests {
         Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap()
     }
 
-    fn sample_run_record(run_id: &str, host_repo_path: Option<&str>) -> RunRecord {
+    fn parse_run_id(value: &str) -> RunId {
+        value.parse().unwrap()
+    }
+
+    fn test_run_id() -> RunId {
+        fixtures::RUN_1
+    }
+
+    fn sample_run_record(run_id: RunId, host_repo_path: Option<&str>) -> RunRecord {
         RunRecord {
-            run_id: run_id.to_string(),
+            run_id,
             created_at: created_at(),
             settings: FabroSettings::default(),
             graph: Graph::new("test"),
@@ -326,9 +340,9 @@ mod tests {
         }
     }
 
-    fn sample_start_record(run_id: &str) -> StartRecord {
+    fn sample_start_record(run_id: RunId) -> StartRecord {
         StartRecord {
-            run_id: run_id.to_string(),
+            run_id,
             start_time: created_at(),
             run_branch: Some(format!("fabro/run/{run_id}")),
             base_sha: Some("base-sha".to_string()),
@@ -384,10 +398,10 @@ mod tests {
 
     async fn create_run_store(
         store: &InMemoryStore,
-        run_id: &str,
+        run_id: RunId,
         host_repo_path: Option<&str>,
     ) -> Arc<dyn DurableRunStore> {
-        let run_store = store.create_run(run_id, created_at(), None).await.unwrap();
+        let run_store = store.create_run(&run_id, created_at(), None).await.unwrap();
         run_store
             .put_run(&sample_run_record(run_id, host_repo_path))
             .await
@@ -395,7 +409,7 @@ mod tests {
         run_store
     }
 
-    fn seed_run_branch(git_store: &GitStore, run_id: &str, nodes: &[&str]) -> Vec<String> {
+    fn seed_run_branch(git_store: &GitStore, run_id: RunId, nodes: &[&str]) -> Vec<String> {
         let sig = test_sig();
         let run_branch = format!("fabro/run/{run_id}");
         let empty_tree = git_store.write_empty_tree().unwrap();
@@ -424,9 +438,9 @@ mod tests {
     async fn rebuild_metadata_branch_round_trips_timeline() {
         let (_dir, git_store) = temp_repo();
         let durable_store = InMemoryStore::default();
-        let run_store = create_run_store(&durable_store, "run-1", None).await;
+        let run_store = create_run_store(&durable_store, test_run_id(), None).await;
         run_store
-            .put_start(&sample_start_record("run-1"))
+            .put_start(&sample_start_record(test_run_id()))
             .await
             .unwrap();
         run_store
@@ -462,11 +476,11 @@ mod tests {
             .await
             .unwrap();
 
-        rebuild_metadata_branch(&git_store, run_store.as_ref(), "run-1")
+        rebuild_metadata_branch(&git_store, run_store.as_ref(), &test_run_id())
             .await
             .unwrap();
 
-        let timeline = build_timeline(&git_store, "run-1").unwrap();
+        let timeline = build_timeline(&git_store, &test_run_id().to_string()).unwrap();
         assert_eq!(timeline.entries.len(), 3);
         assert_eq!(timeline.entries[0].node_name, "start");
         assert_eq!(timeline.entries[0].visit, 1);
@@ -483,7 +497,7 @@ mod tests {
     async fn rebuild_metadata_branch_preserves_historical_node_visits() {
         let (_dir, git_store) = temp_repo();
         let durable_store = InMemoryStore::default();
-        let run_store = create_run_store(&durable_store, "run-1", None).await;
+        let run_store = create_run_store(&durable_store, test_run_id(), None).await;
 
         let build_v1 = NodeVisitRef {
             node_id: "build",
@@ -526,12 +540,12 @@ mod tests {
             .await
             .unwrap();
 
-        rebuild_metadata_branch(&git_store, run_store.as_ref(), "run-1")
+        rebuild_metadata_branch(&git_store, run_store.as_ref(), &test_run_id())
             .await
             .unwrap();
 
         let sig = test_sig();
-        let branch = MetadataStore::branch_name("run-1");
+        let branch = MetadataStore::branch_name(&test_run_id().to_string());
         let bs = BranchStore::new(&git_store, &branch, &sig);
         let checkpoint_commits: Vec<_> = bs
             .log(100)
@@ -576,15 +590,15 @@ mod tests {
     async fn rebuild_metadata_branch_refuses_to_overwrite_existing_branch() {
         let (_dir, git_store) = temp_repo();
         let durable_store = InMemoryStore::default();
-        let run_store = create_run_store(&durable_store, "run-1", None).await;
+        let run_store = create_run_store(&durable_store, test_run_id(), None).await;
 
         let sig = test_sig();
-        let branch = MetadataStore::branch_name("run-1");
+        let branch = MetadataStore::branch_name(&test_run_id().to_string());
         let bs = BranchStore::new(&git_store, &branch, &sig);
         bs.ensure_branch().unwrap();
         bs.write_entry("run.json", b"{}", "init run").unwrap();
 
-        let err = rebuild_metadata_branch(&git_store, run_store.as_ref(), "run-1")
+        let err = rebuild_metadata_branch(&git_store, run_store.as_ref(), &test_run_id())
             .await
             .unwrap_err();
         assert!(err.to_string().contains("metadata branch already exists"));
@@ -594,7 +608,7 @@ mod tests {
     async fn build_timeline_or_rebuild_rebuilds_missing_branch() {
         let (_dir, git_store) = temp_repo();
         let durable_store = InMemoryStore::default();
-        let run_store = create_run_store(&durable_store, "run-1", None).await;
+        let run_store = create_run_store(&durable_store, test_run_id(), None).await;
         run_store
             .append_checkpoint(&sample_checkpoint(
                 "start",
@@ -605,9 +619,10 @@ mod tests {
             .await
             .unwrap();
 
-        let timeline = build_timeline_or_rebuild(&git_store, Some(run_store.as_ref()), "run-1")
-            .await
-            .unwrap();
+        let timeline =
+            build_timeline_or_rebuild(&git_store, Some(run_store.as_ref()), &test_run_id())
+                .await
+                .unwrap();
 
         assert_eq!(timeline.entries.len(), 1);
         assert_eq!(timeline.entries[0].node_name, "start");
@@ -617,7 +632,7 @@ mod tests {
     async fn build_timeline_or_rebuild_preserves_existing_branch() {
         let (_dir, git_store) = temp_repo();
         let durable_store = InMemoryStore::default();
-        let run_store = create_run_store(&durable_store, "run-1", None).await;
+        let run_store = create_run_store(&durable_store, test_run_id(), None).await;
         run_store
             .append_checkpoint(&sample_checkpoint(
                 "start",
@@ -647,7 +662,7 @@ mod tests {
             .unwrap();
 
         let sig = test_sig();
-        let branch = MetadataStore::branch_name("run-1");
+        let branch = MetadataStore::branch_name(&test_run_id().to_string());
         let bs = BranchStore::new(&git_store, &branch, &sig);
         bs.ensure_branch().unwrap();
         bs.write_entry("run.json", b"{}", "init run").unwrap();
@@ -664,9 +679,10 @@ mod tests {
         )
         .unwrap();
 
-        let timeline = build_timeline_or_rebuild(&git_store, Some(run_store.as_ref()), "run-1")
-            .await
-            .unwrap();
+        let timeline =
+            build_timeline_or_rebuild(&git_store, Some(run_store.as_ref()), &test_run_id())
+                .await
+                .unwrap();
 
         assert_eq!(timeline.entries.len(), 2);
         assert_eq!(timeline.entries[0].node_name, "start");
@@ -676,7 +692,7 @@ mod tests {
     #[tokio::test]
     async fn build_timeline_or_rebuild_returns_empty_without_store() {
         let (_dir, git_store) = temp_repo();
-        let timeline = build_timeline_or_rebuild(&git_store, None, "run-1")
+        let timeline = build_timeline_or_rebuild(&git_store, None, &test_run_id())
             .await
             .unwrap();
         assert!(timeline.entries.is_empty());
@@ -688,11 +704,11 @@ mod tests {
         let (_dir, git_store) = temp_repo();
         let durable_store = InMemoryStore::default();
         let run_store = durable_store
-            .create_run("run-1", created_at(), None)
+            .create_run(&test_run_id(), created_at(), None)
             .await
             .unwrap();
 
-        let err = rebuild_metadata_branch(&git_store, run_store.as_ref(), "run-1")
+        let err = rebuild_metadata_branch(&git_store, run_store.as_ref(), &test_run_id())
             .await
             .unwrap_err();
         assert!(err.to_string().contains("run record not found"));
@@ -703,13 +719,15 @@ mod tests {
         let (dir, git_store) = temp_repo();
         let durable_store = InMemoryStore::default();
         let repo_path = dir.path().to_string_lossy().to_string();
-        let _run_store = create_run_store(&durable_store, "abc-123-long", Some(&repo_path)).await;
+        let repo_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        let _run_store = create_run_store(&durable_store, repo_run_id, Some(&repo_path)).await;
+        let prefix = &repo_run_id.to_string()[..6];
 
-        let run_id = find_run_id_by_prefix_or_store(git_store.repo(), &durable_store, "abc-123")
+        let run_id = find_run_id_by_prefix_or_store(git_store.repo(), &durable_store, prefix)
             .await
             .unwrap();
 
-        assert_eq!(run_id, "abc-123-long");
+        assert_eq!(run_id, repo_run_id);
     }
 
     #[tokio::test]
@@ -718,10 +736,12 @@ mod tests {
         let (other_dir, _other_git_store) = temp_repo();
         let durable_store = InMemoryStore::default();
         let other_repo_path = other_dir.path().to_string_lossy().to_string();
+        let other_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
         let _run_store =
-            create_run_store(&durable_store, "abc-123-long", Some(&other_repo_path)).await;
+            create_run_store(&durable_store, other_run_id, Some(&other_repo_path)).await;
+        let prefix = &other_run_id.to_string()[..6];
 
-        let err = find_run_id_by_prefix_or_store(git_store.repo(), &durable_store, "abc-123")
+        let err = find_run_id_by_prefix_or_store(git_store.repo(), &durable_store, prefix)
             .await
             .unwrap_err();
 
@@ -732,19 +752,23 @@ mod tests {
     async fn find_run_id_by_prefix_or_store_requires_exact_match_without_repo_path() {
         let (_dir, git_store) = temp_repo();
         let durable_store = InMemoryStore::default();
-        let _run_store = create_run_store(&durable_store, "abc-123-long", None).await;
+        let repo_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        let _run_store = create_run_store(&durable_store, repo_run_id, None).await;
+        let prefix = &repo_run_id.to_string()[..6];
 
-        let prefix_err =
-            find_run_id_by_prefix_or_store(git_store.repo(), &durable_store, "abc-123")
-                .await
-                .unwrap_err();
+        let prefix_err = find_run_id_by_prefix_or_store(git_store.repo(), &durable_store, prefix)
+            .await
+            .unwrap_err();
         assert!(prefix_err.to_string().contains("no run found matching"));
 
-        let exact =
-            find_run_id_by_prefix_or_store(git_store.repo(), &durable_store, "abc-123-long")
-                .await
-                .unwrap();
-        assert_eq!(exact, "abc-123-long");
+        let exact = find_run_id_by_prefix_or_store(
+            git_store.repo(),
+            &durable_store,
+            &repo_run_id.to_string(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(exact, repo_run_id);
     }
 
     #[tokio::test]
@@ -752,35 +776,50 @@ mod tests {
         let (_dir, git_store) = temp_repo();
         let durable_store = InMemoryStore::default();
         let repo_path = git_store.repo_dir().to_string_lossy().to_string();
-        let _short = create_run_store(&durable_store, "abc-123", Some(&repo_path)).await;
-        let _long = create_run_store(&durable_store, "abc-123-long", Some(&repo_path)).await;
+        let exact_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        let other_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAW");
+        let _exact = create_run_store(&durable_store, exact_run_id, Some(&repo_path)).await;
+        let _other = create_run_store(&durable_store, other_run_id, Some(&repo_path)).await;
 
-        let from_store =
-            find_run_id_by_prefix_or_store(git_store.repo(), &durable_store, "abc-123")
-                .await
-                .unwrap();
-        assert_eq!(from_store, "abc-123");
+        let from_store = find_run_id_by_prefix_or_store(
+            git_store.repo(),
+            &durable_store,
+            &exact_run_id.to_string(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(from_store, exact_run_id);
 
         let sig = test_sig();
-        let short_branch =
-            BranchStore::new(&git_store, MetadataStore::branch_name("abc-123"), &sig);
-        short_branch.ensure_branch().unwrap();
+        let exact_branch = BranchStore::new(
+            &git_store,
+            &MetadataStore::branch_name(&exact_run_id.to_string()),
+            &sig,
+        );
+        exact_branch.ensure_branch().unwrap();
 
-        let long_branch =
-            BranchStore::new(&git_store, MetadataStore::branch_name("abc-123-long"), &sig);
-        long_branch.ensure_branch().unwrap();
+        let other_branch = BranchStore::new(
+            &git_store,
+            &MetadataStore::branch_name(&other_run_id.to_string()),
+            &sig,
+        );
+        other_branch.ensure_branch().unwrap();
 
-        let from_refs = find_run_id_by_prefix_or_store(git_store.repo(), &durable_store, "abc-123")
-            .await
-            .unwrap();
-        assert_eq!(from_refs, "abc-123");
+        let from_refs = find_run_id_by_prefix_or_store(
+            git_store.repo(),
+            &durable_store,
+            &exact_run_id.to_string(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(from_refs, exact_run_id);
     }
 
     #[tokio::test]
     async fn rebuild_metadata_branch_persists_backfilled_run_shas_in_checkpoint_blobs() {
         let (_dir, git_store) = temp_repo();
         let durable_store = InMemoryStore::default();
-        let run_store = create_run_store(&durable_store, "run-1", None).await;
+        let run_store = create_run_store(&durable_store, test_run_id(), None).await;
 
         run_store
             .append_checkpoint(&sample_checkpoint(
@@ -801,14 +840,14 @@ mod tests {
             .await
             .unwrap();
 
-        let expected_shas = seed_run_branch(&git_store, "run-1", &["start", "build"]);
+        let expected_shas = seed_run_branch(&git_store, test_run_id(), &["start", "build"]);
 
-        rebuild_metadata_branch(&git_store, run_store.as_ref(), "run-1")
+        rebuild_metadata_branch(&git_store, run_store.as_ref(), &test_run_id())
             .await
             .unwrap();
 
         let sig = test_sig();
-        let branch = MetadataStore::branch_name("run-1");
+        let branch = MetadataStore::branch_name(&test_run_id().to_string());
         let bs = BranchStore::new(&git_store, &branch, &sig);
         let checkpoint_commits: Vec<_> = bs
             .log(100)
@@ -848,7 +887,7 @@ mod tests {
     async fn rebuild_metadata_branch_is_atomic_on_failure() {
         let (_dir, git_store) = temp_repo();
         let durable_store = InMemoryStore::default();
-        let run_store = create_run_store(&durable_store, "run-1", None).await;
+        let run_store = create_run_store(&durable_store, test_run_id(), None).await;
 
         let bad_node = "bad\0node";
         let bad_visit = NodeVisitRef {
@@ -869,13 +908,13 @@ mod tests {
             .await
             .unwrap();
 
-        let err = rebuild_metadata_branch(&git_store, run_store.as_ref(), "run-1")
+        let err = rebuild_metadata_branch(&git_store, run_store.as_ref(), &test_run_id())
             .await
             .unwrap_err();
         assert!(err.to_string().contains("nul") || err.to_string().contains("NUL"));
         assert!(
             git_store
-                .resolve_ref(&MetadataStore::branch_name("run-1"))
+                .resolve_ref(&MetadataStore::branch_name(&test_run_id().to_string()))
                 .unwrap()
                 .is_none()
         );
@@ -886,7 +925,9 @@ mod tests {
             .unwrap()
             .flatten()
             .filter_map(|reference| reference.name().map(ToOwned::to_owned))
-            .filter(|name| name.starts_with("refs/heads/fabro/meta-rebuild/run-1/"))
+            .filter(|name| {
+                name.starts_with(&format!("refs/heads/fabro/meta-rebuild/{}/", test_run_id()))
+            })
             .collect();
         assert!(
             scratch_refs.is_empty(),

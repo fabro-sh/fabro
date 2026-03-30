@@ -13,6 +13,7 @@ use fabro_hooks::HookConfig;
 use fabro_interview::AutoApproveInterviewer;
 use fabro_sandbox::SandboxSpec;
 use fabro_store::InMemoryStore;
+use fabro_types::{RunId, fixtures};
 
 use super::*;
 use crate::context::{self, Context};
@@ -67,11 +68,18 @@ fn make_registry() -> HandlerRegistry {
     registry
 }
 
+fn test_run_id(label: &str) -> RunId {
+    match label {
+        "git-cp-test" => fixtures::RUN_2,
+        _ => fixtures::RUN_1,
+    }
+}
+
 fn test_run_options(run_dir: &Path, run_id: &str) -> RunOptions {
     RunOptions {
         run_dir: run_dir.to_path_buf(),
         cancel_token: None,
-        run_id: run_id.into(),
+        run_id: test_run_id(run_id),
         settings: FabroSettings::default(),
         git: None,
         host_repo_path: None,
@@ -106,14 +114,14 @@ fn simple_validated_graph() -> (Graph, String) {
     (graph, source)
 }
 
-fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: &str) -> Persisted {
+fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: RunId) -> Persisted {
     Persisted::new(
         graph.clone(),
         source,
         vec![],
         run_dir.to_path_buf(),
         RunRecord {
-            run_id: run_id.to_string(),
+            run_id,
             created_at: Utc::now(),
             settings: FabroSettings::default(),
             graph,
@@ -139,10 +147,10 @@ fn test_lifecycle(setup_commands: Vec<String>) -> LifecycleOptions {
     }
 }
 
-async fn test_run_store(_run_dir: &Path) -> Arc<dyn fabro_store::RunStore> {
+async fn test_run_store(_run_dir: &Path, run_id: &RunId) -> Arc<dyn fabro_store::RunStore> {
     let store: &dyn fabro_store::Store = &InMemoryStore::default();
     store
-        .create_run("test-run", chrono::Utc::now(), None)
+        .create_run(run_id, chrono::Utc::now(), None)
         .await
         .unwrap()
 }
@@ -154,10 +162,10 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
     std::fs::create_dir_all(&run_dir).unwrap();
     let (graph, source) = simple_validated_graph();
     let initialized = initialize(
-        persisted_workflow(graph, source, &run_dir, "run-test"),
+        persisted_workflow(graph, source, &run_dir, test_run_id("run-test")),
         InitOptions {
-            run_id: "run-test".to_string(),
-            run_store: test_run_store(&run_dir).await,
+            run_id: test_run_id("run-test"),
+            run_store: test_run_store(&run_dir, &test_run_id("run-test")).await,
             dry_run: false,
             emitter: Arc::new(crate::event::EventEmitter::new()),
             sandbox: SandboxSpec::Local {
@@ -205,7 +213,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
         executed
             .final_context
             .get(crate::context::keys::INTERNAL_RUN_ID),
-        Some(serde_json::json!("run-test"))
+        Some(serde_json::json!(test_run_id("run-test").to_string()))
     );
 }
 
@@ -221,10 +229,10 @@ async fn run_with_lifecycle(
     let run_dir = run_options.run_dir.clone();
     let run_id = run_options.run_id.clone();
     let initialized = initialize(
-        persisted_workflow(graph.clone(), String::new(), &run_dir, &run_id),
+        persisted_workflow(graph.clone(), String::new(), &run_dir, run_id),
         InitOptions {
             run_id,
-            run_store: test_run_store(&run_dir).await,
+            run_store: test_run_store(&run_dir, &run_id).await,
             dry_run: false,
             emitter,
             sandbox: SandboxSpec::Local {
@@ -551,7 +559,7 @@ async fn execute_writes_start_json_and_node_status() {
     let mut run_options = test_run_options(dir.path(), "test-run");
     run_options.git = Some(GitCheckpointOptions {
         base_sha: Some("abc123".into()),
-        run_branch: Some("fabro/run/test-run".into()),
+        run_branch: Some(format!("fabro/run/{}", test_run_id("test-run"))),
         meta_branch: None,
     });
 
@@ -566,8 +574,11 @@ async fn execute_writes_start_json_and_node_status() {
     .unwrap();
 
     let start = crate::records::StartRecord::load(dir.path()).unwrap();
-    assert_eq!(start.run_id, "test-run");
-    assert_eq!(start.run_branch.as_deref(), Some("fabro/run/test-run"));
+    assert_eq!(start.run_id, test_run_id("test-run"));
+    assert_eq!(
+        start.run_branch.as_deref(),
+        Some(format!("fabro/run/{}", test_run_id("test-run")).as_str())
+    );
     assert_eq!(start.base_sha.as_deref(), Some("abc123"));
 
     let status_path = dir.path().join("nodes").join("start").join("status.json");
@@ -964,7 +975,9 @@ async fn git_checkpoint_skips_start_node() {
     run_options.git = Some(GitCheckpointOptions {
         base_sha: Some(base_sha),
         run_branch: None,
-        meta_branch: Some(crate::git::MetadataStore::branch_name("git-cp-test")),
+        meta_branch: Some(crate::git::MetadataStore::branch_name(
+            &test_run_id("git-cp-test").to_string(),
+        )),
     });
     run_options.host_repo_path = Some(repo.to_path_buf());
 

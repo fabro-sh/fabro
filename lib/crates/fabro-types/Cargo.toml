@@ -23,3 +23,4 @@ clap = { workspace = true, optional = true }
 fabro-macros = { path = "../fabro-macros" }
 serde.workspace = true
 serde_json.workspace = true
+ulid.workspace = true

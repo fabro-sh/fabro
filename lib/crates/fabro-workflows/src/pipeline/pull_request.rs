@@ -634,6 +634,7 @@ mod tests {
     use fabro_retro::retro::{
         AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,
     };
+    use fabro_types::fixtures;
     use futures::stream;
 
     struct MockProvider {
@@ -763,7 +764,7 @@ mod tests {
 
     fn make_test_retro() -> Retro {
         Retro {
-            run_id: "test-run".to_string(),
+            run_id: fixtures::RUN_1,
             workflow_name: "implement".to_string(),
             goal: "Fix the bug".to_string(),
             timestamp: Utc::now(),
@@ -866,7 +867,7 @@ mod tests {
     #[test]
     fn format_retro_section_empty_stats() {
         let retro = Retro {
-            run_id: "test".to_string(),
+            run_id: fixtures::RUN_2,
             workflow_name: "test".to_string(),
             goal: "test".to_string(),
             timestamp: Utc::now(),

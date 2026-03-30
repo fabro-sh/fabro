@@ -3,12 +3,13 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use fabro_config::FabroSettingsExt;
+use fabro_types::RunId;
 use fabro_workflows::records::{RunRecord, RunRecordExt};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct LauncherRecord {
-    pub run_id: String,
+    pub run_id: RunId,
     pub run_dir: PathBuf,
     pub pid: u32,
     pub resume: bool,
@@ -20,11 +21,11 @@ pub(crate) fn launcher_dir(storage_dir: &Path) -> PathBuf {
     storage_dir.join("launchers")
 }
 
-pub(crate) fn launcher_record_path(storage_dir: &Path, run_id: &str) -> PathBuf {
+pub(crate) fn launcher_record_path(storage_dir: &Path, run_id: &RunId) -> PathBuf {
     launcher_dir(storage_dir).join(format!("{run_id}.json"))
 }
 
-pub(crate) fn launcher_log_path(storage_dir: &Path, run_id: &str) -> PathBuf {
+pub(crate) fn launcher_log_path(storage_dir: &Path, run_id: &RunId) -> PathBuf {
     launcher_dir(storage_dir).join(format!("{run_id}.log"))
 }
 
@@ -93,7 +94,8 @@ fn launcher_process_matches(record: &LauncherRecord) -> bool {
 fn command_matches_launcher(record: &LauncherRecord, command: &str) -> bool {
     let run_dir = record.run_dir.to_string_lossy();
     let old_match = command.contains("__detached") && command.contains(run_dir.as_ref());
-    let new_match = command.contains(&format!("fabro: {}", super::short_run_id(&record.run_id)));
+    let run_id = record.run_id.to_string();
+    let new_match = command.contains(&format!("fabro: {}", super::short_run_id(&run_id)));
     old_match || new_match
 }
 
@@ -108,6 +110,7 @@ mod tests {
     use chrono::Utc;
     use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
+    use fabro_types::fixtures;
     use fabro_workflows::records::RunRecord;
 
     #[test]
@@ -118,7 +121,7 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
 
         RunRecord {
-            run_id: "run-test".to_string(),
+            run_id: fixtures::RUN_1,
             created_at: Utc::now(),
             settings: FabroSettings {
                 storage_dir: Some(storage_dir.clone()),
@@ -134,11 +137,11 @@ mod tests {
         .save(&run_dir)
         .unwrap();
 
-        let launcher_path = launcher_record_path(&storage_dir, "run-test");
+        let launcher_path = launcher_record_path(&storage_dir, &fixtures::RUN_1);
         write_launcher_record(
             &launcher_path,
             &LauncherRecord {
-                run_id: "run-test".to_string(),
+                run_id: fixtures::RUN_1,
                 run_dir: run_dir.clone(),
                 pid: u32::MAX,
                 resume: false,
@@ -157,7 +160,7 @@ mod tests {
     fn command_matches_launcher_accepts_old_detached_format() {
         let dir = tempfile::tempdir().unwrap();
         let record = LauncherRecord {
-            run_id: "01JGABCDEF12ZYXW".to_string(),
+            run_id: fixtures::RUN_2,
             run_dir: dir.path().join("run"),
             pid: 42,
             resume: false,
@@ -178,7 +181,7 @@ mod tests {
     fn command_matches_launcher_accepts_new_title_format() {
         let dir = tempfile::tempdir().unwrap();
         let record = LauncherRecord {
-            run_id: "01JGABCDEF12ZYXW".to_string(),
+            run_id: fixtures::RUN_3,
             run_dir: dir.path().join("run"),
             pid: 42,
             resume: false,
@@ -188,7 +191,10 @@ mod tests {
 
         assert!(command_matches_launcher(
             &record,
-            "fabro: 01JGABCDEF12 plan"
+            &format!(
+                "fabro: {} plan",
+                crate::commands::run::short_run_id(&record.run_id.to_string())
+            )
         ));
     }
 }

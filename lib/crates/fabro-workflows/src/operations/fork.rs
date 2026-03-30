@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use fabro_git_storage::branchstore::BranchStore;
 use fabro_git_storage::gitobj::Store;
+use fabro_types::RunId;
 use git2::{Oid, Signature};
 
 use crate::git::{MetadataStore, RUN_BRANCH_PREFIX, push_run_branches};
@@ -12,7 +13,7 @@ use super::rewind::{RewindTarget, TimelineEntry, build_timeline};
 
 #[derive(Debug, Clone)]
 pub struct ForkRunInput {
-    pub source_run_id: String,
+    pub source_run_id: RunId,
     pub target: Option<RewindTarget>,
     pub push: bool,
 }
@@ -20,8 +21,8 @@ pub struct ForkRunInput {
 /// Create a new run that branches from an existing run at a specific checkpoint.
 ///
 /// Returns the new run ID.
-pub fn fork(store: &Store, input: &ForkRunInput) -> Result<String> {
-    let timeline = build_timeline(store, &input.source_run_id)?;
+pub fn fork(store: &Store, input: &ForkRunInput) -> Result<RunId> {
+    let timeline = build_timeline(store, &input.source_run_id.to_string())?;
     let entry = match input.target.as_ref() {
         Some(target) => timeline.resolve(target)?,
         None => timeline.entries.last().ok_or_else(|| {
@@ -33,11 +34,11 @@ pub fn fork(store: &Store, input: &ForkRunInput) -> Result<String> {
 
 fn fork_from_entry(
     store: &Store,
-    source_run_id: &str,
+    source_run_id: &RunId,
     entry: &TimelineEntry,
     push: bool,
-) -> Result<String> {
-    let new_run_id = ulid::Ulid::new().to_string();
+) -> Result<RunId> {
+    let new_run_id = RunId::new();
     let sig = Signature::now("Fabro", "noreply@fabro.sh")?;
 
     let new_run_branch = format!("{RUN_BRANCH_PREFIX}{new_run_id}");
@@ -57,8 +58,8 @@ fn fork_from_entry(
         }
     }
 
-    let source_meta_branch = MetadataStore::branch_name(source_run_id);
-    let new_meta_branch = MetadataStore::branch_name(&new_run_id);
+    let source_meta_branch = MetadataStore::branch_name(&source_run_id.to_string());
+    let new_meta_branch = MetadataStore::branch_name(&new_run_id.to_string());
     let source_bs = BranchStore::new(store, &source_meta_branch, &sig);
     let new_bs = BranchStore::new(store, &new_meta_branch, &sig);
 
@@ -88,14 +89,14 @@ fn fork_from_entry(
 
     let mut run_record: RunRecord =
         serde_json::from_slice(&run_record_bytes).context("failed to parse source run.json")?;
-    run_record.run_id.clone_from(&new_run_id);
+    run_record.run_id = new_run_id;
     run_record.created_at = now;
     let new_run_record_bytes =
         serde_json::to_vec_pretty(&run_record).context("failed to serialize new run.json")?;
 
     let new_start_record_bytes = if start_record_bytes.is_some() {
         let start_record = StartRecord {
-            run_id: new_run_id.clone(),
+            run_id: new_run_id,
             start_time: now,
             run_branch: Some(new_run_branch.clone()),
             base_sha: None,
@@ -160,13 +161,18 @@ mod tests {
 
     use super::super::test_support::*;
     use super::*;
+    use fabro_types::RunId;
     use git2::Oid;
 
     use crate::operations::find_run_id_by_prefix;
 
-    fn make_run_record_json(run_id: &str) -> Vec<u8> {
+    fn parse_run_id(value: &str) -> RunId {
+        value.parse().unwrap()
+    }
+
+    fn make_run_record_json(run_id: &RunId) -> Vec<u8> {
         let record = serde_json::json!({
-            "run_id": run_id,
+            "run_id": run_id.to_string(),
             "created_at": "2025-01-01T00:00:00Z",
             "settings": {},
             "graph": {
@@ -187,16 +193,16 @@ mod tests {
         serde_json::to_vec_pretty(&record).unwrap()
     }
 
-    fn make_start_record_json(run_id: &str) -> Vec<u8> {
+    fn make_start_record_json(run_id: &RunId) -> Vec<u8> {
         let record = serde_json::json!({
-            "run_id": run_id,
+            "run_id": run_id.to_string(),
             "start_time": "2025-01-01T00:00:00Z",
             "run_branch": format!("{}{}", RUN_BRANCH_PREFIX, run_id),
         });
         serde_json::to_vec_pretty(&record).unwrap()
     }
 
-    fn setup_source_run(store: &Store, run_id: &str, nodes: &[&str]) -> Vec<Oid> {
+    fn setup_source_run(store: &Store, run_id: &RunId, nodes: &[&str]) -> Vec<Oid> {
         let sig = test_sig();
 
         let run_branch = format!("{}{run_id}", RUN_BRANCH_PREFIX);
@@ -222,7 +228,7 @@ mod tests {
             parent = Some(oid);
         }
 
-        let meta_branch = MetadataStore::branch_name(run_id);
+        let meta_branch = MetadataStore::branch_name(&run_id.to_string());
         let bs = BranchStore::new(store, &meta_branch, &sig);
         bs.ensure_branch().unwrap();
 
@@ -246,13 +252,13 @@ mod tests {
     #[test]
     fn fork_creates_new_run_and_metadata_branches() {
         let (_dir, store) = temp_repo();
-        let source_run_id = "run-source";
-        let run_oids = setup_source_run(&store, source_run_id, &["start", "build", "test"]);
+        let source_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        let run_oids = setup_source_run(&store, &source_run_id, &["start", "build", "test"]);
 
         let new_run_id = fork(
             &store,
             &ForkRunInput {
-                source_run_id: source_run_id.to_string(),
+                source_run_id,
                 target: Some(RewindTarget::from_str("@2").unwrap()),
                 push: false,
             },
@@ -260,7 +266,7 @@ mod tests {
         .unwrap();
 
         let new_run_branch = format!("{}{new_run_id}", RUN_BRANCH_PREFIX);
-        let new_meta_branch = MetadataStore::branch_name(&new_run_id);
+        let new_meta_branch = MetadataStore::branch_name(&new_run_id.to_string());
 
         assert!(store.resolve_ref(&new_run_branch).unwrap().is_some());
         assert!(store.resolve_ref(&new_meta_branch).unwrap().is_some());
@@ -271,7 +277,7 @@ mod tests {
         let run_record: RunRecord = serde_json::from_slice(&run_json).unwrap();
         assert_eq!(run_record.run_id, new_run_id);
 
-        let timeline = build_timeline(&store, &new_run_id).unwrap();
+        let timeline = build_timeline(&store, &new_run_id.to_string()).unwrap();
         assert_eq!(timeline.entries.len(), 1);
         assert_eq!(timeline.entries[0].node_name, "build");
         assert_eq!(
@@ -284,11 +290,11 @@ mod tests {
     fn fork_rejects_checkpoint_without_run_sha() {
         let (_dir, store) = temp_repo();
         let sig = test_sig();
-        let run_id = "run-no-sha";
-        let meta_branch = MetadataStore::branch_name(run_id);
+        let run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAW");
+        let meta_branch = MetadataStore::branch_name(&run_id.to_string());
         let bs = BranchStore::new(&store, &meta_branch, &sig);
         bs.ensure_branch().unwrap();
-        bs.write_entry("run.json", &make_run_record_json(run_id), "init")
+        bs.write_entry("run.json", &make_run_record_json(&run_id), "init")
             .unwrap();
 
         let cp = make_checkpoint_json("start", 1, None);
@@ -303,7 +309,7 @@ mod tests {
             run_commit_sha: None,
         };
 
-        let err = fork_from_entry(&store, run_id, &entry, false)
+        let err = fork_from_entry(&store, &run_id, &entry, false)
             .unwrap_err()
             .to_string();
         assert!(err.contains("cannot fork"));
@@ -312,10 +318,10 @@ mod tests {
     #[test]
     fn fork_supports_prefix_resolved_source_run_ids() {
         let (_dir, store) = temp_repo();
-        let source_run_id = "abc-123-long";
-        setup_source_run(&store, source_run_id, &["start", "build"]);
+        let source_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAX");
+        setup_source_run(&store, &source_run_id, &["start", "build"]);
 
-        let resolved = find_run_id_by_prefix(store.repo(), "abc-123").unwrap();
+        let resolved = find_run_id_by_prefix(store.repo(), "01ARZ3").unwrap();
         assert_eq!(resolved, source_run_id);
     }
 }

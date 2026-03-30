@@ -12,6 +12,7 @@ use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec, detect_clone_params};
 use fabro_store::{DiskProjectingRunStore, ProjectionError, RunStore};
+use fabro_types::RunId;
 use serde::Serialize;
 
 use crate::context::Context;
@@ -672,7 +673,7 @@ const POSTRUN_CANCELLED_MESSAGE: &str = "Run cancelled before post-run finalizat
 struct DetachedRunCompletionGuard {
     run_dir: PathBuf,
     run_store: Arc<dyn RunStore>,
-    run_id: Option<String>,
+    run_id: Option<RunId>,
     cancel_token: Option<Arc<AtomicBool>>,
     active: bool,
 }
@@ -780,16 +781,16 @@ impl Drop for DetachedRunCompletionGuard {
     }
 }
 
-fn load_run_id(run_dir: &Path) -> Option<String> {
+fn load_run_id(run_dir: &Path) -> Option<RunId> {
     RunRecord::load(run_dir)
         .ok()
         .map(|record| record.run_id)
-        .filter(|run_id| !run_id.trim().is_empty())
         .or_else(|| {
             std::fs::read_to_string(run_dir.join("id.txt"))
                 .ok()
                 .map(|run_id| run_id.trim().to_string())
                 .filter(|run_id| !run_id.is_empty())
+                .and_then(|run_id| run_id.parse().ok())
         })
 }
 
@@ -909,6 +910,7 @@ mod tests {
     use chrono::Utc;
     use fabro_config::FabroSettings;
     use fabro_store::InMemoryStore;
+    use fabro_types::fixtures;
 
     use super::*;
     use crate::context::Context;
@@ -942,7 +944,7 @@ mod tests {
                 .to_path_buf(),
             workflow_slug: Some("test".to_string()),
             run_dir: Some(run_dir.to_path_buf()),
-            run_id: Some("run-test".to_string()),
+            run_id: Some(fixtures::RUN_1),
             host_repo_path: None,
             base_branch: None,
         })

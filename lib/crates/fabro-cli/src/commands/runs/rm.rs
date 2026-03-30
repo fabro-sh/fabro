@@ -37,9 +37,10 @@ async fn remove_from(args: &RunsRemoveArgs, store: &dyn Store, base: &Path) -> R
         };
 
         if run.status.is_active() && !args.force {
+            let run_id = run.run_id.to_string();
             eprintln!(
                 "cannot remove active run {} (status: {}, use -f to force)",
-                short_run_id(&run.run_id),
+                short_run_id(&run_id),
                 run.status
             );
             had_errors = true;
@@ -82,7 +83,8 @@ async fn remove_from(args: &RunsRemoveArgs, store: &dyn Store, base: &Path) -> R
             .delete_run(&run.run_id)
             .await
             .with_context(|| format!("failed to delete store state for {}", run.run_id))?;
-        eprintln!("{}", short_run_id(&run.run_id));
+        let run_id = run.run_id.to_string();
+        eprintln!("{}", short_run_id(&run_id));
     }
 
     if had_errors {

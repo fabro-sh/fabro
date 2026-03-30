@@ -7,17 +7,18 @@ use object_store::ObjectStore;
 use object_store::path::Path;
 
 use crate::{CatalogRecord, ListRunsQuery, Result};
+use fabro_types::RunId;
 
 pub(crate) async fn write_catalog(
     store: Arc<dyn ObjectStore>,
     base_prefix: &str,
-    run_id: &str,
+    run_id: &RunId,
     created_at: DateTime<Utc>,
     db_prefix: &str,
     run_dir: Option<&str>,
 ) -> Result<CatalogRecord> {
     let record = CatalogRecord {
-        run_id: run_id.to_string(),
+        run_id: *run_id,
         created_at,
         db_prefix: db_prefix.to_string(),
         run_dir: run_dir.map(ToOwned::to_owned),
@@ -38,7 +39,7 @@ pub(crate) async fn write_catalog(
 pub(crate) async fn read_locator(
     store: Arc<dyn ObjectStore>,
     base_prefix: &str,
-    run_id: &str,
+    run_id: &RunId,
 ) -> Result<Option<CatalogRecord>> {
     read_catalog_path(store, by_id_path(base_prefix, run_id)).await
 }
@@ -129,18 +130,18 @@ pub(super) async fn repair_catalog(store: Arc<dyn ObjectStore>, base_prefix: &st
     Ok(())
 }
 
-pub(crate) fn db_prefix(base_prefix: &str, created_at: DateTime<Utc>, run_id: &str) -> String {
+pub(crate) fn db_prefix(base_prefix: &str, created_at: DateTime<Utc>, run_id: &RunId) -> String {
     format!(
         "{base_prefix}db/{}/{run_id}/",
         created_at.format("%Y-%m-%d-%H-%M-%S-%3f")
     )
 }
 
-pub(crate) fn by_id_path(base_prefix: &str, run_id: &str) -> Path {
+pub(crate) fn by_id_path(base_prefix: &str, run_id: &RunId) -> Path {
     Path::from(format!("{base_prefix}by-id/{run_id}.json"))
 }
 
-pub(crate) fn by_start_path(base_prefix: &str, created_at: DateTime<Utc>, run_id: &str) -> Path {
+pub(crate) fn by_start_path(base_prefix: &str, created_at: DateTime<Utc>, run_id: &RunId) -> Path {
     Path::from(format!(
         "{base_prefix}by-start/{}/{run_id}.json",
         created_at.format("%Y-%m-%d-%H-%M")

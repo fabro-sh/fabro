@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_store::{NodeVisitRef, RunStore};
-use fabro_types::NodeStatusRecord;
+use fabro_types::{NodeStatusRecord, RunId};
 
 use fabro_core::error::Result as CoreResult;
 use fabro_core::graph::NodeSpec;
@@ -27,7 +27,7 @@ type WfNodeResult = NodeResult<Option<StageUsage>>;
 /// Sub-lifecycle responsible for writing run state to disk (node status, checkpoints).
 pub(crate) struct DiskLifecycle {
     pub run_dir: PathBuf,
-    pub run_id: String,
+    pub run_id: RunId,
     pub run_store: Arc<dyn RunStore>,
     pub graph: Arc<GvGraph>,
     pub run_options: Arc<RunOptions>,
@@ -41,7 +41,7 @@ impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
     async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
         let git_state = self.run_options.git.as_ref();
         let start_record = StartRecord {
-            run_id: self.run_id.clone(),
+            run_id: self.run_id,
             start_time: chrono::Utc::now(),
             run_branch: git_state.and_then(|g| g.run_branch.clone()),
             base_sha: git_state.and_then(|g| g.base_sha.clone()),

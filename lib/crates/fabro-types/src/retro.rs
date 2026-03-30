@@ -3,6 +3,8 @@ use std::fmt;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::run_id::RunId;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SmoothnessRating {
@@ -118,7 +120,7 @@ pub struct RetroNarrative {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Retro {
-    pub run_id: String,
+    pub run_id: RunId,
     pub workflow_name: String,
     pub goal: String,
     pub timestamp: DateTime<Utc>,

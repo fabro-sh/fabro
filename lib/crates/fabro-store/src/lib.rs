@@ -24,8 +24,8 @@ pub use types::{
 };
 
 use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, Retro, RunRecord, RunStatusRecord, SandboxRecord,
-    StartRecord,
+    Checkpoint, Conclusion, NodeStatusRecord, Retro, RunId, RunRecord, RunStatusRecord,
+    SandboxRecord, StartRecord,
 };
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -38,14 +38,14 @@ pub struct ListRunsQuery {
 pub trait Store: Send + Sync {
     async fn create_run(
         &self,
-        run_id: &str,
+        run_id: &RunId,
         created_at: DateTime<Utc>,
         run_dir: Option<&str>,
     ) -> Result<Arc<dyn RunStore>>;
-    async fn open_run(&self, run_id: &str) -> Result<Option<Arc<dyn RunStore>>>;
-    async fn open_run_reader(&self, run_id: &str) -> Result<Option<Arc<dyn RunStore>>>;
+    async fn open_run(&self, run_id: &RunId) -> Result<Option<Arc<dyn RunStore>>>;
+    async fn open_run_reader(&self, run_id: &RunId) -> Result<Option<Arc<dyn RunStore>>>;
     async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>>;
-    async fn delete_run(&self, run_id: &str) -> Result<()>;
+    async fn delete_run(&self, run_id: &RunId) -> Result<()>;
 }
 
 #[async_trait]

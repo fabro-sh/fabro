@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
 use fabro_store::{EventPayload, RunStore};
+use fabro_types::RunId;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
@@ -28,7 +29,7 @@ pub enum RunNoticeLevel {
 pub enum WorkflowRunEvent {
     WorkflowRunStarted {
         name: String,
-        run_id: String,
+        run_id: RunId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         base_branch: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -344,7 +345,7 @@ impl WorkflowRunEvent {
         use tracing::{debug, error, info, warn};
         match self {
             Self::WorkflowRunStarted { name, run_id, .. } => {
-                info!(workflow = name.as_str(), run_id, "Workflow run started");
+                info!(workflow = name.as_str(), run_id = %run_id, "Workflow run started");
             }
             Self::WorkflowRunCompleted {
                 duration_ms,
@@ -804,7 +805,7 @@ pub fn flatten_event(
     (event_name, fields)
 }
 
-pub fn build_event_envelope(event: &WorkflowRunEvent, run_id: &str) -> serde_json::Value {
+pub fn build_event_envelope(event: &WorkflowRunEvent, run_id: &RunId) -> serde_json::Value {
     let (event_name, event_fields) = flatten_event(event);
     let mut envelope = serde_json::Map::new();
     envelope.insert(
@@ -826,7 +827,7 @@ pub fn build_event_envelope(event: &WorkflowRunEvent, run_id: &str) -> serde_jso
 
 pub fn build_redacted_event_payload(
     event: &WorkflowRunEvent,
-    run_id: &str,
+    run_id: &RunId,
 ) -> Result<EventPayload> {
     let envelope = build_event_envelope(event, run_id);
     let line = serde_json::to_string(&envelope)?;
@@ -835,7 +836,11 @@ pub fn build_redacted_event_payload(
     EventPayload::new(value, run_id).map_err(anyhow::Error::from)
 }
 
-pub fn append_progress_event(run_dir: &Path, run_id: &str, event: &WorkflowRunEvent) -> Result<()> {
+pub fn append_progress_event(
+    run_dir: &Path,
+    run_id: &RunId,
+    event: &WorkflowRunEvent,
+) -> Result<()> {
     let envelope = build_event_envelope(event, run_id);
     let line = serde_json::to_string(&envelope)?;
     let line = redact_jsonl_line(&line);
@@ -861,15 +866,15 @@ pub fn append_progress_event(run_dir: &Path, run_id: &str, event: &WorkflowRunEv
 
 pub struct ProgressLogger {
     run_dir: PathBuf,
-    run_id: String,
+    run_id: RunId,
 }
 
 impl ProgressLogger {
     #[must_use]
-    pub fn new(run_dir: impl Into<PathBuf>, run_id: impl Into<String>) -> Self {
+    pub fn new(run_dir: impl Into<PathBuf>, run_id: RunId) -> Self {
         Self {
             run_dir: run_dir.into(),
-            run_id: run_id.into(),
+            run_id,
         }
     }
 
@@ -897,12 +902,12 @@ enum StoreProgressCommand {
 #[derive(Clone)]
 pub struct StoreProgressLogger {
     tx: mpsc::UnboundedSender<StoreProgressCommand>,
-    run_id: Arc<std::sync::Mutex<String>>,
+    run_id: Arc<std::sync::Mutex<RunId>>,
 }
 
 impl StoreProgressLogger {
     #[must_use]
-    pub fn new(run_store: Arc<dyn RunStore>, run_id: impl Into<String>) -> Self {
+    pub fn new(run_store: Arc<dyn RunStore>, run_id: RunId) -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
@@ -922,7 +927,7 @@ impl StoreProgressLogger {
 
         Self {
             tx,
-            run_id: Arc::new(std::sync::Mutex::new(run_id.into())),
+            run_id: Arc::new(std::sync::Mutex::new(run_id)),
         }
     }
 
@@ -1291,6 +1296,7 @@ impl EventEmitter {
 mod tests {
     use super::*;
     use fabro_llm::types::Usage;
+    use fabro_types::fixtures;
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -1313,7 +1319,7 @@ mod tests {
         });
         emitter.emit(&WorkflowRunEvent::WorkflowRunStarted {
             name: "test".to_string(),
-            run_id: "1".to_string(),
+            run_id: fixtures::RUN_1,
             base_branch: None,
             base_sha: None,
             run_branch: None,
@@ -1814,7 +1820,7 @@ mod tests {
         assert_eq!(emitter.last_event_at(), 0);
         emitter.emit(&WorkflowRunEvent::WorkflowRunStarted {
             name: "test".to_string(),
-            run_id: "1".to_string(),
+            run_id: fixtures::RUN_1,
             base_branch: None,
             base_sha: None,
             run_branch: None,
@@ -2023,7 +2029,7 @@ mod tests {
     fn rename_fields_workflow_run_started() {
         let event = WorkflowRunEvent::WorkflowRunStarted {
             name: "my_pipeline".to_string(),
-            run_id: "r1".to_string(),
+            run_id: fixtures::RUN_1,
             base_branch: None,
             base_sha: None,
             run_branch: None,
@@ -2669,7 +2675,7 @@ mod tests {
     fn workflow_run_started_with_goal_round_trip() {
         let event = WorkflowRunEvent::WorkflowRunStarted {
             name: "my_workflow".to_string(),
-            run_id: "r42".to_string(),
+            run_id: fixtures::RUN_42,
             base_branch: None,
             base_sha: None,
             run_branch: None,
@@ -2687,7 +2693,8 @@ mod tests {
     #[test]
     fn workflow_run_started_without_goal_backward_compat() {
         // Old JSONL without `goal` field should deserialize to `goal: None`
-        let json = r#"{"WorkflowRunStarted":{"name":"old_wf","run_id":"r1"}}"#;
+        let json =
+            r#"{"WorkflowRunStarted":{"name":"old_wf","run_id":"00000000000000000000000001"}}"#;
         let deserialized: WorkflowRunEvent = serde_json::from_str(json).unwrap();
         assert!(matches!(
             deserialized,
@@ -2699,7 +2706,7 @@ mod tests {
     fn workflow_run_started_goal_none_omitted_from_json() {
         let event = WorkflowRunEvent::WorkflowRunStarted {
             name: "wf".to_string(),
-            run_id: "r1".to_string(),
+            run_id: fixtures::RUN_1,
             base_branch: None,
             base_sha: None,
             run_branch: None,

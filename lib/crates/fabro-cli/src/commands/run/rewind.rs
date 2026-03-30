@@ -37,15 +37,17 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
     rewind(
         &store,
         &RewindInput {
-            run_id: run_id.clone(),
+            run_id,
             target,
             push: !args.no_push,
         },
     )?;
 
+    let run_id_string = run_id.to_string();
+
     eprintln!(
         "\nTo resume: fabro resume {}",
-        &run_id[..8.min(run_id.len())]
+        &run_id_string[..8.min(run_id_string.len())]
     );
 
     Ok(())

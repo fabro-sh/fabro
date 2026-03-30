@@ -95,9 +95,10 @@ pub(crate) async fn list_command(
                 .host_repo_path
                 .as_deref()
                 .map_or_else(|| "-".to_string(), |p| tilde_path(Path::new(p)));
+            let run_id = run.run_id.to_string();
 
             vec![
-                short_run_id(&run.run_id)
+                short_run_id(&run_id)
                     .cell()
                     .foreground_color(color_if(use_color, Color::Ansi256(8))),
                 run.workflow_name.clone().cell(),

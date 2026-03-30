@@ -212,6 +212,7 @@ mod tests {
     use super::*;
     use crate::config::HookConfig;
     use crate::types::{HookContext, HookEvent, HookResult};
+    use fabro_types::fixtures;
 
     struct MockExecutor {
         decision: HookDecision,
@@ -241,7 +242,7 @@ mod tests {
     }
 
     fn make_context(event: HookEvent) -> HookContext {
-        HookContext::new(event, "run-1".into(), "test-wf".into())
+        HookContext::new(event, fixtures::RUN_1, "test-wf".into())
     }
 
     fn make_hook(event: HookEvent, name: &str) -> HookDefinition {

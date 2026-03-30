@@ -291,7 +291,7 @@ pub async fn write_finalize_commit(
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_slice()))
         .collect();
-    if let Err(e) = store.write_files(&run_options.run_id, &refs, "finalize run") {
+    if let Err(e) = store.write_files(&run_options.run_id.to_string(), &refs, "finalize run") {
         tracing::warn!(error = %e, "Failed to write finalize commit to metadata branch");
         return;
     }
@@ -320,13 +320,13 @@ async fn run_hooks(
 async fn cleanup_sandbox(
     hook_runner: Option<Arc<HookRunner>>,
     sandbox: Arc<dyn fabro_agent::Sandbox>,
-    run_id: &str,
+    run_id: &fabro_types::RunId,
     workflow_name: &str,
     preserve: bool,
 ) -> std::result::Result<(), String> {
     let hook_ctx = HookContext::new(
         HookEvent::SandboxCleanup,
-        run_id.to_string(),
+        *run_id,
         workflow_name.to_string(),
     );
     run_hooks(hook_runner.as_deref(), &hook_ctx, Arc::clone(&sandbox)).await;
@@ -441,17 +441,22 @@ mod tests {
     use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
     use fabro_store::{InMemoryStore, Store};
+    use fabro_types::{RunId, fixtures};
 
     use super::*;
     use crate::pipeline::types::Retroed;
     use crate::run_options::RunOptions;
+
+    fn test_run_id() -> RunId {
+        fixtures::RUN_1
+    }
 
     fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
             settings: FabroSettings::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,
-            run_id: "run-test".to_string(),
+            run_id: test_run_id(),
             labels: HashMap::new(),
             workflow_slug: None,
             github_app: None,
@@ -469,7 +474,7 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let inner_store = InMemoryStore::default()
             .create_run(
-                "run-test",
+                &test_run_id(),
                 Utc::now(),
                 Some(run_dir.to_string_lossy().as_ref()),
             )
@@ -496,7 +501,7 @@ mod tests {
             retroed,
             &FinalizeOptions {
                 run_dir: run_dir.clone(),
-                run_id: "run-test".to_string(),
+                run_id: test_run_id(),
                 run_store: Arc::clone(&run_store),
                 workflow_name: "test".to_string(),
                 hook_runner: None,

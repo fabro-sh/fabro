@@ -9,6 +9,7 @@ pub mod node_status;
 pub mod outcome;
 pub mod retro;
 pub mod run;
+pub mod run_id;
 pub mod sandbox_record;
 pub mod settings;
 pub mod start;
@@ -26,6 +27,8 @@ pub use retro::{
     OpenItemKind, Retro, RetroNarrative, SmoothnessRating, StageRetro,
 };
 pub use run::RunRecord;
+pub use run_id::RunId;
+pub use run_id::fixtures;
 pub use sandbox_record::SandboxRecord;
 pub use settings::FabroSettings;
 pub use start::StartRecord;

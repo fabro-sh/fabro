@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 use fabro_config::FabroSettingsExt;
+use fabro_types::RunId;
 use futures::StreamExt;
 
 use fabro_interview::{AnswerValue, ConsoleInterviewer};
@@ -33,7 +34,7 @@ const INTERVIEW_UNANSWERED_MESSAGE: &str =
 /// Returns exit code 0 for success/partial_success, 1 otherwise.
 pub(crate) async fn attach_run(
     run_dir: &Path,
-    run_id: Option<&str>,
+    run_id: Option<&RunId>,
     kill_on_detach: bool,
     styles: &'static Styles,
     engine_child: Option<std::process::Child>,
@@ -43,7 +44,7 @@ pub(crate) async fn attach_run(
         run_record
             .as_ref()
             .map(|record| record.settings.storage_dir()),
-        run_id.or_else(|| run_record.as_ref().map(|record| record.run_id.as_str())),
+        run_id.or_else(|| run_record.as_ref().map(|record| &record.run_id)),
     ) {
         match store::open_run_reader(&storage_dir, run_id).await {
             Ok(Some(run_store)) => match run_store.list_events().await {
@@ -65,7 +66,7 @@ pub(crate) async fn attach_run(
                 }
                 Err(err) => {
                     tracing::warn!(
-                        run_id,
+                        run_id = %run_id,
                         error = %err,
                         "Failed to list events from store; falling back to filesystem attach"
                     );
@@ -74,7 +75,7 @@ pub(crate) async fn attach_run(
             Ok(None) => {}
             Err(err) => {
                 tracing::warn!(
-                    run_id,
+                    run_id = %run_id,
                     error = %err,
                     "Failed to open store reader; falling back to filesystem attach"
                 );

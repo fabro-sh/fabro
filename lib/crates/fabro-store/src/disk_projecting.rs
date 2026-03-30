@@ -375,13 +375,21 @@ mod tests {
     use super::*;
     use crate::{InMemoryStore, Store};
     use fabro_types::{
-        AggregateStats, AttrValue, FabroSettings, Graph, RunStatus, StageStatus, StatusReason,
+        AggregateStats, AttrValue, FabroSettings, Graph, RunId, RunStatus, StageStatus,
+        StatusReason, fixtures,
     };
 
     fn dt(rfc3339: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(rfc3339)
             .unwrap()
             .with_timezone(&Utc)
+    }
+
+    fn test_run_id(label: &str) -> RunId {
+        match label {
+            "run-1" => fixtures::RUN_1,
+            _ => panic!("unknown test run id: {label}"),
+        }
     }
 
     fn sample_run_record(run_id: &str, created_at: DateTime<Utc>) -> RunRecord {
@@ -391,7 +399,7 @@ mod tests {
             AttrValue::String("map the constellations".to_string()),
         );
         RunRecord {
-            run_id: run_id.to_string(),
+            run_id: test_run_id(run_id),
             created_at,
             settings: FabroSettings::default(),
             graph,
@@ -405,7 +413,7 @@ mod tests {
 
     fn sample_start_record(run_id: &str, created_at: DateTime<Utc>) -> StartRecord {
         StartRecord {
-            run_id: run_id.to_string(),
+            run_id: test_run_id(run_id),
             start_time: created_at + ChronoDuration::seconds(5),
             run_branch: Some("fabro/run/demo".to_string()),
             base_sha: Some("abc123".to_string()),
@@ -460,7 +468,7 @@ mod tests {
 
     fn sample_retro(run_id: &str) -> Retro {
         Retro {
-            run_id: run_id.to_string(),
+            run_id: test_run_id(run_id),
             workflow_name: "night-sky".to_string(),
             goal: "map the constellations".to_string(),
             timestamp: dt("2026-03-27T12:20:00Z"),
@@ -506,10 +514,10 @@ mod tests {
         EventPayload::new(
             serde_json::json!({
                 "ts": ts,
-                "run_id": run_id,
+                "run_id": test_run_id(run_id).to_string(),
                 "event": event,
             }),
-            run_id,
+            &test_run_id(run_id),
         )
         .unwrap()
     }
@@ -520,7 +528,7 @@ mod tests {
     ) -> (Arc<dyn RunStore>, DiskProjectingRunStore) {
         let inner = InMemoryStore::default()
             .create_run(
-                "run-1",
+                &test_run_id("run-1"),
                 created_at,
                 Some(run_dir.to_string_lossy().as_ref()),
             )
@@ -796,7 +804,7 @@ mod tests {
         let created_at = dt("2026-03-27T12:00:00Z");
         let inner = InMemoryStore::default()
             .create_run(
-                "run-1",
+                &test_run_id("run-1"),
                 created_at,
                 Some(temp.path().to_string_lossy().as_ref()),
             )

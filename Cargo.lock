@@ -1948,6 +1948,7 @@ dependencies = [
  "fabro-macros",
  "serde",
  "serde_json",
+ "ulid",
 ]
 
 [[package]]

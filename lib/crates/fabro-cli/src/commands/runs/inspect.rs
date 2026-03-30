@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use fabro_config::FabroSettingsExt;
 use fabro_sandbox::SandboxRecordExt;
+use fabro_types::RunId;
 use fabro_workflows::records::{CheckpointExt, ConclusionExt, RunRecordExt, StartRecordExt};
 use serde::Serialize;
 
@@ -43,7 +44,7 @@ pub(crate) async fn run(args: &InspectArgs, globals: &GlobalArgs) -> Result<()> 
 }
 
 async fn inspect_run_store(
-    run_id: &str,
+    run_id: &RunId,
     run_dir: &Path,
     status: RunStatus,
     run_store: &dyn fabro_store::RunStore,
@@ -74,7 +75,7 @@ async fn inspect_run_store(
     }
 }
 
-fn inspect_run_dir(run_id: &str, run_dir: &Path, status: RunStatus) -> InspectOutput {
+fn inspect_run_dir(run_id: &RunId, run_dir: &Path, status: RunStatus) -> InspectOutput {
     let run_record = RunRecord::load(run_dir)
         .ok()
         .and_then(|v| serde_json::to_value(v).ok());
