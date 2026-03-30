@@ -16,7 +16,6 @@ mod exec;
 mod fabro;
 mod fork;
 mod graph;
-mod init;
 mod inspect;
 mod install;
 mod llm;

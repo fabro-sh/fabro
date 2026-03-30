@@ -158,7 +158,6 @@ async fn main_inner() -> (String, Result<()>) {
         Commands::RunCmd(RunCommands::Run(_) | RunCommands::Create(_))
             | Commands::Exec(_)
             | Commands::Repo(_)
-            | Commands::Init
             | Commands::Install { .. }
     ) {
         commands::upgrade::spawn_upgrade_check(globals.no_upgrade_check, upgrade_check_enabled)
@@ -207,10 +206,6 @@ async fn main_inner() -> (String, Result<()>) {
                 open::that("https://docs.fabro.sh/")?;
             }
             Commands::Repo(ns) => commands::repo::dispatch(ns).await?,
-            Commands::Init => {
-                fabro_util::warn_user!("`fabro init` is deprecated, use `fabro repo init` instead");
-                commands::repo::init::run_init().await?;
-            }
             Commands::Install { web_url } => {
                 commands::install::run_install(&web_url).await?;
             }

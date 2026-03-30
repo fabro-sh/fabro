@@ -50,7 +50,7 @@ The OpenAPI spec at `docs/api-reference/fabro-api.yaml` is the source of truth f
 Fabro is an AI-powered workflow orchestration platform. Workflows are defined as Graphviz graphs, where each node is a stage (agent, prompt, command, conditional, human, parallel, etc.) executed by the workflow engine.
 
 ### Rust crates (`lib/crates/`)
-- **fabro-cli** — CLI entry point. Commands: `run`, `exec`, `serve`, `validate`, `parse`, `cp`, `model`, `doctor`, `init`, `install`, `ps`, `system prune`, `llm`
+- **fabro-cli** — CLI entry point. Commands: `run`, `exec`, `serve`, `validate`, `parse`, `cp`, `model`, `doctor`, `install`, `ps`, `system prune`, `llm`
 - **fabro-workflow** — Core workflow engine. Parses Graphviz graphs, runs stages, manages checkpoints/resume, hooks, retros, and human-in-the-loop interactions
 - **fabro-agent** — AI coding agent with tool use (Bash, Read, Write, Edit, Glob, Grep, WebFetch). `Sandbox` trait abstracts execution environments
 - **fabro-server** — Axum HTTP server. Routes for runs, sessions, models, completions, usage. SSE event streaming. Demo mode via header
@@ -91,6 +91,16 @@ When interpolating values into shell command strings (in `fabro-workflow`), alwa
 - **Types** (structs, enums, traits): import by name — `use crate::outcome::Outcome;`
 - **Functions**: import the parent module, call as `module::function()` — `use fabro_workflow::operations; operations::create(...)`
 - **No glob imports** in production code (`use foo::*`). Globs are acceptable in test modules and preludes. Enforced by clippy `wildcard_imports` lint.
+
+## Snapshot tests (insta)
+
+Many CLI tests use `insta` inline snapshots. When a snapshot needs updating:
+
+1. Run `cargo insta pending-snapshots` to list what changed
+2. Verify each pending snapshot is expected
+3. Run `cargo insta accept` to accept all, or `cargo insta accept --snapshot <path>` for a specific one
+
+Never run `cargo insta accept` without first checking what's pending — it accepts *all* pending snapshots, which may include unrelated changes.
 
 ## Testing workflows
 

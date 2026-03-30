@@ -648,10 +648,6 @@ The command must be run inside a git repository. It creates:
 
 After creating files, it checks whether the GitHub App is installed for the repository. If the app is not installed and the repository owner differs from the app owner, it warns that the app may need to be [made public](/integrations/github#github-app-is-private-but-this-repo-belongs-to-a-different-owner) first.
 
-<Note>
-The old `fabro init` still works but prints a deprecation warning. Use `fabro repo init` instead.
-</Note>
-
 ## `fabro repo deinit`
 
 Remove Fabro from a project by deleting `fabro.toml` and the `fabro/` directory. Fails with an error if the project is not initialized.

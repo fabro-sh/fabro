@@ -777,9 +777,6 @@ pub(crate) enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Initialize a new project (deprecated: use `repo init`)
-    #[command(hide = true)]
-    Init,
     /// Set up the Fabro environment (LLMs, certs, GitHub)
     Install {
         /// Base URL for the web UI (used for OAuth callback URLs)
@@ -865,7 +862,6 @@ impl Commands {
                 RepoCommand::Init { .. } => "repo init",
                 RepoCommand::Deinit => "repo deinit",
             },
-            Self::Init => "init",
             Self::Install { .. } => "install",
             Self::Pr(ns) => match &ns.command {
                 PrCommand::Create(_) => "pr create",

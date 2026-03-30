@@ -124,7 +124,7 @@ Then initialize Fabro in your project:
 fabro install          # one-time setup
 
 cd my-project
-fabro init             # per project
+fabro repo init        # per project
 ```
 
 ---
