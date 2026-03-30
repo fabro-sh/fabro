@@ -9,9 +9,9 @@ fn help() {
     success: true
     exit_code: 0
     ----- stdout -----
-    SSH into a run's Daytona sandbox
+    SSH into a run's sandbox
 
-    Usage: fabro ssh [OPTIONS] <RUN>
+    Usage: fabro sandbox ssh [OPTIONS] <RUN>
 
     Arguments:
       <RUN>  Run ID or prefix

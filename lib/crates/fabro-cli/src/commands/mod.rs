@@ -13,6 +13,7 @@ pub(crate) mod provider;
 pub(crate) mod repo;
 pub(crate) mod run;
 pub(crate) mod runs;
+pub(crate) mod sandbox;
 pub(crate) mod secret;
 pub(crate) mod skill;
 pub(crate) mod store;

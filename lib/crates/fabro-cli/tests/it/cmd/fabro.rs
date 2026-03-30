@@ -16,9 +16,6 @@ fn help() {
       create     Create a workflow run (allocate run dir, persist spec)
       start      Start a created workflow run (spawn engine process)
       attach     Attach to a running or finished workflow run
-      cp         Copy files to/from a run's sandbox
-      preview    Get a preview URL for a port on a run's sandbox
-      ssh        SSH into a run's Daytona sandbox
       logs       View the event log of a workflow run
       resume     Resume an interrupted workflow run
       rewind     Rewind a workflow run to an earlier checkpoint
@@ -43,6 +40,7 @@ fn help() {
       upgrade    Upgrade fabro to the latest version
       repo       Repository commands
       provider   Provider operations
+      sandbox    Sandbox operations (cp, ssh, preview)
       system     System maintenance commands
       help       Print this message or the help of the given subcommand(s)
 

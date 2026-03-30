@@ -671,12 +671,6 @@ pub(crate) enum RunCommands {
         #[arg(long)]
         resume: bool,
     },
-    /// Copy files to/from a run's sandbox
-    Cp(CpArgs),
-    /// Get a preview URL for a port on a run's sandbox
-    Preview(PreviewArgs),
-    /// SSH into a run's Daytona sandbox
-    Ssh(SshArgs),
     /// Show the diff of changes from a workflow run
     #[command(hide = true)]
     Diff(DiffArgs),
@@ -700,15 +694,32 @@ impl RunCommands {
             Self::Start { .. } => "start",
             Self::Attach { .. } => "attach",
             Self::Detached { .. } => "__detached",
-            Self::Cp(_) => "cp",
-            Self::Preview(_) => "preview",
-            Self::Ssh(_) => "ssh",
             Self::Diff(_) => "diff",
             Self::Logs(_) => "logs",
             Self::Resume(_) => "resume",
             Self::Rewind(_) => "rewind",
             Self::Fork(_) => "fork",
             Self::Wait(_) => "wait",
+        }
+    }
+}
+
+#[derive(Subcommand)]
+pub(crate) enum SandboxCommand {
+    /// Copy files to/from a run's sandbox
+    Cp(CpArgs),
+    /// Get a preview URL for a port on a run's sandbox
+    Preview(PreviewArgs),
+    /// SSH into a run's sandbox
+    Ssh(SshArgs),
+}
+
+impl SandboxCommand {
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            Self::Cp(_) => "sandbox cp",
+            Self::Preview(_) => "sandbox preview",
+            Self::Ssh(_) => "sandbox ssh",
         }
     }
 }
@@ -807,6 +818,11 @@ pub(crate) enum Commands {
     Repo(RepoNamespace),
     /// Provider operations
     Provider(ProviderNamespace),
+    /// Sandbox operations (cp, ssh, preview)
+    Sandbox {
+        #[command(subcommand)]
+        command: SandboxCommand,
+    },
     /// System maintenance commands
     System(SystemNamespace),
     /// Send a queued analytics event (internal)
@@ -885,6 +901,7 @@ impl Commands {
             Self::Provider(ns) => match &ns.command {
                 ProviderCommand::Login(_) => "provider login",
             },
+            Self::Sandbox { command } => command.name(),
             Self::System(ns) => match &ns.command {
                 SystemCommand::Prune(_) => "system prune",
                 SystemCommand::Df(_) => "system df",

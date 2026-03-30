@@ -11,7 +11,7 @@ fn help() {
     ----- stdout -----
     Copy files to/from a run's sandbox
 
-    Usage: fabro cp [OPTIONS] <SRC> <DST>
+    Usage: fabro sandbox cp [OPTIONS] <SRC> <DST>
 
     Arguments:
       <SRC>  Source: <run-id>:<path> or local path

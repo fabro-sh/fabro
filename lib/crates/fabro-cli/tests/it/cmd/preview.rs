@@ -11,7 +11,7 @@ fn help() {
     ----- stdout -----
     Get a preview URL for a port on a run's sandbox
 
-    Usage: fabro preview [OPTIONS] <RUN> <PORT>
+    Usage: fabro sandbox preview [OPTIONS] <RUN> <PORT>
 
     Arguments:
       <RUN>   Run ID or prefix

@@ -11,17 +11,17 @@ SSH access is only available with the Daytona sandbox provider. Local, Docker, a
 
 ## Connecting to a run's sandbox
 
-Use `fabro ssh` to connect to the Daytona sandbox from any completed or in-progress run:
+Use `fabro sandbox ssh` to connect to the Daytona sandbox from any completed or in-progress run:
 
 ```bash
-fabro ssh <run-id>
+fabro sandbox ssh <run-id>
 ```
 
 Fabro creates temporary SSH credentials and connects directly. Use `--print` to print the SSH command instead of connecting, or `--ttl` to set the credential expiry:
 
 ```bash
-fabro ssh <run-id> --print
-fabro ssh <run-id> --ttl 120
+fabro sandbox ssh <run-id> --print
+fabro sandbox ssh <run-id> --ttl 120
 ```
 
 ## Keeping the sandbox alive
@@ -56,7 +56,7 @@ Once connected, you have a full shell inside the sandbox VM:
 
 ## Credential lifetime
 
-SSH credentials are temporary and expire after **60 minutes** by default. With `fabro ssh`, you can set a custom TTL with `--ttl <MINUTES>`. If your session expires, run `fabro ssh` again to get fresh credentials.
+SSH credentials are temporary and expire after **60 minutes** by default. With `fabro sandbox ssh`, you can set a custom TTL with `--ttl <MINUTES>`. If your session expires, run `fabro sandbox ssh` again to get fresh credentials.
 
 ## Limitations
 

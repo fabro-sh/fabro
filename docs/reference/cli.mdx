@@ -354,14 +354,14 @@ If no LLM provider API keys are configured, the server automatically falls back 
 
 ---
 
-## `fabro cp`
+## `fabro sandbox cp`
 
 Copy files between a run's sandbox and the local filesystem. The run must have a persisted sandbox record (Daytona, exe.dev, or a preserved local/Docker sandbox).
 
 ```bash
-fabro cp <run-id>:/path/in/sandbox ./local-dir     # download
-fabro cp ./local-file <run-id>:/path/in/sandbox     # upload
-fabro cp -r <run-id>:/output ./results              # recursive download
+fabro sandbox cp <run-id>:/path/in/sandbox ./local-dir     # download
+fabro sandbox cp ./local-file <run-id>:/path/in/sandbox     # upload
+fabro sandbox cp -r <run-id>:/output ./results              # recursive download
 ```
 
 | Argument / Flag | Description |
@@ -679,14 +679,14 @@ fabro diff <run-id> --stat
 
 Output is colorized when writing to a terminal.
 
-## `fabro ssh`
+## `fabro sandbox ssh`
 
 SSH into a Daytona sandbox from a completed or in-progress run. Creates temporary SSH credentials and connects directly, or prints the command with `--print`.
 
 ```bash
-fabro ssh <run-id>
-fabro ssh <run-id> --print
-fabro ssh <run-id> --ttl 120
+fabro sandbox ssh <run-id>
+fabro sandbox ssh <run-id> --print
+fabro sandbox ssh <run-id> --ttl 120
 ```
 
 | Argument / Flag | Description |
@@ -697,14 +697,14 @@ fabro ssh <run-id> --ttl 120
 
 See [SSH Access](/human-tools/ssh-access) for more details on SSH workflows.
 
-## `fabro preview`
+## `fabro sandbox preview`
 
 Generate a preview URL for a port exposed by a Daytona sandbox. Useful for accessing web servers, dev tools, or APIs running inside the sandbox.
 
 ```bash
-fabro preview <run-id> <port>
-fabro preview <run-id> 3000 --signed
-fabro preview <run-id> 3000 --open
+fabro sandbox preview <run-id> <port>
+fabro sandbox preview <run-id> 3000 --signed
+fabro sandbox preview <run-id> 3000 --open
 ```
 
 | Argument / Flag | Description |

@@ -68,9 +68,6 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             launcher_path,
             resume,
         } => detached::execute(run_dir, launcher_path, resume).await,
-        RunCommands::Cp(args) => cp::cp_command(args, globals).await,
-        RunCommands::Preview(args) => preview::run(args, globals).await,
-        RunCommands::Ssh(args) => ssh::run(args, globals).await,
         RunCommands::Diff(args) => diff::run(args, globals).await,
         RunCommands::Logs(args) => {
             let styles = Styles::detect_stdout();

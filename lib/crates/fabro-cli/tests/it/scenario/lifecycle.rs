@@ -163,6 +163,7 @@ fn local_run_lifecycle() {
     .unwrap();
     let cp_dest = context.temp_dir.join("cp_download.txt");
     cmd(&[
+        "sandbox",
         "cp",
         &format!("{run_id}:cp_test.txt"),
         cp_dest.to_str().unwrap(),

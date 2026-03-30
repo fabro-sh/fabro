@@ -20,15 +20,15 @@ When you request a preview, Fabro generates a time-limited, token-authenticated 
 
 ## Using preview from the CLI
 
-Use `fabro preview` to generate a preview URL for any run with an active Daytona sandbox:
+Use `fabro sandbox preview` to generate a preview URL for any run with an active Daytona sandbox:
 
 ```bash
-fabro preview <run-id> 3000              # URL + token + curl example
-fabro preview <run-id> 3000 --signed     # self-contained signed URL
-fabro preview <run-id> 3000 --open       # open in browser (implies --signed)
+fabro sandbox preview <run-id> 3000              # URL + token + curl example
+fabro sandbox preview <run-id> 3000 --signed     # self-contained signed URL
+fabro sandbox preview <run-id> 3000 --open       # open in browser (implies --signed)
 ```
 
-See [`fabro preview`](/reference/cli#fabro-preview) for the full flag reference.
+See [`fabro sandbox preview`](/reference/cli#fabro-sandbox-preview) for the full flag reference.
 
 ## Using preview from the web UI
 

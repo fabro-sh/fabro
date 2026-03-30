@@ -217,6 +217,7 @@ async fn main_inner() -> (String, Result<()>) {
                 commands::upgrade::run_upgrade(args).await?;
             }
             Commands::Provider(ns) => commands::provider::dispatch(ns).await?,
+            Commands::Sandbox { command } => commands::sandbox::dispatch(command, &globals).await?,
             Commands::System(ns) => commands::system::dispatch(ns, &globals).await?,
             Commands::SendAnalytics { path } => {
                 let result = sender::upload(&path).await;
@@ -382,11 +383,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_cp_command() {
-        let cli = Cli::try_parse_from(["fabro", "cp", "ABC123:/tmp/file", "./file"])
+    fn parse_sandbox_cp_command() {
+        let cli = Cli::try_parse_from(["fabro", "sandbox", "cp", "ABC123:/tmp/file", "./file"])
             .expect("should parse");
         match *cli.command {
-            Commands::RunCmd(RunCommands::Cp(args)) => {
+            Commands::Sandbox {
+                command: args::SandboxCommand::Cp(args),
+            } => {
                 assert_eq!(args.src, "ABC123:/tmp/file");
                 assert_eq!(args.dst, "./file");
                 assert!(!args.recursive);
