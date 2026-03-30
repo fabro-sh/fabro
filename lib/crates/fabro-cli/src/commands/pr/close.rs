@@ -34,7 +34,7 @@ async fn close_from(
         &record.owner,
         &record.repo,
         record.number,
-        fabro_github::GITHUB_API_BASE_URL,
+        &fabro_github::github_api_base_url(),
     )
     .await
     .map_err(|err| anyhow::anyhow!("{err}"))?;

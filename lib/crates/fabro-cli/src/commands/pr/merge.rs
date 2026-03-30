@@ -36,7 +36,7 @@ async fn merge_from(
         &record.repo,
         record.number,
         &args.method,
-        fabro_github::GITHUB_API_BASE_URL,
+        &fabro_github::github_api_base_url(),
     )
     .await
     .map_err(|err| anyhow::anyhow!("{err}"))?;

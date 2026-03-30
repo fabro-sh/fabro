@@ -219,7 +219,7 @@ async fn mint_github_token(
         &jwt,
         &owner,
         &repo,
-        fabro_github::GITHUB_API_BASE_URL,
+        &fabro_github::github_api_base_url(),
         perms_json,
     )
     .await

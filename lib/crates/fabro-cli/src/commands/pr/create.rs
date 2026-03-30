@@ -110,7 +110,7 @@ async fn create_from(
         &owner,
         &repo,
         run_branch,
-        fabro_github::GITHUB_API_BASE_URL,
+        &fabro_github::github_api_base_url(),
     )
     .await
     .map_err(|err| anyhow::anyhow!("{err}"))?;

@@ -206,7 +206,7 @@ async fn check_github_app_installation() {
         &jwt,
         &owner,
         &repo,
-        fabro_github::GITHUB_API_BASE_URL,
+        &fabro_github::github_api_base_url(),
     )
     .await
     {
@@ -229,7 +229,7 @@ async fn check_github_app_installation() {
             if let Ok(app_info) = fabro_github::get_authenticated_app(
                 &client,
                 &jwt,
-                fabro_github::GITHUB_API_BASE_URL,
+                &fabro_github::github_api_base_url(),
             )
             .await
             {
@@ -238,7 +238,7 @@ async fn check_github_app_installation() {
                     && fabro_github::is_app_public(
                         &client,
                         &app_info.slug,
-                        fabro_github::GITHUB_API_BASE_URL,
+                        &fabro_github::github_api_base_url(),
                     )
                     .await
                         == Ok(false);
@@ -281,7 +281,7 @@ async fn check_github_app_installation() {
                     &jwt,
                     &owner,
                     &repo,
-                    fabro_github::GITHUB_API_BASE_URL,
+                    &fabro_github::github_api_base_url(),
                 )
                 .await
                 {

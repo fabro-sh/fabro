@@ -4,6 +4,11 @@ use serde::Deserialize;
 
 pub const GITHUB_API_BASE_URL: &str = "https://api.github.com";
 
+/// Returns the GitHub API base URL, allowing override via `GITHUB_BASE_URL` env var.
+pub fn github_api_base_url() -> String {
+    std::env::var("GITHUB_BASE_URL").unwrap_or_else(|_| GITHUB_API_BASE_URL.to_string())
+}
+
 /// Detailed information about a pull request from the GitHub API.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PullRequestDetail {
@@ -409,9 +414,9 @@ pub async fn create_pull_request(
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
     let client = reqwest::Client::new();
 
+    let base_url = github_api_base_url();
     let token =
-        create_installation_access_token_for_pr(&client, &jwt, owner, repo, GITHUB_API_BASE_URL)
-            .await?;
+        create_installation_access_token_for_pr(&client, &jwt, owner, repo, &base_url).await?;
 
     tracing::debug!(title = %title, head = %head, base = %base, draft, "Creating pull request");
 
@@ -423,7 +428,7 @@ pub async fn create_pull_request(
         "draft": draft,
     });
 
-    let url = format!("{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/pulls");
+    let url = format!("{base_url}/repos/{owner}/{repo}/pulls");
     let auth = format!("Bearer {token}");
     let resp = HttpClient::request(
         &client,
@@ -501,9 +506,9 @@ pub async fn enable_auto_merge(
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
     let client = reqwest::Client::new();
 
+    let base_url = github_api_base_url();
     let token =
-        create_installation_access_token_for_pr(&client, &jwt, owner, repo, GITHUB_API_BASE_URL)
-            .await?;
+        create_installation_access_token_for_pr(&client, &jwt, owner, repo, &base_url).await?;
 
     let query = format!(
         r#"mutation {{
@@ -525,7 +530,7 @@ pub async fn enable_auto_merge(
         "Enabling auto-merge"
     );
 
-    let graphql_url = format!("{GITHUB_API_BASE_URL}/graphql");
+    let graphql_url = format!("{base_url}/graphql");
     let auth = format!("Bearer {token}");
     let graphql_body = serde_json::json!({ "query": query });
     let resp = HttpClient::request(
@@ -734,8 +739,8 @@ pub async fn resolve_clone_credentials(
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
     let client = reqwest::Client::new();
 
-    let token =
-        create_installation_access_token(&client, &jwt, owner, repo, GITHUB_API_BASE_URL).await?;
+    let base_url = github_api_base_url();
+    let token = create_installation_access_token(&client, &jwt, owner, repo, &base_url).await?;
     Ok((Some("x-access-token".to_string()), Some(token)))
 }
 

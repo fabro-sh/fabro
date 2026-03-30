@@ -61,7 +61,10 @@ pub async fn open_socket_url(
     app_token: &str,
 ) -> Result<String, ConnectionError> {
     let resp = http
-        .post("https://slack.com/api/apps.connections.open")
+        .post(format!(
+            "{}/apps.connections.open",
+            std::env::var("SLACK_BASE_URL").unwrap_or_else(|_| "https://slack.com/api".to_string())
+        ))
         .bearer_auth(app_token)
         .header("Content-Type", "application/x-www-form-urlencoded")
         .send()

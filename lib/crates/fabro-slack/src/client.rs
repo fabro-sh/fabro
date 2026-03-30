@@ -13,13 +13,17 @@ pub struct PostedMessage {
 #[derive(Clone)]
 pub struct SlackClient {
     bot_token: String,
+    api_base: String,
     http: Client,
 }
 
 impl SlackClient {
     pub fn new(bot_token: String) -> Self {
+        let api_base =
+            std::env::var("SLACK_BASE_URL").unwrap_or_else(|_| SLACK_API_BASE.to_string());
         Self {
             bot_token,
+            api_base,
             http: Client::new(),
         }
     }
@@ -37,7 +41,7 @@ impl SlackClient {
         let body = build_post_message_body(channel, blocks, thread_ts);
         let resp = self
             .http
-            .post(format!("{SLACK_API_BASE}/chat.postMessage"))
+            .post(format!("{}/chat.postMessage", self.api_base))
             .bearer_auth(&self.bot_token)
             .json(&body)
             .send()
@@ -63,7 +67,7 @@ impl SlackClient {
         let body = build_update_message_body(channel, ts, blocks);
         let resp = self
             .http
-            .post(format!("{SLACK_API_BASE}/chat.update"))
+            .post(format!("{}/chat.update", self.api_base))
             .bearer_auth(&self.bot_token)
             .json(&body)
             .send()
