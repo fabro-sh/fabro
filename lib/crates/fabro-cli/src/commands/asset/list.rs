@@ -1,8 +1,8 @@
 use anyhow::Result;
 use fabro_config::FabroSettingsExt;
 use fabro_store::RuntimeState;
-use fabro_workflows::assets::scan_assets;
-use fabro_workflows::run_lookup::{resolve_run, runs_base};
+use fabro_workflow::assets::scan_assets;
+use fabro_workflow::run_lookup::{resolve_run, runs_base};
 
 use crate::args::{AssetListArgs, GlobalArgs};
 use crate::shared::format_size;

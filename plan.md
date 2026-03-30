@@ -7,7 +7,7 @@ GitHub issue #126: Subagent IDs are currently full UUID v4 strings (36 chars, e.
 ## Files to modify
 
 ### 1. `lib/crates/fabro-agent/Cargo.toml`
-- Add `rand.workspace = true` to `[dependencies]`. (`rand = "0.8"` is already defined in workspace root `Cargo.toml`; other crates like `fabro-cli`, `fabro-llm`, `fabro-workflows` already use it.)
+- Add `rand.workspace = true` to `[dependencies]`. (`rand = "0.8"` is already defined in workspace root `Cargo.toml`; other crates like `fabro-cli`, `fabro-llm`, `fabro-workflow` already use it.)
 - Do **not** remove `uuid.workspace = true` — it's still used in `session.rs:58` for session IDs.
 
 ### 2. `lib/crates/fabro-agent/src/subagent.rs`

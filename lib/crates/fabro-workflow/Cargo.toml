@@ -1,5 +1,5 @@
 [package]
-name = "fabro-workflows"
+name = "fabro-workflow"
 edition.workspace = true
 version.workspace = true
 publish = false

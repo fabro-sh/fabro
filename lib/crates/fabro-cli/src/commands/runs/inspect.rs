@@ -4,12 +4,12 @@ use anyhow::Result;
 use fabro_config::FabroSettingsExt;
 use fabro_sandbox::SandboxRecordExt;
 use fabro_types::RunId;
-use fabro_workflows::records::{CheckpointExt, ConclusionExt, RunRecordExt, StartRecordExt};
+use fabro_workflow::records::{CheckpointExt, ConclusionExt, RunRecordExt, StartRecordExt};
 use serde::Serialize;
 
-use fabro_workflows::records::{Checkpoint, Conclusion, RunRecord, StartRecord};
-use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
-use fabro_workflows::run_status::RunStatus;
+use fabro_workflow::records::{Checkpoint, Conclusion, RunRecord, StartRecord};
+use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{GlobalArgs, InspectArgs};
 use crate::store;

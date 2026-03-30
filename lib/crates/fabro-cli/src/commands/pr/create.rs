@@ -4,12 +4,12 @@ use anyhow::{Context, Result, bail};
 use fabro_config::FabroSettingsExt;
 use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;
-use fabro_workflows::outcome::StageStatus;
-use fabro_workflows::pull_request::maybe_open_pull_request;
-use fabro_workflows::records::{
+use fabro_workflow::outcome::StageStatus;
+use fabro_workflow::pull_request::maybe_open_pull_request;
+use fabro_workflow::records::{
     Conclusion, ConclusionExt, RunRecord, RunRecordExt, StartRecord, StartRecordExt,
 };
-use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrCreateArgs};

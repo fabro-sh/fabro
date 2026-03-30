@@ -6,8 +6,8 @@ use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
 use fabro_config::FabroSettingsExt;
 
-use fabro_workflows::run_lookup::{logs_base, runs_base, scan_runs_combined};
-use fabro_workflows::run_status::RunStatus;
+use fabro_workflow::run_lookup::{logs_base, runs_base, scan_runs_combined};
+use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{DfArgs, GlobalArgs};
 use crate::shared::format_size;

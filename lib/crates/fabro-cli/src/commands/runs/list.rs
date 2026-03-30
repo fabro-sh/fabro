@@ -8,8 +8,8 @@ use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 
 use fabro_util::text::strip_goal_decoration;
-use fabro_workflows::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_combined};
-use fabro_workflows::run_status::RunStatus;
+use fabro_workflow::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_combined};
+use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{GlobalArgs, RunsListArgs};
 use crate::shared::{color_if, format_duration_ms, tilde_path};

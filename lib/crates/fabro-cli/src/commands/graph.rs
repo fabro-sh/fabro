@@ -8,7 +8,7 @@ use fabro_config::project::resolve_workflow_path;
 use fabro_graphviz::render::render_dot;
 use fabro_util::terminal::Styles;
 use fabro_validate::Severity;
-use fabro_workflows::operations::{ValidateInput, WorkflowInput, validate};
+use fabro_workflow::operations::{ValidateInput, WorkflowInput, validate};
 use tracing::debug;
 
 use crate::args::{GraphArgs, GraphDirection};

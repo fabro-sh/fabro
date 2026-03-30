@@ -4,25 +4,25 @@ Which source files affect which doc pages. Use this as guidance — also apply j
 
 | Source | Docs |
 |--------|------|
-| `lib/crates/fabro-cli/src/main.rs`, `lib/crates/fabro-workflows/src/cli/mod.rs`, `lib/crates/fabro-workflows/src/cli/run.rs` | `docs/reference/cli.mdx` |
+| `lib/crates/fabro-cli/src/main.rs`, `lib/crates/fabro-workflow/src/cli/mod.rs`, `lib/crates/fabro-workflow/src/cli/run.rs` | `docs/reference/cli.mdx` |
 | `lib/crates/fabro-cli/src/cli_config.rs` | `docs/reference/cli-configuration.mdx` |
 | `lib/crates/fabro-llm/src/cli.rs` | `docs/reference/cli.mdx` |
 | `lib/crates/fabro-api/src/serve.rs` | `docs/reference/cli.mdx` |
-| `lib/crates/fabro-workflows/src/parser/*.rs` | `docs/reference/dot-language.mdx` |
-| `lib/crates/fabro-workflows/src/condition.rs` | `docs/reference/dot-language.mdx` |
-| `lib/crates/fabro-workflows/src/cli/validate.rs` | `docs/reference/dot-language.mdx` |
-| `lib/crates/fabro-workflows/src/stylesheet.rs` | `docs/workflows/stylesheets.mdx` |
-| `lib/crates/fabro-workflows/src/transform.rs` | `docs/workflows/variables.mdx` |
-| `lib/crates/fabro-workflows/src/handler/*.rs` | `docs/workflows/stages-and-nodes.mdx`, `docs/reference/dot-language.mdx` |
-| `lib/crates/fabro-workflows/src/handler/human.rs` | `docs/workflows/human-in-the-loop.mdx` |
-| `lib/crates/fabro-workflows/src/cli/run_config.rs` | `docs/execution/run-configuration.mdx` |
-| `lib/crates/fabro-workflows/src/engine.rs` | `docs/core-concepts/how-arc-works.mdx` |
-| `lib/crates/fabro-workflows/src/context/*.rs` | `docs/execution/context.mdx` |
-| `lib/crates/fabro-workflows/src/checkpoint.rs` | `docs/execution/checkpoints.mdx` |
-| `lib/crates/fabro-workflows/src/retro.rs`, `lib/crates/fabro-workflows/src/retro_agent.rs` | `docs/execution/retros.mdx` |
-| `lib/crates/fabro-workflows/src/interviewer/*.rs` | `docs/execution/interviews.mdx` |
-| `lib/crates/fabro-workflows/src/hook/*.rs` | `docs/agents/hooks.mdx` |
-| `lib/crates/fabro-workflows/src/daytona_sandbox.rs` | `docs/integrations/daytona.mdx`, `docs/execution/environments.mdx` |
+| `lib/crates/fabro-workflow/src/parser/*.rs` | `docs/reference/dot-language.mdx` |
+| `lib/crates/fabro-workflow/src/condition.rs` | `docs/reference/dot-language.mdx` |
+| `lib/crates/fabro-workflow/src/cli/validate.rs` | `docs/reference/dot-language.mdx` |
+| `lib/crates/fabro-workflow/src/stylesheet.rs` | `docs/workflows/stylesheets.mdx` |
+| `lib/crates/fabro-workflow/src/transform.rs` | `docs/workflows/variables.mdx` |
+| `lib/crates/fabro-workflow/src/handler/*.rs` | `docs/workflows/stages-and-nodes.mdx`, `docs/reference/dot-language.mdx` |
+| `lib/crates/fabro-workflow/src/handler/human.rs` | `docs/workflows/human-in-the-loop.mdx` |
+| `lib/crates/fabro-workflow/src/cli/run_config.rs` | `docs/execution/run-configuration.mdx` |
+| `lib/crates/fabro-workflow/src/engine.rs` | `docs/core-concepts/how-arc-works.mdx` |
+| `lib/crates/fabro-workflow/src/context/*.rs` | `docs/execution/context.mdx` |
+| `lib/crates/fabro-workflow/src/checkpoint.rs` | `docs/execution/checkpoints.mdx` |
+| `lib/crates/fabro-workflow/src/retro.rs`, `lib/crates/fabro-workflow/src/retro_agent.rs` | `docs/execution/retros.mdx` |
+| `lib/crates/fabro-workflow/src/interviewer/*.rs` | `docs/execution/interviews.mdx` |
+| `lib/crates/fabro-workflow/src/hook/*.rs` | `docs/agents/hooks.mdx` |
+| `lib/crates/fabro-workflow/src/daytona_sandbox.rs` | `docs/integrations/daytona.mdx`, `docs/execution/environments.mdx` |
 | `lib/crates/fabro-agent/src/tools.rs`, `lib/crates/fabro-agent/src/tool_registry.rs`, `lib/crates/fabro-agent/src/tool_execution.rs` | `docs/agents/tools.mdx` |
 | `lib/crates/fabro-agent/src/v4a_patch.rs` | `docs/agents/tools.mdx` |
 | `lib/crates/fabro-agent/src/cli.rs` | `docs/agents/permissions.mdx` |

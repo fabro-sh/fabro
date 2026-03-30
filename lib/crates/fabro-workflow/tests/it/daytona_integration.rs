@@ -25,17 +25,17 @@ use fabro_sandbox::SandboxRecordExt;
 use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 use fabro_store::RuntimeState;
 use fabro_types::RunId;
-use fabro_workflows::artifact::sync_artifacts_to_env;
-use fabro_workflows::context::Context;
-use fabro_workflows::error::FabroError;
-use fabro_workflows::event::EventEmitter;
-use fabro_workflows::handler::exit::ExitHandler;
-use fabro_workflows::handler::start::StartHandler;
-use fabro_workflows::handler::{Handler, HandlerRegistry};
-use fabro_workflows::outcome::{Outcome, OutcomeExt, StageStatus};
-use fabro_workflows::records::{Checkpoint, CheckpointExt};
-use fabro_workflows::run_options::{GitCheckpointOptions, RunOptions};
-use fabro_workflows::test_support::WorkflowRunner;
+use fabro_workflow::artifact::sync_artifacts_to_env;
+use fabro_workflow::context::Context;
+use fabro_workflow::error::FabroError;
+use fabro_workflow::event::EventEmitter;
+use fabro_workflow::handler::exit::ExitHandler;
+use fabro_workflow::handler::start::StartHandler;
+use fabro_workflow::handler::{Handler, HandlerRegistry};
+use fabro_workflow::outcome::{Outcome, OutcomeExt, StageStatus};
+use fabro_workflow::records::{Checkpoint, CheckpointExt};
+use fabro_workflow::run_options::{GitCheckpointOptions, RunOptions};
+use fabro_workflow::test_support::WorkflowRunner;
 use ulid::Ulid;
 
 fn test_run_id(label: &str) -> RunId {
@@ -352,7 +352,7 @@ impl Handler for LargeOutputHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        _services: &fabro_workflows::handler::EngineServices,
+        _services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         let mut outcome = Outcome::success();
         let large_value = "x".repeat(150 * 1024);
@@ -477,7 +477,7 @@ impl Handler for FileWriterHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        services: &fabro_workflows::handler::EngineServices,
+        services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         let content = format!("output from {}", node.id);
         let cmd = format!("echo '{content}' > {}.txt", node.id);
@@ -627,7 +627,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         let git_events: Vec<_> = events
             .iter()
             .filter_map(|e| {
-                if let fabro_workflows::event::WorkflowRunEvent::CheckpointCompleted {
+                if let fabro_workflow::event::WorkflowRunEvent::CheckpointCompleted {
                     node_id,
                     git_commit_sha: Some(sha),
                     ..
@@ -680,8 +680,8 @@ async fn daytona_git_checkpoint_remote_emits_events() {
 // Parallel git branching on Daytona
 // ---------------------------------------------------------------------------
 
-use fabro_workflows::handler::fan_in::FanInHandler;
-use fabro_workflows::handler::parallel::ParallelHandler;
+use fabro_workflow::handler::fan_in::FanInHandler;
+use fabro_workflow::handler::parallel::ParallelHandler;
 
 /// End-to-end: parallel branches get isolated worktrees in Daytona sandbox,
 /// fan-in fast-forwards to winner.
@@ -882,7 +882,7 @@ async fn daytona_parallel_git_branching_e2e() {
             .filter(|e| {
                 matches!(
                     e,
-                    fabro_workflows::event::WorkflowRunEvent::ParallelStarted { .. }
+                    fabro_workflow::event::WorkflowRunEvent::ParallelStarted { .. }
                 )
             })
             .collect();
@@ -896,7 +896,7 @@ async fn daytona_parallel_git_branching_e2e() {
             .filter(|e| {
                 matches!(
                     e,
-                    fabro_workflows::event::WorkflowRunEvent::ParallelCompleted { .. }
+                    fabro_workflow::event::WorkflowRunEvent::ParallelCompleted { .. }
                 )
             })
             .collect();
@@ -914,8 +914,8 @@ async fn daytona_parallel_git_branching_e2e() {
 // CLI Backend on Daytona — real CLI tools via exec_command
 // ---------------------------------------------------------------------------
 
-use fabro_workflows::handler::agent::{CodergenBackend, CodergenResult};
-use fabro_workflows::handler::llm::AgentCliBackend;
+use fabro_workflow::handler::agent::{CodergenBackend, CodergenResult};
+use fabro_workflow::handler::llm::AgentCliBackend;
 
 /// Helper: run a real CLI backend test on Daytona.
 ///
@@ -1061,7 +1061,7 @@ async fn daytona_cli_gemini() {
 // Daytona shadow commit E2E with MetadataStore
 // ---------------------------------------------------------------------------
 
-use fabro_workflows::git::MetadataStore;
+use fabro_workflow::git::MetadataStore;
 
 /// End-to-end test: pipeline with git checkpointing enabled + `meta_branch`
 /// writes shadow branch on the host repo and includes `Fabro-Checkpoint` trailer in sandbox commits.
@@ -1232,7 +1232,7 @@ impl Handler for AssetCreatorHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        services: &fabro_workflows::handler::EngineServices,
+        services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         let script = concat!(
             "mkdir -p test-results && ",

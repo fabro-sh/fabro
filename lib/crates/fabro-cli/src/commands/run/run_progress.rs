@@ -10,11 +10,11 @@ use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use fabro_agent::AgentEvent;
 use fabro_interview::{Answer, ConsoleInterviewer, Interviewer, Question};
 use fabro_util::version::FABRO_VERSION;
-use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
-use fabro_workflows::outcome::StageStatus;
+use fabro_workflow::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
+use fabro_workflow::outcome::StageStatus;
 
 use crate::shared::{format_duration_ms, format_tokens_human, tilde_path};
-use fabro_workflows::outcome::{compute_stage_cost, format_cost};
+use fabro_workflow::outcome::{compute_stage_cost, format_cost};
 
 // ── Cached styles ───────────────────────────────────────────────────────
 

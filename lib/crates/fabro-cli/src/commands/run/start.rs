@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use fabro_config::FabroSettingsExt;
-use fabro_workflows::records::{RunRecord, RunRecordExt};
+use fabro_workflow::records::{RunRecord, RunRecordExt};
 
 use super::launcher::{
     LauncherRecord, launcher_log_path, launcher_record_path, remove_launcher_record,

@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use fabro_config::FabroSettingsExt;
-use fabro_workflows::run_lookup::runs_base;
+use fabro_workflow::run_lookup::runs_base;
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrCloseArgs};

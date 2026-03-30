@@ -4,8 +4,8 @@ use crate::args::RunArgs;
 use fabro_config::{ConfigLayer, FabroSettings};
 use fabro_types::RunId;
 use fabro_util::terminal::Styles;
-use fabro_workflows::error::FabroError;
-use fabro_workflows::operations::{CreateRunInput, WorkflowInput, create};
+use fabro_workflow::error::FabroError;
+use fabro_workflow::operations::{CreateRunInput, WorkflowInput, create};
 
 use super::output::{print_diagnostics_from_error, print_workflow_report_from_persisted};
 

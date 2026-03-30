@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use fabro_workflows::pull_request::PullRequestRecord;
-use fabro_workflows::run_lookup::resolve_run_combined;
+use fabro_workflow::pull_request::PullRequestRecord;
+use fabro_workflow::run_lookup::resolve_run_combined;
 
 use crate::args::{GlobalArgs, PrCommand, PrNamespace};
 use crate::shared::github::build_github_app_credentials;

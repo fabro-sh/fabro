@@ -14,7 +14,7 @@ medium = { max-threads = 4 }   # 18-30 MB binaries
 [[profile.default.overrides]]
 filter = """
   package(fabro-server)
-  | package(fabro-workflows)
+  | package(fabro-workflow)
   | package(fabro-agent)
   | package(fabro-cli)
 """

@@ -37,7 +37,7 @@ Every line in `progress.jsonl` has three envelope fields, then the event's own f
 | `run_id` | string | ULID for this workflow run |
 | `event` | string | Event name (matches Rust variant, dot-separated for wrapped types) |
 
-The envelope is built in `fabro-workflows/src/event.rs` by `build_event_envelope()`, and file logging is handled by `ProgressLogger`. Field names from the event that collide with envelope keys (`ts`, `run_id`, `event`) are dropped — the `run_id` from `WorkflowRunStarted` populates the envelope itself.
+The envelope is built in `fabro-workflow/src/event.rs` by `build_event_envelope()`, and file logging is handled by `ProgressLogger`. Field names from the event that collide with envelope keys (`ts`, `run_id`, `event`) are dropped — the `run_id` from `WorkflowRunStarted` populates the envelope itself.
 
 ## Run Completion Contract
 

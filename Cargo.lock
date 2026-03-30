@@ -1477,7 +1477,7 @@ dependencies = [
  "fabro-types",
  "fabro-util",
  "fabro-validate",
- "fabro-workflows",
+ "fabro-workflow",
  "futures",
  "git2",
  "httpmock",
@@ -1810,7 +1810,7 @@ dependencies = [
  "fabro-store",
  "fabro-types",
  "fabro-util",
- "fabro-workflows",
+ "fabro-workflow",
  "futures-util",
  "hex",
  "hmac",
@@ -1847,7 +1847,7 @@ name = "fabro-slack"
 version = "0.176.2"
 dependencies = [
  "fabro-interview",
- "fabro-workflows",
+ "fabro-workflow",
  "futures-util",
  "reqwest",
  "rustls",
@@ -1972,7 +1972,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fabro-workflows"
+name = "fabro-workflow"
 version = "0.176.2"
 dependencies = [
  "anyhow",

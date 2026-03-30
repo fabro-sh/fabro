@@ -5,9 +5,9 @@ use anyhow::{Context, Result, bail};
 use fabro_config::FabroSettingsExt;
 use fabro_sandbox::SandboxRecordExt;
 use fabro_sandbox::reconnect::reconnect;
-use fabro_workflows::records::{StartRecord, StartRecordExt};
-use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
-use fabro_workflows::sandbox_git::GIT_REMOTE;
+use fabro_workflow::records::{StartRecord, StartRecordExt};
+use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::sandbox_git::GIT_REMOTE;
 use tracing::{debug, info};
 
 use crate::args::{DiffArgs, GlobalArgs};

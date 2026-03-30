@@ -22,8 +22,8 @@ use fabro_retro::retro::{Retro, extract_stage_durations};
 use fabro_store::{InMemoryStore, Store};
 use fabro_types::RunId;
 use fabro_util::redact::redact_jsonl_line;
-use fabro_workflows::error::FabroError;
-use fabro_workflows::handler::HandlerRegistry;
+use fabro_workflow::error::FabroError;
+use fabro_workflow::handler::HandlerRegistry;
 use futures_util::stream;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
@@ -44,11 +44,11 @@ use crate::sessions as sessions_mod;
 use crate::sessions::{SessionStore, new_session_store};
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_retro::RetroExt;
-use fabro_workflows::context::Context;
-use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
-use fabro_workflows::operations::{self, CreateRunInput, WorkflowInput};
-use fabro_workflows::pipeline::Persisted;
-use fabro_workflows::records::{Checkpoint, CheckpointExt};
+use fabro_workflow::context::Context;
+use fabro_workflow::event::{EventEmitter, WorkflowRunEvent};
+use fabro_workflow::operations::{self, CreateRunInput, WorkflowInput};
+use fabro_workflow::pipeline::Persisted;
+use fabro_workflow::records::{Checkpoint, CheckpointExt};
 
 pub use fabro_api_types::{
     ApiQuestion, ApiQuestionOption, PaginatedRunList, PaginationMeta,
@@ -728,7 +728,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     // Accumulate aggregate usage after execution completes.
     if let Some(ref cp) = checkpoint {
         let stage_durations = match run_store.list_events().await {
-            Ok(events) => fabro_workflows::extract_stage_durations_from_events(&events),
+            Ok(events) => fabro_workflow::extract_stage_durations_from_events(&events),
             Err(err) => {
                 tracing::warn!(run_id = %run_id, error = %err, "Failed to load run events from store");
                 extract_stage_durations(&run_dir)
@@ -1600,7 +1600,7 @@ mod tests {
     use axum::body::Body;
     use axum::http::Request;
     use fabro_types::fixtures;
-    use fabro_workflows::records::{RunRecord, RunRecordExt};
+    use fabro_workflow::records::{RunRecord, RunRecordExt};
     use tower::ServiceExt;
 
     const MINIMAL_DOT: &str = r#"digraph Test {
@@ -2516,8 +2516,8 @@ mod tests {
         let mut status_record = None;
         for _ in 0..50 {
             if let Some(record) = run_store.get_status().await.unwrap() {
-                if record.status == fabro_workflows::run_status::RunStatus::Failed
-                    && record.reason == Some(fabro_workflows::run_status::StatusReason::Cancelled)
+                if record.status == fabro_workflow::run_status::RunStatus::Failed
+                    && record.reason == Some(fabro_workflow::run_status::StatusReason::Cancelled)
                 {
                     status_record = Some(record);
                     break;
@@ -2529,11 +2529,11 @@ mod tests {
         let status_record = status_record.expect("status record should be persisted");
         assert_eq!(
             status_record.status,
-            fabro_workflows::run_status::RunStatus::Failed
+            fabro_workflow::run_status::RunStatus::Failed
         );
         assert_eq!(
             status_record.reason,
-            Some(fabro_workflows::run_status::StatusReason::Cancelled)
+            Some(fabro_workflow::run_status::StatusReason::Cancelled)
         );
     }
 
@@ -2541,7 +2541,7 @@ mod tests {
     async fn cancel_before_run_transitions_to_running_closes_event_stream() {
         let state = create_app_state_with_registry_factory(test_db().await, |interviewer| {
             std::thread::sleep(std::time::Duration::from_millis(200));
-            fabro_workflows::handler::default_registry(interviewer, || None)
+            fabro_workflow::handler::default_registry(interviewer, || None)
         });
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 

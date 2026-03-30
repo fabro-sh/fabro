@@ -5,7 +5,7 @@ use fabro_agent::sandbox::Sandbox;
 use fabro_config::FabroSettingsExt;
 use fabro_sandbox::SandboxRecordExt;
 use fabro_sandbox::reconnect::reconnect;
-use fabro_workflows::run_lookup::{resolve_run, runs_base};
+use fabro_workflow::run_lookup::{resolve_run, runs_base};
 use tokio::fs;
 use tracing::{debug, info};
 

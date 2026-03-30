@@ -421,11 +421,11 @@ mod server_lifecycle {
     use axum::http::{Request, StatusCode};
     use fabro_interview::Interviewer;
     use fabro_server::server::{build_router, create_app_state_with_registry_factory};
-    use fabro_workflows::handler::HandlerRegistry;
-    use fabro_workflows::handler::agent::AgentHandler;
-    use fabro_workflows::handler::exit::ExitHandler;
-    use fabro_workflows::handler::human::HumanHandler;
-    use fabro_workflows::handler::start::StartHandler;
+    use fabro_workflow::handler::HandlerRegistry;
+    use fabro_workflow::handler::agent::AgentHandler;
+    use fabro_workflow::handler::exit::ExitHandler;
+    use fabro_workflow::handler::human::HumanHandler;
+    use fabro_workflow::handler::start::StartHandler;
     use tower::ServiceExt;
 
     fn gate_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {

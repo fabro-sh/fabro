@@ -144,7 +144,7 @@ impl<G: Graph + 'static> Executor<G> {
                 }
             }
 
-            // Check visit limits (>= matches fabro-workflows semantics)
+            // Check visit limits (>= matches fabro-workflow semantics)
             let visits = state.increment_visits(node.id());
             if let Some(max) = node.max_visits() {
                 if visits >= max {

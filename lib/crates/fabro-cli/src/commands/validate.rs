@@ -3,7 +3,7 @@ use fabro_config::ConfigLayer;
 use fabro_config::project::resolve_workflow_path;
 use fabro_util::terminal::Styles;
 use fabro_validate::Severity;
-use fabro_workflows::operations::{ValidateInput, WorkflowInput, validate};
+use fabro_workflow::operations::{ValidateInput, WorkflowInput, validate};
 
 use crate::args::ValidateArgs;
 use crate::shared::{print_diagnostics, relative_path};

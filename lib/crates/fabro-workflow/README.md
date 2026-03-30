@@ -1,4 +1,4 @@
-# fabro-workflows
+# fabro-workflow
 
 A DOT-based pipeline runner for multi-stage AI workflows. Define workflows as Graphviz `digraph` files and execute them with pluggable handlers, conditional routing, human-in-the-loop gates, parallel branching, retry policies, and checkpoint-based recovery.
 
@@ -41,7 +41,7 @@ digraph MyPipeline {
 ### Parsing and Validating a Pipeline
 
 ```rust
-use fabro_workflows::operations::{create, CreateOptions};
+use fabro_workflow::operations::{create, CreateOptions};
 
 let dot_source = r#"digraph Simple {
     graph [goal="Run tests"]
@@ -64,8 +64,8 @@ assert_eq!(graph.goal(), "Run tests");
 ### Running a Pipeline
 
 ```rust
-use fabro_workflows::operations::start;
-use fabro_workflows::pipeline;
+use fabro_workflow::operations::start;
+use fabro_workflow::pipeline;
 
 // Use `operations::start(...)` for the full initialize -> execute -> retro -> finalize flow.
 // Use `pipeline::initialize(...)` + `pipeline::execute(...)` when you need partial lifecycle control.

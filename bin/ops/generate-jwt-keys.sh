@@ -7,7 +7,7 @@ openssl pkey -in fabro-jwt-private.pem -pubout -out fabro-jwt-public.pem
 echo ""
 echo "Generated:"
 echo "  fabro-jwt-private.pem  (private key — for fabro-web / FABRO_JWT_PRIVATE_KEY)"
-echo "  fabro-jwt-public.pem   (public key  — for fabro-workflows / FABRO_JWT_PUBLIC_KEY)"
+echo "  fabro-jwt-public.pem   (public key  — for fabro-workflow / FABRO_JWT_PUBLIC_KEY)"
 echo ""
 echo "Set env vars with the PEM contents (including header/footer lines):"
 echo ""

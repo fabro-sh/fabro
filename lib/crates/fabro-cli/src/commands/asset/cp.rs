@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use fabro_config::FabroSettingsExt;
 use fabro_store::RuntimeState;
-use fabro_workflows::assets::{AssetEntry, scan_assets};
-use fabro_workflows::run_lookup::{resolve_run, runs_base};
+use fabro_workflow::assets::{AssetEntry, scan_assets};
+use fabro_workflow::run_lookup::{resolve_run, runs_base};
 
 use crate::args::{AssetCpArgs, GlobalArgs};
 use crate::shared::split_run_path;

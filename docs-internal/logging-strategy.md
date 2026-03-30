@@ -138,7 +138,7 @@ warn!(provider = %provider, attempt = n, error = %err, "Request failed, retrying
 error!(provider = %provider, error = %err, "Request failed after all retries");
 ```
 
-**fabro-workflows:**
+**fabro-workflow:**
 ```rust
 info!(pipeline = %name, "Starting pipeline execution");
 info!(pipeline = %name, nodes = count, "Pipeline complete");

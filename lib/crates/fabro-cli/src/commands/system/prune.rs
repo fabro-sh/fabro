@@ -6,7 +6,7 @@ use fabro_config::FabroSettingsExt;
 use fabro_store::Store;
 use tracing::{debug, info};
 
-use fabro_workflows::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_combined};
+use fabro_workflow::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_combined};
 
 use crate::args::{GlobalArgs, RunsPruneArgs};
 use crate::shared::format_size;

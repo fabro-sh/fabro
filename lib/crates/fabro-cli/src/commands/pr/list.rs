@@ -2,8 +2,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use fabro_config::FabroSettingsExt;
-use fabro_workflows::pull_request::PullRequestRecord;
-use fabro_workflows::run_lookup::{runs_base, scan_runs_combined};
+use fabro_workflow::pull_request::PullRequestRecord;
+use fabro_workflow::run_lookup::{runs_base, scan_runs_combined};
 use futures::future::join_all;
 use tracing::info;
 

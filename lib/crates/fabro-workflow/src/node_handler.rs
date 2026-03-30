@@ -22,7 +22,7 @@ use fabro_graphviz::graph::types::Graph as GvGraph;
 use tokio::time::timeout;
 
 /// Production node handler that bridges fabro-core's NodeHandler to the
-/// existing fabro-workflows Handler trait via EngineServices.
+/// existing fabro-workflow Handler trait via EngineServices.
 ///
 /// On each `execute()` call, forks the context, runs the handler,
 /// then diffs and applies changes back.

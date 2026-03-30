@@ -28,27 +28,27 @@ use fabro_llm::provider::Provider;
 use fabro_store::RuntimeState;
 use fabro_types::RunId;
 use fabro_validate::{Severity, validate, validate_or_raise};
-use fabro_workflows::context::Context;
-use fabro_workflows::error::{FabroError, FailureSignatureExt};
-use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
-use fabro_workflows::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
-use fabro_workflows::handler::command::CommandHandler;
-use fabro_workflows::handler::conditional::ConditionalHandler;
-use fabro_workflows::handler::default_registry;
-use fabro_workflows::handler::exit::ExitHandler;
-use fabro_workflows::handler::human::HumanHandler;
-use fabro_workflows::handler::llm::AgentApiBackend;
-use fabro_workflows::handler::llm::cli::{AgentCliBackend, BackendRouter, parse_cli_response};
-use fabro_workflows::handler::manager_loop::SubWorkflowHandler;
-use fabro_workflows::handler::start::StartHandler;
-use fabro_workflows::handler::wait::WaitHandler;
-use fabro_workflows::handler::{Handler, HandlerRegistry};
-use fabro_workflows::outcome::{Outcome, OutcomeExt, StageStatus};
-use fabro_workflows::records::{Checkpoint, CheckpointExt};
-use fabro_workflows::run_options::{GitCheckpointOptions, RunOptions};
-use fabro_workflows::stylesheet::{apply_stylesheet, parse_stylesheet};
-use fabro_workflows::test_support::{WorkflowRunner, run_graph_with_hooks};
-use fabro_workflows::transform::{
+use fabro_workflow::context::Context;
+use fabro_workflow::error::{FabroError, FailureSignatureExt};
+use fabro_workflow::event::{EventEmitter, WorkflowRunEvent};
+use fabro_workflow::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
+use fabro_workflow::handler::command::CommandHandler;
+use fabro_workflow::handler::conditional::ConditionalHandler;
+use fabro_workflow::handler::default_registry;
+use fabro_workflow::handler::exit::ExitHandler;
+use fabro_workflow::handler::human::HumanHandler;
+use fabro_workflow::handler::llm::AgentApiBackend;
+use fabro_workflow::handler::llm::cli::{AgentCliBackend, BackendRouter, parse_cli_response};
+use fabro_workflow::handler::manager_loop::SubWorkflowHandler;
+use fabro_workflow::handler::start::StartHandler;
+use fabro_workflow::handler::wait::WaitHandler;
+use fabro_workflow::handler::{Handler, HandlerRegistry};
+use fabro_workflow::outcome::{Outcome, OutcomeExt, StageStatus};
+use fabro_workflow::records::{Checkpoint, CheckpointExt};
+use fabro_workflow::run_options::{GitCheckpointOptions, RunOptions};
+use fabro_workflow::stylesheet::{apply_stylesheet, parse_stylesheet};
+use fabro_workflow::test_support::{WorkflowRunner, run_graph_with_hooks};
+use fabro_workflow::transform::{
     StylesheetApplicationTransform, Transform, VariableExpansionTransform,
 };
 use ulid::Ulid;
@@ -724,11 +724,11 @@ impl Handler for AlwaysFailHandler {
     async fn execute(
         &self,
         node: &Node,
-        _context: &fabro_workflows::context::Context,
+        _context: &fabro_workflow::context::Context,
         _graph: &Graph,
         _run_dir: &Path,
-        _services: &fabro_workflows::handler::EngineServices,
-    ) -> Result<Outcome, fabro_workflows::error::FabroError> {
+        _services: &fabro_workflow::handler::EngineServices,
+    ) -> Result<Outcome, fabro_workflow::error::FabroError> {
         Ok(Outcome::fail_classify(format!(
             "forced failure for {}",
             node.id
@@ -848,11 +848,11 @@ async fn goal_gate_routes_to_retry_target_when_present() {
         async fn execute(
             &self,
             _node: &Node,
-            _context: &fabro_workflows::context::Context,
+            _context: &fabro_workflow::context::Context,
             _graph: &Graph,
             _run_dir: &Path,
-            _services: &fabro_workflows::handler::EngineServices,
-        ) -> Result<Outcome, fabro_workflows::error::FabroError> {
+            _services: &fabro_workflow::handler::EngineServices,
+        ) -> Result<Outcome, fabro_workflow::error::FabroError> {
             let count = self
                 .call_count
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1165,7 +1165,7 @@ async fn retry_on_failure_then_succeed() {
             _context: &Context,
             _graph: &Graph,
             _run_dir: &Path,
-            _services: &fabro_workflows::handler::EngineServices,
+            _services: &fabro_workflow::handler::EngineServices,
         ) -> Result<Outcome, FabroError> {
             let count = self
                 .call_count
@@ -1420,7 +1420,7 @@ impl Handler for CounterHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        _services: &fabro_workflows::handler::EngineServices,
+        _services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         let count = self
             .call_count
@@ -1445,7 +1445,7 @@ impl Handler for LargeOutputHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        _services: &fabro_workflows::handler::EngineServices,
+        _services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         let mut outcome = Outcome::success();
         // 150KB string — well above the 100KB artifact threshold
@@ -1469,7 +1469,7 @@ impl Handler for ContextSetterHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        _services: &fabro_workflows::handler::EngineServices,
+        _services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         let mut outcome = Outcome::success();
         outcome
@@ -1678,8 +1678,8 @@ async fn smoke_test_with_mock_codergen_backend() {
 
 #[tokio::test]
 async fn end_to_end_parallel_fan_out_fan_in() {
-    use fabro_workflows::handler::fan_in::FanInHandler;
-    use fabro_workflows::handler::parallel::ParallelHandler;
+    use fabro_workflow::handler::fan_in::FanInHandler;
+    use fabro_workflow::handler::parallel::ParallelHandler;
 
     let input = r#"digraph parallel_test {
         start [shape=Mdiamond]
@@ -2304,7 +2304,7 @@ async fn branching_loop_back_on_failure() {
             _context: &Context,
             _graph: &Graph,
             _run_dir: &Path,
-            _services: &fabro_workflows::handler::EngineServices,
+            _services: &fabro_workflow::handler::EngineServices,
         ) -> Result<Outcome, FabroError> {
             let count = self
                 .call_count
@@ -2542,8 +2542,8 @@ async fn scenario_ship_a_feature() {
 
 #[tokio::test]
 async fn scenario_parallel_expert_review() {
-    use fabro_workflows::handler::fan_in::FanInHandler;
-    use fabro_workflows::handler::parallel::ParallelHandler;
+    use fabro_workflow::handler::fan_in::FanInHandler;
+    use fabro_workflow::handler::parallel::ParallelHandler;
 
     let input = r#"digraph ParallelReview {
         start [shape=Mdiamond]
@@ -2631,7 +2631,7 @@ async fn scenario_node_retries_on_retry_status() {
             _context: &Context,
             _graph: &Graph,
             _run_dir: &Path,
-            _services: &fabro_workflows::handler::EngineServices,
+            _services: &fabro_workflow::handler::EngineServices,
         ) -> Result<Outcome, FabroError> {
             let count = self
                 .call_count
@@ -2897,7 +2897,7 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
             _context: &Context,
             _graph: &Graph,
             _run_dir: &Path,
-            _services: &fabro_workflows::handler::EngineServices,
+            _services: &fabro_workflow::handler::EngineServices,
         ) -> Result<Outcome, FabroError> {
             let mut outcome = Outcome::success();
             outcome
@@ -2917,7 +2917,7 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
             _context: &Context,
             _graph: &Graph,
             _run_dir: &Path,
-            _services: &fabro_workflows::handler::EngineServices,
+            _services: &fabro_workflow::handler::EngineServices,
         ) -> Result<Outcome, FabroError> {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             Ok(Outcome::success())
@@ -3007,7 +3007,7 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
             _context: &Context,
             _graph: &Graph,
             _run_dir: &Path,
-            _services: &fabro_workflows::handler::EngineServices,
+            _services: &fabro_workflow::handler::EngineServices,
         ) -> Result<Outcome, FabroError> {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             Ok(Outcome::success())
@@ -3446,7 +3446,7 @@ async fn custom_handler_registration_and_execution() {
             _context: &Context,
             _graph: &Graph,
             _run_dir: &Path,
-            _services: &fabro_workflows::handler::EngineServices,
+            _services: &fabro_workflow::handler::EngineServices,
         ) -> Result<Outcome, FabroError> {
             let mut outcome = Outcome::success();
             outcome
@@ -3707,7 +3707,7 @@ async fn manager_loop_context_flows_e2e() {
             context: &Context,
             _graph: &Graph,
             _run_dir: &Path,
-            _services: &fabro_workflows::handler::EngineServices,
+            _services: &fabro_workflow::handler::EngineServices,
         ) -> Result<Outcome, FabroError> {
             let target = context.get_string("review.target", "");
             let mut outcome = Outcome::success();
@@ -3733,7 +3733,7 @@ async fn manager_loop_context_flows_e2e() {
             _context: &Context,
             _graph: &Graph,
             _run_dir: &Path,
-            _services: &fabro_workflows::handler::EngineServices,
+            _services: &fabro_workflow::handler::EngineServices,
         ) -> Result<Outcome, FabroError> {
             let mut outcome = Outcome::success();
             outcome.context_updates.insert(
@@ -3879,7 +3879,7 @@ async fn manager_loop_child_dotfile_e2e() {
 
 #[tokio::test]
 async fn import_e2e_through_engine() {
-    use fabro_workflows::pipeline::{TransformOptions, transform, validate};
+    use fabro_workflow::pipeline::{TransformOptions, transform, validate};
 
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -3905,7 +3905,7 @@ async fn import_e2e_through_engine() {
     )
     .unwrap();
 
-    let parsed = fabro_workflows::pipeline::parse(
+    let parsed = fabro_workflow::pipeline::parse(
         r#"digraph MergeE2E {
             graph [goal="Test file imports"]
             start [shape=Mdiamond]
@@ -4056,7 +4056,7 @@ impl Handler for FidelityCapturingHandler {
         context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        _services: &fabro_workflows::handler::EngineServices,
+        _services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         let fidelity = context.get_string("internal.fidelity", "none");
         self.captures
@@ -5855,9 +5855,9 @@ mod real_llm {
 
     use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Node;
-    use fabro_workflows::context::Context;
-    use fabro_workflows::error::FabroError;
-    use fabro_workflows::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
+    use fabro_workflow::context::Context;
+    use fabro_workflow::error::FabroError;
+    use fabro_workflow::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
 
     use fabro_llm::client::Client;
     use fabro_llm::types::{Message, Request};
@@ -5947,15 +5947,15 @@ mod real_llm {
     use super::{local_env, test_run_id};
     use fabro_graphviz::graph::{AttrValue, Edge, Graph};
     use fabro_interview::AutoApproveInterviewer;
-    use fabro_workflows::event::EventEmitter;
-    use fabro_workflows::handler::HandlerRegistry;
-    use fabro_workflows::handler::exit::ExitHandler;
-    use fabro_workflows::handler::human::HumanHandler;
-    use fabro_workflows::handler::start::StartHandler;
-    use fabro_workflows::outcome::StageStatus;
-    use fabro_workflows::records::{Checkpoint, CheckpointExt};
-    use fabro_workflows::run_options::RunOptions;
-    use fabro_workflows::test_support::WorkflowRunner;
+    use fabro_workflow::event::EventEmitter;
+    use fabro_workflow::handler::HandlerRegistry;
+    use fabro_workflow::handler::exit::ExitHandler;
+    use fabro_workflow::handler::human::HumanHandler;
+    use fabro_workflow::handler::start::StartHandler;
+    use fabro_workflow::outcome::StageStatus;
+    use fabro_workflow::records::{Checkpoint, CheckpointExt};
+    use fabro_workflow::run_options::RunOptions;
+    use fabro_workflow::test_support::WorkflowRunner;
 
     #[tokio::test]
     #[ignore]
@@ -6376,7 +6376,7 @@ mod real_llm {
         registry.register("exit", Box::new(ExitHandler));
         registry.register(
             "prompt",
-            Box::new(fabro_workflows::handler::prompt::PromptHandler::new(Some(
+            Box::new(fabro_workflow::handler::prompt::PromptHandler::new(Some(
                 make_llm_backend(client),
             ))),
         );
@@ -8338,7 +8338,7 @@ async fn arc_e2e_with_real_llm() {
             Provider::Anthropic,
             Vec::new(),
         ))
-            as Box<dyn fabro_workflows::handler::agent::CodergenBackend>)
+            as Box<dyn fabro_workflow::handler::agent::CodergenBackend>)
     });
 
     let run_dir = tempfile::tempdir().unwrap();
@@ -8688,9 +8688,8 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // The checkpoint context should contain an artifact pointer, not the full value
-    let checkpoint =
-        fabro_workflows::records::Checkpoint::load(&dir.path().join("checkpoint.json"))
-            .expect("checkpoint should load");
+    let checkpoint = fabro_workflow::records::Checkpoint::load(&dir.path().join("checkpoint.json"))
+        .expect("checkpoint should load");
     let pointer_value = checkpoint
         .context_values
         .get("response.big_output")
@@ -8943,11 +8942,11 @@ async fn node_dir_uses_visit_count_on_revisit() {
         async fn execute(
             &self,
             _node: &Node,
-            _context: &fabro_workflows::context::Context,
+            _context: &fabro_workflow::context::Context,
             _graph: &Graph,
             _run_dir: &Path,
-            _services: &fabro_workflows::handler::EngineServices,
-        ) -> Result<Outcome, fabro_workflows::error::FabroError> {
+            _services: &fabro_workflow::handler::EngineServices,
+        ) -> Result<Outcome, fabro_workflow::error::FabroError> {
             let n = self
                 .call_count
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -10275,8 +10274,8 @@ fn parse_real_gemini_json() {
 // Git checkpoint e2e (Local)
 // ---------------------------------------------------------------------------
 
-use fabro_workflows::handler::fan_in::FanInHandler;
-use fabro_workflows::handler::parallel::ParallelHandler;
+use fabro_workflow::handler::fan_in::FanInHandler;
+use fabro_workflow::handler::parallel::ParallelHandler;
 
 /// A handler that writes a file named `{node_id}.txt` into the sandbox's
 /// working directory. Used to verify git worktree isolation in parallel branches.
@@ -10290,7 +10289,7 @@ impl Handler for FileWriterHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        services: &fabro_workflows::handler::EngineServices,
+        services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         let work_dir = services.sandbox.working_directory().to_string();
         let file_path = format!("{}/{}.txt", work_dir, node.id);
@@ -10492,7 +10491,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
 /// shadow branch with checkpoint data and includes `Fabro-Checkpoint` trailer in run-branch commits.
 #[tokio::test]
 async fn git_checkpoint_host_writes_shadow_branch() {
-    use fabro_workflows::git::MetadataStore;
+    use fabro_workflow::git::MetadataStore;
 
     // 1. Create a temporary git repo with an initial commit
     let repo = tempfile::tempdir().unwrap();
@@ -11125,7 +11124,7 @@ impl Handler for DeterministicFailHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        _services: &fabro_workflows::handler::EngineServices,
+        _services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         Ok(Outcome::fail_classify(&self.reason))
     }
@@ -11142,7 +11141,7 @@ impl Handler for TransientInfraFailHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        _services: &fabro_workflows::handler::EngineServices,
+        _services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         Ok(Outcome::fail_classify("connection refused"))
     }
@@ -11159,7 +11158,7 @@ impl Handler for SignatureHintHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        _services: &fabro_workflows::handler::EngineServices,
+        _services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         Ok(
             Outcome::fail_classify("error at line 42 in commit abc123def0")
@@ -11194,7 +11193,7 @@ impl Handler for VaryingReasonFailHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        _services: &fabro_workflows::handler::EngineServices,
+        _services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         let n = self
             .counter
@@ -11219,7 +11218,7 @@ impl Handler for SucceedOnNthHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        _services: &fabro_workflows::handler::EngineServices,
+        _services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         let n = self
             .counter
@@ -11324,7 +11323,7 @@ fn circuit_breaker_restart_graph(signature_limit: Option<i64>) -> Graph {
 
 #[test]
 fn e2e_normalize_failure_reason_strips_variable_data() {
-    use fabro_workflows::error::normalize_failure_reason;
+    use fabro_workflow::error::normalize_failure_reason;
 
     // Two error messages that differ only in line numbers and hex hashes
     // should normalize to the same string.
@@ -11350,7 +11349,7 @@ fn e2e_normalize_failure_reason_strips_variable_data() {
 
 #[test]
 fn e2e_failure_signature_composite_key() {
-    use fabro_workflows::error::{FailureCategory, FailureSignature};
+    use fabro_workflow::error::{FailureCategory, FailureSignature};
 
     let sig = FailureSignature::new(
         "verify",
@@ -11377,7 +11376,7 @@ fn e2e_failure_signature_composite_key() {
 
 #[test]
 fn e2e_failure_signature_hint_priority() {
-    use fabro_workflows::error::{FailureCategory, FailureSignature};
+    use fabro_workflow::error::{FailureCategory, FailureSignature};
 
     let sig = FailureSignature::new(
         "build",
@@ -11394,7 +11393,7 @@ fn e2e_failure_signature_hint_priority() {
 
 #[test]
 fn e2e_only_deterministic_and_structural_tracked() {
-    use fabro_workflows::error::FailureCategory;
+    use fabro_workflow::error::FailureCategory;
 
     // These should be tracked
     assert!(FailureCategory::Deterministic.is_signature_tracked());
@@ -11846,7 +11845,7 @@ fn e2e_checkpoint_backward_compat_no_signatures() {
 
 #[test]
 fn e2e_checkpoint_signatures_roundtrip() {
-    use fabro_workflows::error::{FailureCategory, FailureSignature};
+    use fabro_workflow::error::{FailureCategory, FailureSignature};
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("cp.json");
@@ -12136,7 +12135,7 @@ impl Handler for ClassifiedFailHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        _services: &fabro_workflows::handler::EngineServices,
+        _services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         let n = self
             .counter
@@ -12144,7 +12143,7 @@ impl Handler for ClassifiedFailHandler {
         if n >= self.succeed_on {
             return Ok(Outcome::success());
         }
-        let failure_class: fabro_workflows::error::FailureCategory =
+        let failure_class: fabro_workflow::error::FailureCategory =
             self.failure_class.parse().unwrap();
         let mut outcome = Outcome::fail_classify("classified failure");
         if let Some(ref mut f) = outcome.failure {
@@ -12397,7 +12396,7 @@ impl Handler for HangingHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        _services: &fabro_workflows::handler::EngineServices,
+        _services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         Ok(Outcome::success())
@@ -12418,7 +12417,7 @@ impl Handler for KeepaliveHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        services: &fabro_workflows::handler::EngineServices,
+        services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         let start = std::time::Instant::now();
         while start.elapsed() < std::time::Duration::from_millis(self.total_ms) {
@@ -12597,7 +12596,7 @@ impl Handler for SlowTestHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        _services: &fabro_workflows::handler::EngineServices,
+        _services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         tokio::time::sleep(std::time::Duration::from_millis(self.sleep_ms)).await;
         Ok(Outcome::success())
@@ -12684,7 +12683,7 @@ impl Handler for AssetCreatorHandler {
         _context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
-        services: &fabro_workflows::handler::EngineServices,
+        services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
         // Create asset files via the sandbox's exec_command
         let script = concat!(

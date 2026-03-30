@@ -5,11 +5,11 @@ use anyhow::Result;
 use fabro_config::FabroSettingsExt;
 use fabro_interview::FileInterviewer;
 use fabro_store::RuntimeState;
-use fabro_workflows::event::EventEmitter;
-use fabro_workflows::operations::{
+use fabro_workflow::event::EventEmitter;
+use fabro_workflow::operations::{
     StartServices, open_or_hydrate_run, resume as resume_run, start as start_run,
 };
-use fabro_workflows::records::{RunRecord, RunRecordExt};
+use fabro_workflow::records::{RunRecord, RunRecordExt};
 
 use crate::shared;
 use crate::store;
@@ -21,7 +21,7 @@ pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bo
     });
 
     let run_record = RunRecord::load(&run_dir)?;
-    let on_node: fabro_workflows::OnNodeCallback = Some({
+    let on_node: fabro_workflow::OnNodeCallback = Some({
         let run_id = run_record.run_id.to_string();
         let short_id = super::short_run_id(&run_id).to_string();
         fabro_proctitle::set(&format!("fabro: {short_id}"));

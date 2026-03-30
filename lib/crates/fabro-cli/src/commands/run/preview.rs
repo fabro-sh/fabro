@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use fabro_config::FabroSettingsExt;
 use fabro_sandbox::SandboxRecordExt;
 use fabro_sandbox::daytona::DaytonaSandbox;
-use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use tracing::info;
 
 use crate::args::{GlobalArgs, PreviewArgs};

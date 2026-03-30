@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `cargo build --workspace` — build all crates
 - `cargo nextest run --workspace` — run all unit tests
 - `cargo nextest run -p fabro-server` — test a single crate
-- `cargo nextest run -p fabro-workflows -- test_name` — run a single test
+- `cargo nextest run -p fabro-workflow -- test_name` — run a single test
 - `set -a && source .env && set +a && cargo nextest run --workspace --profile e2e --run-ignored only` — run all E2E live tests (requires credentials in `.env`, see `.env.example`)
 - `set -a && source .env && set +a && cargo nextest run -p fabro-llm --profile e2e --run-ignored only` — run E2E tests for a single crate
 - `cargo fmt --check --all` — check formatting
@@ -51,7 +51,7 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 
 ### Rust crates (`lib/crates/`)
 - **fabro-cli** — CLI entry point. Commands: `run`, `exec`, `serve`, `validate`, `parse`, `cp`, `model`, `doctor`, `init`, `install`, `ps`, `system prune`, `llm`
-- **fabro-workflows** — Core workflow engine. Parses Graphviz graphs, runs stages, manages checkpoints/resume, hooks, retros, and human-in-the-loop interactions
+- **fabro-workflow** — Core workflow engine. Parses Graphviz graphs, runs stages, manages checkpoints/resume, hooks, retros, and human-in-the-loop interactions
 - **fabro-agent** — AI coding agent with tool use (Bash, Read, Write, Edit, Glob, Grep, WebFetch). `Sandbox` trait abstracts execution environments
 - **fabro-server** — Axum HTTP server. Routes for runs, sessions, models, completions, usage. SSE event streaming. Demo mode via header
 - **fabro-llm** — Unified LLM client with providers: Anthropic, OpenAI, Gemini, OpenAI-compatible, plus retry/middleware/streaming
@@ -84,12 +84,12 @@ When working on Rust crates, read the relevant strategy doc **before** making ch
 
 ## Shell quoting in sandbox code
 
-When interpolating values into shell command strings (in `fabro-workflows`), always use the `shell_quote()` helper (backed by `shlex::try_quote`). Never use manual `replace('\'', "'\\''")` or unquoted interpolation. This applies to file paths, branch names, URLs, env vars, image names, glob patterns, and any other user-controlled input assembled into a shell script.
+When interpolating values into shell command strings (in `fabro-workflow`), always use the `shell_quote()` helper (backed by `shlex::try_quote`). Never use manual `replace('\'', "'\\''")` or unquoted interpolation. This applies to file paths, branch names, URLs, env vars, image names, glob patterns, and any other user-controlled input assembled into a shell script.
 
 ## Rust import style
 
 - **Types** (structs, enums, traits): import by name — `use crate::outcome::Outcome;`
-- **Functions**: import the parent module, call as `module::function()` — `use fabro_workflows::operations; operations::create(...)`
+- **Functions**: import the parent module, call as `module::function()` — `use fabro_workflow::operations; operations::create(...)`
 - **No glob imports** in production code (`use foo::*`). Globs are acceptable in test modules and preludes. Enforced by clippy `wildcard_imports` lint.
 
 ## Testing workflows

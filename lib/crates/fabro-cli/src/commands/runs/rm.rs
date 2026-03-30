@@ -7,8 +7,8 @@ use fabro_store::Store;
 use tracing::warn;
 
 use fabro_sandbox::reconnect::reconnect as reconnect_sandbox;
-use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
-use fabro_workflows::run_status::{RunStatus, RunStatusRecord, write_run_status};
+use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_status::{RunStatus, RunStatusRecord, write_run_status};
 
 use crate::args::{GlobalArgs, RunsRemoveArgs};
 use crate::store;

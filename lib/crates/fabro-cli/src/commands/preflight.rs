@@ -10,8 +10,8 @@ use fabro_model::{Catalog, Provider};
 use fabro_sandbox::daytona::{DaytonaConfig, detect_repo_info};
 use fabro_sandbox::{DockerSandboxConfig, Sandbox, SandboxProvider, SandboxSpec};
 use fabro_util::terminal::Styles;
-use fabro_workflows::git::{GitSyncStatus, sync_status};
-use fabro_workflows::operations::{ValidateInput, WorkflowInput, validate};
+use fabro_workflow::git::{GitSyncStatus, sync_status};
+use fabro_workflow::operations::{ValidateInput, WorkflowInput, validate};
 
 use crate::args::{GlobalArgs, PreflightArgs};
 use crate::shared::github::build_github_app_credentials;

@@ -13,9 +13,9 @@ use futures::StreamExt;
 use fabro_interview::{AnswerValue, ConsoleInterviewer};
 use fabro_store::{EventEnvelope, RunStore, RuntimeState};
 use fabro_util::terminal::Styles;
-use fabro_workflows::outcome::StageStatus;
-use fabro_workflows::records::{Conclusion, ConclusionExt, RunRecord, RunRecordExt};
-use fabro_workflows::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
+use fabro_workflow::outcome::StageStatus;
+use fabro_workflow::records::{Conclusion, ConclusionExt, RunRecord, RunRecordExt};
+use fabro_workflow::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
 use tokio::signal::ctrl_c;
 use tokio::time::{self, sleep};
 
@@ -695,9 +695,9 @@ mod tests {
     use chrono::Utc;
     use fabro_interview::{Answer, AnswerValue};
     use fabro_util::terminal::Styles;
-    use fabro_workflows::outcome::StageStatus;
-    use fabro_workflows::records::Conclusion;
-    use fabro_workflows::run_status::{StatusReason, write_run_status};
+    use fabro_workflow::outcome::StageStatus;
+    use fabro_workflow::records::Conclusion;
+    use fabro_workflow::run_status::{StatusReason, write_run_status};
 
     fn no_color_styles() -> &'static Styles {
         Box::leak(Box::new(Styles::new(false)))

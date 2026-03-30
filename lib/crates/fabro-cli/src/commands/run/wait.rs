@@ -4,9 +4,9 @@ use anyhow::{Result, bail};
 use fabro_config::FabroSettingsExt;
 use fabro_types::RunId;
 use fabro_util::terminal::Styles;
-use fabro_workflows::records::{Conclusion, ConclusionExt};
-use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
-use fabro_workflows::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
+use fabro_workflow::records::{Conclusion, ConclusionExt};
+use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
 use tracing::info;
 
 use crate::args::{GlobalArgs, WaitArgs};
@@ -147,8 +147,8 @@ fn print_human_output(
 mod tests {
     use super::*;
     use fabro_types::fixtures;
-    use fabro_workflows::outcome::StageStatus;
-    use fabro_workflows::records::Conclusion;
+    use fabro_workflow::outcome::StageStatus;
+    use fabro_workflow::records::Conclusion;
 
     fn no_color_styles() -> Styles {
         Styles::new(false)

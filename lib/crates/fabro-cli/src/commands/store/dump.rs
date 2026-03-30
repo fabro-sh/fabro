@@ -4,7 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use fabro_config::FabroSettingsExt;
 use fabro_store::{NodeVisitRef, RunSnapshot, RunStore};
-use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use serde::Serialize;
 #[cfg(test)]
 use serde::de::DeserializeOwned;

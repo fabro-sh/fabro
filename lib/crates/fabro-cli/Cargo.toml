@@ -35,7 +35,7 @@ fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-git-storage = { path = "../fabro-git-storage" }
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-validate = { path = "../fabro-validate" }
-fabro-workflows = { path = "../fabro-workflows" }
+fabro-workflow = { path = "../fabro-workflow" }
 fabro-server = { path = "../fabro-server", optional = true }
 fabro-telemetry = { path = "../fabro-telemetry" }
 fabro-store = { path = "../fabro-store" }

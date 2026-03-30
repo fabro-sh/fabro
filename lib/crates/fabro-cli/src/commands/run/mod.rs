@@ -1,7 +1,7 @@
 use anyhow::Result;
 use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
-use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 
 use crate::args::{GlobalArgs, RunCommands};
 use crate::store;

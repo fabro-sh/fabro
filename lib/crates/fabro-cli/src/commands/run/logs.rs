@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use fabro_config::FabroSettingsExt;
 use fabro_store::RunStore;
 use fabro_util::terminal::Styles;
-use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use futures::StreamExt;
 use tokio::time;
 use tracing::{debug, info, warn};

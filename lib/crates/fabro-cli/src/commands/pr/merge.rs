@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use fabro_config::FabroSettingsExt;
 use tracing::info;
 
-use fabro_workflows::run_lookup::runs_base;
+use fabro_workflow::run_lookup::runs_base;
 
 use crate::args::{GlobalArgs, PrMergeArgs};
 use crate::user_config::load_user_settings_with_globals;

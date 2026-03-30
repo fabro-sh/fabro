@@ -231,7 +231,7 @@ impl Graph for TestGraph {
                         Some(o) if o.status == *required_status => {}
                         _ => {
                             // Return the failed node id (the node whose gate is
-                            // checked), matching fabro-workflows convention
+                            // checked), matching fabro-workflow convention
                             return Err(required_node.clone());
                         }
                     }

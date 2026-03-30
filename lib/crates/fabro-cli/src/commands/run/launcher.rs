@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use fabro_config::FabroSettingsExt;
 use fabro_types::RunId;
-use fabro_workflows::records::{RunRecord, RunRecordExt};
+use fabro_workflow::records::{RunRecord, RunRecordExt};
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
@@ -114,7 +114,7 @@ mod tests {
     use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
     use fabro_types::fixtures;
-    use fabro_workflows::records::RunRecord;
+    use fabro_workflow::records::RunRecord;
 
     #[test]
     fn active_launcher_record_for_run_removes_stale_record() {
