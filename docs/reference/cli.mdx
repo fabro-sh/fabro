@@ -759,12 +759,14 @@ List assets (screenshots, test reports, traces) collected from a workflow run.
 ```bash
 fabro asset list <RUN_ID>
 fabro asset list <RUN_ID> --node verify --json
+fabro asset list <RUN_ID> --node verify --retry 2
 ```
 
 | Argument / Flag | Description |
 |---|---|
 | `<RUN_ID>` | Run ID or unambiguous prefix (required) |
 | `--node <NODE>` | Filter to assets from a specific node |
+| `--retry <N>` | Filter to assets from a specific retry attempt |
 | `--json` | Output as JSON |
 
 ## `fabro asset cp`
@@ -775,6 +777,7 @@ Copy assets from a workflow run to the local filesystem.
 fabro asset cp <RUN_ID> ./output               # all assets, flat
 fabro asset cp <RUN_ID> ./output --tree         # preserve directory structure
 fabro asset cp <RUN_ID>:report.html ./output    # specific file
+fabro asset cp <RUN_ID>:report.html ./output --node verify --retry 2
 ```
 
 | Argument / Flag | Description |
@@ -782,9 +785,10 @@ fabro asset cp <RUN_ID>:report.html ./output    # specific file
 | `<SOURCE>` | `RUN_ID` (all assets) or `RUN_ID:path` (specific file) |
 | `[DEST]` | Destination directory (defaults to `.`) |
 | `--node <NODE>` | Filter to assets from a specific node |
+| `--retry <N>` | Filter to assets from a specific retry attempt |
 | `--tree` | Preserve `\{node\}/\{retry\}/` directory structure |
 
-When copying all assets in flat mode, filenames must be unique across nodes. Use `--tree` or `--node` to disambiguate.
+When copying all assets in flat mode, filenames must be unique across nodes and retries. Use `--tree`, `--node`, or `--retry` to disambiguate.
 
 ## `fabro provider login`
 

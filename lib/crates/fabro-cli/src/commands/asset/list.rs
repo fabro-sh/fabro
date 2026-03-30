@@ -13,7 +13,11 @@ pub(super) fn list_command(args: &AssetListArgs, globals: &GlobalArgs) -> Result
     let base = runs_base(&cli_settings.storage_dir());
     let run = resolve_run(&base, &args.run_id)?;
     let runtime_state = RuntimeState::new(&run.path);
-    let entries = scan_assets(&runtime_state.assets_dir(), args.node.as_deref())?;
+    let entries = scan_assets(
+        &runtime_state.assets_dir(),
+        args.node.as_deref(),
+        args.retry,
+    )?;
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&entries)?);

@@ -1,8 +1,8 @@
 use fabro_agent::Sandbox;
+use fabro_sandbox::shell_quote;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
-use tokio::fs;
 use tracing::{debug, warn};
 
 /// A file discovered by the find command.
@@ -67,12 +67,12 @@ const MAX_TOTAL_SIZE: u64 = 50 * 1024 * 1024;
 /// Globs with `/` are treated as directory patterns: the trailing `/**` (if any) is stripped
 /// and the remainder is matched via `-path '*/{dir}/*'`.
 pub fn build_find_command(root: &str, platform: &str, globs: &[String]) -> String {
-    let mut cmd = format!("find {root}");
+    let mut cmd = format!("find {}", shell_quote(root));
 
     // Prune excluded directories
     let prune_parts: Vec<String> = EXCLUDE_DIRS
         .iter()
-        .map(|d| format!("-name '{d}'"))
+        .map(|d| format!("-name {}", shell_quote(d)))
         .collect();
     cmd.push_str(" \\( ");
     cmd.push_str(&prune_parts.join(" -o "));
@@ -86,10 +86,10 @@ pub fn build_find_command(root: &str, platform: &str, globs: &[String]) -> Strin
         if glob.contains('/') {
             // Directory-style glob: strip trailing /** and match as path
             let dir = glob.trim_end_matches("/**").trim_end_matches("/*");
-            conditions.push(format!(" -path '*/{dir}/*'"));
+            conditions.push(format!(" -path {}", shell_quote(&format!("*/{dir}/*"))));
         } else {
             // Filename glob
-            conditions.push(format!(" -name '{glob}'"));
+            conditions.push(format!(" -name {}", shell_quote(glob)));
         }
     }
     cmd.push_str(&conditions.join(" -o"));
@@ -275,6 +275,31 @@ fn compute_asset_info(
     })
 }
 
+fn write_asset_manifest(stage_dir: &Path, summary: &AssetCollectionSummary) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(summary)
+        .map_err(|e| format!("failed to serialize manifest: {e}"))?;
+    let manifest_path = stage_dir.join("manifest.json");
+    if let Some(parent) = manifest_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "failed to create manifest directory {}: {e}",
+                parent.display()
+            )
+        })?;
+    }
+    std::fs::write(&manifest_path, json)
+        .map_err(|e| format!("failed to write {}: {e}", manifest_path.display()))?;
+    Ok(())
+}
+
+fn cleanup_asset_stage_dir(stage_dir: &Path) -> Result<(), String> {
+    if !stage_dir.exists() {
+        return Ok(());
+    }
+    std::fs::remove_dir_all(stage_dir)
+        .map_err(|e| format!("failed to clean up {}: {e}", stage_dir.display()))
+}
+
 /// Collect asset files matching the configured globs that were created during this stage.
 pub async fn collect_assets(
     sandbox: &dyn Sandbox,
@@ -348,12 +373,12 @@ pub async fn collect_assets(
     };
 
     if files_copied > 0 {
-        if let Ok(json) = serde_json::to_string_pretty(&summary) {
-            let manifest_path = stage_dir.join("manifest.json");
-            if let Some(parent) = manifest_path.parent() {
-                let _ = fs::create_dir_all(parent).await;
-            }
-            let _ = fs::write(&manifest_path, json).await;
+        if let Err(e) = write_asset_manifest(stage_dir, &summary) {
+            let cleanup_suffix = match cleanup_asset_stage_dir(stage_dir) {
+                Ok(()) => String::new(),
+                Err(cleanup_err) => format!("; cleanup failed: {cleanup_err}"),
+            };
+            return Err(format!("{e}{cleanup_suffix}"));
         }
     }
 
@@ -399,6 +424,7 @@ mod tests {
     use super::*;
     use fabro_agent::sandbox::ExecResult;
     use std::collections::HashMap;
+    use std::fs;
 
     /// Minimal mock sandbox for asset_snapshot tests.
     struct AssetMockSandbox {
@@ -638,6 +664,15 @@ mod tests {
     }
 
     #[test]
+    fn build_find_command_shell_quotes_root_and_globs() {
+        let globs = vec!["test result's/**".to_string(), "*.trace zip".to_string()];
+        let cmd = build_find_command("/workspace with spaces", "linux", &globs);
+        assert!(cmd.starts_with(&format!("find {}", shell_quote("/workspace with spaces"))));
+        assert!(cmd.contains(&format!("-path {}", shell_quote("*/test result's/*"))));
+        assert!(cmd.contains(&format!("-name {}", shell_quote("*.trace zip"))));
+    }
+
+    #[test]
     fn build_find_command_darwin() {
         let globs = vec!["test-results/**".to_string()];
         let cmd = build_find_command("/workspace", "darwin", &globs);
@@ -747,6 +782,42 @@ mod tests {
         assert_eq!(summary.files_copied, 0);
         assert_eq!(summary.download_errors, 2);
         assert_eq!(summary.hash_errors, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_asset_manifest_failure_cleans_up_stage_dir() {
+        use std::fs::Permissions;
+        use std::os::unix::fs::PermissionsExt;
+
+        let parent = tempfile::tempdir().unwrap();
+        let stage_dir = parent.path().join("stage");
+        fs::create_dir_all(stage_dir.join("test-results")).unwrap();
+        fs::write(stage_dir.join("test-results/report.xml"), "<test/>").unwrap();
+        fs::set_permissions(&stage_dir, Permissions::from_mode(0o555)).unwrap();
+
+        let summary = AssetCollectionSummary {
+            files_copied: 1,
+            total_bytes: 7,
+            files_skipped: 0,
+            download_errors: 0,
+            hash_errors: 0,
+            captured_assets: vec![CapturedAssetInfo {
+                path: "test-results/report.xml".to_string(),
+                mime: "text/xml".to_string(),
+                content_md5: "f1430934c390c118ed2f148e1d44d36c".to_string(),
+                content_sha256: "28e51ddac37391b99c2b9053f1122d0bf84b02365e6fd8c6e8667378bd00f436"
+                    .to_string(),
+                bytes: 7,
+            }],
+        };
+
+        let err = write_asset_manifest(&stage_dir, &summary).unwrap_err();
+        assert!(err.contains("failed to write"));
+
+        fs::set_permissions(&stage_dir, Permissions::from_mode(0o755)).unwrap();
+        cleanup_asset_stage_dir(&stage_dir).unwrap();
+        assert!(!stage_dir.exists());
     }
 
     #[test]

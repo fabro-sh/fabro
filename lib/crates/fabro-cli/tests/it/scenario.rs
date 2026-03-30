@@ -783,7 +783,7 @@ fn local_run_lifecycle() {
     );
 
     // 6. Seed a synthetic asset so asset list/cp have something to work with.
-    let asset_dir = RuntimeState::new(&run_dir).asset_stage_dir("step1", 0);
+    let asset_dir = RuntimeState::new(&run_dir).asset_stage_dir("step1", 1);
     std::fs::create_dir_all(&asset_dir).unwrap();
     std::fs::write(asset_dir.join("output.txt"), "asset-content-42").unwrap();
     std::fs::write(
@@ -791,8 +791,16 @@ fn local_run_lifecycle() {
         r#"{"files_copied":1,"total_bytes":16,"files_skipped":0,"download_errors":0,"hash_errors":0,"captured_assets":[{"path":"output.txt","mime":"text/plain","content_md5":"f02439728c0a94b7bfc465acb1201a1f","content_sha256":"0af9dea3e1c2dec968531c18c9331659b8268e8c9cf24b01cda7b8ce51d2ff00","bytes":16}]}"#,
     )
     .unwrap();
+    let retry_two_dir = RuntimeState::new(&run_dir).asset_stage_dir("step1", 2);
+    std::fs::create_dir_all(&retry_two_dir).unwrap();
+    std::fs::write(retry_two_dir.join("output.txt"), "asset-content-84").unwrap();
+    std::fs::write(
+        retry_two_dir.join("manifest.json"),
+        r#"{"files_copied":1,"total_bytes":16,"files_skipped":0,"download_errors":0,"hash_errors":0,"captured_assets":[{"path":"output.txt","mime":"text/plain","content_md5":"5b4e23e40a1630f9caa15a4cb6cfb79b","content_sha256":"1f71e0df61fc3b4e1ee3aba7ceac9ae391af22595b5b5630d97d34cf33d4d540","bytes":16}]}"#,
+    )
+    .unwrap();
 
-    // 7. asset list — now shows the seeded asset
+    // 7. asset list — now shows the seeded assets
     let asset_list_out2 = fabro_home(&["asset", "list", &run_id, "--json"]).success();
     let asset_list_stdout2 =
         String::from_utf8(asset_list_out2.get_output().stdout.clone()).unwrap();
@@ -800,19 +808,36 @@ fn local_run_lifecycle() {
         .expect("asset list --json should produce a JSON array");
     assert_eq!(
         assets.len(),
-        1,
-        "should have one asset: {asset_list_stdout2}"
+        2,
+        "should have two assets: {asset_list_stdout2}"
     );
     assert_eq!(assets[0]["relative_path"].as_str(), Some("output.txt"));
     assert_eq!(assets[0]["node_slug"].as_str(), Some("step1"));
+    let retry_filtered_out =
+        fabro_home(&["asset", "list", &run_id, "--retry", "1", "--json"]).success();
+    let retry_filtered_stdout =
+        String::from_utf8(retry_filtered_out.get_output().stdout.clone()).unwrap();
+    let retry_filtered_assets: Vec<Value> = serde_json::from_str(&retry_filtered_stdout)
+        .expect("asset list --json should produce a JSON array");
+    assert_eq!(retry_filtered_assets.len(), 1);
+    assert_eq!(retry_filtered_assets[0]["retry"].as_u64(), Some(1));
 
-    // 8. asset cp — copy the asset out
+    // 8. asset cp — ambiguous without --retry when multiple retries captured the same path
     let asset_dest = tmp.path().join("asset_copy");
     fabro_home(&[
         "asset",
         "cp",
         &format!("{run_id}:output.txt"),
         asset_dest.to_str().unwrap(),
+    ])
+    .failure();
+    fabro_home(&[
+        "asset",
+        "cp",
+        &format!("{run_id}:output.txt"),
+        asset_dest.to_str().unwrap(),
+        "--retry",
+        "1",
     ])
     .success();
     let copied = std::fs::read_to_string(asset_dest.join("output.txt")).unwrap();

@@ -321,6 +321,10 @@ pub(crate) struct AssetListArgs {
     #[arg(long)]
     pub(crate) node: Option<String>,
 
+    /// Filter to assets from a specific retry attempt
+    #[arg(long)]
+    pub(crate) retry: Option<u32>,
+
     /// Output as JSON
     #[arg(long)]
     pub(crate) json: bool,
@@ -338,6 +342,10 @@ pub(crate) struct AssetCpArgs {
     /// Filter to assets from a specific node
     #[arg(long)]
     pub(crate) node: Option<String>,
+
+    /// Filter to assets from a specific retry attempt
+    #[arg(long)]
+    pub(crate) retry: Option<u32>,
 
     /// Preserve {node_slug}/retry_{N}/ directory structure
     #[arg(long)]

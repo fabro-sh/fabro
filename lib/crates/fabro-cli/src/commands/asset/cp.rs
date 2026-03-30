@@ -16,7 +16,11 @@ pub(super) fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Result<()>
     let (run_id, asset_path) = parse_source(&args.source);
     let run = resolve_run(&base, run_id)?;
     let runtime_state = RuntimeState::new(&run.path);
-    let entries = scan_assets(&runtime_state.assets_dir(), args.node.as_deref())?;
+    let entries = scan_assets(
+        &runtime_state.assets_dir(),
+        args.node.as_deref(),
+        args.retry,
+    )?;
 
     if entries.is_empty() {
         bail!("No assets found for this run");
@@ -33,14 +37,14 @@ pub(super) fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Result<()>
         if matching.is_empty() {
             bail!("No asset matching path '{path}' found in this run");
         }
-        if matching.len() > 1 && args.node.is_none() {
-            let nodes: Vec<_> = matching
+        if matching.len() > 1 {
+            let candidates: Vec<_> = matching
                 .iter()
-                .map(|entry| entry.node_slug.as_str())
+                .map(|entry| format!("{}:retry_{}", entry.node_slug, entry.retry))
                 .collect();
             bail!(
-                "Path '{path}' exists in multiple nodes: {}. Use --node to disambiguate.",
-                nodes.join(", ")
+                "Path '{path}' matches multiple assets: {}. Use --node and/or --retry to disambiguate.",
+                candidates.join(", ")
             );
         }
 

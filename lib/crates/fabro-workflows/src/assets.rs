@@ -20,7 +20,11 @@ fn serialize_path<S: serde::Serializer>(path: &Path, serializer: S) -> Result<S:
 }
 
 /// Walk `{assets_dir}/*/retry_*/manifest.json`, stat each file, and return entries.
-pub fn scan_assets(assets_dir: &Path, node_filter: Option<&str>) -> Result<Vec<AssetEntry>> {
+pub fn scan_assets(
+    assets_dir: &Path,
+    node_filter: Option<&str>,
+    retry_filter: Option<u32>,
+) -> Result<Vec<AssetEntry>> {
     let Ok(nodes) = std::fs::read_dir(assets_dir) else {
         return Ok(Vec::new());
     };
@@ -49,6 +53,12 @@ pub fn scan_assets(assets_dir: &Path, node_filter: Option<&str>) -> Result<Vec<A
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(0);
 
+            if let Some(filter) = retry_filter {
+                if retry != filter {
+                    continue;
+                }
+            }
+
             let manifest = retry_dir.join("manifest.json");
             let Ok(contents) = std::fs::read_to_string(&manifest) else {
                 continue;
@@ -71,4 +81,66 @@ pub fn scan_assets(assets_dir: &Path, node_filter: Option<&str>) -> Result<Vec<A
     }
 
     Ok(entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::asset_snapshot::{AssetCollectionSummary, CapturedAssetInfo};
+
+    #[test]
+    fn scan_assets_filters_by_node_and_retry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let assets_dir = tmp.path().join("cache/artifacts/assets");
+
+        let retry_1 = assets_dir.join("work/retry_1");
+        std::fs::create_dir_all(&retry_1).unwrap();
+        std::fs::write(
+            retry_1.join("manifest.json"),
+            serde_json::to_string(&AssetCollectionSummary {
+                files_copied: 1,
+                total_bytes: 5,
+                files_skipped: 0,
+                download_errors: 0,
+                hash_errors: 0,
+                captured_assets: vec![CapturedAssetInfo {
+                    path: "report.txt".to_string(),
+                    mime: "text/plain".to_string(),
+                    content_md5: "a".repeat(32),
+                    content_sha256: "b".repeat(64),
+                    bytes: 5,
+                }],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let retry_2 = assets_dir.join("work/retry_2");
+        std::fs::create_dir_all(&retry_2).unwrap();
+        std::fs::write(
+            retry_2.join("manifest.json"),
+            serde_json::to_string(&AssetCollectionSummary {
+                files_copied: 1,
+                total_bytes: 6,
+                files_skipped: 0,
+                download_errors: 0,
+                hash_errors: 0,
+                captured_assets: vec![CapturedAssetInfo {
+                    path: "report.txt".to_string(),
+                    mime: "text/plain".to_string(),
+                    content_md5: "c".repeat(32),
+                    content_sha256: "d".repeat(64),
+                    bytes: 6,
+                }],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let entries = scan_assets(&assets_dir, Some("work"), Some(2)).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].retry, 2);
+        assert_eq!(entries[0].relative_path, "report.txt");
+        assert_eq!(entries[0].size, 6);
+    }
 }
