@@ -15,26 +15,20 @@ impl InfoDisplay {
         Self { verbose }
     }
 
-    pub(super) fn show_worktree(&self, renderer: &ProgressRenderer, path: &Path) {
-        self.insert_info_line(renderer, &format!("Worktree: {}", tilde_path(path)));
+    pub(super) fn show_worktree(renderer: &ProgressRenderer, path: &Path) {
+        Self::insert_info_line(renderer, &format!("Worktree: {}", tilde_path(path)));
     }
 
-    pub(super) fn show_base_info(
-        &self,
-        renderer: &ProgressRenderer,
-        branch: Option<&str>,
-        sha: &str,
-    ) {
+    pub(super) fn show_base_info(renderer: &ProgressRenderer, branch: Option<&str>, sha: &str) {
         let short_sha = &sha[..sha.len().min(12)];
         let text = match branch {
             Some(branch) => format!("Base: {branch} ({short_sha})"),
             None => format!("Base: {short_sha}"),
         };
-        self.insert_info_line(renderer, &text);
+        Self::insert_info_line(renderer, &text);
     }
 
     pub(super) fn on_run_notice(
-        &self,
         renderer: &ProgressRenderer,
         level: RunNoticeLevel,
         code: &str,
@@ -51,24 +45,19 @@ impl InfoDisplay {
         } else {
             format!(" {}", styles.dim.apply_to(format!("[{code}]")))
         };
-        self.insert_info_line(renderer, &format!("{label} {message}{code_suffix}"));
+        Self::insert_info_line(renderer, &format!("{label} {message}{code_suffix}"));
     }
 
-    pub(super) fn on_pull_request_created(
-        &self,
-        renderer: &ProgressRenderer,
-        pr_url: &str,
-        draft: bool,
-    ) {
+    pub(super) fn on_pull_request_created(renderer: &ProgressRenderer, pr_url: &str, draft: bool) {
         let label = if draft { "Draft PR:" } else { "PR:" };
-        self.insert_info_line(
+        Self::insert_info_line(
             renderer,
             &format!("{} {pr_url}", renderer.styles().bold.apply_to(label)),
         );
     }
 
-    pub(super) fn on_pull_request_failed(&self, renderer: &ProgressRenderer, error: &str) {
-        self.insert_info_line(
+    pub(super) fn on_pull_request_failed(renderer: &ProgressRenderer, error: &str) {
+        Self::insert_info_line(
             renderer,
             &format!("{} {error}", renderer.styles().red.apply_to("PR failed:")),
         );
@@ -93,7 +82,7 @@ impl InfoDisplay {
         } else {
             String::new()
         };
-        self.insert_info_line(
+        Self::insert_info_line(
             renderer,
             &format!("\u{2192} {from_node} \u{2192} {to_node}{detail}"),
         );
@@ -109,7 +98,7 @@ impl InfoDisplay {
             return;
         }
 
-        self.insert_info_line(
+        Self::insert_info_line(
             renderer,
             &format!("\u{21ba} {from_node} \u{2192} {to_node}  (loop restart)"),
         );
@@ -127,7 +116,7 @@ impl InfoDisplay {
             return;
         }
 
-        self.insert_info_line(
+        Self::insert_info_line(
             renderer,
             &format!(
                 "\u{21bb} {name}: retrying (attempt {attempt}/{max_attempts}, delay {})",
@@ -136,7 +125,7 @@ impl InfoDisplay {
         );
     }
 
-    fn insert_info_line(&self, renderer: &ProgressRenderer, message: &str) {
+    fn insert_info_line(renderer: &ProgressRenderer, message: &str) {
         if renderer.is_tty() {
             let bar = renderer.add_spinner();
             bar.set_style(styles::style_static_dim());
