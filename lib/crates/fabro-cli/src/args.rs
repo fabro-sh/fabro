@@ -18,28 +18,33 @@ pub(crate) const LONG_VERSION: &str = concat!(
 #[derive(Args)]
 pub(crate) struct GlobalArgs {
     /// Enable DEBUG-level logging (default is INFO)
-    #[arg(long, global = true)]
+    #[arg(long, global = true, env = "FABRO_DEBUG", value_parser = clap::builder::BoolishValueParser::new())]
     pub debug: bool,
 
     /// Disable automatic upgrade check
-    #[arg(long, global = true)]
+    #[arg(long, global = true, env = "FABRO_NO_UPGRADE_CHECK", value_parser = clap::builder::BoolishValueParser::new())]
     pub no_upgrade_check: bool,
 
     /// Suppress non-essential output
-    #[arg(long, global = true, conflicts_with = "verbose")]
+    #[arg(long, global = true, env = "FABRO_QUIET", value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "verbose")]
     pub quiet: bool,
 
     /// Enable verbose output
-    #[arg(long, global = true, conflicts_with = "quiet")]
+    #[arg(long, global = true, env = "FABRO_VERBOSE", value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "quiet")]
     pub verbose: bool,
 
     /// Storage directory (default: ~/.fabro)
-    #[arg(long, global = true)]
+    #[arg(long, global = true, env = "FABRO_STORAGE_DIR")]
     pub storage_dir: Option<PathBuf>,
 
     #[cfg(feature = "server")]
     /// Server URL (overrides server.base_url from cli.toml)
-    #[arg(long, global = true, conflicts_with = "storage_dir")]
+    #[arg(
+        long,
+        global = true,
+        env = "FABRO_SERVER_URL",
+        conflicts_with = "storage_dir"
+    )]
     pub server_url: Option<String>,
 }
 
