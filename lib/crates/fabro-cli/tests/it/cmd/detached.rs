@@ -30,7 +30,10 @@ fn help() {
 }
 
 fn launcher_path(context: &fabro_test::TestContext, run_id: &str) -> std::path::PathBuf {
-    context.storage_dir.join("launchers").join(format!("{run_id}.json"))
+    context
+        .storage_dir
+        .join("launchers")
+        .join(format!("{run_id}.json"))
 }
 
 #[test]
@@ -252,7 +255,8 @@ digraph Test {
         .args(["inspect", &run_id])
         .assert()
         .success();
-    let after: serde_json::Value = serde_json::from_slice(&inspect_after.get_output().stdout).unwrap();
+    let after: serde_json::Value =
+        serde_json::from_slice(&inspect_after.get_output().stdout).unwrap();
     let after_summary = serde_json::json!({
         "run_dir": after[0]["run_dir"],
         "start_time": after[0]["start_record"]["start_time"],

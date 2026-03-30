@@ -106,7 +106,11 @@ digraph Smoke {
         ])
         .assert()
         .success();
-    context.command().args(["start", old_run_id]).assert().success();
+    context
+        .command()
+        .args(["start", old_run_id])
+        .assert()
+        .success();
     context
         .command()
         .args(["wait", old_run_id])
@@ -127,7 +131,11 @@ digraph Smoke {
         .assert()
         .success();
 
-    context.command().args(["start", "smoke"]).assert().success();
+    context
+        .command()
+        .args(["start", "smoke"])
+        .assert()
+        .success();
     context
         .command()
         .args(["attach", new_run_id])

@@ -287,7 +287,11 @@ digraph FooWorkflow {
         ])
         .assert()
         .success();
-    context.command().args(["start", "alpha"]).assert().success();
+    context
+        .command()
+        .args(["start", "alpha"])
+        .assert()
+        .success();
     context
         .command()
         .args(["attach", "alpha"])
