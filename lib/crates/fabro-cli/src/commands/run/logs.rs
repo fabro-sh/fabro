@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::Path;
 use std::time::Duration;
@@ -496,8 +497,11 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 duration,
             );
             if token_total > 0 {
-                line.push_str("  ");
-                line.push_str(&styles.dim.apply_to(format_tokens(token_total)).to_string());
+                let _ = write!(
+                    line,
+                    "  {}",
+                    styles.dim.apply_to(format_tokens(token_total))
+                );
             }
             Some(line)
         }

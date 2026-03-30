@@ -86,7 +86,7 @@ pub fn new(
 
 | Method | Description |
 |---|---|
-| `state()` | Returns `SessionState`: `Idle`, `Processing`, `AwaitingInput`, or `Closed`. |
+| `state()` | Returns `SessionState`: `Idle`, `Thinking`, `Executing`, or `Closed`. |
 | `history()` | Returns the conversation as `&History` (a sequence of `Turn` values). |
 | `subscribe()` | Returns a broadcast receiver for `SessionEvent` values. |
 
