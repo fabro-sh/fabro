@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use fabro_types::{RunId, settings::WorktreeMode};
 
-#[cfg(any(feature = "docker", feature = "daytona", feature = "exe"))]
+#[cfg(any(feature = "docker", feature = "daytona"))]
 use anyhow::anyhow;
 
 use crate::sandbox_record::SandboxRecord;
@@ -13,13 +13,9 @@ use crate::{Sandbox, SandboxEventCallback};
 use crate::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 #[cfg(feature = "docker")]
 use crate::docker::{DockerSandbox, DockerSandboxConfig};
-#[cfg(feature = "exe")]
-use crate::exe::{ExeConfig, ExeSandbox, GitCloneParams as ExeGitCloneParams, OpensshRunner};
 use crate::local::LocalSandbox;
-#[cfg(feature = "ssh")]
-use crate::ssh::{GitCloneParams as SshGitCloneParams, SshConfig, SshSandbox};
 
-#[cfg(any(feature = "daytona", feature = "exe", feature = "ssh"))]
+#[cfg(feature = "daytona")]
 use fabro_github::GitHubAppCredentials;
 
 /// Options for sandbox initialization and construction.
@@ -38,21 +34,6 @@ pub enum SandboxSpec {
         run_id: Option<RunId>,
         clone_branch: Option<String>,
     },
-    #[cfg(feature = "exe")]
-    Exe {
-        config: ExeConfig,
-        clone_params: Option<ExeGitCloneParams>,
-        run_id: Option<RunId>,
-        github_app: Option<GitHubAppCredentials>,
-        mgmt_destination: String,
-    },
-    #[cfg(feature = "ssh")]
-    Ssh {
-        config: SshConfig,
-        clone_params: Option<SshGitCloneParams>,
-        run_id: Option<RunId>,
-        github_app: Option<GitHubAppCredentials>,
-    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -70,10 +51,6 @@ impl SandboxSpec {
             Self::Docker { .. } => "docker",
             #[cfg(feature = "daytona")]
             Self::Daytona { .. } => "daytona",
-            #[cfg(feature = "exe")]
-            Self::Exe { .. } => "exe",
-            #[cfg(feature = "ssh")]
-            Self::Ssh { .. } => "ssh",
         }
     }
 
@@ -105,25 +82,6 @@ impl SandboxSpec {
                 identifier,
                 host_working_directory: Some(config.host_working_directory.clone()),
                 container_mount_point: Some(working_directory),
-                data_host: None,
-            },
-            #[cfg(feature = "ssh")]
-            Self::Ssh { .. } => SandboxRecord {
-                provider: self.provider_name().to_string(),
-                working_directory,
-                identifier,
-                host_working_directory: None,
-                container_mount_point: None,
-                data_host: sandbox.data_host().map(ToOwned::to_owned),
-            },
-            #[cfg(feature = "exe")]
-            Self::Exe { .. } => SandboxRecord {
-                provider: self.provider_name().to_string(),
-                working_directory,
-                identifier,
-                host_working_directory: None,
-                container_mount_point: None,
-                data_host: sandbox.data_host().map(ToOwned::to_owned),
             },
             _ => SandboxRecord {
                 provider: self.provider_name().to_string(),
@@ -131,7 +89,6 @@ impl SandboxSpec {
                 identifier,
                 host_working_directory: None,
                 container_mount_point: None,
-                data_host: None,
             },
         }
     }
@@ -232,47 +189,6 @@ impl SandboxSpec {
                 )
                 .await
                 .map_err(|e| anyhow!(e))?;
-                if let Some(callback) = event_callback {
-                    sandbox.set_event_callback(callback);
-                }
-                Ok(Arc::new(sandbox))
-            }
-            #[cfg(feature = "exe")]
-            Self::Exe {
-                config,
-                clone_params,
-                run_id,
-                github_app,
-                mgmt_destination,
-            } => {
-                let mgmt_ssh = OpensshRunner::connect_raw(mgmt_destination)
-                    .await
-                    .map_err(|e| anyhow!("Failed to connect to {mgmt_destination}: {e}"))?;
-                let mut sandbox = ExeSandbox::new(
-                    Box::new(mgmt_ssh),
-                    config.clone(),
-                    clone_params.clone(),
-                    *run_id,
-                    github_app.clone(),
-                );
-                if let Some(callback) = event_callback {
-                    sandbox.set_event_callback(callback);
-                }
-                Ok(Arc::new(sandbox))
-            }
-            #[cfg(feature = "ssh")]
-            Self::Ssh {
-                config,
-                clone_params,
-                run_id,
-                github_app,
-            } => {
-                let mut sandbox = SshSandbox::new(
-                    config.clone(),
-                    clone_params.clone(),
-                    *run_id,
-                    github_app.clone(),
-                );
                 if let Some(callback) = event_callback {
                     sandbox.set_event_callback(callback);
                 }

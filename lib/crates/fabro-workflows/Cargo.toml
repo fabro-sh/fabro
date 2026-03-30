@@ -13,10 +13,6 @@ readme = "README.md"
 [lib]
 doctest = false
 
-[features]
-default = []
-exedev = ["fabro-sandbox/exe", "fabro-config/exedev", "fabro-types/exedev"]
-
 [lints]
 workspace = true
 
@@ -29,7 +25,7 @@ fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-hooks = { path = "../fabro-hooks" }
 fabro-validate = { path = "../fabro-validate" }
 fabro-devcontainer = { path = "../fabro-devcontainer" }
-fabro-sandbox = { path = "../fabro-sandbox", features = ["ssh", "daytona"] }
+fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-mcp = { path = "../fabro-mcp" }
 fabro-github = { path = "../fabro-github" }
 fabro-interview = { path = "../fabro-interview" }

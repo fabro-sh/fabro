@@ -13,7 +13,6 @@ path = "src/main.rs"
 [features]
 default = []
 server = ["dep:fabro-server"]
-exedev = ["fabro-sandbox/exe", "fabro-config/exedev", "fabro-workflows/exedev", "fabro-types/exedev"]
 sleep_inhibitor = ["dep:core-foundation"]
 
 [lints]
@@ -32,7 +31,7 @@ fabro-interview = { path = "../fabro-interview" }
 fabro-mcp = { path = "../fabro-mcp" }
 fabro-proctitle = { path = "../fabro-proctitle" }
 fabro-retro = { path = "../fabro-retro" }
-fabro-sandbox = { path = "../fabro-sandbox", features = ["ssh", "daytona"] }
+fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-git-storage = { path = "../fabro-git-storage" }
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-validate = { path = "../fabro-validate" }

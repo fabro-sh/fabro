@@ -5,16 +5,13 @@ description: "Sandbox providers for workflow execution"
 
 When an agent runs a shell command, edits a file, or searches code, it does so inside a **sandbox**. The sandbox is the execution environment for all tool operations — it controls where commands run, which files are visible, and how much isolation exists between the agent and the host.
 
-Fabro supports six sandbox providers. Each one implements the same interface (file I/O, command execution, grep, glob), so workflows run identically regardless of which provider you choose. The difference is in where and how the tools execute.
+Fabro supports three sandbox providers. Each one implements the same interface (file I/O, command execution, grep, glob), so workflows run identically regardless of which provider you choose. The difference is in where and how the tools execute.
 
 | Provider | Runs on | Use case | Status |
 |---|---|---|---|
 | `local` | Host machine | Development, trusted workflows | Available |
 | `docker` | Docker container | Reproducible environments, untrusted code | Available |
 | `daytona` | Cloud VM | CI/CD, team-shared runs, SSH debugging | Available |
-| `ssh` | Any SSH host | Existing remote machines, dev servers, NAS boxes | Available |
-| `exe` | Cloud VM ([exe.dev](https://exe.dev)) | Fast ephemeral VMs, lightweight cloud sandboxing | Experimental |
-| `sprites` | Cloud VM | Managed cloud sandboxes | In Development |
 
 ## Choosing a provider
 
@@ -25,8 +22,6 @@ Set the sandbox provider via CLI flag, [run config TOML](/execution/run-configur
 fabro run workflow.fabro --sandbox local
 fabro run workflow.fabro --sandbox docker
 fabro run workflow.fabro --sandbox daytona
-fabro run workflow.fabro --sandbox ssh
-fabro run workflow.fabro --sandbox exe
 ```
 
 ```toml title="run.toml"
@@ -53,7 +48,7 @@ The local sandbox runs all tool operations directly on the host machine. It's th
 The local sandbox filters sensitive environment variables before passing them to commands. Variables ending in `_API_KEY`, `_SECRET`, `_TOKEN`, `_PASSWORD`, or `_CREDENTIAL` are stripped. A safelist of common variables (`PATH`, `HOME`, `USER`, `SHELL`, `LANG`, `TERM`, `TMPDIR`, `GOPATH`, `CARGO_HOME`, `NVM_DIR`) is always passed through.
 
 <Note>
-The local sandbox offers no isolation. Agents can read and modify any file on the host. Use `docker`, `daytona`, or `exe` when running untrusted workflows or when you need a reproducible environment.
+The local sandbox offers no isolation. Agents can read and modify any file on the host. Use `docker` or `daytona` when running untrusted workflows or when you need a reproducible environment.
 </Note>
 
 ## Docker
@@ -194,123 +189,6 @@ The `auto_stop_interval` setting (in minutes) tells Daytona to stop the sandbox 
 auto_stop_interval = 30
 ```
 
-## SSH
-
-The SSH sandbox runs all tool operations on an existing remote machine over SSH. Unlike cloud providers (Daytona, Exe), there is no VM lifecycle management — the host must already be running and reachable. This makes it ideal for persistent dev servers, NAS boxes, or any machine you SSH into regularly.
-
-### Prerequisites
-
-- SSH access to the target machine (key-based auth recommended)
-- The remote working directory must exist, or the agent must be able to create it
-- A GitHub App configured via `fabro install` (for private repository cloning)
-
-### How it works
-
-- **No lifecycle management** — Fabro does not create or destroy the remote host. It connects, runs operations, and disconnects. `cleanup()` is a no-op.
-- **Working directory** — Set explicitly in the run config. Relative paths for all file operations resolve against this directory.
-- **Git clone** — Fabro detects the local `origin` remote URL and current branch, converts SSH URLs to HTTPS, and clones into the working directory. For private repositories, Fabro uses a GitHub App Installation Access Token. Public repositories are cloned without credentials. If no git repo is detected, the working directory is used as-is.
-- **Commands** — Executed via SSH. Commands are base64-encoded and piped through `sh` to support pipes, environment variables, and other shell features.
-- **File I/O** — Reads use `cat` over SSH. Writes upload content via SCP. Parent directories are created automatically.
-
-### Configuration
-
-```toml title="run.toml"
-[sandbox]
-provider = "ssh"
-
-[sandbox.ssh]
-destination = "user@myserver"
-working_directory = "/home/user/workspace"
-```
-
-| Field | Required | Description |
-|---|---|---|
-| `destination` | Yes | SSH destination — `user@host`, a hostname, or an SSH alias from `~/.ssh/config`. |
-| `working_directory` | Yes | Absolute path to the working directory on the remote host. |
-| `config_file` | No | Path to a custom SSH config file. Useful when using a non-default key or jump host. |
-| `preview_url_base` | No | Base URL for port previews (e.g. `"http://myserver"`). When set, preview URLs are returned as `{preview_url_base}:{port}` instead of falling back to `localhost`. |
-
-### SSH config file
-
-Use `config_file` to point Fabro at a non-default SSH config — useful when the remote host requires a specific key, ProxyJump, or port:
-
-```toml title="run.toml"
-[sandbox.ssh]
-destination = "devbox"
-working_directory = "/home/user/projects/myapp"
-config_file = "/home/user/.ssh/fabro_config"
-```
-
-```ssh-config title="~/.ssh/fabro_config"
-Host devbox
-  HostName 192.168.1.42
-  User alice
-  IdentityFile ~/.ssh/id_ed25519_devbox
-  Port 2222
-```
-
-### Port previews
-
-When a workflow stage starts a local server on a port, Fabro calls `get_preview_url(port)` to produce a clickable URL. For SSH sandboxes, this requires knowing the host's reachable address — Fabro can't infer it automatically.
-
-Set `preview_url_base` to enable preview URLs:
-
-```toml title="run.toml"
-[sandbox.ssh]
-destination = "alice@devbox"
-working_directory = "/home/alice/projects/myapp"
-preview_url_base = "http://devbox"
-```
-
-With this config, port 3000 on the remote host yields `http://devbox:3000`.
-
-## Exe
-
-<Warning>
-The exe.dev sandbox provider is **under development** and requires building Fabro with the `exedev` feature flag. The API and configuration may change.
-</Warning>
-
-The Exe sandbox runs all tool operations inside a cloud VM managed by [exe.dev](https://exe.dev). It provides full machine-level isolation with fast VM startup via SSH.
-
-### Prerequisites
-
-- SSH keys configured for `exe.dev` (added via the exe.dev dashboard)
-- A GitHub App configured via `fabro install` (for private repository cloning)
-
-### How it works
-
-- **VM lifecycle** — On `initialize()`, Fabro connects to the exe.dev management plane via SSH and runs `new --json` to create a VM. The response contains the VM name and an SSH destination (e.g. `my-vm.exe.xyz`). On `cleanup()`, Fabro runs `rm <vm_name>` to destroy the VM. Cancelling a run cleanly tears down the VM.
-- **Working directory** — Fixed at `/home/exedev`. Relative paths resolve against this directory.
-- **Git clone** — Fabro detects the local `origin` remote URL and current branch, converts SSH URLs to HTTPS, and clones into the VM. For private repositories, Fabro uses a GitHub App Installation Access Token. Public repositories are cloned without credentials. If no git repo is detected, the working directory is created empty.
-- **Commands** — Executed via SSH on the data plane (`<vmname>.exe.xyz`). Commands are base64-encoded and piped through `sh` to handle pipes, environment variables, and other shell features. Environment variables and working directory overrides are supported.
-- **File I/O** — Reads use `cat` over SSH. Writes use SCP upload. Parent directories are created automatically.
-- **Git checkpointing** — Between stages, Fabro commits agent changes and pushes them to a remote branch, the same mechanism used by Daytona sandboxes.
-- **Ephemeral** — Each run gets a fresh VM that is destroyed on cleanup.
-
-### Configuration
-
-```toml title="run.toml"
-[sandbox]
-provider = "exe"
-
-[sandbox.exe]
-image = "my-custom-image:latest"
-```
-
-| Field | Description |
-|---|---|
-| `image` | Custom container image for the VM. Optional — uses the exe.dev default when omitted. |
-
-### SSH access
-
-Connect to a running exe.dev sandbox via SSH for live debugging:
-
-```bash
-fabro sandbox ssh <run-id>
-```
-
-This prints the SSH connection command so you can connect to the VM while the workflow runs.
-
 ## Sandboxing
 
 Sandboxes isolate agent execution from the host machine. When an agent runs a shell command, edits a file, or searches code, it does so inside a sandbox — preventing unintended side effects and providing a reproducible environment for each run.
@@ -324,10 +202,8 @@ Each provider offers a different level of filesystem isolation:
 | `local` | None | The entire host filesystem. Agents can read and modify any file. |
 | `docker` | Container-level | Only the bind-mounted working directory (`/workspace` by default) and whatever is in the container image. Host files outside the mount are inaccessible. |
 | `daytona` | Full machine | A cloud VM with the repository cloned into `/home/daytona/workspace`. The host filesystem is completely inaccessible. |
-| `ssh` | Remote host | The remote machine's filesystem, rooted at the configured working directory. No isolation from other users or processes on that host. |
-| `exe` | Full machine | A cloud VM with the repository cloned into `/home/exedev`. The host filesystem is completely inaccessible. |
 
-For `local`, Fabro filters sensitive environment variables (those ending in `_API_KEY`, `_SECRET`, `_TOKEN`, `_PASSWORD`, or `_CREDENTIAL`) but does not restrict file access. Use `docker`, `daytona`, or `exe` when running untrusted workflows.
+For `local`, Fabro filters sensitive environment variables (those ending in `_API_KEY`, `_SECRET`, `_TOKEN`, `_PASSWORD`, or `_CREDENTIAL`) but does not restrict file access. Use `docker` or `daytona` when running untrusted workflows.
 
 ### Network
 
@@ -338,8 +214,6 @@ Each provider handles outbound network access differently:
 | `local` | Full access | No network isolation. Agents have the same network access as the host. |
 | `docker` | Bridge network | Set via the `network_mode` config option. Supports all Docker network modes (`bridge`, `none`, `host`, etc.). |
 | `daytona` | Full access | Configurable via the `network` setting with three modes: `"allow_all"`, `"block"`, or CIDR-based allow lists. |
-| `ssh` | Remote host's access | No network controls. Agents have the same outbound access as the remote host. |
-| `exe` | Full access | No network isolation controls. VMs have full outbound access. |
 
 For Daytona, network access is configured in the `[sandbox.daytona]` section:
 

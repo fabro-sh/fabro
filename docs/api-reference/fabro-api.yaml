@@ -4072,10 +4072,6 @@ components:
           description: Whether to use a devcontainer for the sandbox.
         daytona:
           $ref: "#/components/schemas/DaytonaSettings"
-        exe:
-          $ref: "#/components/schemas/ExeSettings"
-        ssh:
-          $ref: "#/components/schemas/SshSettings"
         local:
           $ref: "#/components/schemas/LocalSandboxSettings"
         env:
@@ -4093,31 +4089,6 @@ components:
           description: Git worktree mode for local sandbox.
           enum: [always, clean, dirty, never]
           default: clean
-
-    ExeSettings:
-      description: exe.dev sandbox configuration.
-      type: object
-      properties:
-        image:
-          type: string
-          description: VM image to use for the exe.dev sandbox.
-
-    SshSettings:
-      description: SSH sandbox configuration for user-provided hosts.
-      type: object
-      required:
-        - destination
-        - working_directory
-      properties:
-        destination:
-          type: string
-          description: SSH destination (e.g. user@host or an SSH alias).
-        working_directory:
-          type: string
-          description: Remote working directory.
-        config_file:
-          type: string
-          description: Optional path to a custom SSH config file.
 
     DaytonaSettings:
       description: Daytona-specific sandbox settings.

@@ -20,7 +20,6 @@ fn local_record(working_directory: &std::path::Path) -> SandboxRecord {
         identifier: None,
         host_working_directory: None,
         container_mount_point: None,
-        data_host: None,
     }
 }
 
@@ -142,7 +141,6 @@ fn docker_record(host_dir: &std::path::Path, mount_point: &str) -> SandboxRecord
         identifier: None,
         host_working_directory: Some(host_dir.to_string_lossy().to_string()),
         container_mount_point: Some(mount_point.to_string()),
-        data_host: None,
     }
 }
 

@@ -296,8 +296,6 @@ fn fully_populated_server_config() -> FabroSettings {
                 network: Some(DaytonaNetwork::Block),
                 skip_clone: false,
             }),
-            exe: Some(fabro_sandbox::exe::ExeConfig { image: None }),
-            ssh: None,
             env: Some(Default::default()),
         }),
         vars: Some(Default::default()),

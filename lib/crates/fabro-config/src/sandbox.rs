@@ -3,11 +3,9 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "exedev")]
-pub use fabro_types::settings::sandbox::ExeSettings;
 pub use fabro_types::settings::sandbox::{
     DaytonaNetwork, DaytonaSettings, DaytonaSnapshotSettings, DockerfileSource,
-    LocalSandboxSettings, SandboxSettings, SshSettings, WorktreeMode,
+    LocalSandboxSettings, SandboxSettings, WorktreeMode,
 };
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
@@ -61,51 +59,6 @@ impl TryFrom<DaytonaSnapshotConfig> for DaytonaSnapshotSettings {
     }
 }
 
-/// Configuration for an exe.dev sandbox (TOML target for `[sandbox.exe]`).
-#[cfg(feature = "exedev")]
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct ExeConfig {
-    pub image: Option<String>,
-}
-
-#[cfg(feature = "exedev")]
-impl From<ExeConfig> for ExeSettings {
-    fn from(value: ExeConfig) -> Self {
-        Self { image: value.image }
-    }
-}
-
-/// Configuration for an SSH sandbox (TOML target for `[sandbox.ssh]`).
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct SshConfig {
-    /// SSH destination (e.g. `user@host` or an SSH alias).
-    pub destination: Option<String>,
-    /// Remote working directory.
-    pub working_directory: Option<String>,
-    /// Optional path to a custom SSH config file.
-    pub config_file: Option<String>,
-    /// Base URL for port previews (e.g. `"http://beast"`).
-    /// When set, `get_preview_url(port)` returns `"{preview_url_base}:{port}"`.
-    pub preview_url_base: Option<String>,
-}
-
-impl TryFrom<SshConfig> for SshSettings {
-    type Error = anyhow::Error;
-
-    fn try_from(value: SshConfig) -> Result<Self, Self::Error> {
-        Ok(Self {
-            destination: value
-                .destination
-                .ok_or_else(|| anyhow!("sandbox.ssh.destination is required"))?,
-            working_directory: value
-                .working_directory
-                .ok_or_else(|| anyhow!("sandbox.ssh.working_directory is required"))?,
-            config_file: value.config_file,
-            preview_url_base: value.preview_url_base,
-        })
-    }
-}
-
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct LocalSandboxConfig {
     pub worktree_mode: Option<WorktreeMode>,
@@ -126,9 +79,6 @@ pub struct SandboxConfig {
     pub devcontainer: Option<bool>,
     pub local: Option<LocalSandboxConfig>,
     pub daytona: Option<DaytonaConfig>,
-    #[cfg(feature = "exedev")]
-    pub exe: Option<ExeConfig>,
-    pub ssh: Option<SshConfig>,
     pub env: Option<HashMap<String, String>>,
 }
 
@@ -142,9 +92,6 @@ impl TryFrom<SandboxConfig> for SandboxSettings {
             devcontainer: value.devcontainer,
             local: value.local.map(Into::into),
             daytona: value.daytona.map(TryInto::try_into).transpose()?,
-            #[cfg(feature = "exedev")]
-            exe: value.exe.map(Into::into),
-            ssh: value.ssh.map(TryInto::try_into).transpose()?,
             env: value.env,
         })
     }

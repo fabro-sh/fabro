@@ -8,10 +8,7 @@ use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_llm::client::Client as LlmClient;
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::daytona::{DaytonaConfig, detect_repo_info};
-use fabro_sandbox::ssh::SshConfig;
-use fabro_sandbox::{
-    DockerSandboxConfig, Sandbox, SandboxProvider, SandboxSpec, detect_clone_params,
-};
+use fabro_sandbox::{DockerSandboxConfig, Sandbox, SandboxProvider, SandboxSpec};
 use fabro_util::terminal::Styles;
 use fabro_workflows::git::{GitSyncStatus, sync_status};
 use fabro_workflows::operations::{ValidateInput, WorkflowInput, validate};
@@ -139,19 +136,6 @@ fn resolve_daytona_config(settings: &FabroSettings) -> Option<DaytonaConfig> {
         .and_then(|sandbox| sandbox.daytona.clone())
 }
 
-#[cfg(feature = "exedev")]
-fn resolve_exe_config(settings: &FabroSettings) -> Option<fabro_sandbox::exe::ExeConfig> {
-    settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.exe.clone())
-}
-
-fn resolve_ssh_config(settings: &FabroSettings) -> Option<SshConfig> {
-    settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.ssh.clone())
-}
-
 async fn mint_github_token(
     creds: &fabro_github::GitHubAppCredentials,
     origin_url: &str,
@@ -245,9 +229,6 @@ async fn run_preflight(
     });
 
     let daytona_config = resolve_daytona_config(settings);
-    #[cfg(feature = "exedev")]
-    let exe_config = resolve_exe_config(settings);
-    let ssh_config = resolve_ssh_config(settings);
 
     let sandbox_result: Result<Arc<dyn Sandbox>, String> = match sandbox_provider {
         SandboxProvider::Local => SandboxSpec::Local {
@@ -274,31 +255,6 @@ async fn run_preflight(
         .build(None)
         .await
         .map_err(|e| format!("Daytona sandbox creation failed: {e}")),
-        #[cfg(feature = "exedev")]
-        SandboxProvider::Exe => SandboxSpec::Exe {
-            config: exe_config.unwrap_or_default(),
-            clone_params: detect_clone_params(working_directory),
-            run_id: None,
-            github_app: None,
-            mgmt_destination: "exe.dev".to_string(),
-        }
-        .build(None)
-        .await
-        .map_err(|e| format!("exe sandbox creation failed: {e}")),
-        #[cfg(not(feature = "exedev"))]
-        SandboxProvider::Exe => Err("exe sandbox requires the exedev feature".to_string()),
-        SandboxProvider::Ssh => match ssh_config {
-            Some(config) => SandboxSpec::Ssh {
-                config,
-                clone_params: detect_clone_params(working_directory),
-                run_id: None,
-                github_app: None,
-            }
-            .build(None)
-            .await
-            .map_err(|e| e.to_string()),
-            None => Err("SSH sandbox requires [sandbox.ssh] config".to_string()),
-        },
     };
 
     let sandbox_ok = match sandbox_result {

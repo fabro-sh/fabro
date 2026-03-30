@@ -13,7 +13,7 @@ doctest = false
 workspace = true
 
 [dependencies]
-fabro-config = { path = "../fabro-config", features = ["exedev"] }
+fabro-config = { path = "../fabro-config" }
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-hooks = { path = "../fabro-hooks" }
 fabro-interview = { path = "../fabro-interview" }
@@ -24,7 +24,7 @@ fabro-agent = { path = "../fabro-agent" }
 fabro-llm = { path = "../fabro-llm" }
 fabro-model = { path = "../fabro-model" }
 fabro-retro = { path = "../fabro-retro" }
-fabro-types = { path = "../fabro-types", features = ["exedev"] }
+fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 fabro-db = { path = "../fabro-db" }
 fabro-api-types = { path = "../fabro-api-types" }
@@ -70,4 +70,4 @@ http-body-util = "0.1"
 tempfile = "3"
 openapiv3 = "2"
 serde_yaml = "0.9"
-fabro-sandbox = { path = "../fabro-sandbox", features = ["exe"] }
+fabro-sandbox = { path = "../fabro-sandbox" }

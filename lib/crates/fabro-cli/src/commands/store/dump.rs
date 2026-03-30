@@ -471,7 +471,6 @@ mod tests {
             identifier: Some("sandbox-1".to_string()),
             host_working_directory: Some("/tmp/night-sky".to_string()),
             container_mount_point: None,
-            data_host: None,
         }
     }
 

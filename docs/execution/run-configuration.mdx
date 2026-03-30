@@ -153,7 +153,7 @@ preserve = true
 
 | Field | Description |
 |---|---|
-| `provider` | Sandbox mode: `local` (default), `docker`, `daytona`, `ssh`, or `exe`. |
+| `provider` | Sandbox mode: `local` (default), `docker`, or `daytona`. |
 | `preserve` | When `true`, keep the sandbox alive after the run finishes. Useful for debugging. |
 | `devcontainer` | When `true`, use the repo's `devcontainer.json` to configure the sandbox. See [Devcontainers](/execution/devcontainers). |
 
@@ -202,44 +202,6 @@ worktree_mode = "always"
 | Field | Description |
 |---|---|
 | `worktree_mode` | When to create a git worktree for the run: `always`, `clean` (default — only when the working tree is clean), `dirty` (also when dirty), or `never`. |
-
-#### `[sandbox.ssh]`
-
-Additional settings when using the SSH sandbox:
-
-```toml title="run.toml"
-[sandbox]
-provider = "ssh"
-
-[sandbox.ssh]
-destination = "user@myserver"
-working_directory = "/home/user/workspace"
-```
-
-| Field | Required | Description |
-|---|---|---|
-| `destination` | Yes | SSH destination — `user@host`, a hostname, or an SSH alias from `~/.ssh/config`. |
-| `working_directory` | Yes | Absolute path to the working directory on the remote host. |
-| `config_file` | No | Path to a custom SSH config file (e.g. for non-default keys or jump hosts). |
-| `preview_url_base` | No | Base URL for port previews (e.g. `"http://myserver"`). When set, preview URLs are `{preview_url_base}:{port}` instead of `localhost`. |
-
-See [SSH sandbox](/execution/environments#ssh) for full details.
-
-#### `[sandbox.exe]`
-
-Additional settings when using the [exe.dev](/integrations/exe-dev) cloud sandbox:
-
-```toml title="run.toml"
-[sandbox]
-provider = "exe"
-
-[sandbox.exe]
-image = "my-custom-image:latest"
-```
-
-| Field | Description |
-|---|---|
-| `image` | Custom container image for the exe.dev VM. Optional — uses the exe.dev default when omitted. |
 
 #### `[sandbox.env]`
 

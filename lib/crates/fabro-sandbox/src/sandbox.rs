@@ -136,10 +136,6 @@ macro_rules! delegate_sandbox {
                 self.$field.host_git_dir()
             }
 
-            fn data_host(&self) -> Option<&str> {
-                self.$field.data_host()
-            }
-
             fn parallel_worktree_path(
                 &self,
                 run_dir: &std::path::Path,
@@ -461,12 +457,6 @@ pub trait Sandbox: Send + Sync {
         None
     }
 
-    /// The remote host for reconnection (e.g. SSH destination, exe.dev data plane).
-    /// Default is None; Exe and Ssh override.
-    fn data_host(&self) -> Option<&str> {
-        None
-    }
-
     /// Compute the filesystem path for a parallel branch worktree.
     fn parallel_worktree_path(
         &self,
@@ -512,12 +502,7 @@ pub trait Sandbox: Send + Sync {
 
 /// Resolve a path: relative paths are prepended with the working directory.
 /// Used by feature-gated sandbox implementations (exe, ssh, sprites, daytona).
-#[cfg(any(
-    feature = "exe",
-    feature = "ssh",
-    feature = "sprites",
-    feature = "daytona"
-))]
+#[cfg(any(feature = "sprites", feature = "daytona"))]
 pub(crate) fn resolve_path(path: &str, working_dir: &str) -> String {
     if std::path::Path::new(path).is_absolute() {
         path.to_string()
