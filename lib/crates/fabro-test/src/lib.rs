@@ -206,6 +206,38 @@ impl TestContext {
         cmd.arg("system");
         cmd
     }
+
+    /// Write a file under `temp_dir`, creating parent directories as needed.
+    ///
+    /// `path` is relative to `temp_dir`.
+    pub fn write_temp(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        content: impl AsRef<[u8]>,
+    ) -> &Self {
+        let full = self.temp_dir.join(path);
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent).expect("failed to create parent dirs");
+        }
+        std::fs::write(&full, content).expect("failed to write file");
+        self
+    }
+
+    /// Write a file under `home_dir`, creating parent directories as needed.
+    ///
+    /// `path` is relative to `home_dir`.
+    pub fn write_home(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        content: impl AsRef<[u8]>,
+    ) -> &Self {
+        let full = self.home_dir.join(path);
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent).expect("failed to create parent dirs");
+        }
+        std::fs::write(&full, content).expect("failed to write file");
+        self
+    }
 }
 
 /// Execute a command and format the output for snapshot testing.
