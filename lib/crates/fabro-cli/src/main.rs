@@ -210,7 +210,7 @@ async fn main_inner() -> (String, Result<()>) {
             }
             Commands::Pr(ns) => commands::pr::dispatch(ns, &globals).await?,
             Commands::Secret(ns) => commands::secret::dispatch(ns)?,
-            Commands::Config(ns) => commands::config::dispatch(ns, &globals)?,
+            Commands::Settings(args) => commands::config::execute(&args, &globals)?,
             Commands::Workflow(ns) => commands::workflow::dispatch(ns)?,
             Commands::Skill(ns) => commands::skill::dispatch(ns)?,
             Commands::Upgrade(args) => {
@@ -245,10 +245,7 @@ async fn main_inner() -> (String, Result<()>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use args::{
-        ConfigCommand, ConfigNamespace, ProviderCommand, ProviderNamespace, StoreCommand,
-        StoreNamespace,
-    };
+    use args::{ProviderCommand, ProviderNamespace, StoreCommand, StoreNamespace};
     use clap::Parser;
 
     #[test]
@@ -456,13 +453,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_config_show_command() {
-        let cli = Cli::try_parse_from(["fabro", "config", "show"]).expect("should parse");
-        assert_eq!(cli.command.name(), "config show");
+    fn parse_settings_command() {
+        let cli = Cli::try_parse_from(["fabro", "settings"]).expect("should parse");
+        assert_eq!(cli.command.name(), "settings");
         match *cli.command {
-            Commands::Config(ConfigNamespace {
-                command: ConfigCommand::Show(args),
-            }) => {
+            Commands::Settings(args) => {
                 assert!(args.workflow.is_none());
             }
             _ => panic!("unexpected command variant"),
@@ -470,12 +465,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_config_show_with_workflow() {
-        let cli = Cli::try_parse_from(["fabro", "config", "show", "demo"]).expect("should parse");
+    fn parse_settings_with_workflow() {
+        let cli = Cli::try_parse_from(["fabro", "settings", "demo"]).expect("should parse");
         match *cli.command {
-            Commands::Config(ConfigNamespace {
-                command: ConfigCommand::Show(args),
-            }) => {
+            Commands::Settings(args) => {
                 assert_eq!(args.workflow, Some(std::path::PathBuf::from("demo")));
             }
             _ => panic!("unexpected command variant"),
@@ -484,23 +477,21 @@ mod tests {
 
     #[test]
     fn parse_quiet_flag() {
-        let cli =
-            Cli::try_parse_from(["fabro", "--quiet", "config", "show"]).expect("should parse");
+        let cli = Cli::try_parse_from(["fabro", "--quiet", "settings"]).expect("should parse");
         assert!(cli.globals.quiet);
         assert!(!cli.globals.verbose);
     }
 
     #[test]
     fn parse_verbose_flag() {
-        let cli =
-            Cli::try_parse_from(["fabro", "--verbose", "config", "show"]).expect("should parse");
+        let cli = Cli::try_parse_from(["fabro", "--verbose", "settings"]).expect("should parse");
         assert!(!cli.globals.quiet);
         assert!(cli.globals.verbose);
     }
 
     #[test]
     fn quiet_and_verbose_conflict() {
-        let result = Cli::try_parse_from(["fabro", "--quiet", "--verbose", "config", "show"]);
+        let result = Cli::try_parse_from(["fabro", "--quiet", "--verbose", "settings"]);
         assert!(
             result.is_err(),
             "should fail when both --quiet and --verbose"

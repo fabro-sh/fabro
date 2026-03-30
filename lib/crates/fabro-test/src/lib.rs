@@ -144,10 +144,10 @@ impl TestContext {
         cmd
     }
 
-    /// Build a `config` subcommand.
-    pub fn config(&self) -> Command {
+    /// Build a `settings` subcommand.
+    pub fn settings(&self) -> Command {
         let mut cmd = self.command();
-        cmd.arg("config");
+        cmd.arg("settings");
         cmd
     }
 

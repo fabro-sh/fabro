@@ -3,15 +3,15 @@ use fabro_test::{fabro_snapshot, test_context};
 #[test]
 fn help() {
     let context = test_context!();
-    let mut cmd = context.command();
-    cmd.args(["config", "show", "--help"]);
+    let mut cmd = context.settings();
+    cmd.arg("--help");
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
-    Print the merged FabroSettings as YAML
+    Inspect merged configuration
 
-    Usage: fabro config show [OPTIONS] [WORKFLOW]
+    Usage: fabro settings [OPTIONS] [WORKFLOW]
 
     Arguments:
       [WORKFLOW]  Optional workflow name, .fabro path, or .toml run config to overlay

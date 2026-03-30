@@ -10,7 +10,7 @@ use predicates::prelude::*;
 #[test]
 fn help() {
     let context = test_context!();
-    let mut cmd = context.config();
+    let mut cmd = context.settings();
     cmd.arg("--help");
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
@@ -18,35 +18,7 @@ fn help() {
     ----- stdout -----
     Inspect merged configuration
 
-    Usage: fabro config [OPTIONS] <COMMAND>
-
-    Commands:
-      show  Print the merged FabroSettings as YAML
-      help  Print this message or the help of the given subcommand(s)
-
-    Options:
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-      -h, --help                       Print help
-    ----- stderr -----
-    ");
-}
-
-#[test]
-fn show_help() {
-    let context = test_context!();
-    let mut cmd = context.config();
-    cmd.args(["show", "--help"]);
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    Print the merged FabroSettings as YAML
-
-    Usage: fabro config show [OPTIONS] [WORKFLOW]
+    Usage: fabro settings [OPTIONS] [WORKFLOW]
 
     Arguments:
       [WORKFLOW]  Optional workflow name, .fabro path, or .toml run config to overlay
@@ -62,17 +34,35 @@ fn show_help() {
     ");
 }
 
+#[test]
+fn old_config_show_command_is_rejected() {
+    let context = test_context!();
+    let mut cmd = context.command();
+    cmd.args(["config", "show"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 2
+    ----- stdout -----
+    ----- stderr -----
+    error: unrecognized subcommand 'config'
+
+    Usage: fabro [OPTIONS] <COMMAND>
+
+    For more information, try '--help'.
+    ");
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn parse_config_show(stdout: &[u8]) -> FabroSettings {
+fn parse_settings(stdout: &[u8]) -> FabroSettings {
     serde_yaml::from_slice(stdout).expect("stdout should be valid YAML FabroSettings")
 }
 
-/// Set up home config and project config for config show tests.
+/// Set up home config and project config for settings command tests.
 /// Uses `context.home_dir` for the home directory. Returns project tempdir.
-fn setup_config_show_fixture(context: &fabro_test::TestContext) -> tempfile::TempDir {
+fn setup_settings_fixture(context: &fabro_test::TestContext) -> tempfile::TempDir {
     context.write_home(
         ".fabro/user.toml",
         r#"
@@ -262,21 +252,20 @@ commands = ["workflow-setup"]
 // ---------------------------------------------------------------------------
 
 #[test]
-fn config_show_merges_cli_and_project_defaults() {
+fn settings_merges_cli_and_project_defaults() {
     let context = test_context!();
-    let project = setup_config_show_fixture(&context);
+    let project = setup_settings_fixture(&context);
 
     let output = context
-        .command()
+        .settings()
         .current_dir(project.path())
-        .args(["config", "show"])
         .assert()
         .success()
         .get_output()
         .stdout
         .clone();
 
-    let cfg = parse_config_show(&output);
+    let cfg = parse_settings(&output);
     let llm = cfg.llm.as_ref().expect("llm config");
     assert_eq!(llm.model.as_deref(), Some("project-model"));
     assert_eq!(llm.provider.as_deref(), Some("openai"));
@@ -299,21 +288,21 @@ fn config_show_merges_cli_and_project_defaults() {
 }
 
 #[test]
-fn config_show_workflow_name_applies_run_overlay_and_deep_merges() {
+fn settings_workflow_name_applies_run_overlay_and_deep_merges() {
     let context = test_context!();
-    let project = setup_config_show_fixture(&context);
+    let project = setup_settings_fixture(&context);
 
     let output = context
-        .command()
+        .settings()
         .current_dir(project.path())
-        .args(["config", "show", "demo"])
+        .args(["demo"])
         .assert()
         .success()
         .get_output()
         .stdout
         .clone();
 
-    let cfg = parse_config_show(&output);
+    let cfg = parse_settings(&output);
     let llm = cfg.llm.as_ref().expect("llm config");
     assert_eq!(cfg.goal.as_deref(), Some("demo goal"));
     assert_eq!(llm.model.as_deref(), Some("run-model"));
@@ -375,7 +364,7 @@ fn config_show_workflow_name_applies_run_overlay_and_deep_merges() {
 }
 
 #[test]
-fn config_show_explicit_workflow_path_uses_workflow_project_layers() {
+fn settings_explicit_workflow_path_uses_workflow_project_layers() {
     let context = test_context!();
     let (project, _storage_dir) = setup_external_workflow_fixture(&context);
     let cwd = tempfile::tempdir().unwrap();
@@ -383,17 +372,17 @@ fn config_show_explicit_workflow_path_uses_workflow_project_layers() {
 
     // Remove FABRO_STORAGE_DIR so the CLI uses storage_dir from user.toml
     let output = context
-        .command()
+        .settings()
         .env_remove("FABRO_STORAGE_DIR")
         .current_dir(cwd.path())
-        .args(["config", "show", workflow.to_str().unwrap()])
+        .args([workflow.to_str().unwrap()])
         .assert()
         .success()
         .get_output()
         .stdout
         .clone();
 
-    let cfg = parse_config_show(&output);
+    let cfg = parse_settings(&output);
     assert_eq!(cfg.auto_approve, Some(true));
     assert_eq!(
         cfg.setup.as_ref().expect("setup config").commands,
@@ -474,40 +463,39 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
 }
 
 #[test]
-fn config_show_fabro_path_matches_ambient_defaults() {
+fn settings_fabro_path_matches_ambient_defaults() {
     let context = test_context!();
-    let project = setup_config_show_fixture(&context);
+    let project = setup_settings_fixture(&context);
 
     let ambient = context
-        .command()
+        .settings()
         .current_dir(project.path())
-        .args(["config", "show"])
         .assert()
         .success()
         .get_output()
         .stdout
         .clone();
     let graph = context
-        .command()
+        .settings()
         .current_dir(project.path())
-        .args(["config", "show", "standalone.fabro"])
+        .args(["standalone.fabro"])
         .assert()
         .success()
         .get_output()
         .stdout
         .clone();
 
-    assert_eq!(parse_config_show(&graph), parse_config_show(&ambient));
+    assert_eq!(parse_settings(&graph), parse_settings(&ambient));
 }
 
 #[test]
-fn config_show_missing_run_config_errors() {
+fn settings_missing_run_config_errors() {
     let context = test_context!();
-    let project = setup_config_show_fixture(&context);
+    let project = setup_settings_fixture(&context);
 
-    let mut cmd = context.command();
+    let mut cmd = context.settings();
     cmd.current_dir(project.path());
-    cmd.args(["config", "show", "missing.toml"]);
+    cmd.args(["missing.toml"]);
     fabro_snapshot!(context.filters(), cmd, @"
     success: false
     exit_code: 1
@@ -518,7 +506,7 @@ fn config_show_missing_run_config_errors() {
 }
 
 #[test]
-fn config_show_legacy_cli_config_warns_and_ignores_it() {
+fn settings_legacy_cli_config_warns_and_ignores_it() {
     let context = test_context!();
     let project = tempfile::tempdir().unwrap();
 
@@ -533,23 +521,22 @@ model = "legacy-model"
     );
 
     let assert = context
-        .command()
+        .settings()
         .current_dir(project.path())
-        .args(["config", "show"])
         .assert()
         .success()
         .stderr(predicate::str::contains("ignoring legacy config file"))
         .stderr(predicate::str::contains("Rename it to"));
 
-    let cfg = parse_config_show(&assert.get_output().stdout);
+    let cfg = parse_settings(&assert.get_output().stdout);
     assert_eq!(cfg.verbose, None);
     assert_eq!(cfg.llm, None);
 }
 
 #[test]
-fn config_show_user_config_wins_over_legacy_cli_config() {
+fn settings_user_config_wins_over_legacy_cli_config() {
     let context = test_context!();
-    let project = setup_config_show_fixture(&context);
+    let project = setup_settings_fixture(&context);
     context.write_home(
         ".fabro/cli.toml",
         r#"
@@ -562,14 +549,13 @@ shared = "legacy"
     );
 
     let assert = context
-        .command()
+        .settings()
         .current_dir(project.path())
-        .args(["config", "show"])
         .assert()
         .success()
         .stderr(predicate::str::contains("ignoring legacy config file"));
 
-    let cfg = parse_config_show(&assert.get_output().stdout);
+    let cfg = parse_settings(&assert.get_output().stdout);
     let llm = cfg.llm.as_ref().expect("llm config");
     assert_eq!(llm.model.as_deref(), Some("project-model"));
     assert_eq!(
@@ -582,9 +568,9 @@ shared = "legacy"
 
 #[test]
 #[cfg(feature = "server")]
-fn config_show_server_url_overrides_cli_defaults() {
+fn settings_server_url_overrides_cli_defaults() {
     let context = test_context!();
-    let project = setup_config_show_fixture(&context);
+    let project = setup_settings_fixture(&context);
     let user_toml_path = context.home_dir.join(".fabro/user.toml");
     let existing = std::fs::read_to_string(&user_toml_path).unwrap();
     context.write_home(
@@ -597,14 +583,14 @@ fn config_show_server_url_overrides_cli_defaults() {
     let output = context
         .command()
         .current_dir(project.path())
-        .args(["--server-url", "https://cli.example.com", "config", "show"])
+        .args(["--server-url", "https://cli.example.com", "settings"])
         .assert()
         .success()
         .get_output()
         .stdout
         .clone();
 
-    let cfg = parse_config_show(&output);
+    let cfg = parse_settings(&output);
     assert_eq!(cfg.mode, Some(ExecutionMode::Server));
     assert_eq!(
         cfg.server

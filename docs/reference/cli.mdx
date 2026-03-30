@@ -37,14 +37,14 @@ CLI flags always override `user.toml` values, which override hardcoded defaults.
 
 ---
 
-## `fabro config show`
+## `fabro settings`
 
 Print the merged resolved configuration as YAML.
 
 ```bash
-fabro config show
-fabro config show demo
-fabro config show run.toml
+fabro settings
+fabro settings demo
+fabro settings run.toml
 ```
 
 With no argument, Fabro prints the merged ambient defaults from `~/.fabro/user.toml` and the nearest `fabro.toml`.

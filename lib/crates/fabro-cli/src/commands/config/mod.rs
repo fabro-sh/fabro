@@ -1,15 +1,9 @@
 use std::io::Write;
 use std::path::Path;
 
-use crate::args::{ConfigCommand, ConfigNamespace, ConfigShowArgs, GlobalArgs};
+use crate::args::{GlobalArgs, SettingsArgs};
 use crate::user_config;
 use fabro_config::{ConfigLayer, FabroSettings};
-
-pub(crate) fn dispatch(ns: ConfigNamespace, globals: &GlobalArgs) -> anyhow::Result<()> {
-    match ns.command {
-        ConfigCommand::Show(args) => show_command(&args, globals),
-    }
-}
 
 fn merged_config(workflow: Option<&Path>, globals: &GlobalArgs) -> anyhow::Result<FabroSettings> {
     let cwd = std::env::current_dir()?;
@@ -22,7 +16,7 @@ fn merged_config(workflow: Option<&Path>, globals: &GlobalArgs) -> anyhow::Resul
     base.combine(cli).resolve()
 }
 
-pub(crate) fn show_command(args: &ConfigShowArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
+pub(crate) fn execute(args: &SettingsArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
     let config = merged_config(args.workflow.as_deref(), globals)?;
     let mut yaml = serde_yaml::to_string(&config)?;
     if !yaml.ends_with('\n') {

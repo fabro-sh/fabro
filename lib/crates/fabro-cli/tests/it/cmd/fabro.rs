@@ -36,7 +36,7 @@ fn help() {
       install    Set up the Fabro environment (LLMs, certs, GitHub)
       pr         Pull request operations
       secret     Manage secrets in ~/.fabro/.env
-      config     Inspect merged configuration
+      settings   Inspect merged configuration
       workflow   Workflow operations
       discord    Open the Discord community in the browser
       docs       Open the docs website in the browser

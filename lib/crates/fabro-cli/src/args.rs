@@ -558,7 +558,7 @@ pub(crate) struct DfArgs {
 }
 
 #[derive(Args)]
-pub(crate) struct ConfigShowArgs {
+pub(crate) struct SettingsArgs {
     /// Optional workflow name, .fabro path, or .toml run config to overlay
     pub(crate) workflow: Option<PathBuf>,
 }
@@ -794,7 +794,7 @@ pub(crate) enum Commands {
     /// Manage secrets in ~/.fabro/.env
     Secret(SecretNamespace),
     /// Inspect merged configuration
-    Config(ConfigNamespace),
+    Settings(SettingsArgs),
     /// Workflow operations
     Workflow(WorkflowNamespace),
     /// Open the Discord community in the browser
@@ -871,9 +871,7 @@ impl Commands {
                 SecretCommand::Rm(_) => "secret rm",
                 SecretCommand::Set(_) => "secret set",
             },
-            Self::Config(ns) => match &ns.command {
-                ConfigCommand::Show(_) => "config show",
-            },
+            Self::Settings(_) => "settings",
             Self::Workflow(ns) => match &ns.command {
                 WorkflowCommand::List(_) => "workflow list",
                 WorkflowCommand::Create(_) => "workflow create",
@@ -960,18 +958,6 @@ pub(crate) enum SecretCommand {
     Rm(SecretRmArgs),
     /// Set a secret value
     Set(SecretSetArgs),
-}
-
-#[derive(Args)]
-pub(crate) struct ConfigNamespace {
-    #[command(subcommand)]
-    pub(crate) command: ConfigCommand,
-}
-
-#[derive(Subcommand)]
-pub(crate) enum ConfigCommand {
-    /// Print the merged FabroSettings as YAML
-    Show(ConfigShowArgs),
 }
 
 #[derive(Args)]
