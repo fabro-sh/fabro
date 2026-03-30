@@ -22,7 +22,7 @@ pub struct WorkflowToolHookCallback {
 
 impl WorkflowToolHookCallback {
     fn base_context(&self, event: HookEvent, tool_name: &str) -> HookContext {
-        let mut ctx = HookContext::new(event, self.run_id.clone(), self.workflow_name.clone());
+        let mut ctx = HookContext::new(event, self.run_id, self.workflow_name.clone());
         ctx.node_id = Some(self.node_id.clone());
         ctx.tool_name = Some(tool_name.to_string());
         ctx

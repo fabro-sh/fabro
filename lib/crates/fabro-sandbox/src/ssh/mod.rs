@@ -618,7 +618,9 @@ impl Sandbox for SshSandbox {
 mod tests {
     use super::*;
     use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
     use std::sync::{Arc, Mutex};
+    use tokio::fs;
 
     /// A recorded command sent to the mock SSH runner.
     #[derive(Debug, Clone)]
@@ -757,9 +759,7 @@ mod tests {
         let start = wrapped.find("echo '").expect("missing echo prefix") + 6;
         let end = wrapped[start..].find('\'').expect("missing closing quote") + start;
         let encoded = &wrapped[start..end];
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .expect("invalid base64");
+        let bytes = STANDARD.decode(encoded).expect("invalid base64");
         String::from_utf8(bytes).expect("invalid utf8")
     }
 
@@ -1190,7 +1190,7 @@ mod tests {
             .await
             .unwrap();
 
-        let bytes = tokio::fs::read(&local).await.unwrap();
+        let bytes = fs::read(&local).await.unwrap();
         assert_eq!(bytes, b"binary content");
     }
 

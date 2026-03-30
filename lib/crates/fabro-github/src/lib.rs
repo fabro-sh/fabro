@@ -1,3 +1,5 @@
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use serde::Deserialize;
 
 pub const GITHUB_API_BASE_URL: &str = "https://api.github.com";
@@ -79,7 +81,8 @@ fn decode_pem_env(name: &str, raw: &str) -> Result<String, String> {
     if raw.starts_with("-----") {
         return Ok(raw.to_string());
     }
-    let pem_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw)
+    let pem_bytes = STANDARD
+        .decode(raw)
         .map_err(|err| format!("{name} is not valid PEM or base64: {err}"))?;
     String::from_utf8(pem_bytes)
         .map_err(|err| format!("{name} base64 decoded to invalid UTF-8: {err}"))
@@ -973,6 +976,7 @@ pub async fn create_installation_access_token_for_projects(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
     #[test]
     fn decode_pem_env_accepts_raw_pem() {
@@ -983,7 +987,7 @@ mod tests {
     #[test]
     fn decode_pem_env_accepts_base64_pem() {
         let pem = "-----BEGIN TEST KEY-----\nabc\n-----END TEST KEY-----";
-        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, pem);
+        let encoded = STANDARD.encode(pem);
         assert_eq!(
             decode_pem_env("GITHUB_APP_PRIVATE_KEY", &encoded).unwrap(),
             pem
@@ -1114,11 +1118,7 @@ mod tests {
         let pem = test_rsa_key();
         let jwt = sign_app_jwt("12345", pem).unwrap();
         let header_b64 = jwt.split('.').next().unwrap();
-        let header_json = base64::Engine::decode(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            header_b64,
-        )
-        .unwrap();
+        let header_json = URL_SAFE_NO_PAD.decode(header_b64).unwrap();
         let header: serde_json::Value = serde_json::from_slice(&header_json).unwrap();
         assert_eq!(header["alg"], "RS256");
     }
@@ -1128,11 +1128,7 @@ mod tests {
         let pem = test_rsa_key();
         let jwt = sign_app_jwt("99999", pem).unwrap();
         let payload_b64 = jwt.split('.').nth(1).unwrap();
-        let payload_json = base64::Engine::decode(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            payload_b64,
-        )
-        .unwrap();
+        let payload_json = URL_SAFE_NO_PAD.decode(payload_b64).unwrap();
         let claims: serde_json::Value = serde_json::from_slice(&payload_json).unwrap();
         assert_eq!(claims["iss"], "99999");
 
@@ -1413,7 +1409,7 @@ mod tests {
         };
         let result =
             branch_exists_with_client(&mock, &creds, "owner", "repo", "my-branch", "").await;
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
     }
 
     #[tokio::test]
@@ -1445,7 +1441,7 @@ mod tests {
         };
         let result =
             branch_exists_with_client(&mock, &creds, "owner", "repo", "no-such-branch", "").await;
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     #[tokio::test]
@@ -1495,7 +1491,7 @@ mod tests {
             .with_req_header("Authorization", "Bearer test-jwt");
 
         let result = check_app_installed(&mock, "test-jwt", "owner", "repo", "").await;
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
     }
 
     #[tokio::test]
@@ -1504,7 +1500,7 @@ mod tests {
             MockHttpClient::new().on(HttpMethod::Get, "/repos/owner/repo/installation", 404, "");
 
         let result = check_app_installed(&mock, "test-jwt", "owner", "repo", "").await;
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     #[tokio::test]
@@ -1566,7 +1562,7 @@ mod tests {
         );
 
         let result = is_app_public(&mock, "my-fabro-app", "").await;
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
     }
 
     #[tokio::test]
@@ -1574,7 +1570,7 @@ mod tests {
         let mock = MockHttpClient::new().on(HttpMethod::Get, "/apps/my-private-app", 404, "");
 
         let result = is_app_public(&mock, "my-private-app", "").await;
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     #[tokio::test]
@@ -1589,7 +1585,7 @@ mod tests {
             .with_req_header_missing("Authorization");
 
         let result = is_app_public(&mock, "my-app", "").await;
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
     }
 
     // -----------------------------------------------------------------------

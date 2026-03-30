@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use axum::Json;
+#[cfg(test)]
+use axum::body::to_bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
@@ -452,7 +454,7 @@ mod tests {
     }
 
     async fn body_json(body: Body) -> serde_json::Value {
-        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        let bytes = to_bytes(body, usize::MAX).await.unwrap();
         serde_json::from_slice(&bytes).unwrap()
     }
 

@@ -911,6 +911,7 @@ impl StreamState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{AudioData, DocumentData};
 
     #[test]
     fn stream_chunk_minimax_format() {
@@ -1395,7 +1396,7 @@ mod tests {
     fn audio_content_produces_text_fallback() {
         let msg = Message {
             role: Role::User,
-            content: vec![ContentPart::Audio(crate::types::AudioData {
+            content: vec![ContentPart::Audio(AudioData {
                 url: Some("https://example.com/audio.wav".to_string()),
                 data: None,
                 media_type: None,
@@ -1414,7 +1415,7 @@ mod tests {
     fn document_content_produces_text_fallback_with_filename() {
         let msg = Message {
             role: Role::User,
-            content: vec![ContentPart::Document(crate::types::DocumentData {
+            content: vec![ContentPart::Document(DocumentData {
                 url: Some("https://example.com/doc.pdf".to_string()),
                 data: None,
                 media_type: None,
@@ -1434,7 +1435,7 @@ mod tests {
     fn document_content_produces_text_fallback_without_filename() {
         let msg = Message {
             role: Role::User,
-            content: vec![ContentPart::Document(crate::types::DocumentData {
+            content: vec![ContentPart::Document(DocumentData {
                 url: None,
                 data: Some(vec![1, 2, 3]),
                 media_type: None,
@@ -1456,7 +1457,7 @@ mod tests {
             role: Role::User,
             content: vec![
                 ContentPart::text("Check this: "),
-                ContentPart::Audio(crate::types::AudioData {
+                ContentPart::Audio(AudioData {
                     url: None,
                     data: Some(vec![1, 2]),
                     media_type: None,

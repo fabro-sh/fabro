@@ -227,7 +227,7 @@ impl SandboxSpec {
                 let mut sandbox = DaytonaSandbox::new(
                     config.clone(),
                     github_app.clone(),
-                    run_id.clone(),
+                    *run_id,
                     clone_branch.clone(),
                 )
                 .await
@@ -252,7 +252,7 @@ impl SandboxSpec {
                     Box::new(mgmt_ssh),
                     config.clone(),
                     clone_params.clone(),
-                    run_id.clone(),
+                    *run_id,
                     github_app.clone(),
                 );
                 if let Some(callback) = event_callback {
@@ -270,7 +270,7 @@ impl SandboxSpec {
                 let mut sandbox = SshSandbox::new(
                     config.clone(),
                     clone_params.clone(),
-                    run_id.clone(),
+                    *run_id,
                     github_app.clone(),
                 );
                 if let Some(callback) = event_callback {

@@ -484,12 +484,12 @@ mod tests {
     #[test]
     fn upgrade_check_state_roundtrip() {
         let state = UpgradeCheckState {
-            checked_at: 1710000000,
+            checked_at: 1_710_000_000,
             latest_version: "0.5.0".to_string(),
         };
         let json = serde_json::to_string(&state).unwrap();
         let parsed: UpgradeCheckState = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.checked_at, 1710000000);
+        assert_eq!(parsed.checked_at, 1_710_000_000);
         assert_eq!(parsed.latest_version, "0.5.0");
     }
 
@@ -520,12 +520,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.json");
         let state = UpgradeCheckState {
-            checked_at: 1710000000,
+            checked_at: 1_710_000_000,
             latest_version: "0.5.0".to_string(),
         };
         state.save(&path).unwrap();
         let loaded = UpgradeCheckState::load(&path).unwrap();
-        assert_eq!(loaded.checked_at, 1710000000);
+        assert_eq!(loaded.checked_at, 1_710_000_000);
         assert_eq!(loaded.latest_version, "0.5.0");
     }
 

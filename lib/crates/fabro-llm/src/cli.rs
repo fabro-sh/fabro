@@ -1446,7 +1446,7 @@ mod tests {
                         "provider": "anthropic",
                         "family": "test",
                         "display_name": "Test Model",
-                        "limits": { "context_window": 128000, "max_output": 4096 },
+                        "limits": { "context_window": 128_000, "max_output": 4096 },
                         "training": null,
                         "features": { "tools": true, "vision": false, "reasoning": false },
                         "costs": { "input_cost_per_mtok": 1.0, "output_cost_per_mtok": 2.0, "cache_input_cost_per_mtok": null },

@@ -620,6 +620,7 @@ mod tests {
     use crate::sandbox::*;
     use crate::test_support::MockSandbox;
     use crate::tool_registry::ToolContext;
+    use fabro_llm::provider::ProviderAdapter;
     use std::collections::HashMap;
     use tokio_util::sync::CancellationToken;
 
@@ -1169,7 +1170,7 @@ mod tests {
         let env = Arc::new(MockSandbox::default());
         let env_clone: Arc<dyn Sandbox> = env.clone();
         let _result = (tool.executor)(
-            serde_json::json!({"url": "https://example.com", "timeout_ms": 120000}),
+            serde_json::json!({"url": "https://example.com", "timeout_ms": 120_000}),
             ToolContext {
                 env: env_clone,
                 cancel: CancellationToken::new(),
@@ -1329,20 +1330,20 @@ mod tests {
         use fabro_llm::error::{ProviderErrorDetail, ProviderErrorKind, SdkError};
 
         // "other_provider" is the default — it rejects all requests.
-        let default_provider: Arc<dyn fabro_llm::provider::ProviderAdapter> =
-            Arc::new(MockErrorProvider {
-                error: SdkError::Provider {
-                    kind: ProviderErrorKind::NotFound,
-                    detail: Box::new(ProviderErrorDetail::new(
-                        "model not found",
-                        "other_provider",
-                    )),
-                },
-            });
+        let default_provider: Arc<dyn ProviderAdapter> = Arc::new(MockErrorProvider {
+            error: SdkError::Provider {
+                kind: ProviderErrorKind::NotFound,
+                detail: Box::new(ProviderErrorDetail::new(
+                    "model not found",
+                    "other_provider",
+                )),
+            },
+        });
         // "anthropic" provider has the model we actually want.
-        let target_provider: Arc<dyn fabro_llm::provider::ProviderAdapter> = Arc::new(
-            MockLlmProvider::new(vec![text_response("summarized content")]),
-        );
+        let target_provider: Arc<dyn ProviderAdapter> =
+            Arc::new(MockLlmProvider::new(vec![text_response(
+                "summarized content",
+            )]));
 
         let mut providers = HashMap::new();
         providers.insert("other_provider".to_string(), default_provider);
@@ -1414,7 +1415,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires BRAVE_SEARCH_API_KEY env var
+    #[ignore = "requires BRAVE_SEARCH_API_KEY env var"]
     async fn web_search_returns_results() {
         let api_key = std::env::var("BRAVE_SEARCH_API_KEY")
             .expect("BRAVE_SEARCH_API_KEY must be set to run this test");

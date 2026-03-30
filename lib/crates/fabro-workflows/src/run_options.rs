@@ -7,6 +7,8 @@ use fabro_config::FabroSettings;
 use fabro_config::run::PullRequestSettings;
 use fabro_types::RunId;
 
+use crate::git::{GitAuthor, git_author_from_settings};
+
 /// Git checkpoint options for a workflow run.
 #[derive(Clone)]
 pub struct GitCheckpointOptions {
@@ -48,8 +50,8 @@ impl RunOptions {
         &self.settings.checkpoint.exclude_globs
     }
 
-    pub fn git_author(&self) -> crate::git::GitAuthor {
-        crate::git::git_author_from_settings(&self.settings)
+    pub fn git_author(&self) -> GitAuthor {
+        git_author_from_settings(&self.settings)
     }
 
     /// PR config (already normalized — disabled entries stripped at construction).

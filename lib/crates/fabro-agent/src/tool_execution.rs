@@ -346,7 +346,13 @@ mod tests {
     use super::*;
     use crate::config::{ToolHookCallback, ToolHookDecision};
     use crate::event::EventEmitter;
+    use crate::local_sandbox::LocalSandbox;
+    use crate::read_before_write_sandbox::ReadBeforeWriteSandbox;
+    use crate::test_support::MutableMockSandbox;
     use crate::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
+    use crate::tools::{
+        make_edit_file_tool, make_grep_tool, make_read_file_tool, make_write_file_tool,
+    };
     use fabro_llm::types::{ToolCall, ToolDefinition};
     use std::sync::Mutex;
 
@@ -440,9 +446,7 @@ mod tests {
     }
 
     fn make_sandbox() -> Arc<dyn Sandbox> {
-        Arc::new(crate::local_sandbox::LocalSandbox::new(
-            std::env::current_dir().unwrap(),
-        ))
+        Arc::new(LocalSandbox::new(std::env::current_dir().unwrap()))
     }
 
     #[tokio::test]
@@ -607,17 +611,15 @@ mod tests {
     // --- ReadBeforeWriteSandbox e2e tests ---
 
     fn make_guarded_sandbox(files: HashMap<String, String>) -> Arc<dyn Sandbox> {
-        Arc::new(
-            crate::read_before_write_sandbox::ReadBeforeWriteSandbox::new(Arc::new(
-                crate::test_support::MutableMockSandbox::new(files),
-            )),
-        )
+        Arc::new(ReadBeforeWriteSandbox::new(Arc::new(
+            MutableMockSandbox::new(files),
+        )))
     }
 
     #[tokio::test]
     async fn write_to_unread_file_blocked() {
         let mut registry = ToolRegistry::new();
-        registry.register(crate::tools::make_write_file_tool());
+        registry.register(make_write_file_tool());
 
         let sandbox = make_guarded_sandbox(HashMap::from([("a.ts".into(), "content".into())]));
         let tc = make_tool_call(
@@ -648,8 +650,8 @@ mod tests {
     #[tokio::test]
     async fn read_then_write_succeeds() {
         let mut registry = ToolRegistry::new();
-        registry.register(crate::tools::make_read_file_tool());
-        registry.register(crate::tools::make_write_file_tool());
+        registry.register(make_read_file_tool());
+        registry.register(make_write_file_tool());
 
         let sandbox = make_guarded_sandbox(HashMap::from([("a.ts".into(), "content".into())]));
         let emitter = EventEmitter::new();
@@ -700,8 +702,8 @@ mod tests {
     #[tokio::test]
     async fn grep_then_write_succeeds() {
         let mut registry = ToolRegistry::new();
-        registry.register(crate::tools::make_grep_tool());
-        registry.register(crate::tools::make_write_file_tool());
+        registry.register(make_grep_tool());
+        registry.register(make_write_file_tool());
 
         let sandbox = make_guarded_sandbox(HashMap::from([("a.ts".into(), "content".into())]));
         let emitter = EventEmitter::new();
@@ -748,7 +750,7 @@ mod tests {
     #[tokio::test]
     async fn edit_unread_file_blocked() {
         let mut registry = ToolRegistry::new();
-        registry.register(crate::tools::make_edit_file_tool());
+        registry.register(make_edit_file_tool());
 
         let sandbox = make_guarded_sandbox(HashMap::from([("a.ts".into(), "content".into())]));
         let tc = make_tool_call(
@@ -779,7 +781,7 @@ mod tests {
     #[tokio::test]
     async fn write_new_file_succeeds() {
         let mut registry = ToolRegistry::new();
-        registry.register(crate::tools::make_write_file_tool());
+        registry.register(make_write_file_tool());
 
         let sandbox = make_guarded_sandbox(HashMap::new());
         let tc = make_tool_call(

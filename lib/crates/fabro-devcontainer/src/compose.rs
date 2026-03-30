@@ -220,11 +220,11 @@ mod tests {
     #[test]
     fn service_with_image_only() {
         let f = write_compose(
-            r#"
+            r"
 services:
   web:
     image: nginx:latest
-"#,
+",
         );
         let cfg = parse_compose(f.path(), "web").unwrap();
         assert_eq!(cfg.image.as_deref(), Some("nginx:latest"));
@@ -237,11 +237,11 @@ services:
     #[test]
     fn service_with_build_string() {
         let f = write_compose(
-            r#"
+            r"
 services:
   app:
     build: ./src
-"#,
+",
         );
         let cfg = parse_compose(f.path(), "app").unwrap();
         let build = cfg.build.unwrap();
@@ -252,13 +252,13 @@ services:
     #[test]
     fn service_with_build_object() {
         let f = write_compose(
-            r#"
+            r"
 services:
   app:
     build:
       context: ./app
       dockerfile: Dockerfile.dev
-"#,
+",
         );
         let cfg = parse_compose(f.path(), "app").unwrap();
         let build = cfg.build.unwrap();
@@ -298,39 +298,36 @@ services:
         );
         let cfg = parse_compose(f.path(), "app").unwrap();
         assert_eq!(cfg.environment.len(), 2);
-        assert_eq!(
-            cfg.environment.get("DATABASE_URL").unwrap(),
-            "postgres://localhost/db"
-        );
-        assert_eq!(cfg.environment.get("DEBUG").unwrap(), "true");
+        assert_eq!(cfg.environment["DATABASE_URL"], "postgres://localhost/db");
+        assert_eq!(cfg.environment["DEBUG"], "true");
     }
 
     #[test]
     fn environment_as_object() {
         let f = write_compose(
-            r#"
+            r"
 services:
   app:
     image: myapp
     environment:
       RAILS_ENV: production
       PORT: 3000
-"#,
+",
         );
         let cfg = parse_compose(f.path(), "app").unwrap();
         assert_eq!(cfg.environment.len(), 2);
-        assert_eq!(cfg.environment.get("RAILS_ENV").unwrap(), "production");
-        assert_eq!(cfg.environment.get("PORT").unwrap(), "3000");
+        assert_eq!(cfg.environment["RAILS_ENV"], "production");
+        assert_eq!(cfg.environment["PORT"], "3000");
     }
 
     #[test]
     fn service_not_found() {
         let f = write_compose(
-            r#"
+            r"
 services:
   web:
     image: nginx
-"#,
+",
         );
         let err = parse_compose(f.path(), "missing").unwrap_err();
         assert!(err.contains("service 'missing' not found"));
@@ -385,18 +382,18 @@ services:
         let cfg = parse_compose_multi(&paths, "app").unwrap();
         assert_eq!(cfg.image.as_deref(), Some("node:22"));
         assert_eq!(cfg.ports, vec![3000, 9229]);
-        assert_eq!(cfg.environment.get("NODE_ENV").unwrap(), "development");
-        assert_eq!(cfg.environment.get("DEBUG").unwrap(), "true");
+        assert_eq!(cfg.environment["NODE_ENV"], "development");
+        assert_eq!(cfg.environment["DEBUG"], "true");
     }
 
     #[test]
     fn multi_compose_service_not_found() {
         let f = write_compose(
-            r#"
+            r"
 services:
   web:
     image: nginx
-"#,
+",
         );
         let paths = vec![f.path().to_path_buf()];
         let err = parse_compose_multi(&paths, "missing").unwrap_err();
@@ -406,18 +403,18 @@ services:
     #[test]
     fn multi_compose_skips_file_without_service() {
         let base = write_compose(
-            r#"
+            r"
 services:
   db:
     image: postgres:15
-"#,
+",
         );
         let over = write_compose(
-            r#"
+            r"
 services:
   app:
     image: node:22
-"#,
+",
         );
         let paths = vec![base.path().to_path_buf(), over.path().to_path_buf()];
         let cfg = parse_compose_multi(&paths, "app").unwrap();

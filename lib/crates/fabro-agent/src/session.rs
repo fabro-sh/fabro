@@ -981,17 +981,22 @@ const fn is_auth_error(err: &SdkError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ToolApprovalAdapter;
+    use crate::subagent::SubAgentStatus;
     use crate::test_support::*;
     use crate::tool_registry::{RegisteredTool, ToolRegistry};
     use fabro_llm::error::{ProviderErrorDetail, ProviderErrorKind};
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
-    use fabro_llm::types::{Request, Response, Role, StreamEvent, ToolDefinition};
+    use fabro_llm::types::{
+        ContentPart, ReasoningEffort, Request, Response, Role, StreamEvent, ToolDefinition,
+    };
+    use futures::stream;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Clone)]
     enum ScriptedStreamCall {
-        Response(Response),
+        Response(Box<Response>),
         Events(Vec<Result<StreamEvent, SdkError>>),
         Error(SdkError),
     }
@@ -1021,7 +1026,7 @@ mod tests {
             }
 
             for part in &response.message.content {
-                if let fabro_llm::types::ContentPart::ToolCall(tool_call) = part {
+                if let ContentPart::ToolCall(tool_call) = part {
                     events.push(Ok(StreamEvent::ToolCallEnd {
                         tool_call: tool_call.clone(),
                     }));
@@ -1059,10 +1064,10 @@ mod tests {
             };
 
             match scripted {
-                ScriptedStreamCall::Response(response) => Ok(Box::pin(futures::stream::iter(
-                    Self::events_for_response(response),
-                ))),
-                ScriptedStreamCall::Events(events) => Ok(Box::pin(futures::stream::iter(events))),
+                ScriptedStreamCall::Response(response) => {
+                    Ok(Box::pin(stream::iter(Self::events_for_response(*response))))
+                }
+                ScriptedStreamCall::Events(events) => Ok(Box::pin(stream::iter(events))),
                 ScriptedStreamCall::Error(err) => Err(err),
             }
         }
@@ -1074,7 +1079,7 @@ mod tests {
 
     async fn make_session_with_provider_and_manager(
         provider: Arc<dyn ProviderAdapter>,
-        subagent_manager: Option<Arc<tokio::sync::Mutex<crate::subagent::SubAgentManager>>>,
+        subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
     ) -> Session {
         let client = make_client(provider).await;
         let profile = Arc::new(TestProfile::new());
@@ -1643,17 +1648,14 @@ mod tests {
         let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
 
         // Default reasoning_effort is None
-        session.set_reasoning_effort(Some(fabro_llm::types::ReasoningEffort::High));
+        session.set_reasoning_effort(Some(ReasoningEffort::High));
         session.process_input("test").await.unwrap();
 
         let captured = provider_ref.captured_request.lock().unwrap();
         let request = captured
             .as_ref()
             .expect("request should have been captured");
-        assert_eq!(
-            request.reasoning_effort,
-            Some(fabro_llm::types::ReasoningEffort::High)
-        );
+        assert_eq!(request.reasoning_effort, Some(ReasoningEffort::High));
     }
 
     #[tokio::test]
@@ -1856,9 +1858,9 @@ mod tests {
         ];
 
         let config = SessionConfig {
-            tool_hooks: Some(Arc::new(crate::config::ToolApprovalAdapter(Arc::new(
-                |_name, _args| Err("denied by policy".to_string()),
-            )))),
+            tool_hooks: Some(Arc::new(ToolApprovalAdapter(Arc::new(|_name, _args| {
+                Err("denied by policy".to_string())
+            })))),
             ..Default::default()
         };
 
@@ -1897,9 +1899,9 @@ mod tests {
         ];
 
         let config = SessionConfig {
-            tool_hooks: Some(Arc::new(crate::config::ToolApprovalAdapter(Arc::new(
-                |_name, _args| Ok(()),
-            )))),
+            tool_hooks: Some(Arc::new(ToolApprovalAdapter(Arc::new(|_name, _args| {
+                Ok(())
+            })))),
             ..Default::default()
         };
 
@@ -1933,7 +1935,7 @@ mod tests {
         ];
 
         let config = SessionConfig {
-            tool_hooks: Some(Arc::new(crate::config::ToolApprovalAdapter(Arc::new(
+            tool_hooks: Some(Arc::new(ToolApprovalAdapter(Arc::new(
                 move |name, args| {
                     *captured_clone.lock().unwrap() = Some((name.to_string(), args.clone()));
                     Ok(())
@@ -1995,9 +1997,9 @@ mod tests {
         ];
 
         let config = SessionConfig {
-            tool_hooks: Some(Arc::new(crate::config::ToolApprovalAdapter(Arc::new(
-                |_name, _args| Err("not allowed".to_string()),
-            )))),
+            tool_hooks: Some(Arc::new(ToolApprovalAdapter(Arc::new(|_name, _args| {
+                Err("not allowed".to_string())
+            })))),
             ..Default::default()
         };
 
@@ -2068,7 +2070,7 @@ mod tests {
     async fn stream_retries_when_stream_ends_without_finish_before_any_deltas() {
         let provider = Arc::new(ScriptedStreamProvider::new(vec![
             ScriptedStreamCall::Events(vec![]),
-            ScriptedStreamCall::Response(text_response("Recovered")),
+            ScriptedStreamCall::Response(Box::new(text_response("Recovered"))),
         ]));
         let mut session = make_session_with_provider(provider.clone()).await;
         let mut rx = session.subscribe();
@@ -2106,7 +2108,7 @@ mod tests {
     async fn stream_retries_with_output_replace_after_partial_text() {
         let provider = Arc::new(ScriptedStreamProvider::new(vec![
             ScriptedStreamCall::Events(vec![Ok(StreamEvent::text_delta("Hel", None))]),
-            ScriptedStreamCall::Response(text_response("Hello")),
+            ScriptedStreamCall::Response(Box::new(text_response("Hello"))),
         ]));
         let mut session = make_session_with_provider(provider.clone()).await;
         let mut rx = session.subscribe();
@@ -2329,7 +2331,7 @@ mod tests {
                     events.push(Ok(StreamEvent::text_delta(text, None)));
                 }
                 for part in &response.message.content {
-                    if let fabro_llm::types::ContentPart::ToolCall(tc) = part {
+                    if let ContentPart::ToolCall(tc) = part {
                         events.push(Ok(StreamEvent::ToolCallEnd {
                             tool_call: tc.clone(),
                         }));
@@ -2340,7 +2342,7 @@ mod tests {
                     response.usage.clone(),
                     response,
                 )));
-                Ok(Box::pin(futures::stream::iter(events)))
+                Ok(Box::pin(stream::iter(events)))
             }
         }
 
@@ -2414,7 +2416,7 @@ mod tests {
                 } else {
                     self.stream_responses[self.stream_responses.len() - 1].clone()
                 };
-                Ok(crate::test_support::response_to_stream(response))
+                Ok(response_to_stream(response))
             }
         }
 
@@ -2556,8 +2558,8 @@ mod tests {
 
         let provider = Arc::new(MockLlmProvider::new(responses));
         let client = make_client(provider).await;
-        let profile: Arc<dyn crate::agent_profile::AgentProfile> = Arc::new(TestProfile::new());
-        let env: Arc<dyn crate::sandbox::Sandbox> = Arc::new(MockSandbox::default());
+        let profile: Arc<dyn AgentProfile> = Arc::new(TestProfile::new());
+        let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
         let mut session = Session::new(client, profile, env, config, None);
 
         // Subscribe to events before initialize
@@ -2706,10 +2708,10 @@ mod tests {
     async fn close_cleans_up_subagents_before_emitting_session_ended() {
         use crate::subagent::SubAgentManager;
 
-        let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(3)));
+        let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(3)));
 
         let provider = Arc::new(ScriptedStreamProvider::new(vec![
-            ScriptedStreamCall::Response(text_response("done")),
+            ScriptedStreamCall::Response(Box::new(text_response("done"))),
         ]));
         let mut session =
             make_session_with_provider_and_manager(provider, Some(manager.clone())).await;
@@ -2731,7 +2733,7 @@ mod tests {
         // The subagent should have been closed
         assert!(matches!(
             manager.lock().await.status(&agent_id),
-            Some(crate::subagent::SubAgentStatus::Closed)
+            Some(SubAgentStatus::Closed)
         ));
 
         // Verify event ordering: SubAgentClosed before SessionEnded

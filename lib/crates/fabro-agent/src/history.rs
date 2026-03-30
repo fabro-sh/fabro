@@ -136,7 +136,7 @@ fn extract_recent_user_messages(discarded: Vec<Turn>, token_budget: usize) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabro_llm::types::{ToolCall, ToolResult, Usage};
+    use fabro_llm::types::{ThinkingData, ToolCall, ToolResult, Usage};
     use std::time::SystemTime;
 
     #[test]
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn assistant_turn_with_reasoning_in_provider_parts() {
         let mut history = History::default();
-        let thinking = ContentPart::Thinking(fabro_llm::types::ThinkingData {
+        let thinking = ContentPart::Thinking(ThinkingData {
             text: "Let me think about this...".into(),
             signature: None,
             redacted: false,
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn thinking_with_signature_preserved_via_provider_parts() {
         let mut history = History::default();
-        let thinking = ContentPart::Thinking(fabro_llm::types::ThinkingData {
+        let thinking = ContentPart::Thinking(ThinkingData {
             text: "Let me think...".into(),
             signature: Some("sig_abc123".into()),
             redacted: false,
@@ -418,7 +418,7 @@ mod tests {
                 "shell",
                 serde_json::json!({"cmd": "ls"}),
             )],
-            provider_parts: vec![ContentPart::Thinking(fabro_llm::types::ThinkingData {
+            provider_parts: vec![ContentPart::Thinking(ThinkingData {
                 text: "thinking...".into(),
                 signature: None,
                 redacted: false,
@@ -505,7 +505,7 @@ mod tests {
             content: "recent msg".into(),
             timestamp: SystemTime::now(),
         });
-        let thinking = ContentPart::Thinking(fabro_llm::types::ThinkingData {
+        let thinking = ContentPart::Thinking(ThinkingData {
             text: "deep thought".into(),
             signature: Some("sig_xyz".into()),
             redacted: false,

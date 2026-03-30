@@ -982,6 +982,7 @@ impl ProviderAdapter for Adapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{AudioData, DocumentData};
 
     fn minimal_request() -> Request {
         Request {
@@ -1131,7 +1132,7 @@ mod tests {
     fn audio_url_translates_to_file_data() {
         let msg = Message {
             role: Role::User,
-            content: vec![ContentPart::Audio(crate::types::AudioData {
+            content: vec![ContentPart::Audio(AudioData {
                 url: Some("https://example.com/audio.wav".to_string()),
                 data: None,
                 media_type: Some("audio/wav".to_string()),
@@ -1150,7 +1151,7 @@ mod tests {
     fn audio_base64_translates_to_inline_data() {
         let msg = Message {
             role: Role::User,
-            content: vec![ContentPart::Audio(crate::types::AudioData {
+            content: vec![ContentPart::Audio(AudioData {
                 url: None,
                 data: Some(vec![0xFF, 0xFB, 0x90]),
                 media_type: None,
@@ -1168,7 +1169,7 @@ mod tests {
     fn document_url_translates_to_file_data() {
         let msg = Message {
             role: Role::User,
-            content: vec![ContentPart::Document(crate::types::DocumentData {
+            content: vec![ContentPart::Document(DocumentData {
                 url: Some("https://example.com/doc.pdf".to_string()),
                 data: None,
                 media_type: Some("application/pdf".to_string()),
@@ -1187,7 +1188,7 @@ mod tests {
     fn document_base64_translates_to_inline_data() {
         let msg = Message {
             role: Role::User,
-            content: vec![ContentPart::Document(crate::types::DocumentData {
+            content: vec![ContentPart::Document(DocumentData {
                 url: None,
                 data: Some(vec![0x25, 0x50, 0x44, 0x46]),
                 media_type: None,

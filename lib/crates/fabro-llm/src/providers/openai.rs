@@ -1066,6 +1066,8 @@ impl ProviderAdapter for Adapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::common::LineReader;
+    use crate::types::{AudioData, DocumentData};
     use std::collections::HashMap;
 
     fn minimal_request() -> Request {
@@ -1226,7 +1228,7 @@ mod tests {
     fn audio_content_produces_text_fallback() {
         let msg = Message {
             role: Role::User,
-            content: vec![ContentPart::Audio(crate::types::AudioData {
+            content: vec![ContentPart::Audio(AudioData {
                 url: Some("https://example.com/audio.wav".to_string()),
                 data: None,
                 media_type: None,
@@ -1249,7 +1251,7 @@ mod tests {
     fn document_content_produces_text_fallback_with_filename() {
         let msg = Message {
             role: Role::User,
-            content: vec![ContentPart::Document(crate::types::DocumentData {
+            content: vec![ContentPart::Document(DocumentData {
                 url: Some("https://example.com/doc.pdf".to_string()),
                 data: None,
                 media_type: None,
@@ -1273,7 +1275,7 @@ mod tests {
     fn document_content_produces_text_fallback_without_filename() {
         let msg = Message {
             role: Role::User,
-            content: vec![ContentPart::Document(crate::types::DocumentData {
+            content: vec![ContentPart::Document(DocumentData {
                 url: None,
                 data: Some(vec![1, 2, 3]),
                 media_type: None,
@@ -1584,7 +1586,7 @@ mod tests {
         let http_resp = http::Response::builder().status(200).body("").unwrap();
         let response = reqwest::Response::from(http_resp);
         SseStreamState {
-            line_reader: crate::providers::common::LineReader::new(response, None),
+            line_reader: LineReader::new(response, None),
             model: String::new(),
             response_id: String::new(),
             response_model: String::new(),

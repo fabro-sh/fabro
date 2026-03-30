@@ -5,14 +5,15 @@ use crate::config::SessionConfig;
 use crate::profiles::EnvContext;
 use crate::sandbox::*;
 use crate::session::Session;
-use crate::skills::Skill;
-use crate::tool_registry::ToolRegistry;
+use crate::skills::{Skill, format_skills_prompt_section};
+use crate::tool_registry::{RegisteredTool, ToolRegistry};
 use async_trait::async_trait;
 use fabro_llm::client::Client;
 use fabro_llm::error::SdkError;
 use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
 use fabro_llm::types::{ContentPart, FinishReason, Message, Request, Response, StreamEvent, Usage};
 use fabro_model::Provider;
+use futures::stream;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -72,7 +73,7 @@ impl AgentProfile for TestProfile {
         user_instructions: Option<&str>,
         skills: &[Skill],
     ) -> String {
-        let skills_section = crate::skills::format_skills_prompt_section(skills);
+        let skills_section = format_skills_prompt_section(skills);
         let skills_part = if skills_section.is_empty() {
             String::new()
         } else {
@@ -159,7 +160,7 @@ pub fn response_to_stream(response: Response) -> StreamEventStream {
         response,
     )));
 
-    Box::pin(futures::stream::iter(events))
+    Box::pin(stream::iter(events))
 }
 
 // --- Helper functions ---
@@ -259,9 +260,9 @@ pub fn tool_call_response(
     }
 }
 
-pub fn make_echo_tool() -> crate::tool_registry::RegisteredTool {
+pub fn make_echo_tool() -> RegisteredTool {
     use fabro_llm::types::ToolDefinition;
-    crate::tool_registry::RegisteredTool {
+    RegisteredTool {
         definition: ToolDefinition {
             name: "echo".into(),
             description: "Echoes the input".into(),
@@ -279,9 +280,9 @@ pub fn make_echo_tool() -> crate::tool_registry::RegisteredTool {
     }
 }
 
-pub fn make_error_tool() -> crate::tool_registry::RegisteredTool {
+pub fn make_error_tool() -> RegisteredTool {
     use fabro_llm::types::ToolDefinition;
-    crate::tool_registry::RegisteredTool {
+    RegisteredTool {
         definition: ToolDefinition {
             name: "fail_tool".into(),
             description: "Always fails".into(),
@@ -375,18 +376,18 @@ impl ProviderAdapter for MockMidStreamErrorProvider {
             Ok(StreamEvent::text_delta(self.partial_text.clone(), None)),
             Err(self.error.clone()),
         ];
-        Ok(Box::pin(futures::stream::iter(events)))
+        Ok(Box::pin(stream::iter(events)))
     }
 }
 
 pub fn multi_tool_call_response(calls: Vec<(&str, &str, serde_json::Value)>) -> Response {
     use fabro_llm::types::{ContentPart, Role, ToolCall};
     let mut content = vec![ContentPart::text("Let me use multiple tools.")];
-    for (tool_name, tool_call_id, args) in &calls {
+    for (tool_name, tool_call_id, args) in calls {
         content.push(ContentPart::ToolCall(ToolCall::new(
-            *tool_call_id,
-            *tool_name,
-            args.clone(),
+            tool_call_id,
+            tool_name,
+            args,
         )));
     }
     Response {

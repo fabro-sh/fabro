@@ -1,7 +1,8 @@
-use crate::*;
+use crate::{DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use tokio::fs;
 use tokio_util::sync::CancellationToken;
 
 // --- MockSandbox ---
@@ -182,11 +183,11 @@ impl Sandbox for MockSandbox {
             .get(remote_path)
             .ok_or_else(|| format!("File not found: {remote_path}"))?;
         if let Some(parent) = local_path.parent() {
-            tokio::fs::create_dir_all(parent)
+            fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
         }
-        tokio::fs::write(local_path, content.as_bytes())
+        fs::write(local_path, content.as_bytes())
             .await
             .map_err(|e| format!("Failed to write {}: {e}", local_path.display()))?;
         Ok(())
@@ -355,11 +356,11 @@ impl Sandbox for MutableMockSandbox {
             .cloned()
             .ok_or_else(|| format!("File not found: {remote_path}"))?;
         if let Some(parent) = local_path.parent() {
-            tokio::fs::create_dir_all(parent)
+            fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
         }
-        tokio::fs::write(local_path, content.as_bytes())
+        fs::write(local_path, content.as_bytes())
             .await
             .map_err(|e| format!("Failed to write {}: {e}", local_path.display()))?;
         Ok(())
@@ -370,7 +371,7 @@ impl Sandbox for MutableMockSandbox {
         local_path: &std::path::Path,
         remote_path: &str,
     ) -> Result<(), String> {
-        let content = tokio::fs::read_to_string(local_path)
+        let content = fs::read_to_string(local_path)
             .await
             .map_err(|e| format!("Failed to read {}: {e}", local_path.display()))?;
         self.files

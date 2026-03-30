@@ -179,8 +179,8 @@ mod tests {
 
     #[test]
     fn strip_trailing_comma_before_bracket() {
-        let input = r#"[1, 2, 3,]"#;
-        let expected = r#"[1, 2, 3]"#;
+        let input = r"[1, 2, 3,]";
+        let expected = r"[1, 2, 3]";
         assert_eq!(strip_jsonc(input), expected);
     }
 

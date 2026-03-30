@@ -224,6 +224,7 @@ fn parse_sse_block(block: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ProviderErrorKind;
     use crate::types::Message;
     use futures::StreamExt;
     use httpmock::prelude::*;
@@ -350,7 +351,7 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
         let err = adapter.complete(&make_request()).await.unwrap_err();
         match &err {
             SdkError::Provider { kind, detail } => {
-                assert_eq!(*kind, crate::error::ProviderErrorKind::Server);
+                assert_eq!(*kind, ProviderErrorKind::Server);
                 assert_eq!(detail.status_code, Some(502));
             }
             other => panic!("expected Provider error, got {other:?}"),
@@ -369,13 +370,12 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
         let adapter = Adapter::new(reqwest::Client::new(), server.base_url(), "test-provider");
 
         let result = adapter.stream(&make_request()).await;
-        let err = match result {
-            Err(e) => e,
-            Ok(_) => panic!("expected error"),
+        let Err(err) = result else {
+            panic!("expected error");
         };
         match &err {
             SdkError::Provider { kind, detail } => {
-                assert_eq!(*kind, crate::error::ProviderErrorKind::Server);
+                assert_eq!(*kind, ProviderErrorKind::Server);
                 assert_eq!(detail.status_code, Some(502));
             }
             other => panic!("expected Provider error, got {other:?}"),

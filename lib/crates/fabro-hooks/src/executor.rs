@@ -604,6 +604,7 @@ mod tests {
     use crate::config::HookType;
     use crate::types::HookEvent;
     use fabro_types::fixtures;
+    use fabro_util::env::TestEnv;
 
     fn make_context() -> HookContext {
         HookContext::new(HookEvent::StageStart, fixtures::RUN_1, "test-wf".into())
@@ -840,8 +841,8 @@ mod tests {
 
     // --- interpolate_env_vars tests ---
 
-    fn test_env(vars: &[(&str, &str)]) -> fabro_util::env::TestEnv {
-        fabro_util::env::TestEnv(
+    fn test_env(vars: &[(&str, &str)]) -> TestEnv {
+        TestEnv(
             vars.iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),

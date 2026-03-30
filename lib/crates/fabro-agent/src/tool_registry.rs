@@ -72,6 +72,8 @@ impl Default for ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sandbox::Sandbox;
+    use crate::test_support::MockSandbox;
 
     fn make_tool(name: &str) -> RegisteredTool {
         RegisteredTool {
@@ -170,10 +172,6 @@ mod tests {
         registry.register(make_tool("echo"));
 
         let tool = registry.get("echo").unwrap();
-
-        use super::ToolContext;
-        use crate::sandbox::Sandbox;
-        use crate::test_support::MockSandbox;
 
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
         let ctx = ToolContext {

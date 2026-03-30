@@ -248,8 +248,11 @@ pub async fn discover_skills(env: &dyn Sandbox, dirs: &[String]) -> Vec<Skill> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sandbox::Sandbox;
     use crate::test_support::MockSandbox;
+    use crate::tool_registry::ToolContext;
     use std::collections::HashMap;
+    use tokio_util::sync::CancellationToken;
 
     // --- parse_skill tests ---
 
@@ -538,11 +541,11 @@ name: trimmed
         let skills = Arc::new(test_skills());
         let tool = make_use_skill_tool(skills);
 
-        let env: Arc<dyn crate::sandbox::Sandbox> = Arc::new(MockSandbox::default());
+        let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
         let args = serde_json::json!({"skill_name": "commit"});
-        let ctx = crate::tool_registry::ToolContext {
+        let ctx = ToolContext {
             env,
-            cancel: tokio_util::sync::CancellationToken::new(),
+            cancel: CancellationToken::new(),
             tool_env: None,
         };
         let result = (tool.executor)(args, ctx).await;
@@ -557,11 +560,11 @@ name: trimmed
         let skills = Arc::new(test_skills());
         let tool = make_use_skill_tool(skills);
 
-        let env: Arc<dyn crate::sandbox::Sandbox> = Arc::new(MockSandbox::default());
+        let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
         let args = serde_json::json!({"skill_name": "nonexistent"});
-        let ctx = crate::tool_registry::ToolContext {
+        let ctx = ToolContext {
             env,
-            cancel: tokio_util::sync::CancellationToken::new(),
+            cancel: CancellationToken::new(),
             tool_env: None,
         };
         let result = (tool.executor)(args, ctx).await;
@@ -574,11 +577,11 @@ name: trimmed
         let skills = Arc::new(test_skills());
         let tool = make_use_skill_tool(skills);
 
-        let env: Arc<dyn crate::sandbox::Sandbox> = Arc::new(MockSandbox::default());
+        let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
         let args = serde_json::json!({});
-        let ctx = crate::tool_registry::ToolContext {
+        let ctx = ToolContext {
             env,
-            cancel: tokio_util::sync::CancellationToken::new(),
+            cancel: CancellationToken::new(),
             tool_env: None,
         };
         let result = (tool.executor)(args, ctx).await;

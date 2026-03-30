@@ -49,11 +49,7 @@ impl HookLifecycle {
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for HookLifecycle {
     async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
-        let hook_ctx = HookContext::new(
-            HookEvent::RunStart,
-            self.run_id.clone(),
-            self.graph_name.clone(),
-        );
+        let hook_ctx = HookContext::new(HookEvent::RunStart, self.run_id, self.graph_name.clone());
         let decision = self.run_hook(&hook_ctx).await;
         if let HookDecision::Block { reason } = decision {
             let msg = reason.unwrap_or_else(|| "blocked by RunStart hook".into());
@@ -68,11 +64,8 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
         _state: &WfRunState,
     ) -> CoreResult<WfNodeDecision> {
         let gv = ctx.node.inner();
-        let mut hook_ctx = HookContext::new(
-            HookEvent::StageStart,
-            self.run_id.clone(),
-            self.graph_name.clone(),
-        );
+        let mut hook_ctx =
+            HookContext::new(HookEvent::StageStart, self.run_id, self.graph_name.clone());
         hook_ctx.cwd = self
             .hook_work_dir
             .as_ref()
@@ -110,8 +103,7 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
         } else {
             HookEvent::StageComplete
         };
-        let mut hook_ctx =
-            HookContext::new(hook_event, self.run_id.clone(), self.graph_name.clone());
+        let mut hook_ctx = HookContext::new(hook_event, self.run_id, self.graph_name.clone());
         set_hook_node(&mut hook_ctx, node.inner());
         hook_ctx.status = Some(outcome.status.to_string());
         hook_ctx.failure_reason = outcome.failure_reason().map(String::from);
@@ -126,7 +118,7 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
     ) -> CoreResult<EdgeDecision> {
         let mut hook_ctx = HookContext::new(
             HookEvent::EdgeSelected,
-            self.run_id.clone(),
+            self.run_id,
             self.graph_name.clone(),
         );
         hook_ctx.edge_from = Some(ctx.from.to_string());
@@ -155,7 +147,7 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
     ) -> CoreResult<()> {
         let mut hook_ctx = HookContext::new(
             HookEvent::CheckpointSaved,
-            self.run_id.clone(),
+            self.run_id,
             self.graph_name.clone(),
         );
         hook_ctx.node_id = Some(node.inner().id.clone());
@@ -168,22 +160,16 @@ impl RunLifecycle<WorkflowGraph> for HookLifecycle {
             return;
         }
         if outcome.status == StageStatus::Success || outcome.status == StageStatus::PartialSuccess {
-            let hook_ctx = HookContext::new(
-                HookEvent::RunComplete,
-                self.run_id.clone(),
-                self.graph_name.clone(),
-            );
+            let hook_ctx =
+                HookContext::new(HookEvent::RunComplete, self.run_id, self.graph_name.clone());
             let _ = self.run_hook(&hook_ctx).await;
         } else {
             let error_msg = outcome
                 .failure
                 .as_ref()
                 .map_or_else(|| "run failed".to_string(), |f| f.message.clone());
-            let mut hook_ctx = HookContext::new(
-                HookEvent::RunFailed,
-                self.run_id.clone(),
-                self.graph_name.clone(),
-            );
+            let mut hook_ctx =
+                HookContext::new(HookEvent::RunFailed, self.run_id, self.graph_name.clone());
             hook_ctx.failure_reason = Some(error_msg);
             let _ = self.run_hook(&hook_ctx).await;
         }

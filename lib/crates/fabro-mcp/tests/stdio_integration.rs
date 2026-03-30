@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use fabro_mcp::connection_manager::McpConnectionManager;
+
 use fabro_mcp::client::McpClient;
 use fabro_mcp::config::{McpServerConfig, McpTransport};
 use fabro_mcp::connection_manager::call_result_to_string;
@@ -52,7 +54,7 @@ async fn stdio_client_call_tool_echo() {
 #[tokio::test]
 async fn connection_manager_stdio_roundtrip() {
     let config = test_server_config();
-    let mut mgr = fabro_mcp::connection_manager::McpConnectionManager::new();
+    let mut mgr = McpConnectionManager::new();
     let results = mgr.start_servers(&[config]).await;
 
     assert_eq!(results.len(), 1);

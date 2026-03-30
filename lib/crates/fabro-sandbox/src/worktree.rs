@@ -348,6 +348,7 @@ impl Sandbox for WorktreeSandbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::local::LocalSandbox;
     use crate::test_support::MockSandbox;
     use std::sync::Mutex;
 
@@ -642,7 +643,7 @@ mod tests {
         // Put a marker file ONLY in the worktree directory
         std::fs::write(worktree.join("marker.txt"), "UNIQUE_WORKTREE_MARKER").unwrap();
 
-        let inner: Arc<dyn Sandbox> = Arc::new(crate::local::LocalSandbox::new(original.clone()));
+        let inner: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(original.clone()));
         let config = WorktreeConfig {
             branch_name: "test-branch".into(),
             base_sha: "abc123".into(),
@@ -683,7 +684,7 @@ mod tests {
         // Put a file ONLY in the worktree directory
         std::fs::write(worktree.join("worktree_only.txt"), "content").unwrap();
 
-        let inner: Arc<dyn Sandbox> = Arc::new(crate::local::LocalSandbox::new(original.clone()));
+        let inner: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(original.clone()));
         let config = WorktreeConfig {
             branch_name: "test-branch".into(),
             base_sha: "abc123".into(),
@@ -717,7 +718,7 @@ mod tests {
         // Put the file ONLY in the worktree directory
         std::fs::write(worktree.join("only_in_worktree.txt"), "worktree content").unwrap();
 
-        let inner: Arc<dyn Sandbox> = Arc::new(crate::local::LocalSandbox::new(original.clone()));
+        let inner: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(original.clone()));
         let config = WorktreeConfig {
             branch_name: "test-branch".into(),
             base_sha: "abc123".into(),

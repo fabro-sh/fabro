@@ -317,14 +317,14 @@ impl RunSession {
             SandboxProvider::Daytona => SandboxSpec::Daytona {
                 config: resolve_daytona_config(&settings).unwrap_or_default(),
                 github_app: services.github_app.clone(),
-                run_id: Some(record.run_id.clone()),
+                run_id: Some(record.run_id),
                 clone_branch: detected_base_branch.or_else(|| record.base_branch.clone()),
             },
             #[cfg(feature = "exedev")]
             SandboxProvider::Exe => SandboxSpec::Exe {
                 config: resolve_exe_config(&settings).unwrap_or_default(),
                 clone_params: detect_clone_params(&working_directory),
-                run_id: Some(record.run_id.clone()),
+                run_id: Some(record.run_id),
                 github_app: services.github_app.clone(),
                 mgmt_destination: "exe.dev".to_string(),
             },
@@ -341,7 +341,7 @@ impl RunSession {
                     )
                 })?,
                 clone_params: detect_clone_params(&working_directory),
-                run_id: Some(record.run_id.clone()),
+                run_id: Some(record.run_id),
                 github_app: services.github_app.clone(),
             },
         };
@@ -479,7 +479,7 @@ impl RunSession {
             settings: record.settings.clone(),
             run_dir: persisted.run_dir().to_path_buf(),
             cancel_token: self.cancel_token,
-            run_id: record.run_id.clone(),
+            run_id: record.run_id,
             labels: record.labels.clone(),
             workflow_slug: record.workflow_slug.clone(),
             github_app: self.github_app.clone(),
@@ -509,11 +509,11 @@ impl RunSession {
         }
 
         let store_progress_logger =
-            StoreProgressLogger::new(Arc::clone(&self.run_store), record.run_id.clone());
+            StoreProgressLogger::new(Arc::clone(&self.run_store), record.run_id);
         store_progress_logger.register(self.emitter.as_ref());
 
         let init_options = InitOptions {
-            run_id: record.run_id.clone(),
+            run_id: record.run_id,
             run_store: Arc::clone(&self.run_store),
             dry_run: run_options.dry_run_enabled(),
             emitter: self.emitter,
@@ -555,7 +555,7 @@ impl RunSession {
         );
 
         let retro_opts = RetroOptions {
-            run_id: executed.run_options.run_id.clone(),
+            run_id: executed.run_options.run_id,
             run_store: Arc::clone(&executed.run_store),
             workflow_name: executed.graph.name.clone(),
             goal: executed.graph.goal().to_string(),
@@ -576,7 +576,7 @@ impl RunSession {
 
         let finalize_opts = FinalizeOptions {
             run_dir: retroed.run_options.run_dir.clone(),
-            run_id: retroed.run_options.run_id.clone(),
+            run_id: retroed.run_options.run_id,
             run_store: Arc::clone(&retroed.run_store),
             workflow_name: retroed.graph.name.clone(),
             hook_runner: retroed.hook_runner.clone(),
@@ -740,7 +740,7 @@ impl Drop for DetachedRunCompletionGuard {
             );
         }
         let run_store = Arc::clone(&self.run_store);
-        let run_id = self.run_id.clone();
+        let run_id = self.run_id;
         if let Ok(handle) = Handle::try_current() {
             handle.spawn(async move {
                 let _ = run_store

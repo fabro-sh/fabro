@@ -1196,7 +1196,7 @@ mod tests {
 
     #[test]
     fn sdk_error_serde_roundtrip_without_source() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "boom");
+        let io_err = std::io::Error::other("boom");
         let err = SdkError::network("network failed", io_err);
         let json = serde_json::to_string(&err).unwrap();
         let deserialized: SdkError = serde_json::from_str(&json).unwrap();

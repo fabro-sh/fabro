@@ -410,6 +410,8 @@ impl<G: Graph + 'static> Executor<G> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::items_after_statements)]
+
     use std::sync::atomic::AtomicU32;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
@@ -422,6 +424,9 @@ mod tests {
     use crate::lifecycle::RunLifecycle;
     use crate::retry::{BackoffPolicy, RetryPolicy};
     use crate::test_fixtures::*;
+    use tokio::time::{self, Instant};
+
+    type NextNodeLog = Arc<Mutex<Vec<(String, Option<String>)>>>;
 
     // Helper to build and run an executor with default settings
     async fn run_linear(
@@ -1202,7 +1207,7 @@ mod tests {
 
     #[tokio::test]
     async fn executor_retry_backoff_delay() {
-        tokio::time::pause();
+        time::pause();
         let handler = Arc::new(
             CountingHandler::new(vec![
                 Ok(Outcome {
@@ -1221,7 +1226,7 @@ mod tests {
                 },
             }),
         );
-        let start = tokio::time::Instant::now();
+        let start = Instant::now();
         let result = run_linear(
             &["start", "end"],
             handler as Arc<dyn NodeHandler<TestGraph>>,
@@ -1520,7 +1525,7 @@ mod tests {
     async fn executor_checkpoint_called_after_edge_selection() {
         // Verify on_checkpoint receives the resolved next_node_id
         let log = Arc::new(Mutex::new(Vec::<(String, Option<String>)>::new()));
-        struct NextNodeTracker(Arc<Mutex<Vec<(String, Option<String>)>>>);
+        struct NextNodeTracker(NextNodeLog);
         #[async_trait]
         impl RunLifecycle<TestGraph> for NextNodeTracker {
             async fn on_checkpoint(
@@ -1895,7 +1900,7 @@ mod tests {
             Err(CoreError::StallTimeout { ref node_id }) => {
                 assert_eq!(node_id, "start");
             }
-            other => panic!("expected StallTimeout, got {:?}", other),
+            other => panic!("expected StallTimeout, got {other:?}"),
         }
     }
 
@@ -1955,8 +1960,7 @@ mod tests {
         let result = executor.run(&g, state).await;
         assert!(
             matches!(result, Err(CoreError::StallTimeout { .. })),
-            "expected StallTimeout, got {:?}",
-            result
+            "expected StallTimeout, got {result:?}"
         );
     }
 
@@ -1990,8 +1994,7 @@ mod tests {
         let result = executor.run(&g, state).await;
         assert!(
             matches!(result, Err(CoreError::StallTimeout { .. })),
-            "expected StallTimeout, got {:?}",
-            result
+            "expected StallTimeout, got {result:?}"
         );
     }
 }

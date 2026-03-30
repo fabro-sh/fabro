@@ -2,8 +2,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use assert_cmd::Command;
+use assert_cmd::assert::Assert;
 use fabro_store::RuntimeState;
-use predicates;
+use predicates::str::contains;
 use serde_json::Value;
 
 // ---------------------------------------------------------------------------
@@ -49,7 +50,7 @@ fn find_run_dir(storage_dir: &Path) -> PathBuf {
     let runs_base = storage_dir.join("runs");
     let entries: Vec<_> = std::fs::read_dir(&runs_base)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", runs_base.display()))
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.path().is_dir())
         .collect();
     assert_eq!(
@@ -485,7 +486,7 @@ fn test_repo_deinit_fails_when_not_initialized() {
         .current_dir(tmp.path())
         .assert()
         .failure()
-        .stderr(predicates::str::contains("not initialized"));
+        .stderr(contains("not initialized"));
 }
 
 // ---------------------------------------------------------------------------
@@ -530,9 +531,7 @@ fn test_repo_init_help_does_not_show_skill() {
 fn test_secret_lifecycle() {
     let tmp = tempfile::tempdir().unwrap();
 
-    let secret = |args: &[&str]| -> assert_cmd::assert::Assert {
-        fabro().env("HOME", tmp.path()).args(args).assert()
-    };
+    let secret = |args: &[&str]| -> Assert { fabro().env("HOME", tmp.path()).args(args).assert() };
 
     // 1. set FOO=bar
     secret(&["secret", "set", "FOO", "bar"]).success();
@@ -543,7 +542,7 @@ fn test_secret_lifecycle() {
     // 3. list → contains FOO
     secret(&["secret", "list"])
         .success()
-        .stdout(predicates::str::contains("FOO"));
+        .stdout(contains("FOO"));
 
     // 4. update FOO
     secret(&["secret", "set", "FOO", "updated"]).success();
@@ -564,9 +563,7 @@ fn test_secret_lifecycle() {
 fn test_secret_list_show_values() {
     let tmp = tempfile::tempdir().unwrap();
 
-    let secret = |args: &[&str]| -> assert_cmd::assert::Assert {
-        fabro().env("HOME", tmp.path()).args(args).assert()
-    };
+    let secret = |args: &[&str]| -> Assert { fabro().env("HOME", tmp.path()).args(args).assert() };
 
     secret(&["secret", "set", "A", "1"]).success();
     secret(&["secret", "set", "B", "2"]).success();
@@ -574,15 +571,15 @@ fn test_secret_list_show_values() {
     // Without --show-values: just keys
     let out = secret(&["secret", "list"]).success();
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
-    assert!(stdout.contains("A"));
-    assert!(stdout.contains("B"));
+    assert!(stdout.contains('A'));
+    assert!(stdout.contains('B'));
     assert!(!stdout.contains("A=1"));
 
     // With --show-values: KEY=VALUE
     secret(&["secret", "list", "--show-values"])
         .success()
-        .stdout(predicates::str::contains("A=1"))
-        .stdout(predicates::str::contains("B=2"));
+        .stdout(contains("A=1"))
+        .stdout(contains("B=2"));
 }
 
 #[test]
@@ -600,7 +597,7 @@ fn test_secret_list_alias_ls() {
         .args(["secret", "ls"])
         .assert()
         .success()
-        .stdout(predicates::str::contains("X"));
+        .stdout(contains("X"));
 }
 
 #[test]
@@ -612,7 +609,7 @@ fn test_secret_get_missing_key() {
         .args(["secret", "get", "NOPE"])
         .assert()
         .failure()
-        .stderr(predicates::str::contains("secret not found"));
+        .stderr(contains("secret not found"));
 }
 
 #[test]
@@ -624,7 +621,7 @@ fn test_secret_rm_missing_key() {
         .args(["secret", "rm", "NOPE"])
         .assert()
         .failure()
-        .stderr(predicates::str::contains("secret not found"));
+        .stderr(contains("secret not found"));
 }
 
 #[test]
@@ -663,7 +660,7 @@ fn test_model_list() {
         .args(["model", "list"])
         .assert()
         .success()
-        .stdout(predicates::str::contains("claude-haiku"));
+        .stdout(contains("claude-haiku"));
 }
 
 #[test]
@@ -686,7 +683,7 @@ fn test_workflow_list() {
         .assert()
         .success()
         // workflow list prints to stderr
-        .stderr(predicates::str::contains("my_test_wf"));
+        .stderr(contains("my_test_wf"));
 }
 
 #[test]
@@ -706,7 +703,7 @@ fn local_run_lifecycle() {
     dotenvy::dotenv().ok();
     let tmp = tempfile::tempdir().unwrap();
 
-    let fabro_home = |args: &[&str]| -> assert_cmd::assert::Assert {
+    let fabro_home = |args: &[&str]| -> Assert {
         fabro()
             .env("HOME", tmp.path())
             .args(args)

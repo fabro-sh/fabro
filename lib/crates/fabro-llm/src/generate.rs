@@ -1109,12 +1109,14 @@ pub async fn stream_object(
 mod tests {
     use super::*;
     use crate::client::Client;
+    use crate::error::{ProviderErrorDetail, ProviderErrorKind};
     use crate::provider::ProviderAdapter;
-    use crate::types::{ContentPart, Role};
+    use crate::types::{ContentPart, Role, ToolResult};
     use futures::StreamExt;
     use futures::stream;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU32, Ordering};
+    use tokio::time::sleep;
 
     /// Mock provider that returns configurable responses.
     struct MockProvider {
@@ -1781,10 +1783,6 @@ mod tests {
 
     #[tokio::test]
     async fn generate_abort_signal_between_tool_rounds() {
-        let call_count = Arc::new(AtomicU32::new(0));
-        let token = CancellationToken::new();
-        let token_clone = token.clone();
-
         // Provider that always returns tool calls
         struct AlwaysToolCallProvider {
             call_count: Arc<AtomicU32>,
@@ -1829,6 +1827,10 @@ mod tests {
                 Ok(Box::pin(stream::empty()))
             }
         }
+
+        let call_count = Arc::new(AtomicU32::new(0));
+        let token = CancellationToken::new();
+        let token_clone = token.clone();
 
         let provider: Arc<dyn ProviderAdapter> = Arc::new(AlwaysToolCallProvider {
             call_count: call_count.clone(),
@@ -2180,10 +2182,7 @@ mod tests {
             serde_json::json!({"city": "SF"}),
         )];
 
-        let tool_results = vec![crate::types::ToolResult::success(
-            "call_1",
-            serde_json::json!("72F"),
-        )];
+        let tool_results = vec![ToolResult::success("call_1", serde_json::json!("72F"))];
 
         // Processing StepFinish should not panic and should not set the final response
         acc.process(&StreamEvent::step_finish(
@@ -2348,10 +2347,10 @@ mod tests {
 
             if count < self.failures {
                 return Err(SdkError::Provider {
-                    kind: crate::error::ProviderErrorKind::Server,
-                    detail: Box::new(crate::error::ProviderErrorDetail {
+                    kind: ProviderErrorKind::Server,
+                    detail: Box::new(ProviderErrorDetail {
                         status_code: Some(500),
-                        ..crate::error::ProviderErrorDetail::new("server error", "mock")
+                        ..ProviderErrorDetail::new("server error", "mock")
                     }),
                 });
             }
@@ -2459,7 +2458,7 @@ mod tests {
         }
 
         async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
-            tokio::time::sleep(self.delay).await;
+            sleep(self.delay).await;
             let text = "Slow response";
             let response = Response {
                 id: "resp_1".into(),
@@ -2531,8 +2530,6 @@ mod tests {
     async fn stream_total_timeout() {
         // Use a streaming tool call provider with a slow tool to trigger total timeout
         // across multiple rounds
-        let call_count = Arc::new(AtomicU32::new(0));
-
         /// Provider that always returns tool calls with a delay on the second stream
         struct SlowToolCallStreamProvider {
             call_count: Arc<AtomicU32>,
@@ -2592,7 +2589,7 @@ mod tests {
                     Ok(Box::pin(stream::iter(events)))
                 } else {
                     // Second stream: delay long enough to exceed total timeout
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    sleep(std::time::Duration::from_secs(5)).await;
                     let text = "Should not arrive";
                     let response = Response {
                         id: "resp_2".into(),
@@ -2617,6 +2614,8 @@ mod tests {
                 }
             }
         }
+
+        let call_count = Arc::new(AtomicU32::new(0));
 
         let provider: Arc<dyn ProviderAdapter> = Arc::new(SlowToolCallStreamProvider {
             call_count: call_count.clone(),

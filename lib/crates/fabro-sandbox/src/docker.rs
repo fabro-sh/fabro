@@ -800,7 +800,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
+    #[ignore = "requires local Docker daemon"]
     async fn full_lifecycle() {
         let _docker = require_docker();
         let host_dir =
@@ -865,7 +865,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
+    #[ignore = "requires local Docker daemon"]
     async fn timeout_handling() {
         let _docker = require_docker();
         let host_dir =
@@ -888,7 +888,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
+    #[ignore = "requires local Docker daemon"]
     async fn special_characters_in_write() {
         let _docker = require_docker();
         let host_dir =
@@ -914,7 +914,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
+    #[ignore = "requires local Docker daemon"]
     async fn path_resolution() {
         let _docker = require_docker();
         let host_dir =
@@ -941,7 +941,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
+    #[ignore = "requires local Docker daemon"]
     async fn cleanup_idempotent() {
         let _docker = require_docker();
         let host_dir =

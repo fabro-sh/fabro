@@ -815,6 +815,7 @@ impl std::ops::Deref for StepResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fabro_util::backoff::BackoffPolicy;
 
     #[test]
     fn message_system_constructor() {
@@ -1163,7 +1164,7 @@ mod tests {
         use std::time::Duration;
         let policy = RetryPolicy {
             max_retries: 3,
-            backoff: fabro_util::backoff::BackoffPolicy {
+            backoff: BackoffPolicy {
                 initial_delay: Duration::from_secs(1),
                 factor: 2.0,
                 max_delay: Duration::from_secs(60),
@@ -1183,7 +1184,7 @@ mod tests {
         use std::time::Duration;
         let policy = RetryPolicy {
             max_retries: 10,
-            backoff: fabro_util::backoff::BackoffPolicy {
+            backoff: BackoffPolicy {
                 initial_delay: Duration::from_secs(1),
                 factor: 2.0,
                 max_delay: Duration::from_secs(5),
@@ -1199,7 +1200,7 @@ mod tests {
         use std::time::Duration;
         let policy = RetryPolicy {
             max_retries: 3,
-            backoff: fabro_util::backoff::BackoffPolicy {
+            backoff: BackoffPolicy {
                 initial_delay: Duration::from_secs(1),
                 factor: 2.0,
                 max_delay: Duration::from_secs(60),

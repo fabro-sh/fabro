@@ -377,8 +377,7 @@ mod tests {
             let models = Catalog::builtin().list(Some(provider));
             assert!(
                 !models.is_empty(),
-                "Provider {:?} has no models in catalog",
-                provider
+                "Provider {provider:?} has no models in catalog"
             );
         }
     }
@@ -423,8 +422,7 @@ mod tests {
             assert_eq!(
                 roundtripped,
                 Ok(provider),
-                "Provider::{:?}.as_str() does not round-trip through from_str",
-                provider
+                "Provider::{provider:?}.as_str() does not round-trip through from_str"
             );
         }
     }

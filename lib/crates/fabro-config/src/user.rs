@@ -98,6 +98,7 @@ fn should_warn_about_legacy_user_config(path: &Path) -> bool {
 
 /// Load user config from an explicit path or `~/.fabro/user.toml`, returning defaults if the
 /// default file doesn't exist. An explicit path that doesn't exist is an error.
+#[allow(clippy::print_stderr)]
 pub fn load_user_config(path: Option<&Path>) -> anyhow::Result<ConfigLayer> {
     if let Some(explicit) = path {
         return crate::load_config_file(Some(explicit), USER_CONFIG_FILENAME);

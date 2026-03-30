@@ -1,3 +1,15 @@
+#![allow(
+    clippy::absolute_paths,
+    clippy::get_unwrap,
+    clippy::ignore_without_reason,
+    clippy::items_after_statements,
+    clippy::manual_let_else,
+    clippy::print_stderr,
+    clippy::unnecessary_box_returns,
+    clippy::unnecessary_literal_bound,
+    clippy::unreadable_literal
+)]
+
 use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};

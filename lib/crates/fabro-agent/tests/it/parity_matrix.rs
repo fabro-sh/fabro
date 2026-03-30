@@ -1,6 +1,8 @@
+use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;
 
+use fabro_agent::subagent::SessionFactory;
 use fabro_agent::{
     AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile, Session,
     SessionConfig, SubAgentManager, WebFetchSummarizer,
@@ -8,6 +10,7 @@ use fabro_agent::{
 use fabro_llm::client::Client;
 use fabro_llm::provider::Provider;
 use fabro_model::ModelRef;
+use tokio::sync::Mutex as AsyncMutex;
 
 fn summarizer_model_id(provider: Provider) -> ModelRef {
     match provider {
@@ -61,11 +64,11 @@ async fn make_session(provider: Provider, model: &str, cwd: &Path) -> Session {
     let env = Arc::new(LocalSandbox::new(cwd.to_path_buf()));
 
     // Register subagent tools so spawn_agent / wait / send_input / close_agent are available
-    let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(3)));
+    let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(3)));
     let factory_client = client.clone();
     let factory_model: String = model.to_string();
     let factory_cwd = cwd.to_path_buf();
-    let factory: fabro_agent::subagent::SessionFactory = Arc::new(move || {
+    let factory: SessionFactory = Arc::new(move || {
         let sub_profile: Arc<dyn AgentProfile> = {
             let summarizer = Some(build_summarizer(provider, &factory_client));
             match provider {
@@ -317,7 +320,10 @@ async fn scenario_multi_step_read_analyze_edit(session: &mut Session, dir: &Path
 // Scenario 8: tool_output_truncation
 // ---------------------------------------------------------------------------
 async fn scenario_tool_output_truncation(session: &mut Session, dir: &Path) {
-    let lines: String = (1..=10_000).map(|n| format!("line {n}\n")).collect();
+    let lines = (1..=10_000).fold(String::new(), |mut acc, n| {
+        let _ = writeln!(acc, "line {n}");
+        acc
+    });
     std::fs::write(dir.join("big.txt"), lines).expect("failed to write big.txt");
     session
         .process_input("Read the file big.txt and tell me how many lines it has")

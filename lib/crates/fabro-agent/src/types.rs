@@ -561,8 +561,8 @@ mod tests {
         assert!(json.contains("sess_42"));
         assert!(json.contains("SessionStarted"));
         // Timestamp should be ISO-8601
-        assert!(json.contains("T"));
-        assert!(json.contains("Z"));
+        assert!(json.contains('T'));
+        assert!(json.contains('Z'));
 
         let deserialized: SessionEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.session_id, "sess_42");
@@ -672,7 +672,7 @@ mod tests {
     #[test]
     fn error_event_serde_roundtrip_with_agent_error() {
         let event = AgentEvent::Error {
-            error: AgentError::Llm(fabro_llm::error::SdkError::Network {
+            error: AgentError::Llm(SdkError::Network {
                 message: "refused".into(),
                 source: None,
             }),
@@ -695,7 +695,7 @@ mod tests {
             model: "gpt-4".into(),
             attempt: 1,
             delay_secs: 2.0,
-            error: fabro_llm::error::SdkError::Provider {
+            error: SdkError::Provider {
                 kind: ProviderErrorKind::RateLimit,
                 detail: Box::new(ProviderErrorDetail {
                     message: "too fast".into(),

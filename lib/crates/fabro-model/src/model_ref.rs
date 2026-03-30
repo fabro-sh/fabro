@@ -56,6 +56,7 @@ impl fmt::Debug for ModelRef {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::Catalog;
 
     #[test]
     fn by_name_display() {
@@ -78,20 +79,14 @@ mod tests {
 
     #[test]
     fn resolved_display() {
-        let info = crate::catalog::Catalog::builtin()
-            .get("claude-opus-4-6")
-            .unwrap()
-            .clone();
+        let info = Catalog::builtin().get("claude-opus-4-6").unwrap().clone();
         let r = ModelRef::Resolved(Arc::new(info));
         assert_eq!(r.to_string(), "anthropic:claude-opus-4-6");
     }
 
     #[test]
     fn resolved_accessors() {
-        let info = crate::catalog::Catalog::builtin()
-            .get("gpt-5.4")
-            .unwrap()
-            .clone();
+        let info = Catalog::builtin().get("gpt-5.4").unwrap().clone();
         let r = ModelRef::Resolved(Arc::new(info));
         assert_eq!(r.model_id(), "gpt-5.4");
         assert_eq!(r.provider(), Provider::OpenAi);

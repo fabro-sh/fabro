@@ -1,3 +1,5 @@
+#![allow(clippy::absolute_paths, clippy::large_futures)]
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -227,7 +229,7 @@ async fn run_with_lifecycle(
 ) -> Result<Outcome, FabroError> {
     std::fs::create_dir_all(&run_options.run_dir).unwrap();
     let run_dir = run_options.run_dir.clone();
-    let run_id = run_options.run_id.clone();
+    let run_id = run_options.run_id;
     let initialized = initialize(
         persisted_workflow(graph.clone(), String::new(), &run_dir, run_id),
         InitOptions {

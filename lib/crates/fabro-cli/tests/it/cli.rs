@@ -783,7 +783,7 @@ fn dry_run_writes_jsonl_and_live_json() {
     assert!(runs_base.exists(), "runs/ directory should exist");
     let entries: Vec<_> = std::fs::read_dir(&runs_base)
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .collect();
     assert_eq!(entries.len(), 1, "should have exactly one run directory");
     let run_dir = entries[0].path();
@@ -921,7 +921,7 @@ fn detach_creates_run_dir_with_detach_log() {
     assert!(runs_base.exists(), "runs/ directory should exist");
     let entries: Vec<_> = std::fs::read_dir(&runs_base)
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .collect();
     assert_eq!(entries.len(), 1, "should have exactly one run directory");
     let run_dir = entries[0].path();
@@ -1099,15 +1099,13 @@ fn setup_run_dir(
         overrides
             .get(key)
             .and_then(|v| v.as_str())
-            .map(|s| serde_json::json!(s))
-            .unwrap_or_else(|| serde_json::json!(default))
+            .map_or_else(|| serde_json::json!(default), |s| serde_json::json!(s))
     };
     let get_bool = |key: &str, default: bool| -> serde_json::Value {
         overrides
             .get(key)
-            .and_then(|v| v.as_bool())
-            .map(|b| serde_json::json!(b))
-            .unwrap_or_else(|| serde_json::json!(default))
+            .and_then(serde_json::Value::as_bool)
+            .map_or_else(|| serde_json::json!(default), |b| serde_json::json!(b))
     };
 
     // run.json (RunRecord) for resolve_run and run_engine_entrypoint

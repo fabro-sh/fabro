@@ -167,7 +167,10 @@ in the project. Keep changes minimal and focused on the task.";
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::subagent::{SessionFactory, SubAgentManager};
     use crate::test_support::MockSandbox;
+    use std::sync::Arc;
+    use tokio::sync::Mutex as AsyncMutex;
 
     #[test]
     fn anthropic_profile_identity() {
@@ -291,13 +294,10 @@ mod tests {
 
     #[test]
     fn anthropic_register_subagent_tools() {
-        use crate::subagent::{SessionFactory, SubAgentManager};
-        use std::sync::Arc;
-
         let mut profile = AnthropicProfile::new("claude-sonnet-4-20250514");
         assert_eq!(profile.tool_registry().names().len(), 8);
 
-        let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(3)));
+        let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(3)));
         let factory: SessionFactory = Arc::new(|| {
             panic!("should not be called in test");
         });

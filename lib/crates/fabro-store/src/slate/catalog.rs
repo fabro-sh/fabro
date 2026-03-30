@@ -82,7 +82,7 @@ pub(super) async fn repair_catalog(store: Arc<dyn ObjectStore>, base_prefix: &st
     let mut canonical = HashMap::new();
     for meta in by_id_metas {
         if let Some(record) = read_catalog_path(store.clone(), meta.location).await? {
-            canonical.insert(record.run_id.clone(), record);
+            canonical.insert(record.run_id, record);
         }
     }
 

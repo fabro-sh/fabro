@@ -111,6 +111,8 @@ mod tests {
     use super::*;
     use crate::{AnswerValue, QuestionType};
     use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::time::sleep;
 
     #[tokio::test]
     async fn ask_blocks_until_answer_submitted() {
@@ -123,7 +125,7 @@ mod tests {
         });
 
         // Give the ask task a moment to register the question
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(50)).await;
 
         // Question should be pending
         let pending = interviewer.pending_questions();
@@ -149,7 +151,7 @@ mod tests {
             interviewer_clone.ask(q).await
         });
 
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(50)).await;
 
         let pending = interviewer.pending_questions();
         assert_eq!(pending.len(), 1);
@@ -190,7 +192,7 @@ mod tests {
             i2.ask(q).await
         });
 
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(50)).await;
 
         let pending = interviewer.pending_questions();
         assert_eq!(pending.len(), 2);
@@ -243,7 +245,7 @@ mod tests {
             i_clone.ask(q).await
         });
 
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(50)).await;
 
         let pending = interviewer.pending_questions();
         assert_eq!(pending.len(), 1);
@@ -264,7 +266,7 @@ mod tests {
             interviewer_clone.ask(q).await
         });
 
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(50)).await;
 
         {
             let mut inner = interviewer

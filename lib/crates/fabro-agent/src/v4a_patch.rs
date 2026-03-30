@@ -842,9 +842,7 @@ mod tests {
 
     #[test]
     fn format_patch_error_truncates_large_files() {
-        let lines: Vec<String> = (1..=1_000)
-            .map(|i| format!("line number {:04}", i))
-            .collect();
+        let lines: Vec<String> = (1..=1_000).map(|i| format!("line number {i:04}")).collect();
         let content = lines.join("\n");
         let result = format_patch_error("some error", "big.txt", &content);
         assert!(result.len() < 10_000);

@@ -166,7 +166,7 @@ mod tests {
             category: Some(FailureCategory::TransientInfra),
             signature: Some("sig123".into()),
         });
-        let outcome: crate::outcome::Outcome = err.to_fail_outcome();
+        let outcome: Outcome = err.to_fail_outcome();
         assert_eq!(outcome.status, StageStatus::Fail);
         let failure = outcome.failure.unwrap();
         assert_eq!(failure.message, "api down");

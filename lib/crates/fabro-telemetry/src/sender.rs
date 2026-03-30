@@ -147,6 +147,7 @@ mod tests {
     use super::*;
     use crate::event::User;
     use serde_json::json;
+    use tokio::runtime::Runtime;
 
     // -- Step 1: build_segment_batch tests --
 
@@ -278,7 +279,7 @@ mod tests {
     #[test]
     fn upload_noops_without_write_key() {
         // SEGMENT_WRITE_KEY is not set at compile time in tests, so this should error.
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = Runtime::new().unwrap();
         let result = rt.block_on(upload(Path::new("/nonexistent")));
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();

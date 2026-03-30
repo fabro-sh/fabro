@@ -1,5 +1,7 @@
 //! Tests that paginated list endpoints return `{ data, meta: { has_more } }`.
 
+#![allow(clippy::absolute_paths)]
+
 use super::helpers::test_db;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};

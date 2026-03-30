@@ -73,7 +73,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         // Emit WorkflowRunStarted
         self.emitter.emit(&WorkflowRunEvent::WorkflowRunStarted {
             name: self.graph_name.clone(),
-            run_id: self.run_id.clone(),
+            run_id: self.run_id,
             base_branch: self.base_branch.clone(),
             base_sha: self.base_sha.clone(),
             run_branch: self.run_branch.clone(),

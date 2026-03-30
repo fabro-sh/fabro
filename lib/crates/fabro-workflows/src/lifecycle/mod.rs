@@ -117,7 +117,7 @@ impl WorkflowLifecycle {
         let event = EventLifecycle {
             emitter: Arc::clone(emitter),
             graph_name: graph.name.clone(),
-            run_id: run_options.run_id.clone(),
+            run_id: run_options.run_id,
             run_start: Mutex::new(Instant::now()),
             restarted_from: Arc::clone(&restarted_from),
             base_branch: run_options.base_branch.clone(),
@@ -134,7 +134,7 @@ impl WorkflowLifecycle {
             hook_runner,
             sandbox: Arc::clone(sandbox),
             hook_work_dir: working_directory.clone().map(PathBuf::from),
-            run_id: run_options.run_id.clone(),
+            run_id: run_options.run_id,
             graph_name: graph.name.clone(),
         };
 
@@ -142,7 +142,7 @@ impl WorkflowLifecycle {
 
         let disk = DiskLifecycle {
             run_dir: run_dir.clone(),
-            run_id: run_options.run_id.clone(),
+            run_id: run_options.run_id,
             run_store: Arc::clone(&run_store),
             graph: Arc::clone(&graph),
             run_options: Arc::clone(run_options),
@@ -158,7 +158,7 @@ impl WorkflowLifecycle {
             artifact_store: Arc::clone(&artifact_store),
             emitter: Arc::clone(emitter),
             run_dir: run_dir.clone(),
-            run_id: run_options.run_id.clone(),
+            run_id: run_options.run_id,
             run_store,
             run_options: Arc::clone(run_options),
             start_node_id,
@@ -189,7 +189,7 @@ impl WorkflowLifecycle {
             checkpoint_git_result,
             is_initial_resume: AtomicBool::new(is_resume),
             graph,
-            run_id: run_options.run_id.clone(),
+            run_id: run_options.run_id,
             working_directory,
         }
     }

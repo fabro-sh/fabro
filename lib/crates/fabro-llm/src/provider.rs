@@ -74,7 +74,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ProviderAdapter for MockAdapter {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "mock"
         }
         async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
@@ -90,7 +90,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ProviderAdapter for RestrictedAdapter {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "restricted"
         }
         async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {

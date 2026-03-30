@@ -200,7 +200,10 @@ in the project.");
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::subagent::{SessionFactory, SubAgentManager};
     use crate::test_support::MockSandbox;
+    use std::sync::Arc;
+    use tokio::sync::Mutex as AsyncMutex;
 
     #[test]
     fn openai_profile_identity() {
@@ -271,14 +274,10 @@ mod tests {
 
     #[test]
     fn openai_subagent_tools_registered() {
-        use crate::subagent::SessionFactory;
-        use crate::subagent::SubAgentManager;
-        use std::sync::Arc;
-
         let mut profile = OpenAiProfile::new("o3-mini");
         assert_eq!(profile.tool_registry().names().len(), 8);
 
-        let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(3)));
+        let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(3)));
         let factory: SessionFactory = Arc::new(|| panic!("should not be called in test"));
         profile.register_subagent_tools(manager, factory, 0);
         assert_eq!(profile.tool_registry().names().len(), 12);

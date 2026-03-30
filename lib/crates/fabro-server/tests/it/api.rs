@@ -2,6 +2,8 @@
 // mTLS end-to-end tests
 // ===========================================================================
 
+#![allow(clippy::absolute_paths)]
+
 // Skip on macOS: LibreSSL generates certs with extensions rustls rejects
 #[cfg(target_os = "linux")]
 mod mtls_e2e {

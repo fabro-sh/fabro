@@ -463,6 +463,7 @@ mod tests {
     use crate::test_support::*;
     use fabro_llm::provider::ProviderAdapter;
     use fabro_llm::types::Role;
+    use tokio::time;
 
     // --- Tests ---
 
@@ -579,7 +580,7 @@ mod tests {
 
     #[test]
     fn tool_definitions_correct() {
-        let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(3)));
+        let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(3)));
         let factory: SessionFactory = Arc::new(|| {
             panic!("should not be called");
         });
@@ -696,7 +697,7 @@ mod tests {
         let _result = manager.wait(&agent_id).await.unwrap();
 
         // Give the forwarding task a moment to process remaining events
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        time::sleep(std::time::Duration::from_millis(50)).await;
 
         let captured = events.lock().unwrap();
         let forwarded_count = captured

@@ -422,7 +422,7 @@ pub async fn finalize(
     }
 
     Ok(Concluded {
-        run_id: run_options.run_id.clone(),
+        run_id: run_options.run_id,
         outcome,
         conclusion,
         pushed_branch: run_options.git.as_ref().and_then(|g| g.run_branch.clone()),

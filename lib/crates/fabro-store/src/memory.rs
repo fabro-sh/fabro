@@ -652,6 +652,8 @@ mod tests {
     use fabro_types::{
         AttrValue, FabroSettings, Graph, RunId, RunStatus, StageStatus, StatusReason, fixtures,
     };
+    use tokio::time::timeout;
+
     fn dt(rfc3339: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(rfc3339)
             .unwrap()
@@ -1041,7 +1043,7 @@ mod tests {
         run.append_event(&first).await.unwrap();
 
         let mut stream = run.watch_events_from(1).await.unwrap();
-        let existing = tokio::time::timeout(
+        let existing = timeout(
             Duration::from_secs(1),
             futures::StreamExt::next(&mut stream),
         )
@@ -1052,7 +1054,7 @@ mod tests {
         assert_eq!(existing.seq, 1);
 
         run.append_event(&second).await.unwrap();
-        let live = tokio::time::timeout(
+        let live = timeout(
             Duration::from_secs(1),
             futures::StreamExt::next(&mut stream),
         )

@@ -534,7 +534,13 @@ mod tests {
     #[tokio::test]
     async fn read_file_line_number_padding() {
         let dir = temp_dir();
-        let content: String = (1..=12).map(|i| format!("line {i}\n")).collect();
+        let content =
+            (1..=12)
+                .map(|i| format!("line {i}\n"))
+                .fold(String::new(), |mut acc, line| {
+                    acc.push_str(&line);
+                    acc
+                });
         std::fs::write(dir.join("padded.txt"), content.trim_end()).unwrap();
 
         let env = LocalSandbox::new(dir.clone());

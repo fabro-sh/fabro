@@ -40,11 +40,13 @@ impl TestNode {
         }
     }
 
+    #[must_use]
     pub fn with_max_visits(mut self, max: usize) -> Self {
         self.max_visits = Some(max);
         self
     }
 
+    #[must_use]
     pub fn with_goal_gate(mut self, node_id: &str, required_status: StageStatus) -> Self {
         self.goal_gate = Some((node_id.to_string(), required_status));
         self
@@ -85,11 +87,13 @@ impl TestEdge {
         }
     }
 
+    #[must_use]
     pub fn with_label(mut self, label: &str) -> Self {
         self.label = Some(label.to_string());
         self
     }
 
+    #[must_use]
     pub fn with_loop_restart(mut self) -> Self {
         self.loop_restart = true;
         self
@@ -130,6 +134,7 @@ impl TestGraph {
         }
     }
 
+    #[must_use]
     pub fn with_retry_target(mut self, from: &str, to: &str) -> Self {
         self.retry_targets.insert(from.to_string(), to.to_string());
         self
@@ -296,6 +301,7 @@ impl CountingHandler {
         }
     }
 
+    #[must_use]
     pub fn with_retry_policy(mut self, policy: RetryPolicy) -> Self {
         self.retry_policy = policy;
         self
@@ -342,6 +348,7 @@ impl DispatchHandler {
         }
     }
 
+    #[must_use]
     pub fn with_handler(mut self, node_id: &str, handler: Arc<dyn NodeHandler<TestGraph>>) -> Self {
         self.handlers.insert(node_id.to_string(), handler);
         self

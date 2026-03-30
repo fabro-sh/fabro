@@ -943,7 +943,7 @@ impl StoreProgressLogger {
                 (*run_id.lock().unwrap()).clone_from(started_run_id);
             }
 
-            let run_id = run_id.lock().unwrap().clone();
+            let run_id = *run_id.lock().unwrap();
             match build_redacted_event_payload(event, &run_id) {
                 Ok(payload) => {
                     if tx.send(StoreProgressCommand::Event(payload)).is_err() {

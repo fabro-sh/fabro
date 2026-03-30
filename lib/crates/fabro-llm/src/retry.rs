@@ -63,10 +63,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::{ProviderErrorDetail, ProviderErrorKind};
     use crate::types::RetryPolicy;
     use fabro_util::backoff::BackoffPolicy;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
+    use tokio::time::Instant;
 
     fn fast_backoff() -> BackoffPolicy {
         BackoffPolicy {
@@ -121,10 +123,10 @@ mod tests {
                 let count = cc.fetch_add(1, Ordering::SeqCst);
                 if count < 2 {
                     Err(SdkError::Provider {
-                        kind: crate::error::ProviderErrorKind::Server,
-                        detail: Box::new(crate::error::ProviderErrorDetail {
+                        kind: ProviderErrorKind::Server,
+                        detail: Box::new(ProviderErrorDetail {
                             status_code: Some(500),
-                            ..crate::error::ProviderErrorDetail::new("error", "test")
+                            ..ProviderErrorDetail::new("error", "test")
                         }),
                     })
                 } else {
@@ -154,10 +156,10 @@ mod tests {
             async move {
                 cc.fetch_add(1, Ordering::SeqCst);
                 Err::<i32, _>(SdkError::Provider {
-                    kind: crate::error::ProviderErrorKind::Server,
-                    detail: Box::new(crate::error::ProviderErrorDetail {
+                    kind: ProviderErrorKind::Server,
+                    detail: Box::new(ProviderErrorDetail {
                         status_code: Some(500),
-                        ..crate::error::ProviderErrorDetail::new("error", "test")
+                        ..ProviderErrorDetail::new("error", "test")
                     }),
                 })
             }
@@ -184,10 +186,10 @@ mod tests {
             async move {
                 cc.fetch_add(1, Ordering::SeqCst);
                 Err::<i32, _>(SdkError::Provider {
-                    kind: crate::error::ProviderErrorKind::Authentication,
-                    detail: Box::new(crate::error::ProviderErrorDetail {
+                    kind: ProviderErrorKind::Authentication,
+                    detail: Box::new(ProviderErrorDetail {
                         status_code: Some(401),
-                        ..crate::error::ProviderErrorDetail::new("bad key", "test")
+                        ..ProviderErrorDetail::new("bad key", "test")
                     }),
                 })
             }
@@ -219,11 +221,11 @@ mod tests {
             async move {
                 cc.fetch_add(1, Ordering::SeqCst);
                 Err::<i32, _>(SdkError::Provider {
-                    kind: crate::error::ProviderErrorKind::RateLimit,
-                    detail: Box::new(crate::error::ProviderErrorDetail {
+                    kind: ProviderErrorKind::RateLimit,
+                    detail: Box::new(ProviderErrorDetail {
                         status_code: Some(429),
                         retry_after: Some(100.0), // Way beyond max_delay
-                        ..crate::error::ProviderErrorDetail::new("rate limited", "test")
+                        ..ProviderErrorDetail::new("rate limited", "test")
                     }),
                 })
             }
@@ -250,18 +252,18 @@ mod tests {
         let call_count = Arc::new(AtomicU32::new(0));
         let cc = call_count.clone();
 
-        let start = tokio::time::Instant::now();
+        let start = Instant::now();
         let result = retry(&policy, || {
             let cc = cc.clone();
             async move {
                 let count = cc.fetch_add(1, Ordering::SeqCst);
                 if count < 1 {
                     Err(SdkError::Provider {
-                        kind: crate::error::ProviderErrorKind::RateLimit,
-                        detail: Box::new(crate::error::ProviderErrorDetail {
+                        kind: ProviderErrorKind::RateLimit,
+                        detail: Box::new(ProviderErrorDetail {
                             status_code: Some(429),
                             retry_after: Some(0.01),
-                            ..crate::error::ProviderErrorDetail::new("rate limited", "test")
+                            ..ProviderErrorDetail::new("rate limited", "test")
                         }),
                     })
                 } else {
@@ -300,10 +302,10 @@ mod tests {
                 let count = cc.fetch_add(1, Ordering::SeqCst);
                 if count < 2 {
                     Err(SdkError::Provider {
-                        kind: crate::error::ProviderErrorKind::Server,
-                        detail: Box::new(crate::error::ProviderErrorDetail {
+                        kind: ProviderErrorKind::Server,
+                        detail: Box::new(ProviderErrorDetail {
                             status_code: Some(500),
-                            ..crate::error::ProviderErrorDetail::new("error", "test")
+                            ..ProviderErrorDetail::new("error", "test")
                         }),
                     })
                 } else {

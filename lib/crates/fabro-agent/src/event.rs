@@ -40,6 +40,7 @@ impl Default for EventEmitter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::AgentError;
 
     #[tokio::test]
     async fn emit_and_receive_event() {
@@ -61,7 +62,7 @@ mod tests {
         emitter.emit(
             "sess-2".into(),
             AgentEvent::Error {
-                error: crate::error::AgentError::ToolExecution("something went wrong".into()),
+                error: AgentError::ToolExecution("something went wrong".into()),
             },
         );
 
@@ -93,7 +94,7 @@ mod tests {
         emitter.emit(
             "sess-4".into(),
             AgentEvent::Error {
-                error: crate::error::AgentError::ToolExecution("test".into()),
+                error: AgentError::ToolExecution("test".into()),
             },
         );
     }

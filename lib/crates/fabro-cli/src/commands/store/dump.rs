@@ -6,6 +6,8 @@ use fabro_config::FabroSettingsExt;
 use fabro_store::{NodeVisitRef, RunSnapshot, RunStore};
 use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 use serde::Serialize;
+#[cfg(test)]
+use serde::de::DeserializeOwned;
 
 use crate::args::{GlobalArgs, StoreDumpArgs};
 use crate::store;
@@ -494,7 +496,7 @@ mod tests {
         .unwrap()
     }
 
-    fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> T {
+    fn read_json<T: DeserializeOwned>(path: &Path) -> T {
         serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
     }
 

@@ -3,6 +3,14 @@
 //! These tests require a `DAYTONA_API_KEY` environment variable and network access.
 //! Run with: `cargo test --package arc-workflows -- --ignored daytona`
 
+#![allow(
+    clippy::absolute_paths,
+    clippy::format_push_string,
+    clippy::ignore_without_reason,
+    clippy::items_after_statements,
+    clippy::print_stderr
+)]
+
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};

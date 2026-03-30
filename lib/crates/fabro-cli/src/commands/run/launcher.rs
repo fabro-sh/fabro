@@ -7,6 +7,9 @@ use fabro_types::RunId;
 use fabro_workflows::records::{RunRecord, RunRecordExt};
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+use crate::commands::run::short_run_id;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct LauncherRecord {
     pub run_id: RunId,
@@ -191,10 +194,7 @@ mod tests {
 
         assert!(command_matches_launcher(
             &record,
-            &format!(
-                "fabro: {} plan",
-                crate::commands::run::short_run_id(&record.run_id.to_string())
-            )
+            &format!("fabro: {} plan", short_run_id(&record.run_id.to_string()))
         ));
     }
 }

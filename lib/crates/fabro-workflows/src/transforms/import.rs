@@ -1080,11 +1080,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_file(
             &dir.path().join("noop.fabro"),
-            r#"digraph noop {
+            r"digraph noop {
                 start [shape=Mdiamond]
                 exit [shape=Msquare]
                 start -> exit
-            }"#,
+            }",
         );
 
         let graph = apply_import(
@@ -1114,11 +1114,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_file(
             &dir.path().join("noop.fabro"),
-            r#"digraph noop {
+            r"digraph noop {
                 start [shape=Mdiamond]
                 exit [shape=Msquare]
                 start -> exit
-            }"#,
+            }",
         );
 
         let graph = apply_import(

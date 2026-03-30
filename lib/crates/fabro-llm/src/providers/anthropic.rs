@@ -1375,6 +1375,7 @@ impl ProviderAdapter for Adapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{AudioData, DocumentData, ReasoningEffort, ResponseFormat};
 
     #[test]
     fn adapter_with_name() {
@@ -1721,7 +1722,7 @@ mod tests {
         }
     }
 
-    fn make_request_with_format(format: crate::types::ResponseFormat) -> Request {
+    fn make_request_with_format(format: ResponseFormat) -> Request {
         Request {
             provider: None,
             response_format: Some(format),
@@ -1737,7 +1738,7 @@ mod tests {
             "properties": {"name": {"type": "string"}},
             "required": ["name"]
         });
-        let request = make_request_with_format(crate::types::ResponseFormat {
+        let request = make_request_with_format(ResponseFormat {
             kind: ResponseFormatType::JsonSchema,
             json_schema: Some(schema.clone()),
             strict: false,
@@ -1765,7 +1766,7 @@ mod tests {
     #[test]
     fn response_format_json_schema_appends_to_existing_tools() {
         let schema = serde_json::json!({"type": "object"});
-        let mut request = make_request_with_format(crate::types::ResponseFormat {
+        let mut request = make_request_with_format(ResponseFormat {
             kind: ResponseFormatType::JsonSchema,
             json_schema: Some(schema),
             strict: false,
@@ -1791,7 +1792,7 @@ mod tests {
 
     #[test]
     fn response_format_json_object_appends_to_string_system() {
-        let request = make_request_with_format(crate::types::ResponseFormat {
+        let request = make_request_with_format(ResponseFormat {
             kind: ResponseFormatType::JsonObject,
             json_schema: None,
             strict: false,
@@ -1815,7 +1816,7 @@ mod tests {
 
     #[test]
     fn response_format_json_object_sets_system_when_none() {
-        let request = make_request_with_format(crate::types::ResponseFormat {
+        let request = make_request_with_format(ResponseFormat {
             kind: ResponseFormatType::JsonObject,
             json_schema: None,
             strict: false,
@@ -1834,7 +1835,7 @@ mod tests {
 
     #[test]
     fn response_format_json_object_appends_to_array_system() {
-        let request = make_request_with_format(crate::types::ResponseFormat {
+        let request = make_request_with_format(ResponseFormat {
             kind: ResponseFormatType::JsonObject,
             json_schema: None,
             strict: false,
@@ -1855,7 +1856,7 @@ mod tests {
 
     #[test]
     fn response_format_text_is_noop() {
-        let request = make_request_with_format(crate::types::ResponseFormat {
+        let request = make_request_with_format(ResponseFormat {
             kind: ResponseFormatType::Text,
             json_schema: None,
             strict: false,
@@ -1983,7 +1984,7 @@ mod tests {
 
     #[test]
     fn document_url_translates_to_url_source() {
-        let part = ContentPart::Document(crate::types::DocumentData {
+        let part = ContentPart::Document(DocumentData {
             url: Some("https://example.com/doc.pdf".to_string()),
             data: None,
             media_type: None,
@@ -1997,7 +1998,7 @@ mod tests {
 
     #[test]
     fn document_base64_data_translates_to_base64_source() {
-        let part = ContentPart::Document(crate::types::DocumentData {
+        let part = ContentPart::Document(DocumentData {
             url: None,
             data: Some(vec![0x25, 0x50, 0x44, 0x46]),
             media_type: Some("application/pdf".to_string()),
@@ -2012,7 +2013,7 @@ mod tests {
 
     #[test]
     fn document_base64_defaults_to_pdf_mime() {
-        let part = ContentPart::Document(crate::types::DocumentData {
+        let part = ContentPart::Document(DocumentData {
             url: None,
             data: Some(vec![1, 2, 3]),
             media_type: None,
@@ -2130,7 +2131,7 @@ mod tests {
 
     #[test]
     fn audio_produces_text_fallback() {
-        let part = ContentPart::Audio(crate::types::AudioData {
+        let part = ContentPart::Audio(AudioData {
             url: Some("https://example.com/audio.wav".to_string()),
             data: None,
             media_type: None,
@@ -2147,7 +2148,7 @@ mod tests {
     fn build_api_request_maps_reasoning_effort_to_output_config() {
         let adapter = Adapter::new("test-key");
         let request = Request {
-            reasoning_effort: Some(crate::types::ReasoningEffort::Medium),
+            reasoning_effort: Some(ReasoningEffort::Medium),
             ..make_base_request()
         };
 

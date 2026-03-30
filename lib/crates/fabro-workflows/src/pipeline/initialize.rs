@@ -476,7 +476,7 @@ pub async fn initialize(
 
     let hook_ctx = HookContext::new(
         HookEvent::SandboxReady,
-        options.run_options.run_id.clone(),
+        options.run_options.run_id,
         graph.name.clone(),
     );
     let decision = run_hooks(
@@ -670,11 +670,11 @@ mod tests {
     }
 
     fn simple_graph() -> (Graph, String) {
-        let source = r#"digraph test {
+        let source = r"digraph test {
   start [shape=Mdiamond];
   exit [shape=Msquare];
   start -> exit;
-}"#
+}"
         .to_string();
         let mut graph = Graph::new("test");
         let mut start = Node::new("start");

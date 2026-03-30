@@ -108,6 +108,7 @@ impl Drop for StallGuard {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicU32;
+    use tokio::time::sleep;
 
     struct TestMonitor {
         stall_count: AtomicU32,
@@ -140,7 +141,7 @@ mod tests {
         let _guard = watchdog.start();
 
         // Wait for timeout to fire
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        sleep(Duration::from_millis(100)).await;
 
         assert!(cancel.load(Ordering::Relaxed));
         assert_eq!(monitor.stalls(), 1);
@@ -155,15 +156,15 @@ mod tests {
         let guard = watchdog.start();
 
         // Report activity before timeout
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(50)).await;
         guard.report_activity();
 
         // After another 50ms (100ms total, but only 50ms since activity), should not have timed out
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(50)).await;
         assert!(!cancel.load(Ordering::Relaxed));
 
         // Wait long enough for timeout after last activity (80ms + margin)
-        tokio::time::sleep(Duration::from_millis(60)).await;
+        sleep(Duration::from_millis(60)).await;
         assert!(cancel.load(Ordering::Relaxed));
         assert_eq!(monitor.stalls(), 1);
     }
@@ -180,7 +181,7 @@ mod tests {
         drop(guard);
 
         // Wait past timeout
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        sleep(Duration::from_millis(100)).await;
 
         // Should NOT have triggered
         assert!(!cancel.load(Ordering::Relaxed));
@@ -199,7 +200,7 @@ mod tests {
         drop(guard);
 
         // Wait well past timeout
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        sleep(Duration::from_millis(150)).await;
 
         // Cancel should not be set
         assert!(!cancel.load(Ordering::Relaxed));

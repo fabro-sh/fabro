@@ -134,7 +134,7 @@ fn should_track_for_level(level: TelemetryLevel, is_error: bool) -> bool {
 
 /// Internal function called by the `track!` macro. Do not call directly.
 #[doc(hidden)]
-pub fn _track_inner(event: &str, properties: Value, is_error: bool) {
+pub fn track_inner(event: &str, properties: Value, is_error: bool) {
     let Some(global) = GLOBAL.get() else {
         return;
     };
@@ -176,10 +176,10 @@ pub fn _track_inner(event: &str, properties: Value, is_error: bool) {
 #[macro_export]
 macro_rules! track {
     ($event:expr, { $($tt:tt)* }) => {
-        $crate::_track_inner($event, ::serde_json::json!({ $($tt)* }), false)
+        $crate::track_inner($event, ::serde_json::json!({ $($tt)* }), false)
     };
     ($event:expr, { $($tt:tt)* }, error) => {
-        $crate::_track_inner($event, ::serde_json::json!({ $($tt)* }), true)
+        $crate::track_inner($event, ::serde_json::json!({ $($tt)* }), true)
     };
 }
 
@@ -239,6 +239,6 @@ mod tests {
     #[test]
     fn track_inner_noop_when_not_initialized() {
         // GLOBAL is not set in unit tests, so this should silently return
-        _track_inner("Test Event", serde_json::json!({"key": "value"}), false);
+        track!("Test Event", { "key": "value" });
     }
 }

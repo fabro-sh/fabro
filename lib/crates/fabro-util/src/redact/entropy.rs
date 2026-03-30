@@ -69,12 +69,12 @@ mod tests {
 
     #[test]
     fn entropy_empty_string() {
-        assert_eq!(shannon_entropy(""), 0.0);
+        assert!(shannon_entropy("").abs() < f64::EPSILON);
     }
 
     #[test]
     fn entropy_single_char_repeated() {
-        assert_eq!(shannon_entropy("aaaa"), 0.0);
+        assert!(shannon_entropy("aaaa").abs() < f64::EPSILON);
     }
 
     #[test]

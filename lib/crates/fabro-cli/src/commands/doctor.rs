@@ -8,6 +8,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 #[cfg(feature = "server")]
 use fabro_config::server::{ApiAuthStrategy, AuthProvider};
+use fabro_config::user::{default_user_config_path, legacy_user_config_path};
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::types::{Message, Request};
 use fabro_model::{Catalog, Provider};
@@ -963,9 +964,9 @@ pub(crate) async fn run_doctor(verbose: bool, live: bool) -> i32 {
     // Gather state
     let cli_settings = load_user_settings().unwrap_or_default();
 
-    let user_config_path = fabro_config::user::default_user_config_path();
+    let user_config_path = default_user_config_path();
     let user_config_exists = user_config_path.as_ref().is_some_and(|p| p.exists());
-    let legacy_config_path = fabro_config::user::legacy_user_config_path();
+    let legacy_config_path = legacy_user_config_path();
     let legacy_config_exists = legacy_config_path.as_ref().is_some_and(|p| p.exists());
 
     let llm_statuses: Vec<(Provider, bool)> = Provider::ALL

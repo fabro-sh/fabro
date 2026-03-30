@@ -1018,7 +1018,7 @@ mod tests {
 
         // Create 51 IDs to trigger 2 batches
         let ids: Vec<String> = (0..51).map(|i| format!("id-{i}")).collect();
-        let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+        let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
 
         // First batch (ids 0..50)
         let batch1_nodes: Vec<Value> = (0..50)

@@ -41,7 +41,7 @@ pub(crate) async fn resume_command(
     } else {
         let exit_code =
             super::attach::attach_run(&run_dir, Some(&run_id), true, styles, Some(child)).await?;
-        super::output::print_run_summary(&run_dir, &run_id, styles);
+        super::output::print_run_summary(&run_dir, run_id, styles);
         if exit_code != std::process::ExitCode::SUCCESS {
             std::process::exit(1);
         }
@@ -54,17 +54,6 @@ fn launcher_pid_alive(run_dir: &std::path::Path) -> bool {
         .is_some_and(|record| process_alive(record.pid))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn launcher_pid_alive_returns_false_for_missing_record() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(!launcher_pid_alive(dir.path()));
-    }
-}
-
 #[allow(unsafe_code)]
 fn process_alive(pid: u32) -> bool {
     #[cfg(unix)]
@@ -75,5 +64,16 @@ fn process_alive(pid: u32) -> bool {
     {
         let _ = pid;
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn launcher_pid_alive_returns_false_for_missing_record() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!launcher_pid_alive(dir.path()));
     }
 }

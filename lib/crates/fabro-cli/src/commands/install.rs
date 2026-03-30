@@ -13,6 +13,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
+use fabro_config::user::USER_CONFIG_FILENAME;
 use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 use rand::Rng;
@@ -440,7 +441,7 @@ async fn setup_github_app(
         .to_string();
 
     // Write non-secret config to user.toml
-    let user_toml_path = arc_dir.join(fabro_config::user::USER_CONFIG_FILENAME);
+    let user_toml_path = arc_dir.join(USER_CONFIG_FILENAME);
     let existing = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
     let mut doc: toml::Value = if existing.is_empty() {
         toml::Value::Table(toml::Table::default())
@@ -652,7 +653,7 @@ pub(crate) async fn run_install(web_url: &str) -> Result<()> {
         if setup_github {
             let github_env_pairs = setup_github_app(&arc_dir, &s, web_url).await?;
             let slug = {
-                let user_toml_path = arc_dir.join(fabro_config::user::USER_CONFIG_FILENAME);
+                let user_toml_path = arc_dir.join(USER_CONFIG_FILENAME);
                 let toml_content = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
                 let doc: toml::Value = toml::from_str(&toml_content)
                     .unwrap_or(toml::Value::Table(toml::Table::default()));

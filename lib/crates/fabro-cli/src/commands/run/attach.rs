@@ -852,7 +852,7 @@ mod tests {
         // Clean up
         #[cfg(unix)]
         unsafe {
-            libc::kill(pid as i32, libc::SIGKILL);
+            libc::kill(i32::try_from(pid).unwrap(), libc::SIGKILL);
         }
     }
 

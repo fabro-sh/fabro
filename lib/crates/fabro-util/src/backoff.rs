@@ -100,10 +100,7 @@ mod tests {
             let delay = b.delay_for_attempt(1);
             assert!(
                 delay >= min && delay <= max,
-                "delay {:?} out of range [{:?}, {:?}]",
-                delay,
-                min,
-                max,
+                "delay {delay:?} out of range [{min:?}, {max:?}]",
             );
         }
     }

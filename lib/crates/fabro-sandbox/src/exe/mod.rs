@@ -1,9 +1,11 @@
 mod openssh_runner;
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Instant;
 
+use crate::sandbox::resolve_path;
 use crate::shell_quote;
 use crate::ssh_common;
 use crate::{
@@ -11,7 +13,10 @@ use crate::{
     format_lines_numbered,
 };
 use async_trait::async_trait;
+use fabro_github::GitHubAppCredentials;
 use fabro_types::RunId;
+use tokio::fs;
+use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
 pub use crate::ssh_common::{GitCloneParams, SshOutput, SshRunner};
@@ -63,10 +68,10 @@ type DataSshFactory = Box<
 /// - Data plane (`ssh <vmname>.exe.xyz`) for command execution and file I/O
 pub struct ExeSandbox {
     mgmt_ssh: Box<dyn SshRunner>,
-    data_ssh: tokio::sync::OnceCell<Box<dyn SshRunner>>,
-    vm_name: tokio::sync::OnceCell<String>,
-    data_host: tokio::sync::OnceCell<String>,
-    rg_available: tokio::sync::OnceCell<bool>,
+    data_ssh: OnceCell<Box<dyn SshRunner>>,
+    vm_name: OnceCell<String>,
+    data_host: OnceCell<String>,
+    rg_available: OnceCell<bool>,
     event_callback: Option<SandboxEventCallback>,
     /// Factory for creating data-plane SSH runners, used during initialize().
     /// In production, this connects to the VM host via OpensshRunner.
@@ -75,8 +80,8 @@ pub struct ExeSandbox {
     config: ExeConfig,
     clone_params: Option<GitCloneParams>,
     run_id: Option<RunId>,
-    origin_url: tokio::sync::OnceCell<String>,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
+    origin_url: OnceCell<String>,
+    github_app: Option<GitHubAppCredentials>,
 }
 
 impl ExeSandbox {
@@ -86,14 +91,14 @@ impl ExeSandbox {
         config: ExeConfig,
         clone_params: Option<GitCloneParams>,
         run_id: Option<RunId>,
-        github_app: Option<fabro_github::GitHubAppCredentials>,
+        github_app: Option<GitHubAppCredentials>,
     ) -> Self {
         Self {
             mgmt_ssh,
-            data_ssh: tokio::sync::OnceCell::new(),
-            vm_name: tokio::sync::OnceCell::new(),
-            data_host: tokio::sync::OnceCell::new(),
-            rg_available: tokio::sync::OnceCell::const_new(),
+            data_ssh: OnceCell::new(),
+            vm_name: OnceCell::new(),
+            data_host: OnceCell::new(),
+            rg_available: OnceCell::const_new(),
             event_callback: None,
             data_ssh_factory: Box::new(|host: &str| {
                 let host = host.to_string();
@@ -106,7 +111,7 @@ impl ExeSandbox {
             config,
             clone_params,
             run_id,
-            origin_url: tokio::sync::OnceCell::new(),
+            origin_url: OnceCell::new(),
             github_app,
         }
     }
@@ -114,14 +119,14 @@ impl ExeSandbox {
     /// Create an `ExeSandbox` from a pre-connected data-plane SSH runner.
     /// Used for reconnection (e.g. `fabro cp`) when the VM already exists.
     pub fn from_existing(data_ssh: Box<dyn SshRunner>) -> Self {
-        let data_cell = tokio::sync::OnceCell::new();
+        let data_cell = OnceCell::new();
         let _ = data_cell.set(data_ssh);
         Self {
             mgmt_ssh: Box::new(NoopSshRunner),
             data_ssh: data_cell,
-            vm_name: tokio::sync::OnceCell::new(),
-            data_host: tokio::sync::OnceCell::new(),
-            rg_available: tokio::sync::OnceCell::const_new(),
+            vm_name: OnceCell::new(),
+            data_host: OnceCell::new(),
+            rg_available: OnceCell::const_new(),
             event_callback: None,
             data_ssh_factory: Box::new(|_: &str| {
                 Box::pin(async {
@@ -131,7 +136,7 @@ impl ExeSandbox {
             config: ExeConfig::default(),
             clone_params: None,
             run_id: None,
-            origin_url: tokio::sync::OnceCell::new(),
+            origin_url: OnceCell::new(),
             github_app: None,
         }
     }
@@ -166,7 +171,7 @@ impl ExeSandbox {
     fn data_ssh(&self) -> Result<&dyn SshRunner, String> {
         self.data_ssh
             .get()
-            .map(|b| b.as_ref())
+            .map(std::convert::AsRef::as_ref)
             .ok_or_else(|| "Exe sandbox not initialized — call initialize() first".to_string())
     }
 
@@ -190,8 +195,8 @@ impl ExeSandbox {
         .await
     }
 
-    fn resolve_path(&self, path: &str) -> String {
-        crate::sandbox::resolve_path(path, WORKING_DIRECTORY)
+    fn resolve_path(path: &str) -> String {
+        resolve_path(path, WORKING_DIRECTORY)
     }
 }
 
@@ -206,7 +211,7 @@ impl Sandbox for ExeSandbox {
         // Create a new VM via the management plane
         let mut cmd = "new --json".to_string();
         if let Some(ref image) = self.config.image {
-            cmd.push_str(&format!(" --image {}", shell_quote(image)));
+            let _ = write!(cmd, " --image {}", shell_quote(image));
         }
         let output = self.mgmt_ssh.run_command(&cmd).await.map_err(|e| {
             let err = format!("Failed to create exe.dev VM: {e}");
@@ -338,19 +343,15 @@ impl Sandbox for ExeSandbox {
 
         if let Some(vars) = env_vars {
             for (key, value) in vars {
-                script.push_str(&format!(
-                    "export {}={}\n",
-                    shell_quote(key),
-                    shell_quote(value)
-                ));
+                let _ = writeln!(script, "export {}={}", shell_quote(key), shell_quote(value));
             }
         }
 
         let dir = match working_dir {
-            Some(dir) => self.resolve_path(dir),
+            Some(dir) => Self::resolve_path(dir),
             None => WORKING_DIRECTORY.to_string(),
         };
-        script.push_str(&format!("cd {} && {command}", shell_quote(&dir)));
+        let _ = write!(script, "cd {} && {command}", shell_quote(&dir));
 
         let full_cmd = ssh_common::wrap_bash_command(&script);
 
@@ -398,7 +399,7 @@ impl Sandbox for ExeSandbox {
         limit: Option<usize>,
     ) -> Result<String, String> {
         let ssh = self.data_ssh()?;
-        let resolved = self.resolve_path(path);
+        let resolved = Self::resolve_path(path);
 
         let output = ssh
             .run_command(&format!("cat {}", shell_quote(&resolved)))
@@ -417,7 +418,7 @@ impl Sandbox for ExeSandbox {
 
     async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
         let ssh = self.data_ssh()?;
-        let resolved = self.resolve_path(path);
+        let resolved = Self::resolve_path(path);
 
         // Ensure parent directory exists
         if let Some(parent) = Path::new(&resolved).parent() {
@@ -433,7 +434,7 @@ impl Sandbox for ExeSandbox {
 
     async fn delete_file(&self, path: &str) -> Result<(), String> {
         let ssh = self.data_ssh()?;
-        let resolved = self.resolve_path(path);
+        let resolved = Self::resolve_path(path);
 
         let output = ssh
             .run_command(&format!("rm -f {}", shell_quote(&resolved)))
@@ -448,7 +449,7 @@ impl Sandbox for ExeSandbox {
 
     async fn file_exists(&self, path: &str) -> Result<bool, String> {
         let ssh = self.data_ssh()?;
-        let resolved = self.resolve_path(path);
+        let resolved = Self::resolve_path(path);
 
         let output = ssh
             .run_command(&format!("test -e {}", shell_quote(&resolved)))
@@ -462,7 +463,7 @@ impl Sandbox for ExeSandbox {
         path: &str,
         depth: Option<usize>,
     ) -> Result<Vec<DirEntry>, String> {
-        let resolved = self.resolve_path(path);
+        let resolved = Self::resolve_path(path);
         let max_depth = depth.unwrap_or(1);
 
         let cmd = format!(
@@ -511,7 +512,7 @@ impl Sandbox for ExeSandbox {
         path: &str,
         options: &GrepOptions,
     ) -> Result<Vec<String>, String> {
-        let resolved = self.resolve_path(path);
+        let resolved = Self::resolve_path(path);
 
         // Detect ripgrep availability (cached)
         let use_rg = *self
@@ -530,16 +531,17 @@ impl Sandbox for ExeSandbox {
                 cmd.push_str(" -i");
             }
             if let Some(ref glob_filter) = options.glob_filter {
-                cmd.push_str(&format!(" --glob {}", shell_quote(glob_filter)));
+                let _ = write!(cmd, " --glob {}", shell_quote(glob_filter));
             }
             if let Some(max) = options.max_results {
-                cmd.push_str(&format!(" --max-count {max}"));
+                let _ = write!(cmd, " --max-count {max}");
             }
-            cmd.push_str(&format!(
+            let _ = write!(
+                cmd,
                 " -- {} {}",
                 shell_quote(pattern),
                 shell_quote(&resolved)
-            ));
+            );
             cmd
         } else {
             let mut cmd = "grep -rn".to_string();
@@ -547,16 +549,17 @@ impl Sandbox for ExeSandbox {
                 cmd.push_str(" -i");
             }
             if let Some(ref glob_filter) = options.glob_filter {
-                cmd.push_str(&format!(" --include {}", shell_quote(glob_filter)));
+                let _ = write!(cmd, " --include {}", shell_quote(glob_filter));
             }
             if let Some(max) = options.max_results {
-                cmd.push_str(&format!(" -m {max}"));
+                let _ = write!(cmd, " -m {max}");
             }
-            cmd.push_str(&format!(
+            let _ = write!(
+                cmd,
                 " -- {} {}",
                 shell_quote(pattern),
                 shell_quote(&resolved)
-            ));
+            );
             cmd
         };
 
@@ -576,9 +579,7 @@ impl Sandbox for ExeSandbox {
     }
 
     async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String> {
-        let base = path
-            .map(|p| self.resolve_path(p))
-            .unwrap_or_else(|| WORKING_DIRECTORY.to_string());
+        let base = path.map_or_else(|| WORKING_DIRECTORY.to_string(), Self::resolve_path);
 
         let cmd = format!(
             "find {} -name {} -type f | sort",
@@ -609,16 +610,16 @@ impl Sandbox for ExeSandbox {
         local_path: &Path,
     ) -> Result<(), String> {
         let ssh = self.data_ssh()?;
-        let resolved = self.resolve_path(remote_path);
+        let resolved = Self::resolve_path(remote_path);
 
         let bytes = ssh.download_file(&resolved).await?;
 
         if let Some(parent) = local_path.parent() {
-            tokio::fs::create_dir_all(parent)
+            fs::create_dir_all(parent)
                 .await
                 .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
         }
-        tokio::fs::write(local_path, &bytes)
+        fs::write(local_path, &bytes)
             .await
             .map_err(|e| format!("Failed to write {}: {e}", local_path.display()))?;
 
@@ -631,9 +632,9 @@ impl Sandbox for ExeSandbox {
         remote_path: &str,
     ) -> Result<(), String> {
         let ssh = self.data_ssh()?;
-        let resolved = self.resolve_path(remote_path);
+        let resolved = Self::resolve_path(remote_path);
 
-        let bytes = tokio::fs::read(local_path)
+        let bytes = fs::read(local_path)
             .await
             .map_err(|e| format!("Failed to read {}: {e}", local_path.display()))?;
 
@@ -648,7 +649,7 @@ impl Sandbox for ExeSandbox {
         WORKING_DIRECTORY
     }
 
-    fn platform(&self) -> &str {
+    fn platform(&self) -> &'static str {
         "linux"
     }
 
@@ -665,13 +666,11 @@ impl Sandbox for ExeSandbox {
     }
 
     async fn refresh_push_credentials(&self) -> Result<(), String> {
-        let origin_url = match self.origin_url() {
-            Some(url) => url,
-            None => return Ok(()),
+        let Some(origin_url) = self.origin_url() else {
+            return Ok(());
         };
-        let creds = match &self.github_app {
-            Some(c) => c,
-            None => return Ok(()),
+        let Some(creds) = &self.github_app else {
+            return Ok(());
         };
 
         let auth_url = fabro_github::resolve_authenticated_url(creds, origin_url)
@@ -736,7 +735,9 @@ impl Sandbox for ExeSandbox {
 mod tests {
     use super::*;
     use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
     use std::sync::{Arc, Mutex};
+    use tokio::fs;
 
     /// A recorded command sent to the mock SSH runner.
     #[derive(Debug, Clone)]
@@ -875,9 +876,7 @@ mod tests {
         let start = wrapped.find("echo '").expect("missing echo prefix") + 6;
         let end = wrapped[start..].find('\'').expect("missing closing quote") + start;
         let encoded = &wrapped[start..end];
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .expect("invalid base64");
+        let bytes = STANDARD.decode(encoded).expect("invalid base64");
         String::from_utf8(bytes).expect("invalid utf8")
     }
 
@@ -1287,7 +1286,7 @@ mod tests {
             .await
             .unwrap();
 
-        let bytes = tokio::fs::read(&local).await.unwrap();
+        let bytes = fs::read(&local).await.unwrap();
         assert_eq!(bytes, b"binary content");
     }
 

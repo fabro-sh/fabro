@@ -205,7 +205,7 @@ mod tests {
     fn setup_source_run(store: &Store, run_id: &RunId, nodes: &[&str]) -> Vec<Oid> {
         let sig = test_sig();
 
-        let run_branch = format!("{}{run_id}", RUN_BRANCH_PREFIX);
+        let run_branch = format!("{RUN_BRANCH_PREFIX}{run_id}");
         let empty_tree = store.write_empty_tree().unwrap();
         let mut run_oids = Vec::new();
         let mut parent: Option<Oid> = None;
@@ -265,7 +265,7 @@ mod tests {
         )
         .unwrap();
 
-        let new_run_branch = format!("{}{new_run_id}", RUN_BRANCH_PREFIX);
+        let new_run_branch = format!("{RUN_BRANCH_PREFIX}{new_run_id}");
         let new_meta_branch = MetadataStore::branch_name(&new_run_id.to_string());
 
         assert!(store.resolve_ref(&new_run_branch).unwrap().is_some());

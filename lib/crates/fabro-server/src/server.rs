@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
+#[cfg(test)]
+use axum::body::to_bytes;
 use axum::extract::{self as axum_extract, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -16,7 +18,7 @@ use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest,
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
 };
-use fabro_retro::retro::Retro;
+use fabro_retro::retro::{Retro, extract_stage_durations};
 use fabro_store::{InMemoryStore, Store};
 use fabro_types::RunId;
 use fabro_util::redact::redact_jsonl_line;
@@ -492,6 +494,7 @@ fn compute_queue_positions(runs: &HashMap<RunId, ManagedRun>) -> HashMap<RunId, 
         .collect()
 }
 
+#[allow(clippy::result_large_err)]
 fn parse_run_id_path(id: &str) -> Result<RunId, Response> {
     id.parse::<RunId>()
         .map_err(|_| ApiError::bad_request("Invalid run ID.").into_response())
@@ -728,7 +731,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
             Ok(events) => fabro_workflows::extract_stage_durations_from_events(&events),
             Err(err) => {
                 tracing::warn!(run_id = %run_id, error = %err, "Failed to load run events from store");
-                fabro_retro::retro::extract_stage_durations(&run_dir)
+                extract_stage_durations(&run_dir)
             }
         };
         let mut agg = state
@@ -816,7 +819,7 @@ pub fn spawn_scheduler(state: Arc<AppState>) {
                     runs.iter()
                         .filter(|(_, r)| r.status == RunStatus::Queued)
                         .min_by_key(|(_, r)| r.created_at)
-                        .map(|(id, _)| id.clone())
+                        .map(|(id, _)| *id)
                 };
                 match run_to_start {
                     Some(id) => {
@@ -1643,7 +1646,7 @@ mod tests {
     }
 
     async fn body_json(body: Body) -> serde_json::Value {
-        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        let bytes = to_bytes(body, usize::MAX).await.unwrap();
         serde_json::from_slice(&bytes).unwrap()
     }
 
@@ -2127,9 +2130,7 @@ mod tests {
             .unwrap();
         assert_eq!(content_type, "image/svg+xml");
 
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let svg = String::from_utf8_lossy(&bytes);
         assert!(
             svg.contains("<?xml") || svg.contains("<svg"),

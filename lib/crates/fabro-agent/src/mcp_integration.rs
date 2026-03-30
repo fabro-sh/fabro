@@ -41,9 +41,13 @@ pub fn make_mcp_tools(manager: &Arc<McpConnectionManager>) -> Vec<RegisteredTool
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sandbox::Sandbox;
+    use crate::test_support::MockSandbox;
+    use crate::tool_registry::ToolContext;
     use std::collections::HashMap;
 
     use fabro_mcp::config::{McpServerConfig, McpTransport};
+    use tokio_util::sync::CancellationToken;
 
     fn test_server_config() -> McpServerConfig {
         let test_server = format!(
@@ -81,11 +85,6 @@ mod tests {
 
         let tools = make_mcp_tools(&Arc::new(mgr));
         let tool = &tools[0];
-
-        use crate::sandbox::Sandbox;
-        use crate::test_support::MockSandbox;
-        use crate::tool_registry::ToolContext;
-        use tokio_util::sync::CancellationToken;
 
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
         let result = (tool.executor)(

@@ -269,6 +269,7 @@ pub fn ast_to_graph(dot: &DotGraph) -> Result<Graph, GraphvizError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::ast::SubgraphStmt;
 
     #[test]
     fn convert_ast_str_to_string() {
@@ -345,25 +346,25 @@ mod tests {
             statements: vec![
                 Statement::GraphAttr(vec![("goal".into(), AstValue::Str("Run tests".into()))]),
                 Statement::GraphAttrDecl("rankdir".into(), AstValue::Ident("LR".into())),
-                Statement::Node(crate::parser::ast::NodeStmt {
+                Statement::Node(NodeStmt {
                     id: "start".into(),
                     attrs: Some(vec![
                         ("shape".into(), AstValue::Ident("Mdiamond".into())),
                         ("label".into(), AstValue::Str("Start".into())),
                     ]),
                 }),
-                Statement::Node(crate::parser::ast::NodeStmt {
+                Statement::Node(NodeStmt {
                     id: "exit".into(),
                     attrs: Some(vec![
                         ("shape".into(), AstValue::Ident("Msquare".into())),
                         ("label".into(), AstValue::Str("Exit".into())),
                     ]),
                 }),
-                Statement::Node(crate::parser::ast::NodeStmt {
+                Statement::Node(NodeStmt {
                     id: "run_tests".into(),
                     attrs: Some(vec![("label".into(), AstValue::Str("Run Tests".into()))]),
                 }),
-                Statement::Edge(crate::parser::ast::EdgeStmt {
+                Statement::Edge(EdgeStmt {
                     nodes: vec!["start".into(), "run_tests".into(), "exit".into()],
                     attrs: None,
                 }),
@@ -390,11 +391,11 @@ mod tests {
                     ("shape".into(), AstValue::Ident("box".into())),
                     ("timeout".into(), AstValue::Str("900s".into())),
                 ]),
-                Statement::Node(crate::parser::ast::NodeStmt {
+                Statement::Node(NodeStmt {
                     id: "plan".into(),
                     attrs: Some(vec![("label".into(), AstValue::Str("Plan".into()))]),
                 }),
-                Statement::Node(crate::parser::ast::NodeStmt {
+                Statement::Node(NodeStmt {
                     id: "implement".into(),
                     attrs: Some(vec![
                         ("label".into(), AstValue::Str("Implement".into())),
@@ -429,11 +430,11 @@ mod tests {
     fn ast_to_graph_subgraph_class_derivation() {
         let dot = DotGraph {
             name: "SubgraphTest".into(),
-            statements: vec![Statement::Subgraph(crate::parser::ast::SubgraphStmt {
+            statements: vec![Statement::Subgraph(SubgraphStmt {
                 name: Some("cluster_loop".into()),
                 statements: vec![
                     Statement::GraphAttrDecl("label".into(), AstValue::Str("Loop A".into())),
-                    Statement::Node(crate::parser::ast::NodeStmt {
+                    Statement::Node(NodeStmt {
                         id: "plan".into(),
                         attrs: None,
                     }),
@@ -450,14 +451,14 @@ mod tests {
     fn ast_to_graph_subgraph_class_from_graph_attr_block() {
         let dot = DotGraph {
             name: "SubgraphAttrBlock".into(),
-            statements: vec![Statement::Subgraph(crate::parser::ast::SubgraphStmt {
+            statements: vec![Statement::Subgraph(SubgraphStmt {
                 name: Some("cluster_review".into()),
                 statements: vec![
                     Statement::GraphAttr(vec![(
                         "label".into(),
                         AstValue::Str("Code Review".into()),
                     )]),
-                    Statement::Node(crate::parser::ast::NodeStmt {
+                    Statement::Node(NodeStmt {
                         id: "reviewer".into(),
                         attrs: None,
                     }),
@@ -476,7 +477,7 @@ mod tests {
             name: "EdgeDefaults".into(),
             statements: vec![
                 Statement::EdgeDefaults(vec![("weight".into(), AstValue::Int(5))]),
-                Statement::Edge(crate::parser::ast::EdgeStmt {
+                Statement::Edge(EdgeStmt {
                     nodes: vec!["a".into(), "b".into()],
                     attrs: None,
                 }),
@@ -491,7 +492,7 @@ mod tests {
     fn ast_to_graph_chained_edges_with_attrs() {
         let dot = DotGraph {
             name: "Chained".into(),
-            statements: vec![Statement::Edge(crate::parser::ast::EdgeStmt {
+            statements: vec![Statement::Edge(EdgeStmt {
                 nodes: vec!["a".into(), "b".into(), "c".into()],
                 attrs: Some(vec![("label".into(), AstValue::Str("next".into()))]),
             })],
@@ -507,7 +508,7 @@ mod tests {
     fn ast_to_graph_class_attr_parsed() {
         let dot = DotGraph {
             name: "ClassTest".into(),
-            statements: vec![Statement::Node(crate::parser::ast::NodeStmt {
+            statements: vec![Statement::Node(NodeStmt {
                 id: "review".into(),
                 attrs: Some(vec![(
                     "class".into(),
@@ -526,7 +527,7 @@ mod tests {
     fn ast_to_graph_implicit_nodes_from_edges() {
         let dot = DotGraph {
             name: "Implicit".into(),
-            statements: vec![Statement::Edge(crate::parser::ast::EdgeStmt {
+            statements: vec![Statement::Edge(EdgeStmt {
                 nodes: vec!["a".into(), "b".into()],
                 attrs: None,
             })],
@@ -542,14 +543,14 @@ mod tests {
         let dot = DotGraph {
             name: "Legacy".into(),
             statements: vec![
-                Statement::Node(crate::parser::ast::NodeStmt {
+                Statement::Node(NodeStmt {
                     id: "classify".into(),
                     attrs: Some(vec![(
                         "codergen_mode".into(),
                         AstValue::Str("one_shot".into()),
                     )]),
                 }),
-                Statement::Node(crate::parser::ast::NodeStmt {
+                Statement::Node(NodeStmt {
                     id: "work".into(),
                     attrs: Some(vec![(
                         "codergen_mode".into(),
@@ -580,7 +581,7 @@ mod tests {
     fn codergen_mode_does_not_override_explicit_type() {
         let dot = DotGraph {
             name: "ExplicitType".into(),
-            statements: vec![Statement::Node(crate::parser::ast::NodeStmt {
+            statements: vec![Statement::Node(NodeStmt {
                 id: "gate".into(),
                 attrs: Some(vec![
                     ("type".into(), AstValue::Str("human".into())),

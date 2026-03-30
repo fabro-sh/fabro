@@ -253,6 +253,8 @@ mod tests {
     use super::*;
     use crate::event::EventEmitter;
     use crate::history::History;
+    use crate::test_support::TestProfile;
+    use crate::tool_registry::ToolRegistry;
     use crate::types::Turn;
     use fabro_llm::types::{ToolCall, ToolResult, Usage};
     use std::time::SystemTime;
@@ -330,7 +332,7 @@ mod tests {
     fn check_context_usage_below_threshold() {
         let history = History::default();
         let emitter = EventEmitter::new();
-        let profile = crate::test_support::TestProfile::new();
+        let profile = TestProfile::new();
         // Empty history, huge context window => well below threshold
         let over = check_context_usage("short", &history, &profile, 80, &emitter, "sess");
         assert!(!over);
@@ -347,10 +349,7 @@ mod tests {
         let emitter = EventEmitter::new();
         let mut rx = emitter.subscribe();
         // TestProfile has context_window=200_000 by default; use a small one
-        let profile = crate::test_support::TestProfile::with_context_window(
-            crate::tool_registry::ToolRegistry::new(),
-            100,
-        );
+        let profile = TestProfile::with_context_window(ToolRegistry::new(), 100);
         let over = check_context_usage("prompt", &history, &profile, 80, &emitter, "sess");
         assert!(over);
 

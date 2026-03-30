@@ -515,6 +515,7 @@ mod tests {
     use super::*;
     use fabro_agent::AgentEvent;
     use std::time::SystemTime;
+    use tokio::sync::broadcast;
 
     #[test]
     fn submit_retro_schema_is_valid_json() {
@@ -612,7 +613,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(parsed["outcome"], "success");
         assert!(parsed["failure_reason"].is_null());
-        assert!(parsed["timestamp"].as_str().unwrap().contains("T"));
+        assert!(parsed["timestamp"].as_str().unwrap().contains('T'));
     }
 
     #[test]
@@ -641,7 +642,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let jsonl_path = dir.path().join("retro_session.jsonl");
 
-        let (tx, rx) = tokio::sync::broadcast::channel::<SessionEvent>(16);
+        let (tx, rx) = broadcast::channel::<SessionEvent>(16);
         let handle = spawn_retro_event_writer(rx, jsonl_path.clone());
 
         tx.send(SessionEvent {

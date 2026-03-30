@@ -7,6 +7,8 @@ use anyhow::{Context, Result, bail};
 use crate::daytona::DaytonaSandbox;
 #[cfg(feature = "docker")]
 use crate::docker::{DockerSandbox, DockerSandboxConfig};
+#[cfg(feature = "exe")]
+use crate::exe::{ExeSandbox, OpensshRunner as ExeOpensshRunner};
 use crate::local::LocalSandbox;
 use crate::sandbox_record::SandboxRecord;
 #[cfg(feature = "ssh")]
@@ -60,13 +62,11 @@ pub async fn reconnect(record: &SandboxRecord) -> Result<Box<dyn crate::Sandbox>
                 .as_deref()
                 .context("Exe sandbox record missing data_host")?;
 
-            let data_ssh = crate::exe::OpensshRunner::connect(data_host)
-                .await
-                .map_err(|e| {
-                    anyhow::anyhow!("Failed to connect to exe sandbox '{data_host}': {e}")
-                })?;
+            let data_ssh = ExeOpensshRunner::connect(data_host).await.map_err(|e| {
+                anyhow::anyhow!("Failed to connect to exe sandbox '{data_host}': {e}")
+            })?;
 
-            let sandbox = crate::exe::ExeSandbox::from_existing(Box::new(data_ssh));
+            let sandbox = ExeSandbox::from_existing(Box::new(data_ssh));
             Ok(Box::new(sandbox))
         }
         #[cfg(feature = "ssh")]

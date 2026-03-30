@@ -177,21 +177,19 @@ mod tests {
             if request_path.exists() {
                 break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            time::sleep(Duration::from_millis(50)).await;
         }
         assert!(request_path.exists(), "interview_request.json should exist");
 
         // Verify the request contains valid Question JSON
-        let request_data = tokio::fs::read_to_string(&request_path).await.unwrap();
+        let request_data = fs::read_to_string(&request_path).await.unwrap();
         let parsed: Question = serde_json::from_str(&request_data).unwrap();
         assert_eq!(parsed.text, "approve?");
 
         // Write a response
         let answer = Answer::yes();
         let response_json = serde_json::to_string_pretty(&answer).unwrap();
-        tokio::fs::write(&response_path, response_json)
-            .await
-            .unwrap();
+        fs::write(&response_path, response_json).await.unwrap();
 
         // Wait for the ask to complete
         let result = ask_handle.await.unwrap();
@@ -234,7 +232,7 @@ mod tests {
             if request_path.exists() {
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            time::sleep(Duration::from_millis(50)).await;
         }
         assert!(request_path.exists());
 
@@ -242,14 +240,14 @@ mod tests {
         std::fs::write(&claim_path, "12345\n").unwrap();
 
         // Let the poll loop see the claim
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        time::sleep(Duration::from_millis(150)).await;
 
         // Simulate attacher departing (deletes claim without writing response)
         std::fs::remove_file(&claim_path).unwrap();
 
         // Should return timeout within REATTACH_WINDOW
-        let started = tokio::time::Instant::now();
-        let answer = tokio::time::timeout(Duration::from_secs(2), ask_handle)
+        let started = time::Instant::now();
+        let answer = time::timeout(Duration::from_secs(2), ask_handle)
             .await
             .expect("should complete within 2s")
             .unwrap();
@@ -279,16 +277,16 @@ mod tests {
             if request_path.exists() {
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            time::sleep(Duration::from_millis(50)).await;
         }
         assert!(request_path.exists());
 
         // Simulate attacher creating then deleting claim
         std::fs::write(&claim_path, "12345\n").unwrap();
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        time::sleep(Duration::from_millis(150)).await;
         std::fs::remove_file(&claim_path).unwrap();
 
-        let answer = tokio::time::timeout(Duration::from_secs(2), ask_handle)
+        let answer = time::timeout(Duration::from_secs(2), ask_handle)
             .await
             .expect("should complete within 2s")
             .unwrap();
@@ -316,26 +314,24 @@ mod tests {
             if request_path.exists() {
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            time::sleep(Duration::from_millis(50)).await;
         }
         assert!(request_path.exists());
 
         // First attacher creates then releases claim
         std::fs::write(&claim_path, "12345\n").unwrap();
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        time::sleep(Duration::from_millis(150)).await;
         std::fs::remove_file(&claim_path).unwrap();
 
         // Second attacher picks up and answers before reattach window expires
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        time::sleep(Duration::from_millis(50)).await;
         std::fs::write(&claim_path, "12346\n").unwrap();
 
         let answer = Answer::yes();
         let response_json = serde_json::to_string_pretty(&answer).unwrap();
-        tokio::fs::write(response_path, response_json)
-            .await
-            .unwrap();
+        fs::write(response_path, response_json).await.unwrap();
 
-        let result = tokio::time::timeout(Duration::from_secs(2), ask_handle)
+        let result = time::timeout(Duration::from_secs(2), ask_handle)
             .await
             .expect("should complete within 2s")
             .unwrap();

@@ -1805,7 +1805,7 @@ mod tests {
             branch: "security".into(),
             index: 0,
         });
-        let stage = ui.active_stages.get("fork1").unwrap();
+        let stage = &ui.active_stages["fork1"];
         assert_eq!(stage.tool_calls.len(), 1);
         assert_eq!(stage.tool_calls[0].tool_call_id, "security");
         assert!(matches!(
@@ -1820,7 +1820,7 @@ mod tests {
             duration_ms: 2000,
             status: "success".into(),
         });
-        let stage = ui.active_stages.get("fork1").unwrap();
+        let stage = &ui.active_stages["fork1"];
         assert!(matches!(
             stage.tool_calls[0].status,
             ToolCallStatus::Succeeded
@@ -1837,7 +1837,7 @@ mod tests {
             duration_ms: 3000,
             status: "success".into(),
         });
-        let stage = ui.active_stages.get("fork1").unwrap();
+        let stage = &ui.active_stages["fork1"];
         assert_eq!(stage.tool_calls.len(), 2);
 
         // Parallel completed → clears parent
@@ -1863,7 +1863,7 @@ mod tests {
             index: 0,
         });
 
-        let stage = ui.active_stages.get("fork1").unwrap();
+        let stage = &ui.active_stages["fork1"];
         let bar = &stage.tool_calls[0].bar;
         let msg = bar.message();
         assert!(
@@ -1892,7 +1892,7 @@ mod tests {
             status: "fail".into(),
         });
 
-        let stage = ui.active_stages.get("fork1").unwrap();
+        let stage = &ui.active_stages["fork1"];
         assert!(matches!(stage.tool_calls[0].status, ToolCallStatus::Failed));
     }
 
@@ -2116,7 +2116,7 @@ mod tests {
         ui.handle_json_line(branch);
 
         // Branch should have been registered as a tool_call entry on the parent
-        let parent_stage = ui.active_stages.get("fork").unwrap();
+        let parent_stage = &ui.active_stages["fork"];
         assert!(
             !parent_stage.tool_calls.is_empty(),
             "parallel branch should be registered using node_id field"

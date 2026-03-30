@@ -1,5 +1,12 @@
 //! Conformance tests: spec ↔ router ↔ Rust struct consistency.
 
+#![allow(
+    clippy::absolute_paths,
+    clippy::default_trait_access,
+    clippy::manual_assert,
+    clippy::manual_let_else
+)]
+
 use super::helpers::test_db;
 use std::collections::BTreeSet;
 

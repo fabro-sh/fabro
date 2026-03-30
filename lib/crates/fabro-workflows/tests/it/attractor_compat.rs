@@ -1,3 +1,5 @@
+#![allow(clippy::absolute_paths)]
+
 use std::path::Path;
 
 use fabro_graphviz::parser::parse;

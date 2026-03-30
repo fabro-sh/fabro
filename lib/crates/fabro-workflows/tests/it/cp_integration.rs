@@ -4,6 +4,8 @@
 //! Docker tests require a Docker daemon and are marked `#[ignore]`.
 //! Run Docker tests with: `cargo test --package arc-workflows --test cp_integration -- --ignored`
 
+#![allow(clippy::ignore_without_reason)]
+
 use fabro_sandbox::reconnect::reconnect;
 use fabro_sandbox::{SandboxRecord, SandboxRecordExt};
 

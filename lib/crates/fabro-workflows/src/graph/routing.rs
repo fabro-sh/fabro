@@ -345,7 +345,7 @@ mod tests {
                 heavy_count += 1;
             }
         }
-        let ratio = heavy_count as f64 / 500.0;
+        let ratio = f64::from(heavy_count) / 500.0;
         assert!(
             ratio > 0.90,
             "expected heavy edge to win >90% of the time, got {ratio:.2}"

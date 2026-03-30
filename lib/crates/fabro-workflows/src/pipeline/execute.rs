@@ -60,7 +60,7 @@ pub async fn execute(init: Initialized) -> Executed {
     let git_state = run_options.git.as_ref().and_then(|git| {
         let base_sha = git.base_sha.clone()?;
         Some(Arc::new(GitState {
-            run_id: run_options.run_id.clone(),
+            run_id: run_options.run_id,
             base_sha,
             run_branch: git.run_branch.clone(),
             meta_branch: git.meta_branch.clone(),

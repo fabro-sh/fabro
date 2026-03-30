@@ -309,7 +309,7 @@ mod tests {
             i_clone.ask(q).await
         });
 
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        sleep(std::time::Duration::from_millis(50)).await;
 
         let pending = interviewer.pending_questions();
         assert_eq!(pending.len(), 1);

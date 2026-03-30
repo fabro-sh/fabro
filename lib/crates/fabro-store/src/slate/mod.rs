@@ -387,7 +387,9 @@ mod tests {
         RunRecord, RunStatus, RunStatusRecord, StageStatus, StartRecord, StatusReason, fixtures,
     };
     use object_store::memory::InMemory;
+    use slatedb::config::Settings;
     use slatedb::{CloseReason, ErrorKind};
+    use tokio::time::timeout;
 
     use crate::{EventPayload, NodeVisitRef};
 
@@ -524,9 +526,9 @@ mod tests {
         include_init: bool,
     ) -> slatedb::Db {
         let db = slatedb::Db::builder(record.db_prefix.clone(), object_store)
-            .with_settings(slatedb::config::Settings {
+            .with_settings(Settings {
                 flush_interval: Some(Duration::from_millis(5)),
-                ..slatedb::config::Settings::default()
+                ..Settings::default()
             })
             .build()
             .await
@@ -813,7 +815,7 @@ mod tests {
             .await
             .unwrap();
 
-        let event = tokio::time::timeout(
+        let event = timeout(
             Duration::from_secs(2),
             futures::StreamExt::next(&mut stream),
         )
@@ -953,9 +955,9 @@ mod tests {
         let created_at = dt("2026-03-27T12:00:00Z");
         let db_prefix = catalog::db_prefix("runs/", created_at, &test_run_id("run-1"));
         let db = slatedb::Db::builder(db_prefix.clone(), object_store)
-            .with_settings(slatedb::config::Settings {
+            .with_settings(Settings {
                 flush_interval: Some(Duration::from_millis(5)),
-                ..slatedb::config::Settings::default()
+                ..Settings::default()
             })
             .build()
             .await
@@ -971,12 +973,11 @@ mod tests {
             .unwrap();
         db.close().await.unwrap();
 
-        let err = match store
+        let Err(err) = store
             .create_run(&test_run_id("run-1"), created_at, None)
             .await
-        {
-            Ok(_) => panic!("expected create_run to reject mismatched _init.json"),
-            Err(err) => err,
+        else {
+            panic!("expected create_run to reject mismatched _init.json");
         };
         assert!(matches!(
             err,

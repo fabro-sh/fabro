@@ -1,6 +1,6 @@
 use fabro_llm::provider::ProviderAdapter;
 use fabro_llm::providers::{AnthropicAdapter, GeminiAdapter, OpenAiAdapter};
-use fabro_llm::types::{Message, Request};
+use fabro_llm::types::{FinishReason, Message, Request};
 
 fn make_request(model: &str) -> Request {
     Request {
@@ -34,7 +34,7 @@ async fn anthropic_complete() {
         !response.text().is_empty(),
         "response text should not be empty"
     );
-    assert_eq!(response.finish_reason, fabro_llm::types::FinishReason::Stop);
+    assert_eq!(response.finish_reason, FinishReason::Stop);
     assert!(response.usage.input_tokens > 0);
     assert!(response.usage.output_tokens > 0);
     assert_eq!(response.provider, "anthropic");
@@ -53,7 +53,7 @@ async fn openai_complete() {
         !response.text().is_empty(),
         "response text should not be empty"
     );
-    assert_eq!(response.finish_reason, fabro_llm::types::FinishReason::Stop);
+    assert_eq!(response.finish_reason, FinishReason::Stop);
     assert!(response.usage.input_tokens > 0);
     assert!(response.usage.output_tokens > 0);
     assert_eq!(response.provider, "openai");
@@ -89,7 +89,7 @@ async fn gemini_complete() {
         !response.text().is_empty(),
         "response text should not be empty"
     );
-    assert_eq!(response.finish_reason, fabro_llm::types::FinishReason::Stop);
+    assert_eq!(response.finish_reason, FinishReason::Stop);
     assert!(response.usage.input_tokens > 0);
     assert!(response.usage.output_tokens > 0);
     assert_eq!(response.provider, "gemini");

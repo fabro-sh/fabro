@@ -1,3 +1,19 @@
+#![cfg_attr(
+    test,
+    allow(
+        clippy::absolute_paths,
+        clippy::get_unwrap,
+        clippy::large_futures,
+        clippy::needless_borrows_for_generic_args,
+        clippy::option_option,
+        clippy::ptr_as_ptr,
+        clippy::ref_as_ptr,
+        clippy::cast_ptr_alignment,
+        clippy::uninlined_format_args,
+        clippy::unnecessary_literal_bound
+    )
+)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

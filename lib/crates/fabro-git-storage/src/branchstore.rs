@@ -219,6 +219,7 @@ pub fn sharded_path(id: &str, prefix_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gitobj::FileMode;
     use git2::Repository;
 
     fn temp_repo() -> (tempfile::TempDir, Store) {
@@ -331,7 +332,7 @@ mod tests {
 
         let blob_oid = store.write_blob(b"custom content").unwrap();
         bs.write_with("custom write", |entries| {
-            entries.set("custom.txt", blob_oid, crate::gitobj::FileMode::Blob);
+            entries.set("custom.txt", blob_oid, FileMode::Blob);
             Ok(())
         })
         .unwrap();

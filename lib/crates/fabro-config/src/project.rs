@@ -413,6 +413,7 @@ pub fn resolve_fabro_root(config_path: &Path, config: &ConfigLayer) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::run::{LlmConfig, PullRequestConfig};
     use std::fs;
     use tempfile::TempDir;
 
@@ -432,13 +433,12 @@ mod tests {
     #[test]
     fn parse_retros_default_false() {
         let config = parse_project_config("version = 1\n").unwrap();
-        assert_eq!(
-            config
+        assert!(
+            !config
                 .features
                 .as_ref()
                 .and_then(|f| f.retros)
-                .unwrap_or(false),
-            false,
+                .unwrap_or(false)
         );
     }
 
@@ -464,7 +464,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             config.pull_request,
-            Some(crate::run::PullRequestConfig {
+            Some(PullRequestConfig {
                 enabled: Some(true),
                 draft: Some(false),
                 auto_merge: None,
@@ -561,7 +561,6 @@ model = "claude-sonnet-4-6"
             version: Some(1),
             fabro: Some(ProjectConfig {
                 root: Some("fabro/".to_string()),
-                ..Default::default()
             }),
             ..Default::default()
         };
@@ -578,7 +577,6 @@ model = "claude-sonnet-4-6"
             version: Some(1),
             fabro: Some(ProjectConfig {
                 root: Some(".".to_string()),
-                ..Default::default()
             }),
             ..Default::default()
         };
@@ -645,7 +643,7 @@ model = "claude-sonnet-4-6"
 
         let cli_defaults = ConfigLayer {
             verbose: Some(false),
-            llm: Some(crate::run::LlmConfig {
+            llm: Some(LlmConfig {
                 model: Some("cli-model".to_string()),
                 provider: None,
                 fallbacks: None,

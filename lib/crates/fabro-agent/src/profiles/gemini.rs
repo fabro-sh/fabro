@@ -202,8 +202,10 @@ in the project.";
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::subagent::{SessionFactory, SubAgentManager};
     use crate::test_support::MockSandbox;
     use std::sync::Arc;
+    use tokio::sync::Mutex as AsyncMutex;
 
     #[test]
     fn gemini_profile_identity() {
@@ -296,10 +298,8 @@ mod tests {
     #[test]
     fn gemini_subagent_tools_registered() {
         let mut profile = GeminiProfile::new("gemini-2.0-flash");
-        let manager = Arc::new(tokio::sync::Mutex::new(
-            crate::subagent::SubAgentManager::new(3),
-        ));
-        let factory: crate::subagent::SessionFactory = Arc::new(|| {
+        let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(3)));
+        let factory: SessionFactory = Arc::new(|| {
             panic!("should not be called");
         });
         profile.register_subagent_tools(manager, factory, 0);

@@ -274,7 +274,7 @@ impl Handler for ParallelHandler {
             let run_dir = run_dir.to_path_buf();
             let sem = Arc::clone(&semaphore);
             let has_git = git_state.is_some();
-            let run_id = git_state.as_ref().map(|gs| gs.run_id.clone());
+            let run_id = git_state.as_ref().map(|gs| gs.run_id);
             let git_author = git_state
                 .as_ref()
                 .map(|gs| gs.git_author.clone())
@@ -334,9 +334,8 @@ impl Handler for ParallelHandler {
 
                 // Checkpoint commit after branch execution (capture head_sha)
                 let head_sha = if has_git {
-                    let rid = run_id
-                        .map(|run_id| run_id.to_string())
-                        .unwrap_or_else(|| "unknown".to_string());
+                    let rid =
+                        run_id.map_or_else(|| "unknown".to_string(), |run_id| run_id.to_string());
                     let nid = &setup.target_id;
                     let status_str = outcome.status.to_string();
                     // Use exec_command to commit and capture HEAD in the branch worktree
