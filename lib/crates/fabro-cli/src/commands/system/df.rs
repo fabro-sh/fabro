@@ -30,6 +30,7 @@ pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()
     .await
 }
 
+#[allow(clippy::print_stdout)]
 async fn df_from(
     args: &DfArgs,
     store: &dyn fabro_store::Store,
@@ -170,7 +171,6 @@ async fn df_from(
         .color_choice(color_choice)
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    #[allow(clippy::print_stdout)]
     println!("{}", summary_table.display()?);
 
     println!();
@@ -225,7 +225,6 @@ async fn df_from(
         .color_choice(color_choice)
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    #[allow(clippy::print_stdout)]
     println!("{}", verbose_table.display()?);
     println!();
     println!("* = reclaimable");

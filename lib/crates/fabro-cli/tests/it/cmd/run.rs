@@ -344,8 +344,8 @@ fn dry_run_simple() {
     === Run Result ===
     Run:       [ULID]
     Status:    SUCCESS
-    Duration:  0 seconds
-    Run:       [STORAGE_DIR]/runs/20260330-dry-run-[ULID]
+    Duration:  [DURATION]
+    Run:       [DRY_RUN_DIR]
 
     === Output ===
     [Simulated] Response for stage: report
@@ -379,8 +379,8 @@ fn dry_run_branching() {
     === Run Result ===
     Run:       [ULID]
     Status:    SUCCESS
-    Duration:  0 seconds
-    Run:       [STORAGE_DIR]/runs/20260330-dry-run-[ULID]
+    Duration:  [DURATION]
+    Run:       [DRY_RUN_DIR]
 
     === Output ===
     [Simulated] Response for stage: validate
@@ -411,8 +411,8 @@ fn dry_run_conditions() {
     === Run Result ===
     Run:       [ULID]
     Status:    SUCCESS
-    Duration:  0 seconds
-    Run:       [STORAGE_DIR]/runs/20260330-dry-run-[ULID]
+    Duration:  [DURATION]
+    Run:       [DRY_RUN_DIR]
 
     === Output ===
     [Simulated] Response for stage: path_b
@@ -444,8 +444,8 @@ fn dry_run_parallel() {
     === Run Result ===
     Run:       [ULID]
     Status:    SUCCESS
-    Duration:  0 seconds
-    Run:       [STORAGE_DIR]/runs/20260330-dry-run-[ULID]
+    Duration:  [DURATION]
+    Run:       [DRY_RUN_DIR]
 
     === Output ===
     [Simulated] Response for stage: review
@@ -477,8 +477,8 @@ fn dry_run_styled() {
     === Run Result ===
     Run:       [ULID]
     Status:    SUCCESS
-    Duration:  0 seconds
-    Run:       [STORAGE_DIR]/runs/20260330-dry-run-[ULID]
+    Duration:  [DURATION]
+    Run:       [DRY_RUN_DIR]
 
     === Output ===
     [Simulated] Response for stage: critical_review
@@ -508,8 +508,8 @@ fn dry_run_legacy_tool() {
     === Run Result ===
     Run:       [ULID]
     Status:    SUCCESS
-    Duration:  0 seconds
-    Run:       [STORAGE_DIR]/runs/20260330-dry-run-[ULID]
+    Duration:  [DURATION]
+    Run:       [DRY_RUN_DIR]
     ");
 }
 

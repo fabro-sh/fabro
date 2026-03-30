@@ -178,10 +178,7 @@ fn print_models_table(models: &[Model], s: &Styles) {
         .color_choice(color_choice(use_color))
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    #[allow(clippy::print_stdout)]
-    {
-        println!("{}", table.display().unwrap());
-    }
+    println!("{}", table.display().unwrap());
 }
 
 fn read_stdin_prompt() -> Option<String> {
@@ -1000,7 +997,6 @@ async fn test_models_via_server(
         .color_choice(color_choice(use_color))
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    #[allow(clippy::print_stdout)]
     println!("{}", table.display()?);
 
     if failures > 0 {
@@ -1172,7 +1168,6 @@ async fn test_models(
         .color_choice(color_choice(use_color))
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    #[allow(clippy::print_stdout)]
     println!("{}", table.display()?);
 
     if failures > 0 {

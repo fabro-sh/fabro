@@ -18,6 +18,7 @@ use crate::user_config::load_user_settings_with_globals;
 
 use super::short_run_id;
 
+#[allow(clippy::print_stdout)]
 pub(crate) async fn list_command(
     args: &RunsListArgs,
     styles: &Styles,
@@ -123,7 +124,6 @@ pub(crate) async fn list_command(
         .color_choice(color_choice)
         .border(Border::builder().build())
         .separator(Separator::builder().build());
-    #[allow(clippy::print_stdout)]
     println!("{}", table.display()?);
 
     eprintln!("\n{} run(s) listed.", display_runs.len());

@@ -10,6 +10,15 @@ static INSTA_FILTERS: &[(&str, &str)] = &[
     (r"\([0-9a-f]{7} \d{4}-\d{2}-\d{2}\)", "([BUILD])"),
     (r"\b[0-9A-HJKMNP-TV-Z]{26}\b", "[ULID]"),
     (r"in \d+(\.\d+)?(ms|s)", "in [TIME]"),
+    (
+        r"\[STORAGE_DIR\]/runs/\d{8}-dry-run-\[ULID\]",
+        "[DRY_RUN_DIR]",
+    ),
+    (
+        r"Duration:\s+\d+\s+(seconds?|minutes?|hours?)",
+        "Duration:  [DURATION]",
+    ),
+    (r"Base: [^\n]+ \([0-9a-f]{7,40}\)", "Base: [BASE]"),
     (r"\\([\w\d])", "/$1"),
 ];
 
@@ -70,11 +79,12 @@ impl TestContext {
 
     /// Returns the combined static + context-specific filters.
     pub fn filters(&self) -> Vec<(String, String)> {
-        let mut filters: Vec<(String, String)> = INSTA_FILTERS
-            .iter()
-            .map(|(pat, rep)| ((*pat).to_string(), (*rep).to_string()))
-            .collect();
-        filters.extend(self.filters.clone());
+        let mut filters = self.filters.clone();
+        filters.extend(
+            INSTA_FILTERS
+                .iter()
+                .map(|(pat, rep)| ((*pat).to_string(), (*rep).to_string())),
+        );
         filters
     }
 
