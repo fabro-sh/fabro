@@ -29,10 +29,8 @@ Which source files affect which doc pages. Use this as guidance — also apply j
 | `lib/crates/fabro-agent/src/subagent.rs` | `docs/agents/subagents.mdx` |
 | `lib/crates/fabro-agent/src/mcp_integration.rs` | `docs/agents/mcp.mdx` |
 | `lib/crates/fabro-llm/src/catalog.rs`, `lib/crates/fabro-llm/src/providers/*.rs` | `docs/core-concepts/models.mdx` |
-| `lib/crates/fabro-exe/src/*.rs` | `docs/integrations/exe-dev.mdx`, `docs/execution/environments.mdx` |
 | `lib/crates/fabro-devcontainer/src/*.rs` | `docs/execution/devcontainers.mdx` |
 | `lib/crates/fabro-slack/src/*.rs` | `docs/integrations/slack.mdx` |
-| `lib/crates/fabro-sprites/src/*.rs` | `docs/integrations/sprites.mdx` |
 | `lib/crates/fabro-mcp/src/*.rs` | `docs/agents/mcp.mdx` |
 | `lib/crates/fabro-api/src/*.rs` | `docs/api-reference/overview.mdx`, `docs/api-reference/demo-mode.mdx` |
 | `lib/crates/fabro-api/src/server_config.rs` | `docs/administration/server-configuration.mdx` |

@@ -16,9 +16,6 @@ pub mod local;
 #[cfg(feature = "docker")]
 pub mod docker;
 
-#[cfg(feature = "sprites")]
-pub mod sprites;
-
 #[cfg(feature = "daytona")]
 pub mod daytona;
 

@@ -74,9 +74,6 @@ Node handlers execute tools (bash commands, file edits) inside a **sandbox**. Fa
 | `local` | Tools run directly on the host machine (default) |
 | `docker` | Tools run inside a Docker container |
 | `daytona` | Tools run in a cloud VM with SSH access |
-| `ssh` | Tools run on any existing SSH host |
-| `exe` | Tools run in a fast ephemeral VM from [exe.dev](https://exe.dev) |
-| `sprites` | Tools run in a persistent VM from [Sprites](https://sprites.dev) |
 
 The sandbox is configured per-run via CLI flags (`--sandbox docker`) or the run config TOML. See [Environments](/execution/environments) for details on each provider.
 

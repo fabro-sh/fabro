@@ -94,7 +94,6 @@
               "integrations/github",
               "integrations/daytona",
               "integrations/slack",
-              "integrations/sprites",
               "integrations/brave-search"
             ]
           },

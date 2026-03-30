@@ -18,11 +18,11 @@ fabro llm chat --server-url http://localhost:3000
 
 Fabro now supports three sandbox environments for running agent stages. In addition to Daytona, you can now use **exe.dev** VMs or **Sprites** (powered by Fly.io).
 
-exe.dev (beta) manages ephemeral VMs through SSH with separate management and data plane connections. Sprites uses the `sprite` CLI to provision Fly.io VMs with full sandbox lifecycle support.
+Daytona provides cloud sandbox VMs with full lifecycle support.
 
 ```toml title="run.toml"
 [execution]
-environment = "exe"    # or "sprites" or "daytona"
+environment = "daytona"
 ```
 
 ## Sandbox environment variables

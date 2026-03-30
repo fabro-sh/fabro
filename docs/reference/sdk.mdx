@@ -155,7 +155,7 @@ pub trait Sandbox: Send + Sync {
 | `DockerSandbox` | Runs inside a Docker container (feature-gated: `docker`). |
 | `ReadBeforeWriteSandbox` | Decorator that blocks writes to files the agent hasn't read. Wraps any `Arc<dyn Sandbox>`. |
 
-External crates provide additional implementations: `ExeSandbox` (SSH-based) in `fabro-exe`, and `SpritesSandbox` in `fabro-sprites`.
+The `DaytonaSandbox` implementation (feature-gated: `daytona`) runs inside a Daytona cloud sandbox.
 
 ### Provider profiles
 

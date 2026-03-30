@@ -501,8 +501,8 @@ pub trait Sandbox: Send + Sync {
 }
 
 /// Resolve a path: relative paths are prepended with the working directory.
-/// Used by feature-gated sandbox implementations (exe, ssh, sprites, daytona).
-#[cfg(any(feature = "sprites", feature = "daytona"))]
+/// Used by the Daytona sandbox implementation.
+#[cfg(feature = "daytona")]
 pub(crate) fn resolve_path(path: &str, working_dir: &str) -> String {
     if std::path::Path::new(path).is_absolute() {
         path.to_string()
