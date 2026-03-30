@@ -104,125 +104,125 @@ fn dry_run_writes_jsonl_and_live_json() {
     fabro_json_snapshot!(context, &progress_summary, @r#"
     [
       {
-        "event": "Sandbox.Initializing",
-        "sandbox_provider": "local"
+        "event": "sandbox.initializing",
+        "provider": "local"
       },
       {
-        "event": "Sandbox.Ready",
-        "sandbox_provider": "local"
+        "event": "sandbox.ready",
+        "provider": "local"
       },
       {
-        "event": "SandboxInitialized"
+        "event": "sandbox.initialized"
       },
       {
-        "event": "WorkflowRunStarted",
-        "workflow_name": "Simple",
+        "event": "run.started",
+        "name": "Simple",
         "goal": "Run tests and report results"
       },
       {
-        "event": "StageStarted",
+        "event": "stage.started",
         "node_id": "start",
         "node_label": "Start",
         "handler_type": "start",
-        "stage_index": 0
+        "index": 0
       },
       {
-        "event": "StageCompleted",
+        "event": "stage.completed",
         "node_id": "start",
         "node_label": "Start",
-        "stage_index": 0,
+        "index": 0,
         "status": "success"
       },
       {
-        "event": "EdgeSelected",
-        "from_node_id": "start",
-        "to_node_id": "run_tests",
+        "event": "edge.selected",
+        "from_node": "start",
+        "to_node": "run_tests",
         "reason": "unconditional"
       },
       {
-        "event": "CheckpointCompleted",
+        "event": "checkpoint.completed",
         "node_id": "start",
         "node_label": "start",
         "status": "success"
       },
       {
-        "event": "StageStarted",
+        "event": "stage.started",
         "node_id": "run_tests",
         "node_label": "Run Tests",
         "handler_type": "agent",
-        "stage_index": 1
+        "index": 1
       },
       {
-        "event": "StageCompleted",
+        "event": "stage.completed",
         "node_id": "run_tests",
         "node_label": "Run Tests",
-        "stage_index": 1,
+        "index": 1,
         "status": "success"
       },
       {
-        "event": "EdgeSelected",
-        "from_node_id": "run_tests",
-        "to_node_id": "report",
+        "event": "edge.selected",
+        "from_node": "run_tests",
+        "to_node": "report",
         "reason": "unconditional"
       },
       {
-        "event": "CheckpointCompleted",
+        "event": "checkpoint.completed",
         "node_id": "run_tests",
         "node_label": "run_tests",
         "status": "success"
       },
       {
-        "event": "StageStarted",
+        "event": "stage.started",
         "node_id": "report",
         "node_label": "Report",
         "handler_type": "agent",
-        "stage_index": 2
+        "index": 2
       },
       {
-        "event": "StageCompleted",
+        "event": "stage.completed",
         "node_id": "report",
         "node_label": "Report",
-        "stage_index": 2,
+        "index": 2,
         "status": "success"
       },
       {
-        "event": "EdgeSelected",
-        "from_node_id": "report",
-        "to_node_id": "exit",
+        "event": "edge.selected",
+        "from_node": "report",
+        "to_node": "exit",
         "reason": "unconditional"
       },
       {
-        "event": "CheckpointCompleted",
+        "event": "checkpoint.completed",
         "node_id": "report",
         "node_label": "report",
         "status": "success"
       },
       {
-        "event": "StageStarted",
+        "event": "stage.started",
         "node_id": "exit",
         "node_label": "Exit",
         "handler_type": "exit",
-        "stage_index": 3
+        "index": 3
       },
       {
-        "event": "StageCompleted",
+        "event": "stage.completed",
         "node_id": "exit",
         "node_label": "Exit",
-        "stage_index": 3,
+        "index": 3,
         "status": "success"
       },
       {
-        "event": "WorkflowRunCompleted",
+        "event": "run.completed",
         "status": "success",
         "artifact_count": 0
       },
       {
-        "event": "Sandbox.CleanupStarted",
-        "sandbox_provider": "local"
+        "event": "sandbox.cleanup.started",
+        "provider": "local"
       },
       {
-        "event": "Sandbox.CleanupCompleted",
-        "sandbox_provider": "local"
+        "event": "sandbox.cleanup.completed",
+        "provider": "local"
       }
     ]
     "#);
@@ -232,8 +232,8 @@ fn dry_run_writes_jsonl_and_live_json() {
     let live_summary = compact_progress_event(&live_content);
     fabro_json_snapshot!(context, &live_summary, @r#"
     {
-      "event": "Sandbox.CleanupCompleted",
-      "sandbox_provider": "local"
+      "event": "sandbox.cleanup.completed",
+      "provider": "local"
     }
     "#);
 

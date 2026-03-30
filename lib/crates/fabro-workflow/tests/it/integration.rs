@@ -12448,11 +12448,11 @@ async fn e2e_stall_watchdog_triggers_from_dot_parsed_pipeline() {
         "expected error to contain 'stall watchdog', got: {err}"
     );
 
-    // Verify StallWatchdogTimeout event was emitted
+    // Verify the canonical watchdog timeout envelope was emitted.
     let collected = events.lock().unwrap();
     assert!(
-        collected.iter().any(|e| e.contains("StallWatchdogTimeout")),
-        "expected StallWatchdogTimeout event in: {collected:?}"
+        collected.iter().any(|e| e.contains("watchdog.timeout")),
+        "expected watchdog.timeout event in: {collected:?}"
     );
 }
 

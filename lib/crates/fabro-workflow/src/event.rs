@@ -1326,6 +1326,11 @@ impl EventEmitter {
         }
     }
 
+    #[must_use]
+    pub fn run_id(&self) -> RunId {
+        self.run_id
+    }
+
     pub fn on_event(&self, listener: impl Fn(&RunEventEnvelope) + Send + Sync + 'static) {
         self.listeners
             .lock()
@@ -1343,6 +1348,11 @@ impl EventEmitter {
             );
         }
         let envelope = canonicalize_event(&self.run_id, event);
+        self.dispatch_envelope(&envelope);
+    }
+
+    pub(crate) fn dispatch_envelope(&self, envelope: &RunEventEnvelope) {
+        self.last_event_at.store(epoch_millis(), Ordering::Relaxed);
         // Clone the listener list so we don't hold the lock during dispatch.
         // This prevents deadlocks if a listener calls emit() reentrantly.
         // Note: listeners added during this emit() won't receive the current event.
@@ -1538,7 +1548,7 @@ mod tests {
         );
 
         assert_eq!(envelope.event, "run.failed");
-        assert_eq!(envelope.properties["error"], "boom");
+        assert_eq!(envelope.properties["error"], "Handler error: boom");
         assert_eq!(envelope.properties["duration_ms"], 900);
     }
 

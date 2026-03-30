@@ -496,6 +496,7 @@ mod tests {
     fn event_payload(run_id: &str, ts: &str, event: &str) -> EventPayload {
         EventPayload::new(
             serde_json::json!({
+                "id": format!("evt-{run_id}-{event}"),
                 "ts": ts,
                 "run_id": test_run_id(run_id).to_string(),
                 "event": event

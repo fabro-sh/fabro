@@ -570,9 +570,11 @@ mod tests {
     #[test]
     fn parse_edge_selected() {
         let fields = json_map(serde_json::json!({
-            "from_node_id": "a",
-            "to_node_id": "b",
-            "label": "yes"
+            "properties": {
+                "from_node": "a",
+                "to_node": "b",
+                "label": "yes"
+            }
         }));
 
         let event = from_envelope_fields("edge.selected", &fields).unwrap();
