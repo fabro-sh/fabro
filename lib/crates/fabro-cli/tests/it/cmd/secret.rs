@@ -104,25 +104,29 @@ fn test_secret_list_alias_ls() {
 #[test]
 fn test_secret_get_missing_key() {
     let context = test_context!();
-
-    context
-        .secret()
-        .args(["get", "NOPE"])
-        .assert()
-        .failure()
-        .stderr(predicates::str::contains("secret not found"));
+    let mut cmd = context.secret();
+    cmd.args(["get", "NOPE"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: secret not found: NOPE
+    ");
 }
 
 #[test]
 fn test_secret_rm_missing_key() {
     let context = test_context!();
-
-    context
-        .secret()
-        .args(["rm", "NOPE"])
-        .assert()
-        .failure()
-        .stderr(predicates::str::contains("secret not found"));
+    let mut cmd = context.secret();
+    cmd.args(["rm", "NOPE"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: secret not found: NOPE
+    ");
 }
 
 #[test]

@@ -1,5 +1,4 @@
 use fabro_test::{fabro_snapshot, test_context};
-use predicates::prelude::*;
 
 #[test]
 fn invalid_permissions() {
@@ -43,9 +42,13 @@ fn exec_missing_api_key_exits_with_error() {
     cmd.env_clear();
     cmd.env("HOME", &context.home_dir);
     cmd.current_dir(&context.temp_dir);
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("API key not set"));
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: API key not set for provider 'anthropic'
+    ");
 }
 
 #[test]

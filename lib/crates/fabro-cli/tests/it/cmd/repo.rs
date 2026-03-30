@@ -1,5 +1,4 @@
 use fabro_test::{fabro_snapshot, test_context};
-use predicates;
 
 fn init_git_repo(path: &std::path::Path) {
     std::process::Command::new("git")
@@ -76,13 +75,16 @@ fn test_repo_deinit_fails_when_not_initialized() {
     let context = test_context!();
     init_git_repo(&context.temp_dir);
 
-    context
-        .repo()
-        .arg("deinit")
-        .current_dir(&context.temp_dir)
-        .assert()
-        .failure()
-        .stderr(predicates::str::contains("not initialized"));
+    let mut cmd = context.repo();
+    cmd.arg("deinit");
+    cmd.current_dir(&context.temp_dir);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: not initialized — fabro.toml not found
+    ");
 }
 
 #[test]
@@ -111,10 +113,23 @@ fn test_repo_init_skill_installs_skill_files() {
 #[test]
 fn test_repo_init_help_does_not_show_skill() {
     let context = test_context!();
-    let out = context.repo().args(["init", "--help"]).assert().success();
-    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
-    assert!(
-        !stdout.contains("--skill"),
-        "--skill should be hidden from help"
-    );
+    let mut cmd = context.repo();
+    cmd.args(["init", "--help"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    Initialize a new project
+
+    Usage: fabro repo init [OPTIONS]
+
+    Options:
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
+          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+      -h, --help                       Print help
+    ----- stderr -----
+    ");
 }

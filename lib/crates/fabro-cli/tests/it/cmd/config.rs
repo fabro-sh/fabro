@@ -505,13 +505,16 @@ fn config_show_missing_run_config_errors() {
     let context = test_context!();
     let project = setup_config_show_fixture(&context);
 
-    context
-        .command()
-        .current_dir(project.path())
-        .args(["config", "show", "missing.toml"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Workflow not found"));
+    let mut cmd = context.command();
+    cmd.current_dir(project.path());
+    cmd.args(["config", "show", "missing.toml"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: Workflow not found: missing.toml
+    ");
 }
 
 #[test]
