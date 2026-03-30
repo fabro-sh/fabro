@@ -99,12 +99,10 @@ impl ProgressUI {
                 base_sha,
             } => {
                 if let Some(worktree_dir) = worktree_dir {
-                    self.info
-                        .show_worktree(renderer, std::path::Path::new(&worktree_dir));
+                    InfoDisplay::show_worktree(renderer, std::path::Path::new(&worktree_dir));
                 }
                 if let Some(base_sha) = base_sha {
-                    self.info
-                        .show_base_info(renderer, base_branch.as_deref(), &base_sha);
+                    InfoDisplay::show_base_info(renderer, base_branch.as_deref(), &base_sha);
                 }
             }
             ProgressEvent::WorkingDirectorySet { working_directory } => {
@@ -132,7 +130,7 @@ impl ProgressUI {
                 );
             }
             ProgressEvent::SshAccessReady { ssh_command } => {
-                self.setup.on_ssh_access_ready(renderer, &ssh_command);
+                SetupDisplay::on_ssh_access_ready(renderer, &ssh_command);
             }
             ProgressEvent::SetupStarted { command_count } => {
                 self.setup.on_setup_started(renderer, command_count);
@@ -178,7 +176,7 @@ impl ProgressUI {
                 lifecycle_command_count,
                 workspace_folder,
             } => {
-                self.setup.on_devcontainer_resolved(
+                SetupDisplay::on_devcontainer_resolved(
                     renderer,
                     dockerfile_lines,
                     environment_count,
@@ -291,6 +289,7 @@ impl ProgressUI {
                 tool_name,
                 tool_call_id,
                 arguments,
+                timestamp,
             } => {
                 self.stage.on_tool_call_started(
                     renderer,
@@ -298,18 +297,23 @@ impl ProgressUI {
                     &tool_name,
                     &tool_call_id,
                     &arguments,
+                    timestamp,
                 );
             }
             ProgressEvent::ToolCallCompleted {
                 stage_node_id,
                 tool_call_id,
                 is_error,
+                duration_ms,
+                timestamp,
             } => {
                 self.stage.on_tool_call_completed(
                     renderer,
                     &stage_node_id,
                     &tool_call_id,
                     is_error,
+                    duration_ms,
+                    timestamp,
                 );
             }
             ProgressEvent::ContextWindowWarning {
@@ -405,13 +409,13 @@ impl ProgressUI {
                 code,
                 message,
             } => {
-                self.info.on_run_notice(renderer, level, &code, &message);
+                InfoDisplay::on_run_notice(renderer, level, &code, &message);
             }
             ProgressEvent::PullRequestCreated { pr_url, draft } => {
-                self.info.on_pull_request_created(renderer, &pr_url, draft);
+                InfoDisplay::on_pull_request_created(renderer, &pr_url, draft);
             }
             ProgressEvent::PullRequestFailed { error } => {
-                self.info.on_pull_request_failed(renderer, &error);
+                InfoDisplay::on_pull_request_failed(renderer, &error);
             }
         }
     }
@@ -961,5 +965,47 @@ mod tests {
             Draft PR: https://github.com/fabro-sh/fabro/pull/42
             PR failed: auth token expired
         ");
+    }
+
+    #[test]
+    fn tty_parallel_branch_completion_uses_recorded_duration() {
+        let mut ui = ProgressUI::new(true, false);
+
+        ui.handle_event(&stage_started("fork1", "Fork"));
+        ui.handle_event(&WorkflowRunEvent::ParallelStarted {
+            branch_count: 1,
+            join_policy: "wait_all".into(),
+        });
+        ui.handle_event(&WorkflowRunEvent::ParallelBranchStarted {
+            branch: "security".into(),
+            index: 0,
+        });
+        ui.handle_event(&WorkflowRunEvent::ParallelBranchCompleted {
+            branch: "security".into(),
+            index: 0,
+            duration_ms: 500,
+            status: "success".into(),
+        });
+
+        let stage = &ui.stage.active_stages["fork1"];
+        assert_eq!(stage.tool_calls[0].bar.prefix(), "500ms");
+    }
+
+    #[test]
+    fn tty_tool_call_completion_uses_jsonl_timestamps() {
+        let mut ui = ProgressUI::new(true, false);
+
+        ui.handle_json_line(
+            r#"{"ts":"2026-03-30T12:00:00.000Z","event":"StageStarted","node_id":"code","node_label":"Code"}"#,
+        );
+        ui.handle_json_line(
+            r#"{"ts":"2026-03-30T12:00:00.000Z","event":"Agent.ToolCallStarted","node_id":"code","tool_name":"read_file","tool_call_id":"tc1","arguments":{"path":"src/main.rs"}}"#,
+        );
+        ui.handle_json_line(
+            r#"{"ts":"2026-03-30T12:00:00.500Z","event":"Agent.ToolCallCompleted","node_id":"code","tool_call_id":"tc1","is_error":false}"#,
+        );
+
+        let stage = &ui.stage.active_stages["code"];
+        assert_eq!(stage.tool_calls[0].bar.prefix(), "500ms");
     }
 }

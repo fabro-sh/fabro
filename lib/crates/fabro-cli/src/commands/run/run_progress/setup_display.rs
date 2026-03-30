@@ -99,7 +99,7 @@ impl SetupDisplay {
         }
     }
 
-    pub(super) fn on_ssh_access_ready(&self, renderer: &ProgressRenderer, ssh_command: &str) {
+    pub(super) fn on_ssh_access_ready(renderer: &ProgressRenderer, ssh_command: &str) {
         if renderer.is_tty() {
             let bar = renderer.add_spinner();
             bar.set_style(styles::style_sandbox_detail());
@@ -240,7 +240,6 @@ impl SetupDisplay {
     }
 
     pub(super) fn on_devcontainer_resolved(
-        &self,
         renderer: &ProgressRenderer,
         dockerfile_lines: u64,
         environment_count: u64,

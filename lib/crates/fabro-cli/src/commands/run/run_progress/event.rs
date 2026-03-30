@@ -1,5 +1,6 @@
 use std::convert::TryFrom;
 
+use chrono::{DateTime, Utc};
 use fabro_workflow::event::RunNoticeLevel;
 use fabro_workflow::outcome::{StageUsage, compute_stage_cost};
 use serde_json::{Map, Value};
@@ -167,11 +168,14 @@ pub(super) enum ProgressEvent {
         tool_name: String,
         tool_call_id: String,
         arguments: Value,
+        timestamp: Option<DateTime<Utc>>,
     },
     ToolCallCompleted {
         stage_node_id: String,
         tool_call_id: String,
         is_error: bool,
+        duration_ms: Option<u64>,
+        timestamp: Option<DateTime<Utc>>,
     },
     ContextWindowWarning {
         stage_node_id: String,
@@ -235,6 +239,7 @@ pub(super) enum ProgressEvent {
     },
 }
 
+#[allow(clippy::needless_pass_by_value)]
 pub(super) fn from_flattened_fields(
     event_name: &str,
     fields: Map<String, Value>,
@@ -381,6 +386,7 @@ pub(super) fn from_flattened_fields(
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| Value::Object(Map::new())),
+            timestamp: timestamp_field(&fields, "ts"),
         }),
         "Agent.ToolCallCompleted" => Some(ProgressEvent::ToolCallCompleted {
             stage_node_id: string_field(&fields, "node_id")
@@ -388,6 +394,8 @@ pub(super) fn from_flattened_fields(
                 .unwrap_or_else(|| "?".to_string()),
             tool_call_id: string_field(&fields, "tool_call_id").unwrap_or_else(|| "?".to_string()),
             is_error: bool_field(&fields, "is_error"),
+            duration_ms: optional_u64_field(&fields, "duration_ms"),
+            timestamp: timestamp_field(&fields, "ts"),
         }),
         "Agent.Warning" if string_field(&fields, "kind").as_deref() == Some("context_window") => {
             let usage_percent = fields
@@ -532,6 +540,10 @@ fn u64_field(fields: &Map<String, Value>, key: &str) -> u64 {
     fields.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
+fn optional_u64_field(fields: &Map<String, Value>, key: &str) -> Option<u64> {
+    fields.get(key).and_then(Value::as_u64)
+}
+
 fn i64_field(fields: &Map<String, Value>, key: &str) -> i64 {
     fields.get(key).and_then(Value::as_i64).unwrap_or(0)
 }
@@ -542,6 +554,13 @@ fn f64_field(fields: &Map<String, Value>, key: &str) -> Option<f64> {
 
 fn bool_field(fields: &Map<String, Value>, key: &str) -> bool {
     fields.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn timestamp_field(fields: &Map<String, Value>, key: &str) -> Option<DateTime<Utc>> {
+    let value = fields.get(key)?.as_str()?;
+    DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|timestamp| timestamp.with_timezone(&Utc))
 }
 
 #[cfg(test)]
@@ -628,6 +647,47 @@ mod tests {
                 tool_call_id,
                 ..
             } if stage_node_id == "code" && tool_name == "read_file" && tool_call_id == "tc1"
+        ));
+    }
+
+    #[test]
+    fn parse_tool_call_timestamps_from_jsonl_envelope() {
+        let started_fields = json_map(serde_json::json!({
+            "ts": "2026-03-30T12:00:00.000Z",
+            "node_id": "code",
+            "tool_name": "read_file",
+            "tool_call_id": "tc1",
+            "arguments": {"path": "src/main.rs"}
+        }));
+        let completed_fields = json_map(serde_json::json!({
+            "ts": "2026-03-30T12:00:00.500Z",
+            "node_id": "code",
+            "tool_call_id": "tc1",
+            "is_error": false,
+            "duration_ms": 500
+        }));
+
+        let started = from_flattened_fields("Agent.ToolCallStarted", started_fields).unwrap();
+        let completed = from_flattened_fields("Agent.ToolCallCompleted", completed_fields).unwrap();
+
+        assert!(matches!(
+            started,
+            ProgressEvent::ToolCallStarted {
+                timestamp: Some(timestamp),
+                ..
+            } if timestamp == DateTime::parse_from_rfc3339("2026-03-30T12:00:00.000Z")
+                .unwrap()
+                .with_timezone(&Utc)
+        ));
+        assert!(matches!(
+            completed,
+            ProgressEvent::ToolCallCompleted {
+                duration_ms: Some(500),
+                timestamp: Some(timestamp),
+                ..
+            } if timestamp == DateTime::parse_from_rfc3339("2026-03-30T12:00:00.500Z")
+                .unwrap()
+                .with_timezone(&Utc)
         ));
     }
 

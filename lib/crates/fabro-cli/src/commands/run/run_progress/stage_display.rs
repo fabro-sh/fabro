@@ -2,6 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::convert::TryFrom;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use indicatif::ProgressBar;
 
 use fabro_workflow::outcome::{StageStatus, format_cost};
@@ -27,6 +28,7 @@ pub(super) struct ToolCallEntry {
     pub(super) status: ToolCallStatus,
     pub(super) bar: ProgressBar,
     pub(super) is_branch: bool,
+    pub(super) started_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug)]
@@ -137,10 +139,10 @@ impl StageDisplay {
         status: &str,
         usage: Option<&ProgressUsage>,
     ) {
-        let succeeded = status
-            .parse::<StageStatus>()
-            .map(|status| matches!(status, StageStatus::Success | StageStatus::PartialSuccess))
-            .unwrap_or_else(|_| matches!(status, "success" | "partial_success"));
+        let succeeded = status.parse::<StageStatus>().map_or_else(
+            |_| matches!(status, "success" | "partial_success"),
+            |status| matches!(status, StageStatus::Success | StageStatus::PartialSuccess),
+        );
         let cost_str = usage
             .and_then(ProgressUsage::display_cost)
             .map(|cost| format!("{}   ", format_cost(cost)))
@@ -190,7 +192,7 @@ impl StageDisplay {
             "",
         );
         let summary = styles::last_line_truncated(error, 120);
-        self.insert_global_info_line(
+        Self::insert_global_info_line(
             renderer,
             &format!("{} {summary}", renderer.styles().red.apply_to("Error:")),
         );
@@ -232,6 +234,7 @@ impl StageDisplay {
             status: ToolCallStatus::Running,
             bar,
             is_branch: true,
+            started_at: None,
         });
     }
 
@@ -271,9 +274,7 @@ impl StageDisplay {
 
         if renderer.is_tty() {
             entry.bar.set_style(styles::style_branch_done());
-            entry
-                .bar
-                .set_prefix(styles::format_duration_short(entry.bar.elapsed()));
+            set_duration_prefix(&entry.bar, Some(duration_ms));
             entry
                 .bar
                 .finish_with_message(format!("{glyph} {}", entry.display_name));
@@ -312,6 +313,7 @@ impl StageDisplay {
         tool_name: &str,
         tool_call_id: &str,
         arguments: &serde_json::Value,
+        timestamp: Option<DateTime<Utc>>,
     ) {
         let display_name = self.tool_display_name(renderer, tool_name, arguments);
         let Some(stage) = self.active_stages.get_mut(stage_node_id) else {
@@ -341,6 +343,7 @@ impl StageDisplay {
             status: ToolCallStatus::Running,
             bar,
             is_branch: false,
+            started_at: timestamp,
         });
     }
 
@@ -350,6 +353,8 @@ impl StageDisplay {
         stage_node_id: &str,
         tool_call_id: &str,
         is_error: bool,
+        duration_ms: Option<u64>,
+        timestamp: Option<DateTime<Utc>>,
     ) {
         if let Some(counts) = self.stage_counts.get_mut(stage_node_id) {
             counts.1 += 1;
@@ -378,9 +383,20 @@ impl StageDisplay {
         };
         if renderer.is_tty() {
             entry.bar.set_style(styles::style_tool_done());
-            entry
-                .bar
-                .set_prefix(styles::format_duration_short(entry.bar.elapsed()));
+            let computed_duration_ms = duration_ms.or_else(|| {
+                entry
+                    .started_at
+                    .zip(timestamp)
+                    .and_then(|(started_at, completed_at)| {
+                        u64::try_from(
+                            completed_at
+                                .signed_duration_since(started_at)
+                                .num_milliseconds(),
+                        )
+                        .ok()
+                    })
+            });
+            set_duration_prefix(&entry.bar, computed_duration_ms);
             entry
                 .bar
                 .finish_with_message(format!("{glyph} {}", entry.display_name));
@@ -564,7 +580,7 @@ impl StageDisplay {
     ) {
         let Some(stage) = self.active_stages.remove(node_id) else {
             if !renderer.is_tty() {
-                self.print_plain_stage_completion(renderer, name, glyph, prefix);
+                Self::print_plain_stage_completion(renderer, name, glyph, prefix);
             }
             return;
         };
@@ -587,12 +603,11 @@ impl StageDisplay {
                 .spinner
                 .finish_with_message(format!("{glyph} {}", stage.display_name));
         } else {
-            self.print_plain_stage_completion(renderer, name, glyph, prefix);
+            Self::print_plain_stage_completion(renderer, name, glyph, prefix);
         }
     }
 
     fn print_plain_stage_completion(
-        &self,
         renderer: &ProgressRenderer,
         name: &str,
         glyph: &str,
@@ -605,7 +620,7 @@ impl StageDisplay {
         }
     }
 
-    fn insert_global_info_line(&self, renderer: &ProgressRenderer, message: &str) {
+    fn insert_global_info_line(renderer: &ProgressRenderer, message: &str) {
         if renderer.is_tty() {
             let bar = renderer.add_spinner();
             bar.set_style(styles::style_static_dim());
@@ -695,5 +710,34 @@ impl StageDisplay {
             ),
             None => tool_name.to_string(),
         }
+    }
+}
+
+fn set_duration_prefix(bar: &ProgressBar, duration_ms: Option<u64>) {
+    let prefix = duration_ms.map_or_else(
+        || styles::format_duration_short(bar.elapsed()),
+        |duration_ms| styles::format_duration_short(Duration::from_millis(duration_ms)),
+    );
+    bar.set_prefix(prefix);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::run::run_progress::renderer::ProgressRenderer;
+
+    #[test]
+    fn tool_display_name_shortens_paths_relative_to_working_directory() {
+        let renderer = ProgressRenderer::new_plain(Box::new(std::io::sink()), false);
+        let mut stage = StageDisplay::new(false);
+        stage.set_working_directory("/workspace".into());
+
+        let display_name = stage.tool_display_name(
+            &renderer,
+            "read_file",
+            &serde_json::json!({"file_path": "/workspace/src/main.rs"}),
+        );
+
+        assert_eq!(display_name, "read_file(src/main.rs)");
     }
 }
