@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `cd apps/marketing && bunx vercel --prod` — deploy to Vercel (project: website, domain: fabro.sh)
 
 ### Dev servers
-1. `fabro serve` — starts the Rust API server (demo mode is per-request via `X-Fabro-Demo: 1` header)
+1. `fabro server start` — starts the Rust API server (demo mode is per-request via `X-Fabro-Demo: 1` header)
 2. `cd apps/fabro-web && bun run dev` — starts the React dev server
 3. Mintlify docs dev server (requires Docker — `mintlify dev` needs Node LTS which may not match the host):
    ```
@@ -50,7 +50,7 @@ The OpenAPI spec at `docs/api-reference/fabro-api.yaml` is the source of truth f
 Fabro is an AI-powered workflow orchestration platform. Workflows are defined as Graphviz graphs, where each node is a stage (agent, prompt, command, conditional, human, parallel, etc.) executed by the workflow engine.
 
 ### Rust crates (`lib/crates/`)
-- **fabro-cli** — CLI entry point. Commands: `run`, `exec`, `serve`, `validate`, `parse`, `cp`, `model`, `doctor`, `init`, `install`, `ps`, `system prune`, `llm`
+- **fabro-cli** — CLI entry point. Commands: `run`, `exec`, `serve`, `validate`, `parse`, `cp`, `model`, `doctor`, `install`, `ps`, `system prune`, `llm`
 - **fabro-workflow** — Core workflow engine. Parses Graphviz graphs, runs stages, manages checkpoints/resume, hooks, retros, and human-in-the-loop interactions
 - **fabro-agent** — AI coding agent with tool use (Bash, Read, Write, Edit, Glob, Grep, WebFetch). `Sandbox` trait abstracts execution environments
 - **fabro-server** — Axum HTTP server. Routes for runs, sessions, models, completions, usage. SSE event streaming. Demo mode via header
@@ -61,7 +61,7 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 - **fabro-mcp** — Model Context Protocol client/server
 - **fabro-slack** — Slack integration (socket mode, blocks API)
 - **fabro-devcontainer** — Parses `.devcontainer/devcontainer.json` for container setup
-- **fabro-git-storage** — Git-based storage with branch store and snapshots
+- **fabro-checkpoint** — Git-based checkpoint storage with branch store and metadata branches
 - **fabro-telemetry** — CLI analytics (Segment) and crash reporting (Sentry), with anonymous IDs, command sanitization, and detached subprocess delivery
 - **fabro-util** — Shared utilities (redaction, terminal formatting)
 
@@ -75,12 +75,13 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 - **OpenAPI-first** — `fabro-api.yaml` drives both Rust type generation (typify) and TypeScript client generation (openapi-generator)
 - **Checkpoint/resume** — Workflows can be paused, checkpointed, and resumed
 
-## Logging and events
+## Strategy docs
 
 When working on Rust crates, read the relevant strategy doc **before** making changes:
 
-- **`files-internal/logging-strategy.md`** — read when adding `tracing` calls (`info!`, `debug!`, `warn!`, `error!`), working on error handling paths, or adding new operations that should be observable
-- **`files-internal/events-strategy.md`** — read when adding or modifying `WorkflowRunEvent` variants, touching `EventEmitter`/`emit()`, changing `progress.jsonl` output, or adding new workflow stage types
+- **`docs-internal/logging-strategy.md`** — read when adding `tracing` calls (`info!`, `debug!`, `warn!`, `error!`), working on error handling paths, or adding new operations that should be observable
+- **`docs-internal/events-strategy.md`** — read when adding or modifying `WorkflowRunEvent` variants, touching `EventEmitter`/`emit()`, changing `progress.jsonl` output, or adding new workflow stage types
+- **`files-internal/testing-strategy.md`** — read when adding or reorganizing tests, choosing between unit vs `tests/it`, deciding whether a test belongs in `cmd` vs `workflow` vs `scenario`, or deciding how to structure snapshots and fixtures
 
 ## Shell quoting in sandbox code
 
@@ -91,6 +92,16 @@ When interpolating values into shell command strings (in `fabro-workflow`), alwa
 - **Types** (structs, enums, traits): import by name — `use crate::outcome::Outcome;`
 - **Functions**: import the parent module, call as `module::function()` — `use fabro_workflow::operations; operations::create(...)`
 - **No glob imports** in production code (`use foo::*`). Globs are acceptable in test modules and preludes. Enforced by clippy `wildcard_imports` lint.
+
+## Snapshot tests (insta)
+
+Many CLI tests use `insta` inline snapshots. When a snapshot needs updating:
+
+1. Run `cargo insta pending-snapshots` to list what changed
+2. Verify each pending snapshot is expected
+3. Run `cargo insta accept` to accept all, or `cargo insta accept --snapshot <path>` for a specific one
+
+Never run `cargo insta accept` without first checking what's pending — it accepts *all* pending snapshots, which may include unrelated changes.
 
 ## Testing workflows
 

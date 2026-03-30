@@ -16,7 +16,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 ulid = "1"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v7"] }
 rand = "0.8"
 dotenvy = "0.15"
 futures = "0.3"
@@ -26,6 +26,7 @@ base64 = "0.22"
 bytes = "1"
 tokio-util = "0.7"
 clap = { version = "4", features = ["derive", "env"] }
+clap_complete = "4"
 jsonschema = { version = "0.42", default-features = false }
 chrono = { version = "0.4", features = ["clock"] }
 bollard = "0.18"

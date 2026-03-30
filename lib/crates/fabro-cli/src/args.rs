@@ -764,9 +764,9 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         command: Option<ModelsCommand>,
     },
-    /// Start the HTTP API server
+    /// Server operations
     #[cfg(feature = "server")]
-    Serve(fabro_server::serve::ServeArgs),
+    Server(ServerNamespace),
     /// Check environment and integration health
     Doctor {
         /// Show detailed information for each check
@@ -777,9 +777,6 @@ pub(crate) enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Initialize a new project (deprecated: use `repo init`)
-    #[command(hide = true)]
-    Init,
     /// Set up the Fabro environment (LLMs, certs, GitHub)
     Install {
         /// Base URL for the web UI (used for OAuth callback URLs)
@@ -812,6 +809,8 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         command: SandboxCommand,
     },
+    /// Generate shell completions
+    Completion(CompletionArgs),
     /// System maintenance commands
     System(SystemNamespace),
     /// Send a queued analytics event (internal)
@@ -855,13 +854,14 @@ impl Commands {
                 None => "model",
             },
             #[cfg(feature = "server")]
-            Self::Serve(_) => "serve",
+            Self::Server(ns) => match &ns.command {
+                ServerCommand::Start(_) => "server start",
+            },
             Self::Doctor { .. } => "doctor",
             Self::Repo(ns) => match &ns.command {
                 RepoCommand::Init { .. } => "repo init",
                 RepoCommand::Deinit => "repo deinit",
             },
-            Self::Init => "init",
             Self::Install { .. } => "install",
             Self::Pr(ns) => match &ns.command {
                 PrCommand::Create(_) => "pr create",
@@ -891,6 +891,7 @@ impl Commands {
                 ProviderCommand::Login(_) => "provider login",
             },
             Self::Sandbox { command } => command.name(),
+            Self::Completion(_) => "completion",
             Self::System(ns) => match &ns.command {
                 SystemCommand::Prune(_) => "system prune",
                 SystemCommand::Df(_) => "system df",
@@ -966,6 +967,20 @@ pub(crate) enum SecretCommand {
     Set(SecretSetArgs),
 }
 
+#[cfg(feature = "server")]
+#[derive(Args)]
+pub(crate) struct ServerNamespace {
+    #[command(subcommand)]
+    pub(crate) command: ServerCommand,
+}
+
+#[cfg(feature = "server")]
+#[derive(Subcommand)]
+pub(crate) enum ServerCommand {
+    /// Start the HTTP API server
+    Start(fabro_server::serve::ServeArgs),
+}
+
 #[derive(Args)]
 pub(crate) struct SystemNamespace {
     #[command(subcommand)]
@@ -1022,6 +1037,12 @@ pub(crate) struct ProviderNamespace {
 pub(crate) enum ProviderCommand {
     /// Log in to an LLM provider
     Login(ProviderLoginArgs),
+}
+
+#[derive(Args)]
+pub(crate) struct CompletionArgs {
+    /// Shell to generate completions for
+    pub shell: clap_complete::Shell,
 }
 
 #[derive(Args)]

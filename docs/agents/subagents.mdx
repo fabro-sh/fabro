@@ -3,7 +3,7 @@ title: "Sub-agents"
 description: "Delegate subtasks to child agent sessions"
 ---
 
-An agent can spawn **sub-agents** to delegate work to independent child sessions. Each sub-agent gets its own LLM session and tool access, runs concurrently with the parent, and returns its result when finished. This is useful for parallelizing research, isolating risky operations, or breaking complex tasks into focused pieces.
+An agent can spawn **sub-agents** to delegate work to independent child sessions. Each sub-agent gets its own LLM session and tool access, runs concurrently with the parent, and returns its result when finished.
 
 <Note>
 Sub-agents are only available with the [API backend](/core-concepts/agents#api-backend-default) (the default). Agents using the [CLI backend](/core-concepts/agents#cli-backend) cannot spawn sub-agents.
@@ -16,124 +16,84 @@ Sub-agent management is exposed through four built-in tools:
 | Tool | Description |
 |---|---|
 | `spawn_agent` | Create a new sub-agent with a task prompt |
-| `send_input` | Send a follow-up message to a running sub-agent |
+| `send_input` | Send follow-up input to a running sub-agent |
 | `wait` | Block until a sub-agent completes and return its result |
 | `close_agent` | Cancel and remove a running sub-agent |
 
-These tools are registered automatically when the session starts. They inherit the parent's permissions -- no additional approval is needed for sub-agent tool calls.
-
-### spawn_agent
-
-Creates a new sub-agent session and starts it working on the given task.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `task` | string | yes | The task description for the sub-agent |
-| `working_dir` | string | no | Working directory for the sub-agent |
-| `model` | string | no | Model to use for the sub-agent |
-| `max_turns` | integer | no | Maximum number of turns (default: unlimited) |
-
-Returns the `agent_id` string used to reference this sub-agent in subsequent calls.
-
-### send_input
-
-Sends a follow-up message to a running sub-agent. The message is queued and processed by the sub-agent on its next turn.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `agent_id` | string | yes | The ID returned by `spawn_agent` |
-| `message` | string | yes | The message to send |
-
-### wait
-
-Blocks until the specified sub-agent completes, then returns its result. The result includes whether the sub-agent succeeded, how many turns it used, and the final text output.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `agent_id` | string | yes | The ID returned by `spawn_agent` |
-
-Returns a formatted string:
-```
-Agent completed (success: true, turns: 12)
-
-<final assistant message text>
-```
-
-### close_agent
-
-Cancels a running sub-agent and removes it. Use this to clean up sub-agents that are no longer needed.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `agent_id` | string | yes | The ID returned by `spawn_agent` |
+These tools are registered automatically when the session starts. They inherit the parent's permissions.
 
 ## Session isolation
 
-Each sub-agent runs in its own independent session:
+Each sub-agent runs in its own session:
 
-- **Own LLM conversation** -- the sub-agent has a fresh conversation history starting from the task prompt. It does not see the parent's prior conversation.
-- **Own tool access** -- the sub-agent has the same tools as the parent (shell, file editing, grep, etc.) and can use them independently.
-- **Concurrent execution** -- after `spawn_agent`, the parent continues working immediately. The sub-agent runs in a background task. Use `wait` to collect the result when needed.
+- **Own conversation** -- the child starts with a fresh LLM history
+- **Own tool access** -- the child can use the same tools as the parent
+- **Concurrent execution** -- the parent can continue working before calling `wait`
 
-The parent can spawn multiple sub-agents and let them work in parallel, then `wait` on each to collect results:
-
-```
-1. spawn_agent("Research authentication patterns")  -> agent_a
-2. spawn_agent("Analyze the test suite structure")   -> agent_b
-3. ... parent does its own work ...
-4. wait(agent_a)  -> result_a
-5. wait(agent_b)  -> result_b
-6. Synthesize both results
-```
+The parent can spawn multiple sub-agents and synchronize with them later.
 
 ## Depth limits
 
-Sub-agents can themselves spawn sub-agents, creating a hierarchy. The **maximum nesting depth** prevents runaway chains. By default, the depth limit is **1** -- a parent agent can spawn sub-agents, but those sub-agents cannot spawn their own children.
+Sub-agents can themselves spawn sub-agents, creating a hierarchy. `max_subagent_depth` limits how deep that tree can grow. By default the depth limit is `1`.
 
-If a sub-agent tries to spawn beyond the depth limit, the `spawn_agent` call returns an error:
-
-```
-Maximum subagent depth (1) reached
-```
-
-The depth limit is set via the `max_subagent_depth` field in the session configuration.
+If a child tries to exceed the limit, `spawn_agent` returns an error immediately.
 
 ## Error handling
 
-When a sub-agent fails, the error is captured and returned to the parent via the `wait` tool — the parent stage does **not** automatically fail. The parent LLM sees the error message and decides how to respond: retry, try a different approach, or report the failure.
+Sub-agent failures do not automatically fail the parent stage. The parent receives the failure through `wait` and decides how to respond.
 
-Specific failure modes:
+Common cases:
 
-- **Sub-agent hits `max_turns`** — The sub-agent stops naturally and returns its last output as a successful result. The parent sees a normal completion with the final assistant message. By default, there is no turn limit — sub-agents run until they complete their task or hit the context window.
-- **Sub-agent panics or errors** — The error is captured and returned through `wait` as a failure result. The parent can inspect the error and decide what to do.
-- **`spawn_agent` fails** (e.g. depth limit exceeded) — The error is returned immediately as a tool result. The parent can adjust its approach without waiting.
+- **Hits `max_turns`** -- returns normally with its last output
+- **Panics or errors** -- returned as a failed `wait` result
+- **`spawn_agent` fails** -- returned immediately as a tool result
 
 ## Event forwarding
 
-Sub-agent events (tool calls, assistant messages, errors) are forwarded to the parent session's event stream as `SubAgentEvent` wrappers. This means the parent's progress log captures the full activity of all children, giving you visibility into what sub-agents are doing.
+Sub-agent observability now uses **session linkage**, not wrapper events.
 
-Key lifecycle events:
+Parent-owned lifecycle events:
 
 | Event | When |
 |---|---|
-| `SubAgentSpawned` | A sub-agent was created |
-| `SubAgentCompleted` | A sub-agent finished successfully |
-| `SubAgentFailed` | A sub-agent encountered an error |
-| `SubAgentClosed` | A sub-agent was cancelled |
+| `agent.sub.spawned` | A sub-agent was created |
+| `agent.sub.completed` | A sub-agent finished successfully |
+| `agent.sub.failed` | A sub-agent failed |
+| `agent.sub.closed` | A sub-agent was cancelled |
 
-Streaming events (text deltas, tool output deltas) from sub-agents are filtered out to reduce noise.
+Forwarded child activity:
+
+- Child tool calls, assistant messages, warnings, and other non-noisy session events are forwarded into the parent run's event stream as normal agent events.
+- The forwarded event keeps the child's `session_id`.
+- `parent_session_id` points to the child's immediate parent session.
+
+Example envelope:
+
+```json
+{
+  "event": "agent.tool.started",
+  "session_id": "ses_child",
+  "parent_session_id": "ses_parent",
+  "node_id": "code",
+  "properties": {
+    "tool_name": "read_file"
+  }
+}
+```
+
+Nested sub-agents preserve the immediate parent-child relationship. A grandchild forwarded through multiple parents still carries its own `session_id`, and `parent_session_id` remains set to the grandchild's direct parent rather than the root.
+
+High-volume streaming events such as text deltas and tool output deltas are filtered out of the forwarded stream to reduce noise.
 
 ## When to use sub-agents
 
-Sub-agents are most useful when:
+Sub-agents are most useful for:
 
-- **Parallel research** -- gather information from multiple parts of a codebase simultaneously
-- **Isolation** -- let a sub-agent try a risky approach without polluting the parent's context
-- **Divide and conquer** -- break a large task into independent pieces that can be worked on concurrently
-- **Context management** -- offload work to a sub-agent when the parent's context window is getting full
+- **Parallel research** -- inspect multiple code paths at once
+- **Isolation** -- try a risky approach without polluting the parent's context
+- **Divide and conquer** -- split an independent task into smaller pieces
+- **Context management** -- offload work when the parent session is getting crowded
 
 <Note>
-Sub-agents run with no turn limit by default — they continue until the task is complete or the context window is exhausted. Pass `max_turns` when spawning to cap execution for predictable cost control. The parent agent is blocked during a `wait` call, so spawn sub-agents before starting the wait to maximize concurrency.
+Sub-agents run with no turn limit by default. Pass `max_turns` when you want predictable cost or time bounds. All active sub-agents are cleaned up automatically when the parent session closes.
 </Note>
-
-All active sub-agents are automatically cleaned up when the parent session closes — you don't need to explicitly `close_agent` on every sub-agent.

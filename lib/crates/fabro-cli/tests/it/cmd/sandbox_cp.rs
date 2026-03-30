@@ -5,8 +5,8 @@ use super::support::{read_text, setup_asset_sandbox_run, setup_created_dry_run, 
 #[test]
 fn help() {
     let context = test_context!();
-    let mut cmd = context.cp();
-    cmd.arg("--help");
+    let mut cmd = context.command();
+    cmd.args(["sandbox", "cp", "--help"]);
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
     exit_code: 0

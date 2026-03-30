@@ -19,7 +19,8 @@ use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{
     EventEmitter, RunNoticeLevel, StoreProgressLogger, WorkflowRunEvent, append_progress_event,
-    build_redacted_event_payload,
+    append_progress_event_with_line, canonicalize_event, event_payload_from_redacted_json,
+    redacted_event_json,
 };
 use crate::git::MetadataStore;
 use crate::handler::HandlerRegistry;
@@ -128,8 +129,7 @@ pub(super) async fn execute_persisted_run(
 
                 // Write directly to progress.jsonl/live.json so projection failures do not
                 // recurse back through the decorated store.append_event() path.
-                let _ = append_progress_event(
-                    &projection_run_dir,
+                let envelope = canonicalize_event(
                     &run_id,
                     &WorkflowRunEvent::RunNotice {
                         level: RunNoticeLevel::Warn,
@@ -146,6 +146,7 @@ pub(super) async fn execute_persisted_run(
                         ),
                     },
                 );
+                let _ = append_progress_event(&projection_run_dir, &envelope);
             }),
         ),
     );
@@ -468,23 +469,38 @@ impl RunSession {
         {
             let sha_clone = Arc::clone(&last_git_sha);
             self.emitter.on_event(move |event| match event {
-                WorkflowRunEvent::CheckpointCompleted {
-                    git_commit_sha: Some(sha),
-                    ..
+                envelope if envelope.event == "checkpoint.completed" => {
+                    if let Some(sha) = envelope
+                        .properties
+                        .get("git_commit_sha")
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        *sha_clone.lock().unwrap() = Some(sha.to_string());
+                    }
                 }
-                | WorkflowRunEvent::WorkflowRunCompleted {
-                    final_git_commit_sha: Some(sha),
-                    ..
+                envelope if envelope.event == "run.completed" => {
+                    if let Some(sha) = envelope
+                        .properties
+                        .get("final_git_commit_sha")
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        *sha_clone.lock().unwrap() = Some(sha.to_string());
+                    }
                 }
-                | WorkflowRunEvent::GitCommit { sha, .. } => {
-                    *sha_clone.lock().unwrap() = Some(sha.clone());
+                envelope if envelope.event == "git.commit" => {
+                    if let Some(sha) = envelope
+                        .properties
+                        .get("sha")
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        *sha_clone.lock().unwrap() = Some(sha.to_string());
+                    }
                 }
                 _ => {}
             });
         }
 
-        let store_progress_logger =
-            StoreProgressLogger::new(Arc::clone(&self.run_store), record.run_id);
+        let store_progress_logger = StoreProgressLogger::new(Arc::clone(&self.run_store));
         store_progress_logger.register(self.emitter.as_ref());
 
         let init_options = InitOptions {
@@ -703,9 +719,8 @@ impl Drop for DetachedRunCompletionGuard {
         if !self.run_dir.join("conclusion.json").exists() {
             let _ = write_failure_conclusion(&self.run_dir, message, Some(reason));
         }
-        if let Some(run_id) = load_run_id(&self.run_dir) {
-            let _ = append_progress_event(
-                &self.run_dir,
+        let serialized_notice = load_run_id(&self.run_dir).and_then(|run_id| {
+            let envelope = canonicalize_event(
                 &run_id,
                 &WorkflowRunEvent::RunNotice {
                     level: RunNoticeLevel::Error,
@@ -713,7 +728,19 @@ impl Drop for DetachedRunCompletionGuard {
                     message: message.to_string(),
                 },
             );
-        }
+            let line = match redacted_event_json(&envelope) {
+                Ok(line) => line,
+                Err(err) => {
+                    tracing::warn!(error = %err, "Failed to serialize post-run abort event");
+                    return None;
+                }
+            };
+            if let Err(err) = append_progress_event_with_line(&self.run_dir, &envelope, &line) {
+                tracing::warn!(error = %err, "Failed to append post-run abort event");
+                return None;
+            }
+            Some((run_id, line))
+        });
         let run_store = Arc::clone(&self.run_store);
         let run_id = self.run_id;
         if let Ok(handle) = Handle::try_current() {
@@ -733,13 +760,23 @@ impl Drop for DetachedRunCompletionGuard {
                         "Failed to save post-run abort conclusion to store"
                     );
                 }
-                if let Some(run_id) = run_id {
-                    let event = WorkflowRunEvent::RunNotice {
-                        level: RunNoticeLevel::Error,
-                        code: code.to_string(),
-                        message: message.to_string(),
-                    };
-                    match build_redacted_event_payload(&event, &run_id) {
+                if let Some((run_id, line)) = serialized_notice.or(run_id
+                    .map(|run_id| {
+                        let envelope = canonicalize_event(
+                            &run_id,
+                            &WorkflowRunEvent::RunNotice {
+                                level: RunNoticeLevel::Error,
+                                code: code.to_string(),
+                                message: message.to_string(),
+                            },
+                        );
+                        redacted_event_json(&envelope)
+                            .ok()
+                            .map(|line| (run_id, line))
+                    })
+                    .flatten())
+                {
+                    match event_payload_from_redacted_json(&line, &run_id) {
                         Ok(payload) => {
                             let _ = run_store.append_event(&payload).await;
                         }
@@ -814,22 +851,16 @@ async fn persist_detached_failure(
     }
 
     if let Some(run_id) = load_run_id(run_dir) {
-        append_progress_event(
-            run_dir,
-            &run_id,
-            &WorkflowRunEvent::RunNotice {
-                level: RunNoticeLevel::Error,
-                code: format!("{phase}_failed"),
-                message: message.clone(),
-            },
-        )
-        .map_err(|err| FabroError::Io(err.to_string()))?;
         let event = WorkflowRunEvent::RunNotice {
             level: RunNoticeLevel::Error,
             code: format!("{phase}_failed"),
-            message,
+            message: message.clone(),
         };
-        match build_redacted_event_payload(&event, &run_id) {
+        let envelope = canonicalize_event(&run_id, &event);
+        let line = redacted_event_json(&envelope).map_err(|err| FabroError::Io(err.to_string()))?;
+        append_progress_event_with_line(run_dir, &envelope, &line)
+            .map_err(|err| FabroError::Io(err.to_string()))?;
+        match event_payload_from_redacted_json(&line, &run_id) {
             Ok(payload) => {
                 if let Err(err) = run_store.append_event(&payload).await {
                     tracing::warn!(error = %err, "Failed to append detached failure event to store");
@@ -956,7 +987,7 @@ mod tests {
     async fn start_captures_checkpoint_git_sha_in_conclusion() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new());
+        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
         let injected = Arc::new(AtomicBool::new(false));
 
@@ -967,15 +998,13 @@ mod tests {
                 if injected.load(Ordering::SeqCst) {
                     return;
                 }
-                if let WorkflowRunEvent::StageStarted { node_id, .. } = event {
-                    if node_id == "start" {
-                        injected.store(true, Ordering::SeqCst);
-                        emitter_for_injection.emit(&WorkflowRunEvent::CheckpointCompleted {
-                            node_id: node_id.clone(),
-                            status: "success".to_string(),
-                            git_commit_sha: Some("sha-test".to_string()),
-                        });
-                    }
+                if event.event == "stage.started" && event.node_id.as_deref() == Some("start") {
+                    injected.store(true, Ordering::SeqCst);
+                    emitter_for_injection.emit(&WorkflowRunEvent::CheckpointCompleted {
+                        node_id: "start".to_string(),
+                        status: "success".to_string(),
+                        git_commit_sha: Some("sha-test".to_string()),
+                    });
                 }
             });
         }
@@ -1000,7 +1029,7 @@ mod tests {
     async fn start_loads_persisted_from_run_dir() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new());
+        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
@@ -1020,7 +1049,7 @@ mod tests {
     async fn start_invokes_on_node_callback_before_execution() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new());
+        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
         let visited = Arc::new(Mutex::new(Vec::new()));
 
@@ -1049,7 +1078,7 @@ mod tests {
     async fn start_errors_when_checkpoint_exists() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new());
+        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
@@ -1086,7 +1115,7 @@ mod tests {
     async fn resume_errors_when_checkpoint_missing() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new());
+        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
         persisted_workflow(MINIMAL_DOT, &run_dir);
@@ -1108,7 +1137,7 @@ mod tests {
     async fn resume_errors_when_run_already_finished_successfully() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new());
+        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
         persisted_workflow(MINIMAL_DOT, &run_dir);

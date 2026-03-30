@@ -2,7 +2,7 @@ use git2::{Oid, Signature};
 use tracing::{debug, warn};
 
 use crate::Result;
-use crate::gitobj::{FileMode, Store, TreeEntries};
+use crate::git::{FileMode, Store, TreeEntries};
 
 /// Metadata about a commit, returned by `log`.
 #[derive(Debug)]
@@ -47,7 +47,7 @@ impl<'a> BranchStore<'a> {
             self.objects
                 .write_commit(empty_tree, &[], "initialize branch", &self.author)?;
         self.objects.update_ref(&self.branch, commit_oid)?;
-        debug!(branch = %self.branch, "Created git storage branch");
+        debug!(branch = %self.branch, "Created checkpoint branch");
         Ok(())
     }
 
@@ -74,7 +74,7 @@ impl<'a> BranchStore<'a> {
             self.objects
                 .write_commit(new_tree, &[parent_oid], message, &self.author)?;
         self.objects.update_ref(&self.branch, commit_oid)?;
-        debug!(branch = %self.branch, commit = %commit_oid, "Wrote git storage commit");
+        debug!(branch = %self.branch, commit = %commit_oid, "Wrote checkpoint commit");
         Ok(commit_oid)
     }
 
@@ -219,7 +219,7 @@ pub fn sharded_path(id: &str, prefix_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gitobj::FileMode;
+    use crate::git::FileMode;
     use git2::Repository;
 
     fn temp_repo() -> (tempfile::TempDir, Store) {

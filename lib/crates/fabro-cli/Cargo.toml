@@ -32,7 +32,7 @@ fabro-mcp = { path = "../fabro-mcp" }
 fabro-proctitle = { path = "../fabro-proctitle" }
 fabro-retro = { path = "../fabro-retro" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
-fabro-git-storage = { path = "../fabro-git-storage" }
+fabro-checkpoint = { path = "../fabro-checkpoint" }
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-validate = { path = "../fabro-validate" }
 fabro-workflow = { path = "../fabro-workflow" }
@@ -42,6 +42,7 @@ fabro-store = { path = "../fabro-store" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 clap.workspace = true
+clap_complete.workspace = true
 cli-table.workspace = true
 console.workspace = true
 indicatif.workspace = true
@@ -92,7 +93,7 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = "2"
-insta = { workspace = true }
+insta = { workspace = true, features = ["filters"] }
 paste = "1"
 predicates = "3"
 serde_json.workspace = true

@@ -227,7 +227,7 @@ mod tests {
     use fabro_types::{Conclusion, RunStatus, RunStatusRecord, StageStatus, fixtures};
 
     use super::open_or_hydrate_run;
-    use crate::event::{WorkflowRunEvent, append_progress_event};
+    use crate::event::{WorkflowRunEvent, append_progress_event, canonicalize_event};
     use crate::records::{Checkpoint, CheckpointExt, ConclusionExt, RunRecord, RunRecordExt};
     use crate::run_status::RunStatusRecordExt;
 
@@ -286,16 +286,15 @@ mod tests {
             has_pricing: false,
         };
         conclusion.save(&run_dir.join("conclusion.json")).unwrap();
-        append_progress_event(
-            run_dir,
+        let envelope = canonicalize_event(
             &test_run_id(),
             &WorkflowRunEvent::RunNotice {
                 level: crate::event::RunNoticeLevel::Info,
                 code: "hydrated".to_string(),
                 message: "hello".to_string(),
             },
-        )
-        .unwrap();
+        );
+        append_progress_event(run_dir, &envelope).unwrap();
     }
 
     #[tokio::test]

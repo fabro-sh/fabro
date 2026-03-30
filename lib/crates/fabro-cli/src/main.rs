@@ -11,7 +11,9 @@ mod user_config;
 
 use anyhow::Result;
 use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands};
-use clap::Parser;
+#[cfg(feature = "server")]
+use args::{ServerCommand, ServerNamespace};
+use clap::{CommandFactory, Parser};
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -106,7 +108,10 @@ async fn main_inner() -> (String, Result<()>) {
     let (config_log_level, upgrade_check_enabled) = {
         #[cfg(feature = "server")]
         {
-            if let Commands::Serve(args) = command.as_ref() {
+            if let Commands::Server(ServerNamespace {
+                command: ServerCommand::Start(args),
+            }) = command.as_ref()
+            {
                 match fabro_config::server::load_server_settings(args.config.as_deref()) {
                     Ok(server_settings) => (
                         server_settings.log.as_ref().and_then(|l| l.level.clone()),
@@ -136,8 +141,8 @@ async fn main_inner() -> (String, Result<()>) {
         }
     };
 
-    let log_prefix = if command_name == "serve" {
-        "serve"
+    let log_prefix = if command_name == "server start" {
+        "server"
     } else {
         "cli"
     };
@@ -153,7 +158,6 @@ async fn main_inner() -> (String, Result<()>) {
         Commands::RunCmd(RunCommands::Run(_) | RunCommands::Create(_))
             | Commands::Exec(_)
             | Commands::Repo(_)
-            | Commands::Init
             | Commands::Install { .. }
     ) {
         commands::upgrade::spawn_upgrade_check(globals.no_upgrade_check, upgrade_check_enabled)
@@ -183,7 +187,8 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::RunsCmd(cmd) => commands::runs::dispatch(cmd, &globals).await?,
             Commands::Model { command } => commands::model::execute(command, &globals).await?,
             #[cfg(feature = "server")]
-            Commands::Serve(args) => {
+            Commands::Server(ns) => {
+                let ServerCommand::Start(args) = ns.command;
                 let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
                 fabro_server::serve::serve_command(args, styles, globals.storage_dir.clone())
                     .await?;
@@ -201,10 +206,6 @@ async fn main_inner() -> (String, Result<()>) {
                 open::that("https://docs.fabro.sh/")?;
             }
             Commands::Repo(ns) => commands::repo::dispatch(ns).await?,
-            Commands::Init => {
-                fabro_util::warn_user!("`fabro init` is deprecated, use `fabro repo init` instead");
-                commands::repo::init::run_init().await?;
-            }
             Commands::Install { web_url } => {
                 commands::install::run_install(&web_url).await?;
             }
@@ -219,6 +220,27 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Provider(ns) => commands::provider::dispatch(ns).await?,
             Commands::Sandbox { command } => commands::sandbox::dispatch(command, &globals).await?,
             Commands::System(ns) => commands::system::dispatch(ns, &globals).await?,
+            Commands::Completion(args) => {
+                let mut cmd = Cli::command();
+                let shell = args.shell;
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut buf = Vec::new();
+                    clap_complete::generate(shell, &mut cmd, "fabro", &mut buf);
+                    buf
+                }));
+                match result {
+                    Ok(buf) => {
+                        use std::io::Write;
+                        std::io::stdout().write_all(&buf)?;
+                    }
+                    Err(_) => {
+                        anyhow::bail!(
+                            "Failed to generate completions for {shell}. \
+                             Try zsh, fish, elvish, or powershell instead."
+                        );
+                    }
+                }
+            }
             Commands::SendAnalytics { path } => {
                 let result = sender::upload(&path).await;
                 let _ = std::fs::remove_file(&path);

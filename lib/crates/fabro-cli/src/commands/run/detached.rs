@@ -37,7 +37,7 @@ pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bo
 
     let services = StartServices {
         cancel_token: None,
-        emitter: Arc::new(EventEmitter::new()),
+        emitter: Arc::new(EventEmitter::new(run_record.run_id)),
         interviewer: Arc::new(FileInterviewer::new(
             runtime_state.interview_request_path(),
             runtime_state.interview_response_path(),

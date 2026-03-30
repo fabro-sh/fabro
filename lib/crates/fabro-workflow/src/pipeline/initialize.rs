@@ -753,7 +753,7 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let (graph, source) = simple_graph();
         let persisted = test_persisted(graph, source.clone(), &run_dir);
-        let emitter = Arc::new(crate::event::EventEmitter::new());
+        let emitter = Arc::new(crate::event::EventEmitter::default());
 
         let initialized = initialize(
             persisted,
@@ -831,7 +831,7 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let (graph, source) = simple_graph();
         let persisted = test_persisted(graph, source, &run_dir);
-        let emitter = Arc::new(crate::event::EventEmitter::new());
+        let emitter = Arc::new(crate::event::EventEmitter::default());
 
         let initialized = initialize(
             persisted,

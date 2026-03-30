@@ -745,7 +745,7 @@ pub(crate) async fn run_install(web_url: &str) -> Result<()> {
 
         eprintln!("  To start Arc, run these commands:");
         eprintln!();
-        eprintln!("    fabro serve");
+        eprintln!("    fabro server start");
         eprintln!("    cd apps/fabro-web && npx react-router dev");
         eprintln!();
     }

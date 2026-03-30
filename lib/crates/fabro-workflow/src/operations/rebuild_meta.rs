@@ -3,8 +3,8 @@ use std::fmt::Write;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use fabro_git_storage::branchstore::BranchStore;
-use fabro_git_storage::gitobj::Store as GitStore;
+use fabro_checkpoint::branch::BranchStore;
+use fabro_checkpoint::git::Store as GitStore;
 use fabro_store::{
     ListRunsQuery, NodeVisitRef, RunStore as DurableRunStore, Store as DurableStore,
 };

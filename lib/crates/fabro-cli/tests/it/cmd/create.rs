@@ -3,7 +3,9 @@ use serde_json::json;
 
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::support::{fixture, output_stdout, read_json, resolve_run};
+use crate::support::{fabro_json_snapshot, read_json};
+
+use super::support::{fixture, output_stdout, resolve_run};
 
 #[test]
 fn help() {
@@ -41,6 +43,118 @@ fn help() {
       -h, --help                       Print help
     ----- stderr -----
     ");
+}
+
+#[test]
+fn create_persists_directory_workflow_slug_and_cached_graph() {
+    let context = test_context!();
+    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAA";
+    let workflow_path = context.temp_dir.join("sluggy/workflow.fabro");
+
+    context.write_temp(
+        "sluggy/workflow.fabro",
+        "\
+digraph BarBaz {
+  start [shape=Mdiamond, label=\"Start\"]
+  exit  [shape=Msquare, label=\"Exit\"]
+  start -> exit
+}
+",
+    );
+
+    context
+        .command()
+        .args([
+            "create",
+            "--dry-run",
+            "--auto-approve",
+            "--run-id",
+            run_id,
+            workflow_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let run_dir = context.find_run_dir(run_id);
+    let run_record = read_json(run_dir.join("run.json"));
+    let cached_graph = std::fs::read_to_string(run_dir.join("workflow.fabro")).unwrap();
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "workflow_slug": run_record["workflow_slug"],
+            "graph_name": run_record["graph"]["name"],
+            "cached_graph_lines": cached_graph.lines().collect::<Vec<_>>(),
+        }),
+        @r#"
+        {
+          "workflow_slug": "sluggy",
+          "graph_name": "BarBaz",
+          "cached_graph_lines": [
+            "digraph BarBaz {",
+            "  start [shape=Mdiamond, label=\"Start\"]",
+            "  exit  [shape=Msquare, label=\"Exit\"]",
+            "  start -> exit",
+            "}"
+          ]
+        }
+        "#
+    );
+}
+
+#[test]
+fn create_persists_file_stem_slug_for_standalone_file() {
+    let context = test_context!();
+    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAB";
+    let workflow_path = context.temp_dir.join("alpha.fabro");
+
+    context.write_temp(
+        "alpha.fabro",
+        "\
+digraph FooWorkflow {
+  start [shape=Mdiamond, label=\"Start\"]
+  exit  [shape=Msquare, label=\"Exit\"]
+  start -> exit
+}
+",
+    );
+
+    context
+        .command()
+        .args([
+            "create",
+            "--dry-run",
+            "--auto-approve",
+            "--run-id",
+            run_id,
+            workflow_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let run_dir = context.find_run_dir(run_id);
+    let run_record = read_json(run_dir.join("run.json"));
+    let cached_graph = std::fs::read_to_string(run_dir.join("workflow.fabro")).unwrap();
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "workflow_slug": run_record["workflow_slug"],
+            "graph_name": run_record["graph"]["name"],
+            "cached_graph_lines": cached_graph.lines().collect::<Vec<_>>(),
+        }),
+        @r#"
+        {
+          "workflow_slug": "alpha",
+          "graph_name": "FooWorkflow",
+          "cached_graph_lines": [
+            "digraph FooWorkflow {",
+            "  start [shape=Mdiamond, label=\"Start\"]",
+            "  exit  [shape=Msquare, label=\"Exit\"]",
+            "  start -> exit",
+            "}"
+          ]
+        }
+        "#
+    );
 }
 
 #[test]
@@ -85,7 +199,7 @@ fn create_persists_requested_overrides_into_run_json() {
         .expect("create should print a run ID")
         .to_string();
     let run = resolve_run(&context, &run_id);
-    let run_json = read_json(&run.run_dir.join("run.json"));
+    let run_json = read_json(run.run_dir.join("run.json"));
     let labels = json!({
         "env": run_json.pointer("/labels/env"),
         "team": run_json.pointer("/labels/team"),
