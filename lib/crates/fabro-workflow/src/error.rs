@@ -362,6 +362,7 @@ pub type Result<T> = std::result::Result<T, FabroError>;
 mod tests {
     use super::*;
     use crate::outcome::OutcomeExt;
+    use fabro_checkpoint::MetadataError;
     use fabro_llm::error::ProviderErrorDetail;
 
     #[test]
@@ -430,6 +431,38 @@ mod tests {
 
         let err: Result<i32> = Err(FabroError::Parse("bad".to_string()));
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn metadata_checkpoint_deserialize_error_preserves_source_detail() {
+        let source = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        let source_message = source.to_string();
+        let fabro_error = FabroError::from(MetadataError::Deserialize {
+            entity: "checkpoint",
+            branch: "fabro/meta/run-1".to_string(),
+            source,
+        });
+
+        assert!(matches!(fabro_error, FabroError::Checkpoint(_)));
+        let message = fabro_error.to_string();
+        assert!(message.contains("deserialize checkpoint on branch fabro/meta/run-1"));
+        assert!(message.contains(&source_message));
+    }
+
+    #[test]
+    fn metadata_non_checkpoint_deserialize_error_maps_to_engine_with_source_detail() {
+        let source = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        let source_message = source.to_string();
+        let fabro_error = FabroError::from(MetadataError::Deserialize {
+            entity: "run record",
+            branch: "fabro/meta/run-1".to_string(),
+            source,
+        });
+
+        assert!(matches!(fabro_error, FabroError::Engine { .. }));
+        let message = fabro_error.to_string();
+        assert!(message.contains("deserialize run record on branch fabro/meta/run-1"));
+        assert!(message.contains(&source_message));
     }
 
     #[test]

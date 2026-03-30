@@ -47,7 +47,7 @@ impl<'a> BranchStore<'a> {
             self.objects
                 .write_commit(empty_tree, &[], "initialize branch", &self.author)?;
         self.objects.update_ref(&self.branch, commit_oid)?;
-        debug!(branch = %self.branch, "Created git storage branch");
+        debug!(branch = %self.branch, "Created checkpoint branch");
         Ok(())
     }
 
@@ -74,7 +74,7 @@ impl<'a> BranchStore<'a> {
             self.objects
                 .write_commit(new_tree, &[parent_oid], message, &self.author)?;
         self.objects.update_ref(&self.branch, commit_oid)?;
-        debug!(branch = %self.branch, commit = %commit_oid, "Wrote git storage commit");
+        debug!(branch = %self.branch, commit = %commit_oid, "Wrote checkpoint commit");
         Ok(commit_oid)
     }
 

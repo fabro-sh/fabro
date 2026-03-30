@@ -22,7 +22,7 @@ pub enum MetadataError {
     #[error(transparent)]
     Storage(#[from] Error),
 
-    #[error("deserialize {entity} on branch {branch}")]
+    #[error("deserialize {entity} on branch {branch}: {source}")]
     Deserialize {
         entity: &'static str,
         branch: String,
