@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use fabro_config::FabroSettings;
 use fabro_config::mcp::McpTransport;
 #[cfg(feature = "server")]
@@ -64,22 +66,14 @@ fn show_help() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-#[allow(deprecated)]
-fn arc() -> assert_cmd::Command {
-    let mut cmd = assert_cmd::Command::cargo_bin("fabro").unwrap();
-    cmd.arg("--no-upgrade-check");
-    cmd
-}
-
 fn parse_config_show(stdout: &[u8]) -> FabroSettings {
     serde_yaml::from_slice(stdout).expect("stdout should be valid YAML FabroSettings")
 }
 
-fn setup_config_show_fixture() -> (tempfile::TempDir, tempfile::TempDir) {
-    let home = tempfile::tempdir().unwrap();
-    let project = tempfile::tempdir().unwrap();
-
-    let home_fabro = home.path().join(".fabro");
+/// Set up home config and project config for config show tests.
+/// Uses `context.home_dir` for the home directory. Returns project tempdir.
+fn setup_config_show_fixture(context: &fabro_test::TestContext) -> tempfile::TempDir {
+    let home_fabro = context.home_dir.join(".fabro");
     std::fs::create_dir_all(&home_fabro).unwrap();
     std::fs::write(
         home_fabro.join("user.toml"),
@@ -119,6 +113,7 @@ SHARED = "cli"
     )
     .unwrap();
 
+    let project = tempfile::tempdir().unwrap();
     std::fs::write(
         project.path().join("fabro.toml"),
         r#"
@@ -195,15 +190,17 @@ SHARED = "run"
     )
     .unwrap();
 
-    (home, project)
+    project
 }
 
-fn setup_external_workflow_fixture() -> (tempfile::TempDir, tempfile::TempDir, std::path::PathBuf) {
-    let home = tempfile::tempdir().unwrap();
-    let project = tempfile::tempdir().unwrap();
-    let storage_dir = home.path().join("fabro-data");
+/// Set up an external workflow fixture with a custom storage_dir in user.toml.
+/// Returns (project_tempdir, storage_dir_path).
+fn setup_external_workflow_fixture(
+    context: &fabro_test::TestContext,
+) -> (tempfile::TempDir, PathBuf) {
+    let storage_dir = context.home_dir.join("fabro-data");
 
-    let home_fabro = home.path().join(".fabro");
+    let home_fabro = context.home_dir.join(".fabro");
     std::fs::create_dir_all(&home_fabro).unwrap();
     std::fs::write(
         home_fabro.join("user.toml"),
@@ -220,6 +217,7 @@ commands = ["cli-setup"]
     )
     .unwrap();
 
+    let project = tempfile::tempdir().unwrap();
     std::fs::write(
         project.path().join("fabro.toml"),
         r#"
@@ -262,7 +260,7 @@ commands = ["workflow-setup"]
     )
     .unwrap();
 
-    (home, project, storage_dir)
+    (project, storage_dir)
 }
 
 // ---------------------------------------------------------------------------
@@ -271,10 +269,11 @@ commands = ["workflow-setup"]
 
 #[test]
 fn config_show_merges_cli_and_project_defaults() {
-    let (home, project) = setup_config_show_fixture();
+    let context = test_context!();
+    let project = setup_config_show_fixture(&context);
 
-    let output = arc()
-        .env("HOME", home.path())
+    let output = context
+        .command()
         .current_dir(project.path())
         .args(["config", "show"])
         .assert()
@@ -307,10 +306,11 @@ fn config_show_merges_cli_and_project_defaults() {
 
 #[test]
 fn config_show_workflow_name_applies_run_overlay_and_deep_merges() {
-    let (home, project) = setup_config_show_fixture();
+    let context = test_context!();
+    let project = setup_config_show_fixture(&context);
 
-    let output = arc()
-        .env("HOME", home.path())
+    let output = context
+        .command()
         .current_dir(project.path())
         .args(["config", "show", "demo"])
         .assert()
@@ -382,12 +382,15 @@ fn config_show_workflow_name_applies_run_overlay_and_deep_merges() {
 
 #[test]
 fn config_show_explicit_workflow_path_uses_workflow_project_layers() {
-    let (home, project, _storage_dir) = setup_external_workflow_fixture();
+    let context = test_context!();
+    let (project, _storage_dir) = setup_external_workflow_fixture(&context);
     let cwd = tempfile::tempdir().unwrap();
     let workflow = project.path().join("workflow.toml");
 
-    let output = arc()
-        .env("HOME", home.path())
+    // Remove FABRO_STORAGE_DIR so the CLI uses storage_dir from user.toml
+    let output = context
+        .command()
+        .env_remove("FABRO_STORAGE_DIR")
         .current_dir(cwd.path())
         .args(["config", "show", workflow.to_str().unwrap()])
         .assert()
@@ -414,13 +417,16 @@ fn config_show_explicit_workflow_path_uses_workflow_project_layers() {
 
 #[test]
 fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
-    let (home, project, storage_dir) = setup_external_workflow_fixture();
+    let context = test_context!();
+    let (project, storage_dir) = setup_external_workflow_fixture(&context);
     let cwd = tempfile::tempdir().unwrap();
     let workflow = project.path().join("workflow.toml");
     let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FB8";
 
-    arc()
-        .env("HOME", home.path())
+    // Remove FABRO_STORAGE_DIR so the CLI uses storage_dir from user.toml
+    context
+        .command()
+        .env_remove("FABRO_STORAGE_DIR")
         .current_dir(cwd.path())
         .args([
             "create",
@@ -475,10 +481,11 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
 
 #[test]
 fn config_show_fabro_path_matches_ambient_defaults() {
-    let (home, project) = setup_config_show_fixture();
+    let context = test_context!();
+    let project = setup_config_show_fixture(&context);
 
-    let ambient = arc()
-        .env("HOME", home.path())
+    let ambient = context
+        .command()
         .current_dir(project.path())
         .args(["config", "show"])
         .assert()
@@ -486,8 +493,8 @@ fn config_show_fabro_path_matches_ambient_defaults() {
         .get_output()
         .stdout
         .clone();
-    let graph = arc()
-        .env("HOME", home.path())
+    let graph = context
+        .command()
         .current_dir(project.path())
         .args(["config", "show", "standalone.fabro"])
         .assert()
@@ -501,10 +508,11 @@ fn config_show_fabro_path_matches_ambient_defaults() {
 
 #[test]
 fn config_show_missing_run_config_errors() {
-    let (home, project) = setup_config_show_fixture();
+    let context = test_context!();
+    let project = setup_config_show_fixture(&context);
 
-    arc()
-        .env("HOME", home.path())
+    context
+        .command()
         .current_dir(project.path())
         .args(["config", "show", "missing.toml"])
         .assert()
@@ -514,10 +522,10 @@ fn config_show_missing_run_config_errors() {
 
 #[test]
 fn config_show_legacy_cli_config_warns_and_ignores_it() {
-    let home = tempfile::tempdir().unwrap();
+    let context = test_context!();
     let project = tempfile::tempdir().unwrap();
 
-    let home_fabro = home.path().join(".fabro");
+    let home_fabro = context.home_dir.join(".fabro");
     std::fs::create_dir_all(&home_fabro).unwrap();
     std::fs::write(
         home_fabro.join("cli.toml"),
@@ -530,8 +538,8 @@ model = "legacy-model"
     )
     .unwrap();
 
-    let assert = arc()
-        .env("HOME", home.path())
+    let assert = context
+        .command()
         .current_dir(project.path())
         .args(["config", "show"])
         .assert()
@@ -546,9 +554,10 @@ model = "legacy-model"
 
 #[test]
 fn config_show_user_config_wins_over_legacy_cli_config() {
-    let (home, project) = setup_config_show_fixture();
+    let context = test_context!();
+    let project = setup_config_show_fixture(&context);
     std::fs::write(
-        home.path().join(".fabro").join("cli.toml"),
+        context.home_dir.join(".fabro").join("cli.toml"),
         r#"
 [llm]
 model = "legacy-model"
@@ -559,8 +568,8 @@ shared = "legacy"
     )
     .unwrap();
 
-    let assert = arc()
-        .env("HOME", home.path())
+    let assert = context
+        .command()
         .current_dir(project.path())
         .args(["config", "show"])
         .assert()
@@ -581,8 +590,9 @@ shared = "legacy"
 #[test]
 #[cfg(feature = "server")]
 fn config_show_server_url_overrides_cli_defaults() {
-    let (home, project) = setup_config_show_fixture();
-    let user_toml = home.path().join(".fabro").join("user.toml");
+    let context = test_context!();
+    let project = setup_config_show_fixture(&context);
+    let user_toml = context.home_dir.join(".fabro").join("user.toml");
     std::fs::write(
         &user_toml,
         format!(
@@ -592,8 +602,8 @@ fn config_show_server_url_overrides_cli_defaults() {
     )
     .unwrap();
 
-    let output = arc()
-        .env("HOME", home.path())
+    let output = context
+        .command()
         .current_dir(project.path())
         .args(["--server-url", "https://cli.example.com", "config", "show"])
         .assert()
