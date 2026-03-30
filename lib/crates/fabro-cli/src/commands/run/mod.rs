@@ -5,7 +5,8 @@ use fabro_util::terminal::Styles;
 use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 
 use crate::args::{GlobalArgs, RunCommands};
-use crate::cli_config::load_cli_settings;
+use crate::cli_config::load_cli_settings_with_globals;
+use crate::store;
 
 pub(crate) mod attach;
 pub(crate) mod command;
@@ -36,14 +37,15 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         RunCommands::Create(args) => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             let cli = ConfigLayer::cli()?;
-            let (run_id, _run_dir) = create::create_run(&args, cli, styles, true)?;
+            let (run_id, _run_dir) =
+                create::create_run(&args, cli, styles, true, globals.storage_dir.clone())?;
             println!("{run_id}");
             Ok(())
         }
         RunCommands::Start { run } => {
-            let cli_settings = load_cli_settings()?;
+            let cli_settings = load_cli_settings_with_globals(globals)?;
             let base = runs_base(&cli_settings.storage_dir());
-            let store = crate::store::build_store(&cli_settings.storage_dir())?;
+            let store = store::build_store(&cli_settings.storage_dir())?;
             let run_info = resolve_run_combined(store.as_ref(), &base, &run).await?;
             let child = start::start_run(&run_info.path, false)?;
             eprintln!("Started engine process (PID {})", child.id());
@@ -51,9 +53,9 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         }
         RunCommands::Attach { run } => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            let cli_settings = load_cli_settings()?;
+            let cli_settings = load_cli_settings_with_globals(globals)?;
             let base = runs_base(&cli_settings.storage_dir());
-            let store = crate::store::build_store(&cli_settings.storage_dir())?;
+            let store = store::build_store(&cli_settings.storage_dir())?;
             let run_info = resolve_run_combined(store.as_ref(), &base, &run).await?;
             let exit_code =
                 attach::attach_run(&run_info.path, Some(&run_info.run_id), false, styles, None)
@@ -68,34 +70,34 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             launcher_path,
             resume,
         } => detached::execute(run_dir, launcher_path, resume).await,
-        RunCommands::Cp(args) => cp::cp_command(args).await,
-        RunCommands::Preview(args) => preview::run(args).await,
-        RunCommands::Ssh(args) => ssh::run(args).await,
-        RunCommands::Diff(args) => diff::run(args).await,
+        RunCommands::Cp(args) => cp::cp_command(args, globals).await,
+        RunCommands::Preview(args) => preview::run(args, globals).await,
+        RunCommands::Ssh(args) => ssh::run(args, globals).await,
+        RunCommands::Diff(args) => diff::run(args, globals).await,
         RunCommands::Logs(args) => {
             let styles = Styles::detect_stdout();
-            logs::run(&args, &styles).await
+            logs::run(&args, &styles, globals).await
         }
         RunCommands::Resume(args) => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             #[cfg(feature = "sleep_inhibitor")]
             let _sleep_guard = {
-                let cli_settings = load_cli_settings()?;
+                let cli_settings = load_cli_settings_with_globals(globals)?;
                 crate::sleep_inhibitor::guard(cli_settings.prevent_idle_sleep_enabled())
             };
-            resume::resume_command(args, styles).await
+            resume::resume_command(args, styles, globals).await
         }
         RunCommands::Rewind(args) => {
             let styles = Styles::detect_stderr();
-            rewind::run(&args, &styles).await
+            rewind::run(&args, &styles, globals).await
         }
         RunCommands::Fork(args) => {
             let styles = Styles::detect_stderr();
-            fork::run(&args, &styles).await
+            fork::run(&args, &styles, globals).await
         }
         RunCommands::Wait(args) => {
             let styles = Styles::detect_stderr();
-            wait::run(&args, &styles).await
+            wait::run(&args, &styles, globals).await
         }
     }
 }

@@ -54,7 +54,6 @@ impl TryFrom<&RunArgs> for ConfigLayer {
             dry_run: sparse_flag(args.dry_run),
             auto_approve: sparse_flag(args.auto_approve),
             no_retro: sparse_flag(args.no_retro),
-            storage_dir: args.storage_dir.clone(),
             labels: parse_labels(&args.label),
             ..Default::default()
         })

@@ -8,20 +8,20 @@ use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflows::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
 use tracing::info;
 
-use crate::args::WaitArgs;
-use crate::cli_config::load_cli_settings;
+use crate::args::{GlobalArgs, WaitArgs};
+use crate::cli_config::load_cli_settings_with_globals;
 use crate::shared::format_duration_ms;
+use crate::store;
 
-pub(crate) async fn run(args: &WaitArgs, styles: &Styles) -> Result<()> {
-    let cli_settings = load_cli_settings()?;
+pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
+    let cli_settings = load_cli_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = crate::store::build_store(&cli_settings.storage_dir())?;
+    let store = store::build_store(&cli_settings.storage_dir())?;
     let run_info = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
 
     info!(run_id = %run_info.run_id, "Waiting for run to complete");
 
-    let run_store =
-        crate::store::open_run_reader(&cli_settings.storage_dir(), &run_info.run_id).await?;
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_info.run_id).await?;
     let status_path = run_info.path.join("status.json");
     let deadline = args
         .timeout

@@ -12,14 +12,16 @@ use fabro_workflows::records::{
 use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 use tracing::info;
 
-use crate::args::PrCreateArgs;
-use crate::cli_config::load_cli_settings;
+use crate::args::{GlobalArgs, PrCreateArgs};
+use crate::cli_config::load_cli_settings_with_globals;
+use crate::store;
 
 pub(super) async fn create_command(
     args: PrCreateArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
+    globals: &GlobalArgs,
 ) -> Result<()> {
-    let cli_settings = load_cli_settings()?;
+    let cli_settings = load_cli_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     create_from(&base, args, github_app).await
 }
@@ -30,10 +32,10 @@ async fn create_from(
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> Result<()> {
     let storage_dir = base.parent().unwrap_or(base);
-    let store = crate::store::build_store(storage_dir)?;
+    let store = store::build_store(storage_dir)?;
     let run = resolve_run_combined(store.as_ref(), base, &args.run_id).await?;
     let run_dir = run.path.clone();
-    let run_store = crate::store::open_run_reader(storage_dir, &run.run_id).await?;
+    let run_store = store::open_run_reader(storage_dir, &run.run_id).await?;
 
     let record = match run_store.as_ref() {
         Some(run_store) => run_store

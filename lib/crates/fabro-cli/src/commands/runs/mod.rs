@@ -1,20 +1,20 @@
 use anyhow::Result;
 use fabro_util::terminal::Styles;
 
-use crate::args::RunsCommands;
+use crate::args::{GlobalArgs, RunsCommands};
 
 pub(crate) mod inspect;
 pub(crate) mod list;
 pub(crate) mod rm;
 
-pub(crate) async fn dispatch(cmd: RunsCommands) -> Result<()> {
+pub(crate) async fn dispatch(cmd: RunsCommands, globals: &GlobalArgs) -> Result<()> {
     match cmd {
         RunsCommands::Ps(args) => {
             let styles = Styles::detect_stdout();
-            list::list_command(&args, &styles).await
+            list::list_command(&args, &styles, globals).await
         }
-        RunsCommands::Rm(args) => rm::remove_command(&args).await,
-        RunsCommands::Inspect(args) => inspect::run(&args).await,
+        RunsCommands::Rm(args) => rm::remove_command(&args, globals).await,
+        RunsCommands::Inspect(args) => inspect::run(&args, globals).await,
     }
 }
 

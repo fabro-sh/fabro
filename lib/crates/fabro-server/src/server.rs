@@ -16,7 +16,8 @@ use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest,
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
 };
-use fabro_retro::retro::{Retro, derive_retro};
+use fabro_retro::retro;
+use fabro_retro::retro::Retro;
 use fabro_store::{InMemoryStore, Store};
 use fabro_util::redact::redact_jsonl_line;
 use fabro_workflows::error::FabroError;
@@ -820,10 +821,10 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
             Ok(events) => fabro_workflows::extract_stage_durations_from_events(&events),
             Err(err) => {
                 tracing::warn!(run_id = %run_id, error = %err, "Failed to load run events from store");
-                fabro_retro::retro::extract_stage_durations(&run_options.run_dir)
+                retro::extract_stage_durations(&run_options.run_dir)
             }
         };
-        let retro = derive_retro(
+        let retro = retro::derive_retro(
             &run_id,
             "workflow",
             "",

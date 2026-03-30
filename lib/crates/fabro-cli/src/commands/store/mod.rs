@@ -2,10 +2,10 @@ mod dump;
 
 use anyhow::Result;
 
-use crate::args::{StoreCommand, StoreNamespace};
+use crate::args::{GlobalArgs, StoreCommand, StoreNamespace};
 
-pub(crate) async fn dispatch(ns: StoreNamespace) -> Result<()> {
+pub(crate) async fn dispatch(ns: StoreNamespace, globals: &GlobalArgs) -> Result<()> {
     match ns.command {
-        StoreCommand::Dump(args) => dump::dump_command(&args).await,
+        StoreCommand::Dump(args) => dump::dump_command(&args, globals).await,
     }
 }

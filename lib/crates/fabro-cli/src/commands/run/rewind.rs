@@ -11,14 +11,14 @@ use fabro_workflows::operations::{
 };
 use git2::Repository;
 
-use crate::args::RewindArgs;
-use crate::cli_config::load_cli_settings;
+use crate::args::{GlobalArgs, RewindArgs};
+use crate::cli_config::load_cli_settings_with_globals;
 use crate::shared::color_if;
 use crate::store::{build_store, open_run_reader};
 
-pub(crate) async fn run(args: &RewindArgs, styles: &Styles) -> Result<()> {
+pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let cli_settings = load_cli_settings()?;
+    let cli_settings = load_cli_settings_with_globals(globals)?;
     let durable_store = build_store(&cli_settings.storage_dir())?;
     let run_id =
         find_run_id_by_prefix_or_store(&repo, durable_store.as_ref(), &args.run_id).await?;

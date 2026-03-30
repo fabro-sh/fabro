@@ -10,8 +10,9 @@ use fabro_workflows::records::{Checkpoint, Conclusion, RunRecord, StartRecord};
 use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflows::run_status::RunStatus;
 
-use crate::args::InspectArgs;
-use crate::cli_config::load_cli_settings;
+use crate::args::{GlobalArgs, InspectArgs};
+use crate::cli_config::load_cli_settings_with_globals;
+use crate::store;
 
 #[derive(Debug, Serialize)]
 pub(crate) struct InspectOutput {
@@ -25,18 +26,17 @@ pub(crate) struct InspectOutput {
     pub sandbox: Option<serde_json::Value>,
 }
 
-pub(crate) async fn run(args: &InspectArgs) -> Result<()> {
-    let cli_settings = load_cli_settings()?;
+pub(crate) async fn run(args: &InspectArgs, globals: &GlobalArgs) -> Result<()> {
+    let cli_settings = load_cli_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = crate::store::build_store(&cli_settings.storage_dir())?;
+    let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let output =
-        match crate::store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await? {
-            Some(run_store) => {
-                inspect_run_store(&run.run_id, &run.path, run.status, run_store.as_ref()).await
-            }
-            None => inspect_run_dir(&run.run_id, &run.path, run.status),
-        };
+    let output = match store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await? {
+        Some(run_store) => {
+            inspect_run_store(&run.run_id, &run.path, run.status, run_store.as_ref()).await
+        }
+        None => inspect_run_dir(&run.run_id, &run.path, run.status),
+    };
     let json = serde_json::to_string_pretty(&[output])?;
     println!("{json}");
     Ok(())
@@ -55,8 +55,7 @@ async fn inspect_run_store(
             status: snapshot
                 .status
                 .as_ref()
-                .map(|record| record.status)
-                .unwrap_or(status),
+                .map_or(status, |record| record.status),
             run_record: serde_json::to_value(snapshot.run).ok(),
             start_record: snapshot
                 .start

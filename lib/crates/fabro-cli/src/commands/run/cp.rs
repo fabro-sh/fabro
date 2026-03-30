@@ -9,8 +9,8 @@ use fabro_workflows::run_lookup::{resolve_run, runs_base};
 use tokio::fs;
 use tracing::{debug, info};
 
-use crate::args::CpArgs;
-use crate::cli_config::load_cli_settings;
+use crate::args::{CpArgs, GlobalArgs};
+use crate::cli_config::load_cli_settings_with_globals;
 use crate::shared::split_run_path;
 
 enum CopyDirection {
@@ -26,9 +26,9 @@ enum CopyDirection {
     },
 }
 
-pub(crate) async fn cp_command(args: CpArgs) -> Result<()> {
+pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()> {
     let direction = parse_direction(&args.src, &args.dst)?;
-    let cli_settings = load_cli_settings()?;
+    let cli_settings = load_cli_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
 
     match direction {

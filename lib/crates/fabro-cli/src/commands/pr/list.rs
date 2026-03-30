@@ -7,16 +7,18 @@ use fabro_workflows::run_lookup::{runs_base, scan_runs_combined};
 use futures::future::join_all;
 use tracing::info;
 
-use crate::args::PrListArgs;
-use crate::cli_config::load_cli_settings;
+use crate::args::{GlobalArgs, PrListArgs};
+use crate::cli_config::load_cli_settings_with_globals;
+use crate::store;
 
 pub(super) async fn list_command(
     args: PrListArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
+    globals: &GlobalArgs,
 ) -> Result<()> {
-    let cli_settings = load_cli_settings()?;
+    let cli_settings = load_cli_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = crate::store::build_store(&cli_settings.storage_dir())?;
+    let store = store::build_store(&cli_settings.storage_dir())?;
     list_from(store.as_ref(), &base, args, github_app).await
 }
 

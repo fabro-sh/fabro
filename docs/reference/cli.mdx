@@ -11,6 +11,8 @@ These flags apply to all subcommands:
 |---|---|
 | `--debug` | Enable DEBUG-level logging (default is INFO) |
 | `--no-upgrade-check` | Skip the automatic background upgrade check |
+| `--storage-dir <DIR>` | Storage directory for local run data (default: `~/.fabro`). Implies standalone mode. |
+| `--server-url <URL>` | Fabro API server URL (overrides `server.base_url` from `cli.toml`). Implies server mode. |
 | `-h, --help` | Print help |
 | `-V, --version` | Print version |
 
@@ -70,7 +72,6 @@ fabro run run.toml
 | Argument / Flag | Description |
 |---|---|
 | `<WORKFLOW>` | Path to a `.fabro` workflow file, `.toml` task config, or workflow name (resolved from `fabro/workflows/` in the project, then `~/.fabro/workflows/`). |
-| `--storage-dir <DIR>` | Storage directory (default: `~/.fabro`) |
 | `--dry-run` | Execute with a simulated LLM backend |
 | `--auto-approve` | Auto-approve all human gates |
 | `--model <MODEL>` | Override default LLM model |
@@ -249,8 +250,6 @@ fabro exec "Refactor the auth module" --permissions full --auto-approve
 | `--verbose` | Print full LLM request/response JSON to stderr | — |
 | `--skills-dir <DIR>` | Directory containing skill files (overrides default discovery) | — |
 | `--output-format <FORMAT>` | Output format: `text` (human-readable) or `json` (NDJSON event stream) | `text` |
-| `--mode <MODE>` | `standalone` (default) or `server` — in server mode, routes through the Fabro API's `/completions` endpoint | `standalone` |
-| `--server-url <URL>` | Fabro API server URL (overrides `server.base_url` from `cli.toml`) | — |
 
 Permission levels control which tools are auto-approved: `read-only` allows read tools (`read_file`, `grep`, `glob`, `list_dir`) and subagent tools; `read-write` adds write tools (`write_file`, `edit_file`, `apply_patch`); `full` allows all tools including shell commands. Tools outside the permission level are either interactively prompted (if a TTY is present) or denied (with `--auto-approve`). See [default models by provider](/core-concepts/models#default-models).
 
@@ -284,14 +283,13 @@ Start an interactive multi-turn chat session. In server mode, the session is bac
 ```bash
 fabro llm chat
 fabro llm chat -m claude-opus-4-6 -s "You are a helpful coding assistant"
-fabro llm chat --mode server
+fabro llm chat --server-url http://localhost:3000
 ```
 
 | Flag | Description |
 |---|---|
 | `-m, --model <MODEL>` | Model to use |
 | `-s, --system <SYSTEM>` | System prompt |
-| `--mode <MODE>` | `standalone` (default) or `server` — in server mode, routes through the Fabro API |
 
 ---
 
@@ -303,14 +301,13 @@ List available LLM models from the built-in catalog. Running `fabro model` with 
 fabro model list
 fabro model list -p anthropic
 fabro model list -q sonnet
-fabro model list --mode server
+fabro model list --server-url http://localhost:3000
 ```
 
 | Flag | Description |
 |---|---|
 | `-p, --provider <PROVIDER>` | Filter by provider |
 | `-q, --query <QUERY>` | Search for models matching this string (checks ID, display name, and aliases) |
-| `--mode <MODE>` | `standalone` (default) or `server` — in server mode, fetches the catalog from the Fabro API |
 
 ## `fabro model test`
 

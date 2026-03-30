@@ -16,9 +16,10 @@ use fabro_workflows::outcome::StageStatus;
 use fabro_workflows::records::{Conclusion, ConclusionExt, RunRecord, RunRecordExt};
 use fabro_workflows::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
 use tokio::signal::ctrl_c;
-use tokio::time::sleep;
+use tokio::time::{self, sleep};
 
 use super::run_progress;
+use crate::store;
 
 #[cfg(test)]
 const ATTACH_STARTUP_GRACE: Duration = Duration::from_millis(200);
@@ -44,7 +45,7 @@ pub(crate) async fn attach_run(
             .map(|record| record.settings.storage_dir()),
         run_id.or_else(|| run_record.as_ref().map(|record| record.run_id.as_str())),
     ) {
-        match crate::store::open_run_reader(&storage_dir, run_id).await {
+        match store::open_run_reader(&storage_dir, run_id).await {
             Ok(Some(run_store)) => match run_store.list_events().await {
                 Ok(events) => {
                     let event_lines = events
@@ -55,7 +56,7 @@ pub(crate) async fn attach_run(
                         run_dir,
                         run_store.as_ref(),
                         event_lines,
-                        events.last().map(|event| event.seq).unwrap_or(0),
+                        events.last().map_or(0, |event| event.seq),
                         kill_on_detach,
                         styles,
                         engine_child,
@@ -158,7 +159,7 @@ async fn attach_run_store(
         }
 
         let mut saw_event = false;
-        match tokio::time::timeout(Duration::from_millis(100), stream.next()).await {
+        match time::timeout(Duration::from_millis(100), stream.next()).await {
             Ok(Some(Ok(event))) => {
                 let line = event_payload_line(&event)?;
                 progress_ui.handle_json_line(&line);
@@ -642,27 +643,24 @@ fn determine_exit_code(conclusion_path: &Path, status_record: Option<RunStatusRe
 }
 
 async fn determine_exit_code_with_store(run_store: &dyn RunStore, run_dir: &Path) -> ExitCode {
-    match run_store.get_conclusion().await {
-        Ok(Some(conclusion)) => {
-            let success = matches!(
-                conclusion.status,
-                StageStatus::Success | StageStatus::PartialSuccess
-            );
-            if success {
-                ExitCode::from(0)
-            } else {
-                ExitCode::from(1)
-            }
+    if let Ok(Some(conclusion)) = run_store.get_conclusion().await {
+        let success = matches!(
+            conclusion.status,
+            StageStatus::Success | StageStatus::PartialSuccess
+        );
+        if success {
+            ExitCode::from(0)
+        } else {
+            ExitCode::from(1)
         }
-        Ok(None) | Err(_) => {
-            let status_path = run_dir.join("status.json");
-            let conclusion_path = run_dir.join("conclusion.json");
-            let status_record = match run_store.get_status().await {
-                Ok(record) => record.or_else(|| read_status_record(&status_path)),
-                Err(_) => read_status_record(&status_path),
-            };
-            determine_exit_code(&conclusion_path, status_record)
-        }
+    } else {
+        let status_path = run_dir.join("status.json");
+        let conclusion_path = run_dir.join("conclusion.json");
+        let status_record = match run_store.get_status().await {
+            Ok(record) => record.or_else(|| read_status_record(&status_path)),
+            Err(_) => read_status_record(&status_path),
+        };
+        determine_exit_code(&conclusion_path, status_record)
     }
 }
 

@@ -1,8 +1,13 @@
+#[cfg(feature = "server")]
+use std::path::Path;
+
 #[allow(unused_imports)]
 pub(crate) use fabro_config::cli::*;
 
 use fabro_config::ConfigLayer;
 use fabro_config::FabroSettings;
+
+use crate::args::GlobalArgs;
 
 #[cfg(feature = "server")]
 use tracing::debug;
@@ -11,9 +16,19 @@ pub(crate) fn load_cli_settings() -> anyhow::Result<FabroSettings> {
     ConfigLayer::cli()?.resolve()
 }
 
+pub(crate) fn load_cli_settings_with_globals(
+    globals: &GlobalArgs,
+) -> anyhow::Result<FabroSettings> {
+    let mut layer = ConfigLayer::cli()?;
+    if let Some(dir) = &globals.storage_dir {
+        layer.storage_dir = Some(dir.clone());
+    }
+    layer.resolve()
+}
+
 #[cfg(feature = "server")]
 #[derive(Debug, PartialEq)]
-pub struct ResolvedMode {
+pub(crate) struct ResolvedMode {
     pub mode: ExecutionMode,
     pub server_base_url: String,
     pub tls: Option<ClientTlsSettings>,
@@ -23,14 +38,18 @@ pub struct ResolvedMode {
 const DEFAULT_SERVER_URL: &str = "http://localhost:3000";
 
 #[cfg(feature = "server")]
-pub fn resolve_mode(
-    cli_mode: Option<ExecutionMode>,
+pub(crate) fn resolve_mode(
+    cli_storage_dir: Option<&Path>,
     cli_server_url: Option<&str>,
     settings: &FabroSettings,
 ) -> ResolvedMode {
-    let mode = cli_mode
-        .or_else(|| settings.mode.clone())
-        .unwrap_or_default();
+    let mode = if cli_server_url.is_some() {
+        ExecutionMode::Server
+    } else if cli_storage_dir.is_some() {
+        ExecutionMode::Standalone
+    } else {
+        settings.mode.clone().unwrap_or_default()
+    };
 
     let server_defaults = settings.server.as_ref();
 
@@ -51,7 +70,9 @@ pub fn resolve_mode(
 }
 
 #[cfg(feature = "server")]
-pub fn build_server_client(tls: Option<&ClientTlsSettings>) -> anyhow::Result<reqwest::Client> {
+pub(crate) fn build_server_client(
+    tls: Option<&ClientTlsSettings>,
+) -> anyhow::Result<reqwest::Client> {
     let Some(tls) = tls else {
         return Ok(reqwest::Client::new());
     };
@@ -82,7 +103,7 @@ pub fn build_server_client(tls: Option<&ClientTlsSettings>) -> anyhow::Result<re
 
 #[cfg(all(test, feature = "server"))]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use super::*;
 
@@ -98,6 +119,31 @@ mod tests {
     }
 
     #[test]
+    fn resolve_mode_storage_dir_forces_standalone() {
+        let settings = FabroSettings {
+            mode: Some(ExecutionMode::Server),
+            ..FabroSettings::default()
+        };
+        let resolved = resolve_mode(Some(Path::new("/tmp/fabro")), None, &settings);
+        assert_eq!(resolved.mode, ExecutionMode::Standalone);
+    }
+
+    #[test]
+    fn resolve_mode_server_url_forces_server() {
+        let settings = FabroSettings {
+            mode: Some(ExecutionMode::Standalone),
+            server: Some(ServerSettings {
+                base_url: Some("https://config.example.com".to_string()),
+                tls: None,
+            }),
+            ..FabroSettings::default()
+        };
+        let resolved = resolve_mode(None, Some("https://cli.example.com"), &settings);
+        assert_eq!(resolved.mode, ExecutionMode::Server);
+        assert_eq!(resolved.server_base_url, "https://cli.example.com");
+    }
+
+    #[test]
     fn resolve_mode_config_overrides_default() {
         let settings = FabroSettings {
             mode: Some(ExecutionMode::Server),
@@ -110,25 +156,6 @@ mod tests {
         let resolved = resolve_mode(None, None, &settings);
         assert_eq!(resolved.mode, ExecutionMode::Server);
         assert_eq!(resolved.server_base_url, "https://config.example.com");
-    }
-
-    #[test]
-    fn resolve_mode_cli_overrides_config() {
-        let settings = FabroSettings {
-            mode: Some(ExecutionMode::Standalone),
-            server: Some(ServerSettings {
-                base_url: Some("https://config.example.com".to_string()),
-                tls: None,
-            }),
-            ..FabroSettings::default()
-        };
-        let resolved = resolve_mode(
-            Some(ExecutionMode::Server),
-            Some("https://cli.example.com"),
-            &settings,
-        );
-        assert_eq!(resolved.mode, ExecutionMode::Server);
-        assert_eq!(resolved.server_base_url, "https://cli.example.com");
     }
 
     #[test]

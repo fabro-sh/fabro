@@ -9,15 +9,17 @@ use fabro_store::RunStore;
 use fabro_util::terminal::Styles;
 use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 use futures::StreamExt;
+use tokio::time;
 use tracing::{debug, info, warn};
 
-use crate::args::LogsArgs;
-use crate::cli_config::load_cli_settings;
+use crate::args::{GlobalArgs, LogsArgs};
+use crate::cli_config::load_cli_settings_with_globals;
+use crate::store;
 
-pub(crate) async fn run(args: &LogsArgs, styles: &Styles) -> Result<()> {
-    let cli_settings = load_cli_settings()?;
+pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
+    let cli_settings = load_cli_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = crate::store::build_store(&cli_settings.storage_dir())?;
+    let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
 
     info!(run_id = %run.run_id, "Showing logs");
@@ -27,12 +29,12 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles) -> Result<()> {
         None => None,
     };
 
-    let run_store = crate::store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
     let progress_path = run.path.join("progress.jsonl");
-    let (all_lines, last_seq, use_store_follow) = match run_store.as_ref() {
-        Some(run_store) => match run_store.list_events().await {
+    let (all_lines, last_seq, use_store_follow) = if let Some(run_store) = run_store.as_ref() {
+        match run_store.list_events().await {
             Ok(events) => {
-                let last_seq = events.last().map(|event| event.seq).unwrap_or(0);
+                let last_seq = events.last().map_or(0, |event| event.seq);
                 let lines = events
                     .iter()
                     .map(event_payload_line)
@@ -50,13 +52,12 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles) -> Result<()> {
                 );
                 (read_lines(&progress_path)?, 0, false)
             }
-        },
-        None => {
-            if !progress_path.exists() {
-                bail!("No progress.jsonl found for run '{}'", run.run_id);
-            }
-            (read_lines(&progress_path)?, 0, false)
         }
+    } else {
+        if !progress_path.exists() {
+            bail!("No progress.jsonl found for run '{}'", run.run_id);
+        }
+        (read_lines(&progress_path)?, 0, false)
     };
     let filtered = apply_filters(&all_lines, since_cutoff.as_ref(), args.tail);
 
@@ -252,7 +253,7 @@ async fn follow_store_logs(
     let mut out = stdout.lock();
 
     loop {
-        match tokio::time::timeout(Duration::from_millis(200), stream.next()).await {
+        match time::timeout(Duration::from_millis(200), stream.next()).await {
             Ok(Some(Ok(event))) => {
                 let line = event_payload_line(&event)?;
                 if pretty {

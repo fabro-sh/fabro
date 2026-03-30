@@ -1,27 +1,31 @@
 use std::io::Write;
 use std::path::Path;
 
-use crate::args::{ConfigCommand, ConfigNamespace, ConfigShowArgs};
+use crate::args::{ConfigCommand, ConfigNamespace, ConfigShowArgs, GlobalArgs};
 use fabro_config::{ConfigLayer, FabroSettings};
 
-pub(crate) fn dispatch(ns: ConfigNamespace) -> anyhow::Result<()> {
+pub(crate) fn dispatch(ns: ConfigNamespace, globals: &GlobalArgs) -> anyhow::Result<()> {
     match ns.command {
-        ConfigCommand::Show(args) => show_command(&args),
+        ConfigCommand::Show(args) => show_command(&args, globals),
     }
 }
 
-fn merged_config(workflow: Option<&Path>) -> anyhow::Result<FabroSettings> {
+fn merged_config(workflow: Option<&Path>, globals: &GlobalArgs) -> anyhow::Result<FabroSettings> {
     let cwd = std::env::current_dir()?;
     let base = match workflow {
         Some(path) => ConfigLayer::for_workflow(path, &cwd)?,
         None => ConfigLayer::project(&cwd)?,
     };
+    let mut cli = ConfigLayer::cli()?;
+    if let Some(dir) = &globals.storage_dir {
+        cli.storage_dir = Some(dir.clone());
+    }
 
-    base.combine(ConfigLayer::cli()?).resolve()
+    base.combine(cli).resolve()
 }
 
-pub(crate) fn show_command(args: &ConfigShowArgs) -> anyhow::Result<()> {
-    let config = merged_config(args.workflow.as_deref())?;
+pub(crate) fn show_command(args: &ConfigShowArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
+    let config = merged_config(args.workflow.as_deref(), globals)?;
     let mut yaml = serde_yaml::to_string(&config)?;
     if !yaml.ends_with('\n') {
         yaml.push('\n');

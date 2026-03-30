@@ -5,19 +5,18 @@ use fabro_sandbox::daytona::DaytonaSandbox;
 use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
 use tracing::info;
 
-use crate::args::PreviewArgs;
-use crate::cli_config::load_cli_settings;
+use crate::args::{GlobalArgs, PreviewArgs};
+use crate::cli_config::load_cli_settings_with_globals;
 use crate::shared::validate_daytona_provider;
+use crate::store;
 
-pub(crate) async fn run(args: PreviewArgs) -> Result<()> {
-    let cli_settings = load_cli_settings()?;
+pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs) -> Result<()> {
+    let cli_settings = load_cli_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = crate::store::build_store(&cli_settings.storage_dir())?;
+    let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
     let sandbox_json = run.path.join("sandbox.json");
-    let record = match crate::store::open_run_reader(&cli_settings.storage_dir(), &run.run_id)
-        .await?
-    {
+    let record = match store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await? {
         Some(run_store) => run_store
             .get_sandbox()
             .await

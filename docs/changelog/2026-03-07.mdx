@@ -10,8 +10,8 @@ Fabro now exposes a `POST /completions` endpoint for single-turn LLM completions
 The CLI's `fabro llm` commands can now target the server instead of calling providers directly:
 
 ```bash
-fabro llm prompt "Summarize this file" --mode server
-fabro llm chat --mode server
+fabro llm prompt "Summarize this file" --server-url http://localhost:3000
+fabro llm chat --server-url http://localhost:3000
 ```
 
 ## Two new sandbox providers: exe.dev and Sprites
@@ -63,14 +63,14 @@ To migrate, regenerate your TypeScript client and update any direct API calls.
 - New `POST /completions` endpoint for single-turn LLM completions with SSE streaming and structured output via JSON Schema
 - New `GET /models` endpoint exposes the full LLM model catalog with pagination
 - New `POST /models/{id}/test` endpoint for testing model connectivity in server mode
-- Session endpoints for interactive LLM chat via `fabro llm chat --mode server`
+- Session endpoints for interactive LLM chat via `fabro llm chat --server-url http://localhost:3000`
 - Verification API reorganized: `/verifications` split into `/verification/criteria` and `/verification/controls`
 </Accordion>
 
 <Accordion title="CLI">
-- `fabro llm prompt --mode server` routes prompts through the Fabro server
-- `fabro llm chat --mode server` enables interactive chat sessions through the server
-- `fabro model list --mode standalone|server` controls whether model list comes from local config or server
+- `fabro llm prompt --server-url <url>` routes prompts through the Fabro server
+- `fabro llm chat --server-url <url>` enables interactive chat sessions through the server
+- `fabro model list --server-url <url>` fetches the model list from the Fabro server
 - Added `--goal` arg to `fabro run start` to override the workflow goal from the command line
 - Turn and tool-call counts now display correctly in non-TTY mode
 </Accordion>

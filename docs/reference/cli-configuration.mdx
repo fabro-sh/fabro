@@ -149,18 +149,14 @@ Customize the git author identity used for checkpoint commits. Overrides the ser
 
 ## `mode`
 
-Controls whether commands run in-process or delegate to a running Fabro API server.
+Controls the default execution mode when neither `--storage-dir` nor `--server-url` is passed.
 
 | Value | Description |
 |---|---|
 | `"standalone"` | Execute locally (default) |
 | `"server"` | Delegate to an Fabro API server |
 
-Override with the `--mode` CLI flag:
-
-```bash
-fabro --mode server models list
-```
+For a single invocation, `--storage-dir` implies standalone mode and `--server-url` implies server mode.
 
 ## `[server]` section
 
@@ -170,10 +166,10 @@ Configuration for server mode.
 |---|---|---|
 | `base_url` | Server URL | `"http://localhost:3000"` |
 
-Override the URL with the `--server-url` CLI flag:
+Passing `--server-url` implies server mode and overrides `server.base_url`:
 
 ```bash
-fabro --mode server --server-url https://fabro.example.com:3000 models list
+fabro --server-url https://fabro.example.com:3000 model list
 ```
 
 ### `[server.tls]` section

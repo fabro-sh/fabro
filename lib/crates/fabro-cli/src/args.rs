@@ -6,9 +6,6 @@ use fabro_agent::cli::AgentArgs;
 use fabro_graphviz::render::GraphFormat;
 use fabro_llm::cli::{ChatArgs, ModelsCommand, PromptArgs};
 
-#[cfg(feature = "server")]
-use crate::cli_config;
-
 pub(crate) const LONG_VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " (",
@@ -36,26 +33,14 @@ pub(crate) struct GlobalArgs {
     #[arg(long, global = true, conflicts_with = "quiet")]
     pub verbose: bool,
 
-    /// Execution mode: standalone (in-process) or server (delegate to API)
-    #[cfg(feature = "server")]
-    #[arg(long, global = true, value_parser = parse_execution_mode)]
-    pub mode: Option<cli_config::ExecutionMode>,
-
-    /// Server URL (overrides server.base_url from cli.toml)
-    #[cfg(feature = "server")]
+    /// Storage directory (default: ~/.fabro)
     #[arg(long, global = true)]
-    pub server_url: Option<String>,
-}
+    pub storage_dir: Option<PathBuf>,
 
-#[cfg(feature = "server")]
-pub(crate) fn parse_execution_mode(s: &str) -> Result<cli_config::ExecutionMode, String> {
-    match s {
-        "standalone" => Ok(cli_config::ExecutionMode::Standalone),
-        "server" => Ok(cli_config::ExecutionMode::Server),
-        _ => Err(format!(
-            "invalid mode '{s}', expected 'standalone' or 'server'"
-        )),
-    }
+    #[cfg(feature = "server")]
+    /// Server URL (overrides server.base_url from cli.toml)
+    #[arg(long, global = true, conflicts_with = "storage_dir")]
+    pub server_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -101,10 +86,6 @@ pub(crate) struct RunArgs {
     /// Path to a .fabro workflow file or .toml task config
     #[arg(required = true)]
     pub(crate) workflow: Option<PathBuf>,
-
-    /// Storage directory (default: ~/.fabro)
-    #[arg(long)]
-    pub(crate) storage_dir: Option<PathBuf>,
 
     /// Execute with simulated LLM backend
     #[arg(long)]

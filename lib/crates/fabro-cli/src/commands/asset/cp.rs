@@ -6,12 +6,12 @@ use fabro_store::RuntimeState;
 use fabro_workflows::assets::{AssetEntry, scan_assets};
 use fabro_workflows::run_lookup::{resolve_run, runs_base};
 
-use crate::args::AssetCpArgs;
-use crate::cli_config::load_cli_settings;
+use crate::args::{AssetCpArgs, GlobalArgs};
+use crate::cli_config::load_cli_settings_with_globals;
 use crate::shared::split_run_path;
 
-pub(super) fn cp_command(args: &AssetCpArgs) -> Result<()> {
-    let cli_settings = load_cli_settings()?;
+pub(super) fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Result<()> {
+    let cli_settings = load_cli_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     let (run_id, asset_path) = parse_source(&args.source);
     let run = resolve_run(&base, run_id)?;

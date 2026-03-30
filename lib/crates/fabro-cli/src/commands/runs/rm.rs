@@ -8,17 +8,18 @@ use tracing::warn;
 
 use fabro_sandbox::reconnect::reconnect as reconnect_sandbox;
 use fabro_workflows::run_lookup::{resolve_run_combined, runs_base};
-use fabro_workflows::run_status::{RunStatus, write_run_status};
+use fabro_workflows::run_status::{RunStatus, RunStatusRecord, write_run_status};
 
-use crate::args::RunsRemoveArgs;
-use crate::cli_config::load_cli_settings;
+use crate::args::{GlobalArgs, RunsRemoveArgs};
+use crate::cli_config::load_cli_settings_with_globals;
+use crate::store;
 
 use super::short_run_id;
 
-pub(crate) async fn remove_command(args: &RunsRemoveArgs) -> Result<()> {
-    let cli_settings = load_cli_settings()?;
+pub(crate) async fn remove_command(args: &RunsRemoveArgs, globals: &GlobalArgs) -> Result<()> {
+    let cli_settings = load_cli_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = crate::store::build_store(&cli_settings.storage_dir())?;
+    let store = store::build_store(&cli_settings.storage_dir())?;
     remove_from(args, store.as_ref(), &base).await
 }
 
@@ -48,10 +49,7 @@ async fn remove_from(args: &RunsRemoveArgs, store: &dyn Store, base: &Path) -> R
         write_run_status(&run.path, RunStatus::Removing, None);
         if let Ok(Some(run_store)) = store.open_run_reader(&run.run_id).await {
             if let Err(err) = run_store
-                .put_status(&fabro_workflows::run_status::RunStatusRecord::new(
-                    RunStatus::Removing,
-                    None,
-                ))
+                .put_status(&RunStatusRecord::new(RunStatus::Removing, None))
                 .await
             {
                 warn!(

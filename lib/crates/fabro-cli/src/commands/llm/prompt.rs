@@ -19,7 +19,7 @@ pub(super) async fn execute(
     #[cfg(feature = "server")]
     {
         let resolved = crate::cli_config::resolve_mode(
-            globals.mode.clone(),
+            globals.storage_dir.as_deref(),
             globals.server_url.as_deref(),
             cli_settings,
         );

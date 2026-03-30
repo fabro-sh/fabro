@@ -64,7 +64,11 @@ pub struct ServeArgs {
 ///
 /// Returns an error if the server fails to bind or encounters a fatal error.
 #[allow(clippy::print_stderr)]
-pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::Result<()> {
+pub async fn serve_command(
+    args: ServeArgs,
+    styles: &'static Styles,
+    storage_dir_override: Option<PathBuf>,
+) -> anyhow::Result<()> {
     // Resolve dry-run mode (same pattern as run.rs)
     let dry_run_mode = if args.dry_run {
         true
@@ -91,7 +95,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     // Initialize data directory and SQLite database
     let config_path = args.config;
     let server_settings = load_server_settings(config_path.as_deref())?;
-    let data_dir = resolve_storage_dir(&server_settings);
+    let data_dir = storage_dir_override.unwrap_or_else(|| resolve_storage_dir(&server_settings));
 
     // Shared config for live reloading
     let shared_settings = Arc::new(RwLock::new(server_settings));

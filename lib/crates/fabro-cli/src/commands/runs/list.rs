@@ -11,16 +11,21 @@ use fabro_util::text::strip_goal_decoration;
 use fabro_workflows::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_combined};
 use fabro_workflows::run_status::RunStatus;
 
-use crate::args::RunsListArgs;
-use crate::cli_config::load_cli_settings;
+use crate::args::{GlobalArgs, RunsListArgs};
+use crate::cli_config::load_cli_settings_with_globals;
 use crate::shared::{color_if, format_duration_ms, tilde_path};
+use crate::store;
 
 use super::short_run_id;
 
-pub(crate) async fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
-    let cli_settings = load_cli_settings()?;
+pub(crate) async fn list_command(
+    args: &RunsListArgs,
+    styles: &Styles,
+    globals: &GlobalArgs,
+) -> Result<()> {
+    let cli_settings = load_cli_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = crate::store::build_store(&cli_settings.storage_dir())?;
+    let store = store::build_store(&cli_settings.storage_dir())?;
     let runs = scan_runs_combined(store.as_ref(), &base).await?;
     let label_filters = parse_label_filters(&args.filter.label);
     let filtered = filter_runs(

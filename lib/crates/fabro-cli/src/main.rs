@@ -166,7 +166,7 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Llm(ns) => commands::llm::dispatch(ns, &globals).await?,
             Commands::Exec(args) => commands::exec::execute(args, &globals).await?,
             Commands::RunCmd(cmd) => commands::run::dispatch(cmd, &globals).await?,
-            Commands::Preflight(args) => commands::preflight::execute(args).await?,
+            Commands::Preflight(args) => commands::preflight::execute(args, &globals).await?,
             Commands::Validate(args) => {
                 let styles = Styles::detect_stderr();
                 commands::validate::run(&args, &styles)?;
@@ -178,14 +178,15 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Parse(args) => {
                 commands::parse::run(&args)?;
             }
-            Commands::Asset(ns) => commands::asset::dispatch(ns)?,
-            Commands::Store(ns) => commands::store::dispatch(ns).await?,
-            Commands::RunsCmd(cmd) => commands::runs::dispatch(cmd).await?,
+            Commands::Asset(ns) => commands::asset::dispatch(ns, &globals)?,
+            Commands::Store(ns) => commands::store::dispatch(ns, &globals).await?,
+            Commands::RunsCmd(cmd) => commands::runs::dispatch(cmd, &globals).await?,
             Commands::Model { command } => commands::model::execute(command, &globals).await?,
             #[cfg(feature = "server")]
             Commands::Serve(args) => {
                 let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-                fabro_server::serve::serve_command(args, styles).await?;
+                fabro_server::serve::serve_command(args, styles, globals.storage_dir.clone())
+                    .await?;
             }
             Commands::Doctor { verbose, dry_run } => {
                 let cli_settings = cli_config::load_cli_settings()?;
@@ -207,16 +208,16 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Install { web_url } => {
                 commands::install::run_install(&web_url).await?;
             }
-            Commands::Pr(ns) => commands::pr::dispatch(ns).await?,
+            Commands::Pr(ns) => commands::pr::dispatch(ns, &globals).await?,
             Commands::Secret(ns) => commands::secret::dispatch(ns)?,
-            Commands::Config(ns) => commands::config::dispatch(ns)?,
+            Commands::Config(ns) => commands::config::dispatch(ns, &globals)?,
             Commands::Workflow(ns) => commands::workflow::dispatch(ns)?,
             Commands::Skill(ns) => commands::skill::dispatch(ns)?,
             Commands::Upgrade(args) => {
                 commands::upgrade::run_upgrade(args).await?;
             }
             Commands::Provider(ns) => commands::provider::dispatch(ns).await?,
-            Commands::System(ns) => commands::system::dispatch(ns).await?,
+            Commands::System(ns) => commands::system::dispatch(ns, &globals).await?,
             Commands::SendAnalytics { path } => {
                 let result = sender::upload(&path).await;
                 let _ = std::fs::remove_file(&path);
@@ -304,6 +305,46 @@ mod tests {
             }
             _ => panic!("unexpected command variant"),
         }
+    }
+
+    #[test]
+    fn parse_global_storage_dir_after_subcommand() {
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "run",
+            "test/simple.fabro",
+            "--storage-dir",
+            "/tmp/fabro",
+        ])
+        .expect("should parse");
+        assert_eq!(
+            cli.globals.storage_dir.as_deref(),
+            Some(std::path::Path::new("/tmp/fabro"))
+        );
+        match *cli.command {
+            Commands::RunCmd(RunCommands::Run(args)) => {
+                assert_eq!(
+                    args.workflow.as_deref(),
+                    Some(std::path::Path::new("test/simple.fabro"))
+                );
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "server")]
+    fn parse_server_url_conflicts_with_storage_dir() {
+        let result = Cli::try_parse_from([
+            "fabro",
+            "--storage-dir",
+            "/tmp/fabro",
+            "--server-url",
+            "http://localhost:3000",
+            "model",
+            "list",
+        ]);
+        assert!(result.is_err(), "should fail with conflicting global flags");
     }
 
     #[test]
