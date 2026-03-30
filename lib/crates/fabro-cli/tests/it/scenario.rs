@@ -1,20 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use assert_cmd::Command;
 use fabro_store::RuntimeState;
+use fabro_test::test_context;
 use serde_json::Value;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-#[allow(deprecated)]
-fn fabro() -> Command {
-    let mut cmd = Command::cargo_bin("fabro").unwrap();
-    cmd.env("NO_COLOR", "1");
-    cmd
-}
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -115,34 +108,23 @@ scenario_tests!(command_pipeline);
 
 fn scenario_command_pipeline(sandbox: &str) {
     dotenvy::dotenv().ok();
-    let tmp = tempfile::tempdir().unwrap();
-    let storage_dir = tmp.path().join("storage");
+    let context = test_context!();
 
-    // Validate the workflow before running it
-    fabro()
-        .args([
-            "validate",
-            fixture("command_pipeline.fabro").to_str().unwrap(),
-        ])
+    context
+        .validate()
+        .arg(fixture("command_pipeline.fabro"))
         .assert()
         .success();
 
-    fabro()
-        .args([
-            "run",
-            "--auto-approve",
-            "--no-retro",
-            "--sandbox",
-            sandbox,
-            "--storage-dir",
-            storage_dir.to_str().unwrap(),
-            fixture("command_pipeline.fabro").to_str().unwrap(),
-        ])
+    context
+        .run_cmd()
+        .args(["--auto-approve", "--no-retro", "--sandbox", sandbox])
+        .arg(fixture("command_pipeline.fabro"))
         .timeout(timeout_for(sandbox))
         .assert()
         .success();
 
-    let run_dir = find_run_dir(&storage_dir);
+    let run_dir = find_run_dir(&context.storage_dir);
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(
         conclusion["status"].as_str(),
@@ -174,25 +156,17 @@ scenario_tests!(conditional_branching);
 
 fn scenario_conditional_branching(sandbox: &str) {
     dotenvy::dotenv().ok();
-    let tmp = tempfile::tempdir().unwrap();
-    let storage_dir = tmp.path().join("storage");
+    let context = test_context!();
 
-    fabro()
-        .args([
-            "run",
-            "--auto-approve",
-            "--no-retro",
-            "--sandbox",
-            sandbox,
-            "--storage-dir",
-            storage_dir.to_str().unwrap(),
-            fixture("conditional_branching.fabro").to_str().unwrap(),
-        ])
+    context
+        .run_cmd()
+        .args(["--auto-approve", "--no-retro", "--sandbox", sandbox])
+        .arg(fixture("conditional_branching.fabro"))
         .timeout(timeout_for(sandbox))
         .assert()
         .success();
 
-    let run_dir = find_run_dir(&storage_dir);
+    let run_dir = find_run_dir(&context.storage_dir);
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(conclusion["status"].as_str(), Some("success"));
 
@@ -212,27 +186,24 @@ scenario_tests!(agent_linear);
 
 fn scenario_agent_linear(sandbox: &str) {
     dotenvy::dotenv().ok();
-    let tmp = tempfile::tempdir().unwrap();
-    let storage_dir = tmp.path().join("storage");
+    let context = test_context!();
 
-    fabro()
+    context
+        .run_cmd()
         .args([
-            "run",
             "--auto-approve",
             "--no-retro",
             "--sandbox",
             sandbox,
             "--model",
             "claude-haiku-4-5",
-            "--storage-dir",
-            storage_dir.to_str().unwrap(),
-            fixture("agent_linear.fabro").to_str().unwrap(),
         ])
+        .arg(fixture("agent_linear.fabro"))
         .timeout(timeout_for(sandbox))
         .assert()
         .success();
 
-    let run_dir = find_run_dir(&storage_dir);
+    let run_dir = find_run_dir(&context.storage_dir);
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(conclusion["status"].as_str(), Some("success"));
 
@@ -260,27 +231,24 @@ scenario_tests!(human_gate);
 
 fn scenario_human_gate(sandbox: &str) {
     dotenvy::dotenv().ok();
-    let tmp = tempfile::tempdir().unwrap();
-    let storage_dir = tmp.path().join("storage");
+    let context = test_context!();
 
-    fabro()
+    context
+        .run_cmd()
         .args([
-            "run",
             "--auto-approve",
             "--no-retro",
             "--sandbox",
             sandbox,
             "--model",
             "claude-haiku-4-5",
-            "--storage-dir",
-            storage_dir.to_str().unwrap(),
-            fixture("human_gate.fabro").to_str().unwrap(),
         ])
+        .arg(fixture("human_gate.fabro"))
         .timeout(timeout_for(sandbox))
         .assert()
         .success();
 
-    let run_dir = find_run_dir(&storage_dir);
+    let run_dir = find_run_dir(&context.storage_dir);
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(conclusion["status"].as_str(), Some("success"));
 
@@ -300,27 +268,24 @@ scenario_tests!(command_agent_mixed);
 
 fn scenario_command_agent_mixed(sandbox: &str) {
     dotenvy::dotenv().ok();
-    let tmp = tempfile::tempdir().unwrap();
-    let storage_dir = tmp.path().join("storage");
+    let context = test_context!();
 
-    fabro()
+    context
+        .run_cmd()
         .args([
-            "run",
             "--auto-approve",
             "--no-retro",
             "--sandbox",
             sandbox,
             "--model",
             "claude-haiku-4-5",
-            "--storage-dir",
-            storage_dir.to_str().unwrap(),
-            fixture("command_agent_mixed.fabro").to_str().unwrap(),
         ])
+        .arg(fixture("command_agent_mixed.fabro"))
         .timeout(timeout_for(sandbox))
         .assert()
         .success();
 
-    let run_dir = find_run_dir(&storage_dir);
+    let run_dir = find_run_dir(&context.storage_dir);
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(conclusion["status"].as_str(), Some("success"));
 
@@ -352,27 +317,24 @@ scenario_tests!(full_stack);
 
 fn scenario_full_stack(sandbox: &str) {
     dotenvy::dotenv().ok();
-    let tmp = tempfile::tempdir().unwrap();
-    let storage_dir = tmp.path().join("storage");
+    let context = test_context!();
 
-    fabro()
+    context
+        .run_cmd()
         .args([
-            "run",
             "--auto-approve",
             "--no-retro",
             "--sandbox",
             sandbox,
             "--model",
             "claude-haiku-4-5",
-            "--storage-dir",
-            storage_dir.to_str().unwrap(),
-            fixture("full_stack.fabro").to_str().unwrap(),
         ])
+        .arg(fixture("full_stack.fabro"))
         .timeout(timeout_for(sandbox))
         .assert()
         .success();
 
-    let run_dir = find_run_dir(&storage_dir);
+    let run_dir = find_run_dir(&context.storage_dir);
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(
         conclusion["status"].as_str(),
@@ -430,22 +392,21 @@ fn scenario_full_stack(sandbox: &str) {
 #[ignore = "scenario: requires local sandbox"]
 fn local_run_lifecycle() {
     dotenvy::dotenv().ok();
-    let tmp = tempfile::tempdir().unwrap();
+    let context = test_context!();
 
-    let fabro_home = |args: &[&str]| -> assert_cmd::assert::Assert {
-        fabro()
-            .env("HOME", tmp.path())
+    let cmd = |args: &[&str]| -> assert_cmd::assert::Assert {
+        context
+            .command()
             .args(args)
             .timeout(timeout_for("local"))
             .assert()
     };
 
-    // 1. Run a workflow — run lands under <tmp>/.fabro/runs/
-    fabro_home(&[
+    // 1. Run a workflow
+    cmd(&[
         "run",
         "--auto-approve",
         "--no-retro",
-        "--no-upgrade-check",
         "--sandbox",
         "local",
         fixture("command_pipeline.fabro").to_str().unwrap(),
@@ -453,7 +414,7 @@ fn local_run_lifecycle() {
     .success();
 
     // 2. ps -a --json — should list exactly one run
-    let ps_out = fabro_home(&["ps", "-a", "--json"]).success();
+    let ps_out = cmd(&["ps", "-a", "--json"]).success();
     let ps_stdout = String::from_utf8(ps_out.get_output().stdout.clone()).unwrap();
     let runs: Vec<Value> =
         serde_json::from_str(&ps_stdout).expect("ps --json should produce a JSON array");
@@ -469,7 +430,7 @@ fn local_run_lifecycle() {
     );
 
     // 3. inspect <run_id> — JSON array with run_record and conclusion
-    let inspect_out = fabro_home(&["inspect", &run_id]).success();
+    let inspect_out = cmd(&["inspect", &run_id]).success();
     let inspect_stdout = String::from_utf8(inspect_out.get_output().stdout.clone()).unwrap();
     let items: Vec<Value> =
         serde_json::from_str(&inspect_stdout).expect("inspect should produce a JSON array");
@@ -489,7 +450,7 @@ fn local_run_lifecycle() {
     );
 
     // 4. logs <run_id> — non-empty, first line is valid JSONL with event field
-    let logs_out = fabro_home(&["logs", &run_id]).success();
+    let logs_out = cmd(&["logs", &run_id]).success();
     let logs_stdout = String::from_utf8(logs_out.get_output().stdout.clone()).unwrap();
     assert!(!logs_stdout.is_empty(), "logs should not be empty");
     let first_line = logs_stdout.lines().next().unwrap();
@@ -501,7 +462,7 @@ fn local_run_lifecycle() {
     );
 
     // 5. asset list — no assets yet, should succeed with empty message
-    let asset_list_out = fabro_home(&["asset", "list", &run_id]).success();
+    let asset_list_out = cmd(&["asset", "list", &run_id]).success();
     let asset_list_stdout = String::from_utf8(asset_list_out.get_output().stdout.clone()).unwrap();
     assert!(
         asset_list_stdout.contains("No assets found"),
@@ -527,7 +488,7 @@ fn local_run_lifecycle() {
     .unwrap();
 
     // 7. asset list — now shows the seeded assets
-    let asset_list_out2 = fabro_home(&["asset", "list", &run_id, "--json"]).success();
+    let asset_list_out2 = cmd(&["asset", "list", &run_id, "--json"]).success();
     let asset_list_stdout2 =
         String::from_utf8(asset_list_out2.get_output().stdout.clone()).unwrap();
     let assets: Vec<Value> = serde_json::from_str(&asset_list_stdout2)
@@ -539,8 +500,7 @@ fn local_run_lifecycle() {
     );
     assert_eq!(assets[0]["relative_path"].as_str(), Some("output.txt"));
     assert_eq!(assets[0]["node_slug"].as_str(), Some("step1"));
-    let retry_filtered_out =
-        fabro_home(&["asset", "list", &run_id, "--retry", "1", "--json"]).success();
+    let retry_filtered_out = cmd(&["asset", "list", &run_id, "--retry", "1", "--json"]).success();
     let retry_filtered_stdout =
         String::from_utf8(retry_filtered_out.get_output().stdout.clone()).unwrap();
     let retry_filtered_assets: Vec<Value> = serde_json::from_str(&retry_filtered_stdout)
@@ -549,15 +509,15 @@ fn local_run_lifecycle() {
     assert_eq!(retry_filtered_assets[0]["retry"].as_u64(), Some(1));
 
     // 8. asset cp — ambiguous without --retry when multiple retries captured the same path
-    let asset_dest = tmp.path().join("asset_copy");
-    fabro_home(&[
+    let asset_dest = context.temp_dir.join("asset_copy");
+    cmd(&[
         "asset",
         "cp",
         &format!("{run_id}:output.txt"),
         asset_dest.to_str().unwrap(),
     ])
     .failure();
-    fabro_home(&[
+    cmd(&[
         "asset",
         "cp",
         &format!("{run_id}:output.txt"),
@@ -583,8 +543,8 @@ fn local_run_lifecycle() {
         "downloaded-via-cp",
     )
     .unwrap();
-    let cp_dest = tmp.path().join("cp_download.txt");
-    fabro_home(&[
+    let cp_dest = context.temp_dir.join("cp_download.txt");
+    cmd(&[
         "cp",
         &format!("{run_id}:cp_test.txt"),
         cp_dest.to_str().unwrap(),
@@ -597,7 +557,7 @@ fn local_run_lifecycle() {
     );
 
     // 10. system df — mentions "Runs"
-    let df_out = fabro_home(&["system", "df"]).success();
+    let df_out = cmd(&["system", "df"]).success();
     let df_stdout = String::from_utf8(df_out.get_output().stdout.clone()).unwrap();
     assert!(
         df_stdout.contains("Runs"),
@@ -605,10 +565,10 @@ fn local_run_lifecycle() {
     );
 
     // 11. rm <run_id> — remove the run
-    fabro_home(&["rm", &run_id]).success();
+    cmd(&["rm", &run_id]).success();
 
     // 12. ps -a --json — should be empty
-    let ps_out2 = fabro_home(&["ps", "-a", "--json"]).success();
+    let ps_out2 = cmd(&["ps", "-a", "--json"]).success();
     let ps_stdout2 = String::from_utf8(ps_out2.get_output().stdout.clone()).unwrap();
     let runs2: Vec<Value> =
         serde_json::from_str(&ps_stdout2).expect("ps --json should produce a JSON array");
@@ -626,26 +586,24 @@ fn local_run_lifecycle() {
 #[ignore = "scenario: requires ANTHROPIC_API_KEY"]
 fn test_exec_creates_file() {
     dotenvy::dotenv().ok();
-    let tmp = tempfile::tempdir().unwrap();
+    let context = test_context!();
 
-    fabro()
-        .args([
-            "exec",
-            "--auto-approve",
-            "--permissions",
-            "full",
-            "--provider",
-            "anthropic",
-            "--model",
-            "claude-haiku-4-5",
-            "Create a file called hello.txt containing exactly 'Hello from exec scenario'",
-        ])
-        .current_dir(tmp.path())
-        .timeout(Duration::from_secs(120))
-        .assert()
-        .success();
+    let mut cmd = context.exec_cmd();
+    cmd.args([
+        "--auto-approve",
+        "--permissions",
+        "full",
+        "--provider",
+        "anthropic",
+        "--model",
+        "claude-haiku-4-5",
+        "Create a file called hello.txt containing exactly 'Hello from exec scenario'",
+    ]);
+    cmd.current_dir(&context.temp_dir);
+    cmd.timeout(Duration::from_secs(120));
+    cmd.assert().success();
 
-    let hello = tmp.path().join("hello.txt");
+    let hello = context.temp_dir.join("hello.txt");
     assert!(hello.exists(), "hello.txt should exist after exec");
     let content = std::fs::read_to_string(&hello).unwrap();
     assert!(
