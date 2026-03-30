@@ -16,16 +16,12 @@ pub(crate) fn create_run(
     cli_defaults: ConfigLayer,
     styles: &Styles,
     quiet: bool,
-    storage_dir_override: Option<PathBuf>,
 ) -> anyhow::Result<(String, PathBuf)> {
     let workflow_path = args
         .workflow
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
-    let mut cli_args_config = ConfigLayer::try_from(args)?;
-    if let Some(dir) = storage_dir_override {
-        cli_args_config.storage_dir = Some(dir);
-    }
+    let cli_args_config = ConfigLayer::try_from(args)?;
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let settings: FabroSettings = cli_args_config
         .combine(ConfigLayer::for_workflow(workflow_path, &cwd)?)

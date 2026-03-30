@@ -2,6 +2,7 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::args::{ConfigCommand, ConfigNamespace, ConfigShowArgs, GlobalArgs};
+use crate::cli_config;
 use fabro_config::{ConfigLayer, FabroSettings};
 
 pub(crate) fn dispatch(ns: ConfigNamespace, globals: &GlobalArgs) -> anyhow::Result<()> {
@@ -16,10 +17,7 @@ fn merged_config(workflow: Option<&Path>, globals: &GlobalArgs) -> anyhow::Resul
         Some(path) => ConfigLayer::for_workflow(path, &cwd)?,
         None => ConfigLayer::project(&cwd)?,
     };
-    let mut cli = ConfigLayer::cli()?;
-    if let Some(dir) = &globals.storage_dir {
-        cli.storage_dir = Some(dir.clone());
-    }
+    let cli = cli_config::cli_layer_with_globals(globals)?;
 
     base.combine(cli).resolve()
 }

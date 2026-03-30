@@ -6,6 +6,8 @@ use std::time::Duration;
 use assert_cmd::Command;
 use chrono::TimeZone;
 use fabro_config::FabroSettings;
+#[cfg(feature = "server")]
+use fabro_config::cli::ExecutionMode;
 use fabro_config::mcp::McpTransport;
 use fabro_git_storage::branchstore::BranchStore;
 use fabro_git_storage::gitobj::Store as GitStore;
@@ -2016,4 +2018,38 @@ fn config_show_missing_run_config_errors() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("Workflow not found"));
+}
+
+#[test]
+#[cfg(feature = "server")]
+fn config_show_server_url_overrides_cli_defaults() {
+    let (home, project) = setup_config_show_fixture();
+    let cli_toml = home.path().join(".fabro").join("cli.toml");
+    std::fs::write(
+        &cli_toml,
+        format!(
+            "{}\nmode = \"standalone\"\n[server]\nbase_url = \"https://config.example.com\"\n",
+            std::fs::read_to_string(&cli_toml).unwrap()
+        ),
+    )
+    .unwrap();
+
+    let output = arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args(["--server-url", "https://cli.example.com", "config", "show"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let cfg = parse_config_show(&output);
+    assert_eq!(cfg.mode, Some(ExecutionMode::Server));
+    assert_eq!(
+        cfg.server
+            .as_ref()
+            .and_then(|server| server.base_url.as_deref()),
+        Some("https://cli.example.com")
+    );
 }

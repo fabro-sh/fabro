@@ -16,14 +16,30 @@ pub(crate) fn load_cli_settings() -> anyhow::Result<FabroSettings> {
     ConfigLayer::cli()?.resolve()
 }
 
+pub(crate) fn cli_layer_with_globals(globals: &GlobalArgs) -> anyhow::Result<ConfigLayer> {
+    let layer = ConfigLayer::cli()?;
+    Ok(apply_global_overrides(layer, globals))
+}
+
 pub(crate) fn load_cli_settings_with_globals(
     globals: &GlobalArgs,
 ) -> anyhow::Result<FabroSettings> {
-    let mut layer = ConfigLayer::cli()?;
+    cli_layer_with_globals(globals)?.resolve()
+}
+
+pub(crate) fn apply_global_overrides(mut layer: ConfigLayer, globals: &GlobalArgs) -> ConfigLayer {
     if let Some(dir) = &globals.storage_dir {
         layer.storage_dir = Some(dir.clone());
+        layer.mode = Some(ExecutionMode::Standalone);
     }
-    layer.resolve()
+
+    #[cfg(feature = "server")]
+    if let Some(url) = &globals.server_url {
+        layer.server.get_or_insert_with(Default::default).base_url = Some(url.clone());
+        layer.mode = Some(ExecutionMode::Server);
+    }
+
+    layer
 }
 
 #[cfg(feature = "server")]
