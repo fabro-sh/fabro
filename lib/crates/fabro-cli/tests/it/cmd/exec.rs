@@ -1,6 +1,39 @@
 use fabro_test::{fabro_snapshot, test_context};
 
 #[test]
+fn help() {
+    let context = test_context!();
+    let mut cmd = context.command();
+    cmd.args(["exec", "--help"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    Run an agentic coding session
+
+    Usage: fabro exec [OPTIONS] <PROMPT>
+
+    Arguments:
+      <PROMPT>  Task prompt
+
+    Options:
+          --provider <PROVIDER>            LLM provider (anthropic, openai, gemini, kimi, zai, minimax, inception)
+          --model <MODEL>                  Model name (defaults per provider)
+          --no-upgrade-check               Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --permissions <PERMISSIONS>      Permission level for tool execution [possible values: read-only, read-write, full]
+          --quiet                          Suppress non-essential output [env: FABRO_QUIET=]
+          --auto-approve                   Skip interactive prompts; deny tools outside permission level
+          --debug                          Print LLM request/response debug info to stderr
+          --storage-dir <STORAGE_DIR>      Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --verbose                        Print full LLM request/response JSON to stderr
+          --skills-dir <SKILLS_DIR>        Directory containing skill files (overrides default discovery)
+          --output-format <OUTPUT_FORMAT>  Output format (text for human-readable, json for NDJSON event stream) [possible values: text, json]
+      -h, --help                           Print help
+    ----- stderr -----
+    ");
+}
+
+#[test]
 fn invalid_permissions() {
     let context = test_context!();
     let mut cmd = context.exec_cmd();
