@@ -20,9 +20,14 @@ impl EventEmitter {
             event,
             timestamp: SystemTime::now(),
             session_id,
+            parent_session_id: None,
         };
         // Ignore send error (no receivers)
         let _ = self.sender.send(wrapped);
+    }
+
+    pub fn forward(&self, event: SessionEvent) {
+        let _ = self.sender.send(event);
     }
 
     #[must_use]
@@ -52,6 +57,7 @@ mod tests {
         let event = receiver.recv().await.unwrap();
         assert!(matches!(event.event, AgentEvent::SessionStarted));
         assert_eq!(event.session_id, "sess-1");
+        assert_eq!(event.parent_session_id, None);
     }
 
     #[tokio::test]
@@ -70,6 +76,7 @@ mod tests {
         assert!(
             matches!(&event.event, AgentEvent::Error { error } if error.to_string().contains("something went wrong"))
         );
+        assert_eq!(event.parent_session_id, None);
     }
 
     #[tokio::test]
@@ -86,6 +93,8 @@ mod tests {
         assert!(matches!(e2.event, AgentEvent::SessionEnded));
         assert_eq!(e1.session_id, "sess-3");
         assert_eq!(e2.session_id, "sess-3");
+        assert_eq!(e1.parent_session_id, None);
+        assert_eq!(e2.parent_session_id, None);
     }
 
     #[test]
@@ -103,5 +112,23 @@ mod tests {
     fn default_creates_emitter() {
         let emitter = EventEmitter::default();
         let _rx = emitter.subscribe();
+    }
+
+    #[tokio::test]
+    async fn forward_preserves_session_ids() {
+        let emitter = EventEmitter::new();
+        let mut receiver = emitter.subscribe();
+
+        emitter.forward(SessionEvent {
+            event: AgentEvent::SessionStarted,
+            timestamp: SystemTime::now(),
+            session_id: "child".into(),
+            parent_session_id: Some("parent".into()),
+        });
+
+        let event = receiver.recv().await.unwrap();
+        assert_eq!(event.session_id, "child");
+        assert_eq!(event.parent_session_id.as_deref(), Some("parent"));
+        assert!(matches!(event.event, AgentEvent::SessionStarted));
     }
 }

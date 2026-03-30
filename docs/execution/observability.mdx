@@ -3,171 +3,119 @@ title: "Observability"
 description: "How to monitor, inspect, and analyze workflow runs"
 ---
 
-Fabro captures a structured event for every significant action during a workflow run — stage starts and completions, agent tool calls, edge selections, retries, failovers, sandbox lifecycle, and more. These events power real-time monitoring, post-run analysis, and cross-run analytics.
+Fabro captures a structured event for every significant action during a workflow run. These events cover stage execution, agent tool calls, retries, routing, sandbox lifecycle, git checkpoints, retro generation, and more.
 
 ## Event stream
 
-The event stream is the foundation of Fabro's observability. Every workflow run emits a sequence of `WorkflowRunEvent` records that are:
+Every workflow run emits a sequence of canonical **run event envelopes** that are:
 
-- **Written to `progress.jsonl`** in the run's directory (one JSON object per line)
-- **Broadcast via SSE** to connected API clients in real time
-- **Logged via `tracing`** to the daily log file at `~/.fabro/logs/`
+- Written to `progress.jsonl` in the run directory
+- Broadcast over SSE to connected API clients
+- Stored for later analysis and retro generation
+- Rendered by CLI progress and log tooling
 
-### Event types
+### Event names
 
-Events fall into several categories:
+Event names use lowercase dot notation, for example:
 
-**Run lifecycle** — bookend events for the entire run:
+- `run.started`
+- `stage.started`
+- `stage.completed`
+- `agent.tool.started`
+- `agent.tool.completed`
+- `sandbox.ready`
+- `parallel.branch.completed`
 
-| Event | Key fields | Description |
-|---|---|---|
-| `WorkflowRunStarted` | `name`, `run_id`, `base_sha`, `run_branch`, `goal` | Run begins |
-| `WorkflowRunCompleted` | `duration_ms`, `artifact_count`, `total_cost`, `status`, `usage` | Run finishes successfully |
-| `WorkflowRunFailed` | `error`, `duration_ms` | Run terminates with an error |
+### Envelope format
 
-**Stage lifecycle** — events for each node execution:
-
-| Event | Key fields | Description |
-|---|---|---|
-| `StageStarted` | `node_id`, `name`, `handler_type`, `attempt`, `max_attempts` | Node begins executing |
-| `StageCompleted` | `node_id`, `duration_ms`, `status`, `usage`, `files_touched` | Node finishes |
-| `StageFailed` | `node_id`, `failure`, `will_retry` | Node fails (may or may not retry) |
-| `StageRetrying` | `node_id`, `attempt`, `max_attempts`, `delay_ms` | Retry scheduled after failure |
-
-**Agent activity** — forwarded from the LLM agent session, prefixed with `Agent.`:
-
-| Event | Key fields | Description |
-|---|---|---|
-| `Agent.SessionStarted` | `stage` | Agent session begins |
-| `Agent.ToolCallStarted` | `stage`, `tool_name`, `arguments` | Agent invokes a tool |
-| `Agent.ToolCallCompleted` | `stage`, `tool_name`, `output`, `is_error` | Tool returns a result |
-| `Agent.AssistantMessage` | `stage`, `text`, `model`, `usage` | LLM responds with text |
-| `Agent.Error` | `stage`, `error` | Agent-level error |
-| `Agent.LoopDetected` | `stage` | Repeated tool call pattern detected |
-| `Agent.SteeringInjected` | `stage`, `text` | Human steering message injected |
-| `Agent.Warning` | `stage`, `kind`, `message`, `details` | Non-fatal warning (e.g. context window usage) |
-| `Agent.CompactionStarted` | `stage`, `estimated_tokens`, `context_window_size` | Context compaction triggered |
-| `Agent.CompactionCompleted` | `stage`, `original_turn_count`, `preserved_turn_count`, `summary_token_estimate`, `tracked_file_count` | Context compaction finished |
-| `Agent.LlmRetry` | `stage`, `provider`, `model`, `attempt`, `delay_secs` | LLM API call retried |
-| `Agent.SubAgentSpawned` | `stage`, `agent_id`, `task` | Sub-agent launched |
-| `Agent.SubAgentCompleted` | `stage`, `agent_id`, `success`, `turns_used` | Sub-agent finished |
-
-**Routing and control flow:**
-
-| Event | Key fields | Description |
-|---|---|---|
-| `EdgeSelected` | `from_node`, `to_node`, `label`, `condition`, `reason`, `stage_status` | Transition between nodes |
-| `LoopRestart` | `from_node`, `to_node` | Loop restart edge taken |
-| `CheckpointCompleted` | `node_id`, `git_commit_sha` (optional) | Checkpoint saved (with git SHA when git is enabled) |
-| `GitCommit` | `node_id`, `sha` | Git commit created |
-| `GitPush` | `branch`, `success` | Git push attempted |
-| `GitBranch` | `branch`, `sha` | Git branch created |
-| `GitWorktreeAdd` | `path`, `branch` | Git worktree added |
-| `GitWorktreeRemove` | `path` | Git worktree removed |
-| `GitFetch` | `branch`, `success` | Git fetch attempted |
-| `GitReset` | `sha` | Git reset executed |
-| `Failover` | `stage`, `from_provider`, `to_provider`, `error` | LLM provider failover |
-| `RetroStarted` | — | Retrospective generation begins |
-| `RetroCompleted` | `duration_ms` | Retrospective generation finished |
-| `RetroFailed` | `error`, `duration_ms` | Retrospective generation failed |
-
-**Parallel execution:**
-
-| Event | Key fields | Description |
-|---|---|---|
-| `ParallelStarted` | `branch_count`, `join_policy` | Fan-out begins |
-| `ParallelBranchStarted` | `branch`, `index` | Individual branch begins |
-| `ParallelBranchCompleted` | `branch`, `duration_ms`, `status` | Branch finishes |
-| `ParallelCompleted` | `duration_ms`, `success_count`, `failure_count` | All branches done |
-
-**Human-in-the-loop:**
-
-| Event | Key fields | Description |
-|---|---|---|
-| `InterviewStarted` | `question`, `stage`, `question_type` | Human input requested |
-| `InterviewCompleted` | `question`, `answer`, `duration_ms` | Human responded |
-| `InterviewTimeout` | `question`, `stage`, `duration_ms` | Human didn't respond in time |
-
-**Sandbox and setup:**
-
-| Event | Key fields | Description |
-|---|---|---|
-| `Sandbox.Initializing` | `provider` | Sandbox creation started |
-| `Sandbox.Ready` | `provider`, `duration_ms`, `cpu`, `memory` | Sandbox ready |
-| `SetupStarted` | `command_count` | Setup commands beginning |
-| `SetupCommandCompleted` | `command`, `exit_code`, `duration_ms` | Single setup command finished |
-| `SetupFailed` | `command`, `exit_code`, `stderr` | Setup command failed |
-| `SshAccessReady` | `ssh_command` | SSH connection command printed |
-| `StallWatchdogTimeout` | `node`, `idle_seconds` | No activity for too long |
-
-### Event envelope format
-
-Each line in `progress.jsonl` is a JSON object with a standard envelope:
+Each line in `progress.jsonl` is a JSON object with a stable envelope:
 
 ```json
 {
-  "ts": "2026-03-05T14:30:01.234Z",
-  "run_id": "01JKXYZ...",
-  "event": "Agent.ToolCallStarted",
-  "stage": "implement",
-  "tool_name": "shell",
-  "arguments": {"command": "cargo test"}
+  "id": "01960d0c-5d16-7d6e-8f61-9fd6f4a532b5",
+  "ts": "2026-03-30T12:00:01.000Z",
+  "run_id": "01JQ...",
+  "event": "agent.tool.started",
+  "session_id": "ses_child",
+  "parent_session_id": "ses_parent",
+  "node_id": "implement",
+  "node_label": "Implement",
+  "properties": {
+    "tool_name": "shell",
+    "tool_call_id": "call_1",
+    "arguments": {"command": "cargo test"}
+  }
 }
 ```
 
-The `ts`, `run_id`, and `event` fields are always present. The remaining fields vary by event type. Events are flattened — nested variants like agent and sandbox events use dot notation (e.g. `Agent.ToolCallStarted`, `Sandbox.Ready`).
+Envelope fields:
 
-## Log files
+| Field | Description |
+|---|---|
+| `id` | Unique event id |
+| `ts` | UTC timestamp |
+| `run_id` | Workflow run id |
+| `event` | Event name |
+| `session_id` | Session that emitted the event, when applicable |
+| `parent_session_id` | Immediate parent session for forwarded child events |
+| `node_id` | Node or branch id, when applicable |
+| `node_label` | Human-facing label for `node_id`, when applicable |
+| `properties` | Event-specific payload |
 
-Fabro writes two kinds of logs:
+Only `id`, `ts`, `run_id`, and `event` are always present. Optional fields are omitted when they do not apply.
 
-### Run logs (`progress.jsonl`)
+## Reading `progress.jsonl`
 
-Every run writes its event stream to `{run_dir}/progress.jsonl`. This is the primary data source for post-run analysis — [retros](/execution/retros) read it, and you can query it directly with standard tools:
+Because event payload lives in `properties`, most shell queries should look there.
 
 ```bash
 # Count tool calls in a run
-grep "ToolCallStarted" ~/.fabro/runs/01JKXYZ.../progress.jsonl | wc -l
+jq -r 'select(.event == "agent.tool.started") | .properties.tool_name' \
+  ~/.fabro/runs/01JKXYZ.../progress.jsonl | wc -l
 
-# Find all failures
-grep -E "StageFailed|WorkflowRunFailed" ~/.fabro/runs/01JKXYZ.../progress.jsonl | jq .
+# Find stage failures
+jq 'select(.event == "stage.failed")' \
+  ~/.fabro/runs/01JKXYZ.../progress.jsonl
 
 # See which edges were taken
-grep "EdgeSelected" ~/.fabro/runs/01JKXYZ.../progress.jsonl | jq '{from: .from_node, to: .to_node}'
+jq '{from: .properties.from_node, to: .properties.to_node, label: .properties.label}' \
+  ~/.fabro/runs/01JKXYZ.../progress.jsonl | head
 ```
 
-### Live snapshot (`live.json`)
+`live.json` is still a pretty-printed copy of the most recent event envelope.
 
-During execution, Fabro also writes `live.json` — a pretty-printed copy of the most recent event. This is useful for quick status checks while a run is in progress:
+## Event categories
 
-```bash
-cat ~/.fabro/runs/01JKXYZ.../live.json
-```
+Common categories include:
 
-### Application logs
-
-Fabro uses the `tracing` crate to write structured logs to `~/.fabro/logs/YYYY-MM-DD.log`. Control the log level with the `FABRO_LOG` environment variable:
-
-```bash
-FABRO_LOG=debug fabro run workflow.fabro
-```
-
-| Level | What's logged |
+| Category | Example events |
 |---|---|
-| `error` | Run failures, stage failures that won't retry |
-| `warn` | Retries, timeouts, interview timeouts, failovers, early terminations |
-| `info` | Run start/complete, SSH access ready |
-| `debug` | Stage start/complete, edge selections, checkpoints, parallel branches, tool calls |
+| Run lifecycle | `run.started`, `run.completed`, `run.failed`, `run.notice` |
+| Stage lifecycle | `stage.started`, `stage.completed`, `stage.failed`, `stage.retrying` |
+| Agent activity | `agent.message`, `agent.tool.started`, `agent.warning`, `agent.sub.spawned` |
+| Routing | `edge.selected`, `loop.restart`, `parallel.started` |
+| Git and checkpoints | `checkpoint.completed`, `git.commit`, `git.push` |
+| Setup and sandbox | `sandbox.initializing`, `sandbox.ready`, `setup.started` |
+| Retro | `retro.started`, `retro.completed`, `retro.failed` |
+
+## Sub-agent visibility
+
+Sub-agent activity now appears as normal agent events with session linkage:
+
+- `session_id` identifies the child session
+- `parent_session_id` identifies its immediate parent
+
+Lifecycle events such as `agent.sub.spawned` and `agent.sub.completed` are emitted by the parent session. Tool calls and other child activity are forwarded with their original `session_id`.
 
 ## Real-time monitoring
 
 ### API: Server-Sent Events
 
-When running workflows through the API server, subscribe to a live event stream via the [run events endpoint](/api-reference/runs/stream-run-events). Each event is a JSON-serialized `WorkflowRunEvent`. The stream stays open until the run completes.
+When running workflows through the API server, subscribe to the [run events endpoint](/api-reference/runs/stream-run-events). Each SSE payload is a serialized run event envelope in the same shape used by `progress.jsonl`.
 
 ### Web UI
 
-The web frontend connects to the SSE stream automatically and displays run progress in real time — stage transitions, agent tool calls, and human gate prompts are all visible as they happen.
+The web frontend consumes the SSE stream automatically and shows stage progress, tool calls, and human interaction as they happen.
 
 <Frame caption="The Stages tab shows the full agent conversation including tool calls and responses.">
   <img src="/images/web/run-stages.png" alt="Fabro web UI run stages showing agent conversation with tool calls" />
@@ -175,90 +123,20 @@ The web frontend connects to the SSE stream automatically and displays run progr
 
 ### CLI progress
 
-The CLI displays a live progress bar during execution with per-stage status, duration, and cost tracking. This is rendered to stderr so it doesn't interfere with output piping.
+The CLI renders live progress from the same envelope format. This is written to stderr so stdout remains pipe-friendly.
 
 ## Post-run analysis
 
-### Listing runs
-
-Browse your run history with `fabro ps`:
-
-```bash
-fabro ps
-fabro ps --workflow PlanImplement
-fabro ps --before 2026-03-01
-fabro ps --label team=platform
-fabro ps --json
-```
-
-This scans `~/.fabro/runs/` and displays each run's ID, workflow name, status, and start time. Use `--json` for machine-readable output.
-
-### Run artifacts
-
-Each run's directory contains a standard set of files:
+Run artifacts still include:
 
 | File | Description |
 |---|---|
-| `run.json` | Run record — ID, config, graph, workflow slug, labels |
-| `start.json` | Start record — run ID, start time, run branch, base SHA |
-| `progress.jsonl` | Full event stream |
-| `live.json` | Last event snapshot (overwritten during run) |
+| `run.json` | Run metadata and graph |
+| `start.json` | Start record |
+| `progress.jsonl` | Full event envelope stream |
+| `live.json` | Latest event envelope |
 | `checkpoint.json` | Final execution state |
-| `retro.json` | Retrospective (if retro generation is enabled) |
-| `conclusion.json` | Terminal status (`completed`, `failed`, `canceled`) |
+| `retro.json` | Retrospective, when enabled |
+| `conclusion.json` | Terminal summary |
 
-### Inspecting stages and turns
-
-The API provides endpoints for drilling into individual stages and the agent turns within them. See the [stages](/api-reference/run-internals/list-run-stages) and [turns](/api-reference/run-internals/list-stage-turns) API reference pages.
-
-## Insights (SQL analytics)
-
-The Insights feature lets you run SQL queries across your run data using DuckDB. This is useful for aggregate analysis — finding slow workflows, tracking failure rates, comparing model costs, and spotting trends.
-
-Insights is managed through the [saved queries](/api-reference/insights/list-saved-queries) and [execute query](/api-reference/insights/execute-query) API reference pages. You can save, update, and execute queries programmatically.
-
-### Example queries
-
-**Average run duration by workflow:**
-
-```sql
-SELECT workflow_name, AVG(duration_seconds) as avg_duration,
-       COUNT(*) as run_count
-FROM runs
-GROUP BY workflow_name
-ORDER BY avg_duration DESC
-LIMIT 20
-```
-
-**Daily failure rate:**
-
-```sql
-SELECT date_trunc('day', created_at) as day,
-       COUNT(*) FILTER (WHERE status = 'failed') as failures,
-       COUNT(*) as total
-FROM runs
-GROUP BY 1
-ORDER BY 1 DESC
-LIMIT 30
-```
-
-**Top repositories by activity:**
-
-```sql
-SELECT repo, COUNT(*) as runs
-FROM runs
-GROUP BY repo
-ORDER BY runs DESC
-```
-
-## Aggregate usage
-
-The API server tracks aggregate usage counters across all runs — total run count, total runtime, and per-model breakdowns of token usage and cost. See the [usage endpoint](/api-reference/usage/aggregate-usage) in the API reference. Counters reset on server restart.
-
-<Frame caption="The Usage tab breaks down token counts and costs by stage and by model.">
-  <img src="/images/web/run-usage.png" alt="Fabro web UI run usage showing per-stage and per-model token and cost breakdown" />
-</Frame>
-
-## Credential redaction
-
-All event output — `progress.jsonl`, SSE streams, and log files — is automatically redacted before being written. Fabro detects and replaces patterns that look like API keys, AWS credentials, bearer tokens, and other secrets with `REDACTED`. This ensures sensitive values that appear in tool call arguments or command output are never persisted to disk.
+See [retros](/execution/retros), [stages](/api-reference/run-internals/list-run-stages), and [turns](/api-reference/run-internals/list-stage-turns) for higher-level analysis views built on top of this event stream.

@@ -486,6 +486,7 @@ mod tests {
     fn event_payload(run_id: RunId, ts: &str, event: &str) -> EventPayload {
         EventPayload::new(
             serde_json::json!({
+                "id": format!("evt-{run_id}-{event}"),
                 "ts": ts,
                 "run_id": run_id.to_string(),
                 "event": event
@@ -540,14 +541,14 @@ mod tests {
         run.append_event(&event_payload(
             run_id,
             "2026-03-27T12:00:00.000Z",
-            "WorkflowRunStarted",
+            "run.started",
         ))
         .await
         .unwrap();
         run.append_event(&event_payload(
             run_id,
             "2026-03-27T12:00:01.000Z",
-            "StageCompleted",
+            "stage.completed",
         ))
         .await
         .unwrap();

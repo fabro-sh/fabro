@@ -81,7 +81,7 @@ impl EventPayload {
             StoreError::InvalidEvent("event payload must be a JSON object".into())
         })?;
 
-        for field in ["ts", "run_id", "event"] {
+        for field in ["id", "ts", "run_id", "event"] {
             match obj.get(field) {
                 Some(serde_json::Value::String(_)) => {}
                 _ => {

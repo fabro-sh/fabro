@@ -5,26 +5,24 @@ use super::support::setup_asset_sandbox_run;
 #[test]
 fn help() {
     let context = test_context!();
-    let mut cmd = context.preview();
-    cmd.arg("--help");
+    let mut cmd = context.command();
+    cmd.args(["sandbox", "ssh", "--help"]);
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
-    Get a preview URL for a port on a run's sandbox
+    SSH into a run's sandbox
 
-    Usage: fabro sandbox preview [OPTIONS] <RUN> <PORT>
+    Usage: fabro sandbox ssh [OPTIONS] <RUN>
 
     Arguments:
-      <RUN>   Run ID or prefix
-      <PORT>  Port number
+      <RUN>  Run ID or prefix
 
     Options:
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --signed                     Generate a signed URL (embeds auth token, no headers needed)
+          --ttl <TTL>                  SSH access expiry in minutes (default 60) [default: 60]
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --ttl <TTL>                  Signed URL expiry in seconds (default 3600, requires --signed) [default: 3600]
-          --open                       Open URL in browser (implies --signed)
+          --print                      Print the SSH command instead of connecting
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
@@ -34,17 +32,17 @@ fn help() {
 }
 
 #[test]
-fn sandbox_preview_rejects_non_daytona_run() {
+fn sandbox_ssh_rejects_non_daytona_run() {
     let context = test_context!();
     let setup = setup_asset_sandbox_run(&context);
-    let mut cmd = context.preview();
-    cmd.args([&setup.run.run_id, "3000"]);
+    let mut cmd = context.ssh();
+    cmd.args([&setup.run.run_id, "--print"]);
 
     fabro_snapshot!(context.filters(), cmd, @"
     success: false
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: Preview URLs is only supported for Daytona sandboxes (this run uses 'local')
+    error: SSH access is only supported for Daytona sandboxes (this run uses 'local')
     ");
 }

@@ -341,8 +341,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
     let ts = format_timestamp(envelope.get("ts")?.as_str()?);
 
     match event {
-        "WorkflowRunStarted" => {
-            let name = str_field(&envelope, "workflow_name").unwrap_or("?");
+        "run.started" => {
+            let name = prop_str_field(&envelope, "name").unwrap_or("?");
             let run_id = str_field(&envelope, "run_id").unwrap_or("?");
             let header = format!(
                 "{} {} {}  {}",
@@ -351,7 +351,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.bold.apply_to(name),
                 styles.dim.apply_to(run_id),
             );
-            match str_field(&envelope, "goal") {
+            match prop_str_field(&envelope, "goal") {
                 Some(goal) if !goal.is_empty() => {
                     let body = render_indented_markdown(styles, goal, "            ");
                     Some(format!("{header}\n{body}\n"))
@@ -359,9 +359,9 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 _ => Some(header),
             }
         }
-        "WorkflowRunCompleted" => {
-            let duration = format_duration_ms(envelope.get("duration_ms"));
-            let status_str = match str_field(&envelope, "status") {
+        "run.completed" => {
+            let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
+            let status_str = match prop_str_field(&envelope, "status") {
                 Some(status) if !status.is_empty() => status,
                 _ => "success",
             };
@@ -370,7 +370,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 "success" | "partial_success" => &styles.bold_green,
                 _ => &styles.bold_red,
             };
-            let cost = format_cost(envelope.get("total_cost"));
+            let cost = format_cost(prop_field(&envelope, "total_cost"));
 
             let mut lines = vec![format!(
                 "{} {} {}  {}",
@@ -380,7 +380,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.dim.apply_to(&cost),
             )];
 
-            if let Some(usage) = envelope.get("usage") {
+            if let Some(usage) = prop_field(&envelope, "usage") {
                 let total = usage
                     .get("total_tokens")
                     .and_then(serde_json::Value::as_i64)
@@ -433,8 +433,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
 
             Some(lines.join("\n"))
         }
-        "WorkflowRunFailed" => {
-            let error = str_field(&envelope, "error").unwrap_or("unknown error");
+        "run.failed" => {
+            let error = prop_str_field(&envelope, "error").unwrap_or("unknown error");
             Some(format!(
                 "{} {} {}",
                 styles.dim.apply_to(&ts),
@@ -442,10 +442,10 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.red.apply_to(error),
             ))
         }
-        "RunNotice" => {
-            let level = str_field(&envelope, "level").unwrap_or("info");
-            let code = str_field(&envelope, "code").unwrap_or("");
-            let message = str_field(&envelope, "message").unwrap_or("");
+        "run.notice" => {
+            let level = prop_str_field(&envelope, "level").unwrap_or("info");
+            let code = prop_str_field(&envelope, "code").unwrap_or("");
+            let message = prop_str_field(&envelope, "message").unwrap_or("");
             let label = match level {
                 "warn" => styles.yellow.apply_to("Warning:").to_string(),
                 "error" => styles.bold_red.apply_to("Error:").to_string(),
@@ -464,7 +464,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 code_suffix,
             ))
         }
-        "StageStarted" => {
+        "stage.started" => {
             let label = str_field(&envelope, "node_label").unwrap_or("?");
             Some(format!(
                 "{} {} {}",
@@ -473,36 +473,39 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.bold.apply_to(label),
             ))
         }
-        "StageCompleted" => {
+        "stage.completed" => {
             let label = str_field(&envelope, "node_label").unwrap_or("?");
-            let duration = format_duration_ms(envelope.get("duration_ms"));
-            let cost = format_cost(envelope.get("cost"));
-            let turns = envelope
-                .get("turns")
+            let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
+            let usage = prop_field(&envelope, "usage");
+            let cost = format_cost(usage.and_then(|value| value.get("cost")));
+            let input_tokens = usage
+                .and_then(|value| value.get("input_tokens"))
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
-            let tools = envelope
-                .get("tool_calls")
+            let output_tokens = usage
+                .and_then(|value| value.get("output_tokens"))
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
-            let tokens = envelope
-                .get("total_tokens")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0);
-            let stats = format!("({turns} turns, {tools} tools, {})", format_tokens(tokens));
-            Some(format!(
-                "{} {} {}  {}  {}  {}",
+            let token_total = input_tokens.saturating_add(output_tokens);
+            let mut line = format!(
+                "{} {} {}  {}  {}",
                 styles.dim.apply_to(&ts),
                 styles.green.apply_to("\u{2713}"),
                 styles.bold.apply_to(label),
                 cost,
                 duration,
-                styles.dim.apply_to(&stats),
-            ))
+            );
+            if token_total > 0 {
+                line.push_str(&format!(
+                    "  {}",
+                    styles.dim.apply_to(format_tokens(token_total))
+                ));
+            }
+            Some(line)
         }
-        "StageFailed" => {
+        "stage.failed" => {
             let label = str_field(&envelope, "node_label").unwrap_or("?");
-            let error = str_field(&envelope, "error").unwrap_or("unknown error");
+            let error = prop_str_field(&envelope, "error").unwrap_or("unknown error");
             Some(format!(
                 "{} {} {}  {}",
                 styles.dim.apply_to(&ts),
@@ -511,10 +514,10 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.red.apply_to(error),
             ))
         }
-        "Agent.AssistantMessage" => {
+        "agent.message" => {
             let stage = str_field(&envelope, "node_id").unwrap_or("?");
-            let model = str_field(&envelope, "model").unwrap_or("?");
-            let text = str_field(&envelope, "text").unwrap_or("");
+            let model = prop_str_field(&envelope, "model").unwrap_or("?");
+            let text = prop_str_field(&envelope, "text").unwrap_or("");
             let header = format!(
                 "{} {} {} {}{}{}",
                 styles.dim.apply_to(&ts),
@@ -527,8 +530,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
             let body = render_indented_markdown(styles, text, "            ");
             Some(format!("{header}\n{body}\n"))
         }
-        "Agent.ToolCallStarted" => {
-            let tool = str_field(&envelope, "tool_name").unwrap_or("?");
+        "agent.tool.started" => {
+            let tool = prop_str_field(&envelope, "tool_name").unwrap_or("?");
             let detail = tool_detail(&envelope);
             let display = match detail {
                 Some(value) => format!("{tool}({value})"),
@@ -541,10 +544,9 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.dim.apply_to(&display),
             ))
         }
-        "Agent.ToolCallCompleted" => {
-            let tool = str_field(&envelope, "tool_name").unwrap_or("?");
-            let is_error = envelope
-                .get("is_error")
+        "agent.tool.completed" => {
+            let tool = prop_str_field(&envelope, "tool_name").unwrap_or("?");
+            let is_error = prop_field(&envelope, "is_error")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
             let detail = tool_detail(&envelope);
@@ -561,10 +563,10 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 display,
             ))
         }
-        "EdgeSelected" => {
-            let to = str_field(&envelope, "to_node_id").unwrap_or("?");
-            let reason = str_field(&envelope, "reason").unwrap_or("?");
-            let condition = str_field(&envelope, "condition");
+        "edge.selected" => {
+            let to = prop_str_field(&envelope, "to_node").unwrap_or("?");
+            let reason = prop_str_field(&envelope, "reason").unwrap_or("?");
+            let condition = prop_str_field(&envelope, "condition");
             let detail = match condition {
                 Some(value) => format!("  [{value}]"),
                 None => String::new(),
@@ -578,9 +580,9 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.dim.apply_to(&detail),
             ))
         }
-        "Sandbox.Ready" => {
-            let provider = str_field(&envelope, "sandbox_provider").unwrap_or("?");
-            let duration = format_duration_ms(envelope.get("duration_ms"));
+        "sandbox.ready" => {
+            let provider = prop_str_field(&envelope, "provider").unwrap_or("?");
+            let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
             Some(format!(
                 "{}   Sandbox: {}  {}",
                 styles.dim.apply_to(&ts),
@@ -588,26 +590,28 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.dim.apply_to(&duration),
             ))
         }
-        "SetupCompleted" => {
-            let count = envelope
-                .get("command_count")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0);
-            let duration = format_duration_ms(envelope.get("duration_ms"));
-            Some(format!(
-                "{}   Setup: {} commands  {}",
-                styles.dim.apply_to(&ts),
-                count,
-                styles.dim.apply_to(&duration),
-            ))
+        "setup.completed" => {
+            let count = prop_field(&envelope, "command_count").and_then(serde_json::Value::as_u64);
+            let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
+            Some(match count {
+                Some(count) => format!(
+                    "{}   Setup: {} commands  {}",
+                    styles.dim.apply_to(&ts),
+                    count,
+                    styles.dim.apply_to(&duration),
+                ),
+                None => format!(
+                    "{}   Setup: {}",
+                    styles.dim.apply_to(&ts),
+                    styles.dim.apply_to(&duration),
+                ),
+            })
         }
-        "Agent.CompactionCompleted" => {
-            let original = envelope
-                .get("original_turn_count")
+        "agent.compaction.completed" => {
+            let original = prop_field(&envelope, "original_turn_count")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
-            let preserved = envelope
-                .get("preserved_turn_count")
+            let preserved = prop_field(&envelope, "preserved_turn_count")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             Some(format!(
@@ -618,9 +622,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                     .apply_to(format!("compaction: {original}\u{2192}{preserved} turns")),
             ))
         }
-        "ParallelStarted" => {
-            let count = envelope
-                .get("branch_count")
+        "parallel.started" => {
+            let count = prop_field(&envelope, "branch_count")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             Some(format!(
@@ -630,7 +633,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 count,
             ))
         }
-        "ParallelBranchStarted" => {
+        "parallel.branch.started" => {
             let label = str_field(&envelope, "node_label").unwrap_or("?");
             Some(format!(
                 "{}     {} {}",
@@ -639,7 +642,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 label,
             ))
         }
-        "ParallelBranchCompleted" => {
+        "parallel.branch.completed" => {
             let label = str_field(&envelope, "node_label").unwrap_or("?");
             Some(format!(
                 "{}     {} {}",
@@ -648,8 +651,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 label,
             ))
         }
-        "ParallelCompleted" => {
-            let duration = format_duration_ms(envelope.get("duration_ms"));
+        "parallel.completed" => {
+            let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
             Some(format!(
                 "{} {} Parallel  {}",
                 styles.dim.apply_to(&ts),
@@ -657,10 +660,9 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 duration,
             ))
         }
-        "PullRequestCreated" => {
-            let url = str_field(&envelope, "pr_url").unwrap_or("?");
-            let draft = envelope
-                .get("draft")
+        "pull_request.created" => {
+            let url = prop_str_field(&envelope, "pr_url").unwrap_or("?");
+            let draft = prop_field(&envelope, "draft")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
             let label = if draft { "Draft PR:" } else { "PR:" };
@@ -671,8 +673,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 url,
             ))
         }
-        "PullRequestFailed" => {
-            let error = str_field(&envelope, "error").unwrap_or("unknown error");
+        "pull_request.failed" => {
+            let error = prop_str_field(&envelope, "error").unwrap_or("unknown error");
             Some(format!(
                 "{} {} {}",
                 styles.dim.apply_to(&ts),
@@ -680,8 +682,8 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.red.apply_to(error),
             ))
         }
-        "RetroCompleted" => {
-            let duration = format_duration_ms(envelope.get("duration_ms"));
+        "retro.completed" => {
+            let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
             Some(format!(
                 "{} {} Retro  {}",
                 styles.dim.apply_to(&ts),
@@ -689,9 +691,9 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 duration,
             ))
         }
-        "RetroFailed" => {
-            let error = str_field(&envelope, "error").unwrap_or("unknown error");
-            let duration = format_duration_ms(envelope.get("duration_ms"));
+        "retro.failed" => {
+            let error = prop_str_field(&envelope, "error").unwrap_or("unknown error");
+            let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
             Some(format!(
                 "{} {} Retro  {}  {}",
                 styles.dim.apply_to(&ts),
@@ -700,7 +702,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.red.apply_to(error),
             ))
         }
-        "RetroStarted" => Some(format!(
+        "retro.started" => Some(format!(
             "{} {} Retro",
             styles.dim.apply_to(&ts),
             styles.bold_cyan.apply_to("\u{25b6}"),
@@ -711,6 +713,14 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
 
 fn str_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
     value.get(key)?.as_str()
+}
+
+fn prop_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+    value.get("properties")?.get(key)
+}
+
+fn prop_str_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    prop_field(value, key)?.as_str()
 }
 
 fn format_timestamp(ts: &str) -> String {
@@ -751,8 +761,8 @@ fn format_tokens(tokens: u64) -> String {
 }
 
 fn tool_detail(envelope: &serde_json::Value) -> Option<String> {
-    let tool_name = str_field(envelope, "tool_name")?;
-    let arguments = envelope.get("arguments")?;
+    let tool_name = prop_str_field(envelope, "tool_name")?;
+    let arguments = prop_field(envelope, "arguments")?;
     let arg = |key: &str| arguments.get(key).and_then(|v| v.as_str());
 
     match tool_name {
@@ -861,9 +871,9 @@ mod tests {
     fn since_filters_by_timestamp() {
         let cutoff = "2026-01-01T12:00:00Z".parse::<DateTime<Utc>>().unwrap();
         let lines = vec![
-            r#"{"ts":"2026-01-01T11:00:00Z","event":"StageStarted"}"#.to_string(),
-            r#"{"ts":"2026-01-01T12:30:00Z","event":"StageCompleted"}"#.to_string(),
-            r#"{"ts":"2026-01-01T13:00:00Z","event":"WorkflowRunCompleted"}"#.to_string(),
+            r#"{"ts":"2026-01-01T11:00:00Z","event":"stage.started"}"#.to_string(),
+            r#"{"ts":"2026-01-01T12:30:00Z","event":"stage.completed"}"#.to_string(),
+            r#"{"ts":"2026-01-01T13:00:00Z","event":"run.completed"}"#.to_string(),
         ];
         let result = apply_filters(&lines, Some(&cutoff), None);
         assert_eq!(result.len(), 2);
@@ -872,7 +882,7 @@ mod tests {
     #[test]
     fn raw_lines_pass_through_verbatim() {
         let lines = vec![
-            r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_label":"plan"}"#
+            r#"{"ts":"2026-01-01T12:00:00Z","event":"stage.started","node_label":"plan"}"#
                 .to_string(),
         ];
         let result = apply_filters(&lines, None, None);
@@ -882,7 +892,7 @@ mod tests {
     #[test]
     fn pretty_stage_started() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:09Z","event":"StageStarted","node_label":"plan","node_id":"plan","stage_index":0}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:09Z","event":"stage.started","node_label":"plan","node_id":"plan","properties":{"index":0}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("plan"), "got: {result}");
         assert!(result.contains("\u{25b6}"), "got: {result}");
@@ -891,18 +901,18 @@ mod tests {
     #[test]
     fn pretty_stage_completed() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:15Z","event":"StageCompleted","node_label":"plan","cost":0.12,"duration_ms":8000,"turns":3,"tool_calls":2,"total_tokens":15200}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:15Z","event":"stage.completed","node_label":"plan","properties":{"duration_ms":8000,"status":"success","usage":{"cost":0.12,"input_tokens":10000,"output_tokens":5200}}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("plan"), "got: {result}");
         assert!(result.contains("$0.12"), "got: {result}");
         assert!(result.contains("8s"), "got: {result}");
-        assert!(result.contains("3 turns"), "got: {result}");
+        assert!(result.contains("15.2k toks"), "got: {result}");
     }
 
     #[test]
     fn pretty_assistant_message() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:12Z","event":"Agent.AssistantMessage","node_id":"plan","model":"claude-opus-4-6","text":"I'll start by reading the code.","usage":{"input_tokens":100,"output_tokens":50},"tool_call_count":0}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:12Z","event":"agent.message","node_id":"plan","properties":{"model":"claude-opus-4-6","text":"I'll start by reading the code.","usage":{"input_tokens":100,"output_tokens":50},"tool_call_count":0}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("plan"), "got: {result}");
         assert!(result.contains("claude-opus-4-6"), "got: {result}");
@@ -912,7 +922,7 @@ mod tests {
     #[test]
     fn pretty_tool_call_started() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:12Z","event":"Agent.ToolCallStarted","tool_name":"read_file","tool_call_id":"tc_1","arguments":{"path":"src/main.rs"}}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:12Z","event":"agent.tool.started","properties":{"tool_name":"read_file","tool_call_id":"tc_1","arguments":{"path":"src/main.rs"}}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("read_file"), "got: {result}");
         assert!(result.contains("src/main.rs"), "got: {result}");
@@ -921,15 +931,14 @@ mod tests {
     #[test]
     fn pretty_skips_noise_events() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:12Z","event":"Agent.TextDelta","delta":"hello"}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:12Z","event":"agent.text.delta","properties":{"delta":"hello"}}"#;
         assert!(format_event_pretty(line, &styles).is_none());
     }
 
     #[test]
     fn pretty_skips_assistant_output_replace_noise_event() {
         let styles = no_color_styles();
-        let line =
-            r#"{"ts":"2026-01-01T14:23:12Z","event":"Agent.AssistantOutputReplace","text":""}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:12Z","event":"agent.output.replace","properties":{"text":""}}"#;
         assert!(format_event_pretty(line, &styles).is_none());
     }
 
@@ -943,7 +952,7 @@ mod tests {
     #[test]
     fn pretty_workflow_run_started() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:01Z","run_id":"abc123","event":"WorkflowRunStarted","workflow_name":"smoke"}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:01Z","run_id":"abc123","event":"run.started","properties":{"name":"smoke"}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("smoke"), "got: {result}");
         assert!(result.contains("abc123"), "got: {result}");
@@ -952,7 +961,7 @@ mod tests {
     #[test]
     fn pretty_workflow_run_started_with_goal() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:01Z","run_id":"abc123","event":"WorkflowRunStarted","workflow_name":"smoke","goal":"Fix the bug"}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:01Z","run_id":"abc123","event":"run.started","properties":{"name":"smoke","goal":"Fix the bug"}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("smoke"), "got: {result}");
         assert!(result.contains("abc123"), "got: {result}");
@@ -963,7 +972,7 @@ mod tests {
     #[test]
     fn pretty_workflow_run_started_without_goal_no_extra_lines() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:01Z","run_id":"abc123","event":"WorkflowRunStarted","workflow_name":"smoke"}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:01Z","run_id":"abc123","event":"run.started","properties":{"name":"smoke"}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(!result.contains('\n'), "got: {result}");
     }
@@ -971,7 +980,7 @@ mod tests {
     #[test]
     fn pretty_workflow_run_completed() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"WorkflowRunCompleted","duration_ms":25000,"status":"success","total_cost":0.57,"usage":{"input_tokens":5000,"output_tokens":2000,"total_tokens":7000,"cache_read_tokens":3000,"cache_write_tokens":500,"reasoning_tokens":800}}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.completed","properties":{"duration_ms":25000,"status":"success","total_cost":0.57,"usage":{"input_tokens":5000,"output_tokens":2000,"total_tokens":7000,"cache_read_tokens":3000,"cache_write_tokens":500,"reasoning_tokens":800}}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("SUCCESS"), "got: {result}");
         assert!(result.contains("25s"), "got: {result}");
@@ -985,7 +994,7 @@ mod tests {
     #[test]
     fn pretty_workflow_run_completed_backward_compat() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"WorkflowRunCompleted","duration_ms":25000,"total_cost":0.57}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.completed","properties":{"duration_ms":25000,"total_cost":0.57}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("SUCCESS"), "got: {result}");
         assert!(result.contains("25s"), "got: {result}");
@@ -996,7 +1005,7 @@ mod tests {
     #[test]
     fn pretty_workflow_run_completed_fail_status() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:32Z","event":"WorkflowRunCompleted","duration_ms":25000,"status":"fail"}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","event":"run.completed","properties":{"duration_ms":25000,"status":"fail"}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("FAIL"), "got: {result}");
     }
@@ -1004,7 +1013,7 @@ mod tests {
     #[test]
     fn pretty_pull_request_created() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"PullRequestCreated","pr_url":"https://github.com/owner/repo/pull/42","pr_number":42,"draft":false}"#;
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.created","properties":{"pr_url":"https://github.com/owner/repo/pull/42","pr_number":42,"draft":false}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("PR:"), "got: {result}");
         assert!(
@@ -1016,7 +1025,7 @@ mod tests {
     #[test]
     fn pretty_pull_request_created_draft() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"PullRequestCreated","pr_url":"https://github.com/owner/repo/pull/42","pr_number":42,"draft":true}"#;
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.created","properties":{"pr_url":"https://github.com/owner/repo/pull/42","pr_number":42,"draft":true}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("Draft PR:"), "got: {result}");
     }
@@ -1024,7 +1033,7 @@ mod tests {
     #[test]
     fn pretty_pull_request_failed() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"PullRequestFailed","error":"auth token expired"}"#;
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.failed","properties":{"error":"auth token expired"}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("PR failed:"), "got: {result}");
         assert!(result.contains("auth token expired"), "got: {result}");
@@ -1033,7 +1042,7 @@ mod tests {
     #[test]
     fn pretty_run_notice_warn() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"RunNotice","level":"warn","code":"sandbox_cleanup_failed","message":"sandbox cleanup failed: boom"}"#;
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"run.notice","properties":{"level":"warn","code":"sandbox_cleanup_failed","message":"sandbox cleanup failed: boom"}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("Warning:"), "got: {result}");
         assert!(
@@ -1046,7 +1055,7 @@ mod tests {
     #[test]
     fn pretty_run_notice_error() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"RunNotice","level":"error","code":"launch_failed","message":"failed to start engine"}"#;
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"run.notice","properties":{"level":"error","code":"launch_failed","message":"failed to start engine"}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("Error:"), "got: {result}");
         assert!(result.contains("failed to start engine"), "got: {result}");
@@ -1056,10 +1065,20 @@ mod tests {
     #[test]
     fn pretty_workflow_run_failed() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"WorkflowRunFailed","error":"sandbox timeout"}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.failed","properties":{"error":"sandbox timeout"}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("Failed"), "got: {result}");
         assert!(result.contains("sandbox timeout"), "got: {result}");
+    }
+
+    #[test]
+    fn pretty_setup_completed_without_command_count() {
+        let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","event":"setup.completed","properties":{"duration_ms":800}}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("Setup:"), "got: {result}");
+        assert!(result.contains("800ms"), "got: {result}");
+        assert!(!result.contains("0 commands"), "got: {result}");
     }
 
     #[test]

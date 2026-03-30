@@ -13,7 +13,7 @@ use crate::sandbox::Sandbox;
 use crate::skills::{
     ExpandedInput, Skill, default_skill_dirs, discover_skills, expand_skill, make_use_skill_tool,
 };
-use crate::subagent::{SubAgentEventCallback, SubAgentManager};
+use crate::subagent::{SubAgentCallbackEvent, SubAgentEventCallback, SubAgentManager};
 use crate::tool_execution::execute_tool_calls;
 use crate::types::{AgentEvent, SessionEvent, SessionState, Turn};
 use fabro_llm::client::Client;
@@ -91,6 +91,11 @@ impl Session {
 
     pub fn set_tool_env(&mut self, env: HashMap<String, String>) {
         self.tool_env = Some(env);
+    }
+
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
     }
 
     /// Initialize session by discovering project docs and capturing environment context.
@@ -453,13 +458,22 @@ impl Session {
         self.cancel_token.clone()
     }
 
-    /// Build a callback that forwards `AgentEvent`s through this session's emitter.
+    /// Build a callback that forwards sub-agent lifecycle and child session events
+    /// through this session's emitter.
     #[must_use]
-    pub fn event_callback(&self) -> SubAgentEventCallback {
+    pub fn sub_agent_event_callback(&self) -> SubAgentEventCallback {
         let emitter = self.event_emitter.clone();
-        let session_id = self.id.clone();
-        Arc::new(move |event| {
-            emitter.emit(session_id.clone(), event);
+        let parent_session_id = self.id.clone();
+        Arc::new(move |event| match event {
+            SubAgentCallbackEvent::Lifecycle(event) => {
+                emitter.emit(parent_session_id.clone(), event);
+            }
+            SubAgentCallbackEvent::Forwarded(mut event) => {
+                if event.parent_session_id.is_none() {
+                    event.parent_session_id = Some(parent_session_id.clone());
+                }
+                emitter.forward(event);
+            }
         })
     }
 
@@ -2720,7 +2734,7 @@ mod tests {
         manager
             .lock()
             .await
-            .set_event_callback(session.event_callback());
+            .set_event_callback(session.sub_agent_event_callback());
 
         // Spawn a subagent
         let child = make_session(vec![text_response("child done")]).await;

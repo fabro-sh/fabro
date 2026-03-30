@@ -5,14 +5,14 @@ fn help() {
 
     let context = test_context!();
     let mut cmd = context.command();
-    cmd.args(["serve", "--help"]);
+    cmd.args(["server", "start", "--help"]);
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
     Start the HTTP API server
 
-    Usage: fabro serve [OPTIONS]
+    Usage: fabro server start [OPTIONS]
 
     Options:
           --debug

@@ -103,6 +103,7 @@
             "pages": [
               "reference/dot-language",
               "reference/cli",
+              "reference/shell-completions",
               "reference/user-configuration",
               "reference/run-directory",
               "reference/sdk",

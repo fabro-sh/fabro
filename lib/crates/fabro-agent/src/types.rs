@@ -185,11 +185,6 @@ pub enum AgentEvent {
         agent_id: String,
         depth: usize,
     },
-    SubAgentEvent {
-        agent_id: String,
-        depth: usize,
-        event: Box<Self>,
-    },
     McpServerReady {
         server_name: String,
         tool_count: usize,
@@ -237,8 +232,7 @@ impl AgentEvent {
             Self::TextDelta { .. }
             | Self::ReasoningDelta { .. }
             | Self::AssistantOutputReplace { .. }
-            | Self::ToolCallOutputDelta { .. }
-            | Self::SubAgentEvent { .. } => {}
+            | Self::ToolCallOutputDelta { .. } => {}
             Self::ToolCallStarted {
                 tool_name,
                 tool_call_id,
@@ -392,6 +386,8 @@ pub struct SessionEvent {
     #[serde(with = "system_time_iso8601")]
     pub timestamp: SystemTime,
     pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -404,9 +400,11 @@ mod tests {
             event: AgentEvent::SessionStarted,
             timestamp: SystemTime::now(),
             session_id: "sess_1".into(),
+            parent_session_id: None,
         };
         assert!(matches!(event.event, AgentEvent::SessionStarted));
         assert_eq!(event.session_id, "sess_1");
+        assert_eq!(event.parent_session_id, None);
     }
 
     #[test]
@@ -499,21 +497,6 @@ mod tests {
     }
 
     #[test]
-    fn subagent_event_wraps_child_event() {
-        let child = AgentEvent::ToolCallStarted {
-            tool_name: "read_file".into(),
-            tool_call_id: "tc-1".into(),
-            arguments: serde_json::json!({}),
-        };
-        let event = AgentEvent::SubAgentEvent {
-            agent_id: "sa-1".into(),
-            depth: 1,
-            event: Box::new(child),
-        };
-        assert!(matches!(event, AgentEvent::SubAgentEvent { depth: 1, .. }));
-    }
-
-    #[test]
     fn subagent_events_serde_round_trip() {
         let events = vec![
             AgentEvent::SubAgentSpawned {
@@ -536,37 +519,51 @@ mod tests {
                 agent_id: "sa-1".into(),
                 depth: 0,
             },
-            AgentEvent::SubAgentEvent {
-                agent_id: "sa-1".into(),
-                depth: 1,
-                event: Box::new(AgentEvent::SessionStarted),
-            },
         ];
         let json = serde_json::to_string(&events).unwrap();
         let deserialized: Vec<AgentEvent> = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.len(), 5);
-        assert!(
-            matches!(&deserialized[4], AgentEvent::SubAgentEvent { event, .. } if matches!(event.as_ref(), AgentEvent::SessionStarted))
-        );
+        assert_eq!(deserialized.len(), 4);
     }
 
     #[test]
-    fn session_event_serde_round_trip() {
+    fn session_event_serde_round_trip_without_parent_session_id() {
         let event = SessionEvent {
             event: AgentEvent::SessionStarted,
             timestamp: SystemTime::now(),
             session_id: "sess_42".into(),
+            parent_session_id: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("sess_42"));
         assert!(json.contains("SessionStarted"));
-        // Timestamp should be ISO-8601
+        assert!(!json.contains("parent_session_id"));
         assert!(json.contains('T'));
         assert!(json.contains('Z'));
 
         let deserialized: SessionEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.session_id, "sess_42");
+        assert_eq!(deserialized.parent_session_id, None);
         assert!(matches!(deserialized.event, AgentEvent::SessionStarted));
+    }
+
+    #[test]
+    fn session_event_serde_round_trip_with_parent_session_id() {
+        let event = SessionEvent {
+            event: AgentEvent::SessionStarted,
+            timestamp: SystemTime::now(),
+            session_id: "sess_child".into(),
+            parent_session_id: Some("sess_parent".into()),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("sess_child"));
+        assert!(json.contains("sess_parent"));
+
+        let deserialized: SessionEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.session_id, "sess_child");
+        assert_eq!(
+            deserialized.parent_session_id.as_deref(),
+            Some("sess_parent")
+        );
     }
 
     #[test]

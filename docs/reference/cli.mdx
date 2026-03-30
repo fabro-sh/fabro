@@ -327,14 +327,14 @@ fabro model test -m claude-sonnet-4-5
 
 ---
 
-## `fabro serve`
+## `fabro server start`
 
 Start the HTTP API server that exposes the [REST API](/api-reference) for launching and managing workflow runs.
 
 ```bash
-fabro serve
-fabro serve --port 8080 --host 0.0.0.0
-fabro serve --sandbox daytona --max-concurrent-runs 4
+fabro server start
+fabro server start --port 8080 --host 0.0.0.0
+fabro server start --sandbox daytona --max-concurrent-runs 4
 ```
 
 | Flag | Description | Default |
@@ -648,10 +648,6 @@ The command must be run inside a git repository. It creates:
 
 After creating files, it checks whether the GitHub App is installed for the repository. If the app is not installed and the repository owner differs from the app owner, it warns that the app may need to be [made public](/integrations/github#github-app-is-private-but-this-repo-belongs-to-a-different-owner) first.
 
-<Note>
-The old `fabro init` still works but prints a deprecation warning. Use `fabro repo init` instead.
-</Note>
-
 ## `fabro repo deinit`
 
 Remove Fabro from a project by deleting `fabro.toml` and the `fabro/` directory. Fails with an error if the project is not initialized.
@@ -885,6 +881,24 @@ fabro store dump abc123 -o ./debug-output
 |---|---|
 | `<RUN>` | Run ID prefix or workflow name |
 | `-o, --output <DIR>` | Output directory (must not exist or be empty) |
+
+---
+
+## `fabro completion`
+
+Generate shell completion scripts for bash, zsh, fish, elvish, and PowerShell.
+
+```bash
+fabro completion bash
+fabro completion zsh
+fabro completion fish
+```
+
+| Argument | Description |
+|---|---|
+| `<SHELL>` | Shell to generate completions for: `bash`, `zsh`, `fish`, `elvish`, `powershell` (required) |
+
+See [Shell Completions](/reference/shell-completions) for installation instructions for each shell.
 
 ---
 

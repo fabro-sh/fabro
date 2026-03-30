@@ -2,7 +2,7 @@ use crate::error::AgentError;
 use crate::session::Session;
 use crate::tool_registry::RegisteredTool;
 use crate::tools::required_str;
-use crate::types::{AgentEvent, Turn};
+use crate::types::{AgentEvent, SessionEvent, Turn};
 use fabro_llm::types::ToolDefinition;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -11,7 +11,14 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 pub type SessionFactory = Arc<dyn Fn() -> Session + Send + Sync>;
-pub type SubAgentEventCallback = Arc<dyn Fn(AgentEvent) + Send + Sync>;
+
+#[derive(Debug, Clone)]
+pub enum SubAgentCallbackEvent {
+    Lifecycle(AgentEvent),
+    Forwarded(SessionEvent),
+}
+
+pub type SubAgentEventCallback = Arc<dyn Fn(SubAgentCallbackEvent) + Send + Sync>;
 
 #[derive(Debug, Clone)]
 pub struct SubAgentResult {
@@ -57,7 +64,7 @@ impl SubAgentManager {
 
     fn emit_event(&self, event: AgentEvent) {
         if let Some(ref cb) = self.event_callback {
-            cb(event);
+            cb(SubAgentCallbackEvent::Lifecycle(event));
         }
     }
 
@@ -82,8 +89,6 @@ impl SubAgentManager {
         if let Some(ref cb) = self.event_callback {
             let mut rx = session.subscribe();
             let cb = cb.clone();
-            let fwd_agent_id = agent_id.clone();
-            let child_depth = depth + 1;
             tokio::spawn(async move {
                 while let Ok(event) = rx.recv().await {
                     // Skip streaming / noise events
@@ -101,11 +106,7 @@ impl SubAgentManager {
                     ) {
                         continue;
                     }
-                    cb(AgentEvent::SubAgentEvent {
-                        agent_id: fwd_agent_id.clone(),
-                        depth: child_depth,
-                        event: Box::new(event.event),
-                    });
+                    cb(SubAgentCallbackEvent::Forwarded(event));
                 }
             });
         }
@@ -620,8 +621,11 @@ mod tests {
         assert!(close_required.contains(&serde_json::json!("agent_id")));
     }
 
-    fn captured_events() -> (SubAgentEventCallback, Arc<Mutex<Vec<AgentEvent>>>) {
-        let events: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    fn captured_events() -> (
+        SubAgentEventCallback,
+        Arc<Mutex<Vec<SubAgentCallbackEvent>>>,
+    ) {
+        let events: Arc<Mutex<Vec<SubAgentCallbackEvent>>> = Arc::new(Mutex::new(Vec::new()));
         let events_clone = events.clone();
         let cb: SubAgentEventCallback = Arc::new(move |event| {
             events_clone.lock().unwrap().push(event);
@@ -640,9 +644,11 @@ mod tests {
 
         let captured = events.lock().unwrap();
         assert_eq!(captured.len(), 1);
-        assert!(
-            matches!(&captured[0], AgentEvent::SubAgentSpawned { depth: 1, task, .. } if task == "test task")
-        );
+        assert!(matches!(
+            &captured[0],
+            SubAgentCallbackEvent::Lifecycle(AgentEvent::SubAgentSpawned { depth: 1, task, .. })
+                if task == "test task"
+        ));
     }
 
     #[tokio::test]
@@ -658,11 +664,11 @@ mod tests {
         let captured = events.lock().unwrap();
         assert!(captured.iter().any(|e| matches!(
             e,
-            AgentEvent::SubAgentCompleted {
+            SubAgentCallbackEvent::Lifecycle(AgentEvent::SubAgentCompleted {
                 success: true,
                 depth: 1,
                 ..
-            }
+            })
         )));
     }
 
@@ -677,11 +683,10 @@ mod tests {
         manager.close(&agent_id).unwrap();
 
         let captured = events.lock().unwrap();
-        assert!(
-            captured
-                .iter()
-                .any(|e| matches!(e, AgentEvent::SubAgentClosed { depth: 2, .. }))
-        );
+        assert!(captured.iter().any(|e| matches!(
+            e,
+            SubAgentCallbackEvent::Lifecycle(AgentEvent::SubAgentClosed { depth: 2, .. })
+        )));
     }
 
     #[tokio::test]
@@ -702,13 +707,39 @@ mod tests {
         let captured = events.lock().unwrap();
         let forwarded_count = captured
             .iter()
-            .filter(|e| matches!(e, AgentEvent::SubAgentEvent { .. }))
+            .filter(|e| matches!(e, SubAgentCallbackEvent::Forwarded(_)))
             .count();
-        // Child session emits at least UserInput and AssistantMessage (filtered from SessionStarted/SessionEnded/etc)
         assert!(
             forwarded_count > 0,
             "expected at least one forwarded child event, got {forwarded_count}"
         );
+    }
+
+    #[tokio::test]
+    async fn session_callback_stamps_parent_only_once() {
+        let parent = make_session(vec![text_response("parent")]).await;
+        let callback = parent.sub_agent_event_callback();
+        let mut rx = parent.subscribe();
+
+        callback(SubAgentCallbackEvent::Forwarded(SessionEvent {
+            event: AgentEvent::SessionStarted,
+            timestamp: std::time::SystemTime::now(),
+            session_id: "child".into(),
+            parent_session_id: None,
+        }));
+        callback(SubAgentCallbackEvent::Forwarded(SessionEvent {
+            event: AgentEvent::SessionStarted,
+            timestamp: std::time::SystemTime::now(),
+            session_id: "grandchild".into(),
+            parent_session_id: Some("child".into()),
+        }));
+
+        let child = rx.recv().await.unwrap();
+        let grandchild = rx.recv().await.unwrap();
+        assert_eq!(child.session_id, "child");
+        assert_eq!(child.parent_session_id.as_deref(), Some(parent.id()));
+        assert_eq!(grandchild.session_id, "grandchild");
+        assert_eq!(grandchild.parent_session_id.as_deref(), Some("child"));
     }
 
     #[test]

@@ -48,8 +48,6 @@ struct FileTracking {
     last: Option<String>,
 }
 
-/// Recursively extract file-tracking events from agent events, including
-/// those wrapped in one or more layers of `SubAgentEvent`.
 fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
     match event {
         AgentEvent::ToolCallStarted {
@@ -74,9 +72,6 @@ fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
                     state.last = Some(path);
                 }
             }
-        }
-        AgentEvent::SubAgentEvent { event: inner, .. } => {
-            track_file_event(inner, state);
         }
         _ => {}
     }
@@ -116,6 +111,8 @@ fn spawn_event_forwarder(
                 emitter.emit(&WorkflowRunEvent::Agent {
                     stage: node_id.clone(),
                     event: event.event.clone(),
+                    session_id: Some(event.session_id.clone()),
+                    parent_session_id: event.parent_session_id.clone(),
                 });
             }
         }
@@ -261,7 +258,7 @@ impl AgentApiBackend {
         manager_for_callback
             .lock()
             .await
-            .set_event_callback(session.event_callback());
+            .set_event_callback(session.sub_agent_event_callback());
 
         Ok(session)
     }
@@ -730,7 +727,7 @@ mod tests {
     }
 
     #[test]
-    fn track_file_event_unwraps_sub_agent_edit() {
+    fn track_file_event_tracks_edit_file() {
         let mut state = new_file_tracking();
 
         let mut args = serde_json::Map::new();
@@ -739,86 +736,27 @@ mod tests {
             serde_json::Value::String("/src/lib.rs".to_string()),
         );
 
-        // ToolCallStarted wrapped in SubAgentEvent
         track_file_event(
-            &AgentEvent::SubAgentEvent {
-                agent_id: "sub-1".to_string(),
-                depth: 1,
-                event: Box::new(AgentEvent::ToolCallStarted {
-                    tool_name: "edit_file".to_string(),
-                    tool_call_id: "tc-sub".to_string(),
-                    arguments: serde_json::Value::Object(args),
-                }),
+            &AgentEvent::ToolCallStarted {
+                tool_name: "edit_file".to_string(),
+                tool_call_id: "tc-sub".to_string(),
+                arguments: serde_json::Value::Object(args),
             },
             &mut state,
         );
         assert_eq!(state.pending.get("tc-sub").unwrap(), "/src/lib.rs");
 
-        // ToolCallCompleted wrapped in SubAgentEvent
         track_file_event(
-            &AgentEvent::SubAgentEvent {
-                agent_id: "sub-1".to_string(),
-                depth: 1,
-                event: Box::new(AgentEvent::ToolCallCompleted {
-                    tool_call_id: "tc-sub".to_string(),
-                    tool_name: "edit_file".to_string(),
-                    is_error: false,
-                    output: serde_json::Value::String("ok".to_string()),
-                }),
+            &AgentEvent::ToolCallCompleted {
+                tool_call_id: "tc-sub".to_string(),
+                tool_name: "edit_file".to_string(),
+                is_error: false,
+                output: serde_json::Value::String("ok".to_string()),
             },
             &mut state,
         );
         assert!(state.touched.contains("/src/lib.rs"));
         assert_eq!(state.last.as_deref(), Some("/src/lib.rs"));
-    }
-
-    #[test]
-    fn track_file_event_unwraps_nested_sub_sub_agent() {
-        let mut state = new_file_tracking();
-
-        let mut args = serde_json::Map::new();
-        args.insert(
-            "file_path".to_string(),
-            serde_json::Value::String("/deep/file.rs".to_string()),
-        );
-
-        // Double-wrapped SubAgentEvent → SubAgentEvent → ToolCallStarted
-        track_file_event(
-            &AgentEvent::SubAgentEvent {
-                agent_id: "sub-outer".to_string(),
-                depth: 1,
-                event: Box::new(AgentEvent::SubAgentEvent {
-                    agent_id: "sub-inner".to_string(),
-                    depth: 2,
-                    event: Box::new(AgentEvent::ToolCallStarted {
-                        tool_name: "write_file".to_string(),
-                        tool_call_id: "tc-deep".to_string(),
-                        arguments: serde_json::Value::Object(args),
-                    }),
-                }),
-            },
-            &mut state,
-        );
-        assert!(state.pending.contains_key("tc-deep"));
-
-        track_file_event(
-            &AgentEvent::SubAgentEvent {
-                agent_id: "sub-outer".to_string(),
-                depth: 1,
-                event: Box::new(AgentEvent::SubAgentEvent {
-                    agent_id: "sub-inner".to_string(),
-                    depth: 2,
-                    event: Box::new(AgentEvent::ToolCallCompleted {
-                        tool_call_id: "tc-deep".to_string(),
-                        tool_name: "write_file".to_string(),
-                        is_error: false,
-                        output: serde_json::Value::String("ok".to_string()),
-                    }),
-                }),
-            },
-            &mut state,
-        );
-        assert!(state.touched.contains("/deep/file.rs"));
     }
 
     #[test]
@@ -832,28 +770,20 @@ mod tests {
         );
 
         track_file_event(
-            &AgentEvent::SubAgentEvent {
-                agent_id: "sub-1".to_string(),
-                depth: 1,
-                event: Box::new(AgentEvent::ToolCallStarted {
-                    tool_name: "edit_file".to_string(),
-                    tool_call_id: "tc-err".to_string(),
-                    arguments: serde_json::Value::Object(args),
-                }),
+            &AgentEvent::ToolCallStarted {
+                tool_name: "edit_file".to_string(),
+                tool_call_id: "tc-err".to_string(),
+                arguments: serde_json::Value::Object(args),
             },
             &mut state,
         );
 
         track_file_event(
-            &AgentEvent::SubAgentEvent {
-                agent_id: "sub-1".to_string(),
-                depth: 1,
-                event: Box::new(AgentEvent::ToolCallCompleted {
-                    tool_call_id: "tc-err".to_string(),
-                    tool_name: "edit_file".to_string(),
-                    is_error: true,
-                    output: serde_json::Value::String("failed".to_string()),
-                }),
+            &AgentEvent::ToolCallCompleted {
+                tool_call_id: "tc-err".to_string(),
+                tool_name: "edit_file".to_string(),
+                is_error: true,
+                output: serde_json::Value::String("failed".to_string()),
             },
             &mut state,
         );

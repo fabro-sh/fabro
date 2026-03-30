@@ -180,13 +180,6 @@ impl TestContext {
         cmd
     }
 
-    /// Build a `sandbox cp` subcommand.
-    pub fn cp(&self) -> Command {
-        let mut cmd = self.command();
-        cmd.args(["sandbox", "cp"]);
-        cmd
-    }
-
     /// Build an `init` subcommand.
     pub fn init_cmd(&self) -> Command {
         let mut cmd = self.command();
@@ -208,24 +201,10 @@ impl TestContext {
         cmd
     }
 
-    /// Build a `sandbox preview` subcommand.
-    pub fn preview(&self) -> Command {
-        let mut cmd = self.command();
-        cmd.args(["sandbox", "preview"]);
-        cmd
-    }
-
     /// Build a `repo` subcommand.
     pub fn repo(&self) -> Command {
         let mut cmd = self.command();
         cmd.arg("repo");
-        cmd
-    }
-
-    /// Build a `sandbox ssh` subcommand.
-    pub fn ssh(&self) -> Command {
-        let mut cmd = self.command();
-        cmd.args(["sandbox", "ssh"]);
         cmd
     }
 
@@ -276,6 +255,45 @@ impl TestContext {
         }
         std::fs::write(&full, content).expect("failed to write file");
         self
+    }
+
+    /// Find a run directory whose name ends with `run_id_suffix`.
+    pub fn find_run_dir(&self, run_id_suffix: &str) -> PathBuf {
+        let runs_dir = self.storage_dir.join("runs");
+        std::fs::read_dir(&runs_dir)
+            .expect("runs directory should exist")
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.is_dir()
+                    && path
+                        .file_name()
+                        .is_some_and(|name| name.to_string_lossy().ends_with(run_id_suffix))
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected run directory for {run_id_suffix} under {}",
+                    runs_dir.display()
+                )
+            })
+    }
+
+    /// Return the only run directory currently present under storage.
+    pub fn single_run_dir(&self) -> PathBuf {
+        let runs_dir = self.storage_dir.join("runs");
+        let entries: Vec<_> = std::fs::read_dir(&runs_dir)
+            .expect("runs directory should exist")
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect();
+        assert_eq!(
+            entries.len(),
+            1,
+            "expected exactly one run directory under {}",
+            runs_dir.display()
+        );
+        entries.into_iter().next().unwrap()
     }
 }
 

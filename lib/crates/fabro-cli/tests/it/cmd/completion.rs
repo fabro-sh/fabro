@@ -3,15 +3,18 @@ use fabro_test::{fabro_snapshot, test_context};
 #[test]
 fn help() {
     let context = test_context!();
-    let mut cmd = context.init_cmd();
-    cmd.arg("--help");
+    let mut cmd = context.command();
+    cmd.args(["completion", "--help"]);
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
-    Initialize a new project (deprecated: use `repo init`)
+    Generate shell completions
 
-    Usage: fabro init [OPTIONS]
+    Usage: fabro completion [OPTIONS] <SHELL>
+
+    Arguments:
+      <SHELL>  Shell to generate completions for [possible values: bash, elvish, fish, powershell, zsh]
 
     Options:
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
@@ -22,4 +25,20 @@ fn help() {
       -h, --help                       Print help
     ----- stderr -----
     ");
+}
+
+#[test]
+fn generates_zsh_completions() {
+    let context = test_context!();
+    let mut cmd = context.command();
+    cmd.args(["completion", "zsh"]);
+    cmd.assert().success();
+}
+
+#[test]
+fn generates_fish_completions() {
+    let context = test_context!();
+    let mut cmd = context.command();
+    cmd.args(["completion", "fish"]);
+    cmd.assert().success();
 }

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use fabro_git_storage::branchstore::BranchStore;
-use fabro_git_storage::gitobj::Store;
+use fabro_checkpoint::branch::BranchStore;
+use fabro_checkpoint::git::Store;
 use fabro_types::RunId;
 use git2::{Oid, Signature};
 

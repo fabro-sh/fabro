@@ -51,14 +51,16 @@ pub fn extract_stage_durations(run_dir: &Path) -> HashMap<String, u64> {
         let Ok(envelope) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
-        if envelope.get("event").and_then(|v| v.as_str()) != Some("StageCompleted") {
+        if envelope.get("event").and_then(|v| v.as_str()) != Some("stage.completed") {
             continue;
         }
         let Some(name) = envelope.get("node_id").and_then(|v| v.as_str()) else {
             continue;
         };
         let Some(duration_ms) = envelope
-            .get("duration_ms")
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|properties| properties.get("duration_ms"))
             .and_then(serde_json::Value::as_u64)
         else {
             continue;

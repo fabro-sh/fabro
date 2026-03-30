@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use fabro_agent::Sandbox;
-use fabro_git_storage::trailerlink::{self, Trailer};
+use fabro_checkpoint::trailer as trailerlink;
+use fabro_checkpoint::trailer::Trailer;
 use fabro_types::RunId;
 
 use crate::asset_snapshot;

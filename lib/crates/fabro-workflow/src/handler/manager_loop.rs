@@ -4,12 +4,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use async_trait::async_trait;
-use chrono::Utc;
-use fabro_config::FabroSettings;
-use fabro_store::{InMemoryStore, Store};
-use fabro_types::RunId;
-
 use crate::condition::evaluate_condition;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
@@ -20,7 +14,11 @@ use crate::pipeline;
 use crate::pipeline::types::Initialized;
 use crate::run_dir::visit_from_context;
 use crate::run_options::RunOptions;
+use async_trait::async_trait;
+use chrono::Utc;
+use fabro_config::FabroSettings;
 use fabro_graphviz::graph::{AttrValue, Graph, Node};
+use fabro_store::{InMemoryStore, Store};
 use tokio::time::{sleep, timeout};
 
 use super::{EngineServices, Handler};
@@ -166,7 +164,8 @@ impl Handler for SubWorkflowHandler {
             settings: fabro_config::FabroSettings::default(),
             run_dir: child_logs,
             cancel_token: Some(cancel_token),
-            run_id: RunId::new(),
+            // Child workflows are part of the parent run's event stream.
+            run_id: services.emitter.run_id(),
             labels: HashMap::new(),
             workflow_slug: None,
             github_app: None,

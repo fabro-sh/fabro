@@ -71,7 +71,7 @@ impl EngineServices {
     pub fn test_default() -> Self {
         Self {
             registry: Arc::new(HandlerRegistry::new(Box::new(start::StartHandler))),
-            emitter: Arc::new(EventEmitter::new()),
+            emitter: Arc::new(EventEmitter::default()),
             sandbox: Arc::new(fabro_agent::LocalSandbox::new(
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             )),

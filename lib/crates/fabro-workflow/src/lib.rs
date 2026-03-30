@@ -113,13 +113,18 @@ pub fn extract_stage_durations_from_events(events: &[EventEnvelope]) -> HashMap<
     let mut durations = HashMap::new();
     for envelope in events {
         let value = envelope.payload.as_value();
-        if value.get("event").and_then(serde_json::Value::as_str) != Some("StageCompleted") {
+        if value.get("event").and_then(serde_json::Value::as_str) != Some("stage.completed") {
             continue;
         }
         let Some(node_id) = value.get("node_id").and_then(serde_json::Value::as_str) else {
             continue;
         };
-        let Some(duration_ms) = value.get("duration_ms").and_then(serde_json::Value::as_u64) else {
+        let Some(duration_ms) = value
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|properties| properties.get("duration_ms"))
+            .and_then(serde_json::Value::as_u64)
+        else {
             continue;
         };
         durations.insert(node_id.to_string(), duration_ms);

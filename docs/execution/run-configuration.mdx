@@ -423,7 +423,7 @@ Project defaults are merged with run config values using the same rules as serve
 
 ### Server defaults
 
-When running via `fabro serve`, the server config at `~/.fabro/server.toml` can set default values for `[llm]`, `[setup]`, `[sandbox]`, and `[vars]`. These defaults are applied to every run unless the run config overrides them.
+When running via `fabro server start`, the server config at `~/.fabro/server.toml` can set default values for `[llm]`, `[setup]`, `[sandbox]`, and `[vars]`. These defaults are applied to every run unless the run config overrides them.
 
 For variables, defaults and run config are **merged** — the run config wins on key collisions:
 

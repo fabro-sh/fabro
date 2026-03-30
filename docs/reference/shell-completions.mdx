@@ -1,0 +1,70 @@
+---
+title: "Shell Completions"
+description: "Set up tab completion for the fabro CLI in your shell"
+---
+
+The `fabro completion` command generates shell completion scripts for tab-completing commands, flags, and arguments.
+
+## Bash
+
+Add to your `~/.bashrc`:
+
+```bash
+eval "$(fabro completion bash)"
+```
+
+Or generate a file and source it:
+
+```bash
+fabro completion bash > ~/.local/share/bash-completion/completions/fabro
+```
+
+## Zsh
+
+Add to your `~/.zshrc` (before `compinit`):
+
+```bash
+eval "$(fabro completion zsh)"
+```
+
+Or generate a file:
+
+```bash
+fabro completion zsh > "${fpath[1]}/_fabro"
+```
+
+You may need to run `compinit` or start a new shell session for changes to take effect.
+
+## Fish
+
+```bash
+fabro completion fish | source
+```
+
+Or persist to the completions directory:
+
+```bash
+fabro completion fish > ~/.config/fish/completions/fabro.fish
+```
+
+## PowerShell
+
+Add to your PowerShell profile:
+
+```powershell
+fabro completion powershell | Out-String | Invoke-Expression
+```
+
+## Elvish
+
+```bash
+eval (fabro completion elvish | slurp)
+```
+
+## Supported shells
+
+Run `fabro completion --help` to see all supported shells:
+
+```bash
+fabro completion --help
+```

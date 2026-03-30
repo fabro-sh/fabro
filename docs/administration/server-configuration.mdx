@@ -5,7 +5,7 @@ description: "Server config file, CLI overrides, and environment variables"
 
 ## Config file
 
-The server config file at `~/.fabro/server.toml` controls how `fabro serve` behaves — API binding, authentication, run defaults, and more. The [Quick Start](/getting-started/quick-start) doesn't require one, but production deployments should configure it explicitly.
+The server config file at `~/.fabro/server.toml` controls how `fabro server start` behaves — API binding, authentication, run defaults, and more. The [Quick Start](/getting-started/quick-start) doesn't require one, but production deployments should configure it explicitly.
 
 ### Full reference
 
@@ -83,7 +83,7 @@ default_branch = "main"
 
 ### CLI overrides
 
-Several `server.toml` settings can be overridden via `fabro serve` flags:
+Several `server.toml` settings can be overridden via `fabro server start` flags:
 
 | Flag | Default | Description |
 |---|---|---|
@@ -123,7 +123,7 @@ The CLI can also set `[git.author]` in `user.toml` to override the server defaul
 
 ### `[git.webhooks]` section
 
-Enable automatic GitHub webhook delivery via Tailscale funnel. When configured, `fabro serve` binds a local HTTP listener, exposes it through `tailscale funnel`, and updates the GitHub App's webhook URL on startup. Incoming webhooks are verified with HMAC-SHA256.
+Enable automatic GitHub webhook delivery via Tailscale funnel. When configured, `fabro server start` binds a local HTTP listener, exposes it through `tailscale funnel`, and updates the GitHub App's webhook URL on startup. Incoming webhooks are verified with HMAC-SHA256.
 
 | Key | Description | Values |
 |---|---|---|

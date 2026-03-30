@@ -1,76 +1,19 @@
-use std::fmt::Write;
 use std::path::Path;
 use std::process::Command;
 
+use fabro_checkpoint::git::Store;
 use fabro_config::FabroSettings;
-use fabro_config::server::GitAuthorSettings;
-use fabro_git_storage::branchstore::BranchStore;
-use fabro_git_storage::gitobj::Store;
-use git2::{Repository, Signature};
 
 use crate::error::{FabroError, Result};
-use crate::records::{Checkpoint, RunRecord, StartRecord};
 use tokio::task::{JoinError, spawn_blocking};
 use tokio::time::timeout;
 
+pub use fabro_checkpoint::META_BRANCH_PREFIX;
+pub use fabro_checkpoint::author::GitAuthor;
+pub use fabro_checkpoint::metadata::MetadataStore;
+
 /// Branch prefix for workflow run branches (e.g. `fabro/run/{run_id}`).
 pub const RUN_BRANCH_PREFIX: &str = "fabro/run/";
-
-/// Branch prefix for metadata branches (e.g. `fabro/meta/{run_id}`).
-pub const META_BRANCH_PREFIX: &str = "fabro/meta/";
-
-/// Resolved git author identity for checkpoint commits.
-#[derive(Debug, Clone, PartialEq)]
-pub struct GitAuthor {
-    pub name: String,
-    pub email: String,
-}
-
-impl Default for GitAuthor {
-    fn default() -> Self {
-        Self {
-            name: "Fabro".into(),
-            email: "noreply@fabro.sh".into(),
-        }
-    }
-}
-
-impl GitAuthor {
-    /// Create a `GitAuthor` from optional name/email, falling back to defaults.
-    pub fn from_options(name: Option<String>, email: Option<String>) -> Self {
-        let defaults = Self::default();
-        Self {
-            name: name.unwrap_or(defaults.name),
-            email: email.unwrap_or(defaults.email),
-        }
-    }
-
-    /// Returns true when this identity matches the default Fabro identity.
-    pub fn is_default(&self) -> bool {
-        let defaults = Self::default();
-        self.name == defaults.name && self.email == defaults.email
-    }
-
-    /// Append the Fabro footer (and Co-Authored-By when the author is not the
-    /// default identity) to a commit message.
-    pub fn append_footer(&self, message: &mut String) {
-        message.push_str("\n\u{2692}\u{fe0f} Generated with [Fabro](https://fabro.sh)\n");
-        if !self.is_default() {
-            let defaults = Self::default();
-            let _ = write!(
-                message,
-                "\nCo-Authored-By: {} <{}>\n",
-                defaults.name, defaults.email
-            );
-        }
-    }
-}
-
-impl From<&GitAuthorSettings> for GitAuthor {
-    fn from(value: &GitAuthorSettings) -> Self {
-        Self::from_options(value.name.clone(), value.email.clone())
-    }
-}
 
 pub fn git_author_from_settings(settings: &FabroSettings) -> GitAuthor {
     settings
@@ -409,159 +352,10 @@ pub fn scan_node_files(run_dir: &Path) -> Vec<(String, Vec<u8>)> {
     result
 }
 
-/// Git-native metadata storage for pipeline runs.
-///
-/// Stores checkpoint data, run records, and metadata on an orphan branch
-/// (`fabro/meta/{run_id}`) so that runs can be resumed from git alone.
-pub struct MetadataStore {
-    repo_path: std::path::PathBuf,
-    author: GitAuthor,
-}
-
-impl MetadataStore {
-    pub fn new(repo_path: impl Into<std::path::PathBuf>, author: &GitAuthor) -> Self {
-        Self {
-            repo_path: repo_path.into(),
-            author: author.clone(),
-        }
-    }
-
-    /// Returns the branch name for a run: `fabro/meta/{run_id}`.
-    pub fn branch_name(run_id: &str) -> String {
-        format!("{META_BRANCH_PREFIX}{run_id}")
-    }
-
-    /// Format a commit message with the standard Fabro footer appended.
-    fn commit_message(&self, subject: &str) -> String {
-        let mut msg = format!("{subject}\n");
-        self.author.append_footer(&mut msg);
-        msg
-    }
-
-    fn open_store(&self) -> Result<(Store, Signature<'static>)> {
-        let repo = Repository::discover(&self.repo_path)
-            .map_err(|e| git_error(format!("failed to open repo: {e}")))?;
-        let store = Store::new(repo);
-        let sig = Signature::now(&self.author.name, &self.author.email)
-            .map_err(|e| git_error(format!("failed to create signature: {e}")))?;
-        Ok((store, sig))
-    }
-
-    /// Initialize a run's metadata branch with the given files.
-    ///
-    /// Callers pass all files (run.json, start.json, sandbox.json, etc.)
-    /// via the `files` slice.
-    pub fn init_run(&self, run_id: &str, files: &[(&str, &[u8])]) -> Result<()> {
-        let (store, sig) = self.open_store()?;
-        let branch = Self::branch_name(run_id);
-        let bs = BranchStore::new(&store, &branch, &sig);
-        bs.ensure_branch()
-            .map_err(|e| git_error(format!("ensure_branch failed: {e}")))?;
-        let msg = self.commit_message("init run");
-        bs.write_entries(files, &msg)
-            .map_err(|e| git_error(format!("write_entries failed: {e}")))?;
-        Ok(())
-    }
-
-    /// Write arbitrary files to the metadata branch without overwriting checkpoint.json.
-    pub fn write_files(
-        &self,
-        run_id: &str,
-        entries: &[(&str, &[u8])],
-        message: &str,
-    ) -> Result<()> {
-        let (store, sig) = self.open_store()?;
-        let branch = Self::branch_name(run_id);
-        let bs = BranchStore::new(&store, &branch, &sig);
-        let msg = self.commit_message(message);
-        bs.write_entries(entries, &msg)
-            .map_err(|e| git_error(format!("write_entries failed: {e}")))?;
-        Ok(())
-    }
-
-    /// Write checkpoint data (and optional artifacts) to the metadata branch.
-    /// Returns the SHA of the new commit on the shadow branch.
-    pub fn write_checkpoint(
-        &self,
-        run_id: &str,
-        checkpoint_json: &[u8],
-        artifacts: &[(&str, &[u8])],
-    ) -> Result<String> {
-        let (store, sig) = self.open_store()?;
-        let branch = Self::branch_name(run_id);
-        let bs = BranchStore::new(&store, &branch, &sig);
-        let mut entries: Vec<(&str, &[u8])> = vec![("checkpoint.json", checkpoint_json)];
-        entries.extend_from_slice(artifacts);
-        let msg = self.commit_message("checkpoint");
-        let oid = bs
-            .write_entries(&entries, &msg)
-            .map_err(|e| git_error(format!("write_entries failed: {e}")))?;
-        Ok(oid.to_string())
-    }
-
-    /// Read a single file from the metadata branch. Returns `None` if branch or path doesn't exist.
-    fn read_file(repo_path: &Path, run_id: &str, path: &str) -> Result<Option<Vec<u8>>> {
-        let Ok(repo) = Repository::discover(repo_path) else {
-            return Ok(None);
-        };
-        let store = Store::new(repo);
-        let sig = Signature::now("Fabro", "noreply@fabro.sh")
-            .map_err(|e| git_error(format!("failed to create signature: {e}")))?;
-        let branch = Self::branch_name(run_id);
-        let bs = BranchStore::new(&store, &branch, &sig);
-        bs.read_entry(path)
-            .map_err(|e| git_error(format!("read_entry failed: {e}")))
-    }
-
-    /// Read a checkpoint from the metadata branch. Returns `None` if branch or file doesn't exist.
-    pub fn read_checkpoint(repo_path: &Path, run_id: &str) -> Result<Option<Checkpoint>> {
-        match Self::read_file(repo_path, run_id, "checkpoint.json")? {
-            Some(bytes) => {
-                let cp: Checkpoint = serde_json::from_slice(&bytes)
-                    .map_err(|e| FabroError::Checkpoint(format!("deserialize failed: {e}")))?;
-                Ok(Some(cp))
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// Read the run record from the metadata branch. Returns `None` if not found.
-    pub fn read_run_record(repo_path: &Path, run_id: &str) -> Result<Option<RunRecord>> {
-        match Self::read_file(repo_path, run_id, "run.json")? {
-            Some(bytes) => {
-                let record: RunRecord = serde_json::from_slice(&bytes)
-                    .map_err(|e| git_error(format!("run record deserialize failed: {e}")))?;
-                Ok(Some(record))
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// Read the start record from the metadata branch. Returns `None` if not found.
-    pub fn read_start_record(repo_path: &Path, run_id: &str) -> Result<Option<StartRecord>> {
-        match Self::read_file(repo_path, run_id, "start.json")? {
-            Some(bytes) => {
-                let record: StartRecord = serde_json::from_slice(&bytes)
-                    .map_err(|e| git_error(format!("start record deserialize failed: {e}")))?;
-                Ok(Some(record))
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// Read an artifact from the metadata branch. Returns `None` if not found.
-    pub fn read_artifact(repo_path: &Path, run_id: &str, key: &str) -> Result<Option<Vec<u8>>> {
-        Self::read_file(repo_path, run_id, &format!("artifacts/{key}.json"))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabro_types::fixtures;
     use std::fs;
-
-    use crate::records::{CheckpointExt, RunRecordExt};
 
     /// Create a temporary git repo with an initial commit.
     fn init_repo(dir: &Path) {
@@ -647,142 +441,6 @@ mod tests {
         assert!(!wt_path.exists());
     }
 
-    // --- MetadataStore tests ---
-
-    #[test]
-    fn metadata_store_init_run_and_read() {
-        let dir = tempfile::tempdir().unwrap();
-        init_repo(dir.path());
-
-        let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        let run_id = fixtures::RUN_1.to_string();
-        let run_record = format!(
-            r#"{{"run_id":"{run_id}","created_at":"2025-01-01T00:00:00Z","settings":{{}},"graph":{{"name":"test","nodes":{{}},"edges":[],"attrs":{{}}}},"working_directory":"/tmp"}}"#
-        );
-        store
-            .init_run(&run_id, &[("run.json", run_record.as_bytes())])
-            .unwrap();
-
-        let read_record = MetadataStore::read_run_record(dir.path(), &run_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(read_record.run_id, fixtures::RUN_1);
-        assert_eq!(read_record.workflow_name(), "test");
-    }
-
-    #[test]
-    fn metadata_store_write_and_read_checkpoint() {
-        let dir = tempfile::tempdir().unwrap();
-        init_repo(dir.path());
-
-        let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        store.init_run("RUN2", &[]).unwrap();
-
-        let ctx = crate::context::Context::new();
-        ctx.set("goal", serde_json::json!("test"));
-        let cp = crate::records::Checkpoint::from_context(
-            &ctx,
-            "node_a",
-            vec!["start".to_string()],
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            Some("node_b".to_string()),
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-        );
-        let cp_json = serde_json::to_vec_pretty(&cp).unwrap();
-        store.write_checkpoint("RUN2", &cp_json, &[]).unwrap();
-
-        let loaded = MetadataStore::read_checkpoint(dir.path(), "RUN2")
-            .unwrap()
-            .unwrap();
-        assert_eq!(loaded.current_node, "node_a");
-        assert_eq!(loaded.completed_nodes, vec!["start"]);
-        assert_eq!(loaded.next_node_id.as_deref(), Some("node_b"));
-        assert_eq!(
-            loaded.context_values.get("goal"),
-            Some(&serde_json::json!("test"))
-        );
-    }
-
-    #[test]
-    fn metadata_store_write_checkpoint_overwrites() {
-        let dir = tempfile::tempdir().unwrap();
-        init_repo(dir.path());
-
-        let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        store.init_run("RUN3", &[]).unwrap();
-
-        let ctx = crate::context::Context::new();
-        let cp1 = crate::records::Checkpoint::from_context(
-            &ctx,
-            "node_a",
-            vec!["start".to_string()],
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            None,
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-        );
-        let cp1_json = serde_json::to_vec_pretty(&cp1).unwrap();
-        store.write_checkpoint("RUN3", &cp1_json, &[]).unwrap();
-
-        let cp2 = crate::records::Checkpoint::from_context(
-            &ctx,
-            "node_b",
-            vec!["start".to_string(), "node_a".to_string()],
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            Some("node_c".to_string()),
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-        );
-        let cp2_json = serde_json::to_vec_pretty(&cp2).unwrap();
-        store.write_checkpoint("RUN3", &cp2_json, &[]).unwrap();
-
-        let loaded = MetadataStore::read_checkpoint(dir.path(), "RUN3")
-            .unwrap()
-            .unwrap();
-        assert_eq!(loaded.current_node, "node_b");
-        assert_eq!(loaded.completed_nodes.len(), 2);
-    }
-
-    #[test]
-    fn metadata_store_read_checkpoint_missing_branch() {
-        let dir = tempfile::tempdir().unwrap();
-        init_repo(dir.path());
-
-        let result = MetadataStore::read_checkpoint(dir.path(), "NONEXISTENT").unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn metadata_store_artifact_roundtrip() {
-        let dir = tempfile::tempdir().unwrap();
-        init_repo(dir.path());
-
-        let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        store.init_run("RUN4", &[]).unwrap();
-
-        let artifact_data = br#"{"large_output":"some data"}"#;
-        let cp_json = b"{}"; // minimal checkpoint for the test
-        store
-            .write_checkpoint(
-                "RUN4",
-                cp_json,
-                &[("artifacts/response.plan.json", artifact_data.as_slice())],
-            )
-            .unwrap();
-
-        let read_back = MetadataStore::read_artifact(dir.path(), "RUN4", "response.plan")
-            .unwrap()
-            .unwrap();
-        assert_eq!(read_back, artifact_data);
-    }
-
     #[test]
     fn scan_node_files_picks_up_allowlisted() {
         let dir = tempfile::tempdir().unwrap();
@@ -832,56 +490,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let files = scan_node_files(dir.path());
         assert!(files.is_empty());
-    }
-
-    #[test]
-    fn metadata_store_write_files() {
-        let dir = tempfile::tempdir().unwrap();
-        init_repo(dir.path());
-
-        let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        let run_id = fixtures::RUN_5.to_string();
-        let run_record = format!(
-            r#"{{"run_id":"{run_id}","created_at":"2025-01-01T00:00:00Z","settings":{{}},"graph":{{"name":"test","nodes":{{}},"edges":[],"attrs":{{}}}},"working_directory":"/tmp"}}"#
-        );
-        store
-            .init_run(&run_id, &[("run.json", run_record.as_bytes())])
-            .unwrap();
-
-        store
-            .write_files(
-                &run_id,
-                &[("retro.json", b"{\"status\":\"ok\"}")],
-                "finalize",
-            )
-            .unwrap();
-
-        let data = MetadataStore::read_file(dir.path(), &run_id, "retro.json")
-            .unwrap()
-            .unwrap();
-        assert_eq!(data, b"{\"status\":\"ok\"}");
-
-        // Original files still present
-        let record = MetadataStore::read_run_record(dir.path(), &run_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(record.run_id, fixtures::RUN_5);
-    }
-
-    #[test]
-    fn metadata_store_init_run_with_extra_files() {
-        let dir = tempfile::tempdir().unwrap();
-        init_repo(dir.path());
-
-        let store = MetadataStore::new(dir.path(), &GitAuthor::default());
-        store
-            .init_run("RUN6", &[("sandbox.json", b"{\"type\":\"local\"}")])
-            .unwrap();
-
-        let data = MetadataStore::read_file(dir.path(), "RUN6", "sandbox.json")
-            .unwrap()
-            .unwrap();
-        assert_eq!(data, b"{\"type\":\"local\"}");
     }
 
     #[test]

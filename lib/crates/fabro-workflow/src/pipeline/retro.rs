@@ -80,6 +80,8 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
                         emitter.emit(&WorkflowRunEvent::Agent {
                             stage: "retro".to_string(),
                             event: event.event.clone(),
+                            session_id: Some(event.session_id.clone()),
+                            parent_session_id: event.parent_session_id.clone(),
                         });
                     }
                 })
@@ -178,7 +180,7 @@ mod tests {
 
     use super::*;
     use crate::context::Context;
-    use crate::event::{EventEmitter, WorkflowRunEvent};
+    use crate::event::EventEmitter;
     use crate::pipeline::types::Executed;
     use crate::records::{Checkpoint, CheckpointExt};
     use crate::run_options::RunOptions;
@@ -249,7 +251,7 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let checkpoint = write_checkpoint(&run_dir);
 
-        let emitter = Arc::new(EventEmitter::new());
+        let emitter = Arc::new(EventEmitter::default());
         let sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::new(fabro_agent::LocalSandbox::new(
             std::env::current_dir().unwrap(),
         ));
@@ -299,11 +301,11 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let checkpoint = write_checkpoint(&run_dir);
 
-        let emitter = Arc::new(EventEmitter::new());
+        let emitter = Arc::new(EventEmitter::default());
         let seen = Arc::new(Mutex::new(Vec::new()));
         emitter.on_event({
             let seen = Arc::clone(&seen);
-            move |event| seen.lock().unwrap().push(event.clone())
+            move |event| seen.lock().unwrap().push(event.event.clone())
         });
 
         let retro = run_retro(
@@ -330,13 +332,7 @@ mod tests {
 
         assert!(retro.is_some());
         let seen = seen.lock().unwrap();
-        assert!(
-            seen.iter()
-                .any(|event| matches!(event, WorkflowRunEvent::RetroStarted))
-        );
-        assert!(
-            seen.iter()
-                .any(|event| matches!(event, WorkflowRunEvent::RetroCompleted { .. }))
-        );
+        assert!(seen.iter().any(|event| event == "retro.started"));
+        assert!(seen.iter().any(|event| event == "retro.completed"));
     }
 }

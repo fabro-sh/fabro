@@ -7,7 +7,7 @@ description: "Run Fabro as an API server with a web UI, concurrent runs, and tea
   Server mode is in private early access. Contact [bryan@qlty.sh](mailto:bryan@qlty.sh) if you're interested in trying it.
 </Warning>
 
-Fabro has two modes: **standalone** and **server**. Standalone mode (`fabro run`) executes a single workflow synchronously in your terminal. Server mode (`fabro serve`) starts an HTTP API that queues runs, streams events, and serves a web UI — so you can close your laptop and let workflows run.
+Fabro has two modes: **standalone** and **server**. Standalone mode (`fabro run`) executes a single workflow synchronously in your terminal. Server mode (`fabro server start`) starts an HTTP API that queues runs, streams events, and serves a web UI — so you can close your laptop and let workflows run.
 
 Both modes use the same workflow engine, the same Graphviz files, and the same sandbox providers. The difference is how you interact with them.
 
@@ -15,7 +15,7 @@ Both modes use the same workflow engine, the same Graphviz files, and the same s
 
 | | Standalone | Server |
 |---|---|---|
-| **Command** | `fabro run workflow.fabro` | `fabro serve` |
+| **Command** | `fabro run workflow.fabro` | `fabro server start` |
 | **Best for** | Local development, one-off runs, CI/CD | Production, team use, running at scale |
 | **Execution** | Synchronous, one run per process | Asynchronous, queued with configurable concurrency |
 | **Human-in-the-loop** | Terminal prompts | Web UI or HTTP endpoints |
@@ -27,13 +27,13 @@ Both modes use the same workflow engine, the same Graphviz files, and the same s
 ## Starting the server
 
 ```bash
-fabro serve
+fabro server start
 ```
 
 This starts the API on `127.0.0.1:3000` by default. To also run the web UI:
 
 ```bash
-fabro serve                        # API on port 3000
+fabro server start                 # API on port 3000
 cd apps/fabro-web && bun run dev   # Web UI on port 5173
 ```
 

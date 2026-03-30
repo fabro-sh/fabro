@@ -986,6 +986,7 @@ mod tests {
         assert!(matches!(err, StoreError::InvalidEvent(_)));
 
         let invalid_run_id: EventPayload = serde_json::from_value(serde_json::json!({
+            "id": "evt-invalid-run",
             "ts": "2026-03-27T12:00:00Z",
             "run_id": "other-run",
             "event": "StageStarted"
@@ -1022,6 +1023,7 @@ mod tests {
             .unwrap();
         let first = EventPayload::new(
             serde_json::json!({
+                "id": "evt-1",
                 "ts": "2026-03-27T12:00:00.000Z",
                 "run_id": test_run_id("run-1").to_string(),
                 "event": "WorkflowRunStarted"
@@ -1031,6 +1033,7 @@ mod tests {
         .unwrap();
         let second = EventPayload::new(
             serde_json::json!({
+                "id": "evt-2",
                 "ts": "2026-03-27T12:00:01.000Z",
                 "run_id": test_run_id("run-1").to_string(),
                 "event": "StageCompleted"
