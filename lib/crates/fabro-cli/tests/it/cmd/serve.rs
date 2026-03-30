@@ -6,5 +6,45 @@ fn help() {
     let context = test_context!();
     let mut cmd = context.command();
     cmd.args(["serve", "--help"]);
-    fabro_snapshot!(context.filters(), cmd, @"");
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    Start the HTTP API server
+
+    Usage: fabro serve [OPTIONS]
+
+    Options:
+          --debug
+              Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --port <PORT>
+              Port to listen on [default: 3000]
+          --host <HOST>
+              Host address to bind to [default: 127.0.0.1]
+          --no-upgrade-check
+              Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --model <MODEL>
+              Override default LLM model
+          --quiet
+              Suppress non-essential output [env: FABRO_QUIET=]
+          --provider <PROVIDER>
+              Override default LLM provider
+          --verbose
+              Enable verbose output [env: FABRO_VERBOSE=]
+          --dry-run
+              Execute with simulated LLM backend
+          --storage-dir <STORAGE_DIR>
+              Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --sandbox <SANDBOX>
+              Sandbox for agent tools
+          --server-url <SERVER_URL>
+              Server URL (overrides server.base_url from user.toml) [env: FABRO_SERVER_URL=]
+          --max-concurrent-runs <MAX_CONCURRENT_RUNS>
+              Maximum number of concurrent run executions
+          --config <CONFIG>
+              Path to server config file (default: ~/.fabro/server.toml)
+      -h, --help
+              Print help
+    ----- stderr -----
+    ");
 }
