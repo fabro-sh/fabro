@@ -55,6 +55,7 @@ hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 insta = "1"
+fabro-test = { path = "lib/crates/fabro-test" }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 openssh = "0.11"

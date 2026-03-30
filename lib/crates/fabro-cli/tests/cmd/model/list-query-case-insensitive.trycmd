@@ -1,6 +1,0 @@
-```console
-$ fabro model list --query OPUS
-[0m [0m[0m[0m[1mMODEL          [0m [0m[0m [0m[0m[0m[1mPROVIDER [0m [0m[0m [0m[0m[0m[1mALIASES          [0m [0m[0m [0m[0m[0m[1mCONTEXT[0m [0m[0m [0m[0m[0m[1m         COST[0m [0m[0m [0m[0m[0m[1m   SPEED[0m [0m
-[0m[0m [0m[0m[0mclaude-opus-4-6[0m [0m[0m [0m[0m[0manthropic[0m [0m[0m [0m[0m[0mopus, claude-opus[0m [0m[0m [0m[0m[0m     1m[0m [0m[0m [0m[0m[0m$15.0 / $75.0[0m [0m[0m [0m[0m[0m25 tok/s[0m [0m
-[0m
-```

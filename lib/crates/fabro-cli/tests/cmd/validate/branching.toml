@@ -1,9 +1,0 @@
-bin.name = "fabro"
-args = ["validate", "../../../test/branching.fabro"]
-
-[env]
-inherit = false
-
-[fs]
-sandbox = false
-cwd = "../../.."

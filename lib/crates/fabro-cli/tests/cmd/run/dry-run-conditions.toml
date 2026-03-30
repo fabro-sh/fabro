@@ -1,9 +1,0 @@
-bin.name = "fabro"
-args = ["run", "--dry-run", "--auto-approve", "../../../test/conditions.fabro"]
-
-[env]
-inherit = false
-
-[fs]
-sandbox = false
-cwd = "../../.."

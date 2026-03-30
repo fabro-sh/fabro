@@ -1,7 +1,0 @@
-bin.name = "fabro"
-args = ["llm", "prompt", "-o", "bad_option", "hello"]
-status = "failed"
-stderr-to-stdout = true
-
-[env]
-inherit = false

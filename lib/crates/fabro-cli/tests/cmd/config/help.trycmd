@@ -1,9 +1,0 @@
-```console
-$ fabro config --help
-[..]
-...
-
-$ fabro config show --help
-[..]
-...
-```

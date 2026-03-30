@@ -1,0 +1,17 @@
+mod config;
+mod cp;
+mod doctor;
+mod exec;
+mod init;
+mod install;
+mod llm;
+mod model;
+mod pr;
+mod preview;
+mod repo;
+mod run;
+mod secret;
+mod ssh;
+mod system;
+mod top_level;
+mod validate;

@@ -1,3 +1,3 @@
 mod cli;
+mod cmd;
 mod scenario;
-mod trycmd;

@@ -1,0 +1,19 @@
+[package]
+name = "fabro-test"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+description = "Test utilities for fabro integration tests"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+assert_cmd = "2"
+insta = { workspace = true, features = ["filters"] }
+regex = { workspace = true }
+tempfile = "3"

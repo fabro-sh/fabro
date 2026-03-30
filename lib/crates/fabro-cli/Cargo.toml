@@ -99,4 +99,4 @@ predicates = "3"
 serde_json.workspace = true
 tempfile = "3"
 httpmock = "0.8"
-trycmd = "0.15"
+fabro-test = { workspace = true }
