@@ -123,6 +123,15 @@ impl Sandbox for WorktreeSandbox {
             .exec_command(&rm_cmd, 30_000, None, None, None)
             .await;
 
+        // Prune all stale worktree references whose directories no longer exist.
+        // Without this, a branch may remain locked by a worktree in a deleted
+        // temp directory from a previous run.
+        let prune_cmd = format!("{GIT} worktree prune");
+        let _ = self
+            .inner
+            .exec_command(&prune_cmd, 30_000, None, None, None)
+            .await;
+
         if !self.config.skip_branch_creation {
             let cmd = format!("{GIT} branch --force {branch} {sha}");
             let result = self
@@ -386,15 +395,16 @@ mod tests {
         wt.initialize().await.unwrap();
 
         let cmds = mock.captured_commands.lock().unwrap().clone();
-        // worktree remove (best-effort), branch --force, worktree add
-        assert_eq!(cmds.len(), 3, "expected 3 git commands, got: {cmds:?}");
+        // worktree remove (best-effort), worktree prune, branch --force, worktree add
+        assert_eq!(cmds.len(), 4, "expected 4 git commands, got: {cmds:?}");
         assert!(
             cmds[0].contains("worktree remove --force"),
             "cmd[0]: {}",
             cmds[0]
         );
-        assert!(cmds[1].contains("branch --force"), "cmd[1]: {}", cmds[1]);
-        assert!(cmds[2].contains("worktree add"), "cmd[2]: {}", cmds[2]);
+        assert!(cmds[1].contains("worktree prune"), "cmd[1]: {}", cmds[1]);
+        assert!(cmds[2].contains("branch --force"), "cmd[2]: {}", cmds[2]);
+        assert!(cmds[3].contains("worktree add"), "cmd[3]: {}", cmds[3]);
     }
 
     #[tokio::test]
@@ -453,14 +463,15 @@ mod tests {
         wt.initialize().await.unwrap();
 
         let cmds = mock.captured_commands.lock().unwrap().clone();
-        // Only worktree remove (best-effort) and worktree add
-        assert_eq!(cmds.len(), 2, "expected 2 git commands, got: {cmds:?}");
+        // worktree remove (best-effort), worktree prune, worktree add
+        assert_eq!(cmds.len(), 3, "expected 3 git commands, got: {cmds:?}");
         assert!(
             cmds[0].contains("worktree remove --force"),
             "cmd[0]: {}",
             cmds[0]
         );
-        assert!(cmds[1].contains("worktree add"), "cmd[1]: {}", cmds[1]);
+        assert!(cmds[1].contains("worktree prune"), "cmd[1]: {}", cmds[1]);
+        assert!(cmds[2].contains("worktree add"), "cmd[2]: {}", cmds[2]);
     }
 
     #[tokio::test]
