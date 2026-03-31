@@ -46,16 +46,17 @@ impl TestMode {
 
 /// Read an env var required by an E2E test, with mode-aware skip/strict behavior.
 #[must_use]
+#[allow(clippy::print_stderr)]
 pub fn require_env(name: &str) -> Option<String> {
-    match std::env::var(name) {
-        Ok(value) => Some(value),
-        Err(_) => {
-            if TestMode::from_env() == TestMode::Strict {
-                panic!("{name} not set (FABRO_TEST_MODE=strict)");
-            }
-            eprintln!("skipping: {name} not set");
-            None
-        }
+    if let Ok(value) = std::env::var(name) {
+        Some(value)
+    } else {
+        assert!(
+            TestMode::from_env() != TestMode::Strict,
+            "{name} not set (FABRO_TEST_MODE=strict)"
+        );
+        eprintln!("skipping: {name} not set");
+        None
     }
 }
 
