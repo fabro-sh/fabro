@@ -129,7 +129,6 @@ async fn remove_from(
                 "error": err.to_string(),
             }));
             had_errors = true;
-            continue;
         }
     }
 
